@@ -4,7 +4,7 @@ use crate::types::{
     hotkey_config::HotkeyConfig,
     player_settings::{
         EnterBehavior, NavDisplayMode, NavLayout, NormalizationLevel, SlotRowHeight,
-        TrackInfoDisplay, VisualizationMode,
+        StripClickAction, TrackInfoDisplay, VisualizationMode,
     },
     queue::{QueueSortPreferences, SortPreferences},
     queue_sort_mode::QueueSortMode,
@@ -93,6 +93,21 @@ pub struct PlayerSettings {
     /// Volume normalization target level (default: Normal)
     #[serde(default)]
     pub normalization_level: NormalizationLevel,
+    /// Whether the title field is visible in the track info strip (default: true)
+    #[serde(default = "default_true")]
+    pub strip_show_title: bool,
+    /// Whether the artist field is visible in the track info strip (default: true)
+    #[serde(default = "default_true")]
+    pub strip_show_artist: bool,
+    /// Whether the album field is visible in the track info strip (default: true)
+    #[serde(default = "default_true")]
+    pub strip_show_album: bool,
+    /// Whether format info (codec/kHz/kbps) is visible in the track info strip (default: true)
+    #[serde(default = "default_true")]
+    pub strip_show_format_info: bool,
+    /// What happens when clicking the track info strip (default: GoToQueue)
+    #[serde(default)]
+    pub strip_click_action: StripClickAction,
 }
 
 fn default_volume() -> f64 {
@@ -125,6 +140,9 @@ fn default_opacity_gradient() -> bool {
 fn default_crossfade_duration_secs() -> u32 {
     5
 }
+fn default_true() -> bool {
+    true
+}
 
 impl Default for PlayerSettings {
     fn default() -> Self {
@@ -155,6 +173,11 @@ impl Default for PlayerSettings {
             horizontal_volume: false,
             volume_normalization: false,
             normalization_level: NormalizationLevel::default(),
+            strip_show_title: true,
+            strip_show_artist: true,
+            strip_show_album: true,
+            strip_show_format_info: true,
+            strip_click_action: StripClickAction::default(),
         }
     }
 }

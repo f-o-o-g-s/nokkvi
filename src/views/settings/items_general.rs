@@ -11,11 +11,6 @@ pub(crate) struct GeneralSettingsData<'a> {
     pub auto_follow_playing: bool,
     pub enter_behavior: &'a str,
     pub local_music_path: &'a str,
-    pub nav_layout: &'a str,
-    pub nav_display_mode: &'a str,
-    pub track_info_display: &'a str,
-    pub slot_row_height: &'a str,
-    pub horizontal_volume: bool,
 }
 
 /// Build settings entries for the General tab
@@ -57,55 +52,6 @@ pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEnt
             ),
             data.local_music_path,
             "",
-        ),
-        SettingItem::enum_val(
-            meta!(
-                "general.nav_layout",
-                "Navigation Layout",
-                "Top bar tabs or vertical sidebar"
-            ),
-            data.nav_layout,
-            "Top",
-            vec!["Top", "Side"],
-        ),
-        SettingItem::enum_val(
-            meta!(
-                "general.nav_display_mode",
-                "Nav Display",
-                "Show text, icons, or both in navigation tabs"
-            ),
-            data.nav_display_mode,
-            "Text Only",
-            vec!["Text Only", "Text + Icons", "Icons Only"],
-        ),
-        SettingItem::enum_val(
-            meta!(
-                "general.track_info_display",
-                "Track Info Display",
-                "Show now-playing metadata strip (Player Bar or Top Bar)"
-            ),
-            data.track_info_display,
-            "Off",
-            vec!["Off", "Player Bar", "Top Bar"],
-        ),
-        SettingItem::enum_val(
-            meta!(
-                "general.slot_row_height",
-                "Row Density",
-                "Controls how many rows are visible · fewer rows = larger artwork & text"
-            ),
-            data.slot_row_height,
-            "Default",
-            vec!["Compact", "Default", "Comfortable", "Spacious"],
-        ),
-        SettingItem::bool_val(
-            meta!(
-                "general.horizontal_volume",
-                "Horizontal Volume Controls",
-                "Stack volume sliders horizontally in the player bar"
-            ),
-            data.horizontal_volume,
-            false,
         ),
         // --- Mouse Behavior ---
         SettingsEntry::Header {

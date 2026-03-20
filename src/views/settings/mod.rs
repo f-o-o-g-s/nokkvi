@@ -19,6 +19,7 @@ pub(crate) mod items;
 mod entries;
 mod items_general;
 mod items_hotkeys;
+mod items_interface;
 mod items_playback;
 mod items_theme;
 mod items_visualizer;
@@ -56,6 +57,7 @@ pub(crate) enum SettingsTab {
     Visualizer,
     Theme,
     General,
+    Interface,
     Playback,
     Hotkeys,
 }
@@ -64,6 +66,7 @@ impl SettingsTab {
     /// All tabs in display order
     pub(crate) const ALL: &'static [SettingsTab] = &[
         SettingsTab::General,
+        SettingsTab::Interface,
         SettingsTab::Playback,
         SettingsTab::Hotkeys,
         SettingsTab::Theme,
@@ -76,6 +79,7 @@ impl SettingsTab {
             SettingsTab::Visualizer => "Visualizer",
             SettingsTab::Theme => "Theme",
             SettingsTab::General => "General",
+            SettingsTab::Interface => "Interface",
             SettingsTab::Playback => "Playback",
             SettingsTab::Hotkeys => "Hotkeys",
         }
@@ -87,6 +91,7 @@ impl SettingsTab {
             SettingsTab::Visualizer => "assets/icons/sliders-horizontal.svg",
             SettingsTab::Theme => "assets/icons/palette.svg",
             SettingsTab::General => "assets/icons/cog.svg",
+            SettingsTab::Interface => "assets/icons/panels-top-left.svg",
             SettingsTab::Playback => "assets/icons/circle-play.svg",
             SettingsTab::Hotkeys => "assets/icons/keyboard.svg",
         }
@@ -96,6 +101,7 @@ impl SettingsTab {
     pub(crate) fn description(&self) -> &'static str {
         match self {
             SettingsTab::General => "Application behavior, account, and cache settings",
+            SettingsTab::Interface => "Layout, display, and metadata strip settings",
             SettingsTab::Playback => "Playback, scrobbling, and playlist behavior",
             SettingsTab::Hotkeys => "Keyboard shortcut bindings and customization",
             SettingsTab::Theme => "Visual theme, colors, fonts, and presets",
@@ -167,6 +173,8 @@ pub enum SettingsMessage {
     ToggleSearch,
     /// Directly set a value by string (from clickable badges: bool On/Off, enum options)
     EditSetValue(String),
+    /// Toggle a single badge in a ToggleSet (key = the setting_key of the toggled badge)
+    ToggleSetToggle(String),
 }
 
 /// Actions that the settings view requests from the parent
@@ -274,6 +282,11 @@ pub(crate) struct SettingsViewData {
     pub default_playlist_name: String,
     pub quick_add_to_playlist: bool,
     pub horizontal_volume: bool,
+    pub strip_show_title: bool,
+    pub strip_show_artist: bool,
+    pub strip_show_album: bool,
+    pub strip_show_format_info: bool,
+    pub strip_click_action: &'static str,
 }
 
 // ============================================================================
@@ -682,6 +695,22 @@ impl SettingsPage {
             SettingsMessage::EditSetValue(val_str) => {
                 self.auto_enter_edit_if_needed();
                 self.apply_edit(|v| v.parse_from_str(&val_str))
+            }
+            SettingsMessage::ToggleSetToggle(toggle_key) => {
+                // Find the center item and flip the matching toggle badge
+                if let Some(center_idx) = self.slot_list.get_center_item_index(total)
+                    && let Some(SettingsEntry::Item(item)) = self.cached_entries.get_mut(center_idx)
+                    && let SettingValue::ToggleSet(ref mut items) = item.value
+                    && let Some(entry) = items.iter_mut().find(|(_, k, _)| k == &toggle_key)
+                {
+                    entry.2 = !entry.2;
+                    let new_val = entry.2;
+                    return SettingsAction::WriteGeneralSetting {
+                        key: toggle_key,
+                        value: SettingValue::Bool(new_val),
+                    };
+                }
+                SettingsAction::None
             }
             SettingsMessage::ResetToDefault => {
                 // Hotkey items: reset single binding

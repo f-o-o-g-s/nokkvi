@@ -878,6 +878,13 @@ impl Nokkvi {
         // Apply horizontal volume mode from persisted settings
         crate::theme::set_horizontal_volume(settings.horizontal_volume);
 
+        // Apply strip field visibility from persisted settings
+        crate::theme::set_strip_show_title(settings.strip_show_title);
+        crate::theme::set_strip_show_artist(settings.strip_show_artist);
+        crate::theme::set_strip_show_album(settings.strip_show_album);
+        crate::theme::set_strip_show_format_info(settings.strip_show_format_info);
+        crate::theme::set_strip_click_action(settings.strip_click_action);
+
         // Sync volume to MPRIS D-Bus (prevents initial 100% jump on first playerctl command)
         if let Some(ref conn) = self.mpris_connection {
             conn.set_volume(f64::from(settings.volume));

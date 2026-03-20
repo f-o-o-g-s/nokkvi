@@ -69,6 +69,8 @@ pub enum NavBarMessage {
     ToggleLightMode,
     ToggleSoundEffects,
     OpenSettings,
+    /// Track info strip was clicked — dispatch depends on strip_click_action setting
+    StripClicked,
     Quit,
 }
 
@@ -336,10 +338,12 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         left_section = left_section.push(tab_separator(true));
     }
 
-    // Responsive visibility flags — fields collapse progressively
-    let show_title = data.window_width >= BREAKPOINT_SHOW_TITLE;
-    let show_artist = data.window_width >= BREAKPOINT_SHOW_ARTIST;
-    let show_album = data.window_width >= BREAKPOINT_SHOW_ALBUM;
+    // Responsive visibility flags — fields collapse progressively.
+    // AND with the user's settings toggles so fields are hidden either by
+    // narrow window OR by user preference.
+    let show_title = data.window_width >= BREAKPOINT_SHOW_TITLE && theme::strip_show_title();
+    let show_artist = data.window_width >= BREAKPOINT_SHOW_ARTIST && theme::strip_show_artist();
+    let show_album = data.window_width >= BREAKPOINT_SHOW_ALBUM && theme::strip_show_album();
 
     // Helper: labeled field (dimmed label: + scrolling value) — delegates to shared helper
     let info_field = |label: &'static str,
@@ -355,93 +359,34 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // Layout: │ title: xxx │ artist: xxx │ album: xxx │ [fill] │ FLAC 44.1kHz · 1411kbps │
     let is_playing = data.is_playing;
 
-    let center_section: Element<'static, NavBarMessage> = if !show_title {
-        // All metadata hidden at very narrow widths
-        Space::new().width(Length::Fill).into()
-    } else if !is_playing {
-        // Stopped state - no track loaded
-        container(
-            text("No track loaded")
-                .size(12.0)
-                .font(Font {
-                    weight: Weight::Semibold,
-                    ..theme::ui_font()
-                })
-                .color(theme::fg4())
-                .wrapping(Wrapping::None),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .center_x(Length::Fill)
-        .center_y(Length::Fill)
-        .into()
-    } else {
-        // Playing or paused - build nav-bar-specific track info
-        let title = data.track_title.clone();
-        let artist = data.track_artist.clone();
-        let album = data.track_album.clone();
-
-        let info_sep = || -> Element<'static, NavBarMessage> {
-            container(Space::new())
-                .width(Length::Fixed(2.0))
-                .height(Length::Fill)
-                .style(move |_| container::Style {
-                    background: Some(theme::bg1().into()),
-                    ..Default::default()
-                })
-                .into()
-        };
-
-        let mut info_row = iced::widget::Row::new()
-            .spacing(6)
-            .align_y(Alignment::Center)
-            .height(Length::Fill);
-
-        // Fill spacer → center the metadata fields
-        info_row = info_row.push(Space::new().width(Length::Fill));
-
-        // Progressive metadata: title (always when visible) → artist → album
-        info_row = info_row.push(info_sep());
-        info_row = info_row.push(info_field("title:", title, theme::now_playing_color()));
-
-        if show_artist {
-            info_row = info_row.push(info_sep());
-            info_row = info_row.push(info_field("artist:", artist, theme::selected_color()));
-        }
-
-        if show_album {
-            info_row = info_row.push(info_sep());
-            info_row = info_row.push(info_field("album:", album, theme::fg2()));
-        }
-
-        info_row = info_row.push(info_sep());
-
-        // Fill spacer → push format info away
-        info_row = info_row.push(Space::new().width(Length::Fill));
-
-        // Wrap in mouse_area so clicking metadata navigates to queue
-        container(mouse_area(info_row).on_press(NavBarMessage::SwitchView(NavView::Queue)))
+    let center_section: Element<'static, NavBarMessage> =
+        if !show_title && !show_artist && !show_album {
+            // All metadata hidden (narrow window OR all user toggles off)
+            Space::new().width(Length::Fill).into()
+        } else if !is_playing {
+            // Stopped state - no track loaded
+            container(
+                text("No track loaded")
+                    .size(12.0)
+                    .font(Font {
+                        weight: Weight::Semibold,
+                        ..theme::ui_font()
+                    })
+                    .color(theme::fg4())
+                    .wrapping(Wrapping::None),
+            )
             .width(Length::Fill)
             .height(Length::Fill)
+            .center_x(Length::Fill)
             .center_y(Length::Fill)
             .into()
-    };
+        } else {
+            // Playing or paused - build nav-bar-specific track info
+            let title = data.track_title.clone();
+            let artist = data.track_artist.clone();
+            let album = data.track_album.clone();
 
-    // -------------------------------------------------------------------------
-    // Format Info (independent of metadata — stays visible at narrow widths)
-    // -------------------------------------------------------------------------
-    let format_section: Element<'static, NavBarMessage> = if is_playing {
-        let format_split = super::format_info::format_audio_info_split(
-            &data.format_suffix,
-            data.sample_rate_khz,
-            data.bitrate_kbps,
-        );
-        if let Some((left, right)) = format_split {
-            let combined = match right {
-                Some(r) => format!("{left} · {r}"),
-                None => left,
-            };
-            let fmt_sep = || -> Element<'static, NavBarMessage> {
+            let info_sep = || -> Element<'static, NavBarMessage> {
                 container(Space::new())
                     .width(Length::Fixed(2.0))
                     .height(Length::Fill)
@@ -451,33 +396,103 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                     })
                     .into()
             };
-            row![
-                fmt_sep(),
-                text(combined)
-                    .size(9.0)
-                    .font(Font {
-                        weight: Weight::Medium,
-                        ..theme::ui_font()
-                    })
-                    .color(theme::fg3())
-                    .wrapping(Wrapping::None),
-            ]
-            .spacing(6)
-            .align_y(Alignment::Center)
-            .height(Length::Fill)
-            .padding(iced::Padding {
-                top: 0.0,
-                right: 6.0,
-                bottom: 0.0,
-                left: 0.0,
-            })
-            .into()
+
+            let mut info_row = iced::widget::Row::new()
+                .spacing(6)
+                .align_y(Alignment::Center)
+                .height(Length::Fill);
+
+            // Fill spacer → center the metadata fields
+            info_row = info_row.push(Space::new().width(Length::Fill));
+
+            // Progressive metadata: each field independently toggleable
+            let mut has_prev_field = false;
+
+            if show_title {
+                info_row = info_row.push(info_sep());
+                info_row = info_row.push(info_field("title:", title, theme::now_playing_color()));
+                has_prev_field = true;
+            }
+
+            if show_artist {
+                info_row = info_row.push(info_sep());
+                info_row = info_row.push(info_field("artist:", artist, theme::selected_color()));
+                has_prev_field = true;
+            }
+
+            if show_album {
+                info_row = info_row.push(info_sep());
+                info_row = info_row.push(info_field("album:", album, theme::fg2()));
+                has_prev_field = true;
+            }
+
+            if has_prev_field {
+                info_row = info_row.push(info_sep());
+            }
+
+            // Fill spacer → push format info away
+            info_row = info_row.push(Space::new().width(Length::Fill));
+
+            // Wrap in mouse_area so clicking metadata navigates to queue
+            container(mouse_area(info_row).on_press(NavBarMessage::StripClicked))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center_y(Length::Fill)
+                .into()
+        };
+
+    // -------------------------------------------------------------------------
+    // Format Info (independent of metadata — stays visible at narrow widths)
+    // -------------------------------------------------------------------------
+    let format_section: Element<'static, NavBarMessage> =
+        if is_playing && theme::strip_show_format_info() {
+            let format_split = super::format_info::format_audio_info_split(
+                &data.format_suffix,
+                data.sample_rate_khz,
+                data.bitrate_kbps,
+            );
+            if let Some((left, right)) = format_split {
+                let combined = match right {
+                    Some(r) => format!("{left} · {r}"),
+                    None => left,
+                };
+                let fmt_sep = || -> Element<'static, NavBarMessage> {
+                    container(Space::new())
+                        .width(Length::Fixed(2.0))
+                        .height(Length::Fill)
+                        .style(move |_| container::Style {
+                            background: Some(theme::bg1().into()),
+                            ..Default::default()
+                        })
+                        .into()
+                };
+                row![
+                    fmt_sep(),
+                    text(combined)
+                        .size(9.0)
+                        .font(Font {
+                            weight: Weight::Medium,
+                            ..theme::ui_font()
+                        })
+                        .color(theme::fg3())
+                        .wrapping(Wrapping::None),
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center)
+                .height(Length::Fill)
+                .padding(iced::Padding {
+                    top: 0.0,
+                    right: 6.0,
+                    bottom: 0.0,
+                    left: 0.0,
+                })
+                .into()
+            } else {
+                Space::new().width(Length::Shrink).into()
+            }
         } else {
             Space::new().width(Length::Shrink).into()
-        }
-    } else {
-        Space::new().width(Length::Shrink).into()
-    };
+        };
 
     // -------------------------------------------------------------------------
     // Hamburger Menu (far right)

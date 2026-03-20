@@ -87,6 +87,20 @@ impl Nokkvi {
             // Navigation
             // -----------------------------------------------------------------
             Message::SwitchView(view) => self.handle_switch_view(view),
+            Message::StripClicked => {
+                use nokkvi_data::types::player_settings::StripClickAction;
+                match crate::theme::strip_click_action() {
+                    StripClickAction::GoToQueue => self.handle_switch_view(crate::View::Queue),
+                    StripClickAction::GoToAlbum => self.handle_switch_view(crate::View::Albums),
+                    StripClickAction::GoToArtist => self.handle_switch_view(crate::View::Artists),
+                    StripClickAction::CopyTrackInfo => {
+                        let info = format!("{} — {}", self.playback.artist, self.playback.title);
+                        self.toast_info("Copied to clipboard");
+                        iced::clipboard::write(info).map(|_| Message::NoOp)
+                    }
+                    StripClickAction::DoNothing => Task::none(),
+                }
+            }
             Message::ToggleSettings => {
                 if self.current_view == crate::View::Settings {
                     self.handle_close_settings()

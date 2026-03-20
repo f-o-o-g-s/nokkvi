@@ -183,7 +183,8 @@ impl SettingsPage {
             | SettingsMessage::HotkeyCaptured(_, _)
             | SettingsMessage::FontSearchChanged(_)
             | SettingsMessage::SearchChanged(_)
-            | SettingsMessage::ToggleSearch => SettingsAction::None,
+            | SettingsMessage::ToggleSearch
+            | SettingsMessage::ToggleSetToggle(_) => SettingsAction::None,
         }
     }
 
@@ -247,7 +248,8 @@ impl SettingsPage {
             | SettingsMessage::HexInputSubmit
             | SettingsMessage::HotkeyCaptured(_, _)
             | SettingsMessage::SearchChanged(_)
-            | SettingsMessage::ToggleSearch => SettingsAction::None,
+            | SettingsMessage::ToggleSearch
+            | SettingsMessage::ToggleSetToggle(_) => SettingsAction::None,
         }
     }
 

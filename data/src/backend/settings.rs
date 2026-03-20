@@ -265,6 +265,39 @@ impl SettingsService {
         sm.set_horizontal_volume(enabled)
     }
 
+    /// Set strip show title and persist
+    pub async fn set_strip_show_title(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_strip_show_title(enabled)
+    }
+
+    /// Set strip show artist and persist
+    pub async fn set_strip_show_artist(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_strip_show_artist(enabled)
+    }
+
+    /// Set strip show album and persist
+    pub async fn set_strip_show_album(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_strip_show_album(enabled)
+    }
+
+    /// Set strip show format info and persist
+    pub async fn set_strip_show_format_info(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_strip_show_format_info(enabled)
+    }
+
+    /// Set strip click action and persist
+    pub async fn set_strip_click_action(
+        &self,
+        action: crate::types::player_settings::StripClickAction,
+    ) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_strip_click_action(action)
+    }
+
     /// Set volume normalization enabled and persist
     pub async fn set_volume_normalization(&self, enabled: bool) -> anyhow::Result<()> {
         let mut sm = self.settings_manager.lock().await;

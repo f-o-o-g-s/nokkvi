@@ -6,7 +6,7 @@ use crate::{
         hotkey_config::{HotkeyAction, HotkeyConfig, KeyCombo},
         player_settings::{
             EnterBehavior, NavDisplayMode, NavLayout, NormalizationLevel, SlotRowHeight,
-            TrackInfoDisplay,
+            StripClickAction, TrackInfoDisplay,
         },
         queue::{QueueSortPreferences, SortPreferences},
         queue_sort_mode::QueueSortMode,
@@ -185,6 +185,31 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_strip_show_title(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.strip_show_title = enabled;
+        self.save()
+    }
+
+    pub fn set_strip_show_artist(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.strip_show_artist = enabled;
+        self.save()
+    }
+
+    pub fn set_strip_show_album(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.strip_show_album = enabled;
+        self.save()
+    }
+
+    pub fn set_strip_show_format_info(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.strip_show_format_info = enabled;
+        self.save()
+    }
+
+    pub fn set_strip_click_action(&mut self, action: StripClickAction) -> Result<()> {
+        self.settings.player.strip_click_action = action;
+        self.save()
+    }
+
     // -------------------------------------------------------------------------
     // View Sort Preferences
     // -------------------------------------------------------------------------
@@ -288,6 +313,11 @@ impl SettingsManager {
             horizontal_volume: p.horizontal_volume,
             volume_normalization: p.volume_normalization,
             normalization_level: p.normalization_level,
+            strip_show_title: p.strip_show_title,
+            strip_show_artist: p.strip_show_artist,
+            strip_show_album: p.strip_show_album,
+            strip_show_format_info: p.strip_show_format_info,
+            strip_click_action: p.strip_click_action,
         }
     }
 

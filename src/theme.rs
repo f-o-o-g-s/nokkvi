@@ -48,6 +48,16 @@ struct UiModeFlags {
     opacity_gradient: AtomicBool,
     /// Whether volume sliders are displayed horizontally in the player bar
     horizontal_volume: AtomicBool,
+    /// Whether the title field is shown in the track info strip
+    strip_show_title: AtomicBool,
+    /// Whether the artist field is shown in the track info strip
+    strip_show_artist: AtomicBool,
+    /// Whether the album field is shown in the track info strip
+    strip_show_album: AtomicBool,
+    /// Whether format info (codec/kHz/kbps) is shown in the track info strip
+    strip_show_format_info: AtomicBool,
+    /// Strip click action: 0=GoToQueue, 1=GoToAlbum, 2=GoToArtist, 3=CopyTrackInfo, 4=DoNothing
+    strip_click_action: AtomicU8,
 }
 
 static UI_MODE: UiModeFlags = UiModeFlags {
@@ -59,6 +69,11 @@ static UI_MODE: UiModeFlags = UiModeFlags {
     slot_row_height: AtomicU8::new(1), // Default variant
     opacity_gradient: AtomicBool::new(true),
     horizontal_volume: AtomicBool::new(false),
+    strip_show_title: AtomicBool::new(true),
+    strip_show_artist: AtomicBool::new(true),
+    strip_show_album: AtomicBool::new(true),
+    strip_show_format_info: AtomicBool::new(true),
+    strip_click_action: AtomicU8::new(0), // GoToQueue
 };
 
 /// Reload theme from config.toml (hot-reload support)
@@ -359,6 +374,87 @@ pub(crate) fn is_horizontal_volume() -> bool {
 pub(crate) fn set_horizontal_volume(enabled: bool) {
     UI_MODE.horizontal_volume.store(enabled, Ordering::Relaxed);
     debug!(" Horizontal volume changed: horizontal_volume={}", enabled);
+}
+
+// ============================================================================
+// Strip Field Visibility Controls
+// ============================================================================
+
+use nokkvi_data::types::player_settings::StripClickAction;
+
+/// Returns true if the title field is visible in the track info strip
+#[inline]
+pub(crate) fn strip_show_title() -> bool {
+    UI_MODE.strip_show_title.load(Ordering::Relaxed)
+}
+
+/// Set strip title visibility
+#[inline]
+pub(crate) fn set_strip_show_title(enabled: bool) {
+    UI_MODE.strip_show_title.store(enabled, Ordering::Relaxed);
+}
+
+/// Returns true if the artist field is visible in the track info strip
+#[inline]
+pub(crate) fn strip_show_artist() -> bool {
+    UI_MODE.strip_show_artist.load(Ordering::Relaxed)
+}
+
+/// Set strip artist visibility
+#[inline]
+pub(crate) fn set_strip_show_artist(enabled: bool) {
+    UI_MODE.strip_show_artist.store(enabled, Ordering::Relaxed);
+}
+
+/// Returns true if the album field is visible in the track info strip
+#[inline]
+pub(crate) fn strip_show_album() -> bool {
+    UI_MODE.strip_show_album.load(Ordering::Relaxed)
+}
+
+/// Set strip album visibility
+#[inline]
+pub(crate) fn set_strip_show_album(enabled: bool) {
+    UI_MODE.strip_show_album.store(enabled, Ordering::Relaxed);
+}
+
+/// Returns true if format info (codec/kHz/kbps) is visible in the track info strip
+#[inline]
+pub(crate) fn strip_show_format_info() -> bool {
+    UI_MODE.strip_show_format_info.load(Ordering::Relaxed)
+}
+
+/// Set strip format info visibility
+#[inline]
+pub(crate) fn set_strip_show_format_info(enabled: bool) {
+    UI_MODE
+        .strip_show_format_info
+        .store(enabled, Ordering::Relaxed);
+}
+
+/// Returns the current strip click action
+#[inline]
+pub(crate) fn strip_click_action() -> StripClickAction {
+    match UI_MODE.strip_click_action.load(Ordering::Relaxed) {
+        1 => StripClickAction::GoToAlbum,
+        2 => StripClickAction::GoToArtist,
+        3 => StripClickAction::CopyTrackInfo,
+        4 => StripClickAction::DoNothing,
+        _ => StripClickAction::GoToQueue,
+    }
+}
+
+/// Set strip click action (call when user changes the setting)
+#[inline]
+pub(crate) fn set_strip_click_action(action: StripClickAction) {
+    let val = match action {
+        StripClickAction::GoToQueue => 0,
+        StripClickAction::GoToAlbum => 1,
+        StripClickAction::GoToArtist => 2,
+        StripClickAction::CopyTrackInfo => 3,
+        StripClickAction::DoNothing => 4,
+    };
+    UI_MODE.strip_click_action.store(val, Ordering::Relaxed);
 }
 
 // ============================================================================

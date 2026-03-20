@@ -79,6 +79,7 @@ pub(crate) fn get_svg(path: &str) -> &'static str {
         "assets/icons/copy.svg" => COPY,
         "assets/icons/folder-open.svg" => FOLDER_OPEN,
         "assets/icons/panel-right-open.svg" => PANEL_RIGHT_OPEN,
+        "assets/icons/panels-top-left.svg" => PANELS_TOP_LEFT,
         "assets/icons/swatch-book.svg" => SWATCH_BOOK,
         "assets/icons/tags.svg" => TAGS,
         _ => {
@@ -167,6 +168,7 @@ const X: &str = include_str!("../assets/icons/x.svg");
 const COPY: &str = include_str!("../assets/icons/copy.svg");
 const FOLDER_OPEN: &str = include_str!("../assets/icons/folder-open.svg");
 const PANEL_RIGHT_OPEN: &str = include_str!("../assets/icons/panel-right-open.svg");
+const PANELS_TOP_LEFT: &str = include_str!("../assets/icons/panels-top-left.svg");
 const TAGS: &str = include_str!("../assets/icons/tags.svg");
 
 /// Check whether a given SVG path is registered in the embedded icon table.
@@ -243,6 +245,7 @@ fn is_registered(path: &str) -> bool {
         "assets/icons/copy.svg",
         "assets/icons/folder-open.svg",
         "assets/icons/panel-right-open.svg",
+        "assets/icons/panels-top-left.svg",
         "assets/icons/swatch-book.svg",
         "assets/icons/tags.svg",
     ];
@@ -394,6 +397,7 @@ mod tests {
             "assets/icons/copy.svg",
             "assets/icons/folder-open.svg",
             "assets/icons/panel-right-open.svg",
+            "assets/icons/panels-top-left.svg",
             "assets/icons/swatch-book.svg",
             "assets/icons/tags.svg",
         ];

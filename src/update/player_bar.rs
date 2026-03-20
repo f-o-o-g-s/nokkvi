@@ -61,6 +61,7 @@ impl Nokkvi {
                 Task::done(Message::SwitchView(crate::View::Settings))
             }
             PlayerBarMessage::GoToQueue => Task::done(Message::SwitchView(crate::View::Queue)),
+            PlayerBarMessage::StripClicked => Task::done(Message::StripClicked),
             PlayerBarMessage::ToggleLightMode => Task::done(Message::ToggleLightMode),
             PlayerBarMessage::Quit => Task::done(Message::QuitApp),
         }

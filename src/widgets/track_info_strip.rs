@@ -70,11 +70,16 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
     data: &TrackInfoStripData<'_>,
     on_press: Option<M>,
 ) -> Element<'a, M> {
-    let format_split = super::format_info::format_audio_info_split(
-        data.format_suffix,
-        data.sample_rate as f32 / 1000.0,
-        data.bitrate,
-    );
+    let show_format = theme::strip_show_format_info();
+    let format_split = if show_format {
+        super::format_info::format_audio_info_split(
+            data.format_suffix,
+            data.sample_rate as f32 / 1000.0,
+            data.bitrate,
+        )
+    } else {
+        None
+    };
 
     let title = data.title.to_string();
     let artist = data.artist.to_string();
@@ -95,7 +100,7 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
         .spacing(6)
         .align_y(Alignment::Center);
 
-    // LEFT: codec + sample rate
+    // LEFT: codec + sample rate (gated by strip_show_format_info)
     if let Some((ref left, _)) = format_split {
         info_row = info_row.push(
             text(left.clone())
@@ -114,17 +119,44 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
     info_row = info_row.push(space().width(Length::Fill));
 
     // CENTER: │ title: │ artist: │ album: │
-    // Wrapped in mouse_area so clicking navigates to queue.
+    // Each field is independently toggleable. Separators only between visible fields.
+    let show_title = theme::strip_show_title();
+    let show_artist = theme::strip_show_artist();
+    let show_album = theme::strip_show_album();
+
     let mut center_row = iced::widget::Row::new()
         .spacing(6)
         .align_y(Alignment::Center);
-    center_row = center_row.push(info_sep());
-    center_row = center_row.push(info_field("title:", title, theme::now_playing_color()));
-    center_row = center_row.push(info_sep());
-    center_row = center_row.push(info_field("artist:", artist, theme::selected_color()));
-    center_row = center_row.push(info_sep());
-    center_row = center_row.push(info_field("album:", album, theme::fg2()));
-    center_row = center_row.push(info_sep());
+    let mut has_prev_field = false;
+
+    // Leading separator
+    if show_title || show_artist || show_album {
+        center_row = center_row.push(info_sep());
+    }
+
+    if show_title {
+        center_row = center_row.push(info_field("title:", title, theme::now_playing_color()));
+        has_prev_field = true;
+    }
+    if show_artist {
+        if has_prev_field {
+            center_row = center_row.push(info_sep());
+        }
+        center_row = center_row.push(info_field("artist:", artist, theme::selected_color()));
+        has_prev_field = true;
+    }
+    if show_album {
+        if has_prev_field {
+            center_row = center_row.push(info_sep());
+        }
+        center_row = center_row.push(info_field("album:", album, theme::fg2()));
+        has_prev_field = true;
+    }
+
+    // Trailing separator
+    if has_prev_field {
+        center_row = center_row.push(info_sep());
+    }
 
     let center_element: Element<'a, M> = if let Some(msg) = on_press {
         mouse_area(center_row).on_press(msg).into()
@@ -136,7 +168,7 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
     // Fill spacer → right
     info_row = info_row.push(space().width(Length::Fill));
 
-    // RIGHT: bitrate
+    // RIGHT: bitrate (gated by strip_show_format_info)
     if let Some((_, Some(ref right))) = format_split {
         info_row = info_row.push(info_sep());
         info_row = info_row.push(

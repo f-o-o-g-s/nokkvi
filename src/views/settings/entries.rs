@@ -63,13 +63,23 @@ impl SettingsPage {
                     auto_follow_playing: data.auto_follow_playing,
                     enter_behavior: data.enter_behavior,
                     local_music_path: &data.local_music_path,
+                };
+                items::build_general_items(&gdata)
+            }
+            SettingsTab::Interface => {
+                let idata = items::InterfaceSettingsData {
                     nav_layout: data.nav_layout,
                     nav_display_mode: data.nav_display_mode,
                     track_info_display: data.track_info_display,
                     slot_row_height: data.slot_row_height,
                     horizontal_volume: data.horizontal_volume,
+                    strip_show_title: data.strip_show_title,
+                    strip_show_artist: data.strip_show_artist,
+                    strip_show_album: data.strip_show_album,
+                    strip_show_format_info: data.strip_show_format_info,
+                    strip_click_action: data.strip_click_action,
                 };
-                items::build_general_items(&gdata)
+                items::build_interface_items(&idata)
             }
             SettingsTab::Playback => {
                 let pdata = items::PlaybackSettingsData {

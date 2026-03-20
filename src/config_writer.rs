@@ -185,8 +185,8 @@ fn setting_value_to_toml(value: &SettingValue) -> Item {
             Item::Value(Value::Array(arr))
         }
         SettingValue::Text(t) => Item::Value(Value::String(toml_edit::Formatted::new(t.clone()))),
-        // Hotkeys are stored in redb, not TOML — this branch should never be reached
-        SettingValue::Hotkey(_) => Item::None,
+        // Hotkeys and ToggleSet are stored in redb, not TOML — these branches should never be reached
+        SettingValue::Hotkey(_) | SettingValue::ToggleSet(_) => Item::None,
     }
 }
 

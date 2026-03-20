@@ -200,6 +200,61 @@ impl std::fmt::Display for TrackInfoDisplay {
     }
 }
 
+/// Strip click action — controls what happens when clicking the track info strip.
+///
+/// Serializes to snake_case strings for redb storage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StripClickAction {
+    /// Navigate to the Queue view (default)
+    #[default]
+    GoToQueue,
+    /// Navigate to the album expansion for the currently playing track
+    GoToAlbum,
+    /// Navigate to the artist expansion for the currently playing track
+    GoToArtist,
+    /// Copy "Artist — Title" to the system clipboard
+    CopyTrackInfo,
+    /// No action — passive display
+    DoNothing,
+}
+
+impl StripClickAction {
+    /// Convert from settings GUI label to enum variant
+    pub fn from_label(label: &str) -> Self {
+        match label {
+            "Go to Album" => Self::GoToAlbum,
+            "Go to Artist" => Self::GoToArtist,
+            "Copy Track Info" => Self::CopyTrackInfo,
+            "Do Nothing" => Self::DoNothing,
+            _ => Self::GoToQueue,
+        }
+    }
+
+    /// Convert to settings GUI label
+    pub fn as_label(self) -> &'static str {
+        match self {
+            Self::GoToQueue => "Go to Queue",
+            Self::GoToAlbum => "Go to Album",
+            Self::GoToArtist => "Go to Artist",
+            Self::CopyTrackInfo => "Copy Track Info",
+            Self::DoNothing => "Do Nothing",
+        }
+    }
+}
+
+impl std::fmt::Display for StripClickAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::GoToQueue => write!(f, "go_to_queue"),
+            Self::GoToAlbum => write!(f, "go_to_album"),
+            Self::GoToArtist => write!(f, "go_to_artist"),
+            Self::CopyTrackInfo => write!(f, "copy_track_info"),
+            Self::DoNothing => write!(f, "do_nothing"),
+        }
+    }
+}
+
 /// Slot list row density — controls the target row height for all slot lists.
 ///
 /// Each variant is spaced far enough apart (~20px) to guarantee a different
@@ -371,6 +426,16 @@ pub struct PlayerSettings {
     pub volume_normalization: bool,
     /// Volume normalization target level (Quiet / Normal / Loud)
     pub normalization_level: NormalizationLevel,
+    /// Whether the title field is visible in the track info strip (default: true)
+    pub strip_show_title: bool,
+    /// Whether the artist field is visible in the track info strip (default: true)
+    pub strip_show_artist: bool,
+    /// Whether the album field is visible in the track info strip (default: true)
+    pub strip_show_album: bool,
+    /// Whether format info (codec/kHz/kbps) is visible in the track info strip (default: true)
+    pub strip_show_format_info: bool,
+    /// What happens when clicking the track info strip (default: GoToQueue)
+    pub strip_click_action: StripClickAction,
 }
 
 #[cfg(test)]

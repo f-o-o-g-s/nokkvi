@@ -52,6 +52,9 @@ pub(crate) enum SettingValue {
     Text(String),
     /// Hotkey binding display (key combo string, read-only in Phase 3)
     Hotkey(String),
+    /// Multi-select toggle badges — each badge independently toggleable.
+    /// Vec of (display_label, setting_key, enabled).
+    ToggleSet(Vec<(String, String, bool)>),
 }
 
 impl SettingValue {
@@ -89,6 +92,18 @@ impl SettingValue {
             SettingValue::ColorArray(colors) => format!("{} colors", colors.len()),
             SettingValue::Text(t) => t.clone(),
             SettingValue::Hotkey(combo) => combo.clone(),
+            SettingValue::ToggleSet(items) => {
+                let enabled: Vec<_> = items
+                    .iter()
+                    .filter(|(_, _, on)| *on)
+                    .map(|(label, _, _)| label.as_str())
+                    .collect();
+                if enabled.is_empty() {
+                    "None".to_string()
+                } else {
+                    enabled.join(", ")
+                }
+            }
         }
     }
 
@@ -446,6 +461,21 @@ impl SettingItem {
         }
         entry
     }
+
+    /// Build a toggle-set setting entry (multi-select badges).
+    /// Each item is (display_label, setting_key, enabled).
+    /// All enabled by default.
+    pub(crate) fn toggle_set(m: SettingMeta, items: Vec<(String, String, bool)>) -> SettingsEntry {
+        let defaults: Vec<(String, String, bool)> = items
+            .iter()
+            .map(|(l, k, _)| (l.clone(), k.clone(), true))
+            .collect();
+        Self::from_meta(
+            m,
+            SettingValue::ToggleSet(items),
+            SettingValue::ToggleSet(defaults),
+        )
+    }
 }
 
 /// A slot-list-renderable entry — either a real setting or a section header
@@ -480,6 +510,7 @@ pub(crate) use super::{
         build_hotkeys_items, is_action_key, is_preset_key, is_restore_key, key_to_hotkey_action,
         preset_key_index,
     },
+    items_interface::{InterfaceSettingsData, build_interface_items},
     items_playback::{PlaybackSettingsData, build_playback_items},
     items_theme::build_theme_items,
     items_visualizer::build_visualizer_items,
@@ -707,11 +738,6 @@ mod tests {
             auto_follow_playing: true,
             enter_behavior: "Play All",
             local_music_path: "",
-            nav_layout: "Top",
-            nav_display_mode: "Text Only",
-            track_info_display: "Off",
-            slot_row_height: "Default",
-            horizontal_volume: false,
         };
         let entries = build_general_items(&data);
 
@@ -722,8 +748,37 @@ mod tests {
         );
         assert_eq!(
             count_items(&entries),
-            15,
-            "Expected 15 items (start_view, enter_behavior, local_music_path, nav_layout, nav_display_mode, track_info_display, slot_row_height, horizontal_volume, stable_viewport, auto_follow_playing, server_url, username, logout, rebuild_artwork, rebuild_artist)"
+            10,
+            "Expected 10 items (start_view, enter_behavior, local_music_path, stable_viewport, auto_follow_playing, server_url, username, logout, rebuild_artwork, rebuild_artist)"
+        );
+    }
+
+    #[test]
+    fn interface_items_structure() {
+        use super::super::items_interface::{InterfaceSettingsData, build_interface_items};
+        let data = InterfaceSettingsData {
+            nav_layout: "Top",
+            nav_display_mode: "Text Only",
+            track_info_display: "Off",
+            slot_row_height: "Default",
+            horizontal_volume: false,
+            strip_show_title: true,
+            strip_show_artist: true,
+            strip_show_album: true,
+            strip_show_format_info: true,
+            strip_click_action: "Go to Queue",
+        };
+        let entries = build_interface_items(&data);
+
+        assert_eq!(
+            count_headers(&entries),
+            2,
+            "Expected 2 sections: Layout, Metadata Strip"
+        );
+        assert_eq!(
+            count_items(&entries),
+            7,
+            "Expected 7 items (nav_layout, nav_display_mode, track_info_display, slot_row_height, horizontal_volume, visible_fields, click_action)"
         );
     }
 

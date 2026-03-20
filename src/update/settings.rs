@@ -120,6 +120,11 @@ impl Nokkvi {
             default_playlist_name: self.default_playlist_name.clone(),
             quick_add_to_playlist: self.quick_add_to_playlist,
             horizontal_volume: crate::theme::is_horizontal_volume(),
+            strip_show_title: crate::theme::strip_show_title(),
+            strip_show_artist: crate::theme::strip_show_artist(),
+            strip_show_album: crate::theme::strip_show_album(),
+            strip_show_format_info: crate::theme::strip_show_format_info(),
+            strip_click_action: crate::theme::strip_click_action().as_label(),
         };
         // Only rebuild entries when config has changed or entries are empty
         if self.settings_page.config_dirty || self.settings_page.cached_entries.is_empty() {
@@ -671,6 +676,56 @@ impl Nokkvi {
                 },
                 true,
             ),
+            "general.strip_show_title" => self.persist_bool_setting(
+                &value,
+                "persist_strip_show_title",
+                |_s, v| crate::theme::set_strip_show_title(v),
+                |shell: AppService, v| async move {
+                    shell.settings().set_strip_show_title(v).await
+                },
+                true,
+            ),
+            "general.strip_show_artist" => self.persist_bool_setting(
+                &value,
+                "persist_strip_show_artist",
+                |_s, v| crate::theme::set_strip_show_artist(v),
+                |shell: AppService, v| async move {
+                    shell.settings().set_strip_show_artist(v).await
+                },
+                true,
+            ),
+            "general.strip_show_album" => self.persist_bool_setting(
+                &value,
+                "persist_strip_show_album",
+                |_s, v| crate::theme::set_strip_show_album(v),
+                |shell: AppService, v| async move {
+                    shell.settings().set_strip_show_album(v).await
+                },
+                true,
+            ),
+            "general.strip_show_format_info" => self.persist_bool_setting(
+                &value,
+                "persist_strip_show_format_info",
+                |_s, v| crate::theme::set_strip_show_format_info(v),
+                |shell: AppService, v| async move {
+                    shell.settings().set_strip_show_format_info(v).await
+                },
+                true,
+            ),
+            "general.strip_click_action" => {
+                if let crate::views::settings::items::SettingValue::Enum { val, .. } = value {
+                    let action =
+                        nokkvi_data::types::player_settings::StripClickAction::from_label(&val);
+                    crate::theme::set_strip_click_action(action);
+                    self.shell_spawn(
+                        "persist_strip_click_action",
+                        move |shell| async move {
+                            shell.settings().set_strip_click_action(action).await
+                        },
+                    );
+                }
+                Task::none()
+            }
             other => {
                 tracing::warn!(" [SETTINGS] Unhandled general setting key: {other}");
                 Task::none()

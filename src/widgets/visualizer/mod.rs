@@ -200,7 +200,13 @@ impl Visualizer {
         if self.dynamic_bars && self.mode == VisualizationMode::Bars {
             // Read bar width min/max and spacing from shared config for hot-reload support
             let cfg = self.config.read();
-            let (bar_width_min, bar_width_max, config_bar_spacing, config_max_bars, config_border_width) = (
+            let (
+                bar_width_min,
+                bar_width_max,
+                config_bar_spacing,
+                config_max_bars,
+                config_border_width,
+            ) = (
                 cfg.bars.bar_width_min,
                 cfg.bars.bar_width_max,
                 cfg.bars.bar_spacing,

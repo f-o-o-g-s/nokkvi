@@ -231,6 +231,8 @@ pub enum ToastMessage {
 pub enum Message {
     // --- Navigation ---
     SwitchView(View),
+    /// Track info strip was clicked — dispatch depends on strip_click_action setting
+    StripClicked,
     /// Toggle settings view: open if not in settings, return to Queue if already there
     ToggleSettings,
 

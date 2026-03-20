@@ -662,6 +662,11 @@ fn render_value_display<'a>(
             render_sm_options(options, val, font_size, is_center, opacity)
         }
 
+        SettingValue::ToggleSet(items) => {
+            // Multi-select: each badge independently toggleable
+            render_toggle_set(items, font_size, is_center, opacity)
+        }
+
         SettingValue::Hotkey(combo) => {
             // Capture mode: show "Press a key..." or conflict warning
             if ctx.is_capturing && ctx.is_center {
@@ -898,6 +903,89 @@ fn render_sm_options<'a>(
         // non-center row would modify the wrong setting.
         if is_center {
             option_btn = option_btn.on_press(SettingsMessage::EditSetValue(option_str));
+        }
+
+        r = r.push(option_btn);
+    }
+
+    container(r).width(Length::Fill).clip(true).into()
+}
+
+/// Render a multi-select toggle set as independently clickable badges.
+///
+/// Mirrors `render_sm_options` visually but each badge toggles independently.
+/// - **Enabled**: bold text + accent underline
+/// - **Disabled**: dimmed text, no underline
+fn render_toggle_set<'a>(
+    items: &[(String, String, bool)],
+    font_size: f32,
+    is_center: bool,
+    opacity: f32,
+) -> Element<'a, SettingsMessage> {
+    let opt_size = font_size * 0.75;
+    let underline_height = 2.0;
+
+    let mut r = row![].spacing(22).align_y(Alignment::Center);
+
+    for (label, key, enabled) in items {
+        let is_on = *enabled;
+
+        let text_color = if is_center {
+            Color {
+                a: if is_on { 1.0 } else { 0.5 },
+                ..theme::fg0()
+            }
+        } else {
+            Color {
+                a: opacity * if is_on { 0.8 } else { 0.35 },
+                ..theme::fg0()
+            }
+        };
+
+        let underline_color = if is_on {
+            if is_center {
+                theme::accent_bright()
+            } else {
+                Color {
+                    a: opacity * 0.6,
+                    ..theme::accent_bright()
+                }
+            }
+        } else {
+            Color::TRANSPARENT
+        };
+
+        let font_weight = if is_on { Weight::Bold } else { Weight::Normal };
+
+        let label_widget = text(label.clone())
+            .size(opt_size)
+            .font(Font {
+                weight: font_weight,
+                ..theme::ui_font()
+            })
+            .color(text_color)
+            .wrapping(Wrapping::None);
+
+        let underline = container(Space::new())
+            .width(Length::Fill)
+            .height(Length::Fixed(underline_height))
+            .style(move |_: &iced::Theme| container::Style {
+                background: Some(underline_color.into()),
+                ..Default::default()
+            });
+
+        let option_col = column![label_widget, underline]
+            .spacing(1)
+            .width(Length::Shrink)
+            .align_x(Alignment::Center);
+
+        let key_owned = key.clone();
+        let mut option_btn = button(option_col)
+            .style(transparent_button_style)
+            .padding(Padding::new(2.0).left(4.0).right(4.0));
+
+        if is_center {
+            option_btn = option_btn.on_press(SettingsMessage::ToggleSetToggle(key_owned));
         }
 
         r = r.push(option_btn);

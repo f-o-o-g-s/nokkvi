@@ -89,6 +89,8 @@ pub enum PlayerBarMessage {
     OpenSettings,
     ToggleLightMode,
     GoToQueue,
+    /// Track info strip was clicked — dispatch depends on strip_click_action setting
+    StripClicked,
     Quit,
 }
 

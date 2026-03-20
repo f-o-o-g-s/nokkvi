@@ -35,6 +35,7 @@ fn map_nav_bar_message(msg: widgets::NavBarMessage) -> Message {
             Message::Playback(PlaybackMessage::ToggleSoundEffects)
         }
         widgets::NavBarMessage::OpenSettings => Message::SwitchView(View::Settings),
+        widgets::NavBarMessage::StripClicked => Message::StripClicked,
         widgets::NavBarMessage::Quit => Message::QuitApp,
     }
 }
@@ -118,7 +119,7 @@ impl Nokkvi {
             if crate::theme::show_top_bar_strip() {
                 outer = outer.push(widgets::track_info_strip::track_info_strip(
                     &strip_data,
-                    Some(Message::SwitchView(View::Queue)),
+                    Some(Message::StripClicked),
                 ));
                 // Bottom separator to delineate strip from content below
                 outer = outer.push(crate::theme::horizontal_separator::<Message>(1.0));
@@ -129,7 +130,7 @@ impl Nokkvi {
                 if crate::theme::show_player_bar_strip() {
                     Some(widgets::track_info_strip::track_info_strip_with_separator(
                         &strip_data,
-                        Some(widgets::PlayerBarMessage::GoToQueue),
+                        Some(widgets::PlayerBarMessage::StripClicked),
                     ))
                 } else {
                     None
@@ -723,6 +724,11 @@ impl Nokkvi {
                     default_playlist_name: self.default_playlist_name.clone(),
                     quick_add_to_playlist: self.quick_add_to_playlist,
                     horizontal_volume: crate::theme::is_horizontal_volume(),
+                    strip_show_title: crate::theme::strip_show_title(),
+                    strip_show_artist: crate::theme::strip_show_artist(),
+                    strip_show_album: crate::theme::strip_show_album(),
+                    strip_show_format_info: crate::theme::strip_show_format_info(),
+                    strip_click_action: crate::theme::strip_click_action().as_label(),
                 };
                 self.settings_page
                     .view(settings_data)
