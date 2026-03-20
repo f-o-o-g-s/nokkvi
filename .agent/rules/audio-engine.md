@@ -22,7 +22,7 @@ CustomAudioEngine
 All audio flows through **one cpal stream** via a shared `rodio::Mixer`:
 - `MixerDeviceSink` creates a single `(mixer, queue)` → `DeviceSink`
 - Music renderer receives a `Mixer` clone via `set_shared_mixer()`
-- Each track gets an `ActiveStream`: ring buffer + `StreamingSource` added to mixer
+- Each track gets an `ActiveStream`: ring buffer (480K samples ≈ 5s at 48kHz stereo) + `StreamingSource` added to mixer
 - `StreamingSource` implements `rodio::Source` (pull model) — cpal callback pulls f32 samples
 - **Perceptual volume curve**: linear 0.0–1.0 input → exponential amplitude (same as rodio's `amplify_normalized()`)
 - Volume applied per-sample with exponential smoothing (~5ms time constant) to avoid crossfade crackle
@@ -110,4 +110,4 @@ Canceling operations (seek, skip, stop) cancel active crossfades via `cancel_cro
 
 ## Sparse Chunk Cache (Decoder)
 
-HTTP Range requests with 256KB chunk cache — avoids downloading entire files. Enables random-access seeking.
+HTTP Range requests with 256KB chunks, 16-chunk LRU cache (~4MB). Connection pooling enabled (TCP/TLS reuse between chunk fetches). Next-chunk prefetch after sequential reads reduces decoder stalls. Enables random-access seeking.

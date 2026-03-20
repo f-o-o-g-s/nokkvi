@@ -27,6 +27,7 @@ globs: src/widgets/**
 - Transport controls always visible
 - **Scroll-to-volume**: mouse wheel anywhere on the player bar adjusts volume
 - **Horizontal volume mode**: `horizontal_volume` setting stacks volume sliders horizontally; both SFX and main volume sliders' combined height matches adjacent button height when both visible
+- `GoToQueue` message — used by track info strip to navigate to queue view
 
 ## Progress Bar (`progress_bar.rs`)
 
@@ -70,6 +71,7 @@ globs: src/widgets/**
 - Shared widget rendering now-playing metadata (title, artist, album, codec, kHz, kbps)
 - Used by both the player bar and the top bar (side nav only)
 - Controlled by `TrackInfoDisplay` setting (Off / PlayerBar / TopBar)
+- **Clickable center metadata**: title/artist/album wrapped in `mouse_area` with optional `on_press` — navigates to queue view. Codec/sample-rate and bitrate sections remain non-clickable.
 - **`info_field_widget()`**: shared helper for labeled scrolling metadata fields — single source of truth
 
 ## Format Info (`format_info.rs`)
@@ -94,6 +96,7 @@ globs: src/widgets/**
 
 - Top-bar navigation: view tabs + audio format stats (kHz, bitrate) + hamburger menu
 - Stats display live values from audio engine via atomics
+- **Clickable info row**: metadata area wrapped in `mouse_area` — navigates to queue view
 - Toast notifications rendered in the nav bar area
 
 ## Hamburger Menu (`hamburger_menu.rs`)
