@@ -57,7 +57,7 @@ fi
 cp -r assets "${TEMP_DIR}/"
 
 # Install script (desktop entry + icon)
-cp install.sh "${TEMP_DIR}/"
+cp -p install.sh "${TEMP_DIR}/"
 
 # Git files (for version control)
 cp .gitignore "${TEMP_DIR}/"

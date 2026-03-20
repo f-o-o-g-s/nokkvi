@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.0.4 — 2026-03-19
+
+### Fixes
+- **install.sh permissions in zip** — `package.sh` now uses `cp -p` to preserve
+  the execute bit on `install.sh`, so users no longer need to `chmod +x` after
+  extracting.
+
+---
+
 ## v0.0.3 — 2026-03-19
 
 ### Fixes
