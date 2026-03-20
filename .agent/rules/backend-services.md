@@ -12,7 +12,8 @@ AppService (orchestrator)
 ├── PlaybackController (audio engine + queue navigator)
 │   ├── Transport, volume, modes, gapless transitions
 │   ├── Playback history (Vec<Song>, capped, dedup-on-push)
-│   └── source_generation counter (AtomicU64) — prevents stale track-completion callbacks
+│   ├── source_generation counter (AtomicU64) — prevents stale track-completion callbacks
+│   └── reset_next_track() on mode toggles — clears stale gapless/crossfade prep
 ├── Domain Services (Albums, Artists, Songs, Genres, Playlists, Queue, Settings, Auth)
 │   └── Lazy-initialized via `tokio::sync::OnceCell` (not Mutex<Option<T>>)
 ├── ArtworkPrefetch (artwork_prefetch.rs) — background artwork loading with progress tracking

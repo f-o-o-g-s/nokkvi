@@ -108,6 +108,8 @@ globs: src/widgets/**
 
 - Generic right-click context menu widget (adapted from Halloy)
 - Two entry enums: `LibraryContextEntry` for library views, `QueueContextEntry` for queue
+- `library_entries()` — base entries (AddToQueue, AddToPlaylist, GetInfo)
+- `library_entries_with_folder()` — adds ShowInFolder (used by Songs, Albums, Artists)
 - Supports separator entries for visual grouping
 
 ## Info Modal (`info_modal.rs`)
@@ -115,6 +117,8 @@ globs: src/widgets/**
 - Feishin-style two-column property table for "Get Info" context menu action
 - `InfoModalItem` enum: `Song`, `Album`, `Artist`, `Playlist` — each provides `properties()` → `Vec<(label, value)>`
 - Per-row expand/collapse, hover copy button, clickable URLs, open in file manager
+- `OpenFolder(path)` — direct path open (songs, albums with loaded tracks)
+- `FetchAndOpenAlbumFolder(album_id)` — async fetch representative song path for albums without loaded tracks
 
 ## Text Input Dialog (`text_input_dialog.rs`)
 

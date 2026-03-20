@@ -33,6 +33,7 @@ All audio flows through **one cpal stream** via a shared `rodio::Mixer`:
 1. **Fresh decoder creation**: On track change, create a new decoder — never reuse
 2. **Atomic signaling**: `pending_clear` atomic flag clears visualizer buffer without blocking
 3. **Decoupled initialization**: Gapless prep happens outside engine lock
+4. **Mode toggle reset**: `reset_next_track()` clears prepared decoder, shared source, and disarms crossfade trigger — called on shuffle/repeat/consume toggle to prevent stale gapless transitions
 
 **Never hold the engine lock during decoder operations.**
 
@@ -100,6 +101,7 @@ Two concurrent `ActiveStream` instances on the shared mixer:
 Settings: `crossfade_enabled` (bool) and `crossfade_duration_secs` (u32) in `PlayerSettings`, exposed in Settings → Playback.
 
 Canceling operations (seek, skip, stop) cancel active crossfades via `cancel_crossfade()`.
+Mode toggles (shuffle/repeat/consume) call `reset_next_track()` to clear any armed crossfade prep.
 
 ## Sound Effects Engine (`sfx_engine.rs`)
 

@@ -108,3 +108,7 @@ All track transitions (gapless, crossfade, manual skip) must use `peek_next_song
 ## 26. Artwork Refresh Must Use Handle::from_bytes
 
 `Handle::from_path` derives its ID from the file path. During a refresh, the disk cache file is overwritten at the same path — so `from_path` produces the same Handle ID, and Iced's GPU texture cache serves the stale texture. The refresh handler (`handle_refresh_album_artwork`) must use `Handle::from_bytes(data)` so the Handle ID is content-derived, busting the stale cache entry.
+
+## 27. Stale Gapless Prep on Mode Toggles
+
+Toggling shuffle/repeat/consume after gapless preparation (~80% through track) leaves a stale decoder in the engine. Mode toggle handlers must call `reset_next_track()` to clear the prepared decoder and disarm the crossfade trigger, plus reset `gapless_preparing` in the UI so prep re-triggers with the correct next track.

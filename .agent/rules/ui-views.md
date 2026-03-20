@@ -130,3 +130,7 @@ Each `update/{name}.rs` handles data loading and message routing:
 
 - `Message::ShowInFolder(String)` → `handle_show_in_folder` in `update/components.rs`
 - Requires `local_music_path` configured; shows toast warning if unset
+- **Songs**: direct path from `SongUIViewData.path`
+- **Albums/Artists**: async API fetch via `load_album_songs()` → first song's path → `Message::ShowInFolder`
+- Context menu: `LibraryContextEntry::ShowInFolder` — Songs, Albums, Artists views use `library_entries_with_folder()`
+- Info modal: `FetchAndOpenAlbumFolder(album_id)` message triggers async fetch for albums without a pre-loaded path
