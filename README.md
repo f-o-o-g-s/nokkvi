@@ -32,7 +32,7 @@ A native Rust/Iced client for [Navidrome](https://www.navidrome.org/) music serv
 - Toast notification system for user feedback
 - Server-side pagination for large libraries (`PagedBuffer<T>`)
 - Confirmation dialogs for destructive actions
-- Queue persistence across app restarts (resumes from last track)
+- Queue persistence across app restarts (restores queue contents and current track)
 - Non-wrapping slot list navigation with dynamic center slot
 - Dynamic slot sizing with configurable row height (Settings → General)
 
