@@ -109,6 +109,8 @@ pub enum AlbumsAction {
     PlayNext(String),      // album_id - insert after currently playing
     AddToPlaylist(String), // album_id or song_id - add to playlist dialog
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
+    ShowInFolder(String),  // album_id - fetch a song path and open containing folder
+    ShowSongInFolder(String), // song path - open containing folder directly (expansion child)
     RefreshArtwork(String), // album_id - refresh artwork from server
     None,
 }
@@ -375,13 +377,18 @@ impl AlbumsPage {
                                     id: album.id.clone(),
                                     tags: album.tags.clone(),
                                     participants: album.participants.clone(),
-                                    representative_path: None,
+                                    representative_path: self
+                                        .expansion
+                                        .children
+                                        .first()
+                                        .map(|s| s.path.clone()),
                                 };
                                 (Task::none(), AlbumsAction::ShowInfo(Box::new(item)))
                             }
-                            LibraryContextEntry::Separator | LibraryContextEntry::ShowInFolder => {
-                                (Task::none(), AlbumsAction::None)
+                            LibraryContextEntry::ShowInFolder => {
+                                (Task::none(), AlbumsAction::ShowInFolder(album.id.clone()))
                             }
+                            LibraryContextEntry::Separator => (Task::none(), AlbumsAction::None),
                         },
                         Some(SlotListEntry::Child(song, _parent_id)) => match entry {
                             LibraryContextEntry::AddToQueue => (
@@ -396,9 +403,11 @@ impl AlbumsPage {
                                 let item = InfoModalItem::from_song_view_data(song);
                                 (Task::none(), AlbumsAction::ShowInfo(Box::new(item)))
                             }
-                            LibraryContextEntry::Separator | LibraryContextEntry::ShowInFolder => {
-                                (Task::none(), AlbumsAction::None)
-                            }
+                            LibraryContextEntry::ShowInFolder => (
+                                Task::none(),
+                                AlbumsAction::ShowSongInFolder(song.path.clone()),
+                            ),
+                            LibraryContextEntry::Separator => (Task::none(), AlbumsAction::None),
                         },
                         None => (Task::none(), AlbumsAction::None),
                     }
@@ -667,13 +676,19 @@ impl AlbumsPage {
             .padding(0)
             .width(Length::Fill);
 
-        use crate::widgets::context_menu::{context_menu, library_entries, library_entry_view};
+        use crate::widgets::context_menu::{
+            context_menu, library_entries_with_folder, library_entry_view,
+        };
         let item_idx = ctx.item_index;
-        context_menu(slot_button, library_entries(), move |entry, length| {
-            library_entry_view(entry, length, |e| {
-                AlbumsMessage::ContextMenuAction(item_idx, e)
-            })
-        })
+        context_menu(
+            slot_button,
+            library_entries_with_folder(),
+            move |entry, length| {
+                library_entry_view(entry, length, |e| {
+                    AlbumsMessage::ContextMenuAction(item_idx, e)
+                })
+            },
+        )
         .into()
     }
 

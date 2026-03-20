@@ -112,6 +112,8 @@ pub enum ArtistsAction {
     PlayNext(String),      // artist_id or album_id - insert after currently playing
     AddToPlaylist(String), // artist_id or album_id - add to playlist dialog
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
+    ShowAlbumInFolder(String), // album_id - fetch a song path and open containing folder
+    ShowSongInFolder(String), // song path - open containing folder directly
     None,
 }
 
@@ -515,7 +517,7 @@ impl ArtistsPage {
                                 };
                                 (Task::none(), ArtistsAction::ShowInfo(Box::new(item)))
                             }
-                            LibraryContextEntry::Separator | LibraryContextEntry::ShowInFolder => {
+                            LibraryContextEntry::ShowInFolder | LibraryContextEntry::Separator => {
                                 (Task::none(), ArtistsAction::None)
                             }
                         },
@@ -551,13 +553,19 @@ impl ArtistsPage {
                                     id: album.id.clone(),
                                     tags: album.tags.clone(),
                                     participants: album.participants.clone(),
-                                    representative_path: None,
+                                    representative_path: self
+                                        .sub_expansion
+                                        .children
+                                        .first()
+                                        .map(|s| s.path.clone()),
                                 };
                                 (Task::none(), ArtistsAction::ShowInfo(Box::new(item)))
                             }
-                            LibraryContextEntry::Separator | LibraryContextEntry::ShowInFolder => {
-                                (Task::none(), ArtistsAction::None)
-                            }
+                            LibraryContextEntry::ShowInFolder => (
+                                Task::none(),
+                                ArtistsAction::ShowAlbumInFolder(album.id.clone()),
+                            ),
+                            LibraryContextEntry::Separator => (Task::none(), ArtistsAction::None),
                         },
                         Some(ThreeTierEntry::Grandchild(song, _)) => match entry {
                             LibraryContextEntry::AddToQueue => (
@@ -575,9 +583,11 @@ impl ArtistsPage {
                                 let item = InfoModalItem::from_song_view_data(song);
                                 (Task::none(), ArtistsAction::ShowInfo(Box::new(item)))
                             }
-                            LibraryContextEntry::Separator | LibraryContextEntry::ShowInFolder => {
-                                (Task::none(), ArtistsAction::None)
-                            }
+                            LibraryContextEntry::ShowInFolder => (
+                                Task::none(),
+                                ArtistsAction::ShowSongInFolder(song.path.clone()),
+                            ),
+                            LibraryContextEntry::Separator => (Task::none(), ArtistsAction::None),
                         },
                         None => (Task::none(), ArtistsAction::None),
                     }
@@ -873,13 +883,19 @@ impl ArtistsPage {
             .padding(0)
             .width(Length::Fill);
 
-        use crate::widgets::context_menu::{context_menu, library_entries, library_entry_view};
+        use crate::widgets::context_menu::{
+            context_menu, library_entries_with_folder, library_entry_view,
+        };
         let item_idx = ctx.item_index;
-        context_menu(slot_button, library_entries(), move |entry, length| {
-            library_entry_view(entry, length, |e| {
-                ArtistsMessage::ContextMenuAction(item_idx, e)
-            })
-        })
+        context_menu(
+            slot_button,
+            library_entries_with_folder(),
+            move |entry, length| {
+                library_entry_view(entry, length, |e| {
+                    ArtistsMessage::ContextMenuAction(item_idx, e)
+                })
+            },
+        )
         .into()
     }
 

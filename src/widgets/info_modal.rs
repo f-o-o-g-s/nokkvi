@@ -148,6 +148,8 @@ pub enum InfoModalMessage {
     OpenUrl(String),
     /// Open the item's containing folder in the file manager.
     OpenFolder(String),
+    /// Fetch a representative song path for an album and open its containing folder.
+    FetchAndOpenAlbumFolder(String),
     /// A text_editor action for a specific value row (index, action).
     EditorAction(usize, text_editor::Action),
 }
@@ -247,10 +249,18 @@ pub(crate) fn info_modal_overlay<'a>(
         ..Default::default()
     });
 
-    // Only show folder button when we have a resolvable local path
+    // Show folder button for Songs (direct path) and Albums (async fetch via ID)
     let folder_path = item.folder_path();
-    let header = if let Some(ref fp) = folder_path {
-        let folder_path_msg = fp.clone();
+    let album_id = match item {
+        nokkvi_data::types::info_modal::InfoModalItem::Album { id, .. } => Some(id.clone()),
+        _ => None,
+    };
+    let folder_msg = if let Some(ref fp) = folder_path {
+        Some(InfoModalMessage::OpenFolder(fp.clone()))
+    } else {
+        album_id.map(InfoModalMessage::FetchAndOpenAlbumFolder)
+    };
+    let header = if let Some(msg) = folder_msg {
         let folder_button = button(
             crate::embedded_svg::svg_widget("assets/icons/folder-open.svg")
                 .width(14)
@@ -259,7 +269,7 @@ pub(crate) fn info_modal_overlay<'a>(
                     color: Some(theme::fg3()),
                 }),
         )
-        .on_press(InfoModalMessage::OpenFolder(folder_path_msg))
+        .on_press(msg)
         .padding(iced::Padding {
             top: 2.0,
             bottom: 2.0,

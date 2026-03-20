@@ -51,7 +51,7 @@ pub(crate) fn library_entries() -> Vec<LibraryContextEntry> {
     ]
 }
 
-/// Library context menu entries with "Show in File Manager" (Songs view only).
+/// Library context menu entries with "Show in File Manager" (Songs, Albums, Artists views).
 pub(crate) fn library_entries_with_folder() -> Vec<LibraryContextEntry> {
     vec![
         LibraryContextEntry::AddToQueue,
