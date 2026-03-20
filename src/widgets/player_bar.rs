@@ -88,6 +88,7 @@ pub enum PlayerBarMessage {
     ScrollVolume(f32),
     OpenSettings,
     ToggleLightMode,
+    GoToQueue,
     Quit,
 }
 

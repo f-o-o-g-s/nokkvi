@@ -116,7 +116,10 @@ impl Nokkvi {
 
             // Top bar info strip (full window width, above sidebar)
             if crate::theme::show_top_bar_strip() {
-                outer = outer.push(widgets::track_info_strip::track_info_strip(&strip_data));
+                outer = outer.push(widgets::track_info_strip::track_info_strip(
+                    &strip_data,
+                    Some(Message::SwitchView(View::Queue)),
+                ));
                 // Bottom separator to delineate strip from content below
                 outer = outer.push(crate::theme::horizontal_separator::<Message>(1.0));
             }
@@ -126,6 +129,7 @@ impl Nokkvi {
                 if crate::theme::show_player_bar_strip() {
                     Some(widgets::track_info_strip::track_info_strip_with_separator(
                         &strip_data,
+                        Some(widgets::PlayerBarMessage::GoToQueue),
                     ))
                 } else {
                     None

@@ -8,7 +8,7 @@
 use iced::{
     Alignment, Background, Border, Element, Length,
     font::{Font, Weight},
-    widget::{Space, button, column, container, row, text, text::Wrapping},
+    widget::{Space, button, column, container, mouse_area, row, text, text::Wrapping},
 };
 use nokkvi_data::types::player_settings::NavDisplayMode;
 
@@ -407,7 +407,8 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         // Fill spacer → push format info away
         info_row = info_row.push(Space::new().width(Length::Fill));
 
-        container(info_row)
+        // Wrap in mouse_area so clicking metadata navigates to queue
+        container(mouse_area(info_row).on_press(NavBarMessage::SwitchView(NavView::Queue)))
             .width(Length::Fill)
             .height(Length::Fill)
             .center_y(Length::Fill)

@@ -8,7 +8,7 @@
 use iced::{
     Alignment, Element, Length,
     font::{Font, Weight},
-    widget::{container, row, space, text},
+    widget::{container, mouse_area, row, space, text},
 };
 
 use crate::theme;
@@ -62,7 +62,14 @@ pub(crate) fn info_field_widget<'a, M: 'static>(
 ///
 /// Returns a padded row with codec/kHz left, track metadata center, kbps right,
 /// separated by 1px vertical lines.
-pub(crate) fn track_info_strip<'a, M: 'static>(data: &TrackInfoStripData<'_>) -> Element<'a, M> {
+///
+/// When `on_press` is `Some`, clicking the center metadata (title/artist/album)
+/// emits the given message. The codec/sample-rate and bitrate sections remain
+/// non-clickable.
+pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
+    data: &TrackInfoStripData<'_>,
+    on_press: Option<M>,
+) -> Element<'a, M> {
     let format_split = super::format_info::format_audio_info_split(
         data.format_suffix,
         data.sample_rate as f32 / 1000.0,
@@ -107,13 +114,24 @@ pub(crate) fn track_info_strip<'a, M: 'static>(data: &TrackInfoStripData<'_>) ->
     info_row = info_row.push(space().width(Length::Fill));
 
     // CENTER: │ title: │ artist: │ album: │
-    info_row = info_row.push(info_sep());
-    info_row = info_row.push(info_field("title:", title, theme::now_playing_color()));
-    info_row = info_row.push(info_sep());
-    info_row = info_row.push(info_field("artist:", artist, theme::selected_color()));
-    info_row = info_row.push(info_sep());
-    info_row = info_row.push(info_field("album:", album, theme::fg2()));
-    info_row = info_row.push(info_sep());
+    // Wrapped in mouse_area so clicking navigates to queue.
+    let mut center_row = iced::widget::Row::new()
+        .spacing(6)
+        .align_y(Alignment::Center);
+    center_row = center_row.push(info_sep());
+    center_row = center_row.push(info_field("title:", title, theme::now_playing_color()));
+    center_row = center_row.push(info_sep());
+    center_row = center_row.push(info_field("artist:", artist, theme::selected_color()));
+    center_row = center_row.push(info_sep());
+    center_row = center_row.push(info_field("album:", album, theme::fg2()));
+    center_row = center_row.push(info_sep());
+
+    let center_element: Element<'a, M> = if let Some(msg) = on_press {
+        mouse_area(center_row).on_press(msg).into()
+    } else {
+        center_row.into()
+    };
+    info_row = info_row.push(center_element);
 
     // Fill spacer → right
     info_row = info_row.push(space().width(Length::Fill));
@@ -145,10 +163,11 @@ pub(crate) fn track_info_strip<'a, M: 'static>(data: &TrackInfoStripData<'_>) ->
 }
 
 /// Build a full strip with separator line above it.
-pub(crate) fn track_info_strip_with_separator<'a, M: 'static>(
+pub(crate) fn track_info_strip_with_separator<'a, M: Clone + 'static>(
     data: &TrackInfoStripData<'_>,
+    on_press: Option<M>,
 ) -> Element<'a, M> {
-    let strip = track_info_strip(data);
+    let strip = track_info_strip(data, on_press);
     let separator = theme::horizontal_separator(1.0);
     iced::widget::column![separator, strip].into()
 }
