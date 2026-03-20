@@ -200,11 +200,12 @@ impl Visualizer {
         if self.dynamic_bars && self.mode == VisualizationMode::Bars {
             // Read bar width min/max and spacing from shared config for hot-reload support
             let cfg = self.config.read();
-            let (bar_width_min, bar_width_max, config_bar_spacing, config_max_bars) = (
+            let (bar_width_min, bar_width_max, config_bar_spacing, config_max_bars, config_border_width) = (
                 cfg.bars.bar_width_min,
                 cfg.bars.bar_width_max,
                 cfg.bars.bar_spacing,
                 cfg.bars.max_bars,
+                cfg.bars.border_width,
             );
             drop(cfg);
 
@@ -215,6 +216,7 @@ impl Visualizer {
             // Update local fields from config
             self.bar_spacing = config_bar_spacing;
             self.max_bars = config_max_bars;
+            self.border_width = config_border_width;
 
             // Calculate optimal bar count, width, and edge spacing to fill the screen
             let (new_bar_count, calculated_bar_width, edge_spacing) = calculate_bar_layout(
