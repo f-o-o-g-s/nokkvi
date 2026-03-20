@@ -17,6 +17,10 @@ install -Dm755 "$BINARY" ~/.local/bin/nokkvi
 install -Dm644 "$SCRIPT_DIR/assets/org.nokkvi.nokkvi.desktop" \
     ~/.local/share/applications/org.nokkvi.nokkvi.desktop
 
+# Patch Exec= to use absolute path (launchers may not inherit shell $PATH)
+sed -i "s|^Exec=nokkvi|Exec=$HOME/.local/bin/nokkvi|" \
+    ~/.local/share/applications/org.nokkvi.nokkvi.desktop
+
 # SVG icon (hicolor scalable — picked up by most icon themes)
 install -Dm644 "$SCRIPT_DIR/assets/org.nokkvi.nokkvi.svg" \
     ~/.local/share/icons/hicolor/scalable/apps/org.nokkvi.nokkvi.svg
