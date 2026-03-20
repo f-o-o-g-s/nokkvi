@@ -97,6 +97,7 @@ globs: src/widgets/**
 - Top-bar navigation: view tabs + audio format stats (kHz, bitrate) + hamburger menu
 - Stats display live values from audio engine via atomics
 - **Clickable info row**: metadata area wrapped in `mouse_area` — navigates to queue view
+- **Progressive metadata collapsing**: items collapse individually as window narrows — album <900px, artist <750px, title <600px
 - Toast notifications rendered in the nav bar area
 
 ## Hamburger Menu (`hamburger_menu.rs`)

@@ -112,3 +112,7 @@ All track transitions (gapless, crossfade, manual skip) must use `peek_next_song
 ## 27. Stale Gapless Prep on Mode Toggles
 
 Toggling shuffle/repeat/consume after gapless preparation (~80% through track) leaves a stale decoder in the engine. Mode toggle handlers must call `reset_next_track()` to clear the prepared decoder and disarm the crossfade trigger, plus reset `gapless_preparing` in the UI so prep re-triggers with the correct next track.
+
+## 28. Stale Struct Fields in Visualizer Builder
+
+The `Visualizer` struct caches config values (e.g., `border_width`) set at construction time. Builder methods like `width()` that re-read some fields from shared config must re-read **all** config fields they use — partial re-reads cause layout/render divergence. The `view()` method reads fresh config for the shader, so if `width()` uses a stale field the layout won't match what the GPU renders.
