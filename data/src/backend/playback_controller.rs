@@ -366,15 +366,27 @@ impl PlaybackController {
     // =========================================================================
 
     /// Toggle random mode
+    ///
+    /// Clears the engine's prepared next-track decoder because toggling shuffle
+    /// reshuffles the order array, invalidating any pre-buffered gapless song.
     pub async fn toggle_random(&self) -> Result<bool> {
         let queue_manager_arc = self.queue_service.queue_manager();
         let mut queue_manager = queue_manager_arc.lock().await;
         queue_manager.toggle_shuffle()?;
         let is_random = queue_manager.get_queue().shuffle;
+        drop(queue_manager);
+
+        // Invalidate engine-level gapless prep (stale after order change)
+        let mut engine = self.audio_engine.lock().await;
+        engine.reset_next_track().await;
+
         Ok(is_random)
     }
 
     /// Cycle repeat mode: None → Track → Playlist → None
+    ///
+    /// Clears queued next-song and engine prep because repeat mode affects
+    /// what `peek_next_song` returns (e.g. repeat-track → same song).
     pub async fn cycle_repeat(&self) -> Result<(bool, bool)> {
         use crate::types::queue::RepeatMode;
 
@@ -389,6 +401,13 @@ impl PlaybackController {
         };
 
         queue_manager.set_repeat(next_repeat)?;
+        queue_manager.clear_queued();
+        queue_manager.save_order()?;
+        drop(queue_manager);
+
+        // Invalidate engine-level gapless prep (stale after mode change)
+        let mut engine = self.audio_engine.lock().await;
+        engine.reset_next_track().await;
 
         let repeat = next_repeat == RepeatMode::Track;
         let repeat_queue = next_repeat == RepeatMode::Playlist;
@@ -396,11 +415,21 @@ impl PlaybackController {
     }
 
     /// Toggle consume mode
+    ///
+    /// Clears the engine's prepared next-track decoder because consume mode
+    /// affects post-transition queue state (the finished song may be removed).
     pub async fn toggle_consume(&self) -> Result<bool> {
         let queue_manager_arc = self.queue_service.queue_manager();
         let mut queue_manager = queue_manager_arc.lock().await;
         queue_manager.toggle_consume()?;
-        Ok(queue_manager.get_queue().consume)
+        let consume = queue_manager.get_queue().consume;
+        drop(queue_manager);
+
+        // Invalidate engine-level gapless prep (stale after mode change)
+        let mut engine = self.audio_engine.lock().await;
+        engine.reset_next_track().await;
+
+        Ok(consume)
     }
 
     /// Get current modes (random, repeat_track, repeat_queue, consume)

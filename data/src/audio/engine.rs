@@ -1385,10 +1385,17 @@ impl CustomAudioEngine {
         self.source_generation.load(Ordering::Acquire)
     }
 
-    async fn reset_next_track(&mut self) {
+    /// Clear the prepared next-track decoder and all associated state.
+    ///
+    /// Call this whenever the play order changes (shuffle/repeat/consume toggle)
+    /// to prevent a stale gapless transition to the wrong song.
+    pub async fn reset_next_track(&mut self) {
         *self.next_decoder.lock().await = None;
+        *self.next_track_prepared.lock().await = false;
         self.next_source.clear();
+        *self.next_source_shared.lock().await = String::new();
         self.next_format = AudioFormat::invalid();
+        self.renderer.lock().disarm_crossfade();
     }
 
     /// Get playback state

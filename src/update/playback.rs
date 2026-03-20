@@ -570,6 +570,8 @@ impl Nokkvi {
 
     pub(crate) fn handle_random_toggled(&mut self, random: bool) -> Task<Message> {
         self.modes.random = random;
+        // Allow gapless prep to re-trigger with the new shuffled/unshuffled order
+        self.engine.gapless_preparing = false;
         Task::none()
     }
 
@@ -598,6 +600,8 @@ impl Nokkvi {
     ) -> Task<Message> {
         self.modes.repeat = repeat;
         self.modes.repeat_queue = repeat_queue;
+        // Allow gapless prep to re-trigger with the new repeat mode
+        self.engine.gapless_preparing = false;
         Task::none()
     }
 
@@ -614,6 +618,8 @@ impl Nokkvi {
 
     pub(crate) fn handle_consume_toggled(&mut self, consume: bool) -> Task<Message> {
         self.modes.consume = consume;
+        // Allow gapless prep to re-trigger with the new consume setting
+        self.engine.gapless_preparing = false;
         Task::none()
     }
 
