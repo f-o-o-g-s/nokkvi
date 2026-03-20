@@ -14,10 +14,10 @@ use tracing::{debug, info};
 use super::streaming_source::{SharedVisualizerCallback, StreamHandle, StreamingSource};
 
 /// Default ring buffer capacity in samples.
-/// 48000 Hz × 2 channels × 2 seconds = 192000 samples.
-/// Two seconds of buffering absorbs decoder stalls while keeping memory
-/// reasonable (~750KB per stream).
-pub const RING_BUFFER_CAPACITY: usize = 192_000;
+/// 48000 Hz × 2 channels × 5 seconds = 480000 samples.
+/// Five seconds of buffering absorbs network latency spikes while keeping
+/// memory reasonable (~1.8MB per stream).
+pub const RING_BUFFER_CAPACITY: usize = 480_000;
 
 /// A handle to an active audio stream on the mixer.
 ///

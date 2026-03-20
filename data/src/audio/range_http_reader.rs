@@ -9,9 +9,9 @@ use std::io::{Read, Seek, SeekFrom};
 use symphonia::core::io::MediaSource;
 
 const CHUNK_SIZE: u64 = 256 * 1024; // 256KB chunks
-/// Maximum chunks to keep in cache (~2MB total)
-/// This bounds memory for long tracks while providing reasonable lookahead
-const MAX_CACHED_CHUNKS: usize = 8;
+/// Maximum chunks to keep in cache (~4MB total)
+/// Larger cache reduces re-fetches during sequential playback and decoder backtracks
+const MAX_CACHED_CHUNKS: usize = 16;
 
 /// HTTP reader with Range request support for random access
 ///
@@ -57,9 +57,9 @@ impl RangeHttpReader {
             .timeout(std::time::Duration::from_secs(10))
             // More aggressive keepalive to detect dead connections faster
             .tcp_keepalive(std::time::Duration::from_secs(10))
-            // Disable connection pooling - fresh connections avoid stale connection issues
-            // Stale pooled connections cause timeouts when server closes idle connections
-            .pool_max_idle_per_host(0)
+            // Connection pooling enabled (default) — reuses TCP connections between
+            // chunk fetches, avoiding repeated TLS handshake and TCP slow start.
+            // Retry logic already recreates the client on failures.
             .build()
             .expect("Failed to create HTTP client")
     }
@@ -232,10 +232,12 @@ impl RangeHttpReader {
 
         let mut bytes_read = 0;
         let mut current_pos = offset;
+        let mut last_chunk_idx = None;
 
         while bytes_read < buf.len() && current_pos < self.content_length {
             let chunk_idx = Self::chunk_index(current_pos);
             self.ensure_chunk(chunk_idx)?;
+            last_chunk_idx = Some(chunk_idx);
 
             if let Some(chunk) = self.chunks.get(&chunk_idx) {
                 let chunk_start = chunk_idx * CHUNK_SIZE;
@@ -275,6 +277,18 @@ impl RangeHttpReader {
                     chunk_idx
                 );
                 break;
+            }
+        }
+
+        // PREFETCH: After reading, speculatively fetch the next chunk.
+        // This keeps the cache ahead of the decoder, reducing stalls
+        // during sequential playback over the network.
+        if let Some(last_idx) = last_chunk_idx {
+            let next_chunk = last_idx + 1;
+            if next_chunk * CHUNK_SIZE < self.content_length
+                && !self.chunks.contains_key(&next_chunk)
+            {
+                let _ = self.ensure_chunk(next_chunk);
             }
         }
 

@@ -381,7 +381,7 @@ impl CustomAudioEngine {
 
         // PREBUFFERING: Queue initial buffers before starting renderer
         // This prevents buffer starvation at playback start
-        const PREBUFFER_COUNT: usize = 5;
+        const PREBUFFER_COUNT: usize = 15;
         trace!(
             " AudioEngine: prebuffering {} buffers before playback",
             PREBUFFER_COUNT
@@ -841,7 +841,7 @@ impl CustomAudioEngine {
                     renderer.seek(pos);
 
                     // PREBUFFERING: Queue initial buffers after seek
-                    const PREBUFFER_COUNT: usize = 3;
+                    const PREBUFFER_COUNT: usize = 10;
                     tracing::trace!(
                         "🔍 [SEEK/BLOCKING] Prebuffering {} buffers",
                         PREBUFFER_COUNT
