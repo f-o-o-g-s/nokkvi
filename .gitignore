@@ -1,0 +1,45 @@
+# Build artifacts
+/target
+Cargo.lock
+/dist
+
+# Sensitive configuration and authentication
+navidrome_auth.json
+*.json.local
+*.env
+.env
+.env.*
+config.local.*
+
+# Application state and cache
+state.redb
+current_queue.json
+*.redb
+*.db
+*.sqlite
+*.sqlite3
+
+# Reference folders (accessible locally, not tracked in git)
+reference-*/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Agent/AI assistant data
+.gemini/
+
+# Logs and debugging
+*.log
+debug/
+*.profdata
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+__pycache__/

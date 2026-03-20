@@ -1,0 +1,6 @@
+# Requires nightly rustfmt: cargo +nightly fmt --all
+unstable_features = true
+edition = "2021"
+max_width = 100
+imports_granularity = "Crate"
+group_imports = "StdExternalCrate"

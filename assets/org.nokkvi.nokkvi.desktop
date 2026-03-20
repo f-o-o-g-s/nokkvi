@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Nokkvi
+GenericName=Navidrome Client
+Comment=A small boat for your music stream
+Exec=nokkvi
+Icon=org.nokkvi.nokkvi
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=music;audio;player;streaming;navidrome;
+StartupNotify=true
+StartupWMClass=org.nokkvi.nokkvi

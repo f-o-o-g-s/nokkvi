@@ -1,0 +1,187 @@
+# Navidrome Client Configuration - Dracula Theme
+# Dark mode: Dracula Classic | Light mode: Alucard Classic
+# All colors from official Dracula spec: https://draculatheme.com
+
+# REPLACE THESE WITH YOUR CREDENTIALS
+server_url = "http://localhost:4533"
+username = ""
+
+# ============================================================================
+# DRACULA CLASSIC (Dark Mode)
+# ============================================================================
+
+[theme.dark.accent]
+border_dark = "#BD93F9"
+border_light = "#D6ACFF"
+bright = "#D6ACFF"
+primary = "#BD93F9"
+
+[theme.dark.aqua]
+bright = "#A4FFFF"
+normal = "#8BE9FD"
+
+[theme.dark.background]
+default = "#282A36"
+hard = "#191A21"
+level1 = "#343746"
+level2 = "#424450"
+level3 = "#44475A"
+level4 = "#6272A4"
+soft = "#21222C"
+
+[theme.dark.foreground]
+bright = "#FFFFFF"
+gray = "#6272A4"
+level1 = "#F8F8F2"
+level2 = "#E8E8E2"
+level3 = "#D8D8D2"
+level4 = "#C8C8C2"
+
+[theme.dark.green]
+bright = "#69FF94"
+normal = "#50FA7B"
+
+[theme.dark.orange]
+bright = "#FFCB8C"
+normal = "#FFB86C"
+
+[theme.dark.purple]
+bright = "#D6ACFF"
+normal = "#BD93F9"
+
+[theme.dark.red]
+bright = "#FF6E6E"
+normal = "#FF5555"
+
+[theme.dark.yellow]
+bright = "#FFFFA5"
+normal = "#F1FA8C"
+
+# ============================================================================
+# ALUCARD CLASSIC (Light Mode)
+# ============================================================================
+
+[theme.light.accent]
+border_dark = "#644AC9"
+border_light = "#7862D0"
+bright = "#7862D0"
+primary = "#644AC9"
+
+[theme.light.aqua]
+bright = "#047FB4"
+normal = "#036A96"
+
+[theme.light.background]
+default = "#EFEDDC"
+hard = "#FFFBEB"
+level1 = "#ECE9DF"
+level2 = "#DEDCCF"
+level3 = "#CECCC0"
+level4 = "#BCBAB3"
+soft = "#FFFBEB"
+
+[theme.light.foreground]
+bright = "#1F1F1F"
+gray = "#6C664B"
+level1 = "#1F1F1F"
+level2 = "#2C2B31"
+level3 = "#3C3B41"
+level4 = "#4C4B51"
+
+[theme.light.green]
+bright = "#198D0C"
+normal = "#14710A"
+
+[theme.light.orange]
+bright = "#B35D1A"
+normal = "#A34D14"
+
+[theme.light.purple]
+bright = "#7862D0"
+normal = "#644AC9"
+
+[theme.light.red]
+bright = "#D74C3D"
+normal = "#CB3A2A"
+
+[theme.light.yellow]
+bright = "#9E841A"
+normal = "#846E15"
+
+[theme.font]
+family = "JetBrainsMono Nerd Font"
+
+# ============================================================================
+# VISUALIZER
+# ============================================================================
+
+
+[visualizer]
+higher_cutoff_freq = 10000
+
+lower_cutoff_freq = 50
+monstercat = 0.0
+noise_reduction = 0.77
+waves = false
+
+# Dark mode visualizer: Purple → Pink → Cyan gradient
+
+[visualizer.bars]
+bar_spacing = 2.0
+gradient_mode = "wave"
+border_width = 1.0
+led_bars = true
+led_segment_height = 2.0
+peak_gradient_mode = "cycle"
+peak_mode = "fall"
+peak_hold_time = 500
+peak_fade_time = 750
+bar_depth_3d = 0.0
+peak_height_ratio = 66
+
+[visualizer.bars.dark]
+border_color = "#191A21"
+border_opacity = 1.0
+led_border_opacity = 1.0
+bar_gradient_colors = [
+    "#BD93F9",
+    "#BD93F9",
+    "#FF79C6",
+    "#FF79C6",
+    "#8BE9FD",
+    "#8BE9FD",
+]
+peak_gradient_colors = [
+    "#F1FA8C",
+    "#F1FA8C",
+    "#FFFFA5",
+    "#FFFFA5",
+    "#FFFFA5",
+    "#FFFFA5",
+]
+
+[visualizer.bars.light]
+border_color = "#FFFBEB"
+border_opacity = 0.0
+led_border_opacity = 0.0
+bar_gradient_colors = [
+    "#644AC9",
+    "#644AC9",
+    "#A3144D",
+    "#A3144D",
+    "#036A96",
+    "#036A96",
+]
+peak_gradient_colors = [
+    "#846E15",
+    "#846E15",
+    "#9E841A",
+    "#9E841A",
+    "#9E841A",
+    "#9E841A",
+]
+
+[visualizer.lines]
+line_thickness = 0.025
+point_count = 32
+

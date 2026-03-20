@@ -1,0 +1,163 @@
+# Navidrome Client Configuration
+# Bio-Luminal Swamplab Theme - A bioluminescent swamp aesthetic
+
+# REPLACE THESE WITH YOUR CREDENTIALS
+server_url = "http://localhost:4533"
+username = ""
+
+[theme.dark.accent]
+border_dark = "#0b1612"
+border_light = "#5aff9d"
+bright = "#5aff9d"
+primary = "#2fdc8b"
+
+[theme.dark.aqua]
+bright = "#4fffd2"
+normal = "#22bfa3"
+
+[theme.dark.background]
+default = "#070d0b"
+hard = "#040807"
+level1 = "#13241d"
+level2 = "#1a332a"
+level3 = "#244a3c"
+level4 = "#2f6250"
+soft = "#0d1814"
+
+[theme.dark.foreground]
+bright = "#eafff4"
+gray = "#7fb3a1"
+level1 = "#c8f5e4"
+level2 = "#a6e3cf"
+level3 = "#84cbb6"
+level4 = "#6bb09c"
+
+[theme.dark.green]
+bright = "#7dff7a"
+normal = "#3fdc66"
+
+[theme.dark.orange]
+bright = "#ffb347"
+normal = "#d9911e"
+
+[theme.dark.purple]
+bright = "#b38cff"
+normal = "#7e5bd6"
+
+[theme.dark.red]
+bright = "#ff6f61"
+normal = "#cc4f44"
+
+[theme.dark.yellow]
+bright = "#f6ff4d"
+normal = "#c9d600"
+
+[theme.font]
+family = "JetBrainsMono Nerd Font"
+
+[theme.light.accent]
+border_dark = "#2fdc8b"
+border_light = "#5aff9d"
+bright = "#2fdc8b"
+primary = "#1aa36a"
+
+[theme.light.aqua]
+bright = "#22bfa3"
+normal = "#18947f"
+
+[theme.light.background]
+default = "#f2fff9"
+hard = "#e6fff4"
+level1 = "#d6f5e8"
+level2 = "#bfe8d8"
+level3 = "#a8dac8"
+level4 = "#91cbb8"
+soft = "#ecfff7"
+
+[theme.light.foreground]
+bright = "#070d0b"
+gray = "#5e8f80"
+level1 = "#13241d"
+level2 = "#1a332a"
+level3 = "#244a3c"
+level4 = "#2f6250"
+
+[theme.light.green]
+bright = "#3fdc66"
+normal = "#2fb354"
+
+[theme.light.orange]
+bright = "#d9911e"
+normal = "#b87616"
+
+[theme.light.purple]
+bright = "#7e5bd6"
+normal = "#6545b8"
+
+[theme.light.red]
+bright = "#cc4f44"
+normal = "#a84037"
+
+[theme.light.yellow]
+bright = "#c9d600"
+normal = "#a8b300"
+
+
+[visualizer]
+higher_cutoff_freq = 9000
+
+lower_cutoff_freq = 25
+monstercat = 0.0
+noise_reduction = 0.85
+waves = false
+
+
+[visualizer.bars]
+bar_spacing = 3
+gradient_mode = "wave"
+border_width = 2
+led_bars = true
+led_segment_height = 3
+peak_gradient_mode = "cycle"
+peak_mode = "fall"
+peak_hold_time = 500
+peak_fade_time = 750
+bar_depth_3d = 0.0
+peak_height_ratio = 66
+
+[visualizer.bars.dark]
+border_color = "#040807"
+border_opacity = 1.0
+led_border_opacity = 0.6
+bar_gradient_colors = [
+    "#5aff9d",
+    "#2fdc8b",
+    "#22bfa3",
+    "#7dff7a",
+]
+peak_gradient_colors = [
+    "#f6ff4d",
+    "#ffb347",
+    "#ff6f61",
+]
+
+[visualizer.bars.light]
+border_color = "#e6fff4"
+border_opacity = 0.0
+led_border_opacity = 0.0
+bar_gradient_colors = [
+    "#2fdc8b",
+    "#1aa36a",
+    "#18947f",
+    "#3fdc66",
+]
+peak_gradient_colors = [
+    "#c9d600",
+    "#d9911e",
+    "#cc4f44",
+]
+
+[visualizer.lines]
+line_thickness = 0.055
+point_count = 24
+

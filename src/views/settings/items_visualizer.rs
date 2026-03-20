@@ -1,0 +1,530 @@
+//! Visualizer tab setting entries
+
+use super::items::{SettingItem, SettingsEntry};
+use crate::visualizer_config::VisualizerConfig;
+
+/// Build settings entries for the Visualizer tab from live config
+#[allow(clippy::vec_init_then_push)]
+pub(crate) fn build_visualizer_items(config: &VisualizerConfig) -> Vec<SettingsEntry> {
+    let d = VisualizerConfig::default();
+    const S: &str = "assets/icons/sliders-horizontal.svg";
+    const B: &str = "assets/icons/audio-lines.svg";
+    const P: &str = "assets/icons/palette.svg";
+    const L: &str = "assets/icons/audio-waveform.svg";
+
+    let mut e = Vec::with_capacity(40);
+
+    // --- General section ---
+    e.push(SettingsEntry::Header {
+        label: "General",
+        icon: S,
+    });
+    e.push(SettingItem::text(
+        meta!(
+            "__restore_visualizer",
+            "⟲ Restore Defaults",
+            "General",
+            "Restore all visualizer settings to defaults. Preserves your color palette."
+        ),
+        "Press Enter",
+        "Press Enter",
+    ));
+    e.push(SettingItem::float(
+        meta!(
+            "visualizer.noise_reduction",
+            "Noise Reduction",
+            "General",
+            "0.0 = raw FFT, 1.0 = fully smoothed"
+        ),
+        config.noise_reduction,
+        d.noise_reduction,
+        0.0,
+        1.0,
+        0.01,
+        "",
+    ));
+    e.push(SettingItem::bool_val(
+        meta!(
+            "visualizer.waves",
+            "Waves Smoothing",
+            "General",
+            "Bars mode only — Catmull-Rom spline smoothing creates smooth rolling hills. Mutually exclusive with Monstercat"
+        ),
+        config.waves,
+        d.waves,
+    ));
+    e.push(SettingItem::int(
+        meta!(
+            "visualizer.waves_smoothing",
+            "Waves Intensity",
+            "General",
+            "Bars mode only — control point spacing for waves spline. Higher = smoother (fewer control points)"
+        ),
+        config.waves_smoothing as i64,
+        d.waves_smoothing as i64,
+        2,
+        16,
+        1,
+        "",
+    ));
+    e.push(SettingItem::float(
+        meta!(
+            "visualizer.monstercat",
+            "Monstercat Smoothing",
+            "General",
+            "Bars mode only — sharp triangular peaks with exponential falloff. Higher = wider spread. Mutually exclusive with Waves"
+        ),
+        config.monstercat,
+        d.monstercat,
+        0.0,
+        10.0,
+        0.1,
+        "",
+    ));
+    e.push(SettingItem::int(
+        meta!(
+            "visualizer.lower_cutoff_freq",
+            "Lower Cutoff Freq",
+            "General",
+            "Frequencies below this are hidden"
+        ),
+        config.lower_cutoff_freq as i64,
+        d.lower_cutoff_freq as i64,
+        20,
+        1000,
+        10,
+        " Hz",
+    ));
+    e.push(SettingItem::int(
+        meta!(
+            "visualizer.higher_cutoff_freq",
+            "Upper Cutoff Freq",
+            "General",
+            "Frequencies above this are hidden"
+        ),
+        config.higher_cutoff_freq as i64,
+        d.higher_cutoff_freq as i64,
+        1000,
+        22050,
+        100,
+        " Hz",
+    ));
+    e.push(SettingItem::float(
+        meta!(
+            "visualizer.height_percent",
+            "Visualizer Height",
+            "General",
+            "% of window height, 10–60%"
+        ),
+        config.height_percent as f64,
+        d.height_percent as f64,
+        0.1,
+        0.60,
+        0.05,
+        "%",
+    ));
+    e.push(SettingItem::float(
+        meta!(
+            "visualizer.opacity",
+            "Visualizer Opacity",
+            "General",
+            "0.0 = invisible, 1.0 = fully opaque"
+        ),
+        config.opacity as f64,
+        d.opacity as f64,
+        0.0,
+        1.0,
+        0.05,
+        "",
+    ));
+    e.push(SettingItem::bool_val(
+        meta!(
+            "visualizer.auto_sensitivity",
+            "Auto Sensitivity",
+            "General",
+            "Scales output to always fill full height"
+        ),
+        config.auto_sensitivity,
+        d.auto_sensitivity,
+    ));
+
+    // --- Bars section ---
+    e.push(SettingsEntry::Header {
+        label: "Bars",
+        icon: B,
+    });
+    e.push(SettingItem::int(
+        meta!(
+            "visualizer.bars.max_bars",
+            "Max Bar Count",
+            "Bars",
+            "Maximum number of bars to fit in the window"
+        ),
+        config.bars.max_bars as i64,
+        d.bars.max_bars as i64,
+        16,
+        2048,
+        8,
+        "",
+    ));
+    e.push(SettingItem::int(
+        meta!(
+            "visualizer.bars.bar_width_min",
+            "Bar Width Min",
+            "Bars",
+            "Bar width at smallest window size"
+        ),
+        config.bars.bar_width_min as i64,
+        d.bars.bar_width_min as i64,
+        1,
+        10,
+        1,
+        " px",
+    ));
+    e.push(SettingItem::int(
+        meta!(
+            "visualizer.bars.bar_width_max",
+            "Bar Width Max",
+            "Bars",
+            "Bar width at largest window size"
+        ),
+        config.bars.bar_width_max as i64,
+        d.bars.bar_width_max as i64,
+        2,
+        20,
+        1,
+        " px",
+    ));
+    e.push(SettingItem::int(
+        meta!(
+            "visualizer.bars.bar_spacing",
+            "Bar Spacing",
+            "Bars",
+            "Gap between bars in pixels"
+        ),
+        config.bars.bar_spacing as i64,
+        d.bars.bar_spacing as i64,
+        0,
+        10,
+        1,
+        " px",
+    ));
+    e.push(SettingItem::int(
+        meta!(
+            "visualizer.bars.border_width",
+            "Border Width",
+            "Bars",
+            "Outline around each bar; also sets LED gap size"
+        ),
+        config.bars.border_width as i64,
+        d.bars.border_width as i64,
+        0,
+        5,
+        1,
+        " px",
+    ));
+
+    e.push(SettingItem::bool_val(
+        meta!(
+            "visualizer.bars.led_bars",
+            "LED Mode",
+            "Bars",
+            "Render bars as stacked LED segments like a VU meter"
+        ),
+        config.bars.led_bars,
+        d.bars.led_bars,
+    ));
+    e.push(SettingItem::int(
+        meta!(
+            "visualizer.bars.led_segment_height",
+            "LED Segment Height",
+            "Bars",
+            "Height of each LED segment in pixels"
+        ),
+        config.bars.led_segment_height as i64,
+        d.bars.led_segment_height as i64,
+        2,
+        20,
+        1,
+        " px",
+    ));
+
+    e.push(SettingItem::enum_val(
+        meta!(
+            "visualizer.bars.gradient_mode",
+            "Gradient Mode",
+            "Bars",
+            "How bar colors shift with amplitude\nstatic: height-based gradient (bottom to top)\nwave: gradient stretching (taller bars show more bottom colors)\nshimmer: bars cycle through all gradient colors as flat per-bar colors\nenergy: gradient shifts based on overall loudness\nalternate: bars alternate between first two gradient colors"
+        ),
+        &config.bars.gradient_mode,
+        &d.bars.gradient_mode,
+        vec!["static", "wave", "shimmer", "energy", "alternate"],
+    ));
+    e.push(SettingItem::enum_val(
+        meta!(
+            "visualizer.bars.gradient_orientation",
+            "Gradient Orientation",
+            "Bars",
+            "Axis the gradient colors are mapped along (ignored by alternate mode)\nvertical: colors map bottom-to-top within each bar\nhorizontal: colors map left-to-right across bars (bass to treble)"
+        ),
+        &config.bars.gradient_orientation,
+        &d.bars.gradient_orientation,
+        vec!["vertical", "horizontal"],
+    ));
+    e.push(SettingItem::enum_val(
+        meta!(
+            "visualizer.bars.peak_gradient_mode",
+            "Peak Gradient Mode",
+            "Bars",
+            "Color mode for peak indicators\nstatic: uses first color in peak gradient only\ncycle: time-based animation cycling through all peak colors\nheight: color based on peak height position\nmatch: uses same color as bar gradient at that height"
+        ),
+        &config.bars.peak_gradient_mode,
+        &d.bars.peak_gradient_mode,
+        vec!["static", "cycle", "height", "match"],
+    ));
+    e.push(SettingItem::enum_val(
+        meta!(
+            "visualizer.bars.peak_mode",
+            "Peak Mode",
+            "Bars",
+            "Behavior of peak indicators after holding\nnone: peak bars disabled\nfade: hold, then fade out in place (opacity decreases)\nfall: hold, then fall at constant speed\nfall_accel: hold, then fall with gravity acceleration"
+        ),
+        &config.bars.peak_mode,
+        &d.bars.peak_mode,
+        vec!["none", "fade", "fall", "fall_accel"],
+    ));
+    e.push(SettingItem::int(
+        meta!(
+            "visualizer.bars.peak_hold_time",
+            "Peak Hold Time",
+            "Bars",
+            "How long peaks stay before falling/fading"
+        ),
+        config.bars.peak_hold_time as i64,
+        d.bars.peak_hold_time as i64,
+        0,
+        5000,
+        50,
+        " ms",
+    ));
+    e.push(SettingItem::int(
+        meta!(
+            "visualizer.bars.peak_fade_time",
+            "Peak Fade Time",
+            "Bars",
+            "Duration of fade-out in 'fade' mode"
+        ),
+        config.bars.peak_fade_time as i64,
+        d.bars.peak_fade_time as i64,
+        0,
+        5000,
+        50,
+        " ms",
+    ));
+    e.push(SettingItem::int(
+        meta!(
+            "visualizer.bars.peak_fall_speed",
+            "Peak Fall Speed",
+            "Bars",
+            "How fast peaks drop in fall/fall_accel modes. 1 = slow, 20 = fast. No effect in fade mode"
+        ),
+        config.bars.peak_fall_speed as i64,
+        d.bars.peak_fall_speed as i64,
+        1,
+        20,
+        1,
+        "",
+    ));
+    e.push(SettingItem::int(
+        meta!(
+            "visualizer.bars.peak_height_ratio",
+            "Peak Height",
+            "Bars",
+            "Peak bar size as % of bar width (ignored in LED mode — peaks are one segment tall)"
+        ),
+        config.bars.peak_height_ratio as i64,
+        d.bars.peak_height_ratio as i64,
+        10,
+        100,
+        5,
+        "%",
+    ));
+    e.push(SettingItem::int(
+        meta!(
+            "visualizer.bars.bar_depth_3d",
+            "Isometric Depth",
+            "Bars",
+            "3D top and side face depth in pixels, 0 = flat"
+        ),
+        config.bars.bar_depth_3d as i64,
+        d.bars.bar_depth_3d as i64,
+        0,
+        20,
+        1,
+        " px",
+    ));
+
+    // --- Bar Colors (Dark) ---
+    e.push(SettingsEntry::Header {
+        label: "Bar Colors (Dark)",
+        icon: P,
+    });
+    e.push(SettingItem::hex_color(
+        meta!(
+            "visualizer.bars.dark.border_color",
+            "Border Color",
+            "Bar Colors (Dark)",
+            "Color of bar borders and LED gaps"
+        ),
+        &config.bars.dark.border_color,
+        &d.bars.dark.border_color,
+    ));
+    e.push(SettingItem::float(
+        meta!(
+            "visualizer.bars.dark.border_opacity",
+            "Border Opacity",
+            "Bar Colors (Dark)",
+            "Transparency of bar outlines in non-LED mode"
+        ),
+        config.bars.dark.border_opacity as f64,
+        d.bars.dark.border_opacity as f64,
+        0.0,
+        1.0,
+        0.1,
+        "",
+    ));
+    e.push(SettingItem::float(
+        meta!(
+            "visualizer.bars.dark.led_border_opacity",
+            "LED Border Opacity",
+            "Bar Colors (Dark)",
+            "Opacity of gaps between LED segments"
+        ),
+        config.bars.dark.led_border_opacity as f64,
+        d.bars.dark.led_border_opacity as f64,
+        0.0,
+        1.0,
+        0.1,
+        "",
+    ));
+    e.push(SettingItem::color_array(
+        meta!(
+            "visualizer.bars.dark.bar_gradient_colors",
+            "Bar Gradient",
+            "Bar Colors (Dark)",
+            "6 colors from low to high frequency"
+        ),
+        config.bars.dark.bar_gradient_colors.clone(),
+        d.bars.dark.bar_gradient_colors.clone(),
+    ));
+    e.push(SettingItem::color_array(
+        meta!(
+            "visualizer.bars.dark.peak_gradient_colors",
+            "Peak Gradient",
+            "Bar Colors (Dark)",
+            "6 colors cycling for peak indicators"
+        ),
+        config.bars.dark.peak_gradient_colors.clone(),
+        d.bars.dark.peak_gradient_colors.clone(),
+    ));
+
+    // --- Bar Colors (Light) ---
+    e.push(SettingsEntry::Header {
+        label: "Bar Colors (Light)",
+        icon: P,
+    });
+    e.push(SettingItem::hex_color(
+        meta!(
+            "visualizer.bars.light.border_color",
+            "Border Color",
+            "Bar Colors (Light)",
+            "Color of bar borders and LED gaps"
+        ),
+        &config.bars.light.border_color,
+        &d.bars.light.border_color,
+    ));
+    e.push(SettingItem::float(
+        meta!(
+            "visualizer.bars.light.border_opacity",
+            "Border Opacity",
+            "Bar Colors (Light)",
+            "Transparency of bar outlines in non-LED mode"
+        ),
+        config.bars.light.border_opacity as f64,
+        d.bars.light.border_opacity as f64,
+        0.0,
+        1.0,
+        0.1,
+        "",
+    ));
+    e.push(SettingItem::float(
+        meta!(
+            "visualizer.bars.light.led_border_opacity",
+            "LED Border Opacity",
+            "Bar Colors (Light)",
+            "Opacity of gaps between LED segments"
+        ),
+        config.bars.light.led_border_opacity as f64,
+        d.bars.light.led_border_opacity as f64,
+        0.0,
+        1.0,
+        0.1,
+        "",
+    ));
+    e.push(SettingItem::color_array(
+        meta!(
+            "visualizer.bars.light.bar_gradient_colors",
+            "Bar Gradient",
+            "Bar Colors (Light)",
+            "6 colors from low to high frequency"
+        ),
+        config.bars.light.bar_gradient_colors.clone(),
+        d.bars.light.bar_gradient_colors.clone(),
+    ));
+    e.push(SettingItem::color_array(
+        meta!(
+            "visualizer.bars.light.peak_gradient_colors",
+            "Peak Gradient",
+            "Bar Colors (Light)",
+            "6 colors cycling for peak indicators"
+        ),
+        config.bars.light.peak_gradient_colors.clone(),
+        d.bars.light.peak_gradient_colors.clone(),
+    ));
+
+    // --- Lines section ---
+    e.push(SettingsEntry::Header {
+        label: "Lines",
+        icon: L,
+    });
+    e.push(SettingItem::int(
+        meta!(
+            "visualizer.lines.point_count",
+            "Point Count",
+            "Lines",
+            "8–512, more = finer detail"
+        ),
+        config.lines.point_count as i64,
+        d.lines.point_count as i64,
+        8,
+        512,
+        8,
+        "",
+    ));
+    e.push(SettingItem::float(
+        meta!(
+            "visualizer.lines.line_thickness",
+            "Line Thickness",
+            "Lines",
+            "% of visualizer height, 1–10%"
+        ),
+        config.lines.line_thickness as f64,
+        d.lines.line_thickness as f64,
+        0.01,
+        0.10,
+        0.01,
+        "%",
+    ));
+
+    e
+}

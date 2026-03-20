@@ -1,0 +1,783 @@
+//! Albums Page Component
+//!
+//! Self-contained albums view with slot list navigation, search, and filtering.
+//! Uses message bubbling pattern to communicate global actions to root.
+//! Supports inline track expansion (Shift+Enter) using flattened SlotListEntry list.
+
+use std::collections::HashMap;
+
+use iced::{
+    Alignment, Element, Length, Task,
+    widget::{button, container, image, row, text},
+};
+use nokkvi_data::{
+    backend::{albums::AlbumUIViewData, songs::SongUIViewData},
+    utils::{formatters, scale::calculate_font_size},
+};
+
+use super::expansion::{ExpansionState, SlotListEntry};
+use crate::{
+    app_message::Message,
+    widgets::{self, SlotListPageState, view_header::SortMode},
+};
+
+/// Albums page local state
+#[derive(Debug)]
+pub struct AlbumsPage {
+    pub common: SlotListPageState,
+    /// Inline expansion state (album → tracks)
+    pub expansion: ExpansionState<SongUIViewData>,
+}
+
+/// View data passed from root (read-only, borrows from app state to avoid allocations)
+pub struct AlbumsViewData<'a> {
+    pub albums: &'a [AlbumUIViewData],
+    pub album_art: &'a HashMap<String, image::Handle>,
+    pub large_artwork: &'a HashMap<String, image::Handle>,
+    pub window_width: f32,
+    pub window_height: f32,
+    pub scale_factor: f32,
+    pub total_album_count: usize,
+    pub loading: bool,
+    pub stable_viewport: bool,
+}
+
+/// Messages for local album page interactions
+#[derive(Debug, Clone)]
+pub enum AlbumsMessage {
+    // Slot list navigation
+    SlotListNavigateUp,
+    SlotListNavigateDown,
+    SlotListSetOffset(usize),
+    SlotListScrollSeek(usize),
+    SlotListActivateCenter,
+    SlotListClickPlay(usize), // Click non-center to play directly (skip focus)
+    AddCenterToQueue,         // Add centered album to queue (Shift+Q)
+
+    // Mouse click on star/heart (item_index, value)
+    ClickSetRating(usize, usize), // (item_index, rating 1-5)
+    ClickToggleStar(usize),       // item_index
+
+    // Context menu
+    ContextMenuAction(usize, crate::widgets::context_menu::LibraryContextEntry),
+
+    // Inline expansion (Shift+Enter)
+    ExpandCenter,
+    CollapseExpansion,
+    /// Tracks loaded for expanded album (album_id, tracks)
+    TracksLoaded(String, Vec<SongUIViewData>),
+
+    // View header
+    SortModeSelected(widgets::view_header::SortMode),
+    ToggleSortOrder,
+    SearchQueryChanged(String),
+    SearchFocused(bool),
+
+    // Data loading (moved from root Message enum)
+    AlbumsLoaded(Result<Vec<AlbumUIViewData>, String>, usize), // result, total_count
+    AlbumsPageLoaded(Result<Vec<AlbumUIViewData>, String>, usize), // result, total_count (subsequent page)
+
+    // Artwork loading (moved from root Message enum)
+    /// Album artwork loaded (album_id, handle)
+    ArtworkLoaded(String, Option<image::Handle>),
+    /// Large album artwork loaded (album_id, handle)
+    LargeArtworkLoaded(String, Option<image::Handle>),
+    /// Refresh artwork for a specific album (album_id)
+    RefreshArtwork(String),
+}
+
+/// Actions that bubble up to root for global state mutation
+#[derive(Debug, Clone)]
+pub enum AlbumsAction {
+    PlayAlbum(String),              // album_id - clear queue and play
+    AddAlbumToQueue(String),        // album_id - add to queue without clearing
+    AddSongToQueue(String, String), // (song_id, album_id) - add individual song to queue
+    LoadLargeArtwork(String),       // center_idx as string
+    /// Expand album inline — root should load tracks (album_id)
+    ExpandAlbum(String),
+    /// Play album starting from a specific track (album_id, track_index)
+    PlayAlbumFromTrack(String, usize),
+    /// Set rating on item (item_id, item_type "album"|"song", rating)
+    SetRating(String, &'static str, usize),
+    /// Star/unstar item (item_id, item_type, new_starred)
+    ToggleStar(String, &'static str, bool),
+
+    LoadPage(usize),       // offset - trigger fetch of next page
+    SearchChanged(String), // trigger reload
+    SortModeChanged(widgets::view_header::SortMode), // trigger reload
+    SortOrderChanged(bool), // trigger reload
+    PlayNext(String),      // album_id - insert after currently playing
+    AddToPlaylist(String), // album_id or song_id - add to playlist dialog
+    ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
+    RefreshArtwork(String), // album_id - refresh artwork from server
+    None,
+}
+
+impl super::HasCommonAction for AlbumsAction {
+    fn as_common(&self) -> super::CommonViewAction {
+        match self {
+            Self::SearchChanged(_) => super::CommonViewAction::SearchChanged,
+            Self::SortModeChanged(m) => super::CommonViewAction::SortModeChanged(*m),
+            Self::SortOrderChanged(a) => super::CommonViewAction::SortOrderChanged(*a),
+            Self::None => super::CommonViewAction::None,
+            _ => super::CommonViewAction::ViewSpecific,
+        }
+    }
+}
+
+impl Default for AlbumsPage {
+    fn default() -> Self {
+        Self {
+            common: SlotListPageState::new(
+                widgets::view_header::SortMode::RecentlyAdded,
+                false, // sort_ascending
+            ),
+            expansion: ExpansionState::default(),
+        }
+    }
+}
+
+impl AlbumsPage {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Convert sort mode to API string for server requests
+    pub fn sort_mode_to_api_string(
+        sort_mode: crate::widgets::view_header::SortMode,
+    ) -> &'static str {
+        use crate::widgets::view_header::SortMode;
+        match sort_mode {
+            SortMode::RecentlyAdded => "recentlyAdded",
+            SortMode::RecentlyPlayed => "recentlyPlayed",
+            SortMode::MostPlayed => "mostPlayed",
+            SortMode::Favorited => "favorited",
+            SortMode::Random => "random",
+            SortMode::Name => "name",
+            SortMode::AlbumArtist => "albumArtist",
+            SortMode::Artist => "artist",
+            SortMode::ReleaseYear => "year",
+            SortMode::SongCount => "songCount",
+            SortMode::Duration => "duration",
+            SortMode::Rating => "rating",
+            SortMode::Genre => "genre",
+            SortMode::AlbumCount => "albumCount",
+            _ => "recentlyAdded", // Fallback for song-specific sort modes
+        }
+    }
+
+    /// Update internal state and return actions for root
+    pub fn update(
+        &mut self,
+        message: AlbumsMessage,
+        total_items: usize,
+        albums: &[AlbumUIViewData],
+    ) -> (Task<AlbumsMessage>, AlbumsAction) {
+        match super::impl_expansion_update!(
+            self, message, albums, total_items,
+            id_fn: |a| &a.id,
+            expand_center: AlbumsMessage::ExpandCenter => AlbumsAction::ExpandAlbum,
+            collapse: AlbumsMessage::CollapseExpansion,
+            children_loaded: AlbumsMessage::TracksLoaded,
+            sort_selected: AlbumsMessage::SortModeSelected => AlbumsAction::SortModeChanged,
+            toggle_sort: AlbumsMessage::ToggleSortOrder => AlbumsAction::SortOrderChanged,
+            search_changed: AlbumsMessage::SearchQueryChanged => AlbumsAction::SearchChanged,
+            search_focused: AlbumsMessage::SearchFocused,
+            action_none: AlbumsAction::None,
+        ) {
+            Ok(result) => result,
+            Err(msg) => match msg {
+                AlbumsMessage::SlotListNavigateUp => {
+                    let center = self.expansion.handle_navigate_up(albums, &mut self.common);
+                    match center {
+                        Some(idx) => (
+                            Task::none(),
+                            AlbumsAction::LoadLargeArtwork(idx.to_string()),
+                        ),
+                        None => (Task::none(), AlbumsAction::None),
+                    }
+                }
+                AlbumsMessage::SlotListNavigateDown => {
+                    let center = self
+                        .expansion
+                        .handle_navigate_down(albums, &mut self.common);
+                    match center {
+                        Some(idx) => (
+                            Task::none(),
+                            AlbumsAction::LoadLargeArtwork(idx.to_string()),
+                        ),
+                        None => (Task::none(), AlbumsAction::None),
+                    }
+                }
+                AlbumsMessage::SlotListSetOffset(offset) => {
+                    let center =
+                        self.expansion
+                            .handle_select_offset(offset, albums, &mut self.common);
+                    match center {
+                        Some(idx) => (
+                            Task::none(),
+                            AlbumsAction::LoadLargeArtwork(idx.to_string()),
+                        ),
+                        None => (Task::none(), AlbumsAction::None),
+                    }
+                }
+                AlbumsMessage::SlotListScrollSeek(offset) => {
+                    self.expansion
+                        .handle_set_offset(offset, albums, &mut self.common);
+                    (Task::none(), AlbumsAction::None)
+                }
+                AlbumsMessage::SlotListClickPlay(offset) => {
+                    // Set offset then activate (play without focusing)
+                    self.expansion
+                        .handle_set_offset(offset, albums, &mut self.common);
+                    self.update(AlbumsMessage::SlotListActivateCenter, total_items, albums)
+                }
+                AlbumsMessage::SlotListActivateCenter => {
+                    let total = self.expansion.flattened_len(albums);
+                    if let Some(center_idx) = self.common.get_center_item_index(total) {
+                        self.common.slot_list.flash_center();
+                        match self.expansion.get_entry_at(center_idx, albums, |a| &a.id) {
+                            Some(SlotListEntry::Child(_song, parent_album_id)) => {
+                                let track_index =
+                                    self.expansion
+                                        .count_children_before(center_idx, albums, |a| &a.id);
+                                (
+                                    Task::none(),
+                                    AlbumsAction::PlayAlbumFromTrack(parent_album_id, track_index),
+                                )
+                            }
+                            Some(SlotListEntry::Parent(_)) => (
+                                Task::none(),
+                                AlbumsAction::PlayAlbum(center_idx.to_string()),
+                            ),
+                            None => (Task::none(), AlbumsAction::None),
+                        }
+                    } else {
+                        (Task::none(), AlbumsAction::None)
+                    }
+                }
+                AlbumsMessage::AddCenterToQueue => {
+                    let total = self.expansion.flattened_len(albums);
+                    if let Some(center_idx) = self.common.get_center_item_index(total) {
+                        match self.expansion.get_entry_at(center_idx, albums, |a| &a.id) {
+                            Some(SlotListEntry::Child(song, parent_id)) => (
+                                Task::none(),
+                                AlbumsAction::AddSongToQueue(song.id.clone(), parent_id),
+                            ),
+                            Some(SlotListEntry::Parent(_)) => (
+                                Task::none(),
+                                AlbumsAction::AddAlbumToQueue(center_idx.to_string()),
+                            ),
+                            None => (Task::none(), AlbumsAction::None),
+                        }
+                    } else {
+                        (Task::none(), AlbumsAction::None)
+                    }
+                }
+                // Data loading messages (handled at root level, no action needed here)
+                AlbumsMessage::AlbumsLoaded(_, _) => (Task::none(), AlbumsAction::None),
+                AlbumsMessage::AlbumsPageLoaded(_, _) => (Task::none(), AlbumsAction::None),
+                AlbumsMessage::ArtworkLoaded(_, _) => (Task::none(), AlbumsAction::None),
+                AlbumsMessage::LargeArtworkLoaded(_, _) => (Task::none(), AlbumsAction::None),
+                AlbumsMessage::RefreshArtwork(album_id) => {
+                    (Task::none(), AlbumsAction::RefreshArtwork(album_id))
+                }
+                AlbumsMessage::ClickSetRating(item_index, rating) => {
+                    if let Some(entry) = self.expansion.get_entry_at(item_index, albums, |a| &a.id)
+                    {
+                        match entry {
+                            SlotListEntry::Child(song, _) => {
+                                let current = song.rating.unwrap_or(0) as usize;
+                                let new_rating = if rating == current {
+                                    rating.saturating_sub(1)
+                                } else {
+                                    rating
+                                };
+                                (
+                                    Task::none(),
+                                    AlbumsAction::SetRating(song.id.clone(), "song", new_rating),
+                                )
+                            }
+                            SlotListEntry::Parent(album) => {
+                                let current = album.rating.unwrap_or(0) as usize;
+                                let new_rating = if rating == current {
+                                    rating.saturating_sub(1)
+                                } else {
+                                    rating
+                                };
+                                (
+                                    Task::none(),
+                                    AlbumsAction::SetRating(album.id.clone(), "album", new_rating),
+                                )
+                            }
+                        }
+                    } else {
+                        (Task::none(), AlbumsAction::None)
+                    }
+                }
+                AlbumsMessage::ClickToggleStar(item_index) => {
+                    if let Some(entry) = self.expansion.get_entry_at(item_index, albums, |a| &a.id)
+                    {
+                        match entry {
+                            SlotListEntry::Child(song, _) => (
+                                Task::none(),
+                                AlbumsAction::ToggleStar(song.id.clone(), "song", !song.is_starred),
+                            ),
+                            SlotListEntry::Parent(album) => (
+                                Task::none(),
+                                AlbumsAction::ToggleStar(
+                                    album.id.clone(),
+                                    "album",
+                                    !album.is_starred,
+                                ),
+                            ),
+                        }
+                    } else {
+                        (Task::none(), AlbumsAction::None)
+                    }
+                }
+                AlbumsMessage::ContextMenuAction(item_index, entry) => {
+                    use crate::widgets::context_menu::LibraryContextEntry;
+                    match self.expansion.get_entry_at(item_index, albums, |a| &a.id) {
+                        Some(SlotListEntry::Parent(album)) => match entry {
+                            LibraryContextEntry::AddToQueue => {
+                                let idx = albums.iter().position(|a| a.id == album.id);
+                                if let Some(i) = idx {
+                                    (Task::none(), AlbumsAction::AddAlbumToQueue(i.to_string()))
+                                } else {
+                                    (Task::none(), AlbumsAction::None)
+                                }
+                            }
+                            LibraryContextEntry::AddToPlaylist => {
+                                (Task::none(), AlbumsAction::AddToPlaylist(album.id.clone()))
+                            }
+                            LibraryContextEntry::GetInfo => {
+                                use nokkvi_data::types::info_modal::InfoModalItem;
+                                let item = InfoModalItem::Album {
+                                    name: album.name.clone(),
+                                    album_artist: Some(album.artist.clone()),
+                                    release_type: album.release_type.clone(),
+                                    genre: album.genre.clone(),
+                                    genres: album.genres.clone(),
+                                    duration: album.duration,
+                                    year: album.year,
+                                    song_count: Some(album.song_count),
+                                    compilation: album.compilation,
+                                    size: album.size,
+                                    is_starred: album.is_starred,
+                                    rating: album.rating,
+                                    play_count: album.play_count,
+                                    play_date: album.play_date.clone(),
+                                    updated_at: album.updated_at.clone(),
+                                    created_at: album.created_at.clone(),
+                                    mbz_album_id: album.mbz_album_id.clone(),
+                                    comment: album.comment.clone(),
+                                    id: album.id.clone(),
+                                    tags: album.tags.clone(),
+                                    participants: album.participants.clone(),
+                                    representative_path: None,
+                                };
+                                (Task::none(), AlbumsAction::ShowInfo(Box::new(item)))
+                            }
+                            LibraryContextEntry::Separator | LibraryContextEntry::ShowInFolder => {
+                                (Task::none(), AlbumsAction::None)
+                            }
+                        },
+                        Some(SlotListEntry::Child(song, _parent_id)) => match entry {
+                            LibraryContextEntry::AddToQueue => (
+                                Task::none(),
+                                AlbumsAction::AddSongToQueue(song.id.clone(), _parent_id),
+                            ),
+                            LibraryContextEntry::AddToPlaylist => {
+                                (Task::none(), AlbumsAction::AddToPlaylist(song.id.clone()))
+                            }
+                            LibraryContextEntry::GetInfo => {
+                                use nokkvi_data::types::info_modal::InfoModalItem;
+                                let item = InfoModalItem::from_song_view_data(song);
+                                (Task::none(), AlbumsAction::ShowInfo(Box::new(item)))
+                            }
+                            LibraryContextEntry::Separator | LibraryContextEntry::ShowInFolder => {
+                                (Task::none(), AlbumsAction::None)
+                            }
+                        },
+                        None => (Task::none(), AlbumsAction::None),
+                    }
+                }
+                // Common arms already handled by macro above
+                _ => (Task::none(), AlbumsAction::None),
+            },
+        }
+    }
+
+    // NOTE: build_flattened_list, collapse, clear are now on self.expansion (ExpansionState)
+
+    /// Build the view
+    pub fn view<'a>(&'a self, data: AlbumsViewData<'a>) -> Element<'a, AlbumsMessage> {
+        use crate::widgets::view_header::SortMode;
+
+        let header = widgets::view_header::view_header(
+            self.common.current_sort_mode,
+            SortMode::ALBUM_OPTIONS,
+            self.common.sort_ascending,
+            &self.common.search_query,
+            data.albums.len(),
+            data.total_album_count,
+            "albums",
+            crate::views::ALBUMS_SEARCH_ID,
+            AlbumsMessage::SortModeSelected,
+            AlbumsMessage::ToggleSortOrder,
+            None, // No shuffle button for albums
+            AlbumsMessage::SearchQueryChanged,
+        );
+
+        // Create layout config BEFORE empty checks to route empty states through
+        // base_slot_list_layout, preserving the widget tree structure and search focus
+        use crate::widgets::base_slot_list_layout::BaseSlotListLayoutConfig;
+        let layout_config = BaseSlotListLayoutConfig {
+            window_width: data.window_width,
+            window_height: data.window_height,
+            show_artwork_column: true,
+        };
+
+        // If loading, show header with loading message
+        if data.loading {
+            return widgets::base_slot_list_empty_state(header, "Loading...", &layout_config);
+        }
+
+        // If no albums match search, show message but keep the header
+        if data.albums.is_empty() {
+            return widgets::base_slot_list_empty_state(
+                header,
+                "No albums match your search.",
+                &layout_config,
+            );
+        }
+
+        // Configure slot list with albums-specific chrome height (has view header)
+        use crate::widgets::slot_list::{
+            SlotListConfig, chrome_height_with_header, slot_list_view_with_scroll,
+        };
+
+        let config =
+            SlotListConfig::with_dynamic_slots(data.window_height, chrome_height_with_header());
+
+        // Capture values needed in closure
+        let _scale_factor = data.scale_factor;
+        let albums = data.albums; // Borrow slice to extend lifetime
+        let album_art = data.album_art;
+        let current_sort_mode = self.common.current_sort_mode;
+
+        // Build flattened list (albums + injected tracks when expanded)
+        let flattened = self.expansion.build_flattened_list(albums, |a| &a.id);
+        let center_index = self.common.get_center_item_index(flattened.len());
+
+        // Render slot list using generic component with item renderer closure
+        let slot_list_content = slot_list_view_with_scroll(
+            &self.common.slot_list,
+            &flattened,
+            &config,
+            AlbumsMessage::SlotListNavigateUp,
+            AlbumsMessage::SlotListNavigateDown,
+            {
+                let total = flattened.len();
+                move |f| AlbumsMessage::SlotListScrollSeek((f * total as f32) as usize)
+            },
+            |entry, ctx| match entry {
+                SlotListEntry::Parent(album) => self.render_album_row(
+                    album,
+                    &ctx,
+                    album_art,
+                    current_sort_mode,
+                    data.stable_viewport,
+                ),
+                SlotListEntry::Child(song, _parent_album_id) => {
+                    self.render_track_row(song, &ctx, data.stable_viewport)
+                }
+            },
+        );
+
+        // Wrap slot list content with standard background (prevents color bleed-through)
+        use crate::widgets::slot_list::slot_list_background_container;
+        let slot_list_content = slot_list_background_container(slot_list_content);
+
+        // Use base slot list layout with artwork column
+        use crate::widgets::base_slot_list_layout::{
+            base_slot_list_layout, single_artwork_panel_with_menu,
+        };
+
+        // Build artwork column component — show parent album art even when on a child track
+        let centered_album = center_index.and_then(|idx| match flattened.get(idx) {
+            Some(SlotListEntry::Parent(album)) => Some(album),
+            Some(SlotListEntry::Child(_, parent_id)) => albums.iter().find(|a| &a.id == parent_id),
+            None => None,
+        });
+        let artwork_handle = centered_album.and_then(|album| data.large_artwork.get(&album.id));
+        let on_refresh =
+            centered_album.map(|album| AlbumsMessage::RefreshArtwork(album.id.clone()));
+
+        let artwork_content = Some(single_artwork_panel_with_menu(artwork_handle, on_refresh));
+
+        base_slot_list_layout(&layout_config, header, slot_list_content, artwork_content)
+    }
+
+    /// Render an album row in the slot list (existing album layout)
+    fn render_album_row<'a>(
+        &self,
+        album: &AlbumUIViewData,
+        ctx: &crate::widgets::slot_list::SlotListRowContext,
+        album_art: &'a HashMap<String, image::Handle>,
+        current_sort_mode: SortMode,
+        stable_viewport: bool,
+    ) -> Element<'a, AlbumsMessage> {
+        use crate::widgets::slot_list::{
+            SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column, slot_list_text,
+        };
+
+        let album_id = album.id.clone();
+        let album_name = album.name.clone();
+        let album_artist = album.artist.clone();
+        let song_count = album.song_count;
+        let is_starred = album.is_starred;
+        let rating = album.rating.unwrap_or(0).min(5) as usize;
+        let extra_value = get_extra_column_value(album, current_sort_mode);
+
+        // Check if this album is the expanded one
+        let is_expanded = self.expansion.is_expanded_parent(&album.id);
+        let style = SlotListSlotStyle::for_slot(ctx.is_center, is_expanded, ctx.opacity);
+
+        let base_artwork_size = (ctx.row_height - 16.0).max(32.0);
+        let artwork_size = base_artwork_size * ctx.scale_factor;
+        let title_size =
+            calculate_font_size(16.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
+        let subtitle_size =
+            calculate_font_size(13.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
+        let song_count_size =
+            calculate_font_size(12.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
+        let star_size = (ctx.row_height * 0.3 * ctx.scale_factor).clamp(16.0, 24.0);
+        let index_size =
+            calculate_font_size(12.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
+
+        let content = row![
+            slot_list_index_column(ctx.item_index, index_size, style, ctx.opacity),
+            {
+                use crate::widgets::slot_list::slot_list_artwork_column;
+                slot_list_artwork_column(
+                    album_art.get(&album_id),
+                    artwork_size,
+                    ctx.is_center,
+                    false,
+                    ctx.opacity,
+                )
+            },
+            {
+                use crate::widgets::slot_list::slot_list_text_column;
+                slot_list_text_column(
+                    album_name,
+                    album_artist,
+                    title_size,
+                    subtitle_size,
+                    style,
+                    ctx.is_center,
+                    50,
+                )
+            },
+            {
+                use crate::widgets::slot_list::slot_list_metadata_column;
+                slot_list_metadata_column(format!("{song_count} songs"), song_count_size, style, 22)
+            },
+            {
+                if current_sort_mode == SortMode::Rating {
+                    let star_icon_size =
+                        calculate_font_size(14.0, ctx.row_height, ctx.scale_factor)
+                            * ctx.scale_factor;
+                    let idx = ctx.item_index;
+                    use crate::widgets::slot_list::slot_list_star_rating;
+                    slot_list_star_rating(
+                        rating,
+                        star_icon_size,
+                        ctx.is_center,
+                        ctx.opacity,
+                        Some(21),
+                        Some(move |star: usize| AlbumsMessage::ClickSetRating(idx, star)),
+                    )
+                } else if !extra_value.is_empty() {
+                    container(slot_list_text(
+                        extra_value,
+                        calculate_font_size(14.0, ctx.row_height, ctx.scale_factor)
+                            * ctx.scale_factor,
+                        style.subtext_color,
+                    ))
+                    .width(Length::FillPortion(21))
+                    .height(Length::Fill)
+                    .clip(true)
+                    .align_y(Alignment::Center)
+                    .into()
+                } else {
+                    container(text("")).width(Length::FillPortion(21)).into()
+                }
+            },
+            container({
+                use crate::widgets::slot_list::slot_list_favorite_icon;
+                slot_list_favorite_icon(
+                    is_starred,
+                    ctx.is_center,
+                    false,
+                    ctx.opacity,
+                    star_size,
+                    "heart",
+                    Some(AlbumsMessage::ClickToggleStar(ctx.item_index)),
+                )
+            })
+            .width(Length::FillPortion(5))
+            .padding(iced::Padding {
+                left: 4.0,
+                right: 4.0,
+                ..Default::default()
+            })
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center),
+        ]
+        .spacing(6.0)
+        .padding(iced::Padding {
+            left: SLOT_LIST_SLOT_PADDING,
+            right: 4.0,
+            top: 4.0,
+            bottom: 4.0,
+        })
+        .align_y(Alignment::Center)
+        .height(Length::Fill);
+
+        let clickable = container(content)
+            .style(move |_theme| style.to_container_style())
+            .width(Length::Fill);
+
+        let slot_button = button(clickable)
+            .on_press(if ctx.is_center {
+                AlbumsMessage::SlotListActivateCenter
+            } else if stable_viewport {
+                AlbumsMessage::SlotListSetOffset(ctx.item_index)
+            } else {
+                AlbumsMessage::SlotListClickPlay(ctx.item_index)
+            })
+            .style(|_theme, _status| button::Style {
+                background: None,
+                border: iced::Border::default(),
+                ..Default::default()
+            })
+            .padding(0)
+            .width(Length::Fill);
+
+        use crate::widgets::context_menu::{context_menu, library_entries, library_entry_view};
+        let item_idx = ctx.item_index;
+        context_menu(slot_button, library_entries(), move |entry, length| {
+            library_entry_view(entry, length, |e| {
+                AlbumsMessage::ContextMenuAction(item_idx, e)
+            })
+        })
+        .into()
+    }
+
+    /// Render a child track row in the slot list (indented, simpler layout)
+    fn render_track_row<'a>(
+        &self,
+        song: &SongUIViewData,
+        ctx: &crate::widgets::slot_list::SlotListRowContext,
+        stable_viewport: bool,
+    ) -> Element<'a, AlbumsMessage> {
+        super::expansion::render_child_track_row(
+            song,
+            ctx,
+            AlbumsMessage::SlotListActivateCenter,
+            if stable_viewport {
+                AlbumsMessage::SlotListSetOffset(ctx.item_index)
+            } else {
+                AlbumsMessage::SlotListClickPlay(ctx.item_index)
+            },
+            Some(AlbumsMessage::ClickToggleStar(ctx.item_index)),
+        )
+    }
+}
+
+/// Get extra column value based on current sort mode (matches QML getExtraColumnData)
+fn get_extra_column_value(album: &AlbumUIViewData, sort_mode: SortMode) -> String {
+    match sort_mode {
+        SortMode::RecentlyAdded => {
+            album.created_at.as_ref()
+                .and_then(|d| formatters::format_date(d).ok())
+                .unwrap_or_default()
+        }
+        SortMode::RecentlyPlayed => {
+            album.play_date.as_ref().map_or_else(|| "never".to_string(), |d| d.split('T').next().unwrap_or(d).to_string())
+        }
+        SortMode::MostPlayed => {
+            let count = album.play_count.unwrap_or(0);
+            format!("{count} plays")
+        }
+        SortMode::ReleaseYear => {
+            album.year
+                .map(|y| y.to_string())
+                .unwrap_or_default()
+        }
+        SortMode::Duration => {
+            album.duration
+                .map(|d| formatters::format_time(d as u32))
+                .unwrap_or_default()
+        }
+        SortMode::Genre => {
+            album.genre
+                .clone()
+                .unwrap_or_default()
+        }
+        // No extra column for these views (they sort by name/artist already visible)
+        SortMode::Favorited | SortMode::Random | SortMode::Name |
+        SortMode::AlbumArtist | SortMode::Artist | SortMode::SongCount |
+        SortMode::Rating | SortMode::AlbumCount |
+        // Song-specific sort modes (not applicable to albums)
+        SortMode::Title | SortMode::Album | SortMode::Bpm |
+        SortMode::Channels | SortMode::Comment | SortMode::UpdatedAt => String::new(),
+    }
+}
+
+// ============================================================================
+// ViewPage trait implementation
+// ============================================================================
+
+impl super::ViewPage for AlbumsPage {
+    fn common(&self) -> &SlotListPageState {
+        &self.common
+    }
+    fn common_mut(&mut self) -> &mut SlotListPageState {
+        &mut self.common
+    }
+
+    fn is_expanded(&self) -> bool {
+        self.expansion.is_expanded()
+    }
+    fn collapse_expansion_message(&self) -> Option<Message> {
+        Some(Message::Albums(AlbumsMessage::CollapseExpansion))
+    }
+
+    fn search_input_id(&self) -> &'static str {
+        super::ALBUMS_SEARCH_ID
+    }
+
+    fn sort_mode_options(&self) -> Option<&'static [SortMode]> {
+        Some(SortMode::ALBUM_OPTIONS)
+    }
+    fn sort_mode_selected_message(&self, mode: SortMode) -> Option<Message> {
+        Some(Message::Albums(AlbumsMessage::SortModeSelected(mode)))
+    }
+    fn toggle_sort_order_message(&self) -> Message {
+        Message::Albums(AlbumsMessage::ToggleSortOrder)
+    }
+
+    fn add_to_queue_message(&self) -> Option<Message> {
+        Some(Message::Albums(AlbumsMessage::AddCenterToQueue))
+    }
+    fn expand_center_message(&self) -> Option<Message> {
+        Some(Message::Albums(AlbumsMessage::ExpandCenter))
+    }
+    fn reload_message(&self) -> Option<Message> {
+        Some(Message::LoadAlbums)
+    }
+}

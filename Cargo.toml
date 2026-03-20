@@ -1,0 +1,46 @@
+[workspace]
+members = [".", "data"]
+
+[workspace.package]
+repository = "https://github.com/f-o-o-g-s/nokkvi"
+license = "MIT"
+
+[workspace.lints.clippy]
+# Code clarity
+redundant_else = "warn"
+manual_string_new = "warn"
+cloned_instead_of_copied = "warn"
+flat_map_option = "warn"
+implicit_clone = "warn"
+inconsistent_struct_constructor = "warn"
+map_unwrap_or = "warn"
+semicolon_if_nothing_returned = "warn"
+uninlined_format_args = "warn"
+unnested_or_patterns = "warn"
+
+[package]
+name = "nokkvi"
+version = "0.0.1"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+nokkvi-data = { path = "data" }
+anyhow = "1.0.102"
+bytemuck = { version = "1.25", features = ["derive"] }
+iced = { git = "https://github.com/iced-rs/iced.git", rev = "12a01265", features = ["tokio", "image", "svg", "advanced", "canvas", "wgpu", "sipper"] }
+lru = "0.16"
+image = "0.25.10"
+reqwest = { version = "0.13.2", features = ["json", "blocking", "stream"] }
+serde = { version = "1.0.228", features = ["derive"] }
+toml = { version = "1.0", features = ["parse", "display"] }
+toml_edit = "0.25"
+tokio = { version = "1.50.0", features = ["full"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+futures = "0.3.32"
+mpris-server = "0.9"
+notify = "8"
+parking_lot = "0.12.5"

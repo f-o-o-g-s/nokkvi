@@ -1,0 +1,754 @@
+//! Update function for Nokkvi
+//!
+//! Contains the central message handler and helper functions.
+//! Message handlers are organized into submodules by domain.
+
+/// DRY macro for `handle_*_page_loaded` handlers. Songs, albums, and artists
+/// all follow the exact same pattern: append to paged buffer on Ok, log on Err.
+macro_rules! impl_page_loaded_handler {
+    ($self:ident, $field:ident, $label:expr, $result:expr, $total_count:expr) => {{
+        match $result {
+            Ok(new_items) => {
+                let count = new_items.len();
+                let loaded_before = $self.library.$field.loaded_count();
+                $self.library.$field.append_page(new_items, $total_count);
+                tracing::debug!(
+                    "📄 {} page loaded: {} new items ({}→{} of {})",
+                    $label,
+                    count,
+                    loaded_before,
+                    $self.library.$field.loaded_count(),
+                    $total_count,
+                );
+            }
+            Err(e) => {
+                tracing::error!("Error loading {} page: {}", $label, e);
+                $self.library.$field.set_loading(false);
+                $self.toast_error(format!("Failed to load {}: {}", $label, e));
+            }
+        }
+        iced::Task::none()
+    }};
+}
+
+mod albums;
+mod artists;
+mod browsing_panel;
+mod collage;
+mod components;
+mod cross_pane_drag;
+mod genres;
+mod hotkeys;
+mod info_modal;
+mod mpris;
+mod navigation;
+mod playback;
+mod player_bar;
+mod playlists;
+mod progressive_queue;
+mod queue;
+mod scrobbling;
+mod settings;
+mod slot_list;
+mod songs;
+#[cfg(test)]
+mod tests;
+mod text_input_dialog;
+mod toast;
+mod window;
+
+use iced::Task;
+use tracing::debug;
+
+use crate::{
+    Nokkvi,
+    app_message::{HotkeyMessage, Message, PlaybackMessage, ScrobbleMessage},
+};
+
+impl Nokkvi {
+    /// Central message handler
+    ///
+    /// Routes messages to appropriate handlers organized by domain.
+    pub fn update(&mut self, message: Message) -> Task<Message> {
+        // Auto-login check on first update
+        if self.should_auto_login
+            && matches!(
+                message,
+                Message::Playback(crate::app_message::PlaybackMessage::Tick)
+            )
+        {
+            self.should_auto_login = false;
+            debug!(" Triggering session resume...");
+            return Task::done(Message::ResumeSession);
+        }
+
+        match message {
+            // -----------------------------------------------------------------
+            // Navigation
+            // -----------------------------------------------------------------
+            Message::SwitchView(view) => self.handle_switch_view(view),
+            Message::ToggleSettings => {
+                if self.current_view == crate::View::Settings {
+                    self.handle_close_settings()
+                } else {
+                    self.handle_switch_view(crate::View::Settings)
+                }
+            }
+            Message::Login(msg) => self.handle_login(msg),
+            Message::LoginResult(result) => self.handle_login_result(result),
+            Message::ResumeSession => self.handle_resume_session(),
+
+            // -----------------------------------------------------------------
+            // Data Loading: Albums
+            // -----------------------------------------------------------------
+            Message::LoadAlbums => self.handle_load_albums(),
+            Message::Albums(crate::views::AlbumsMessage::AlbumsLoaded(result, total_count)) => {
+                self.handle_albums_loaded(result, total_count)
+            }
+            Message::Albums(crate::views::AlbumsMessage::AlbumsPageLoaded(result, total_count)) => {
+                self.handle_albums_page_loaded(result, total_count)
+            }
+            // -----------------------------------------------------------------
+            // Data Loading: Queue
+            // -----------------------------------------------------------------
+            Message::LoadQueue => self.handle_load_queue(),
+            Message::Queue(crate::views::QueueMessage::QueueLoaded(result)) => {
+                self.handle_queue_loaded(result)
+            }
+            Message::ProgressiveQueueAppendPage {
+                sort_mode,
+                sort_order,
+                search_query,
+                offset,
+                total_count,
+                generation,
+            } => self.handle_progressive_queue_append_page(
+                sort_mode,
+                sort_order,
+                search_query,
+                offset,
+                total_count,
+                generation,
+            ),
+            Message::ProgressiveQueueDone => {
+                self.library.queue_loading_target = None;
+                self.handle_load_queue()
+            }
+
+            // -----------------------------------------------------------------
+            // Data Loading: Artists
+            // -----------------------------------------------------------------
+            Message::LoadArtists => self.handle_load_artists(),
+            Message::Artists(crate::views::ArtistsMessage::ArtistsLoaded(result, total_count)) => {
+                self.handle_artists_loaded(result, total_count)
+            }
+            Message::Artists(crate::views::ArtistsMessage::ArtistsPageLoaded(
+                result,
+                total_count,
+            )) => self.handle_artists_page_loaded(result, total_count),
+
+            // -----------------------------------------------------------------
+            // Data Loading: Songs
+            // -----------------------------------------------------------------
+            Message::LoadSongs => self.handle_load_songs(),
+            Message::Songs(crate::views::SongsMessage::SongsLoaded(result, total_count)) => {
+                self.handle_songs_loaded(result, total_count)
+            }
+            Message::Songs(crate::views::SongsMessage::SongsPageLoaded(result, total_count)) => {
+                self.handle_songs_page_loaded(result, total_count)
+            }
+
+            // -----------------------------------------------------------------
+            // Data Loading: Genres
+            // -----------------------------------------------------------------
+            Message::LoadGenres => self.handle_load_genres(),
+            Message::Genres(crate::views::GenresMessage::GenresLoaded(result, total_count)) => {
+                self.handle_genres_loaded(result, total_count)
+            }
+
+            // -----------------------------------------------------------------
+            // Data Loading: Playlists
+            // -----------------------------------------------------------------
+            Message::LoadPlaylists => self.handle_load_playlists(),
+            Message::PlaylistDeleted(name) => {
+                self.toast_success(format!("Deleted '{name}'"));
+                self.handle_load_playlists()
+            }
+            Message::PlaylistRenamed(name) => {
+                self.toast_success(format!("Renamed to '{name}'"));
+                self.handle_load_playlists()
+            }
+            Message::PlaylistCreated(name) => {
+                self.toast_success(format!("Created playlist '{name}'"));
+                self.handle_load_playlists()
+            }
+            Message::PlaylistOverwritten(name) => {
+                self.toast_success(format!("Overwritten playlist '{name}'"));
+                self.handle_load_playlists()
+            }
+            Message::PlaylistAppended(name) => {
+                self.toast_success(format!("Added songs to '{name}'"));
+                self.handle_load_playlists()
+            }
+            Message::PlaylistsFetchedForDialog(playlists) => {
+                self.text_input_dialog.open_save_playlist(&playlists);
+                Task::none()
+            }
+            Message::PlaylistsFetchedForAddToPlaylist(playlists, song_ids) => {
+                // Quick-add bypass: skip dialog when default playlist is configured
+                if self.quick_add_to_playlist
+                    && let Some(ref default_id) = self.default_playlist_id
+                {
+                    let playlist_id = default_id.clone();
+                    let playlist_name = self.default_playlist_name.clone();
+                    let count = song_ids.len();
+                    return self.shell_action_task(
+                        move |shell| async move {
+                            let service = shell.playlists_api().await?;
+                            service.add_songs_to_playlist(&playlist_id, &song_ids).await
+                        },
+                        Message::PlaylistAppended(format!(
+                            "{playlist_name}' ({count} song{})",
+                            if count == 1 { "" } else { "s" }
+                        )),
+                        "quick-add to default playlist",
+                    );
+                }
+                self.text_input_dialog
+                    .open_add_to_playlist(&playlists, song_ids);
+                Task::none()
+            }
+            Message::Playlists(crate::views::PlaylistsMessage::PlaylistsLoaded(
+                result,
+                total_count,
+            )) => self.handle_playlists_loaded(result, total_count),
+
+            // -----------------------------------------------------------------
+            // Artwork Pipeline (namespaced)
+            // -----------------------------------------------------------------
+            Message::Artwork(msg) => {
+                use crate::app_message::{ArtworkMessage, CollageTarget};
+                match msg {
+                    // Shared album artwork
+                    ArtworkMessage::Loaded(id, handle) => self.handle_artwork_loaded(id, handle),
+                    ArtworkMessage::LoadLarge(album_id) => self.handle_load_large_artwork(album_id),
+                    ArtworkMessage::LargeLoaded(id, handle) => {
+                        self.handle_large_artwork_loaded(id, handle)
+                    }
+                    ArtworkMessage::StartPrefetch => self.handle_start_artwork_prefetch(None),
+                    ArtworkMessage::StartArtistPrefetch => {
+                        self.handle_start_artist_prefetch(None)
+                    }
+                    ArtworkMessage::RefreshAlbumArtwork(album_id) => {
+                        self.handle_refresh_album_artwork(album_id)
+                    }
+                    ArtworkMessage::RefreshComplete(album_id, thumb, large) => {
+                        self.handle_refresh_complete(album_id, thumb, large)
+                    }
+                    // Collage artwork pipeline (genre / playlist)
+                    ArtworkMessage::LoadCollage(target, id, server_url, cred, album_ids) => {
+                        match target {
+                            CollageTarget::Genre => self.handle_load_collage_artwork(
+                                target,
+                                id,
+                                server_url,
+                                cred,
+                                album_ids,
+                                |client, server_url, subsonic_credential, entity_id| async move {
+                                    let service = nokkvi_data::services::api::genres::GenresApiService::new_with_client(
+                                        client, server_url, subsonic_credential,
+                                    );
+                                    service.load_genre_albums(&entity_id).await.unwrap_or_default()
+                                },
+                            ),
+                            CollageTarget::Playlist => self.handle_load_collage_artwork(
+                                target,
+                                id,
+                                server_url,
+                                cred,
+                                album_ids,
+                                |client, server_url, subsonic_credential, entity_id| async move {
+                                    let service = nokkvi_data::services::api::playlists::PlaylistsApiService::new_with_client(
+                                        client, server_url, subsonic_credential,
+                                    );
+                                    service.load_playlist_albums(&entity_id).await.unwrap_or_default()
+                                },
+                            ),
+                        }
+                    }
+                    ArtworkMessage::StartCollagePrefetch(target) => {
+                        // Collect items needing album IDs from the appropriate library
+                        let items_needing_ids: Vec<(String, String)> = match target {
+                            CollageTarget::Genre => self
+                                .library
+                                .genres
+                                .iter()
+                                .filter(|g| g.artwork_album_ids.is_empty())
+                                .map(|g| (g.id.clone(), g.name.clone()))
+                                .collect(),
+                            CollageTarget::Playlist => self
+                                .library
+                                .playlists
+                                .iter()
+                                .filter(|p| p.artwork_album_ids.is_empty())
+                                .map(|p| (p.id.clone(), p.name.clone()))
+                                .collect(),
+                        };
+                        match target {
+                            CollageTarget::Genre => self.handle_start_collage_prefetch(
+                                target,
+                                items_needing_ids,
+                                |client, server_url, subsonic_credential, entity_id| async move {
+                                    let service = nokkvi_data::services::api::genres::GenresApiService::new_with_client(
+                                        client, server_url, subsonic_credential,
+                                    );
+                                    service.load_genre_albums(&entity_id).await.unwrap_or_default()
+                                },
+                            ),
+                            CollageTarget::Playlist => self.handle_start_collage_prefetch(
+                                target,
+                                items_needing_ids,
+                                |client, server_url, subsonic_credential, entity_id| async move {
+                                    let service = nokkvi_data::services::api::playlists::PlaylistsApiService::new_with_client(
+                                        client, server_url, subsonic_credential,
+                                    );
+                                    service.load_playlist_albums(&entity_id).await.unwrap_or_default()
+                                },
+                            ),
+                        }
+                    }
+                    ArtworkMessage::CollageAlbumIdsLoaded(target, results) => {
+                        self.handle_collage_album_ids_loaded(target, results)
+                    }
+                    ArtworkMessage::LoadCollageFromIds(target) => {
+                        self.handle_load_collage_artwork_from_ids(target)
+                    }
+                    ArtworkMessage::CollageMiniLoaded(target, id, handle_opt) => {
+                        self.handle_collage_mini_loaded(target, id, handle_opt)
+                    }
+                    ArtworkMessage::CollageLoaded(
+                        target,
+                        id,
+                        handle_opt,
+                        collage_handles,
+                        album_ids,
+                    ) => self.handle_collage_artwork_loaded(
+                        target,
+                        id,
+                        handle_opt,
+                        collage_handles,
+                        album_ids,
+                    ),
+                    ArtworkMessage::CollageBatchLoaded(target, results) => {
+                        self.handle_collage_batch_loaded(target, results)
+                    }
+                    ArtworkMessage::CollageBatchReady(target, ids, server_url, cred) => {
+                        Task::batch(ids.into_iter().map(|id| {
+                            Task::done(Message::Artwork(ArtworkMessage::LoadCollage(
+                                target,
+                                id,
+                                server_url.clone(),
+                                cred.clone(),
+                                Vec::new(),
+                            )))
+                        }))
+                    }
+                    // Song artwork
+                    ArtworkMessage::SongMiniLoaded(album_id, handle) => {
+                        self.handle_song_artwork_loaded(album_id, handle)
+                    }
+                }
+            }
+
+            // -----------------------------------------------------------------
+            // Playback (namespaced under PlaybackMessage)
+            // -----------------------------------------------------------------
+            Message::Playback(msg) => {
+                use crate::app_message::PlaybackMessage;
+                match msg {
+                    PlaybackMessage::Tick => {
+                        // ── Stale-loading watchdog ──────────────────────────────
+                        // Safety net: if a buffer has been in "loading" state for
+                        // more than 30 seconds, something went wrong (network
+                        // timeout, dropped task, etc). Auto-clear so the view is
+                        // usable and warn so the root cause can be investigated.
+                        let stale_timeout = std::time::Duration::from_secs(30);
+                        let stale_views: Vec<&str> = [
+                            (
+                                "albums",
+                                self.library.albums.is_stale_loading(stale_timeout),
+                            ),
+                            (
+                                "artists",
+                                self.library.artists.is_stale_loading(stale_timeout),
+                            ),
+                            ("songs", self.library.songs.is_stale_loading(stale_timeout)),
+                            (
+                                "genres",
+                                self.library.genres.is_stale_loading(stale_timeout),
+                            ),
+                            (
+                                "playlists",
+                                self.library.playlists.is_stale_loading(stale_timeout),
+                            ),
+                        ]
+                        .iter()
+                        .filter(|(_, stale)| *stale)
+                        .map(|(name, _)| *name)
+                        .collect();
+
+                        for view_name in &stale_views {
+                            tracing::warn!(
+                                "⚠️ Stale loading state detected for {} (loading for >30s), auto-clearing",
+                                view_name
+                            );
+                        }
+                        if !stale_views.is_empty() {
+                            // Clear all stale buffers
+                            self.library.albums.set_loading(false);
+                            self.library.artists.set_loading(false);
+                            self.library.songs.set_loading(false);
+                            self.library.genres.set_loading(false);
+                            self.library.playlists.set_loading(false);
+                            self.toast_warn(format!(
+                                "Loading timed out for: {}. Please retry.",
+                                stale_views.join(", ")
+                            ));
+                        }
+
+                        // Poll active progress handles and update sticky toasts.
+                        // Collect snapshots first to avoid borrow conflicts with self.
+                        let snapshots: Vec<_> = self
+                            .active_progress
+                            .iter()
+                            .map(|h| (h.toast_key(), h.snapshot()))
+                            .collect();
+
+                        let mut completed_indices = Vec::new();
+                        for (i, (toast_key, snap)) in snapshots.iter().enumerate() {
+                            if snap.done {
+                                self.toast.dismiss_key(toast_key);
+                                self.toast_success(format!("{} ✓", snap.label));
+                                completed_indices.push(i);
+                            } else if snap.total > 0 {
+                                let pct = snap.percent();
+                                let msg = format!("{}… {}%", snap.label, pct);
+                                self.toast.push(nokkvi_data::types::toast::Toast::keyed(
+                                    toast_key.clone(),
+                                    msg,
+                                    nokkvi_data::types::toast::ToastLevel::Info,
+                                ));
+                            }
+                        }
+                        // Remove completed handles (iterate in reverse to preserve indices)
+                        for i in completed_indices.into_iter().rev() {
+                            self.active_progress.remove(i);
+                        }
+
+                        self.handle_tick()
+                    }
+                    PlaybackMessage::PlaybackStateUpdated(update) => {
+                        self.handle_playback_state_updated(*update)
+                    }
+                    PlaybackMessage::TogglePlay => self.handle_toggle_play(),
+                    PlaybackMessage::Play => self.handle_play(),
+                    PlaybackMessage::Pause => self.handle_pause(),
+                    PlaybackMessage::Stop => self.handle_stop(),
+                    PlaybackMessage::NextTrack => self.handle_next_track(),
+                    PlaybackMessage::PrevTrack => self.handle_prev_track(),
+                    PlaybackMessage::ToggleRandom => self.handle_toggle_random(),
+                    PlaybackMessage::RandomToggled(random) => self.handle_random_toggled(random),
+                    PlaybackMessage::ToggleRepeat => self.handle_toggle_repeat(),
+                    PlaybackMessage::RepeatToggled(repeat, repeat_queue) => {
+                        self.handle_repeat_toggled(repeat, repeat_queue)
+                    }
+                    PlaybackMessage::ToggleConsume => self.handle_toggle_consume(),
+                    PlaybackMessage::ConsumeToggled(consume) => {
+                        self.handle_consume_toggled(consume)
+                    }
+                    PlaybackMessage::ToggleSoundEffects => self.handle_toggle_sound_effects(),
+                    PlaybackMessage::SfxVolumeChanged(vol) => self.handle_sfx_volume_changed(vol),
+                    PlaybackMessage::HideSfxVolumePercentage(id) => {
+                        self.handle_hide_sfx_volume_percentage(id)
+                    }
+                    PlaybackMessage::CycleVisualization => self.handle_cycle_visualization(),
+                    PlaybackMessage::Seek(val) => self.handle_seek(val),
+                    PlaybackMessage::VolumeChanged(val) => self.handle_volume_changed(val),
+                    PlaybackMessage::HideVolumePercentage(id) => {
+                        self.handle_hide_volume_percentage(id)
+                    }
+                    PlaybackMessage::PrepareNextForGapless => {
+                        self.handle_prepare_next_for_gapless()
+                    }
+                    PlaybackMessage::PlayerSettingsLoaded(settings) => {
+                        self.handle_player_settings_loaded(settings)
+                    }
+                    PlaybackMessage::InitializeScrobbleState(song_id) => {
+                        self.handle_initialize_scrobble_state(song_id)
+                    }
+                }
+            }
+            Message::ViewPreferencesLoaded(prefs) => self.handle_view_preferences_loaded(prefs),
+
+            // -----------------------------------------------------------------
+            // Slot List Navigation (namespaced)
+            // -----------------------------------------------------------------
+            Message::SlotList(msg) => self.handle_slot_list_message(msg),
+
+            // -----------------------------------------------------------------
+            // Window Events
+            // -----------------------------------------------------------------
+            Message::WindowResized(width, height) => self.handle_window_resized(width, height),
+            Message::ScaleFactorChanged(scale_factor) => {
+                self.handle_scale_factor_changed(scale_factor)
+            }
+            Message::HotkeyConfigUpdated(config) => {
+                tracing::info!(" [SETTINGS] Hotkey config hot-reloaded");
+                self.hotkey_config = config;
+                Task::none()
+            }
+            Message::NoOp => Task::none(),
+            Message::QuitApp => iced::exit(),
+            Message::PlaySfx(sfx_type) => self.handle_play_sfx(sfx_type),
+
+            // -----------------------------------------------------------------
+            // Scrobbling (namespaced)
+            // -----------------------------------------------------------------
+            Message::Scrobble(msg) => match msg {
+                ScrobbleMessage::NowPlaying(timer_id, song_id) => {
+                    self.handle_scrobble_now_playing(timer_id, song_id)
+                }
+                ScrobbleMessage::Submit(song_id) => self.handle_scrobble_submit(song_id),
+                ScrobbleMessage::Result(result) => self.handle_scrobble_result(result),
+                ScrobbleMessage::TrackLooped(song_id) => self.handle_scrobble_track_looped(song_id),
+            },
+
+            // -----------------------------------------------------------------
+            // Hotkey Actions (namespaced)
+            // -----------------------------------------------------------------
+            Message::Hotkey(msg) => match msg {
+                HotkeyMessage::ClearSearch => {
+                    // If info modal is visible, Escape closes it first
+                    if self.info_modal.visible {
+                        self.info_modal.close();
+                        return Task::none();
+                    }
+                    self.handle_clear_search()
+                }
+                HotkeyMessage::CycleSortMode(forward) => self.handle_cycle_sort_mode(forward),
+                HotkeyMessage::CenterOnPlaying => self.handle_center_on_playing(),
+                HotkeyMessage::ToggleStar => self.handle_toggle_star(),
+                HotkeyMessage::SongStarredStatusUpdated(song_id, new_starred_status) => {
+                    self.handle_song_starred_status_updated(song_id, new_starred_status)
+                }
+                HotkeyMessage::AlbumStarredStatusUpdated(album_id, new_starred_status) => {
+                    self.handle_album_starred_status_updated(album_id, new_starred_status)
+                }
+                HotkeyMessage::ArtistStarredStatusUpdated(artist_id, new_starred_status) => {
+                    self.handle_artist_starred_status_updated(artist_id, new_starred_status)
+                }
+                HotkeyMessage::AddToQueue => self.handle_add_to_queue(),
+                HotkeyMessage::ShuffleQueue => self.handle_shuffle_queue(),
+                HotkeyMessage::SaveQueueAsPlaylist => self.handle_save_queue_as_playlist(),
+                HotkeyMessage::RemoveFromQueue => self.handle_remove_from_queue(),
+                HotkeyMessage::ClearQueue => self.handle_clear_queue(),
+                HotkeyMessage::FocusSearch => self.handle_focus_search(),
+                HotkeyMessage::IncreaseRating => self.handle_increase_rating(),
+                HotkeyMessage::DecreaseRating => self.handle_decrease_rating(),
+                HotkeyMessage::SongRatingUpdated(song_id, new_rating) => {
+                    self.handle_song_rating_updated(song_id, new_rating)
+                }
+                HotkeyMessage::AlbumRatingUpdated(album_id, new_rating) => {
+                    self.handle_album_rating_updated(album_id, new_rating)
+                }
+                HotkeyMessage::ArtistRatingUpdated(artist_id, new_rating) => {
+                    self.handle_artist_rating_updated(artist_id, new_rating)
+                }
+                HotkeyMessage::ExpandCenter => self.handle_expand_center(),
+                HotkeyMessage::MoveTrackUp => self.handle_move_track(true),
+                HotkeyMessage::MoveTrackDown => self.handle_move_track(false),
+                HotkeyMessage::GetInfo => self.handle_get_info(),
+            },
+
+            // -----------------------------------------------------------------
+            // Component Message Bubbling
+            // -----------------------------------------------------------------
+            Message::PlayerBar(msg) => self.handle_player_bar(msg),
+            Message::NavBar(_msg) => {
+                // NavBar messages are handled via map() in navigation_bar()
+                // SwitchView -> Message::SwitchView, ToggleLightMode -> Message::ToggleLightMode, etc.
+                Task::none()
+            }
+            Message::ToggleLightMode => {
+                // Toggle light mode: write to config.toml (single source of truth)
+                let new_state = !crate::theme::is_light_mode();
+                crate::theme::set_light_mode(new_state);
+                debug!(" Light mode set to: {}", new_state);
+                // Persist to config.toml — the config file watcher will pick this up
+                // and ThemeConfigReloaded will read the correct value
+                if let Err(e) = crate::config_writer::update_config_value(
+                    "theme.light_mode",
+                    &crate::views::settings::items::SettingValue::Bool(new_state),
+                    None,
+                ) {
+                    tracing::warn!(" Failed to write light_mode to config.toml: {e}");
+                }
+                // Force UI refresh
+                Task::done(Message::Playback(PlaybackMessage::Tick))
+            }
+            Message::Albums(msg) => {
+                let is_seek = matches!(msg, crate::views::AlbumsMessage::SlotListScrollSeek(_));
+                let task = self.handle_albums(msg);
+                if is_seek {
+                    Task::batch([task, self.scrollbar_fade_timer(), self.seek_settled_timer()])
+                } else {
+                    task
+                }
+            }
+            Message::Queue(msg) => self.handle_queue(msg),
+            Message::Artists(msg) => {
+                let is_seek = matches!(msg, crate::views::ArtistsMessage::SlotListScrollSeek(_));
+                let task = self.handle_artists(msg);
+                if is_seek {
+                    Task::batch([task, self.scrollbar_fade_timer(), self.seek_settled_timer()])
+                } else {
+                    task
+                }
+            }
+            Message::Songs(msg) => {
+                let is_seek = matches!(msg, crate::views::SongsMessage::SlotListScrollSeek(_));
+                let task = self.handle_songs(msg);
+                if is_seek {
+                    Task::batch([task, self.scrollbar_fade_timer(), self.seek_settled_timer()])
+                } else {
+                    task
+                }
+            }
+            Message::Genres(msg) => {
+                let is_seek = matches!(msg, crate::views::GenresMessage::SlotListScrollSeek(_));
+                let task = self.handle_genres(msg);
+                if is_seek {
+                    Task::batch([task, self.scrollbar_fade_timer(), self.seek_settled_timer()])
+                } else {
+                    task
+                }
+            }
+            Message::Playlists(msg) => {
+                let is_seek = matches!(msg, crate::views::PlaylistsMessage::SlotListScrollSeek(_));
+                let task = self.handle_playlists(msg);
+                if is_seek {
+                    Task::batch([task, self.scrollbar_fade_timer(), self.seek_settled_timer()])
+                } else {
+                    task
+                }
+            }
+            Message::Settings(msg) => self.handle_settings(msg),
+
+            // -----------------------------------------------------------------
+            // MPRIS D-Bus Integration
+            // -----------------------------------------------------------------
+            Message::Mpris(event) => self.handle_mpris(event),
+
+            // -----------------------------------------------------------------
+            // Visualizer Hot-Reload
+            // -----------------------------------------------------------------
+            Message::VisualizerConfigChanged(config) => {
+                // Update shared config state
+                {
+                    let mut cfg = self.visualizer_config.write();
+                    debug!(
+                        " Applying new visualizer config: noise_reduction={:.2}, waves={}, bar_spacing={:.1}",
+                        config.noise_reduction, config.waves, config.bars.bar_spacing
+                    );
+                    *cfg = config;
+                }
+                // Apply config to visualizer (reinitializes spectrum engine with new params)
+                if let Some(ref vis) = self.visualizer {
+                    vis.apply_config();
+                }
+                // Mark settings dirty so entries show updated values
+                self.settings_page.config_dirty = true;
+                Task::none()
+            }
+
+            // -----------------------------------------------------------------
+            // Theme Hot-Reload
+            // -----------------------------------------------------------------
+            Message::ThemeConfigReloaded => {
+                // Reload theme colors from config.toml
+                crate::theme::reload_theme();
+                // Also apply light_mode from config — this is for script-driven
+                // demos (visualizer_showcase.py --both-modes), not user-facing config.
+                // The in-app toggle + redb is the intended user mechanism.
+                let config_light_mode = crate::theme_config::load_light_mode_from_config();
+                if config_light_mode != crate::theme::is_light_mode() {
+                    crate::theme::set_light_mode(config_light_mode);
+                    debug!(" Light mode set to {} from config.toml", config_light_mode);
+                }
+                // Force UI refresh so all widgets pick up new colors
+                self.settings_page.config_dirty = true;
+                Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
+            }
+
+            // -----------------------------------------------------------------
+            // Raw Keyboard Events → HotkeyConfig dispatch
+            // -----------------------------------------------------------------
+            Message::RawKeyEvent(key, modifiers) => {
+                // If settings is in hotkey capture mode, forward the raw event there
+                // instead of dispatching it as a normal hotkey action
+                if self.settings_page.capturing_hotkey.is_some() {
+                    return self.handle_settings(crate::views::SettingsMessage::HotkeyCaptured(
+                        key, modifiers,
+                    ));
+                }
+                // Look up the key event against the user's hotkey config
+                match crate::hotkeys::handle_hotkey(key, modifiers, &self.hotkey_config) {
+                    Some(msg) => self.update(msg),
+                    None => Task::none(),
+                }
+            }
+
+            // -----------------------------------------------------------------
+            // Toast Notifications
+            // -----------------------------------------------------------------
+            Message::Toast(msg) => self.handle_toast(msg),
+
+            // -----------------------------------------------------------------
+            // Text Input Dialog
+            // -----------------------------------------------------------------
+            Message::TextInputDialog(msg) => self.handle_text_input_dialog(msg),
+
+            // -----------------------------------------------------------------
+            // Playlist Edit Mode (split-view)
+            // -----------------------------------------------------------------
+            Message::BrowsingPanel(msg) => self.handle_browsing_panel_message(msg),
+            Message::EnterPlaylistEditMode {
+                playlist_id,
+                playlist_name,
+            } => self.handle_enter_playlist_edit_mode(playlist_id, playlist_name),
+            Message::ExitPlaylistEditMode => self.handle_exit_playlist_edit_mode(),
+            Message::ToggleBrowsingPanel => self.handle_toggle_browsing_panel(),
+            Message::SwitchPaneFocus => self.handle_switch_pane_focus(),
+            Message::SavePlaylistEdits => self.handle_save_playlist_edits(),
+            Message::PlaylistEditsSaved => self.handle_playlist_edits_saved(),
+
+            // -----------------------------------------------------------------
+            // Info Modal
+            // -----------------------------------------------------------------
+            Message::InfoModal(msg) => self.handle_info_modal(msg),
+
+            // -----------------------------------------------------------------
+            // Cross-Pane Drag (browsing panel → queue)
+            // -----------------------------------------------------------------
+            Message::CrossPaneDragPressed => self.handle_cross_pane_drag_pressed(),
+            Message::CrossPaneDragMoved(pos) => self.handle_cross_pane_drag_moved(pos),
+            Message::CrossPaneDragReleased => self.handle_cross_pane_drag_released(),
+            Message::CrossPaneDragCancel => self.handle_cross_pane_drag_cancel(),
+
+            // -----------------------------------------------------------------
+            // Show in File Manager
+            // -----------------------------------------------------------------
+            Message::ShowInFolder(path) => self.handle_show_in_folder(path),
+        }
+    }
+}

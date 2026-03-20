@@ -1,0 +1,228 @@
+//! Centralized artwork URL generation and fetching for Navidrome Subsonic API
+//!
+//! This module provides a single source of truth for building cover art URLs
+//! and fetching artwork via POST (credentials in body, not URL).
+
+/// Known Subsonic cover art ID prefixes
+const KNOWN_PREFIXES: [&str; 5] = ["al-", "ar-", "mf-", "pl-", "sh-"];
+
+/// Default size for high-resolution artwork (matches QML client)
+pub const HIGH_RES_SIZE: u32 = 1000;
+
+/// Default size for thumbnails
+pub const THUMBNAIL_SIZE: u32 = 80;
+
+/// Build a Subsonic getCoverArt URL
+///
+/// # Arguments
+/// * `art_id` - The artwork identifier (album ID, cover_art field, etc.)
+/// * `server_url` - Base Navidrome server URL
+/// * `subsonic_credential` - Pre-formatted credential string (e.g., "u=user&t=token&s=salt")
+/// * `size` - Optional size in pixels (square). If None, uses HIGH_RES_SIZE (1000)
+///
+/// # Returns
+/// Complete URL string, or empty string if credentials are missing
+///
+/// # Examples
+/// ```ignore
+/// let url = build_cover_art_url("al-abc123", "http://server", "u=user&t=tok&s=salt", Some(80), None);
+/// ```
+pub fn build_cover_art_url(
+    art_id: &str,
+    server_url: &str,
+    subsonic_credential: &str,
+    size: Option<u32>,
+) -> String {
+    build_cover_art_url_with_timestamp(art_id, server_url, subsonic_credential, size, None)
+}
+
+/// Build cover art URL with optional updated_at timestamp for cache invalidation
+/// When artwork is updated on the server, the timestamp changes and triggers re-download
+pub fn build_cover_art_url_with_timestamp(
+    art_id: &str,
+    server_url: &str,
+    subsonic_credential: &str,
+    size: Option<u32>,
+    updated_at: Option<&str>,
+) -> String {
+    // Handle empty or already-complete URLs
+    if art_id.is_empty() {
+        return String::new();
+    }
+
+    if art_id.starts_with("http") {
+        return art_id.to_string();
+    }
+
+    // Normalize ID: add "al-" prefix if no known prefix present
+    let final_id = if KNOWN_PREFIXES
+        .iter()
+        .any(|prefix| art_id.starts_with(prefix))
+    {
+        art_id.to_string()
+    } else {
+        format!("al-{art_id}")
+    };
+
+    // Build URL with size parameter
+    let actual_size = size.unwrap_or(HIGH_RES_SIZE);
+
+    if !subsonic_credential.is_empty() {
+        // Include updated_at in URL for cache invalidation
+        // This becomes part of the URL hash, so changed artwork = new cache file
+        let cache_buster = updated_at.unwrap_or("");
+        format!(
+            "{server_url}/rest/getCoverArt?id={final_id}&{subsonic_credential}&size={actual_size}&square=true&f=json&v=1.8.0&c=nokkvi&_u={cache_buster}"
+        )
+    } else {
+        String::new()
+    }
+}
+
+/// Build a Subsonic stream URL for audio playback
+///
+/// # Arguments
+/// * `song_id` - The song ID
+/// * `server_url` - Base Navidrome server URL
+/// * `subsonic_credential` - Pre-formatted credential string
+///
+/// # Returns
+/// Complete stream URL string, or empty string if credentials are missing
+pub fn build_stream_url(song_id: &str, server_url: &str, subsonic_credential: &str) -> String {
+    if song_id.is_empty() || subsonic_credential.is_empty() {
+        return String::new();
+    }
+
+    let cache_bust = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+
+    format!(
+        "{server_url}/rest/stream?id={song_id}&{subsonic_credential}&f=json&v=1.8.0&c=nokkvi&_={cache_bust}"
+    )
+}
+
+/// Build the POST endpoint URL and form body for a getCoverArt request.
+///
+/// Returns `(url, form_body)` where:
+/// - `url` is the endpoint without credentials: `{server_url}/rest/getCoverArt`
+/// - `form_body` is `application/x-www-form-urlencoded` with all params including credentials
+///
+/// Returns `None` if art_id is empty or credentials are missing.
+pub fn build_cover_art_post_params(
+    art_id: &str,
+    server_url: &str,
+    subsonic_credential: &str,
+    size: Option<u32>,
+    updated_at: Option<&str>,
+) -> Option<(String, String)> {
+    if art_id.is_empty() || subsonic_credential.is_empty() {
+        return None;
+    }
+
+    // HTTP URLs are external, can't POST to them
+    if art_id.starts_with("http") {
+        return None;
+    }
+
+    // Normalize ID: add "al-" prefix if no known prefix present
+    let final_id = if KNOWN_PREFIXES
+        .iter()
+        .any(|prefix| art_id.starts_with(prefix))
+    {
+        art_id.to_string()
+    } else {
+        format!("al-{art_id}")
+    };
+
+    let actual_size = size.unwrap_or(HIGH_RES_SIZE);
+    let cache_buster = updated_at.unwrap_or("");
+    let url = format!("{server_url}/rest/getCoverArt");
+    let body = format!(
+        "id={final_id}&{subsonic_credential}&size={actual_size}&square=true&f=json&v=1.8.0&c=nokkvi&_u={cache_buster}"
+    );
+
+    Some((url, body))
+}
+
+/// Fetch cover art via POST request (credentials in form body, not URL).
+///
+/// Falls back to GET for external HTTP URLs that can't be POSTed to.
+/// Returns raw image bytes on success.
+pub async fn fetch_cover_art(
+    client: &reqwest::Client,
+    art_id: &str,
+    server_url: &str,
+    subsonic_credential: &str,
+    size: Option<u32>,
+) -> Option<Vec<u8>> {
+    if art_id.is_empty() || subsonic_credential.is_empty() {
+        return None;
+    }
+
+    // External HTTP URLs: GET directly (can't POST to third-party servers)
+    if art_id.starts_with("http") {
+        let response = client.get(art_id).send().await.ok()?;
+        if response.status().is_success() {
+            return response.bytes().await.ok().map(|b| b.to_vec());
+        }
+        return None;
+    }
+
+    let (url, body) =
+        build_cover_art_post_params(art_id, server_url, subsonic_credential, size, None)?;
+
+    let response = client
+        .post(&url)
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(body)
+        .send()
+        .await
+        .ok()?;
+
+    if response.status().is_success() {
+        response.bytes().await.ok().map(|b| b.to_vec())
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_empty_id_returns_empty() {
+        assert_eq!(build_cover_art_url("", "http://srv", "cred", None), "");
+    }
+
+    #[test]
+    fn test_http_url_passthrough() {
+        let url = "http://example.com/art.jpg";
+        assert_eq!(build_cover_art_url(url, "http://srv", "cred", None), url);
+    }
+
+    #[test]
+    fn test_adds_al_prefix() {
+        let url = build_cover_art_url("123", "http://srv", "u=x", Some(80));
+        assert!(url.contains("id=al-123"));
+    }
+
+    #[test]
+    fn test_preserves_existing_prefix() {
+        let url = build_cover_art_url("ar-456", "http://srv", "u=x", Some(80));
+        assert!(url.contains("id=ar-456"));
+    }
+
+    #[test]
+    fn test_default_size() {
+        let url = build_cover_art_url("123", "http://srv", "u=x", None);
+        assert!(url.contains("size=1000"));
+    }
+
+    #[test]
+    fn test_empty_credential_returns_empty() {
+        assert_eq!(build_cover_art_url("123", "http://srv", "", None), "");
+    }
+}

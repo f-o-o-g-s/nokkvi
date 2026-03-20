@@ -1,0 +1,188 @@
+# Navidrome Client Configuration - Ember Dusk Theme
+# A warm, fiery color palette
+
+# REPLACE THESE WITH YOUR CREDENTIALS
+server_url = "http://localhost:4533"
+username = ""
+
+# =========================
+# Ember Dusk Theme
+# =========================
+
+[theme.font]
+family = "JetBrainsMono Nerd Font"
+
+# -------- DARK THEME --------
+
+[theme.dark.accent]
+primary = "#b45309"
+bright = "#f59e0b"
+border_dark = "#1c1917"
+border_light = "#292524"
+
+[theme.dark.background]
+default = "#181412"
+hard = "#0c0a09"
+soft = "#1c1917"
+level1 = "#292524"
+level2 = "#44403c"
+level3 = "#57534e"
+level4 = "#78716c"
+
+[theme.dark.foreground]
+bright = "#fafaf9"
+gray = "#a8a29e"
+level1 = "#e7e5e4"
+level2 = "#d6d3d1"
+level3 = "#a8a29e"
+level4 = "#78716c"
+
+[theme.dark.red]
+normal = "#dc2626"
+bright = "#f87171"
+
+[theme.dark.orange]
+normal = "#ea580c"
+bright = "#fb923c"
+
+[theme.dark.yellow]
+normal = "#ca8a04"
+bright = "#fde047"
+
+[theme.dark.green]
+normal = "#15803d"
+bright = "#4ade80"
+
+[theme.dark.aqua]
+normal = "#0f766e"
+bright = "#2dd4bf"
+
+[theme.dark.purple]
+normal = "#7c2d12"
+bright = "#c2410c"
+
+# -------- LIGHT THEME --------
+# warm parchment style, not pure white
+
+[theme.light.accent]
+primary = "#92400e"
+bright = "#b45309"
+border_dark = "#d6d3d1"
+border_light = "#a8a29e"
+
+[theme.light.background]
+default = "#faf7f2"
+hard = "#f5f5f4"
+soft = "#e7e5e4"
+level1 = "#d6d3d1"
+level2 = "#a8a29e"
+level3 = "#78716c"
+level4 = "#57534e"
+
+[theme.light.foreground]
+bright = "#1c1917"
+gray = "#57534e"
+level1 = "#292524"
+level2 = "#44403c"
+level3 = "#57534e"
+level4 = "#78716c"
+
+[theme.light.red]
+normal = "#b91c1c"
+bright = "#dc2626"
+
+[theme.light.orange]
+normal = "#c2410c"
+bright = "#ea580c"
+
+[theme.light.yellow]
+normal = "#a16207"
+bright = "#ca8a04"
+
+[theme.light.green]
+normal = "#166534"
+bright = "#22c55e"
+
+[theme.light.aqua]
+normal = "#155e75"
+bright = "#06b6d4"
+
+[theme.light.purple]
+normal = "#78350f"
+bright = "#b45309"
+
+# =========================
+# Visualizer
+# =========================
+
+
+[visualizer]
+lower_cutoff_freq = 45
+higher_cutoff_freq = 11000
+noise_reduction = 0.85
+
+monstercat = 0.0
+waves = false
+
+# -------- DARK BARS --------
+
+
+[visualizer.bars]
+bar_spacing = 2
+border_width = 1
+led_bars = true
+led_segment_height = 3
+gradient_mode = "wave"
+peak_gradient_mode = "cycle"
+peak_mode = "fall"
+peak_hold_time = 500
+peak_fade_time = 750
+bar_depth_3d = 0.0
+peak_height_ratio = 66
+
+[visualizer.bars.dark]
+border_color = "#0c0a09"
+border_opacity = 1.0
+led_border_opacity = 1
+bar_gradient_colors = [
+    "#92400e",
+    "#b45309",
+    "#d97706",
+    "#f59e0b",
+    "#fde047",
+    "#4ade80",
+]
+peak_gradient_colors = [
+    "#7c2d12",
+    "#b91c1c",
+    "#ea580c",
+    "#f59e0b",
+    "#fde047",
+    "#22c55e",
+]
+
+[visualizer.bars.light]
+border_color = "#f5f5f4"
+border_opacity = 0.0
+led_border_opacity = 0.0
+bar_gradient_colors = [
+    "#a16207",
+    "#b45309",
+    "#c2410c",
+    "#ea580c",
+    "#ca8a04",
+    "#22c55e",
+]
+peak_gradient_colors = [
+    "#991b1b",
+    "#c2410c",
+    "#ea580c",
+    "#ca8a04",
+    "#16a34a",
+    "#0d9488",
+]
+
+[visualizer.lines]
+line_thickness = 0.03
+point_count = 32
+
