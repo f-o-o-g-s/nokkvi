@@ -21,8 +21,10 @@ use crate::{
 // Types & Responsive Breakpoints
 // ============================================================================
 
-// Responsive breakpoint — track info hides at narrow width
-const BREAKPOINT_HIDE_TRACK_INFO: f32 = 900.0;
+// Responsive breakpoints — metadata fields collapse progressively (album → artist → title)
+const BREAKPOINT_SHOW_ALBUM: f32 = 900.0;
+const BREAKPOINT_SHOW_ARTIST: f32 = 750.0;
+const BREAKPOINT_SHOW_TITLE: f32 = 600.0;
 
 /// Navigation view options (mirrors app::View)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -334,8 +336,10 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         left_section = left_section.push(tab_separator(true));
     }
 
-    // Responsive visibility flag based on window width
-    let show_track_info = data.window_width >= BREAKPOINT_HIDE_TRACK_INFO;
+    // Responsive visibility flags — fields collapse progressively
+    let show_title = data.window_width >= BREAKPOINT_SHOW_TITLE;
+    let show_artist = data.window_width >= BREAKPOINT_SHOW_ARTIST;
+    let show_album = data.window_width >= BREAKPOINT_SHOW_ALBUM;
 
     // Helper: labeled field (dimmed label: + scrolling value) — delegates to shared helper
     let info_field = |label: &'static str,
@@ -351,7 +355,8 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // Layout: │ title: xxx │ artist: xxx │ album: xxx │ [fill] │ FLAC 44.1kHz · 1411kbps │
     let is_playing = data.is_playing;
 
-    let center_section: Element<'static, NavBarMessage> = if !show_track_info {
+    let center_section: Element<'static, NavBarMessage> = if !show_title {
+        // All metadata hidden at very narrow widths
         Space::new().width(Length::Fill).into()
     } else if !is_playing {
         // Stopped state - no track loaded
@@ -395,13 +400,20 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         // Fill spacer → center the metadata fields
         info_row = info_row.push(Space::new().width(Length::Fill));
 
-        // │ title │ artist │ album │
+        // Progressive metadata: title (always when visible) → artist → album
         info_row = info_row.push(info_sep());
         info_row = info_row.push(info_field("title:", title, theme::now_playing_color()));
-        info_row = info_row.push(info_sep());
-        info_row = info_row.push(info_field("artist:", artist, theme::selected_color()));
-        info_row = info_row.push(info_sep());
-        info_row = info_row.push(info_field("album:", album, theme::fg2()));
+
+        if show_artist {
+            info_row = info_row.push(info_sep());
+            info_row = info_row.push(info_field("artist:", artist, theme::selected_color()));
+        }
+
+        if show_album {
+            info_row = info_row.push(info_sep());
+            info_row = info_row.push(info_field("album:", album, theme::fg2()));
+        }
+
         info_row = info_row.push(info_sep());
 
         // Fill spacer → push format info away
