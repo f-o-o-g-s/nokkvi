@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.0.3 — 2026-03-19
+
+### Fixes
+- **install.sh copies binary** — `install.sh` now copies `target/release/nokkvi`
+  to `~/.local/bin/`, so the desktop entry's `Exec=nokkvi` works without manual
+  `$PATH` setup. Exits with a helpful message if the binary hasn't been built yet.
+
+---
+
 ## v0.0.2 — 2026-03-19
 
 ### Features
