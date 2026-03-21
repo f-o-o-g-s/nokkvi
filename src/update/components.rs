@@ -683,4 +683,86 @@ impl Nokkvi {
 
         Task::none()
     }
+
+    // ── Strip context menu helpers ──────────────────────────────────────
+
+    /// Whether the currently playing track is starred.
+    /// Used to render the star/unstar label in the strip context menu.
+    pub(crate) fn is_current_track_starred(&self) -> bool {
+        let Some(song_id) = &self.scrobble.current_song_id else {
+            return false;
+        };
+        self.library
+            .queue_songs
+            .iter()
+            .find(|s| &s.id == song_id)
+            .is_some_and(|s| s.starred)
+    }
+
+    /// Toggle star on the currently playing track via the strip context menu.
+    /// Uses the existing `star_item_task` pattern with optimistic update.
+    pub(crate) fn handle_toggle_star_for_playing_track(&mut self) -> Task<Message> {
+        let Some(song_id) = self.scrobble.current_song_id.clone() else {
+            self.toast_warn("No track is currently playing");
+            return Task::none();
+        };
+
+        let is_starred = self.is_current_track_starred();
+        let new_starred = !is_starred;
+        let name = self.playback.title.clone();
+
+        // Optimistic update
+        let optimistic_msg = Self::starred_revert_message(song_id.clone(), "song", new_starred);
+
+        // API call
+        let api_task = self.star_item_task(song_id, "song", new_starred);
+
+        // Toast
+        let toast_label = if new_starred {
+            format!("♥ Loved: {name}")
+        } else {
+            format!("Unloved: {name}")
+        };
+        let toast_msg = Message::Toast(crate::app_message::ToastMessage::Push(
+            nokkvi_data::types::toast::Toast::new(
+                toast_label,
+                nokkvi_data::types::toast::ToastLevel::Success,
+            ),
+        ));
+
+        Task::batch(vec![
+            Task::done(optimistic_msg),
+            api_task,
+            Task::done(toast_msg),
+        ])
+    }
+
+    /// Open the currently playing track's folder in the file manager.
+    /// Uses API lookup since QueueSongUIViewData doesn't carry the file path.
+    pub(crate) fn handle_show_in_folder_for_playing_track(&mut self) -> Task<Message> {
+        let Some(song_id) = self.scrobble.current_song_id.clone() else {
+            self.toast_warn("No track is currently playing");
+            return Task::none();
+        };
+
+        self.shell_task(
+            move |shell| async move {
+                let api = shell.songs_api().await?;
+                let song = api.load_song_by_id(&song_id).await?;
+                Ok(song.path)
+            },
+            |result: Result<String, anyhow::Error>| match result {
+                Ok(path) => Message::ShowInFolder(path),
+                Err(e) => {
+                    tracing::error!("Failed to load song path: {e}");
+                    Message::Toast(crate::app_message::ToastMessage::Push(
+                        nokkvi_data::types::toast::Toast::new(
+                            format!("Failed to load song path: {e}"),
+                            nokkvi_data::types::toast::ToastLevel::Error,
+                        ),
+                    ))
+                }
+            },
+        )
+    }
 }

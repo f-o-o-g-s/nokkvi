@@ -94,6 +94,85 @@ pub(crate) fn library_entry_view<'a, Message: Clone + 'a>(
 }
 
 // ============================================================================
+// Strip Context Menu Entry (now-playing metadata strip)
+// ============================================================================
+
+/// Context menu entries for the track info strip (now-playing metadata).
+#[derive(Debug, Clone, Copy)]
+pub enum StripContextEntry {
+    GoToQueue,
+    GoToAlbum,
+    GoToArtist,
+    Separator,
+    CopyTrackInfo,
+    ToggleStar,
+    ShowInFolder,
+}
+
+/// Build strip context menu entries.
+/// `has_local_path`: true if `local_music_path` is configured (shows "Show in File Manager").
+pub(crate) fn strip_entries(has_local_path: bool) -> Vec<StripContextEntry> {
+    let mut entries = vec![
+        StripContextEntry::GoToQueue,
+        StripContextEntry::GoToAlbum,
+        StripContextEntry::GoToArtist,
+        StripContextEntry::Separator,
+        StripContextEntry::CopyTrackInfo,
+        StripContextEntry::ToggleStar,
+    ];
+    if has_local_path {
+        entries.push(StripContextEntry::ShowInFolder);
+    }
+    entries
+}
+
+/// Render a strip context menu entry.
+/// `is_starred`: whether the currently playing track is starred.
+pub(crate) fn strip_entry_view<'a, Message: Clone + 'a>(
+    entry: StripContextEntry,
+    _length: Length,
+    is_starred: bool,
+    on_action: impl Fn(StripContextEntry) -> Message,
+) -> Element<'a, Message> {
+    match entry {
+        StripContextEntry::GoToQueue => menu_button(
+            Some("assets/icons/list-music.svg"),
+            "Go to Queue",
+            on_action(StripContextEntry::GoToQueue),
+        ),
+        StripContextEntry::GoToAlbum => menu_button(
+            Some("assets/icons/disc-3.svg"),
+            "Go to Album",
+            on_action(StripContextEntry::GoToAlbum),
+        ),
+        StripContextEntry::GoToArtist => menu_button(
+            Some("assets/icons/mic.svg"),
+            "Go to Artist",
+            on_action(StripContextEntry::GoToArtist),
+        ),
+        StripContextEntry::Separator => menu_separator(),
+        StripContextEntry::CopyTrackInfo => menu_button(
+            Some("assets/icons/copy.svg"),
+            "Copy Track Info",
+            on_action(StripContextEntry::CopyTrackInfo),
+        ),
+        StripContextEntry::ToggleStar => {
+            let (icon, label) = if is_starred {
+                ("assets/icons/star-filled.svg", "Unlove")
+            } else {
+                ("assets/icons/star.svg", "Love")
+            };
+            menu_button(Some(icon), label, on_action(StripContextEntry::ToggleStar))
+        }
+        StripContextEntry::ShowInFolder => menu_button(
+            Some("assets/icons/folder-open.svg"),
+            "Show in File Manager",
+            on_action(StripContextEntry::ShowInFolder),
+        ),
+    }
+}
+
+// ============================================================================
 // Public API
 // ============================================================================
 

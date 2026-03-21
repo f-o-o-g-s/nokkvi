@@ -60,6 +60,10 @@ pub(crate) struct NavBarViewData {
     pub sound_effects_enabled: bool,
     /// Whether the settings view is currently open (disables nav tab highlighting)
     pub settings_open: bool,
+    /// Local music path for "Show in File Manager" (empty = not configured)
+    pub local_music_path: String,
+    /// Whether the currently playing track is starred
+    pub is_current_starred: bool,
 }
 
 /// Messages emitted by nav bar interactions
@@ -71,6 +75,7 @@ pub enum NavBarMessage {
     OpenSettings,
     /// Track info strip was clicked — dispatch depends on strip_click_action setting
     StripClicked,
+    StripContextAction(super::context_menu::StripContextEntry),
     Quit,
 }
 
@@ -434,11 +439,25 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             info_row = info_row.push(Space::new().width(Length::Fill));
 
             // Wrap in mouse_area so clicking metadata navigates to queue
-            container(mouse_area(info_row).on_press(NavBarMessage::StripClicked))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .center_y(Length::Fill)
-                .into()
+            let clickable = mouse_area(info_row).on_press(NavBarMessage::StripClicked);
+            let has_local_path = !data.local_music_path.is_empty();
+            let is_starred = data.is_current_starred;
+            let wrapped = super::context_menu::context_menu(
+                container(clickable)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .center_y(Length::Fill),
+                super::context_menu::strip_entries(has_local_path),
+                move |entry, length| {
+                    super::context_menu::strip_entry_view(
+                        entry,
+                        length,
+                        is_starred,
+                        NavBarMessage::StripContextAction,
+                    )
+                },
+            );
+            wrapped.into()
         };
 
     // -------------------------------------------------------------------------

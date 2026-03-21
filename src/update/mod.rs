@@ -101,6 +101,36 @@ impl Nokkvi {
                     StripClickAction::DoNothing => Task::none(),
                 }
             }
+            Message::StripContextAction(entry) => {
+                use crate::widgets::context_menu::StripContextEntry;
+                match entry {
+                    StripContextEntry::GoToQueue => {
+                        let switch = self.handle_switch_view(crate::View::Queue);
+                        let center = self.handle_center_on_playing();
+                        Task::batch([switch, center])
+                    }
+                    StripContextEntry::GoToAlbum => {
+                        let switch = self.handle_switch_view(crate::View::Albums);
+                        let center = self.handle_center_on_playing();
+                        Task::batch([switch, center])
+                    }
+                    StripContextEntry::GoToArtist => {
+                        let switch = self.handle_switch_view(crate::View::Artists);
+                        let center = self.handle_center_on_playing();
+                        Task::batch([switch, center])
+                    }
+                    StripContextEntry::CopyTrackInfo => {
+                        let info = format!("{} — {}", self.playback.artist, self.playback.title);
+                        self.toast_info("Copied to clipboard");
+                        iced::clipboard::write(info).map(|_| Message::NoOp)
+                    }
+                    StripContextEntry::ToggleStar => self.handle_toggle_star_for_playing_track(),
+                    StripContextEntry::ShowInFolder => {
+                        self.handle_show_in_folder_for_playing_track()
+                    }
+                    StripContextEntry::Separator => Task::none(),
+                }
+            }
             Message::ToggleSettings => {
                 if self.current_view == crate::View::Settings {
                     self.handle_close_settings()

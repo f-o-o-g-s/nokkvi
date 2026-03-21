@@ -233,6 +233,8 @@ pub enum Message {
     SwitchView(View),
     /// Track info strip was clicked — dispatch depends on strip_click_action setting
     StripClicked,
+    /// Track info strip right-click context menu action
+    StripContextAction(crate::widgets::context_menu::StripContextEntry),
     /// Toggle settings view: open if not in settings, return to Queue if already there
     ToggleSettings,
 

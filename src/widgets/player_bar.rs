@@ -91,6 +91,7 @@ pub enum PlayerBarMessage {
     GoToQueue,
     /// Track info strip was clicked — dispatch depends on strip_click_action setting
     StripClicked,
+    StripContextAction(super::context_menu::StripContextEntry),
     Quit,
 }
 

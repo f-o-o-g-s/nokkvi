@@ -36,6 +36,7 @@ fn map_nav_bar_message(msg: widgets::NavBarMessage) -> Message {
         }
         widgets::NavBarMessage::OpenSettings => Message::SwitchView(View::Settings),
         widgets::NavBarMessage::StripClicked => Message::StripClicked,
+        widgets::NavBarMessage::StripContextAction(entry) => Message::StripContextAction(entry),
         widgets::NavBarMessage::Quit => Message::QuitApp,
     }
 }
@@ -117,10 +118,26 @@ impl Nokkvi {
 
             // Top bar info strip (full window width, above sidebar)
             if crate::theme::show_top_bar_strip() {
-                outer = outer.push(widgets::track_info_strip::track_info_strip(
+                let strip = widgets::track_info_strip::track_info_strip(
                     &strip_data,
                     Some(Message::StripClicked),
-                ));
+                );
+                let has_local_path = !self.local_music_path.is_empty();
+                let is_starred = self.is_current_track_starred();
+                let wrapped: Element<'_, Message> = widgets::context_menu::context_menu(
+                    strip,
+                    widgets::context_menu::strip_entries(has_local_path),
+                    move |entry, length| {
+                        widgets::context_menu::strip_entry_view(
+                            entry,
+                            length,
+                            is_starred,
+                            Message::StripContextAction,
+                        )
+                    },
+                )
+                .into();
+                outer = outer.push(wrapped);
                 // Bottom separator to delineate strip from content below
                 outer = outer.push(crate::theme::horizontal_separator::<Message>(1.0));
             }
@@ -135,6 +152,26 @@ impl Nokkvi {
                 } else {
                     None
                 };
+
+            // Wrap player bar strip in context menu for right-click actions
+            let player_strip: Option<Element<'_, widgets::PlayerBarMessage>> =
+                player_strip.map(|strip| {
+                    let has_local_path = !self.local_music_path.is_empty();
+                    let is_starred = self.is_current_track_starred();
+                    widgets::context_menu::context_menu(
+                        strip,
+                        widgets::context_menu::strip_entries(has_local_path),
+                        move |entry, length| {
+                            widgets::context_menu::strip_entry_view(
+                                entry,
+                                length,
+                                is_starred,
+                                widgets::PlayerBarMessage::StripContextAction,
+                            )
+                        },
+                    )
+                    .into()
+                });
 
             // Sidebar + content row
             outer = outer.push(iced::widget::row![
@@ -414,6 +451,8 @@ impl Nokkvi {
             is_light_mode: crate::theme::is_light_mode(),
             sound_effects_enabled: self.sfx.enabled,
             settings_open,
+            local_music_path: self.local_music_path.clone(),
+            is_current_starred: self.is_current_track_starred(),
         };
 
         // Use the nav_bar component, mapping NavBarMessage to app Message
