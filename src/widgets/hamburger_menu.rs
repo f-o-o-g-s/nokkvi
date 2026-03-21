@@ -13,7 +13,7 @@ use iced::{
         svg::{Handle, Svg as SvgData},
         widget::{self, Widget},
     },
-    mouse, touch,
+    keyboard, mouse, touch,
 };
 
 use crate::theme;
@@ -357,6 +357,15 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
         let bounds = layout.bounds();
 
         match event {
+            // Escape key → close
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(keyboard::key::Named::Escape),
+                ..
+            }) => {
+                self.state.is_open = false;
+                shell.capture_event();
+                shell.request_redraw();
+            }
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
             | Event::Touch(touch::Event::FingerPressed { .. }) => {
                 if let Some(cursor_pos) = cursor.position() {
