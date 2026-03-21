@@ -12,7 +12,10 @@ use iced::{
 
 use crate::{
     theme, widgets,
-    widgets::{three_d_button::three_d_button, three_d_icon_button::three_d_icon_button},
+    widgets::{
+        hover_overlay::HoverOverlay, three_d_button::three_d_button,
+        three_d_icon_button::three_d_icon_button,
+    },
 };
 
 // Player bar dimensions
@@ -95,52 +98,58 @@ pub enum PlayerBarMessage {
     Quit,
 }
 
-/// Helper function to create a player control button with standard sizing
+/// Helper function to create a player control button with standard sizing,
+/// wrapped in a `HoverOverlay` for consistent hover/press feedback.
 fn player_control_button(
     icon_path: &'static str,
     message: PlayerBarMessage,
     background: iced::Color,
     icon_color: iced::Color,
     active: bool,
-) -> widgets::three_d_icon_button::ThreeDIconButton<PlayerBarMessage> {
-    three_d_icon_button(icon_path)
-        .on_press(message)
-        .width(BUTTON_SIZE)
-        .height(BUTTON_SIZE)
-        .background(background)
-        .icon_color(icon_color)
-        .active(active)
+) -> Element<'static, PlayerBarMessage> {
+    HoverOverlay::new(
+        three_d_icon_button(icon_path)
+            .on_press(message)
+            .width(BUTTON_SIZE)
+            .height(BUTTON_SIZE)
+            .background(background)
+            .icon_color(icon_color)
+            .active(active),
+    )
+    .into()
 }
 
 /// Build a mode toggle button with tooltip — shared pattern for repeat, shuffle,
-/// consume, and visualizer toggles.
+/// consume, and visualizer toggles. Wrapped in `HoverOverlay` for hover/press feedback.
 fn mode_toggle_button<'a>(
     icon_path: &'static str,
     message: PlayerBarMessage,
     active: bool,
     label: &'a str,
 ) -> Element<'a, PlayerBarMessage> {
-    tooltip(
-        player_control_button(
-            icon_path,
-            message,
-            if active {
-                theme::accent_bright()
-            } else {
-                theme::bg1()
-            },
-            if active {
-                theme::bg0_hard()
-            } else {
-                theme::fg1()
-            },
-            active,
-        ),
-        container(text(label).size(11.0).font(theme::ui_font())).padding(4),
-        tooltip::Position::Top,
+    HoverOverlay::new(
+        tooltip(
+            player_control_button(
+                icon_path,
+                message,
+                if active {
+                    theme::accent_bright()
+                } else {
+                    theme::bg1()
+                },
+                if active {
+                    theme::bg0_hard()
+                } else {
+                    theme::fg1()
+                },
+                active,
+            ),
+            container(text(label).size(11.0).font(theme::ui_font())).padding(4),
+            tooltip::Position::Top,
+        )
+        .gap(4)
+        .style(theme::container_tooltip),
     )
-    .gap(4)
-    .style(theme::container_tooltip)
     .into()
 }
 
@@ -359,7 +368,7 @@ pub(crate) fn player_bar<'a>(
 
     // SFX toggle button
     if sound_effects_enabled {
-        mode_toggles_row = mode_toggles_row.push(
+        mode_toggles_row = mode_toggles_row.push(Element::from(HoverOverlay::new(
             tooltip(
                 three_d_button(
                     container(text("SFX").size(10.0).font(Font {
@@ -386,7 +395,7 @@ pub(crate) fn player_bar<'a>(
             )
             .gap(4)
             .style(theme::container_tooltip),
-        );
+        )));
     }
 
     // Visualizer button
@@ -409,7 +418,7 @@ pub(crate) fn player_bar<'a>(
         use crate::widgets::hamburger_menu::{HamburgerMenu, MenuAction};
         let is_light = data.is_light_mode;
         let sfx_on = sound_effects_enabled;
-        mode_toggles_row = mode_toggles_row.push(
+        mode_toggles_row = mode_toggles_row.push(Element::from(HoverOverlay::new(
             HamburgerMenu::new(
                 |action| match action {
                     MenuAction::ToggleLightMode => PlayerBarMessage::ToggleLightMode,
@@ -421,7 +430,7 @@ pub(crate) fn player_bar<'a>(
                 sfx_on,
             )
             .player_bar_style(),
-        );
+        )));
     }
 
     let mode_toggles = mode_toggles_row;

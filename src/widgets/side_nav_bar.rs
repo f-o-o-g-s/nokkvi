@@ -47,12 +47,14 @@ pub(crate) struct SideNavBarData {
     pub settings_open: bool,
 }
 
-/// Canvas program that draws rotated text with optional active indicator.
+/// Canvas program that draws rotated text with optional active/hover indicator.
 struct RotatedLabel {
     label: &'static str,
     color: Color,
-    /// If set, draw a right-edge accent indicator bar (rounded mode active state)
+    /// If set, draw a right-edge accent indicator bar (active state)
     indicator_color: Option<Color>,
+    /// If set, draw indicator on hover when no active indicator is shown
+    hover_indicator_color: Option<Color>,
 }
 
 impl<Message> canvas::Program<Message> for RotatedLabel {
@@ -64,12 +66,19 @@ impl<Message> canvas::Program<Message> for RotatedLabel {
         renderer: &iced::Renderer,
         _theme: &iced::Theme,
         bounds: Rectangle,
-        _cursor: iced::mouse::Cursor,
+        cursor: iced::mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
 
-        // Draw right-edge indicator if active (rounded mode)
-        if let Some(accent) = self.indicator_color {
+        // Draw right-edge indicator: active state always, hover state on mouse-over
+        let show_indicator = self.indicator_color.or_else(|| {
+            if cursor.is_over(bounds) {
+                self.hover_indicator_color
+            } else {
+                None
+            }
+        });
+        if let Some(accent) = show_indicator {
             frame.fill_rectangle(
                 Point::new(bounds.width - INDICATOR_WIDTH, 0.0),
                 iced::Size::new(INDICATOR_WIDTH, bounds.height),
@@ -100,6 +109,42 @@ impl<Message> canvas::Program<Message> for RotatedLabel {
     }
 }
 
+/// Canvas program for the right-edge indicator bar in icon-only mode.
+/// Shows the indicator when the cursor is over the bounds (hover) or when active.
+struct IconIndicator {
+    /// Active indicator color (always shown)
+    indicator_color: Option<Color>,
+    /// Hover indicator color (shown on mouse-over when not active)
+    hover_indicator_color: Option<Color>,
+}
+
+impl<Message> canvas::Program<Message> for IconIndicator {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &iced::Renderer,
+        _theme: &iced::Theme,
+        bounds: Rectangle,
+        cursor: iced::mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let show_indicator = self.indicator_color.or_else(|| {
+            if cursor.is_over(bounds) {
+                self.hover_indicator_color
+            } else {
+                None
+            }
+        });
+
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        if let Some(accent) = show_indicator {
+            frame.fill_rectangle(Point::ORIGIN, bounds.size(), canvas::Fill::from(accent));
+        }
+        vec![frame.into_geometry()]
+    }
+}
+
 /// Build side nav tab content based on display mode.
 ///
 /// Returns `(content_element, tab_height)` — shared between `nav_tab` and the settings indicator
@@ -110,6 +155,7 @@ fn side_nav_tab_content(
     display_mode: NavDisplayMode,
     text_color: Color,
     indicator_color: Option<Color>,
+    hover_indicator_color: Option<Color>,
 ) -> (Element<'static, NavBarMessage>, f32) {
     match display_mode {
         NavDisplayMode::TextOnly => {
@@ -117,6 +163,7 @@ fn side_nav_tab_content(
                 label,
                 color: text_color,
                 indicator_color,
+                hover_indicator_color,
             })
             .width(Length::Fixed(SIDE_NAV_WIDTH))
             .height(Length::Fixed(TAB_HEIGHT))
@@ -130,14 +177,13 @@ fn side_nav_tab_content(
                 .align_x(iced::Alignment::Center)
                 .align_y(iced::Alignment::Center);
 
-            // Right-edge indicator bar (matches TextOnly canvas indicator style)
-            let indicator = container(Space::new())
-                .width(Length::Fixed(INDICATOR_WIDTH))
-                .height(Length::Fill)
-                .style(move |_: &iced::Theme| container::Style {
-                    background: indicator_color.map(iced::Background::Color),
-                    ..Default::default()
-                });
+            // Right-edge indicator bar — canvas-based for cursor hover detection
+            let indicator = canvas(IconIndicator {
+                indicator_color,
+                hover_indicator_color,
+            })
+            .width(Length::Fixed(INDICATOR_WIDTH))
+            .height(Length::Fill);
 
             let content = row![icon_container, indicator]
                 .width(Length::Fixed(SIDE_NAV_WIDTH))
@@ -156,6 +202,7 @@ fn side_nav_tab_content(
                 label,
                 color: text_color,
                 indicator_color,
+                hover_indicator_color,
             })
             .width(Length::Fixed(SIDE_NAV_WIDTH))
             .height(Length::Fixed(TEXT_ICON_TAB_HEIGHT - ICON_SLOT_HEIGHT));
@@ -185,7 +232,7 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
         let is_active = !settings_open && current == view;
         let display_mode = theme::nav_display_mode();
 
-        // Button style — flat mode uses shared flat_tab_style, rounded uses transparent bg
+        // Button style — flat mode uses shared flat_tab_style, rounded uses plain bg
         let tab_style = move |_theme: &iced::Theme, status: button::Status| {
             if is_rounded {
                 button::Style {
@@ -218,8 +265,21 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
             None
         };
 
-        let (content, tab_height) =
-            side_nav_tab_content(label, icon_path, display_mode, text_color, indicator_color);
+        // Hover indicator: show accent bar on hover in rounded mode
+        let hover_indicator_color = if is_rounded && !is_active {
+            Some(active_accent)
+        } else {
+            None
+        };
+
+        let (content, tab_height) = side_nav_tab_content(
+            label,
+            icon_path,
+            display_mode,
+            text_color,
+            indicator_color,
+            hover_indicator_color,
+        );
 
         button(content)
             .on_press(NavBarMessage::SwitchView(view))
@@ -271,6 +331,7 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
             display_mode,
             text_color,
             indicator_color,
+            None, // No hover indicator — settings tab is always active
         );
 
         Some(

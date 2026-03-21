@@ -9,9 +9,9 @@
 //! - Supports arbitrary content (text, icons, etc.)
 
 use iced::{
-    Color, Element, Event, Length, Padding, Rectangle, Size, Theme, Transformation,
+    Color, Element, Event, Length, Padding, Rectangle, Size, Theme,
     advanced::{
-        Renderer as _, Shell,
+        Shell,
         layout::{self, Layout},
         renderer,
         widget::{self, Widget},
@@ -20,9 +20,6 @@ use iced::{
 };
 
 use crate::theme;
-
-/// Scale factor on press: shrink to 92% for tactile "push in" on small buttons.
-const PRESS_SCALE: f32 = 0.92;
 
 /// State for 3D button interaction
 #[derive(Debug, Clone, Copy, Default)]
@@ -257,22 +254,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ThreeDButton<'_,
             }
         };
 
-        // When pressed, scale the entire button down around its center
-        if state.is_pressed {
-            let cx = bounds.x + bounds.width / 2.0;
-            let cy = bounds.y + bounds.height / 2.0;
-            let transformation = Transformation::translate(cx, cy)
-                * Transformation::scale(PRESS_SCALE)
-                * Transformation::translate(-cx, -cy);
-
-            renderer.with_layer(bounds, |renderer| {
-                renderer.with_transformation(transformation, |renderer| {
-                    draw_content(renderer);
-                });
-            });
-        } else {
-            draw_content(renderer);
-        }
+        draw_content(renderer);
     }
 
     fn mouse_interaction(
