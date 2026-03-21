@@ -71,7 +71,7 @@ cargo test                    # Unit tests
 cargo build --release         # Release build verification
 ```
 
-Tests live in inline `#[cfg(test)]` modules. Key test locations: `update/tests.rs`, `data/src/services/queue/mod.rs`, `data/src/services/queue/navigation.rs`, `data/src/types/hotkey_config.rs`, `data/src/types/paged_buffer.rs`, `data/src/types/player_settings.rs`, `data/src/credentials.rs`, `data/src/audio/spectrum.rs`, `src/embedded_svg.rs`, `src/widgets/format_info.rs`. Additional `#[cfg(test)]` modules exist in various type/utility files (`data/src/types/song_pool.rs`, `data/src/utils/`, `src/widgets/slot_list*.rs`, `src/views/expansion.rs`, `src/update/mod.rs`).
+Tests live in inline `#[cfg(test)]` modules. Key test locations: `update/tests.rs`, `data/src/services/queue/mod.rs`, `data/src/services/queue/navigation.rs`, `data/src/types/hotkey_config.rs`, `data/src/types/paged_buffer.rs`, `data/src/types/player_settings.rs`, `data/src/credentials.rs`, `data/src/audio/spectrum.rs`, `src/embedded_svg.rs`, `src/widgets/format_info.rs`, `src/views/settings/items.rs` (general + interface + playback structure tests). Additional `#[cfg(test)]` modules exist in various type/utility files (`data/src/types/song_pool.rs`, `data/src/utils/`, `src/widgets/slot_list*.rs`, `src/views/expansion.rs`, `src/update/mod.rs`).
 
 ## Config & Persistence
 

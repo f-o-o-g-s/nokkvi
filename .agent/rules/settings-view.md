@@ -9,23 +9,24 @@ globs: src/views/settings/**,src/update/settings.rs
 
 ```
 views/settings/
-├── mod.rs              — SettingsPage state, SettingsMessage, SettingsAction, update, view
-├── entries.rs          — Entry building and filtering: level builders, cross-tab search
-├── items.rs            — SettingValue types, SettingMeta + meta! macro, shared helpers
-├── items_general.rs    — General tab item builders (Application, Mouse Behavior, Account, Cache)
-├── items_playback.rs   — Playback tab item builders (Playback, Scrobbling, Playlists)
-├── items_hotkeys.rs    — Hotkeys tab item builders (per-category hotkey entries)
-├── items_theme.rs      — Theme tab item builders (font, colors, presets, opacity gradient)
-├── items_visualizer.rs — Visualizer tab item builders (bars, peaks, LED, 3D, gradient)
-├── sub_lists.rs        — Sub-slot-list handling: font picker, color gradient editor
-├── presets.rs          — 10 embedded preset themes applied inline (no separate sub-slot-list)
-├── rendering.rs        — Slot rendering: headers, items, color sub-slot-list, presets, hotkey badges, row separators
-└── view.rs             — Layout: breadcrumb/search bar, footer, font modal overlay, exit button
+├── mod.rs               — SettingsPage state, SettingsMessage, SettingsAction, update, view
+├── entries.rs           — Entry building and filtering: level builders, cross-tab search
+├── items.rs             — SettingValue types, SettingMeta + meta! macro, shared helpers
+├── items_general.rs     — General tab item builders (Application, Mouse Behavior, Account, Cache)
+├── items_interface.rs   — Interface tab item builders (Layout, Metadata Strip)
+├── items_playback.rs    — Playback tab item builders (Playback, Scrobbling, Playlists)
+├── items_hotkeys.rs     — Hotkeys tab item builders (per-category hotkey entries)
+├── items_theme.rs       — Theme tab item builders (font, colors, presets, opacity gradient)
+├── items_visualizer.rs  — Visualizer tab item builders (bars, peaks, LED, 3D, gradient)
+├── sub_lists.rs         — Sub-slot-list handling: font picker, color gradient editor
+├── presets.rs           — 10 embedded preset themes applied inline (no separate sub-slot-list)
+├── rendering.rs         — Slot rendering: headers, items, color sub-slot-list, presets, hotkey badges, toggle sets, row separators
+└── view.rs              — Layout: breadcrumb/search bar, footer, font modal overlay, exit button
 ```
 
 ## Settings Architecture
 
-- 5 tabs: **General, Playback, Hotkeys, Theme, Visualizer**
+- 6 tabs: **General, Interface, Playback, Hotkeys, Theme, Visualizer**
 - **Two-level drill-down navigation** (not accordion):
   - Level 1 (`CategoryPicker`): one header per tab — Enter drills into the selected category
   - Level 2 (`Category`): all items within a tab, grouped under auto-expanded section headers (non-interactive separators)
@@ -36,7 +37,7 @@ views/settings/
 
 ## Search / Filter
 
-- Cross-tab search: when a query is active, entries from all 5 tabs are combined and filtered
+- Cross-tab search: when a query is active, entries from all 6 tabs are combined and filtered
 - Tab-name matching: if a tab name matches the query, all its entries are included
 - `SETTINGS_SEARCH_INPUT_ID` is separate from per-view search IDs
 - **Search navigation pitfall**: `SlotListDown` must **not** rebuild entries — navigate within `cached_entries`; entries are only rebuilt on `SearchChanged`
@@ -49,6 +50,7 @@ views/settings/
 | `Float` / `Int` | ←/→ increment/decrement with step + clamp. Arrow buttons are clickable. |
 | `Bool` | Toggle. Clickable "On"/"Off" badges. |
 | `Enum` | Cycle. Center slot shows all options as clickable badges (`EditSetValue`). |
+| `ToggleSet` | Multi-select badges. Each badge independently toggleable via `ToggleSetToggle(key)`. `Vec<(label, key, enabled)>`. |
 | `HexColor` | Direct hex input |
 | `ColorArray` | Opens sub-slot-list for gradient editing |
 | `Text` | Read-only (or editable via TextInputDialog for paths) |
@@ -58,9 +60,15 @@ views/settings/
 
 ## General Tab
 
-4 sections persisted to redb via `SettingsManager`: **Application** (start view, enter behavior, local music path, nav layout, nav display, track info display, slot row height, horizontal volume controls), **Mouse Behavior** (stable viewport, auto-follow playing), **Account** (read-only server URL + username, logout), **Cache** (rebuild artwork/artist cache action buttons).
+4 sections persisted to redb via `SettingsManager`: **Application** (start view, enter behavior, local music path), **Mouse Behavior** (stable viewport, auto-follow playing), **Account** (read-only server URL + username, logout), **Cache** (rebuild artwork/artist cache action buttons).
+
+## Interface Tab
+
+2 sections persisted to redb via `SettingsManager`: **Layout** (nav layout, nav display, track info display, row density, horizontal volume controls), **Metadata Strip** (visible fields as `ToggleSet`, click action enum).
 
 `slot_row_height` is a `SlotRowHeight` enum (Compact/Default/Comfortable/Spacious) — not a numeric slider. Each variant maps to a fixed pixel height (50/70/90/110px).
+
+Strip visibility toggles and click action use theme atomics for immediate UI response. `ToggleSetToggle` message flips the cached entry and emits `WriteGeneralSetting` with the individual field's key.
 
 ## Playback Tab
 

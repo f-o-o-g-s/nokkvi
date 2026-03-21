@@ -59,6 +59,8 @@ The root `Message` enum uses **namespaced sub-enums**:
 | `SlotListMessage` | Navigate up/down, set offset, activate center, toggle sort |
 | `ToastMessage` | Push / dismiss / dismiss-by-key |
 
+`Message::StripClicked` — centralized click handler for the track info strip. Reads `strip_click_action` theme atomic and dispatches: navigate to queue/album/artist, copy track info to clipboard, or do nothing.
+
 Flat `Message` variants remain for cross-cutting concerns. See `src/app_message.rs`.
 
 ## Naming Conventions
