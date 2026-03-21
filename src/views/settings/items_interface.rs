@@ -50,8 +50,8 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
         SettingItem::enum_val(
             meta!(
                 "general.track_info_display",
-                "Track Info Display",
-                "Show now-playing metadata strip (Player Bar or Top Bar)"
+                "Metadata Strip",
+                "Where to show the now-playing metadata strip"
             ),
             data.track_info_display,
             "Off",
