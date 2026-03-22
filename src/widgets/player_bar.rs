@@ -120,36 +120,35 @@ fn player_control_button(
 }
 
 /// Build a mode toggle button with tooltip — shared pattern for repeat, shuffle,
-/// consume, and visualizer toggles. Wrapped in `HoverOverlay` for hover/press feedback.
+/// consume, and visualizer toggles. The inner `player_control_button` already
+/// wraps in `HoverOverlay`, so this function only adds the tooltip layer.
 fn mode_toggle_button<'a>(
     icon_path: &'static str,
     message: PlayerBarMessage,
     active: bool,
     label: &'a str,
 ) -> Element<'a, PlayerBarMessage> {
-    HoverOverlay::new(
-        tooltip(
-            player_control_button(
-                icon_path,
-                message,
-                if active {
-                    theme::accent_bright()
-                } else {
-                    theme::bg1()
-                },
-                if active {
-                    theme::bg0_hard()
-                } else {
-                    theme::fg1()
-                },
-                active,
-            ),
-            container(text(label).size(11.0).font(theme::ui_font())).padding(4),
-            tooltip::Position::Top,
-        )
-        .gap(4)
-        .style(theme::container_tooltip),
+    tooltip(
+        player_control_button(
+            icon_path,
+            message,
+            if active {
+                theme::accent_bright()
+            } else {
+                theme::bg1()
+            },
+            if active {
+                theme::bg0_hard()
+            } else {
+                theme::fg1()
+            },
+            active,
+        ),
+        container(text(label).size(11.0).font(theme::ui_font())).padding(4),
+        tooltip::Position::Top,
     )
+    .gap(4)
+    .style(theme::container_tooltip)
     .into()
 }
 

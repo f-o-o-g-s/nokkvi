@@ -679,28 +679,7 @@ impl Nokkvi {
                 ));
             }
             ArtistsAction::ShowAlbumInFolder(album_id) => {
-                // Album doesn't carry a file path — fetch one song to get a representative path.
-                return self.shell_task(
-                    move |shell| async move {
-                        let songs = shell.albums().load_album_songs(&album_id).await?;
-                        songs
-                            .first()
-                            .map(|s| s.path.clone())
-                            .ok_or_else(|| anyhow::anyhow!("Album has no songs"))
-                    },
-                    |result: Result<String, anyhow::Error>| match result {
-                        Ok(path) => Message::ShowInFolder(path),
-                        Err(e) => {
-                            tracing::error!("Failed to load album path: {e}");
-                            Message::Toast(crate::app_message::ToastMessage::Push(
-                                nokkvi_data::types::toast::Toast::new(
-                                    format!("Failed to open folder: {e}"),
-                                    nokkvi_data::types::toast::ToastLevel::Error,
-                                ),
-                            ))
-                        }
-                    },
-                );
+                return self.show_album_in_folder_task(album_id);
             }
             ArtistsAction::ShowSongInFolder(path) => {
                 return self.handle_show_in_folder(path);

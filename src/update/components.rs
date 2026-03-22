@@ -684,6 +684,35 @@ impl Nokkvi {
         Task::none()
     }
 
+    /// Fetch a representative song path for an album and open its containing folder.
+    ///
+    /// Albums don't carry file paths directly — this fetches the first song
+    /// to obtain a path, then dispatches `Message::ShowInFolder`. Used by
+    /// albums, artists, and info modal handlers.
+    pub(crate) fn show_album_in_folder_task(&self, album_id: String) -> Task<Message> {
+        self.shell_task(
+            move |shell| async move {
+                let songs = shell.albums().load_album_songs(&album_id).await?;
+                songs
+                    .first()
+                    .map(|s| s.path.clone())
+                    .ok_or_else(|| anyhow::anyhow!("Album has no songs"))
+            },
+            |result: Result<String, anyhow::Error>| match result {
+                Ok(path) => Message::ShowInFolder(path),
+                Err(e) => {
+                    tracing::error!("Failed to load album path: {e}");
+                    Message::Toast(crate::app_message::ToastMessage::Push(
+                        nokkvi_data::types::toast::Toast::new(
+                            format!("Failed to open folder: {e}"),
+                            nokkvi_data::types::toast::ToastLevel::Error,
+                        ),
+                    ))
+                }
+            },
+        )
+    }
+
     // ── Strip context menu helpers ──────────────────────────────────────
 
     /// Whether the currently playing track is starred.

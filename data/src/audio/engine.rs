@@ -381,15 +381,15 @@ impl CustomAudioEngine {
 
         // PREBUFFERING: Queue initial buffers before starting renderer
         // This prevents buffer starvation at playback start
-        const PREBUFFER_COUNT: usize = 15;
+        const PLAY_PREBUFFER_COUNT: usize = 15;
         trace!(
             " AudioEngine: prebuffering {} buffers before playback",
-            PREBUFFER_COUNT
+            PLAY_PREBUFFER_COUNT
         );
 
         {
             let mut decoder_guard = self.decoder.lock().await;
-            for i in 0..PREBUFFER_COUNT {
+            for i in 0..PLAY_PREBUFFER_COUNT {
                 let buffer_size = decode_buffer_size(decoder_guard.format());
 
                 // Use block_in_place for blocking HTTP I/O
@@ -402,13 +402,13 @@ impl CustomAudioEngine {
                     trace!(
                         " AudioEngine: queued prebuffer {}/{}",
                         i + 1,
-                        PREBUFFER_COUNT
+                        PLAY_PREBUFFER_COUNT
                     );
                 } else {
                     warn!(
                         "  AudioEngine: prebuffering stopped at {}/{} (no more data)",
                         i + 1,
-                        PREBUFFER_COUNT
+                        PLAY_PREBUFFER_COUNT
                     );
                     break;
                 }
@@ -841,13 +841,13 @@ impl CustomAudioEngine {
                     renderer.seek(pos);
 
                     // PREBUFFERING: Queue initial buffers after seek
-                    const PREBUFFER_COUNT: usize = 10;
+                    const SEEK_PREBUFFER_COUNT: usize = 10;
                     tracing::trace!(
                         "🔍 [SEEK/BLOCKING] Prebuffering {} buffers",
-                        PREBUFFER_COUNT
+                        SEEK_PREBUFFER_COUNT
                     );
 
-                    for i in 0..PREBUFFER_COUNT {
+                    for i in 0..SEEK_PREBUFFER_COUNT {
                         let buffer_size = decode_buffer_size(decoder.format());
 
                         let buffer = decoder.read_buffer(buffer_size);
@@ -857,13 +857,13 @@ impl CustomAudioEngine {
                             tracing::trace!(
                                 "🔍 [SEEK/BLOCKING] Queued prebuffer {}/{}",
                                 i + 1,
-                                PREBUFFER_COUNT
+                                SEEK_PREBUFFER_COUNT
                             );
                         } else {
                             tracing::trace!(
                                 "🔍 [SEEK/BLOCKING] Prebuffering stopped at {}/{} (no more data)",
                                 i + 1,
-                                PREBUFFER_COUNT
+                                SEEK_PREBUFFER_COUNT
                             );
                             break;
                         }

@@ -17,7 +17,10 @@ use iced::{
 };
 use nokkvi_data::types::player_settings::NavDisplayMode;
 
-use super::nav_bar::{NAV_TABS, NavBarMessage, NavView, colored_icon, flat_tab_style};
+use super::{
+    hover_indicator::{HoverExpand, HoverIndicator},
+    nav_bar::{NAV_TABS, NavBarMessage, NavView, colored_icon, flat_tab_style},
+};
 use crate::theme;
 
 /// Width of the side nav bar (px)
@@ -109,51 +112,6 @@ impl<Message> canvas::Program<Message> for RotatedLabel {
     }
 }
 
-/// Canvas program for the right-edge indicator bar in icon-only mode.
-/// Shows the indicator when the cursor is over the expanded hover area or when active.
-struct IconIndicator {
-    /// Active indicator color (always shown)
-    indicator_color: Option<Color>,
-    /// Hover indicator color (shown on mouse-over when not active)
-    hover_indicator_color: Option<Color>,
-    /// Expand the cursor detection area leftward by this amount
-    expand_hover_left: f32,
-}
-
-impl<Message> canvas::Program<Message> for IconIndicator {
-    type State = ();
-
-    fn draw(
-        &self,
-        _state: &(),
-        renderer: &iced::Renderer,
-        _theme: &iced::Theme,
-        bounds: Rectangle,
-        cursor: iced::mouse::Cursor,
-    ) -> Vec<canvas::Geometry> {
-        let show_indicator = self.indicator_color.or_else(|| {
-            // Expand the hover detection area to cover the full tab width
-            let hover_area = Rectangle {
-                x: bounds.x - self.expand_hover_left,
-                y: bounds.y,
-                width: bounds.width + self.expand_hover_left,
-                height: bounds.height,
-            };
-            if cursor.position().is_some_and(|p| hover_area.contains(p)) {
-                self.hover_indicator_color
-            } else {
-                None
-            }
-        });
-
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
-        if let Some(accent) = show_indicator {
-            frame.fill_rectangle(Point::ORIGIN, bounds.size(), canvas::Fill::from(accent));
-        }
-        vec![frame.into_geometry()]
-    }
-}
-
 /// Build side nav tab content based on display mode.
 ///
 /// Returns `(content_element, tab_height)` — shared between `nav_tab` and the settings indicator
@@ -186,11 +144,11 @@ fn side_nav_tab_content(
                 .align_x(iced::Alignment::Center)
                 .align_y(iced::Alignment::Center);
 
-            // Right-edge indicator bar — canvas-based with expanded hover detection
-            let indicator = canvas(IconIndicator {
+            // Right-edge indicator bar — shared canvas-based hover indicator
+            let indicator = canvas(HoverIndicator {
                 indicator_color,
                 hover_indicator_color,
-                expand_hover_left: SIDE_NAV_WIDTH - INDICATOR_WIDTH,
+                expand: HoverExpand::left(SIDE_NAV_WIDTH - INDICATOR_WIDTH),
             })
             .width(Length::Fixed(INDICATOR_WIDTH))
             .height(Length::Fill);

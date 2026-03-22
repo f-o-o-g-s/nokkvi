@@ -6,7 +6,7 @@
 //! - Right: Audio format info + hamburger menu
 
 use iced::{
-    Alignment, Background, Border, Color, Element, Length, Point, Rectangle,
+    Alignment, Background, Border, Element, Length,
     font::{Font, Weight},
     widget::{Space, button, canvas, column, container, mouse_area, row, text, text::Wrapping},
 };
@@ -155,54 +155,23 @@ fn tab_separator<'a, M: 'a>(force_visible: bool) -> Element<'a, M> {
         .into()
 }
 
+/// 2px vertical separator for the metadata info row.
+///
+/// Extracted as a module-level function to avoid duplicating the same closure
+/// in the center section and format info section.
+fn info_separator<'a, M: 'a>() -> Element<'a, M> {
+    container(Space::new())
+        .width(Length::Fixed(2.0))
+        .height(Length::Fill)
+        .style(move |_| container::Style {
+            background: Some(theme::bg1().into()),
+            ..Default::default()
+        })
+        .into()
+}
+
 /// Height of the rounded underline indicator beneath active/hovered tabs
 const UNDERLINE_HEIGHT: f32 = 2.0;
-
-/// Canvas program for the bottom-edge underline indicator in topped nav rounded mode.
-/// Expands the cursor detection area upward to cover the button above.
-struct UnderlineIndicator {
-    /// Active indicator color (always shown)
-    indicator_color: Option<Color>,
-    /// Hover indicator color (shown on mouse-over when not active)
-    hover_indicator_color: Option<Color>,
-    /// Expand the cursor detection area upward by this amount
-    expand_hover_up: f32,
-}
-
-impl<Message> canvas::Program<Message> for UnderlineIndicator {
-    type State = ();
-
-    fn draw(
-        &self,
-        _state: &(),
-        renderer: &iced::Renderer,
-        _theme: &iced::Theme,
-        bounds: Rectangle,
-        cursor: iced::mouse::Cursor,
-    ) -> Vec<canvas::Geometry> {
-        let show_indicator = self.indicator_color.or_else(|| {
-            let hover_area = Rectangle {
-                x: bounds.x,
-                y: bounds.y - self.expand_hover_up,
-                width: bounds.width,
-                height: bounds.height + self.expand_hover_up,
-            };
-            if cursor.position().is_some_and(|p| hover_area.contains(p)) {
-                self.hover_indicator_color
-            } else {
-                None
-            }
-        });
-
-        let mut frame = canvas::Frame::new(renderer, bounds.size());
-        if let Some(accent) = show_indicator {
-            // Draw rounded pill shape matching the original container border radius
-            let pill = canvas::Path::rectangle(Point::ORIGIN, bounds.size());
-            frame.fill(&pill, canvas::Fill::from(accent));
-        }
-        vec![frame.into_geometry()]
-    }
-}
 
 /// Build tab content based on display mode (text, icon+text, icon-only).
 ///
@@ -319,10 +288,10 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                     .padding(tab_padding)
                     .height(Length::Fill)
                     .style(tab_style),
-                canvas(UnderlineIndicator {
+                canvas(super::hover_indicator::HoverIndicator {
                     indicator_color: underline_active,
                     hover_indicator_color: underline_hover,
-                    expand_hover_up: 100.0, // Generous expansion to cover the button above
+                    expand: super::hover_indicator::HoverExpand::up(NAV_BAR_HEIGHT),
                 })
                 .width(Length::Fill)
                 .height(Length::Fixed(UNDERLINE_HEIGHT)),
@@ -436,16 +405,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             let artist = data.track_artist.clone();
             let album = data.track_album.clone();
 
-            let info_sep = || -> Element<'static, NavBarMessage> {
-                container(Space::new())
-                    .width(Length::Fixed(2.0))
-                    .height(Length::Fill)
-                    .style(move |_| container::Style {
-                        background: Some(theme::bg1().into()),
-                        ..Default::default()
-                    })
-                    .into()
-            };
+            let info_sep = info_separator;
 
             let mut info_row = iced::widget::Row::new()
                 .spacing(6)
@@ -520,16 +480,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                     Some(r) => format!("{left} · {r}"),
                     None => left,
                 };
-                let fmt_sep = || -> Element<'static, NavBarMessage> {
-                    container(Space::new())
-                        .width(Length::Fixed(2.0))
-                        .height(Length::Fill)
-                        .style(move |_| container::Style {
-                            background: Some(theme::bg1().into()),
-                            ..Default::default()
-                        })
-                        .into()
-                };
+                let fmt_sep = info_separator;
                 row![
                     fmt_sep(),
                     text(combined)
