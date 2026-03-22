@@ -1,11 +1,12 @@
 use iced::{
     Alignment, Element, Length,
     font::{Font, Weight},
-    widget::{button, container, pick_list, row, svg, text, text_input},
+    widget::{container, mouse_area, pick_list, row, svg, text, text_input},
 };
 // Re-export SortMode from data crate (canonical definition)
 pub(crate) use nokkvi_data::types::sort_mode::SortMode;
 
+use super::hover_overlay::HoverOverlay;
 use crate::theme;
 
 /// ViewHeader component - horizontal bar with view selector, sort, search, and count
@@ -88,24 +89,29 @@ pub(crate) fn view_header<
             color: Some(theme::fg0()),
         });
 
-    let sort_button = button(sort_svg)
-        .width(Length::Fixed(40.0))
-        .height(Length::Fixed(40.0))
-        .style(|_theme, status| button::Style {
-            background: Some((theme::bg0_soft()).into()),
-            text_color: theme::fg0(),
-            border: iced::Border {
-                color: if matches!(status, button::Status::Hovered) {
-                    theme::accent_bright()
-                } else {
-                    iced::Color::TRANSPARENT
-                },
-                width: 2.0,
-                radius: theme::ui_border_radius(),
-            },
-            ..button::Style::default()
-        })
-        .on_press(on_sort_toggle);
+    // Use mouse_area + HoverOverlay(container) — same pattern as slot list rows.
+    // Native button captures ButtonPressed before HoverOverlay's passive tracker
+    // can run, so the press state never gets set and the scale effect never fires.
+    let sort_button: Element<'a, Message> = mouse_area(
+        HoverOverlay::new(
+            container(sort_svg)
+                .width(Length::Fixed(40.0))
+                .height(Length::Fixed(40.0))
+                .style(|_theme| container::Style {
+                    background: Some(theme::bg0_soft().into()),
+                    border: iced::Border {
+                        radius: theme::ui_border_radius(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+                .center(Length::Fixed(40.0)),
+        )
+        .border_radius(theme::ui_border_radius()),
+    )
+    .on_press(on_sort_toggle)
+    .interaction(iced::mouse::Interaction::Pointer)
+    .into();
 
     // Optional shuffle button (only rendered if on_shuffle is provided)
     let shuffle_button = on_shuffle.map(|shuffle_msg| {
@@ -116,24 +122,27 @@ pub(crate) fn view_header<
                 color: Some(theme::fg0()),
             });
 
-        button(shuffle_svg)
-            .width(Length::Fixed(40.0))
-            .height(Length::Fixed(40.0))
-            .style(|_theme, status| button::Style {
-                background: Some((theme::bg0_soft()).into()),
-                text_color: theme::fg0(),
-                border: iced::Border {
-                    color: if matches!(status, button::Status::Hovered) {
-                        theme::accent_bright()
-                    } else {
-                        iced::Color::TRANSPARENT
-                    },
-                    width: 2.0,
-                    radius: theme::ui_border_radius(),
-                },
-                ..button::Style::default()
-            })
-            .on_press(shuffle_msg)
+        let el: Element<'a, Message> = mouse_area(
+            HoverOverlay::new(
+                container(shuffle_svg)
+                    .width(Length::Fixed(40.0))
+                    .height(Length::Fixed(40.0))
+                    .style(|_theme| container::Style {
+                        background: Some(theme::bg0_soft().into()),
+                        border: iced::Border {
+                            radius: theme::ui_border_radius(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    })
+                    .center(Length::Fixed(40.0)),
+            )
+            .border_radius(theme::ui_border_radius()),
+        )
+        .on_press(shuffle_msg)
+        .interaction(iced::mouse::Interaction::Pointer)
+        .into();
+        el
     });
 
     let search_field = container(

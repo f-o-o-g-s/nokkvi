@@ -161,14 +161,19 @@ where
         let state = tree.state.downcast_mut::<State>();
 
         match event {
-            // Mouse press/release tracking (passive — never captures)
+            // Mouse press/release tracking (passive — never captures).
+            // Request redraws so the scale-down effect is painted immediately.
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if cursor.is_over(layout.bounds()) {
                     state.is_mouse_pressed = true;
+                    shell.request_redraw();
                 }
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                state.is_mouse_pressed = false;
+                if state.is_mouse_pressed {
+                    state.is_mouse_pressed = false;
+                    shell.request_redraw();
+                }
             }
 
             // During a flash animation, request redraws to keep it alive

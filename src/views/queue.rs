@@ -5,7 +5,7 @@
 
 use iced::{
     Alignment, Element, Length, Task,
-    widget::{button, column, container, row},
+    widget::{button, column, container, mouse_area, row},
 };
 // Re-export QueueSortMode from data crate (canonical definition)
 pub(crate) use nokkvi_data::types::queue_sort_mode::QueueSortMode;
@@ -14,7 +14,7 @@ use tracing::{debug, trace};
 
 use crate::{
     app_message::Message,
-    widgets::{self, SlotListPageState, drag_column::DragEvent},
+    widgets::{self, SlotListPageState, drag_column::DragEvent, hover_overlay::HoverOverlay},
 };
 
 /// Queue page local state
@@ -438,7 +438,8 @@ impl QueuePage {
                     selection: crate::theme::selection_color(),
                 });
 
-            // Icon-only action button — matches playlist context bar style
+            // Icon-only action button — mouse_area + HoverOverlay(container) so the
+            // press scale effect fires (native button captures ButtonPressed first).
             let icon_btn =
                 |icon_path: &'static str, msg: QueueMessage| -> Element<'a, QueueMessage> {
                     let icon = crate::embedded_svg::svg_widget(icon_path)
@@ -447,24 +448,26 @@ impl QueuePage {
                         .style(|_theme, _status| svg::Style {
                             color: Some(crate::theme::fg2()),
                         });
-                    button(icon)
-                        .padding([4, 6])
-                        .on_press(msg)
-                        .style(|_theme, status| button::Style {
-                            background: None,
-                            text_color: crate::theme::fg0(),
-                            border: iced::Border {
-                                color: if matches!(status, button::Status::Hovered) {
-                                    crate::theme::accent_bright()
-                                } else {
-                                    iced::Color::TRANSPARENT
-                                },
-                                width: 2.0,
-                                radius: crate::theme::ui_border_radius(),
-                            },
-                            ..Default::default()
-                        })
-                        .into()
+                    mouse_area(
+                        HoverOverlay::new(
+                            container(icon)
+                                .padding([4, 6])
+                                .style(|_theme| container::Style {
+                                    background: None,
+                                    border: iced::Border {
+                                        color: iced::Color::TRANSPARENT,
+                                        width: 2.0,
+                                        radius: crate::theme::ui_border_radius(),
+                                    },
+                                    ..Default::default()
+                                })
+                                .center_y(Length::Shrink),
+                        )
+                        .border_radius(crate::theme::ui_border_radius()),
+                    )
+                    .on_press(msg)
+                    .interaction(iced::mouse::Interaction::Pointer)
+                    .into()
                 };
 
             let save_btn = icon_btn("assets/icons/save.svg", QueueMessage::SavePlaylist);
@@ -570,23 +573,26 @@ impl QueuePage {
                     color: Some(crate::theme::fg2()),
                 });
 
-            let save_btn = button(save_icon)
-                .padding([4, 6])
-                .on_press(QueueMessage::QuickSavePlaylist)
-                .style(|_theme, status| button::Style {
-                    background: None,
-                    text_color: crate::theme::fg0(),
-                    border: iced::Border {
-                        color: if matches!(status, button::Status::Hovered) {
-                            crate::theme::accent_bright()
-                        } else {
-                            iced::Color::TRANSPARENT
-                        },
-                        width: 2.0,
-                        radius: crate::theme::ui_border_radius(),
-                    },
-                    ..Default::default()
-                });
+            let save_btn: Element<'a, QueueMessage> = mouse_area(
+                HoverOverlay::new(
+                    container(save_icon)
+                        .padding([4, 6])
+                        .style(|_theme| container::Style {
+                            background: None,
+                            border: iced::Border {
+                                color: iced::Color::TRANSPARENT,
+                                width: 2.0,
+                                radius: crate::theme::ui_border_radius(),
+                            },
+                            ..Default::default()
+                        })
+                        .center_y(Length::Shrink),
+                )
+                .border_radius(crate::theme::ui_border_radius()),
+            )
+            .on_press(QueueMessage::QuickSavePlaylist)
+            .interaction(iced::mouse::Interaction::Pointer)
+            .into();
 
             // Edit button — enters split-view playlist edit mode
             let edit_icon = crate::embedded_svg::svg_widget("assets/icons/pencil-line.svg")
@@ -596,23 +602,26 @@ impl QueuePage {
                     color: Some(crate::theme::fg2()),
                 });
 
-            let edit_btn = button(edit_icon)
-                .padding([4, 6])
-                .on_press(QueueMessage::EditPlaylist)
-                .style(|_theme, status| button::Style {
-                    background: None,
-                    text_color: crate::theme::fg0(),
-                    border: iced::Border {
-                        color: if matches!(status, button::Status::Hovered) {
-                            crate::theme::accent_bright()
-                        } else {
-                            iced::Color::TRANSPARENT
-                        },
-                        width: 2.0,
-                        radius: crate::theme::ui_border_radius(),
-                    },
-                    ..Default::default()
-                });
+            let edit_btn: Element<'a, QueueMessage> = mouse_area(
+                HoverOverlay::new(
+                    container(edit_icon)
+                        .padding([4, 6])
+                        .style(|_theme| container::Style {
+                            background: None,
+                            border: iced::Border {
+                                color: iced::Color::TRANSPARENT,
+                                width: 2.0,
+                                radius: crate::theme::ui_border_radius(),
+                            },
+                            ..Default::default()
+                        })
+                        .center_y(Length::Shrink),
+                )
+                .border_radius(crate::theme::ui_border_radius()),
+            )
+            .on_press(QueueMessage::EditPlaylist)
+            .interaction(iced::mouse::Interaction::Pointer)
+            .into();
 
             // 3px accent stripes — frame the bar and distinguish from artwork column
             let accent_stripe_left: Element<'a, QueueMessage> =

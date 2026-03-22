@@ -7,10 +7,10 @@
 
 use iced::{
     Element, Length,
-    widget::{button, container, row, text},
+    widget::{container, mouse_area, row, text},
 };
 
-use crate::theme;
+use crate::{theme, widgets::hover_overlay::HoverOverlay};
 
 /// Which library view is active in the browsing panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,8 +59,9 @@ impl BrowsingPanel {
 
     /// Render the tab bar at the top of the browsing panel.
     ///
-    /// Follows the canonical view_header pattern: bg0_soft buttons,
-    /// transparent border on idle, accent_bright on hover/active, radius 0.
+    /// Uses mouse_area + HoverOverlay(container) so HoverOverlay sees mouse
+    /// events directly — native button captures ButtonPressed which prevents
+    /// HoverOverlay's passive press tracker from firing (no scale effect).
     pub fn tab_bar(&self) -> Element<'_, BrowsingPanelMessage> {
         let tabs = BrowsingView::ALL.iter().map(|&view| {
             let label = text(view.label())
@@ -68,46 +69,41 @@ impl BrowsingPanel {
                     weight: iced::font::Weight::Medium,
                     ..theme::ui_font()
                 })
-                .size(12);
+                .size(12)
+                .color(if view == self.active_view {
+                    theme::fg0()
+                } else {
+                    theme::fg2()
+                });
 
-            let styled: Element<'_, BrowsingPanelMessage> = if view == self.active_view {
-                // Active tab: accent border, bg0_soft background
-                button(label)
-                    .padding([6, 12])
-                    .on_press(BrowsingPanelMessage::SwitchView(view))
-                    .style(|_theme, _status| button::Style {
-                        background: Some(theme::bg0_soft().into()),
-                        text_color: theme::fg0(),
-                        border: iced::Border {
-                            color: theme::accent_bright(),
-                            width: 2.0,
-                            radius: theme::ui_border_radius(),
-                        },
-                        ..Default::default()
-                    })
-                    .into()
+            // Active tab keeps the accent border as a selection indicator.
+            // Both active and inactive use mouse_area + HoverOverlay(container)
+            // so the press scale effect actually fires.
+            let border_color = if view == self.active_view {
+                theme::accent_bright()
             } else {
-                // Inactive tab: transparent border, accent on hover
-                button(label)
-                    .padding([6, 12])
-                    .on_press(BrowsingPanelMessage::SwitchView(view))
-                    .style(|_theme, status| button::Style {
+                iced::Color::TRANSPARENT
+            };
+
+            let tab: Element<'_, BrowsingPanelMessage> = mouse_area(
+                HoverOverlay::new(container(label).padding([6, 12]).style(move |_theme| {
+                    container::Style {
                         background: Some(theme::bg0_soft().into()),
-                        text_color: theme::fg2(),
                         border: iced::Border {
-                            color: if matches!(status, button::Status::Hovered) {
-                                theme::accent_bright()
-                            } else {
-                                iced::Color::TRANSPARENT
-                            },
+                            color: border_color,
                             width: 2.0,
                             radius: theme::ui_border_radius(),
                         },
                         ..Default::default()
-                    })
-                    .into()
-            };
-            styled
+                    }
+                }))
+                .border_radius(theme::ui_border_radius()),
+            )
+            .on_press(BrowsingPanelMessage::SwitchView(view))
+            .interaction(iced::mouse::Interaction::Pointer)
+            .into();
+
+            tab
         });
 
         container(row(tabs).spacing(4).padding([6, 8]).width(Length::Fill))
