@@ -478,9 +478,16 @@ impl Nokkvi {
             // Build edit_mode_info only when actually editing a playlist
             let edit_mode_info = self.playlist_edit.as_ref().map(|edit_state| {
                 let current_ids = self.queue_song_ids();
-                let is_dirty = edit_state.is_dirty(&current_ids) || edit_state.is_name_dirty();
+                let is_dirty = edit_state.is_dirty(&current_ids)
+                    || edit_state.is_name_dirty()
+                    || edit_state.is_comment_dirty();
                 (edit_state.playlist_name.clone(), is_dirty)
             });
+
+            let edit_mode_comment = self
+                .playlist_edit
+                .as_ref()
+                .map(|edit_state| edit_state.playlist_comment.clone());
 
             let queue_view_data = views::QueueViewData {
                 queue_songs: filtered_queue_songs,
@@ -498,6 +505,7 @@ impl Nokkvi {
                     .unwrap_or(self.library.queue_songs.len()),
                 stable_viewport: self.stable_viewport,
                 edit_mode_info,
+                edit_mode_comment,
                 playlist_context_info: self.active_playlist_info.clone(),
             };
 
@@ -668,6 +676,7 @@ impl Nokkvi {
                         .unwrap_or(self.library.queue_songs.len()),
                     stable_viewport: self.stable_viewport,
                     edit_mode_info: None,
+                    edit_mode_comment: None,
                     playlist_context_info: self.active_playlist_info.clone(),
                 };
                 self.queue_page.view(view_data).map(Message::Queue)

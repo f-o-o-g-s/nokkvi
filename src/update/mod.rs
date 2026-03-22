@@ -769,7 +769,8 @@ impl Nokkvi {
             Message::EnterPlaylistEditMode {
                 playlist_id,
                 playlist_name,
-            } => self.handle_enter_playlist_edit_mode(playlist_id, playlist_name),
+                playlist_comment,
+            } => self.handle_enter_playlist_edit_mode(playlist_id, playlist_name, playlist_comment),
             Message::ExitPlaylistEditMode => self.handle_exit_playlist_edit_mode(),
             Message::ToggleBrowsingPanel => self.handle_toggle_browsing_panel(),
             Message::SwitchPaneFocus => self.handle_switch_pane_focus(),

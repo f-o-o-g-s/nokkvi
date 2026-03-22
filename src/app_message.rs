@@ -349,6 +349,7 @@ pub enum Message {
     EnterPlaylistEditMode {
         playlist_id: String,
         playlist_name: String,
+        playlist_comment: String,
     },
     /// Exit split-view playlist editing mode
     ExitPlaylistEditMode,

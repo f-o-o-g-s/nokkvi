@@ -162,7 +162,7 @@ pub enum PlaylistsAction {
     PlayNext(String),     // playlist_id - insert after currently playing
     DeletePlaylist(String), // playlist_id
     RenamePlaylist(String), // playlist_id — triggers rename flow
-    EditPlaylist(String, String), // (playlist_id, playlist_name) — enter split-view edit mode
+    EditPlaylist(String, String, String), // (playlist_id, playlist_name, comment) — enter split-view edit mode
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
     SetAsDefaultPlaylist(String, String), // (playlist_id, playlist_name) — set as quick-add default
     None,
@@ -407,6 +407,7 @@ impl PlaylistsPage {
                                 PlaylistsAction::EditPlaylist(
                                     playlist.id.clone(),
                                     playlist.name.clone(),
+                                    playlist.comment.clone(),
                                 ),
                             ),
                             PlaylistContextEntry::Separator => {

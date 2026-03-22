@@ -41,6 +41,8 @@ pub struct QueueViewData<'a> {
     pub stable_viewport: bool,
     /// When in edit mode: (playlist_name, is_dirty)
     pub edit_mode_info: Option<(String, bool)>,
+    /// Playlist comment when in edit mode
+    pub edit_mode_comment: Option<String>,
     /// When a playlist is loaded for playback (not editing): (playlist_id, playlist_name, comment)
     pub playlist_context_info: Option<(String, String, String)>,
 }
@@ -94,6 +96,7 @@ pub enum QueueMessage {
     SavePlaylist,
     DiscardEdits,
     PlaylistNameChanged(String),
+    PlaylistCommentChanged(String),
     EditPlaylist,      // Enter edit mode for the currently-playing playlist
     QuickSavePlaylist, // Save current queue back to the active playlist without entering edit mode
 
@@ -126,6 +129,7 @@ pub enum QueueAction {
     SavePlaylist,                        // save playlist edits (edit mode)
     DiscardEdits,                        // discard edits and exit edit mode
     PlaylistNameChanged(String),         // playlist name edited inline
+    PlaylistCommentChanged(String),      // playlist comment edited inline
     EditPlaylist,                        // enter edit mode from playlist context bar
     ShowInfo(usize),                     // Open info modal (queue index for full Song lookup)
     ShowInFolder(usize), // Open containing folder (queue index, path fetched via API)
@@ -339,6 +343,9 @@ impl QueuePage {
             QueueMessage::PlaylistNameChanged(name) => {
                 (Task::none(), QueueAction::PlaylistNameChanged(name))
             }
+            QueueMessage::PlaylistCommentChanged(comment) => {
+                (Task::none(), QueueAction::PlaylistCommentChanged(comment))
+            }
             QueueMessage::EditPlaylist => (Task::none(), QueueAction::EditPlaylist),
             QueueMessage::QuickSavePlaylist => (Task::none(), QueueAction::SaveAsPlaylist),
             QueueMessage::RefreshArtwork(album_id) => {
@@ -395,7 +402,7 @@ impl QueuePage {
                     ..crate::theme::ui_font()
                 })
                 .size(12)
-                .width(Length::FillPortion(1))
+                .width(Length::FillPortion(3))
                 .padding([2, 4])
                 .style(|_theme, _status| iced::widget::text_input::Style {
                     background: iced::Background::Color(iced::Color::TRANSPARENT),
@@ -407,6 +414,27 @@ impl QueuePage {
                     icon: crate::theme::fg0(),
                     placeholder: crate::theme::fg2(),
                     value: crate::theme::fg0(),
+                    selection: crate::theme::selection_color(),
+                });
+
+            // Comment text input — lighter, smaller, visually secondary
+            let comment_value = data.edit_mode_comment.as_deref().unwrap_or_default();
+            let comment_input = iced::widget::text_input("Comment", comment_value)
+                .on_input(QueueMessage::PlaylistCommentChanged)
+                .font(crate::theme::ui_font())
+                .size(11)
+                .width(Length::FillPortion(2))
+                .padding([2, 4])
+                .style(|_theme, _status| iced::widget::text_input::Style {
+                    background: iced::Background::Color(iced::Color::TRANSPARENT),
+                    border: iced::Border {
+                        color: crate::theme::bg3(),
+                        width: 0.0,
+                        radius: crate::theme::ui_border_radius(),
+                    },
+                    icon: crate::theme::fg2(),
+                    placeholder: crate::theme::fg2(),
+                    value: crate::theme::fg2(),
                     selection: crate::theme::selection_color(),
                 });
 
@@ -442,6 +470,16 @@ impl QueuePage {
             let save_btn = icon_btn("assets/icons/save.svg", QueueMessage::SavePlaylist);
             let discard_btn = icon_btn("assets/icons/x.svg", QueueMessage::DiscardEdits);
 
+            // Thin vertical separator between name and comment inputs
+            let vert_sep: Element<'a, QueueMessage> = container(iced::widget::Space::new())
+                .width(Length::Fixed(1.0))
+                .height(Length::Fixed(18.0))
+                .style(|_| container::Style {
+                    background: Some(crate::theme::bg3().into()),
+                    ..Default::default()
+                })
+                .into();
+
             // 3px accent stripes — frame the bar and distinguish from artwork column
             let accent_stripe_left: Element<'a, QueueMessage> =
                 container(iced::widget::Space::new())
@@ -465,11 +503,18 @@ impl QueuePage {
             let edit_bar = container(
                 row![
                     accent_stripe_left,
-                    row![edit_icon, name_input, save_btn, discard_btn,]
-                        .spacing(6)
-                        .align_y(Alignment::Center)
-                        .padding([0, 8])
-                        .width(Length::Fill),
+                    row![
+                        edit_icon,
+                        name_input,
+                        vert_sep,
+                        comment_input,
+                        save_btn,
+                        discard_btn,
+                    ]
+                    .spacing(6)
+                    .align_y(Alignment::Center)
+                    .padding([0, 8])
+                    .width(Length::Fill),
                     accent_stripe_right,
                 ]
                 .spacing(0)

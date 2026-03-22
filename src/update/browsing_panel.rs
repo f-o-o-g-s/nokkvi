@@ -90,6 +90,7 @@ impl Nokkvi {
         &mut self,
         playlist_id: String,
         playlist_name: String,
+        playlist_comment: String,
     ) -> Task<Message> {
         info!(
             " Entering playlist edit mode: \"{}\" ({})",
@@ -100,6 +101,7 @@ impl Nokkvi {
         self.playlist_edit = Some(nokkvi_data::types::playlist_edit::PlaylistEditState::new(
             playlist_id.clone(),
             playlist_name,
+            playlist_comment,
             Vec::new(),
         ));
         // NOTE: Do NOT clear `active_playlist_info` here — the view code
@@ -167,23 +169,36 @@ impl Nokkvi {
 
         let playlist_id = edit_state.playlist_id.clone();
         let playlist_name = edit_state.playlist_name.clone();
+        let playlist_comment = edit_state.playlist_comment.clone();
         let song_ids = self.queue_song_ids();
         let name_changed = edit_state.is_name_dirty();
+        let comment_changed = edit_state.is_comment_dirty();
+        let metadata_changed = name_changed || comment_changed;
 
         info!(
-            " Saving playlist \"{}\" with {} tracks{}",
+            " Saving playlist \"{}\" with {} tracks{}{}",
             playlist_name,
             song_ids.len(),
             if name_changed { " (renamed)" } else { "" },
+            if comment_changed {
+                " (comment changed)"
+            } else {
+                ""
+            },
         );
 
         self.shell_action_task(
             move |shell| async move {
                 let service = shell.playlists_api().await?;
-                // Rename if the name was changed
-                if name_changed {
+                // Update name/comment if either changed
+                if metadata_changed {
+                    let comment_arg = if comment_changed {
+                        Some(playlist_comment.as_str())
+                    } else {
+                        None
+                    };
                     service
-                        .rename_playlist(&playlist_id, &playlist_name)
+                        .update_playlist(&playlist_id, &playlist_name, comment_arg)
                         .await?;
                 }
                 service
@@ -201,8 +216,15 @@ impl Nokkvi {
 
         if let Some(edit_state) = &mut self.playlist_edit {
             let name = edit_state.playlist_name.clone();
+            let comment = edit_state.playlist_comment.clone();
+            let id = edit_state.playlist_id.clone();
             edit_state.update_snapshot(current_ids);
             self.toast_success(format!("Playlist \"{name}\" saved"));
+
+            // Sync edited name/comment back to active_playlist_info so the
+            // read-only context bar shows updated values after exiting edit mode.
+            self.active_playlist_info = Some((id, name, comment));
+            self.persist_active_playlist_info();
         }
 
         // Reload playlists so the Playlists view reflects any rename immediately

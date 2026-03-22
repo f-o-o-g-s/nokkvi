@@ -77,7 +77,7 @@ impl Nokkvi {
                 self.shell_action_task(
                     move |shell| async move {
                         let service = shell.playlists_api().await?;
-                        service.rename_playlist(&playlist_id, &name).await
+                        service.update_playlist(&playlist_id, &name, None).await
                     },
                     Message::PlaylistRenamed(value),
                     "rename playlist",

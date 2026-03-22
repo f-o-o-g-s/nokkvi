@@ -384,11 +384,20 @@ impl PlaylistsApiService {
         Ok(())
     }
 
-    /// Rename a playlist.
+    /// Update a playlist's name and/or comment.
     ///
     /// Uses Navidrome native API: PUT /api/playlist/:id
-    pub async fn rename_playlist(&self, playlist_id: &str, name: &str) -> Result<()> {
-        let body = serde_json::json!({ "name": name });
+    pub async fn update_playlist(
+        &self,
+        playlist_id: &str,
+        name: &str,
+        comment: Option<&str>,
+    ) -> Result<()> {
+        let body = if let Some(c) = comment {
+            serde_json::json!({ "name": name, "comment": c })
+        } else {
+            serde_json::json!({ "name": name })
+        };
         self.client
             .put_json(&format!("api/playlist/{playlist_id}"), &body)
             .await?;
