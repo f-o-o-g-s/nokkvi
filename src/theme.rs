@@ -485,10 +485,6 @@ pub(crate) fn bg2() -> Color {
 pub(crate) fn bg3() -> Color {
     current_theme().bg3
 }
-#[inline]
-pub(crate) fn bg4() -> Color {
-    current_theme().bg4
-}
 
 // ============================================================================
 // Foreground Colors

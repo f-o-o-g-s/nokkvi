@@ -380,7 +380,6 @@ pub(crate) struct ResolvedTheme {
     pub bg1: Color,
     pub bg2: Color,
     pub bg3: Color,
-    pub bg4: Color,
 
     // Foreground
     pub fg0: Color,
@@ -426,7 +425,6 @@ impl ResolvedTheme {
             bg1: parse_hex_or_default(&config.background.level1, fallback_bg),
             bg2: parse_hex_or_default(&config.background.level2, fallback_bg),
             bg3: parse_hex_or_default(&config.background.level3, fallback_bg),
-            bg4: parse_hex_or_default(&config.background.level4, fallback_bg),
 
             // Foreground
             fg0: parse_hex_or_default(&config.foreground.bright, fallback_fg),
