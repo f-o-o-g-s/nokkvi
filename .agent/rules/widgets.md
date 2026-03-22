@@ -156,6 +156,7 @@ globs: src/widgets/**
 - Each slot wrapped in `HoverOverlay`; center slot receives `flash_at` for externally triggered flash
 - **Clickable star ratings**: `slot_list_star_rating()` with `on_click` closure per star
 - **Clickable hearts**: `slot_list_favorite_icon()` with `on_click` closure
+- **Top-packing**: when `total_items < slot_count`, `effective_center = 0` — items render from the top slot down (not centered). Opacity calculation and center styling both use `effective_center`.
 
 ## Layout Constants (`slot_list.rs`)
 

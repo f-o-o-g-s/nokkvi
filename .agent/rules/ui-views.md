@@ -66,7 +66,7 @@ All views (Albums, Artists, Songs, Genres, Playlists, Queue) use `SlotListPageSt
 ## Playlist Editing (Split-View)
 
 - `PlaylistEditState` tracks snapshot for dirty detection (`is_dirty()`, `is_name_dirty()`, `is_comment_dirty()`)
-- Inline playlist name and comment editing in queue header (name + comment text inputs side by side)
+- Inline playlist name and comment editing in queue header (name + comment text inputs **stacked vertically** in a `column!`)
 - Save via `handle_save_playlist_edits()` → rename + update comment + replace tracks
 - Browsing panel cannot be closed during edit mode
 
@@ -122,9 +122,10 @@ Each `update/{name}.rs` handles data loading and message routing:
 
 ## Playlist Header Bar
 
-- Read-only context bar (32px): playlist name + optional comment, list-music icon, quick-save button, edit button
-- Edit mode bar (44px): pencil icon, name + comment text inputs, save + discard buttons
-- Both bars share a 1px `bg3` right border spanning the full header column height; no top separator, 1px bottom separator
+- Read-only context bar (32px): list-music accent icon, playlist name + optional comment (stacked), quick-save + edit buttons
+- Edit mode bar (44px): pencil accent icon, `column![name_input, comment_input]`, save + discard buttons
+- Both bars use `bg0_soft` background + 1px horizontal separator between bar and view header
+- Artwork column separator: `with_left_stripe()` adds 2px `bg1` stripe on the artwork panel's left edge
 - `active_playlist_info`: 3-tuple `(playlist_id, playlist_name, comment)` — persisted across restarts via `SettingsManager`
 - Chrome height: `+33px` for context bar, `+45px` for edit bar (bar height + 1px separator)
 - **Quick-save** opens `SaveAsPlaylist` dialog for confirmation
