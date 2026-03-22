@@ -116,3 +116,7 @@ Toggling shuffle/repeat/consume after gapless preparation (~80% through track) l
 ## 28. Stale Struct Fields in Visualizer Builder
 
 The `Visualizer` struct caches config values (e.g., `border_width`) set at construction time. Builder methods like `width()` that re-read some fields from shared config must re-read **all** config fields they use — partial re-reads cause layout/render divergence. The `view()` method reads fresh config for the shader, so if `width()` uses a stale field the layout won't match what the GPU renders.
+
+## 29. Artwork Size: Queue Song Mini vs Large
+
+Queue songs request 80px thumbnails for slot list mini artwork. When the large artwork pipeline falls back to loading from the network (cache miss), it must construct a **full-size** cover art URL — not reuse the 80px thumbnail URL from the song's `cover_art` field. The queue fallback in `handle_load_large_artwork` must build the URL with `size=1000` (or omit size) for crisp large artwork.

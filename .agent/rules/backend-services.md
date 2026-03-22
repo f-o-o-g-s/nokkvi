@@ -84,7 +84,7 @@ Playing from Songs view: first 500-song page plays immediately. Remaining pages 
 - `PlayerSettings`: persisted to redb with serde defaults. Fields include: volume, sfx_volume, visualization_mode, scrobbling, start_view, stable_viewport, auto_follow, enter_behavior, local_music_path, rounded_mode, nav_layout, nav_display_mode, track_info_display, slot_row_height (`SlotRowHeight` enum: Compact/Default/Comfortable/Spacious), opacity_gradient, crossfade_enabled, crossfade_duration_secs, default_playlist_id/name, quick_add_to_playlist, horizontal_volume, volume_normalization, normalization_level (`NormalizationLevel` enum: Quiet/Normal/Loud)
 - `Queue`: lightweight ordering struct — `song_ids`, `order` (play-order array), `current_index`, `current_order`, `queued`, mode flags. Bincode-serialized.
 - `QueueSortMode`: physical sort (no QueueOrder)
-- `PlaylistEditState`: tracks playlist snapshot for dirty detection
+- `PlaylistEditState`: tracks playlist snapshot for dirty detection (name, comment, track order). `is_dirty()`, `is_name_dirty()`, `is_comment_dirty()`.
 - `ReactiveProperty<T>` / `ReactiveVecProperty<T>`: `Arc<RwLock<T>>` wrappers (parking_lot)
 - `SongPool`: `HashMap<String, Song>` separating song data from queue ordering
 - Serialization: serde for redb and API; bincode for large payloads (song pool, queue ordering)

@@ -72,6 +72,7 @@ globs: src/widgets/**
 - Used by both the player bar and the top bar (side nav only)
 - Controlled by `TrackInfoDisplay` setting (Off / PlayerBar / TopBar)
 - **Clickable center metadata**: title/artist/album wrapped in `mouse_area` with optional `on_press` — navigates to queue view. Codec/sample-rate and bitrate sections remain non-clickable.
+- **Right-click context menu**: strip wrapped in `context_menu()` with `StripContextEntry` actions (GoToQueue, GoToAlbum, GoToArtist, CopyTrackInfo, ToggleStar, ShowInFolder)
 - **`info_field_widget()`**: shared helper for labeled scrolling metadata fields — single source of truth
 
 ## Format Info (`format_info.rs`)
@@ -86,32 +87,42 @@ globs: src/widgets/**
 - **Generic over message type** — usable in any view
 - Uses `FillPortion` for proportional gap distribution during scroll
 
+## Hover Indicator (`hover_indicator.rs`)
+
+- Custom `iced::Canvas` widget for hover underline/indicator effects
+- `HoverExpand`: configurable cursor detection area expansion (up/down/directional) — expands the hot zone beyond the visual indicator
+- Used by side nav bar (icon-only mode active indicator) and top nav bar (tab hover underlines in rounded mode)
+
 ## Side Nav Bar (`side_nav_bar.rs`)
 
 - Vertical sidebar navigation layout (alternative to top bar)
 - Enabled via `NavLayout::Side` setting
 - `NavDisplayMode` controls content: TextOnly, TextAndIcons, IconsOnly
+- Uses `HoverIndicator` with `HoverExpand` for active tab indicators in icon-only mode
 
 ## Nav Bar (`nav_bar.rs`)
 
 - Top-bar navigation: view tabs + audio format stats (kHz, bitrate) + hamburger menu
 - Stats display live values from audio engine via atomics
 - **Clickable info row**: metadata area wrapped in `mouse_area` — navigates to queue view
+- **Hover underlines**: tab hover effects in rounded mode via `HoverIndicator` canvas
 - **Progressive metadata collapsing**: items collapse individually as window narrows — album <900px, artist <750px, title <600px
 - Toast notifications rendered in the nav bar area
 
 ## Hamburger Menu (`hamburger_menu.rs`)
 
 - Custom `iced::advanced` widget with overlay dropdown
-- Click-outside-close behavior
+- Click-outside-close and Escape-to-close behavior
 
 ## Context Menu (`context_menu.rs`)
 
 - Generic right-click context menu widget (adapted from Halloy)
-- Two entry enums: `LibraryContextEntry` for library views, `QueueContextEntry` for queue
+- Three entry enums: `LibraryContextEntry` (library views), `QueueContextEntry` (queue), `StripContextEntry` (metadata strip)
 - `library_entries()` — base entries (AddToQueue, AddToPlaylist, GetInfo)
 - `library_entries_with_folder()` — adds ShowInFolder (used by Songs, Albums, Artists)
+- `strip_entries(has_local_path)` — strip entries (GoToQueue, GoToAlbum, GoToArtist, CopyTrackInfo, ToggleStar, ShowInFolder)
 - Supports separator entries for visual grouping
+- `StripContextAction` handled inline in `update/mod.rs`
 
 ## Info Modal (`info_modal.rs`)
 

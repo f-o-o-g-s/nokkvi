@@ -65,9 +65,9 @@ All views (Albums, Artists, Songs, Genres, Playlists, Queue) use `SlotListPageSt
 
 ## Playlist Editing (Split-View)
 
-- `PlaylistEditState` tracks snapshot for dirty detection (`is_dirty()`, `is_name_dirty()`)
-- Inline playlist name editing in queue header
-- Save via `handle_save_playlist_edits()` → rename + replace tracks
+- `PlaylistEditState` tracks snapshot for dirty detection (`is_dirty()`, `is_name_dirty()`, `is_comment_dirty()`)
+- Inline playlist name and comment editing in queue header (name + comment text inputs side by side)
+- Save via `handle_save_playlist_edits()` → rename + update comment + replace tracks
 - Browsing panel cannot be closed during edit mode
 
 ## Cross-Pane Drag-and-Drop
@@ -122,7 +122,9 @@ Each `update/{name}.rs` handles data loading and message routing:
 
 ## Playlist Header Bar
 
-- Read-only context bar with playlist name, list-music icon, quick-save button, edit button
+- Read-only context bar with playlist name + optional comment, list-music icon, quick-save button, edit button
+- Accent stripe separators and redesigned layout with visual hierarchy
+- `active_playlist_info`: 3-tuple `(playlist_id, playlist_name, comment)` — persisted across restarts via `SettingsManager`
 - **Quick-save** opens `SaveAsPlaylist` dialog for confirmation
 - `active_playlist_info` cleared when non-playlist content replaces the queue (including Shift+D queue clear)
 
