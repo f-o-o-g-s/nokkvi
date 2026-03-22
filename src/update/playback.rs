@@ -468,17 +468,57 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_play(&mut self) -> Task<Message> {
-        // Optimistic UI update: show "playing" immediately
-        self.playback.playing = true;
-        self.playback.paused = false;
-        self.queue_page.common.slot_list.flash_center();
-        self.shell_task(
-            |shell| async move {
-                let _ = shell.play().await;
-            },
-            |_| Message::Playback(PlaybackMessage::Tick),
-        )
+        // If a track is already loaded (playing or paused), just resume via play().
+        // This covers the pause→play case.
+        if self.playback.has_track() {
+            self.playback.playing = true;
+            self.playback.paused = false;
+            return self.shell_task(
+                |shell| async move {
+                    let _ = shell.play().await;
+                },
+                |_| Message::Playback(PlaybackMessage::Tick),
+            );
+        }
+
+        // Nothing loaded — cold start. Use the same path as Enter-key:
+        // play_song_from_queue() with the current (or first) queue item.
+        // This ensures all metadata, artwork, and navigator wiring fires correctly.
+        let first_song = self.library.queue_songs.first().map(|s| {
+            let queue_index = s.track_number as usize - 1;
+            (s.id.clone(), queue_index)
+        });
+
+        if let Some((song_id, queue_index)) = first_song {
+            // Optimistic UI update
+            self.playback.playing = true;
+            self.playback.paused = false;
+            self.queue_page.common.slot_list.flash_center();
+            self.suppress_next_auto_center = true;
+            return self.shell_task(
+                move |shell| async move {
+                    shell.play_song_from_queue(&song_id, queue_index).await
+                },
+                |result| match result {
+                    Ok(()) => Message::Playback(PlaybackMessage::Tick),
+                    Err(e) => {
+                        tracing::error!(" Play button cold-start failed: {}", e);
+                        Message::Toast(crate::app_message::ToastMessage::Push(
+                            nokkvi_data::types::toast::Toast::new(
+                                format!("Failed to start playback: {e}"),
+                                nokkvi_data::types::toast::ToastLevel::Error,
+                            ),
+                        ))
+                    }
+                },
+            );
+        }
+
+        // Queue is empty — toast instead of silently failing
+        self.toast_info("Queue is empty");
+        Task::none()
     }
+
 
     pub(crate) fn handle_pause(&mut self) -> Task<Message> {
         // Optimistic UI update: show "paused" immediately

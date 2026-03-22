@@ -219,15 +219,36 @@ impl PlaybackController {
             }
         }
 
-        // No current song - try to play the song at the current queue index
+        // No current song - try to play the song at the current queue index.
+        // If current_index is None but songs exist (e.g. after add_songs() to an
+        // empty queue), default to index 0 as a cold-start fallback so the play
+        // button works identically to pressing Enter on the first queue slot.
         {
             let queue_manager_arc = self.queue_service.queue_manager();
-            let queue_manager = queue_manager_arc.lock().await;
-            let current_index = queue_manager.get_queue().current_index;
+            let mut queue_manager = queue_manager_arc.lock().await;
+            let current_index = queue_manager
+                .get_queue()
+                .current_index
+                .or_else(|| {
+                    if queue_manager.get_queue().song_ids.is_empty() {
+                        None
+                    } else {
+                        Some(0)
+                    }
+                });
             let song = current_index
                 .and_then(|idx| queue_manager.get_queue().song_ids.get(idx))
                 .and_then(|id| queue_manager.get_song(id))
                 .cloned();
+
+            // Persist the resolved current_index so the queue navigator and UI
+            // stay in sync (mirrors what play_song_from_queue does).
+            if let Some(idx) = current_index
+                && queue_manager.get_queue().current_index.is_none()
+            {
+                queue_manager.set_current_index(Some(idx));
+                let _ = queue_manager.save_order();
+            }
             drop(queue_manager);
 
             if let Some(song) = song {
@@ -246,11 +267,14 @@ impl PlaybackController {
                     chrono::Utc::now().timestamp_millis()
                 );
 
+                // Sync reactive current_index for UI highlighting
+                self.queue_service.refresh_from_queue().await?;
+
                 // Load and play the track
                 audio.load_track(&stream_url).await;
                 audio.play().await?;
 
-                // Update current song ID
+                // Update navigator's current_song_id so consume/gapless knows what's playing
                 let queue_navigator = self.queue_navigator.lock().await;
                 queue_navigator
                     .set_current_song_id(Some(song.id.clone()))
