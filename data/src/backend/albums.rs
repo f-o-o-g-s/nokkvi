@@ -431,7 +431,20 @@ impl AlbumsService {
         }
 
         // 3. No usable cache - fetch from network via POST (credentials in body, not URL)
-        let client = self.albums_service.get()?.get_http_client();
+        // Use get_service() to lazily initialize the API client. Using .get() alone
+        // returns None when genres/playlists load before albums, causing all collage
+        // tile fetches to silently fail.
+        let service = match self.get_service().await {
+            Ok(s) => s,
+            Err(e) => {
+                debug!(
+                    " [ARTWORK] Network fallback skipped — {} (album_id={})",
+                    e, album_id
+                );
+                return None;
+            }
+        };
+        let client = service.get_http_client();
 
         let (server_url, subsonic_credential) = self.get_server_config().await;
 
@@ -516,7 +529,7 @@ impl AlbumsService {
         }
 
         // 3. Fetch from network, write to disk, return path
-        let client = self.albums_service.get()?.get_http_client();
+        let client = self.get_service().await.ok()?.get_http_client();
         let (server_url, subsonic_credential) = self.get_server_config().await;
 
         let bytes = crate::utils::artwork_url::fetch_cover_art(

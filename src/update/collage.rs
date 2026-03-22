@@ -327,7 +327,10 @@ impl Nokkvi {
                                 cache.get_path(&cache_key),
                             )),
                             collage_handles: Vec::new(),
-                            album_ids: vec![first_album_id],
+                            // Don't overwrite artwork_album_ids — the full list was already
+                            // stored by StartCollagePrefetch. Passing empty here means
+                            // set_collage_item_album_ids is a no-op.
+                            album_ids: Vec::new(),
                         });
                         continue;
                     }
@@ -353,7 +356,8 @@ impl Nokkvi {
                                 cache.get_path(&cache_key),
                             )),
                             collage_handles: Vec::new(),
-                            album_ids: vec![first_album_id],
+                            // Don't overwrite artwork_album_ids — same reasoning as above.
+                            album_ids: Vec::new(),
                         });
                     }
                 }
@@ -422,11 +426,13 @@ impl Nokkvi {
         if let Some(handle) = handle_opt {
             cache.mini.insert(item_id.clone(), handle);
         }
-        if !collage_handles.is_empty() {
+        if collage_handles.len() >= 2 {
             cache.collage.insert(item_id.clone(), collage_handles);
         }
 
-        self.set_collage_item_album_ids(target, &item_id, album_ids);
+        if !album_ids.is_empty() {
+            self.set_collage_item_album_ids(target, &item_id, album_ids);
+        }
         Task::none()
     }
 
@@ -447,10 +453,12 @@ impl Nokkvi {
             if let Some(handle) = handle_opt {
                 cache.mini.insert(item_id.clone(), handle);
             }
-            if !collage_handles.is_empty() {
+            if collage_handles.len() >= 2 {
                 cache.collage.insert(item_id.clone(), collage_handles);
             }
-            self.set_collage_item_album_ids(target, &item_id, album_ids);
+            if !album_ids.is_empty() {
+                self.set_collage_item_album_ids(target, &item_id, album_ids);
+            }
         }
         Task::none()
     }
