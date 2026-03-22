@@ -14,10 +14,10 @@ use crate::theme;
 /// visually separating it from the slot list column.
 fn with_left_stripe<'a, Message: 'a>(artwork: Element<'a, Message>) -> Element<'a, Message> {
     let stripe = container(iced::widget::Space::new())
-        .width(Length::Fixed(1.0))
+        .width(Length::Fixed(2.0))
         .height(Length::Fill)
         .style(|_| container::Style {
-            background: Some(theme::bg3().into()),
+            background: Some(theme::bg1().into()),
             ..Default::default()
         });
     row![stripe, artwork].spacing(0).height(Length::Fill).into()
@@ -28,18 +28,6 @@ fn with_left_stripe<'a, Message: 'a>(artwork: Element<'a, Message>) -> Element<'
 pub(crate) fn artwork_outer_bg() -> Color {
     theme::bg0_soft()
 }
-#[inline]
-pub(crate) fn artwork_inner_bg() -> Color {
-    theme::bg0()
-}
-#[inline]
-pub(crate) fn artwork_border_color() -> Color {
-    theme::bg4()
-}
-pub(crate) const ARTWORK_BORDER_WIDTH: f32 = 2.0;
-pub(crate) const ARTWORK_OUTER_PADDING: f32 = 10.0;
-pub(crate) const ARTWORK_INNER_MARGIN: f32 = 20.0; // inner_square = square_size - ARTWORK_INNER_MARGIN
-pub(crate) const ARTWORK_IMAGE_PADDING: f32 = 8.0;
 
 /// Minimum slot list width before artwork column hides
 pub(crate) const MIN_SLOT_LIST_WIDTH: f32 = 800.0;
@@ -100,30 +88,15 @@ pub(crate) fn base_slot_list_empty_artwork<'a, Message: 'a>(
     Some(
         iced::widget::responsive(move |size| {
             let square_size = size.width.min(size.height).max(0.0);
-            let inner_square = (square_size - ARTWORK_INNER_MARGIN).max(0.0);
 
-            iced::widget::container(
-                iced::widget::container(iced::widget::text(""))
-                    .width(Length::Fixed(inner_square))
-                    .height(Length::Fixed(inner_square))
-                    .style(|_theme| iced::widget::container::Style {
-                        background: Some(artwork_inner_bg().into()),
-                        border: iced::Border {
-                            color: artwork_border_color(),
-                            width: ARTWORK_BORDER_WIDTH,
-                            radius: theme::ui_border_radius(),
-                        },
-                        ..Default::default()
-                    }),
-            )
-            .padding(ARTWORK_OUTER_PADDING)
-            .width(Length::Fixed(square_size))
-            .height(Length::Fixed(square_size))
-            .style(|_theme| iced::widget::container::Style {
-                background: Some(artwork_outer_bg().into()),
-                ..Default::default()
-            })
-            .into()
+            iced::widget::container(iced::widget::text(""))
+                .width(Length::Fixed(square_size))
+                .height(Length::Fixed(square_size))
+                .style(|_theme| iced::widget::container::Style {
+                    background: Some(artwork_outer_bg().into()),
+                    ..Default::default()
+                })
+                .into()
         })
         .width(Length::Shrink)
         .into(),
@@ -144,48 +117,32 @@ pub(crate) fn single_artwork_panel<'a, Message: 'a>(
         use iced::widget::{container, image, text};
 
         let square_size = size.width.min(size.height).max(0.0);
-        let inner_square = (square_size - ARTWORK_INNER_MARGIN).max(0.0);
 
-        let inner_content: Element<'_, Message> = if let Some(handle) = artwork_handle {
-            container(
-                image(handle.clone())
-                    .content_fit(iced::ContentFit::Cover)
-                    .width(Length::Fill)
-                    .height(Length::Fill),
-            )
-            .padding(ARTWORK_IMAGE_PADDING)
-            .width(Length::Fixed(inner_square))
-            .height(Length::Fixed(inner_square))
-            .into()
+        let content: Element<'_, Message> = if let Some(handle) = artwork_handle {
+            image(handle.clone())
+                .content_fit(iced::ContentFit::Cover)
+                .width(Length::Fixed(square_size))
+                .height(Length::Fixed(square_size))
+                .into()
         } else {
             container(text(""))
-                .width(Length::Fixed(inner_square))
-                .height(Length::Fixed(inner_square))
+                .width(Length::Fixed(square_size))
+                .height(Length::Fixed(square_size))
+                .style(|_theme| container::Style {
+                    background: Some(artwork_outer_bg().into()),
+                    ..Default::default()
+                })
                 .into()
         };
 
-        container(
-            container(inner_content)
-                .width(Length::Fixed(inner_square))
-                .height(Length::Fixed(inner_square))
-                .style(|_theme| container::Style {
-                    background: Some(artwork_inner_bg().into()),
-                    border: iced::Border {
-                        color: artwork_border_color(),
-                        width: ARTWORK_BORDER_WIDTH,
-                        radius: theme::ui_border_radius(),
-                    },
-                    ..Default::default()
-                }),
-        )
-        .padding(ARTWORK_OUTER_PADDING)
-        .width(Length::Fixed(square_size))
-        .height(Length::Fixed(square_size))
-        .style(|_theme| container::Style {
-            background: Some(artwork_outer_bg().into()),
-            ..Default::default()
-        })
-        .into()
+        container(content)
+            .width(Length::Fixed(square_size))
+            .height(Length::Fixed(square_size))
+            .style(|_theme| container::Style {
+                background: Some(artwork_outer_bg().into()),
+                ..Default::default()
+            })
+            .into()
     })
     .width(Length::Shrink)
     .into()
@@ -233,16 +190,19 @@ pub(crate) fn collage_artwork_panel<'a, Message: 'a>(
         use iced::widget::{column as col, container, image, row as irow, text};
 
         let square_size = size.width.min(size.height).max(0.0);
-        let inner_square = (square_size - ARTWORK_INNER_MARGIN).max(0.0);
 
-        let inner_content: Element<'_, Message> = if collage_handles.is_empty() {
+        let content: Element<'_, Message> = if collage_handles.is_empty() {
             container(text(""))
-                .width(Length::Fixed(inner_square))
-                .height(Length::Fixed(inner_square))
+                .width(Length::Fixed(square_size))
+                .height(Length::Fixed(square_size))
+                .style(|_theme| container::Style {
+                    background: Some(artwork_outer_bg().into()),
+                    ..Default::default()
+                })
                 .into()
         } else {
             let num = collage_handles.len();
-            let cell_size = (inner_square - ARTWORK_IMAGE_PADDING * 2.0) / 3.0;
+            let cell_size = square_size / 3.0;
 
             let mut rows_vec: Vec<Element<'_, Message>> = Vec::new();
             for row_idx in 0..3 {
@@ -271,38 +231,19 @@ pub(crate) fn collage_artwork_panel<'a, Message: 'a>(
 
             col(rows_vec)
                 .spacing(0.0)
-                .width(Length::Fixed(inner_square))
-                .height(Length::Fixed(inner_square))
+                .width(Length::Fixed(square_size))
+                .height(Length::Fixed(square_size))
                 .into()
         };
 
-        container(
-            container(inner_content)
-                .padding(if collage_handles.is_empty() {
-                    0.0
-                } else {
-                    ARTWORK_IMAGE_PADDING
-                })
-                .width(Length::Fixed(inner_square))
-                .height(Length::Fixed(inner_square))
-                .style(|_theme| container::Style {
-                    background: Some(artwork_inner_bg().into()),
-                    border: iced::Border {
-                        color: artwork_border_color(),
-                        width: ARTWORK_BORDER_WIDTH,
-                        radius: theme::ui_border_radius(),
-                    },
-                    ..Default::default()
-                }),
-        )
-        .padding(ARTWORK_OUTER_PADDING)
-        .width(Length::Fixed(square_size))
-        .height(Length::Fixed(square_size))
-        .style(|_theme| container::Style {
-            background: Some(artwork_outer_bg().into()),
-            ..Default::default()
-        })
-        .into()
+        container(content)
+            .width(Length::Fixed(square_size))
+            .height(Length::Fixed(square_size))
+            .style(|_theme| container::Style {
+                background: Some(artwork_outer_bg().into()),
+                ..Default::default()
+            })
+            .into()
     })
     .width(Length::Shrink)
     .into()
