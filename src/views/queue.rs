@@ -41,8 +41,8 @@ pub struct QueueViewData<'a> {
     pub stable_viewport: bool,
     /// When in edit mode: (playlist_name, is_dirty)
     pub edit_mode_info: Option<(String, bool)>,
-    /// When a playlist is loaded for playback (not editing): (playlist_id, playlist_name)
-    pub playlist_context_info: Option<(String, String)>,
+    /// When a playlist is loaded for playback (not editing): (playlist_id, playlist_name, comment)
+    pub playlist_context_info: Option<(String, String, String)>,
 }
 
 /// Context menu entries for queue items
@@ -485,7 +485,9 @@ impl QueuePage {
             let sep_top: Element<'a, QueueMessage> = crate::theme::horizontal_separator(1.0);
             let sep_bottom: Element<'a, QueueMessage> = crate::theme::horizontal_separator(1.0);
             column![sep_top, edit_bar, sep_bottom, header].into()
-        } else if let Some((ref _playlist_id, ref playlist_name)) = data.playlist_context_info {
+        } else if let Some((ref _playlist_id, ref playlist_name, ref comment)) =
+            data.playlist_context_info
+        {
             // Read-only playlist context bar (playing a playlist, not editing)
             use iced::widget::svg;
 
@@ -503,6 +505,17 @@ impl QueuePage {
                 })
                 .size(12)
                 .color(crate::theme::fg0());
+
+            // Build name + optional comment as a column
+            let name_area: Element<'a, QueueMessage> = if comment.is_empty() {
+                name_label.into()
+            } else {
+                let comment_label = iced::widget::text(comment.clone())
+                    .font(crate::theme::ui_font())
+                    .size(10)
+                    .color(crate::theme::fg2());
+                column![name_label, comment_label].spacing(1).into()
+            };
 
             // Save button — quick-saves the current queue back to this playlist
             let save_icon = crate::embedded_svg::svg_widget("assets/icons/save.svg")
@@ -581,7 +594,7 @@ impl QueuePage {
                     accent_stripe_left,
                     row![
                         playlist_icon,
-                        name_label,
+                        name_area,
                         iced::widget::Space::new().width(Length::Fill),
                         save_btn,
                         edit_btn

@@ -822,6 +822,15 @@ impl Nokkvi {
         self.default_playlist_name = settings.default_playlist_name.clone();
         self.quick_add_to_playlist = settings.quick_add_to_playlist;
 
+        // Restore active playlist context from persisted settings
+        self.active_playlist_info = settings.active_playlist_id.clone().map(|id| {
+            (
+                id,
+                settings.active_playlist_name.clone(),
+                settings.active_playlist_comment.clone(),
+            )
+        });
+
         // Apply start_view on first load (one-shot: only before first application)
         let mut start_view_task = Task::none();
         if !self.start_view_applied {

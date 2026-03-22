@@ -253,6 +253,17 @@ impl SettingsService {
         sm.set_default_playlist(id, name)
     }
 
+    /// Set active playlist context (for queue header bar) and persist
+    pub async fn set_active_playlist(
+        &self,
+        id: Option<String>,
+        name: String,
+        comment: String,
+    ) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_active_playlist(id, name, comment)
+    }
+
     /// Set quick-add to playlist enabled and persist
     pub async fn set_quick_add_to_playlist(&self, enabled: bool) -> anyhow::Result<()> {
         let mut sm = self.settings_manager.lock().await;

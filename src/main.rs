@@ -131,9 +131,9 @@ pub struct Nokkvi {
     // Playlist Edit Mode (split-view)
     // -------------------------------------------------------------------------
     pub playlist_edit: Option<nokkvi_data::types::playlist_edit::PlaylistEditState>,
-    /// Identity of the playlist currently loaded in the queue (playlist_id, playlist_name).
+    /// Identity of the playlist currently loaded in the queue (playlist_id, playlist_name, comment).
     /// Set on PlayPlaylist, cleared on non-playlist play.
-    pub active_playlist_info: Option<(String, String)>,
+    pub active_playlist_info: Option<(String, String, String)>,
     pub browsing_panel: Option<views::BrowsingPanel>,
     pub pane_focus: crate::state::PaneFocus,
     /// Active cross-pane drag from browsing panel to queue (None when idle)

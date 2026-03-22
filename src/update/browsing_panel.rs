@@ -102,7 +102,10 @@ impl Nokkvi {
             playlist_name,
             Vec::new(),
         ));
-        self.active_playlist_info = None;
+        // NOTE: Do NOT clear `active_playlist_info` here — the view code
+        // checks `edit_mode_info` first (if/else-if), so the edit bar takes
+        // priority while editing.  Keeping `active_playlist_info` intact
+        // ensures the read-only playlist bar reappears after exiting edit mode.
         self.browsing_panel = Some(BrowsingPanel::new());
         self.pane_focus = PaneFocus::Queue;
         self.current_view = View::Queue;

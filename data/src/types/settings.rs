@@ -108,6 +108,15 @@ pub struct PlayerSettings {
     /// What happens when clicking the track info strip (default: GoToQueue)
     #[serde(default)]
     pub strip_click_action: StripClickAction,
+    /// Active playlist ID loaded in the queue (None = no playlist context)
+    #[serde(default)]
+    pub active_playlist_id: Option<String>,
+    /// Active playlist display name
+    #[serde(default)]
+    pub active_playlist_name: String,
+    /// Active playlist comment/description
+    #[serde(default)]
+    pub active_playlist_comment: String,
 }
 
 fn default_volume() -> f64 {
@@ -178,6 +187,9 @@ impl Default for PlayerSettings {
             strip_show_album: true,
             strip_show_format_info: true,
             strip_click_action: StripClickAction::default(),
+            active_playlist_id: None,
+            active_playlist_name: String::new(),
+            active_playlist_comment: String::new(),
         }
     }
 }

@@ -436,6 +436,12 @@ pub struct PlayerSettings {
     pub strip_show_format_info: bool,
     /// What happens when clicking the track info strip (default: GoToQueue)
     pub strip_click_action: StripClickAction,
+    /// Active playlist ID loaded in the queue (None = no playlist context)
+    pub active_playlist_id: Option<String>,
+    /// Active playlist display name
+    pub active_playlist_name: String,
+    /// Active playlist comment/description
+    pub active_playlist_comment: String,
 }
 
 #[cfg(test)]

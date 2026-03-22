@@ -543,6 +543,7 @@ impl Nokkvi {
                     let id = album.id.clone();
                     let name = album.name.clone();
                     self.active_playlist_info = None;
+                    self.persist_active_playlist_info();
                     return self.shell_fire_and_forget_task(
                         move |shell| async move { shell.add_album_and_play(&id).await },
                         format!("Playing '{name}'"),

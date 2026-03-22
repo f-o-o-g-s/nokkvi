@@ -165,6 +165,7 @@ impl Nokkvi {
                 use nokkvi_data::types::player_settings::EnterBehavior;
                 if self.enter_behavior == EnterBehavior::AppendAndPlay {
                     self.active_playlist_info = None;
+                    self.persist_active_playlist_info();
                     let name = genre_name.clone();
                     return self.shell_fire_and_forget_task(
                         move |shell| async move { shell.add_genre_and_play(&name).await },
@@ -318,6 +319,7 @@ impl Nokkvi {
                 {
                     let song_data: nokkvi_data::types::song::Song = song.into();
                     self.active_playlist_info = None;
+                    self.persist_active_playlist_info();
                     return self.shell_action_task(
                         move |shell| async move { shell.play_songs(vec![song_data], 0).await },
                         Message::SwitchView(View::Queue),

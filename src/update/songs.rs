@@ -284,6 +284,7 @@ impl Nokkvi {
                             // Replace queue with just this song
                             let song: nokkvi_data::types::song::Song = song.clone().into();
                             self.active_playlist_info = None;
+                            self.persist_active_playlist_info();
                             let play_task = self.shell_task(
                                 move |shell| async move { shell.play_songs(vec![song], 0).await },
                                 |result| match result {
@@ -347,6 +348,7 @@ impl Nokkvi {
 
                             // Clear playlist context
                             self.active_playlist_info = None;
+                            self.persist_active_playlist_info();
 
                             // Phase 1: Play immediately with loaded songs
                             let play_task = self.shell_task(

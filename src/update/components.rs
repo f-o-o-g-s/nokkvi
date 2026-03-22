@@ -169,7 +169,25 @@ impl Nokkvi {
         // doesn't show a stale "X of Y" count from a superseded play action.
         self.library.queue_loading_target = None;
         self.active_playlist_info = None;
+        self.persist_active_playlist_info();
         None
+    }
+
+    /// Persist the current `active_playlist_info` state to redb.
+    ///
+    /// Call after every mutation of `self.active_playlist_info` so the
+    /// playlist context bar survives application restarts.
+    pub(crate) fn persist_active_playlist_info(&self) {
+        let (id, name, comment) = match &self.active_playlist_info {
+            Some((id, name, comment)) => (Some(id.clone()), name.clone(), comment.clone()),
+            None => (None, String::new(), String::new()),
+        };
+        self.shell_spawn("persist_active_playlist", move |shell| async move {
+            shell
+                .settings()
+                .set_active_playlist(id, name, comment)
+                .await
+        });
     }
 
     /// Play an entity by parsing an index string, looking up the item, and calling a shell method.

@@ -165,6 +165,7 @@ impl Nokkvi {
                         .find(|p| p.id == playlist_id)
                         .map_or_else(|| "playlist".to_string(), |p| p.name.clone());
                     self.active_playlist_info = None;
+                    self.persist_active_playlist_info();
                     return self.shell_fire_and_forget_task(
                         move |shell| async move { shell.add_playlist_and_play(&playlist_id).await },
                         format!("Playing '{name}'"),
@@ -178,7 +179,8 @@ impl Nokkvi {
                     .playlists
                     .iter()
                     .find(|p| p.id == playlist_id)
-                    .map(|p| (p.id.clone(), p.name.clone()));
+                    .map(|p| (p.id.clone(), p.name.clone(), p.comment.clone()));
+                self.persist_active_playlist_info();
                 return self.shell_action_task(
                     move |shell| async move { shell.play_playlist(&playlist_id).await },
                     Message::SwitchView(View::Queue),
@@ -229,7 +231,8 @@ impl Nokkvi {
                     .playlists
                     .iter()
                     .find(|p| p.id == playlist_id)
-                    .map(|p| (p.id.clone(), p.name.clone()));
+                    .map(|p| (p.id.clone(), p.name.clone(), p.comment.clone()));
+                self.persist_active_playlist_info();
                 return self.shell_action_task(
                     move |shell| async move {
                         shell

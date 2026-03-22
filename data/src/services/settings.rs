@@ -210,6 +210,18 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_active_playlist(
+        &mut self,
+        id: Option<String>,
+        name: String,
+        comment: String,
+    ) -> Result<()> {
+        self.settings.player.active_playlist_id = id;
+        self.settings.player.active_playlist_name = name;
+        self.settings.player.active_playlist_comment = comment;
+        self.save()
+    }
+
     // -------------------------------------------------------------------------
     // View Sort Preferences
     // -------------------------------------------------------------------------
@@ -318,6 +330,9 @@ impl SettingsManager {
             strip_show_album: p.strip_show_album,
             strip_show_format_info: p.strip_show_format_info,
             strip_click_action: p.strip_click_action,
+            active_playlist_id: p.active_playlist_id.clone(),
+            active_playlist_name: p.active_playlist_name.clone(),
+            active_playlist_comment: p.active_playlist_comment.clone(),
         }
     }
 
