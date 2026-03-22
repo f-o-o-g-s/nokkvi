@@ -614,21 +614,19 @@ impl QueuePage {
         // Add 1px right border to the header area to match the slot list right border.
         // Use height(Shrink) on the row so it takes the view_header's natural height
         // rather than expanding to fill all remaining column space.
-        let header_right_stripe: Element<'a, QueueMessage> =
-            container(iced::widget::Space::new())
-                .width(Length::Fixed(1.0))
-                .height(Length::Fill)
-                .style(|_| container::Style {
-                    background: Some(crate::theme::bg3().into()),
-                    ..Default::default()
-                })
-                .into();
-        let header: Element<'a, QueueMessage> =
-            iced::widget::row![header, header_right_stripe]
-                .spacing(0)
-                .width(Length::Fill)
-                .height(Length::Shrink)
-                .into();
+        let header_right_stripe: Element<'a, QueueMessage> = container(iced::widget::Space::new())
+            .width(Length::Fixed(1.0))
+            .height(Length::Fill)
+            .style(|_| container::Style {
+                background: Some(crate::theme::bg3().into()),
+                ..Default::default()
+            })
+            .into();
+        let header: Element<'a, QueueMessage> = iced::widget::row![header, header_right_stripe]
+            .spacing(0)
+            .width(Length::Fill)
+            .height(Length::Shrink)
+            .into();
 
         // Create layout config BEFORE empty checks to route empty states through
         // base_slot_list_layout, preserving the widget tree structure and search focus

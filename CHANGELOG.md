@@ -1,5 +1,74 @@
 # Changelog
 
+## v0.0.5 — 2026-03-22
+
+### Features
+- **Playlist comment editing** — the split-view edit mode now includes a comment
+  field alongside the playlist name, so you can view and edit the playlist
+  description directly in the queue panel.
+- **Persist playlist context across restarts** — the currently-playing playlist
+  name, ID, and comment are saved to disk and restored on next launch, keeping
+  the queue header accurate after a restart.
+- **Configurable metadata strip** — a new Interface settings tab lets you choose
+  where the track info strip appears (player bar, top bar, or both), and
+  configure click behaviour (navigate to queue, album, or artist).
+- **Right-click context menu on metadata strip** — right-clicking the strip now
+  shows "Go to Queue", "Go to Album", "Go to Artist", "Copy Track Info",
+  "Toggle Star", and "Show in Folder" actions.
+- **Progressive metadata collapsing in nav bar** — track info in the side/top
+  nav collapses gracefully as the window narrows (title → title+artist →
+  title+artist+album → full metadata).
+- **HoverOverlay on player bar buttons and side nav** — player bar transport
+  buttons and the side nav hover indicator now use the `HoverOverlay` widget for
+  consistent press-darkening and flash micro-animations.
+- **Show in File Manager for albums and artists** — album and artist context
+  menus now expose a "Show in File Manager" entry in addition to individual
+  songs.
+
+### Fixes
+- **Artwork: full-res collage for single-album genres/playlists** — genres and
+  playlists that contain only one album now correctly display the high-resolution
+  1000px artwork in the collage view instead of a thumbnail.
+- **Artwork: genre/playlist collage 3×3 tile layout restored** — a regression
+  that collapsed the 3×3 collage to a single tile was fixed.
+- **Artwork: large artwork URL in queue fallback** — the queue's fallback artwork
+  path now correctly builds a full-size URL instead of reusing the thumbnail URL.
+- **Artwork: 80px thumbnails for queue song rows** — each song row in the queue
+  now requests the 80px thumbnail instead of the 1000px image, reducing bandwidth
+  and memory usage.
+- **Queue playlist edit bar layout** — the name and comment inputs are stacked
+  vertically instead of overflowing horizontally.
+- **HoverOverlay press-scale fix** — replaced the `HoverOverlay`-wrapped
+  `Button` pattern with `mouse_area` + `HoverOverlay`-wrapped `Container` to
+  correctly apply the press-darkening scale effect.
+- **Hamburger menu Escape key** — pressing Escape now closes the hamburger
+  context menu, consistent with all other context menus in the app.
+- **Nav tab hover indicator cursor detection** — expanded the hit area for hover
+  indicator detection in side nav icon-only mode so it triggers reliably.
+- **Visualizer border width stale layout** — the visualizer widget now re-reads
+  `border_width` from the live config on each `width()` call, fixing layout
+  drift after hot-reload.
+- **Gapless prep cleared on mode change** — stale gapless pre-buffer is now
+  discarded when shuffle, repeat, or consume mode is toggled mid-playback,
+  preventing the wrong track from being preloaded.
+- **install.sh Exec= absolute path** — the desktop entry `Exec=` line is patched
+  to the absolute binary path so launchers that don't search `$PATH` work
+  correctly.
+- **install.sh desktop database refresh** — `install.sh` now runs
+  `update-desktop-database` after copying the desktop entry, ensuring the
+  launcher discovers the app immediately.
+
+### Improvements
+- **Playlist header redesign** — the queue panel header for playing playlists
+  now features accent stripes and separators for a cleaner visual hierarchy.
+  Borders refined to 1px, stripe color adjusted to neutral.
+
+### Internal
+- Agent rules and workflows synced with current codebase.
+- Added `/commit` workflow for conventional commits.
+
+---
+
 ## v0.0.4 — 2026-03-19
 
 ### Fixes

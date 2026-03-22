@@ -11,7 +11,7 @@ A native Rust/Iced client for [Navidrome](https://www.navidrome.org/) music serv
 - Scrobbling support (last.fm / ListenBrainz via Navidrome)
 - Hot-reloadable theme and visualizer configuration
 - Side or top navigation layout with text, icons, or both
-- Now-playing track info strip (player bar or full-width top bar) with marquee scrolling
+- Now-playing metadata strip (player bar or full-width top bar) with marquee scrolling and right-click context menu
 - Optional rounded corners mode for the entire UI
 - User-configurable keyboard shortcuts
 - In-app settings editor with drill-down navigation, inline search, and preset themes
@@ -21,7 +21,7 @@ A native Rust/Iced client for [Navidrome](https://www.navidrome.org/) music serv
 - Show in File Manager — right-click songs to open their containing folder
 - Inline three-tier expansion (Artist → Album → Track, Genre → Album → Track)
 - Playlist management — create, rename, delete, save queue as playlist
-- Split-view playlist editing with library browser panel
+- Split-view playlist editing with library browser panel (includes inline comment editing)
 - Cross-pane drag-and-drop from library browser to queue with visual drop indicator
 - Right-click context menus on all views (Add to Queue, Add to Playlist, Get Info, etc.)
 - Queue drag-and-drop reordering and keyboard track reordering
