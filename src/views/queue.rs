@@ -442,20 +442,49 @@ impl QueuePage {
             let save_btn = icon_btn("assets/icons/save.svg", QueueMessage::SavePlaylist);
             let discard_btn = icon_btn("assets/icons/x.svg", QueueMessage::DiscardEdits);
 
+            // 3px accent stripes — frame the bar and distinguish from artwork column
+            let accent_stripe_left: Element<'a, QueueMessage> =
+                container(iced::widget::Space::new())
+                    .width(Length::Fixed(3.0))
+                    .height(Length::Fill)
+                    .style(|_| container::Style {
+                        background: Some(crate::theme::accent().into()),
+                        ..Default::default()
+                    })
+                    .into();
+            let accent_stripe_right: Element<'a, QueueMessage> =
+                container(iced::widget::Space::new())
+                    .width(Length::Fixed(3.0))
+                    .height(Length::Fill)
+                    .style(|_| container::Style {
+                        background: Some(crate::theme::accent().into()),
+                        ..Default::default()
+                    })
+                    .into();
+
             let edit_bar = container(
-                row![edit_icon, name_input, save_btn, discard_btn,]
-                    .spacing(6)
-                    .align_y(Alignment::Center)
-                    .padding([0, 8]),
+                row![
+                    accent_stripe_left,
+                    row![edit_icon, name_input, save_btn, discard_btn,]
+                        .spacing(6)
+                        .align_y(Alignment::Center)
+                        .padding([0, 8])
+                        .width(Length::Fill),
+                    accent_stripe_right,
+                ]
+                .spacing(0)
+                .align_y(Alignment::Center),
             )
             .height(Length::Fixed(32.0))
             .style(|_theme| container::Style {
-                background: Some(crate::theme::bg0_hard().into()),
+                background: Some(crate::theme::bg0_soft().into()),
                 ..Default::default()
             })
             .width(Length::Fill);
 
-            column![header, edit_bar].into()
+            let sep_top: Element<'a, QueueMessage> = crate::theme::horizontal_separator(1.0);
+            let sep_bottom: Element<'a, QueueMessage> = crate::theme::horizontal_separator(1.0);
+            column![sep_top, edit_bar, sep_bottom, header].into()
         } else if let Some((ref _playlist_id, ref playlist_name)) = data.playlist_context_info {
             // Read-only playlist context bar (playing a playlist, not editing)
             use iced::widget::svg;
@@ -527,26 +556,55 @@ impl QueuePage {
                     ..Default::default()
                 });
 
+            // 3px accent stripes — frame the bar and distinguish from artwork column
+            let accent_stripe_left: Element<'a, QueueMessage> =
+                container(iced::widget::Space::new())
+                    .width(Length::Fixed(3.0))
+                    .height(Length::Fill)
+                    .style(|_| container::Style {
+                        background: Some(crate::theme::accent().into()),
+                        ..Default::default()
+                    })
+                    .into();
+            let accent_stripe_right: Element<'a, QueueMessage> =
+                container(iced::widget::Space::new())
+                    .width(Length::Fixed(3.0))
+                    .height(Length::Fill)
+                    .style(|_| container::Style {
+                        background: Some(crate::theme::accent().into()),
+                        ..Default::default()
+                    })
+                    .into();
+
             let playlist_bar = container(
                 row![
-                    playlist_icon,
-                    name_label,
-                    iced::widget::Space::new().width(Length::Fill),
-                    save_btn,
-                    edit_btn
+                    accent_stripe_left,
+                    row![
+                        playlist_icon,
+                        name_label,
+                        iced::widget::Space::new().width(Length::Fill),
+                        save_btn,
+                        edit_btn
+                    ]
+                    .spacing(6)
+                    .align_y(Alignment::Center)
+                    .padding([0, 8])
+                    .width(Length::Fill),
+                    accent_stripe_right,
                 ]
-                .spacing(6)
-                .align_y(Alignment::Center)
-                .padding([0, 8]),
+                .spacing(0)
+                .align_y(Alignment::Center),
             )
             .height(Length::Fixed(32.0))
             .style(|_theme| container::Style {
-                background: Some(crate::theme::bg0_hard().into()),
+                background: Some(crate::theme::bg0_soft().into()),
                 ..Default::default()
             })
             .width(Length::Fill);
 
-            column![header, playlist_bar].into()
+            let sep_top: Element<'a, QueueMessage> = crate::theme::horizontal_separator(1.0);
+            let sep_bottom: Element<'a, QueueMessage> = crate::theme::horizontal_separator(1.0);
+            column![sep_top, playlist_bar, sep_bottom, header].into()
         } else {
             header
         };
@@ -576,7 +634,7 @@ impl QueuePage {
         use crate::widgets::slot_list::chrome_height_with_header;
         let has_extra_bar = data.edit_mode_info.is_some() || data.playlist_context_info.is_some();
         let chrome_height = if has_extra_bar {
-            chrome_height_with_header() + 32.0
+            chrome_height_with_header() + 34.0 // 32px bar + 2px separators
         } else {
             chrome_height_with_header()
         };
