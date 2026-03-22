@@ -415,8 +415,12 @@ fn build_slot_list_slots<'a, T, Message: 'a>(
 
     // Dynamic center: adapts based on position in the list.
     // When fewer items than slots exist, center=0 so items pack to the top
-    // and empty slots flow naturally below.
-    let effective_center = if total_items < config.slot_count {
+    // and empty slots flow naturally below. In this case viewport_offset must
+    // be treated as 0 — scrolling is meaningless when all items fit, and
+    // using the real viewport_offset would cause items to disappear off the
+    // top as the user scrolls down.
+    let top_packing = total_items < config.slot_count;
+    let effective_center = if top_packing {
         0
     } else {
         let items_at_and_after = total_items.saturating_sub(sl.viewport_offset);
@@ -435,9 +439,15 @@ fn build_slot_list_slots<'a, T, Message: 'a>(
 
         let mut is_center_slot = false;
 
-        let slot_content: Element<'a, Message> = if let Some(item_index) =
+        // In top-packing mode, map slots directly to item indices (slot N → item N),
+        // ignoring viewport_offset which is meaningless when all items fit.
+        let item_index_opt = if top_packing {
+            if slot_index < total_items { Some(slot_index) } else { None }
+        } else {
             sl.get_slot_item_index_with_center(slot_index, total_items, effective_center)
-        {
+        };
+
+        let slot_content: Element<'a, Message> = if let Some(item_index) = item_index_opt {
             if let Some(item) = items.get(item_index) {
                 let is_center = match sl.selected_offset {
                     Some(sel) => item_index == sel,

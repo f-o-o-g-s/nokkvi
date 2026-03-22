@@ -74,14 +74,14 @@ impl SlotListView {
     /// Replicates the `effective_center` computation from `build_slot_list_slots`
     /// so the drag handler uses exactly the same slot→item mapping as rendering.
     pub fn slot_to_item_index(&self, slot_index: usize, total_items: usize) -> Option<usize> {
+        // Top-packing: slot N maps directly to item N (viewport_offset is ignored).
+        if total_items < self.slot_count {
+            return if slot_index < total_items { Some(slot_index) } else { None };
+        }
         let center_slot = self.slot_count / 2;
-        let effective_center = if total_items < self.slot_count {
-            0
-        } else {
-            let items_at_and_after = total_items.saturating_sub(self.viewport_offset);
-            let end_push = self.slot_count.saturating_sub(items_at_and_after);
-            center_slot.min(self.viewport_offset).max(end_push)
-        };
+        let items_at_and_after = total_items.saturating_sub(self.viewport_offset);
+        let end_push = self.slot_count.saturating_sub(items_at_and_after);
+        let effective_center = center_slot.min(self.viewport_offset).max(end_push);
         self.get_slot_item_index_with_center(slot_index, total_items, effective_center)
     }
 
@@ -96,14 +96,16 @@ impl SlotListView {
         slot_index: usize,
         total_items: usize,
     ) -> Option<usize> {
+        // Top-packing: slot N maps directly to item N.
+        // Allow total_items as a valid drop target (insert-after-last).
+        if total_items < self.slot_count {
+            return if slot_index <= total_items { Some(slot_index) } else { None };
+        }
+
         let center_slot = self.slot_count / 2;
-        let effective_center = if total_items < self.slot_count {
-            0
-        } else {
-            let items_at_and_after = total_items.saturating_sub(self.viewport_offset);
-            let end_push = self.slot_count.saturating_sub(items_at_and_after);
-            center_slot.min(self.viewport_offset).max(end_push)
-        };
+        let items_at_and_after = total_items.saturating_sub(self.viewport_offset);
+        let end_push = self.slot_count.saturating_sub(items_at_and_after);
+        let effective_center = center_slot.min(self.viewport_offset).max(end_push);
 
         if total_items == 0 {
             return None;
@@ -112,8 +114,6 @@ impl SlotListView {
         let offset_from_center = slot_index as i32 - effective_center as i32;
         let target_index = self.viewport_offset as i32 + offset_from_center;
 
-        // Allow target_index == total_items (insert-after-last), but reject
-        // negative and anything beyond total_items.
         if target_index < 0 || target_index > total_items as i32 {
             return None;
         }
