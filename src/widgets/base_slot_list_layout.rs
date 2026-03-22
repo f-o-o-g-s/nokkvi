@@ -5,10 +5,23 @@
 
 use iced::{
     Alignment, Color, Element, Length,
-    widget::{column, row},
+    widget::{column, container, row},
 };
 
 use crate::theme;
+
+/// Wrap an artwork panel element with a 1px `bg3` stripe on its left edge,
+/// visually separating it from the slot list column.
+fn with_left_stripe<'a, Message: 'a>(artwork: Element<'a, Message>) -> Element<'a, Message> {
+    let stripe = container(iced::widget::Space::new())
+        .width(Length::Fixed(1.0))
+        .height(Length::Fill)
+        .style(|_| container::Style {
+            background: Some(theme::bg3().into()),
+            ..Default::default()
+        });
+    row![stripe, artwork].spacing(0).height(Length::Fill).into()
+}
 
 /// Artwork column styling - functions for dynamic theme support
 #[inline]
@@ -305,13 +318,13 @@ pub(crate) fn base_slot_list_layout<'a, Message: 'a>(
     let show_artwork = should_show_artwork(config);
 
     if show_artwork && let Some(artwork) = artwork_content {
-        // Two-column layout: slot list + artwork
+        // Two-column layout: slot list + artwork (stripe on artwork's left edge)
         row![
             column![header, slot_list_content]
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .spacing(0),
-            artwork
+            with_left_stripe(artwork)
         ]
         .align_y(Alignment::Start)
         .spacing(0)
