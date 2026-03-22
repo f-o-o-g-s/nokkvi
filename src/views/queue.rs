@@ -473,16 +473,6 @@ impl QueuePage {
             let save_btn = icon_btn("assets/icons/save.svg", QueueMessage::SavePlaylist);
             let discard_btn = icon_btn("assets/icons/x.svg", QueueMessage::DiscardEdits);
 
-            // Thin vertical separator between name and comment inputs
-            let vert_sep: Element<'a, QueueMessage> = container(iced::widget::Space::new())
-                .width(Length::Fixed(1.0))
-                .height(Length::Fixed(18.0))
-                .style(|_| container::Style {
-                    background: Some(crate::theme::bg3().into()),
-                    ..Default::default()
-                })
-                .into();
-
             // 3px accent stripes — frame the bar and distinguish from artwork column
             let accent_stripe_left: Element<'a, QueueMessage> =
                 container(iced::widget::Space::new())
@@ -503,27 +493,26 @@ impl QueuePage {
                     })
                     .into();
 
+            let name_comment_col: Element<'a, QueueMessage> =
+                iced::widget::column![name_input, comment_input]
+                    .spacing(1)
+                    .width(Length::Fill)
+                    .into();
+
             let edit_bar = container(
                 row![
                     accent_stripe_left,
-                    row![
-                        edit_icon,
-                        name_input,
-                        vert_sep,
-                        comment_input,
-                        save_btn,
-                        discard_btn,
-                    ]
-                    .spacing(6)
-                    .align_y(Alignment::Center)
-                    .padding([0, 8])
-                    .width(Length::Fill),
+                    row![edit_icon, name_comment_col, save_btn, discard_btn,]
+                        .spacing(6)
+                        .align_y(Alignment::Center)
+                        .padding([0, 8])
+                        .width(Length::Fill),
                     accent_stripe_right,
                 ]
                 .spacing(0)
                 .align_y(Alignment::Center),
             )
-            .height(Length::Fixed(32.0))
+            .height(Length::Fixed(44.0))
             .style(|_theme| container::Style {
                 background: Some(crate::theme::bg0_soft().into()),
                 ..Default::default()
@@ -696,12 +685,12 @@ impl QueuePage {
         }
 
         // Configure slot list with queue-specific chrome height (with view header now)
-        // Edit mode adds a 32px bar below the header — account for it so
+        // Edit mode adds a 44px bar + context bar adds 32px bar; account for the tallest so
         // the last slot isn't shorter than the rest.
         use crate::widgets::slot_list::chrome_height_with_header;
         let has_extra_bar = data.edit_mode_info.is_some() || data.playlist_context_info.is_some();
         let chrome_height = if has_extra_bar {
-            chrome_height_with_header() + 34.0 // 32px bar + 2px separators
+            chrome_height_with_header() + 46.0 // edit: 44px bar + 2px separators; context: 32px + 2px
         } else {
             chrome_height_with_header()
         };
