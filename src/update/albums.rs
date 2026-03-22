@@ -260,17 +260,24 @@ impl Nokkvi {
             }
 
             // Fallback: Check queue songs (fixes artwork loading when albums list is empty/filtered)
-            // Queue songs have pre-computed full-size artwork URLs
-            if let Some(song) = self
+            // Construct a full-size URL from the album_id rather than reusing the
+            // queue song's pre-baked thumbnail URL (which is only 80px).
+            if self
                 .library
                 .queue_songs
                 .iter()
-                .find(|s| s.album_id == album_id)
+                .any(|s| s.album_id == album_id)
             {
                 let art_id = album_id.clone();
-                let artwork_url = song.artwork_url.clone();
                 return Task::perform(
                     async move {
+                        let (url, cred) = albums_vm.get_server_config().await;
+                        let artwork_url = nokkvi_data::utils::artwork_url::build_cover_art_url(
+                            &art_id,
+                            &url,
+                            &cred,
+                            Some(1000),
+                        );
                         let path = albums_vm
                             .get_artwork_cache_path(&artwork_url, Some(1000))
                             .await;
