@@ -120,3 +120,11 @@ The `Visualizer` struct caches config values (e.g., `border_width`) set at const
 ## 29. Artwork Size: Queue Song Mini vs Large
 
 Queue songs request 80px thumbnails for slot list mini artwork. When the large artwork pipeline falls back to loading from the network (cache miss), it must construct a **full-size** cover art URL — not reuse the 80px thumbnail URL from the song's `cover_art` field. The queue fallback in `handle_load_large_artwork` must build the URL with `size=1000` (or omit size) for crisp large artwork.
+
+## 30. HoverOverlay Must Wrap a Container, Not a Button
+
+Native `button` captures `ButtonPressed` before `HoverOverlay`'s passive event tracker can run — the press state is never set, the scale animation never fires. Pattern: `mouse_area(HoverOverlay::new(container(content)...)).on_press(msg)`. Never: `HoverOverlay::new(button(content).on_press(msg))`.
+
+## 31. Length::Fill Stripe in Unconstrained Row in Column
+
+A `container(Space).height(Length::Fill)` inside a `row![]` that itself has no explicit height will cause the row to expand to fill all remaining column space — not just match sibling element heights. Always set `height(Length::Shrink)` on the wrapper row when adding a right-edge stripe to a header element whose height is determined by its main content (e.g., view_header at 48px). The stripe itself should still use `Fill` so it spans the row's allocated height.

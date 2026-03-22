@@ -122,9 +122,11 @@ Each `update/{name}.rs` handles data loading and message routing:
 
 ## Playlist Header Bar
 
-- Read-only context bar with playlist name + optional comment, list-music icon, quick-save button, edit button
-- Accent stripe separators and redesigned layout with visual hierarchy
+- Read-only context bar (32px): playlist name + optional comment, list-music icon, quick-save button, edit button
+- Edit mode bar (44px): pencil icon, name + comment text inputs, save + discard buttons
+- Both bars share a 1px `bg3` right border spanning the full header column height; no top separator, 1px bottom separator
 - `active_playlist_info`: 3-tuple `(playlist_id, playlist_name, comment)` — persisted across restarts via `SettingsManager`
+- Chrome height: `+33px` for context bar, `+45px` for edit bar (bar height + 1px separator)
 - **Quick-save** opens `SaveAsPlaylist` dialog for confirmation
 - `active_playlist_info` cleared when non-playlist content replaces the queue (including Shift+D queue clear)
 

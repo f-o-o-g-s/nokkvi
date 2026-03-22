@@ -159,7 +159,13 @@ globs: src/widgets/**
 
 ## Layout Constants (`slot_list.rs`)
 
-Shared layout constants: `NAV_BAR_HEIGHT`, `CHROME_HEIGHT`, `CHROME_HEIGHT_WITH_HEADER`, etc. Used by queue view, app_view, and cross-pane drag for slot sizing.
+Single source of truth for layout sizing. Key constants/functions:
+- `chrome_height_with_header()` — nav + player bar + view header; varies by nav mode and top-bar strip
+- `queue_slot_list_start_y(edit_bar_height)` — Y offset where queue slot list begins
+- `NAV_BAR_HEIGHT` (32), `VIEW_HEADER_HEIGHT` (48), `TAB_BAR_HEIGHT` (36), `EDIT_BAR_HEIGHT` (32), `SLOT_SPACING` (3)
+- Used by `queue.rs`, `app_view.rs`, `cross_pane_drag.rs` for slot sizing and drop indicator positioning
+
+**HoverOverlay button pattern**: use `mouse_area(HoverOverlay::new(container(...)))` — never wrap a native `button` with `HoverOverlay` (button captures `ButtonPressed` first, blocking the press animation).
 
 ## SVG Icons (`embedded_svg.rs`)
 
