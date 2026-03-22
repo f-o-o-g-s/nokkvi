@@ -414,9 +414,10 @@ fn build_slot_list_slots<'a, T, Message: 'a>(
     let total_items = items.len();
 
     // Dynamic center: adapts based on position in the list.
+    // When fewer items than slots exist, center=0 so items pack to the top
+    // and empty slots flow naturally below.
     let effective_center = if total_items < config.slot_count {
-        let block_start = (config.slot_count.saturating_sub(total_items)) / 2;
-        (block_start + sl.viewport_offset).min(config.slot_count.saturating_sub(1))
+        0
     } else {
         let items_at_and_after = total_items.saturating_sub(sl.viewport_offset);
         let end_push = config.slot_count.saturating_sub(items_at_and_after);

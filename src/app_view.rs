@@ -372,7 +372,7 @@ impl Nokkvi {
                 } else {
                     // slot = item_index - viewport_offset + effective_center
                     let effective_center = if total_queue < config.slot_count {
-                        (config.slot_count.saturating_sub(total_queue)) / 2
+                        0
                     } else {
                         let items_at_and_after = total_queue.saturating_sub(viewport_offset);
                         let end_push = config.slot_count.saturating_sub(items_at_and_after);

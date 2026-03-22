@@ -76,8 +76,7 @@ impl SlotListView {
     pub fn slot_to_item_index(&self, slot_index: usize, total_items: usize) -> Option<usize> {
         let center_slot = self.slot_count / 2;
         let effective_center = if total_items < self.slot_count {
-            let block_start = (self.slot_count.saturating_sub(total_items)) / 2;
-            (block_start + self.viewport_offset).min(self.slot_count.saturating_sub(1))
+            0
         } else {
             let items_at_and_after = total_items.saturating_sub(self.viewport_offset);
             let end_push = self.slot_count.saturating_sub(items_at_and_after);
@@ -99,8 +98,7 @@ impl SlotListView {
     ) -> Option<usize> {
         let center_slot = self.slot_count / 2;
         let effective_center = if total_items < self.slot_count {
-            let block_start = (self.slot_count.saturating_sub(total_items)) / 2;
-            (block_start + self.viewport_offset).min(self.slot_count.saturating_sub(1))
+            0
         } else {
             let items_at_and_after = total_items.saturating_sub(self.viewport_offset);
             let end_push = self.slot_count.saturating_sub(items_at_and_after);
