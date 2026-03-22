@@ -473,26 +473,6 @@ impl QueuePage {
             let save_btn = icon_btn("assets/icons/save.svg", QueueMessage::SavePlaylist);
             let discard_btn = icon_btn("assets/icons/x.svg", QueueMessage::DiscardEdits);
 
-            // 3px accent stripes — frame the bar and distinguish from artwork column
-            let accent_stripe_left: Element<'a, QueueMessage> =
-                container(iced::widget::Space::new())
-                    .width(Length::Fixed(3.0))
-                    .height(Length::Fill)
-                    .style(|_| container::Style {
-                        background: Some(crate::theme::accent().into()),
-                        ..Default::default()
-                    })
-                    .into();
-            let accent_stripe_right: Element<'a, QueueMessage> =
-                container(iced::widget::Space::new())
-                    .width(Length::Fixed(3.0))
-                    .height(Length::Fill)
-                    .style(|_| container::Style {
-                        background: Some(crate::theme::accent().into()),
-                        ..Default::default()
-                    })
-                    .into();
-
             let name_comment_col: Element<'a, QueueMessage> =
                 iced::widget::column![name_input, comment_input]
                     .spacing(1)
@@ -500,17 +480,11 @@ impl QueuePage {
                     .into();
 
             let edit_bar = container(
-                row![
-                    accent_stripe_left,
-                    row![edit_icon, name_comment_col, save_btn, discard_btn,]
-                        .spacing(6)
-                        .align_y(Alignment::Center)
-                        .padding([0, 8])
-                        .width(Length::Fill),
-                    accent_stripe_right,
-                ]
-                .spacing(0)
-                .align_y(Alignment::Center),
+                row![edit_icon, name_comment_col, save_btn, discard_btn,]
+                    .spacing(6)
+                    .align_y(Alignment::Center)
+                    .padding([0, 8])
+                    .width(Length::Fill),
             )
             .height(Length::Fixed(44.0))
             .style(|_theme| container::Style {
@@ -519,9 +493,8 @@ impl QueuePage {
             })
             .width(Length::Fill);
 
-            let sep_top: Element<'a, QueueMessage> = crate::theme::horizontal_separator(1.0);
             let sep_bottom: Element<'a, QueueMessage> = crate::theme::horizontal_separator(1.0);
-            column![sep_top, edit_bar, sep_bottom, header].into()
+            column![edit_bar, sep_bottom, header].into()
         } else if let Some((ref _playlist_id, ref playlist_name, ref comment)) =
             data.playlist_context_info
         {
@@ -612,44 +585,18 @@ impl QueuePage {
             .interaction(iced::mouse::Interaction::Pointer)
             .into();
 
-            // 3px accent stripes — frame the bar and distinguish from artwork column
-            let accent_stripe_left: Element<'a, QueueMessage> =
-                container(iced::widget::Space::new())
-                    .width(Length::Fixed(3.0))
-                    .height(Length::Fill)
-                    .style(|_| container::Style {
-                        background: Some(crate::theme::accent().into()),
-                        ..Default::default()
-                    })
-                    .into();
-            let accent_stripe_right: Element<'a, QueueMessage> =
-                container(iced::widget::Space::new())
-                    .width(Length::Fixed(3.0))
-                    .height(Length::Fill)
-                    .style(|_| container::Style {
-                        background: Some(crate::theme::accent().into()),
-                        ..Default::default()
-                    })
-                    .into();
-
             let playlist_bar = container(
                 row![
-                    accent_stripe_left,
-                    row![
-                        playlist_icon,
-                        name_area,
-                        iced::widget::Space::new().width(Length::Fill),
-                        save_btn,
-                        edit_btn
-                    ]
-                    .spacing(6)
-                    .align_y(Alignment::Center)
-                    .padding([0, 8])
-                    .width(Length::Fill),
-                    accent_stripe_right,
+                    playlist_icon,
+                    name_area,
+                    iced::widget::Space::new().width(Length::Fill),
+                    save_btn,
+                    edit_btn
                 ]
-                .spacing(0)
-                .align_y(Alignment::Center),
+                .spacing(6)
+                .align_y(Alignment::Center)
+                .padding([0, 8])
+                .width(Length::Fill),
             )
             .height(Length::Fixed(32.0))
             .style(|_theme| container::Style {
@@ -658,12 +605,30 @@ impl QueuePage {
             })
             .width(Length::Fill);
 
-            let sep_top: Element<'a, QueueMessage> = crate::theme::horizontal_separator(1.0);
             let sep_bottom: Element<'a, QueueMessage> = crate::theme::horizontal_separator(1.0);
-            column![sep_top, playlist_bar, sep_bottom, header].into()
+            column![playlist_bar, sep_bottom, header].into()
         } else {
             header
         };
+
+        // Add 1px right border to the header area to match the slot list right border.
+        // Use height(Shrink) on the row so it takes the view_header's natural height
+        // rather than expanding to fill all remaining column space.
+        let header_right_stripe: Element<'a, QueueMessage> =
+            container(iced::widget::Space::new())
+                .width(Length::Fixed(1.0))
+                .height(Length::Fill)
+                .style(|_| container::Style {
+                    background: Some(crate::theme::bg3().into()),
+                    ..Default::default()
+                })
+                .into();
+        let header: Element<'a, QueueMessage> =
+            iced::widget::row![header, header_right_stripe]
+                .spacing(0)
+                .width(Length::Fill)
+                .height(Length::Shrink)
+                .into();
 
         // Create layout config BEFORE empty checks to route empty states through
         // base_slot_list_layout, preserving the widget tree structure and search focus
@@ -688,9 +653,10 @@ impl QueuePage {
         // Edit mode adds a 44px bar + context bar adds 32px bar; account for the tallest so
         // the last slot isn't shorter than the rest.
         use crate::widgets::slot_list::chrome_height_with_header;
-        let has_extra_bar = data.edit_mode_info.is_some() || data.playlist_context_info.is_some();
-        let chrome_height = if has_extra_bar {
-            chrome_height_with_header() + 46.0 // edit: 44px bar + 2px separators; context: 32px + 2px
+        let chrome_height = if data.edit_mode_info.is_some() {
+            chrome_height_with_header() + 45.0 // 44px edit bar + 1px separator
+        } else if data.playlist_context_info.is_some() {
+            chrome_height_with_header() + 33.0 // 32px context bar + 1px separator
         } else {
             chrome_height_with_header()
         };
@@ -1002,6 +968,23 @@ impl QueuePage {
         // Wrap slot list content with standard background (prevents color bleed-through)
         use crate::widgets::slot_list::slot_list_background_container;
         let slot_list_content = slot_list_background_container(slot_list_content);
+
+        // 1px right border — visually separates the slot list from the artwork column
+        let slot_list_right_stripe: Element<'a, QueueMessage> =
+            container(iced::widget::Space::new())
+                .width(Length::Fixed(1.0))
+                .height(Length::Fill)
+                .style(|_| container::Style {
+                    background: Some(crate::theme::bg3().into()),
+                    ..Default::default()
+                })
+                .into();
+        let slot_list_content: Element<'a, QueueMessage> =
+            iced::widget::row![slot_list_content, slot_list_right_stripe]
+                .spacing(0)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into();
 
         // Get large artwork: prioritize currently playing song, fallback to centered song
         let center_artwork_handle: Option<&iced::widget::image::Handle> = if data.is_playing {
