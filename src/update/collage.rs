@@ -134,12 +134,15 @@ impl Nokkvi {
                         &album_ids[0],
                         &server_url,
                         &subsonic_credential,
-                        None, // full res
+                        Some(nokkvi_data::utils::artwork_url::HIGH_RES_SIZE),
                     );
 
                     let (mini_handle, full_res_bytes) = futures::join!(
                         mini_handle_fut,
-                        albums_vm.load_album_artwork_buffer(&full_res_url, None)
+                        albums_vm.load_album_artwork_buffer(
+                            &full_res_url,
+                            Some(nokkvi_data::utils::artwork_url::HIGH_RES_SIZE)
+                        )
                     );
 
                     let mut collage_handles = Vec::new();
@@ -426,7 +429,7 @@ impl Nokkvi {
         if let Some(handle) = handle_opt {
             cache.mini.insert(item_id.clone(), handle);
         }
-        if collage_handles.len() >= 2 {
+        if !collage_handles.is_empty() {
             cache.collage.insert(item_id.clone(), collage_handles);
         }
 
@@ -453,7 +456,7 @@ impl Nokkvi {
             if let Some(handle) = handle_opt {
                 cache.mini.insert(item_id.clone(), handle);
             }
-            if collage_handles.len() >= 2 {
+            if !collage_handles.is_empty() {
                 cache.collage.insert(item_id.clone(), collage_handles);
             }
             if !album_ids.is_empty() {

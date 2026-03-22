@@ -82,16 +82,9 @@ pub(crate) fn check_cache<T: CollageArtworkItem>(
         return CacheCheckResult::AlreadyPending;
     }
 
-    // Skip if both mini and collage already in memory with adequate tile count
-    if ctx.memory_artwork.contains_key(id) {
-        if let Some(handles) = ctx.memory_collage.get(id) {
-            if handles.len() >= 2 {
-                return CacheCheckResult::FullyCached;
-            }
-            // Only 1 handle for a multi-album item — allow retry
-        } else {
-            // No collage at all, but mini exists — will fall through to check disk
-        }
+    // Skip if both mini and collage already in memory
+    if ctx.memory_artwork.contains_key(id) && ctx.memory_collage.contains_key(id) {
+        return CacheCheckResult::FullyCached;
     }
 
     // Try disk cache for mini artwork
