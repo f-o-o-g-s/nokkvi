@@ -6,9 +6,9 @@
 //! - Right: Audio format info + hamburger menu
 
 use iced::{
-    Alignment, Background, Border, Element, Length,
+    Alignment, Background, Border, Color, Element, Length, Point, Rectangle,
     font::{Font, Weight},
-    widget::{Space, button, column, container, mouse_area, row, text, text::Wrapping},
+    widget::{Space, button, canvas, column, container, mouse_area, row, text, text::Wrapping},
 };
 use nokkvi_data::types::player_settings::NavDisplayMode;
 
@@ -157,8 +157,52 @@ fn tab_separator<'a, M: 'a>(force_visible: bool) -> Element<'a, M> {
 
 /// Height of the rounded underline indicator beneath active/hovered tabs
 const UNDERLINE_HEIGHT: f32 = 2.0;
-/// Rounded radius for the underline pill shape
-const UNDERLINE_RADIUS: f32 = 1.0;
+
+/// Canvas program for the bottom-edge underline indicator in topped nav rounded mode.
+/// Expands the cursor detection area upward to cover the button above.
+struct UnderlineIndicator {
+    /// Active indicator color (always shown)
+    indicator_color: Option<Color>,
+    /// Hover indicator color (shown on mouse-over when not active)
+    hover_indicator_color: Option<Color>,
+    /// Expand the cursor detection area upward by this amount
+    expand_hover_up: f32,
+}
+
+impl<Message> canvas::Program<Message> for UnderlineIndicator {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &iced::Renderer,
+        _theme: &iced::Theme,
+        bounds: Rectangle,
+        cursor: iced::mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let show_indicator = self.indicator_color.or_else(|| {
+            let hover_area = Rectangle {
+                x: bounds.x,
+                y: bounds.y - self.expand_hover_up,
+                width: bounds.width,
+                height: bounds.height + self.expand_hover_up,
+            };
+            if cursor.position().is_some_and(|p| hover_area.contains(p)) {
+                self.hover_indicator_color
+            } else {
+                None
+            }
+        });
+
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        if let Some(accent) = show_indicator {
+            // Draw rounded pill shape matching the original container border radius
+            let pill = canvas::Path::rectangle(Point::ORIGIN, bounds.size());
+            frame.fill(&pill, canvas::Fill::from(accent));
+        }
+        vec![frame.into_geometry()]
+    }
+}
 
 /// Build tab content based on display mode (text, icon+text, icon-only).
 ///
@@ -257,9 +301,14 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                 }
             };
 
-            // Underline: accent colored for active tab, transparent for idle
-            let underline_bg = if is_active {
-                Some(rounded_accent.into())
+            // Underline: accent colored for active tab, accent on hover for idle
+            let underline_active = if is_active {
+                Some(rounded_accent)
+            } else {
+                None
+            };
+            let underline_hover = if !is_active {
+                Some(rounded_accent)
             } else {
                 None
             };
@@ -270,17 +319,13 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                     .padding(tab_padding)
                     .height(Length::Fill)
                     .style(tab_style),
-                container(Space::new())
-                    .width(Length::Fill)
-                    .height(Length::Fixed(UNDERLINE_HEIGHT))
-                    .style(move |_: &iced::Theme| container::Style {
-                        background: underline_bg,
-                        border: Border {
-                            radius: UNDERLINE_RADIUS.into(),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    }),
+                canvas(UnderlineIndicator {
+                    indicator_color: underline_active,
+                    hover_indicator_color: underline_hover,
+                    expand_hover_up: 100.0, // Generous expansion to cover the button above
+                })
+                .width(Length::Fill)
+                .height(Length::Fixed(UNDERLINE_HEIGHT)),
             ]
             .spacing(0)
             .width(Length::Shrink)

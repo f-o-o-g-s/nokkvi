@@ -110,12 +110,14 @@ impl<Message> canvas::Program<Message> for RotatedLabel {
 }
 
 /// Canvas program for the right-edge indicator bar in icon-only mode.
-/// Shows the indicator when the cursor is over the bounds (hover) or when active.
+/// Shows the indicator when the cursor is over the expanded hover area or when active.
 struct IconIndicator {
     /// Active indicator color (always shown)
     indicator_color: Option<Color>,
     /// Hover indicator color (shown on mouse-over when not active)
     hover_indicator_color: Option<Color>,
+    /// Expand the cursor detection area leftward by this amount
+    expand_hover_left: f32,
 }
 
 impl<Message> canvas::Program<Message> for IconIndicator {
@@ -130,7 +132,14 @@ impl<Message> canvas::Program<Message> for IconIndicator {
         cursor: iced::mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let show_indicator = self.indicator_color.or_else(|| {
-            if cursor.is_over(bounds) {
+            // Expand the hover detection area to cover the full tab width
+            let hover_area = Rectangle {
+                x: bounds.x - self.expand_hover_left,
+                y: bounds.y,
+                width: bounds.width + self.expand_hover_left,
+                height: bounds.height,
+            };
+            if cursor.position().is_some_and(|p| hover_area.contains(p)) {
                 self.hover_indicator_color
             } else {
                 None
@@ -177,10 +186,11 @@ fn side_nav_tab_content(
                 .align_x(iced::Alignment::Center)
                 .align_y(iced::Alignment::Center);
 
-            // Right-edge indicator bar — canvas-based for cursor hover detection
+            // Right-edge indicator bar — canvas-based with expanded hover detection
             let indicator = canvas(IconIndicator {
                 indicator_color,
                 hover_indicator_color,
+                expand_hover_left: SIDE_NAV_WIDTH - INDICATOR_WIDTH,
             })
             .width(Length::Fixed(INDICATOR_WIDTH))
             .height(Length::Fill);
