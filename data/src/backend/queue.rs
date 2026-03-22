@@ -196,7 +196,7 @@ impl QueueService {
                     cover_art_id,
                     server_url,
                     subsonic_credential,
-                    None,
+                    Some(artwork_url::THUMBNAIL_SIZE),
                 );
                 let duration_str = crate::utils::formatters::format_duration(song.duration);
                 let genre = song.genre.clone().unwrap_or_default();
