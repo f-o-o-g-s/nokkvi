@@ -572,7 +572,7 @@ pub(crate) fn build_visualizer_items(config: &VisualizerConfig) -> Vec<SettingsE
             "visualizer.lines.gradient_mode",
             "Gradient Mode",
             "Lines",
-            "How the line color is determined\nbreathing: time-based cycling through gradient palette\nstatic: uses first gradient color only\nposition: color by horizontal position (bass → treble rainbow)\nheight: color by amplitude (quiet → loud)\ngradient: full palette mapped across the line"
+            "How the line color is determined\nbreathing: time-based cycling through gradient palette\nstatic: uses first gradient color only\nposition: color by horizontal position (bass → treble rainbow)\nheight: color by amplitude (quiet → loud)\ngradient: position + amplitude blend (peaks shift palette)"
         ),
         &config.lines.gradient_mode,
         &d.lines.gradient_mode,

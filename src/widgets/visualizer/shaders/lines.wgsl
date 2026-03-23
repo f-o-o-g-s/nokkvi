@@ -110,13 +110,13 @@ fn get_gradient_color_static() -> vec4<f32> {
 // Position-based gradient: color by horizontal position along the line
 // Left = first gradient color, right = last gradient color (bass → treble rainbow)
 fn get_gradient_color_by_position(normalized_x: f32) -> vec4<f32> {
-    let segments = 5.0;
+    let segments = 7.0;
     let pos = clamp(normalized_x, 0.0, 1.0) * segments;
     let idx = u32(floor(pos));
     let frac = pos - floor(pos);
     
-    if (idx >= 5u) {
-        return uniforms.gradient_colors[5];
+    if (idx >= 7u) {
+        return uniforms.gradient_colors[7];
     }
     
     let c1 = uniforms.gradient_colors[idx];
@@ -127,13 +127,13 @@ fn get_gradient_color_by_position(normalized_x: f32) -> vec4<f32> {
 
 // Height-based gradient: color by amplitude (quiet = bottom colors, loud = top colors)
 fn get_gradient_color_by_height(amplitude: f32) -> vec4<f32> {
-    let segments = 5.0;
+    let segments = 7.0;
     let pos = clamp(amplitude, 0.0, 1.0) * segments;
     let idx = u32(floor(pos));
     let frac = pos - floor(pos);
     
-    if (idx >= 5u) {
-        return uniforms.gradient_colors[5];
+    if (idx >= 7u) {
+        return uniforms.gradient_colors[7];
     }
     
     let c1 = uniforms.gradient_colors[idx];
@@ -142,10 +142,14 @@ fn get_gradient_color_by_height(amplitude: f32) -> vec4<f32> {
     return mix(c1, c2, frac);
 }
 
-// Gradient mode: full 8-color palette mapped across the line by horizontal position
-fn get_gradient_color_full_palette(normalized_x: f32) -> vec4<f32> {
+// Wave gradient: blends horizontal position and amplitude for a 2D color field.
+// Peaks shift colors further along the palette, creating a music-reactive rainbow.
+fn get_gradient_color_wave(normalized_x: f32, amplitude: f32) -> vec4<f32> {
+    // Base color from position (0.0-0.5 of palette range)
+    // Amplitude pushes further along the palette (0.0-0.5 extra)
+    let blended = clamp(normalized_x * 0.5 + amplitude * 0.5, 0.0, 1.0);
     let segments = 7.0;
-    let pos = clamp(normalized_x, 0.0, 1.0) * segments;
+    let pos = blended * segments;
     let idx = u32(floor(pos));
     let frac = pos - floor(pos);
     
@@ -170,7 +174,7 @@ fn get_lines_gradient_color(time: f32, normalized_x: f32, amplitude: f32) -> vec
     } else if (mode == 3u) {
         return get_gradient_color_by_height(amplitude);
     } else if (mode == 4u) {
-        return get_gradient_color_full_palette(normalized_x);
+        return get_gradient_color_wave(normalized_x, amplitude);
     }
     // Default: breathing (mode 0)
     return get_gradient_color_animated(time);
