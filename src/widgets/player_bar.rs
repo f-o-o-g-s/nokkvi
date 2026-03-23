@@ -7,7 +7,7 @@ use iced::{
     Alignment, Element, Length, Theme,
     font::{Font, Weight},
     mouse::ScrollDelta,
-    widget::{column, container, mouse_area, row, space, text, tooltip},
+    widget::{column, container, mouse_area, row, text, tooltip},
 };
 
 use crate::{
@@ -275,26 +275,39 @@ pub(crate) fn player_bar<'a>(
         && crate::theme::track_info_display()
             == nokkvi_data::types::player_settings::TrackInfoDisplay::ProgressTrack
     {
-        let mut meta = String::from("title: ");
-        meta.push_str(&data.track_title);
-        if !data.track_artist.is_empty() {
-            meta.push_str(" · artist: ");
+        let mut meta = String::new();
+        if crate::theme::strip_show_title() {
+            meta.push_str("title: ");
+            meta.push_str(&data.track_title);
+        }
+        if !data.track_artist.is_empty() && crate::theme::strip_show_artist() {
+            if !meta.is_empty() {
+                meta.push_str(" · ");
+            }
+            meta.push_str("artist: ");
             meta.push_str(&data.track_artist);
         }
-        if !data.track_album.is_empty() {
-            meta.push_str(" · album: ");
+        if !data.track_album.is_empty() && crate::theme::strip_show_album() {
+            if !meta.is_empty() {
+                meta.push_str(" · ");
+            }
+            meta.push_str("album: ");
             meta.push_str(&data.track_album);
         }
-        meta_overlay = Some(meta);
+        if !meta.is_empty() {
+            meta_overlay = Some(meta);
+        }
 
-        if let Some((left, right)) = super::format_info::format_audio_info_split(
-            &data.format_suffix,
-            data.sample_rate as f32 / 1000.0,
-            data.bitrate,
-        ) {
-            format_info_left = left;
-            if let Some(r) = right {
-                format_info_right = r;
+        if crate::theme::strip_show_format_info() {
+            if let Some((left, right)) = super::format_info::format_audio_info_split(
+                &data.format_suffix,
+                data.sample_rate as f32 / 1000.0,
+                data.bitrate,
+            ) {
+                format_info_left = left;
+                if let Some(r) = right {
+                    format_info_right = r;
+                }
             }
         }
     }

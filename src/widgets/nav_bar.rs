@@ -358,12 +358,26 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         left_section = left_section.push(tab_separator(true));
     }
 
+    // Only show nav bar metadata when the display mode targets the top/nav bar.
+    // Off and ProgressTrack modes shouldn't show metadata here.
+    let show_nav_metadata = {
+        use nokkvi_data::types::player_settings::TrackInfoDisplay;
+        let mode = theme::track_info_display();
+        mode == TrackInfoDisplay::TopBar
+            || (!is_side_nav && mode == TrackInfoDisplay::PlayerBar)
+    };
+
     // Responsive visibility flags — fields collapse progressively.
     // AND with the user's settings toggles so fields are hidden either by
     // narrow window OR by user preference.
-    let show_title = data.window_width >= BREAKPOINT_SHOW_TITLE && theme::strip_show_title();
-    let show_artist = data.window_width >= BREAKPOINT_SHOW_ARTIST && theme::strip_show_artist();
-    let show_album = data.window_width >= BREAKPOINT_SHOW_ALBUM && theme::strip_show_album();
+    let show_title =
+        show_nav_metadata && data.window_width >= BREAKPOINT_SHOW_TITLE && theme::strip_show_title();
+    let show_artist = show_nav_metadata
+        && data.window_width >= BREAKPOINT_SHOW_ARTIST
+        && theme::strip_show_artist();
+    let show_album = show_nav_metadata
+        && data.window_width >= BREAKPOINT_SHOW_ALBUM
+        && theme::strip_show_album();
 
     // Helper: labeled field (dimmed label: + scrolling value) — delegates to shared helper
     let info_field = |label: &'static str,
@@ -470,7 +484,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // Format Info (independent of metadata — stays visible at narrow widths)
     // -------------------------------------------------------------------------
     let format_section: Element<'static, NavBarMessage> =
-        if is_playing && theme::strip_show_format_info() {
+        if is_playing && show_nav_metadata && theme::strip_show_format_info() {
             let format_split = super::format_info::format_audio_info_split(
                 &data.format_suffix,
                 data.sample_rate_khz,
