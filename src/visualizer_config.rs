@@ -243,6 +243,7 @@ pub struct BarsConfig {
     /// - "fade": Hold, then fade out in place (opacity decreases)
     /// - "fall": Hold, then fall at constant speed
     /// - "fall_accel": Hold, then fall with gravity acceleration
+    /// - "fall_fade": Hold, then fall at constant speed while simultaneously fading out
     ///   Default: "fall"
     pub peak_mode: String,
 
@@ -352,13 +353,14 @@ impl BarsConfig {
         }
     }
 
-    /// Get the peak behavior mode as u32 for shader (0=none, 1=fade, 2=fall, 3=fall_accel)
+    /// Get the peak behavior mode as u32 for shader (0=none, 1=fade, 2=fall, 3=fall_accel, 4=fall_fade)
     pub fn get_peak_mode_value(&self) -> u32 {
         match self.peak_mode.to_lowercase().as_str() {
             "none" => 0,
             "fade" => 1,
             "fall" => 2,
             "fall_accel" => 3,
+            "fall_fade" => 4,
             _ => 2, // Default to fall mode
         }
     }

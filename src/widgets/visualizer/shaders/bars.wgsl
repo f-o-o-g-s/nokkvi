@@ -35,7 +35,7 @@ struct Config {
     border_opacity: f32,      // 0.0 = transparent, 1.0 = opaque (border opacity in non-LED mode)
     gradient_mode: u32,          // 0 = static, 2 = wave, 3 = shimmer, 4 = energy
     peak_gradient_mode: u32,  // 0=static, 1=cycle, 2=height, 3=match
-    peak_mode: u32,           // 0=none, 1=fade, 2=fall, 3=fall_accel
+    peak_mode: u32,           // 0=none, 1=fade, 2=fall, 3=fall_accel, 4=fall_fade
     peak_hold_time: f32,      // Time in seconds for peak to hold
     peak_fade_time: f32,      // Time in seconds for peak to fade (fade mode)
     flash_count: u32,         // Number of bars (for bounds checking)
@@ -882,7 +882,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         );
     }
     
-    if (uniforms.config.peak_mode == 1u) {
+    if (uniforms.config.peak_mode == 1u || uniforms.config.peak_mode == 4u) {
         final_color.a = final_color.a * input.peak_alpha;
     }
     // Apply global opacity

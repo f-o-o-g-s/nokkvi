@@ -592,7 +592,7 @@ impl VisualizerState {
                                     display.peak_bars[i] =
                                         if new_peak <= 0.0 { 0.0 } else { new_peak };
                                 }
-                                _ => {
+                                3 => {
                                     // Fall_accel mode
                                     let new_peak = display.peak_bars[i] - peaks.velocities[i];
                                     let new_velocity =
@@ -603,6 +603,18 @@ impl VisualizerState {
                                     } else {
                                         display.peak_bars[i] = new_peak;
                                         peaks.velocities[i] = new_velocity;
+                                    }
+                                }
+                                _ => {
+                                    // Fall_fade mode: fall at constant speed + fade opacity
+                                    let new_peak = display.peak_bars[i] - peak_constant_velocity;
+                                    display.peak_alphas[i] =
+                                        (display.peak_alphas[i] - fade_rate_per_frame).max(0.0);
+                                    if new_peak <= 0.0 || display.peak_alphas[i] <= 0.0 {
+                                        display.peak_bars[i] = 0.0;
+                                        display.peak_alphas[i] = 0.0;
+                                    } else {
+                                        display.peak_bars[i] = new_peak;
                                     }
                                 }
                             }
@@ -835,7 +847,7 @@ impl VisualizerState {
                         let new_peak = display.peak_bars[i] - peak_constant_velocity;
                         display.peak_bars[i] = if new_peak <= 0.0 { 0.0 } else { new_peak };
                     }
-                    _ => {
+                    3 => {
                         let new_peak = display.peak_bars[i] - peaks.velocities[i];
                         let new_velocity = peaks.velocities[i] * peak_falloff_multiplier;
                         if new_peak <= 0.0 {
@@ -844,6 +856,17 @@ impl VisualizerState {
                         } else {
                             display.peak_bars[i] = new_peak;
                             peaks.velocities[i] = new_velocity;
+                        }
+                    }
+                    _ => {
+                        // Fall_fade mode: fall at constant speed + fade opacity
+                        let new_peak = display.peak_bars[i] - peak_constant_velocity;
+                        display.peak_alphas[i] = (display.peak_alphas[i] - fade_rate).max(0.0);
+                        if new_peak <= 0.0 || display.peak_alphas[i] <= 0.0 {
+                            display.peak_bars[i] = 0.0;
+                            display.peak_alphas[i] = 0.0;
+                        } else {
+                            display.peak_bars[i] = new_peak;
                         }
                     }
                 }

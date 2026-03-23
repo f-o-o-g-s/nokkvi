@@ -41,7 +41,7 @@ pub(crate) struct VisualizerConfig {
     pub border_opacity: f32,     // 0.0 = transparent, 1.0 = opaque (border opacity in non-LED mode)
     pub gradient_mode: u32,      // 0 = static, 2 = wave, 3 = shimmer, 4 = energy, 5 = alternate
     pub peak_gradient_mode: u32, // 0=static, 1=cycle, 2=height, 3=match
-    pub peak_mode: u32,          // 0=none, 1=fade, 2=fall, 3=fall_accel
+    pub peak_mode: u32,          // 0=none, 1=fade, 2=fall, 3=fall_accel, 4=fall_fade
     pub peak_hold_time: f32,     // Time in seconds for peak to hold
     pub peak_fade_time: f32,     // Time in seconds for peak to fade (fade mode only)
     pub flash_count: u32,        // Number of bars (for flash data bounds checking)
@@ -126,7 +126,7 @@ pub(crate) struct ShaderParams {
     pub gradient_mode: u32,
     /// Peak gradient mode: 0=static, 1=cycle, 2=height, 3=match
     pub peak_gradient_mode: u32,
-    /// Peak behavior mode: 0=none, 1=fade, 2=fall, 3=fall_accel
+    /// Peak behavior mode: 0=none, 1=fade, 2=fall, 3=fall_accel, 4=fall_fade
     pub peak_mode: u32,
     /// Time in seconds for peaks to hold before falling/fading
     pub peak_hold_time: f32,

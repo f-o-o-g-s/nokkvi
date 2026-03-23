@@ -287,11 +287,11 @@ pub(crate) fn build_visualizer_items(config: &VisualizerConfig) -> Vec<SettingsE
             "visualizer.bars.peak_mode",
             "Peak Mode",
             "Bars",
-            "Behavior of peak indicators after holding\nnone: peak bars disabled\nfade: hold, then fade out in place (opacity decreases)\nfall: hold, then fall at constant speed\nfall_accel: hold, then fall with gravity acceleration"
+            "none: peak bars disabled\nfade: hold, then fade out in place (opacity decreases)\nfall: hold, then fall at constant speed\nfall_accel: hold, then fall with gravity acceleration\nfall_fade: hold, then fall at constant speed while fading out"
         ),
         &config.bars.peak_mode,
         &d.bars.peak_mode,
-        vec!["none", "fade", "fall", "fall_accel"],
+        vec!["none", "fade", "fall", "fall_accel", "fall_fade"],
     ));
     e.push(SettingItem::int(
         meta!(

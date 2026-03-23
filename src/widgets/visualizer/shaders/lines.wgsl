@@ -36,7 +36,7 @@ struct Config {
     border_opacity: f32,      // Border opacity in non-LED mode (not used in lines mode)
     gradient_mode: u32,       // 0 = static gradient, 1 = breathing animation
     peak_gradient_mode: u32,  // 0=static, 1=cycle, 2=height, 3=match (not used in lines mode)
-    peak_mode: u32,           // 0=none, 1=fade, 2=fall, 3=fall_accel (not used in lines mode)
+    peak_mode: u32,           // 0=none, 1=fade, 2=fall, 3=fall_accel, 4=fall_fade (not used in lines mode)
     peak_hold_time: f32,      // Time in seconds for peak to hold (not used in lines mode)
     peak_fade_time: f32,      // Time in seconds for peak to fade (not used in lines mode)
     flash_count: u32,         // Number of bars (not used in lines mode)
