@@ -561,7 +561,7 @@ impl Nokkvi {
                         shell.settings().set_track_info_display(mode).await
                     });
                 }
-                Task::none()
+                Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
             }
             "general.slot_row_height" => {
                 if let crate::views::settings::items::SettingValue::Enum { ref val, .. } = value {
