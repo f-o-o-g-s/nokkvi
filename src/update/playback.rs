@@ -482,14 +482,20 @@ impl Nokkvi {
         }
 
         // Nothing loaded — cold start. Use the same path as Enter-key:
-        // play_song_from_queue() with the current (or first) queue item.
+        // play_song_from_queue() with the selected (or first) queue item.
         // This ensures all metadata, artwork, and navigator wiring fires correctly.
-        let first_song = self.library.queue_songs.first().map(|s| {
+        let selected_index = self
+            .queue_page
+            .common
+            .slot_list
+            .get_center_item_index(self.library.queue_songs.len())
+            .unwrap_or(0);
+        let selected_song = self.library.queue_songs.get(selected_index).map(|s| {
             let queue_index = s.track_number as usize - 1;
             (s.id.clone(), queue_index)
         });
 
-        if let Some((song_id, queue_index)) = first_song {
+        if let Some((song_id, queue_index)) = selected_song {
             // Optimistic UI update
             self.playback.playing = true;
             self.playback.paused = false;
