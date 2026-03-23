@@ -23,16 +23,20 @@ globs: src/widgets/**
 
 ## Player Bar (`player_bar.rs`)
 
-- Responsive element culling at breakpoints: 1000px → 520px
+- Responsive element culling at breakpoints: format info (1000px) → visualizer (920px) → SFX slider (840px) → consume (680px) → shuffle (600px) → repeat (520px)
 - Transport controls always visible
 - **Scroll-to-volume**: mouse wheel anywhere on the player bar adjusts volume
 - **Horizontal volume mode**: `horizontal_volume` setting stacks volume sliders horizontally; both SFX and main volume sliders' combined height matches adjacent button height when both visible
+- **Progress Track metadata mode**: when `TrackInfoDisplay::ProgressTrack` is active, builds scrolling metadata overlay and format info container next to the progress bar. Gated by `strip_show_*` toggles.
+- **Format info container**: shows codec + sample rate / bitrate stacked vertically, styled with inset border. Collapses first at responsive breakpoints.
 - `GoToQueue` message — used by track info strip to navigate to queue view
 
 ## Progress Bar (`progress_bar.rs`)
 
 - Custom `iced::advanced` seekable progress/scrub bar widget
 - Click-to-seek with smooth visual feedback
+- **Overlay text**: optional scrolling metadata text rendered inside the progress bar track. Built during `layout()` as a `Plain` paragraph, animated in `draw()` with ring-buffer scroll (2s initial pause, 30px/s, 80px loop gap). Text fits → centered; overflows → scrolls.
+- **Handle layering**: handle + grip rendered in a separate `with_layer()` call so they draw ON TOP of overlay text
 
 ## Volume Slider (`volume_slider.rs`)
 
@@ -70,7 +74,7 @@ globs: src/widgets/**
 
 - Shared widget rendering now-playing metadata (title, artist, album, codec, kHz, kbps)
 - Used by both the player bar and the top bar (side nav only)
-- Controlled by `TrackInfoDisplay` setting (Off / PlayerBar / TopBar)
+- Controlled by `TrackInfoDisplay` setting (Off / PlayerBar / TopBar / ProgressTrack)
 - **Clickable center metadata**: title/artist/album wrapped in `mouse_area` with optional `on_press` — navigates to queue view. Codec/sample-rate and bitrate sections remain non-clickable.
 - **Right-click context menu**: strip wrapped in `context_menu()` with `StripContextEntry` actions (GoToQueue, GoToAlbum, GoToArtist, CopyTrackInfo, ToggleStar, ShowInFolder)
 - **`info_field_widget()`**: shared helper for labeled scrolling metadata fields — single source of truth
@@ -104,6 +108,7 @@ globs: src/widgets/**
 
 - Top-bar navigation: view tabs + audio format stats (kHz, bitrate) + hamburger menu
 - Stats display live values from audio engine via atomics
+- **Metadata gating**: center track info and format info sections only render when `TrackInfoDisplay` targets the nav bar (`TopBar` mode, or `PlayerBar` in top nav layout). `Off` and `ProgressTrack` modes hide all metadata.
 - **Clickable info row**: metadata area wrapped in `mouse_area` — navigates to queue view
 - **Hover underlines**: tab hover effects in rounded mode via `HoverIndicator` canvas
 - **Progressive metadata collapsing**: items collapse individually as window narrows — album <900px, artist <750px, title <600px

@@ -66,9 +66,11 @@ views/settings/
 
 2 sections persisted to redb via `SettingsManager`: **Layout** (nav layout, nav display, track info display, row density, horizontal volume controls), **Metadata Strip** (visible fields as `ToggleSet`, click action enum).
 
+`TrackInfoDisplay` enum: `Off | Player Bar | Top Bar | Progress Track`. The `ProgressTrack` variant shows scrolling metadata overlay + format info container on the progress bar track instead of a separate strip. These four modes are **mutually exclusive**.
+
 `slot_row_height` is a `SlotRowHeight` enum (Compact/Default/Comfortable/Spacious) — not a numeric slider. Each variant maps to a fixed pixel height (50/70/90/110px).
 
-Strip visibility toggles and click action use theme atomics for immediate UI response. `ToggleSetToggle` message flips the cached entry and emits `WriteGeneralSetting` with the individual field's key.
+Strip visibility toggles (`strip_show_title`, `strip_show_artist`, `strip_show_album`, `strip_show_format_info`) and click action use theme atomics for immediate UI response. **These toggles affect both the metadata strip AND the progress track overlay** — toggling off a field hides it from whichever display mode is active. `ToggleSetToggle` message flips the cached entry and emits `WriteGeneralSetting` with the individual field's key.
 
 ## Playback Tab
 
