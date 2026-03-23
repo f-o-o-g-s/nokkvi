@@ -266,8 +266,9 @@ pub(crate) fn player_bar<'a>(
     let position = data.playback_position as f32;
 
     // Build metadata for scrolling overlay on the progress bar track
-    // Include labels like the metadata strip: "title: X · artist: Y · album: Z"
-    let mut meta_overlay: Option<String> = None;
+    // Colored segments matching the track info strip: title/artist/album each get their own color
+    use super::progress_bar::OverlaySegment;
+    let mut meta_segments: Vec<OverlaySegment> = Vec::new();
     let mut format_info_left = String::new();
     let mut format_info_right = String::new();
 
@@ -275,39 +276,60 @@ pub(crate) fn player_bar<'a>(
         && crate::theme::track_info_display()
             == nokkvi_data::types::player_settings::TrackInfoDisplay::ProgressTrack
     {
-        let mut meta = String::new();
+        let label_color = theme::fg4();
         if crate::theme::strip_show_title() {
-            meta.push_str("title: ");
-            meta.push_str(&data.track_title);
+            meta_segments.push(OverlaySegment {
+                text: "title: ".to_string(),
+                color: label_color,
+            });
+            meta_segments.push(OverlaySegment {
+                text: data.track_title.clone(),
+                color: theme::now_playing_color(),
+            });
         }
         if !data.track_artist.is_empty() && crate::theme::strip_show_artist() {
-            if !meta.is_empty() {
-                meta.push_str(" · ");
+            if !meta_segments.is_empty() {
+                meta_segments.push(OverlaySegment {
+                    text: " · ".to_string(),
+                    color: label_color,
+                });
             }
-            meta.push_str("artist: ");
-            meta.push_str(&data.track_artist);
+            meta_segments.push(OverlaySegment {
+                text: "artist: ".to_string(),
+                color: label_color,
+            });
+            meta_segments.push(OverlaySegment {
+                text: data.track_artist.clone(),
+                color: theme::selected_color(),
+            });
         }
         if !data.track_album.is_empty() && crate::theme::strip_show_album() {
-            if !meta.is_empty() {
-                meta.push_str(" · ");
+            if !meta_segments.is_empty() {
+                meta_segments.push(OverlaySegment {
+                    text: " · ".to_string(),
+                    color: label_color,
+                });
             }
-            meta.push_str("album: ");
-            meta.push_str(&data.track_album);
-        }
-        if !meta.is_empty() {
-            meta_overlay = Some(meta);
+            meta_segments.push(OverlaySegment {
+                text: "album: ".to_string(),
+                color: label_color,
+            });
+            meta_segments.push(OverlaySegment {
+                text: data.track_album.clone(),
+                color: theme::fg2(),
+            });
         }
 
-        if crate::theme::strip_show_format_info() {
-            if let Some((left, right)) = super::format_info::format_audio_info_split(
+        if crate::theme::strip_show_format_info()
+            && let Some((left, right)) = super::format_info::format_audio_info_split(
                 &data.format_suffix,
                 data.sample_rate as f32 / 1000.0,
                 data.bitrate,
-            ) {
-                format_info_left = left;
-                if let Some(r) = right {
-                    format_info_right = r;
-                }
+            )
+        {
+            format_info_left = left;
+            if let Some(r) = right {
+                format_info_right = r;
             }
         }
     }
@@ -317,8 +339,8 @@ pub(crate) fn player_bar<'a>(
             .is_playing(data.playback_playing && !data.playback_paused)
             .width(Length::Fill)
             .height(24.0);
-    if let Some(meta) = meta_overlay {
-        custom_progress_bar = custom_progress_bar.overlay_text(meta);
+    if !meta_segments.is_empty() {
+        custom_progress_bar = custom_progress_bar.overlay_segments(meta_segments);
     }
 
     let mut progress_items: Vec<Element<'_, PlayerBarMessage>> = vec![
@@ -360,34 +382,30 @@ pub(crate) fn player_bar<'a>(
                     .into(),
             );
         }
-        let format_col = container(
-            column(col_items)
-                .align_x(Alignment::Center)
-                .spacing(0),
-        )
-        .style(|_: &Theme| {
-            let (inset_tl, _) = theme::border_3d_inset();
-            container::Style {
-                background: Some(theme::bg1().into()),
-                border: iced::Border {
-                    color: inset_tl,
-                    width: 1.0,
-                    radius: theme::ui_border_radius(),
-                },
-                ..Default::default()
-            }
-        })
-        .padding([0, 6])
-        .center_y(BUTTON_SIZE)
-        .align_x(Alignment::Center);
+        let format_col = container(column(col_items).align_x(Alignment::Center).spacing(0))
+            .style(|_: &Theme| {
+                let (inset_tl, _) = theme::border_3d_inset();
+                container::Style {
+                    background: Some(theme::bg1().into()),
+                    border: iced::Border {
+                        color: inset_tl,
+                        width: 1.0,
+                        radius: theme::ui_border_radius(),
+                    },
+                    ..Default::default()
+                }
+            })
+            .padding([0, 6])
+            .center_y(BUTTON_SIZE)
+            .align_x(Alignment::Center);
         progress_items.push(format_col.into());
     }
 
     let progress_row = row(progress_items)
-    .spacing(8)
-    .align_y(Alignment::Center)
-    .height(Length::Fixed(CONTROL_ROW_HEIGHT))
-    .width(Length::Fill);
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .height(Length::Fixed(CONTROL_ROW_HEIGHT))
+        .width(Length::Fill);
 
     // Mode toggle buttons with SVG icons
     let is_random_mode = data.is_random_mode;
@@ -635,15 +653,10 @@ pub(crate) fn player_bar<'a>(
         // Info strip below: pre-built by the caller
 
         // Main row: controls + progress + toggles + volume
-        let main_row = row![
-            player_controls,
-            progress_row,
-            mode_toggles,
-            volume_control,
-        ]
-        .spacing(4)
-        .padding([4, 8])
-        .align_y(Alignment::Center);
+        let main_row = row![player_controls, progress_row, mode_toggles, volume_control,]
+            .spacing(4)
+            .padding([4, 8])
+            .align_y(Alignment::Center);
 
         column![
             container(main_row)
@@ -655,15 +668,10 @@ pub(crate) fn player_bar<'a>(
         .into()
     } else {
         // --- NORMAL MODE (unchanged) ---
-        row![
-            player_controls,
-            progress_row,
-            mode_toggles,
-            volume_control,
-        ]
-        .spacing(4)
-        .padding([4, 8])
-        .into()
+        row![player_controls, progress_row, mode_toggles, volume_control,]
+            .spacing(4)
+            .padding([4, 8])
+            .into()
     };
 
     // Top separator: always visible (2px, bg1), matching nav bar / settings separator style.

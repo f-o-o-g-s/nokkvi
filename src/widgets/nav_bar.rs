@@ -316,7 +316,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                     .style(tab_style),
             )
             .border_radius(theme::ui_border_radius())
-                .into()
+            .into()
         }
     };
 
@@ -363,15 +363,15 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     let show_nav_metadata = {
         use nokkvi_data::types::player_settings::TrackInfoDisplay;
         let mode = theme::track_info_display();
-        mode == TrackInfoDisplay::TopBar
-            || (!is_side_nav && mode == TrackInfoDisplay::PlayerBar)
+        mode == TrackInfoDisplay::TopBar || (!is_side_nav && mode == TrackInfoDisplay::PlayerBar)
     };
 
     // Responsive visibility flags — fields collapse progressively.
     // AND with the user's settings toggles so fields are hidden either by
     // narrow window OR by user preference.
-    let show_title =
-        show_nav_metadata && data.window_width >= BREAKPOINT_SHOW_TITLE && theme::strip_show_title();
+    let show_title = show_nav_metadata
+        && data.window_width >= BREAKPOINT_SHOW_TITLE
+        && theme::strip_show_title();
     let show_artist = show_nav_metadata
         && data.window_width >= BREAKPOINT_SHOW_ARTIST
         && theme::strip_show_artist();
