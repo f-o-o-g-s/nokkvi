@@ -47,7 +47,7 @@ struct Config {
     lines_outline_thickness: f32,  // Outline width in pixels (0.0 = disabled)
     lines_outline_opacity: f32,    // Outline alpha (0.0-1.0)
     lines_animation_speed: f32,    // Color cycling speed (0.05-1.0)
-    lines_gradient_mode: u32,      // 0=breathing, 1=static, 2=position, 3=height
+    lines_gradient_mode: u32,      // 0=breathing, 1=static, 2=position, 3=height, 4=gradient
     lines_fill_opacity: f32,       // Fill under curve (0.0 = disabled)
     lines_mirror: u32,             // 0=normal, 1=mirrored
     lines_glow_intensity: f32,     // Glow bloom (0.0 = disabled)
@@ -142,8 +142,25 @@ fn get_gradient_color_by_height(amplitude: f32) -> vec4<f32> {
     return mix(c1, c2, frac);
 }
 
+// Gradient mode: full 8-color palette mapped across the line by horizontal position
+fn get_gradient_color_full_palette(normalized_x: f32) -> vec4<f32> {
+    let segments = 7.0;
+    let pos = clamp(normalized_x, 0.0, 1.0) * segments;
+    let idx = u32(floor(pos));
+    let frac = pos - floor(pos);
+    
+    if (idx >= 7u) {
+        return uniforms.gradient_colors[7];
+    }
+    
+    let c1 = uniforms.gradient_colors[idx];
+    let c2 = uniforms.gradient_colors[idx + 1u];
+    
+    return mix(c1, c2, frac);
+}
+
 // Dispatch to the correct gradient function based on lines_gradient_mode
-// mode: 0=breathing, 1=static, 2=position, 3=height
+// mode: 0=breathing, 1=static, 2=position, 3=height, 4=gradient
 fn get_lines_gradient_color(time: f32, normalized_x: f32, amplitude: f32) -> vec4<f32> {
     let mode = uniforms.config.lines_gradient_mode;
     if (mode == 1u) {
@@ -152,6 +169,8 @@ fn get_lines_gradient_color(time: f32, normalized_x: f32, amplitude: f32) -> vec
         return get_gradient_color_by_position(normalized_x);
     } else if (mode == 3u) {
         return get_gradient_color_by_height(amplitude);
+    } else if (mode == 4u) {
+        return get_gradient_color_full_palette(normalized_x);
     }
     // Default: breathing (mode 0)
     return get_gradient_color_animated(time);

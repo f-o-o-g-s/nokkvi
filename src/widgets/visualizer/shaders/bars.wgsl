@@ -46,7 +46,7 @@ struct Config {
     lines_outline_thickness: f32,  // Lines mode only: outline width in pixels
     lines_outline_opacity: f32,    // Lines mode only: outline alpha (0.0-1.0)
     lines_animation_speed: f32,    // Lines mode only: color cycling speed
-    lines_gradient_mode: u32,      // Lines mode only: 0=breathing, 1=static, 2=position, 3=height
+    lines_gradient_mode: u32,      // Lines mode only: 0=breathing, 1=static, 2=position, 3=height, 4=gradient
     lines_fill_opacity: f32,       // Lines mode only: fill under curve (0.0 = disabled)
     lines_mirror: u32,             // Lines mode only: 0=normal, 1=mirrored
     lines_glow_intensity: f32,     // Lines mode only: glow bloom (0.0 = disabled)

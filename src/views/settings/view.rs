@@ -17,7 +17,7 @@ use super::{
 use crate::{embedded_svg, theme, widgets::slot_list};
 
 /// Height of the description area at the bottom of the panel
-const DESCRIPTION_HEIGHT: f32 = 48.0;
+const DESCRIPTION_HEIGHT: f32 = 72.0;
 
 /// SM-style panel container: bg0_soft interior + bg1 border.
 /// Replaces `slot_list_background_container` for the settings-only panel look.

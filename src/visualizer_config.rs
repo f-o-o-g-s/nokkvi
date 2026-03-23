@@ -420,13 +420,14 @@ impl Default for LinesConfig {
 }
 
 impl LinesConfig {
-    /// Get the gradient mode as u32 for shader (0=breathing, 1=static, 2=position, 3=height)
+    /// Get the gradient mode as u32 for shader (0=breathing, 1=static, 2=position, 3=height, 4=gradient)
     pub fn get_gradient_mode_value(&self) -> u32 {
         match self.gradient_mode.to_lowercase().as_str() {
             "breathing" => 0,
             "static" => 1,
             "position" => 2,
             "height" => 3,
+            "gradient" => 4,
             _ => 0, // Default to breathing
         }
     }
