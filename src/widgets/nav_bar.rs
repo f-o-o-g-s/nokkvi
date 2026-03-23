@@ -96,33 +96,31 @@ pub(crate) const NAV_TABS: &[(&str, &str, NavView)] = &[
     ("Playlists", "assets/icons/list.svg", NavView::Playlists),
 ];
 
-/// Flat-mode tab button style (filled accent background when active, bg2 hover).
+/// Flat-mode tab button style (filled accent background when active, bg0_hard idle).
+///
+/// Hover feedback is handled by `HoverOverlay` at the call site — this style
+/// only distinguishes active (accent) vs idle (bg0_hard).
 ///
 /// Shared between the horizontal nav bar and the vertical side nav bar.
 pub(crate) fn flat_tab_style(
     is_active: bool,
 ) -> impl Fn(&iced::Theme, button::Status) -> button::Style {
-    move |_theme: &iced::Theme, status: button::Status| {
-        let is_hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-        button::Style {
-            background: if is_active {
-                Some(Background::Color(theme::accent_bright()))
-            } else if is_hovered {
-                Some(Background::Color(theme::bg2()))
-            } else {
-                Some(Background::Color(theme::bg0_hard()))
-            },
-            text_color: if is_active {
-                theme::bg0()
-            } else {
-                theme::fg2()
-            },
-            border: Border {
-                radius: theme::ui_border_radius(),
-                ..Default::default()
-            },
-            ..button::Style::default()
-        }
+    move |_theme: &iced::Theme, _status: button::Status| button::Style {
+        background: if is_active {
+            Some(Background::Color(theme::accent_bright()))
+        } else {
+            Some(Background::Color(theme::bg0_hard()))
+        },
+        text_color: if is_active {
+            theme::bg0()
+        } else {
+            theme::fg2()
+        },
+        border: Border {
+            radius: theme::ui_border_radius(),
+            ..Default::default()
+        },
+        ..button::Style::default()
     }
 }
 
@@ -310,11 +308,14 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                 theme::fg2()
             };
 
-            button(tab_content(label, icon_path, display_mode, text_color))
-                .on_press(NavBarMessage::SwitchView(view))
-                .padding(tab_padding)
-                .height(Length::Fill)
-                .style(tab_style)
+            super::hover_overlay::HoverOverlay::new(
+                button(tab_content(label, icon_path, display_mode, text_color))
+                    .on_press(NavBarMessage::SwitchView(view))
+                    .padding(tab_padding)
+                    .height(Length::Fill)
+                    .style(tab_style),
+            )
+            .border_radius(theme::ui_border_radius())
                 .into()
         }
     };
@@ -512,17 +513,19 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // -------------------------------------------------------------------------
     // Hamburger Menu (far right)
     // -------------------------------------------------------------------------
-    let hamburger: Element<'static, NavBarMessage> = HamburgerMenu::new(
-        |action| match action {
-            MenuAction::ToggleLightMode => NavBarMessage::ToggleLightMode,
-            MenuAction::ToggleSoundEffects => NavBarMessage::ToggleSoundEffects,
-            MenuAction::OpenSettings => NavBarMessage::OpenSettings,
-            MenuAction::Quit => NavBarMessage::Quit,
-        },
-        data.is_light_mode,
-        data.sound_effects_enabled,
-    )
-    .into();
+    let hamburger: Element<'static, NavBarMessage> =
+        super::hover_overlay::HoverOverlay::new(HamburgerMenu::new(
+            |action| match action {
+                MenuAction::ToggleLightMode => NavBarMessage::ToggleLightMode,
+                MenuAction::ToggleSoundEffects => NavBarMessage::ToggleSoundEffects,
+                MenuAction::OpenSettings => NavBarMessage::OpenSettings,
+                MenuAction::Quit => NavBarMessage::Quit,
+            },
+            data.is_light_mode,
+            data.sound_effects_enabled,
+        ))
+        .border_radius(theme::ui_border_radius())
+        .into();
 
     // -------------------------------------------------------------------------
     // Assemble Layout: Tabs | Track Info | Format Info | Hamburger

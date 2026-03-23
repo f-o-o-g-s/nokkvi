@@ -4,7 +4,7 @@
 //! Each button uses a canvas widget with rotated text (-90°, reading bottom-to-top).
 //! Styling matches the horizontal nav_bar exactly:
 //!   - Rounded mode: accent text for active, accent right-edge indicator, fg1 on hover
-//!   - Flat mode: filled accent_bright background for active, bg2 on hover
+//!   - Flat mode: filled accent_bright background for active, HoverOverlay on hover
 //!
 //! Emits the same `NavBarMessage` variants as the horizontal nav bar.
 
@@ -249,13 +249,16 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
             hover_indicator_color,
         );
 
-        button(content)
-            .on_press(NavBarMessage::SwitchView(view))
-            .padding(0)
-            .width(Length::Fixed(SIDE_NAV_WIDTH))
-            .height(Length::Fixed(tab_height))
-            .style(tab_style)
-            .into()
+        super::hover_overlay::HoverOverlay::new(
+            button(content)
+                .on_press(NavBarMessage::SwitchView(view))
+                .padding(0)
+                .width(Length::Fixed(SIDE_NAV_WIDTH))
+                .height(Length::Fixed(tab_height))
+                .style(tab_style),
+        )
+        .border_radius(theme::ui_border_radius())
+        .into()
     };
 
     // Separator line between tabs (horizontal line in vertical layout)

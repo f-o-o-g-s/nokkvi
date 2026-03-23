@@ -148,14 +148,13 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Hambur
         _theme: &Theme,
         _style: &renderer::Style,
         layout: Layout<'_>,
-        cursor: mouse::Cursor,
+        _cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
         use iced::advanced::{Renderer, svg::Renderer as SvgRenderer};
 
         let state = tree.state.downcast_ref::<State>();
         let bounds = layout.bounds();
-        let is_hovered = cursor.is_over(bounds);
 
         let icon_color = if self.player_bar_style {
             // 3D player bar button styling (matches ThreeDIconButton)
@@ -192,10 +191,10 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Hambur
             icon_color
         } else {
             // Original flat nav bar styling
+            // Hover feedback is handled by HoverOverlay at the call site —
+            // this widget only needs to distinguish open (accent) vs idle (bg0_hard).
             let bg_color = if state.is_open {
                 theme::accent_bright()
-            } else if is_hovered {
-                theme::bg2()
             } else {
                 theme::bg0_hard()
             };
