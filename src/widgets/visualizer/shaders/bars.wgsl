@@ -43,7 +43,17 @@ struct Config {
     gradient_orientation: u32, // 0 = vertical, 1 = horizontal
     average_energy: f32,       // Average bar amplitude (0.0-1.0), computed CPU-side
     global_opacity: f32,       // Overall visualizer opacity (0.0-1.0)
-    _pad: u32,                 // Padding for 16-byte alignment before flash_data
+    lines_outline_thickness: f32,  // Lines mode only: outline width in pixels
+    lines_outline_opacity: f32,    // Lines mode only: outline alpha (0.0-1.0)
+    lines_animation_speed: f32,    // Lines mode only: color cycling speed
+    lines_gradient_mode: u32,      // Lines mode only: 0=breathing, 1=static, 2=position, 3=height
+    lines_fill_opacity: f32,       // Lines mode only: fill under curve (0.0 = disabled)
+    lines_mirror: u32,             // Lines mode only: 0=normal, 1=mirrored
+    lines_glow_intensity: f32,     // Lines mode only: glow bloom (0.0 = disabled)
+    lines_style: u32,              // Lines mode only: 0=smooth, 1=angular, 2=stepped
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
     // Flash intensities: one per bar (0.0-1.0), stored as vec4s
     // Up to 2048 bars = 512 vec4s
     flash_data: array<vec4<f32>, 512>,

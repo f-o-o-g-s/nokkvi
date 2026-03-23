@@ -525,6 +525,94 @@ pub(crate) fn build_visualizer_items(config: &VisualizerConfig) -> Vec<SettingsE
         0.01,
         "%",
     ));
+    e.push(SettingItem::float(
+        meta!(
+            "visualizer.lines.outline_thickness",
+            "Outline Thickness",
+            "Lines",
+            "Border behind the line in pixels, 0 = disabled"
+        ),
+        config.lines.outline_thickness as f64,
+        d.lines.outline_thickness as f64,
+        0.0,
+        5.0,
+        0.5,
+        " px",
+    ));
+    e.push(SettingItem::float(
+        meta!(
+            "visualizer.lines.outline_opacity",
+            "Outline Opacity",
+            "Lines",
+            "0.0 = invisible, 1.0 = fully opaque"
+        ),
+        config.lines.outline_opacity as f64,
+        d.lines.outline_opacity as f64,
+        0.0,
+        1.0,
+        0.1,
+        "",
+    ));
+    e.push(SettingItem::float(
+        meta!(
+            "visualizer.lines.animation_speed",
+            "Animation Speed",
+            "Lines",
+            "Color cycling speed. Lower = slower, higher = faster"
+        ),
+        config.lines.animation_speed as f64,
+        d.lines.animation_speed as f64,
+        0.05,
+        1.0,
+        0.05,
+        "",
+    ));
+    e.push(SettingItem::enum_val(
+        meta!(
+            "visualizer.lines.gradient_mode",
+            "Gradient Mode",
+            "Lines",
+            "How the line color is determined\nbreathing: time-based cycling through gradient palette\nstatic: uses first gradient color only\nposition: color by horizontal position (bass → treble rainbow)\nheight: color by amplitude (quiet → loud)"
+        ),
+        &config.lines.gradient_mode,
+        &d.lines.gradient_mode,
+        vec!["breathing", "static", "position", "height"],
+    ));
+    e.push(SettingItem::float(
+        meta!(
+            "visualizer.lines.fill_opacity",
+            "Fill Opacity",
+            "Lines",
+            "Fills under the curve with a gradient. 0 = disabled"
+        ),
+        config.lines.fill_opacity as f64,
+        d.lines.fill_opacity as f64,
+        0.0,
+        1.0,
+        0.05,
+        "",
+    ));
+    e.push(SettingItem::bool_val(
+        meta!(
+            "visualizer.lines.mirror",
+            "Mirror",
+            "Lines",
+            "Symmetric oscilloscope — line extends from center"
+        ),
+        config.lines.mirror,
+        d.lines.mirror,
+    ));
+    e.push(SettingItem::enum_val(
+        meta!(
+            "visualizer.lines.style",
+            "Line Style",
+            "Lines",
+            "Interpolation between data points\nsmooth: Catmull-Rom spline (curvy)\nangular: straight line segments"
+        ),
+        &config.lines.style,
+        &d.lines.style,
+        vec!["smooth", "angular"],
+    ));
 
     e
 }

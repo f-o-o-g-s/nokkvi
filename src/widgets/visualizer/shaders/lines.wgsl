@@ -44,7 +44,17 @@ struct Config {
     gradient_orientation: u32, // 0 = vertical, 1 = horizontal (not used in lines mode)
     average_energy: f32,       // Average bar amplitude (not used in lines mode)
     global_opacity: f32,       // Overall visualizer opacity (0.0-1.0)
-    _pad: u32,                 // Padding for 16-byte alignment before flash_data
+    lines_outline_thickness: f32,  // Outline width in pixels (0.0 = disabled)
+    lines_outline_opacity: f32,    // Outline alpha (0.0-1.0)
+    lines_animation_speed: f32,    // Color cycling speed (0.05-1.0)
+    lines_gradient_mode: u32,      // 0=breathing, 1=static, 2=position, 3=height
+    lines_fill_opacity: f32,       // Fill under curve (0.0 = disabled)
+    lines_mirror: u32,             // 0=normal, 1=mirrored
+    lines_glow_intensity: f32,     // Glow bloom (0.0 = disabled)
+    lines_style: u32,              // 0=smooth, 1=angular, 2=stepped
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
     // Flash intensities: one per bar (0.0-1.0), stored as vec4s
     // Up to 2048 bars = 512 vec4s (not used in lines mode)
     flash_data: array<vec4<f32>, 512>,
@@ -60,6 +70,9 @@ struct VertexOutput {
     @location(0) color: vec4<f32>,
     @location(1) distance_to_center: f32,  // Distance from center line for antialiasing
     @location(2) is_outline: f32,  // 1.0 = outline, 0.0 = main line
+    @location(3) normalized_x: f32,  // Horizontal position (0.0 = left, 1.0 = right)
+    @location(4) amplitude: f32,  // Point amplitude (0.0 = silent, 1.0 = max)
+    @location(5) is_fill: f32,  // 1.0 = fill pass, 0.0 = line/outline pass
 }
 
 // Convert pixel coordinates to NDC (-1 to 1)
@@ -72,8 +85,8 @@ fn pixel_to_ndc(pixel_x: f32, pixel_y: f32) -> vec2<f32> {
 
 // Get gradient color based on time (breathing animation cycling through all colors)
 fn get_gradient_color_animated(time: f32) -> vec4<f32> {
-    // Cycle speed: complete cycle through all colors in ~4 seconds
-    let cycle_speed = 0.25;  // Lower = slower
+    // Cycle speed from config (higher = faster cycling through gradient colors)
+    let cycle_speed = uniforms.config.lines_animation_speed;
     let t = fract(time * cycle_speed);
     
     // Interpolate through 8 gradient colors (0-7)
@@ -87,6 +100,61 @@ fn get_gradient_color_animated(time: f32) -> vec4<f32> {
     let c2 = uniforms.gradient_colors[next_idx];
     
     return mix(c1, c2, frac);
+}
+
+// Static gradient: always use first gradient color
+fn get_gradient_color_static() -> vec4<f32> {
+    return uniforms.gradient_colors[0];
+}
+
+// Position-based gradient: color by horizontal position along the line
+// Left = first gradient color, right = last gradient color (bass → treble rainbow)
+fn get_gradient_color_by_position(normalized_x: f32) -> vec4<f32> {
+    let segments = 5.0;
+    let pos = clamp(normalized_x, 0.0, 1.0) * segments;
+    let idx = u32(floor(pos));
+    let frac = pos - floor(pos);
+    
+    if (idx >= 5u) {
+        return uniforms.gradient_colors[5];
+    }
+    
+    let c1 = uniforms.gradient_colors[idx];
+    let c2 = uniforms.gradient_colors[idx + 1u];
+    
+    return mix(c1, c2, frac);
+}
+
+// Height-based gradient: color by amplitude (quiet = bottom colors, loud = top colors)
+fn get_gradient_color_by_height(amplitude: f32) -> vec4<f32> {
+    let segments = 5.0;
+    let pos = clamp(amplitude, 0.0, 1.0) * segments;
+    let idx = u32(floor(pos));
+    let frac = pos - floor(pos);
+    
+    if (idx >= 5u) {
+        return uniforms.gradient_colors[5];
+    }
+    
+    let c1 = uniforms.gradient_colors[idx];
+    let c2 = uniforms.gradient_colors[idx + 1u];
+    
+    return mix(c1, c2, frac);
+}
+
+// Dispatch to the correct gradient function based on lines_gradient_mode
+// mode: 0=breathing, 1=static, 2=position, 3=height
+fn get_lines_gradient_color(time: f32, normalized_x: f32, amplitude: f32) -> vec4<f32> {
+    let mode = uniforms.config.lines_gradient_mode;
+    if (mode == 1u) {
+        return get_gradient_color_static();
+    } else if (mode == 2u) {
+        return get_gradient_color_by_position(normalized_x);
+    } else if (mode == 3u) {
+        return get_gradient_color_by_height(amplitude);
+    }
+    // Default: breathing (mode 0)
+    return get_gradient_color_animated(time);
 }
 
 // Catmull-Rom spline interpolation
@@ -113,18 +181,35 @@ fn get_point(idx: i32, point_count: i32, canvas_width: f32, canvas_height: f32) 
     // X position: evenly distributed across width
     let x = f32(clamped_idx) / f32(point_count - 1) * canvas_width;
     
-    // Y position: value maps to height (0 = bottom, 1 = top)
-    // Reserve space at top for maximum line expansion to prevent clipping
-    // Double the margin to account for worst-case perpendicular offset at steep angles
+    // Y position depends on mirror mode
     let line_thickness = max(uniforms.config.line_thickness, 2.0);
-    let outline_extra = 2.0;
+    let outline_extra = uniforms.config.lines_outline_thickness;
     let aa_padding = 1.5;
     let max_expansion = ((line_thickness * 0.5) + outline_extra + aa_padding) * 4.0;
-    let drawable_height = canvas_height - max_expansion;
     
-    let y = canvas_height - (clamped_value * drawable_height);
+    var y: f32;
+    if (uniforms.config.lines_mirror == 1u) {
+        // Mirror mode: line extends from center, value controls displacement
+        // Center of canvas, with expansion margin
+        let center_y = canvas_height * 0.5;
+        let drawable_half = (canvas_height - max_expansion * 2.0) * 0.5;
+        // Value of 0 = center, value > 0 = extends upward from center
+        y = center_y - (clamped_value * drawable_half);
+    } else {
+        // Normal mode: value maps to height (0 = bottom, 1 = top)
+        let drawable_height = canvas_height - max_expansion;
+        y = canvas_height - (clamped_value * drawable_height);
+    }
     
     return vec2<f32>(x, y);
+}
+
+/// Get the Y coordinate of the fill baseline (bottom for normal, center for mirror)
+fn get_fill_baseline(canvas_height: f32) -> f32 {
+    if (uniforms.config.lines_mirror == 1u) {
+        return canvas_height * 0.5;
+    }
+    return canvas_height;
 }
 
 @vertex
@@ -141,14 +226,35 @@ fn vs_main(
     let canvas_width = viewport.z;
     let canvas_height = viewport.w;
     
-    // Determine if this is outline (instance 0) or main line (instance 1)
-    let is_outline_pass = instance_index == 0u;
+    // Instance layout:
+    // 0=fill(top), 1=outline(top), 2=main(top)
+    // 3=fill(mirror), 4=outline(mirror), 5=main(mirror)
+    let is_mirror_pass = instance_index >= 3u;
+    let base_instance = select(instance_index, instance_index - 3u, is_mirror_pass);
+    let is_fill_pass = base_instance == 0u;
+    let is_outline_pass = base_instance == 1u;
+    // base_instance 2 = main line pass
     
     if (point_count < 2) {
         output.position = vec4<f32>(-2.0, -2.0, 0.0, 1.0);
         output.color = vec4<f32>(0.0);
         output.distance_to_center = 0.0;
         output.is_outline = 0.0;
+        output.normalized_x = 0.0;
+        output.amplitude = 0.0;
+        output.is_fill = 0.0;
+        return output;
+    }
+    
+    // If fill is disabled, discard fill pass vertices
+    if (is_fill_pass && uniforms.config.lines_fill_opacity < 0.001) {
+        output.position = vec4<f32>(-2.0, -2.0, 0.0, 1.0);
+        output.color = vec4<f32>(0.0);
+        output.distance_to_center = 0.0;
+        output.is_outline = 0.0;
+        output.normalized_x = 0.0;
+        output.amplitude = 0.0;
+        output.is_fill = 0.0;
         return output;
     }
     
@@ -157,7 +263,7 @@ fn vs_main(
     let num_segments = point_count - 1;
     let total_spline_points = num_segments * samples_per_segment + 1;
     
-    // Each spline point needs 2 vertices (left and right of line)
+    // Each spline point needs 2 vertices (left/right for line, curve/bottom for fill)
     let vertices_per_spline = 2;
     let vertices_per_pass = u32(total_spline_points) * u32(vertices_per_spline);
     
@@ -166,12 +272,15 @@ fn vs_main(
         output.color = vec4<f32>(0.0);
         output.distance_to_center = 0.0;
         output.is_outline = 0.0;
+        output.normalized_x = 0.0;
+        output.amplitude = 0.0;
+        output.is_fill = 0.0;
         return output;
     }
     
     // Which spline point is this vertex for?
     let spline_point_index = vertex_index / 2u;
-    let is_left_side = (vertex_index % 2u) == 0u;
+    let is_even_vertex = (vertex_index % 2u) == 0u;
     
     // Calculate which segment and t value within segment
     let segment_index = i32(spline_point_index) / samples_per_segment;
@@ -184,43 +293,109 @@ fn vs_main(
     var prev_point: vec2<f32>;
     
     if (i32(spline_point_index) >= total_spline_points - 1) {
-        // Last point - use tangent from prev to current, don't extrapolate
         current_point = get_point(point_count - 1, point_count, canvas_width, canvas_height);
         prev_point = get_point(point_count - 2, point_count, canvas_width, canvas_height);
-        // Use current_point as next_point to avoid extrapolation that causes artifacts
         next_point = current_point;
     } else if (segment_index >= num_segments) {
-        // Safety: clamp to last segment
         current_point = get_point(point_count - 1, point_count, canvas_width, canvas_height);
         prev_point = get_point(point_count - 2, point_count, canvas_width, canvas_height);
         next_point = current_point;
     } else {
-        // Get control points for Catmull-Rom spline
         let p0 = get_point(segment_index - 1, point_count, canvas_width, canvas_height);
         let p1 = get_point(segment_index, point_count, canvas_width, canvas_height);
         let p2 = get_point(segment_index + 1, point_count, canvas_width, canvas_height);
         let p3 = get_point(segment_index + 2, point_count, canvas_width, canvas_height);
         
-        // Interpolate
-        current_point = catmull_rom(p0, p1, p2, p3, t);
-        
-        // Get tangent for perpendicular calculation
-        let t_prev = max(t - 0.01, 0.0);
-        let t_next = min(t + 0.01, 1.0);
-        prev_point = catmull_rom(p0, p1, p2, p3, t_prev);
-        next_point = catmull_rom(p0, p1, p2, p3, t_next);
+        let line_style = uniforms.config.lines_style;
+        if (line_style == 1u) {
+            // Angular: straight line segments between data points
+            current_point = mix(p1, p2, t);
+            let t_prev_a = max(t - 0.01, 0.0);
+            let t_next_a = min(t + 0.01, 1.0);
+            prev_point = mix(p1, p2, t_prev_a);
+            next_point = mix(p1, p2, t_next_a);
+        } else {
+            // Smooth (default): Catmull-Rom spline
+            current_point = catmull_rom(p0, p1, p2, p3, t);
+            let t_prev_s = max(t - 0.01, 0.0);
+            let t_next_s = min(t + 0.01, 1.0);
+            prev_point = catmull_rom(p0, p1, p2, p3, t_prev_s);
+            next_point = catmull_rom(p0, p1, p2, p3, t_next_s);
+        }
     }
     
     // Clamp Y coordinates after spline interpolation
-    // Catmull-Rom splines can overshoot at sharp peaks (low-HIGH-low pattern)
-    // The minimum safe Y is max_expansion (to leave room for line thickness at top)
-    let outline_extra = 2.0;
+    let outline_extra = uniforms.config.lines_outline_thickness;
     let aa_padding = 1.5;
     let max_expansion = half_thickness + outline_extra + aa_padding;
-    current_point.y = clamp(current_point.y, max_expansion, canvas_height);
-    prev_point.y = clamp(prev_point.y, max_expansion, canvas_height);
-    next_point.y = clamp(next_point.y, max_expansion, canvas_height);
+    if (uniforms.config.lines_mirror == 1u) {
+        let center_y = canvas_height * 0.5;
+        current_point.y = clamp(current_point.y, max_expansion, center_y);
+        prev_point.y = clamp(prev_point.y, max_expansion, center_y);
+        next_point.y = clamp(next_point.y, max_expansion, center_y);
+    } else {
+        current_point.y = clamp(current_point.y, max_expansion, canvas_height);
+        prev_point.y = clamp(prev_point.y, max_expansion, canvas_height);
+        next_point.y = clamp(next_point.y, max_expansion, canvas_height);
+    }
     
+    // Mirror pass: flip Y coordinates around center line
+    if (is_mirror_pass) {
+        let center_y = canvas_height * 0.5;
+        current_point.y = 2.0 * center_y - current_point.y;
+        prev_point.y = 2.0 * center_y - prev_point.y;
+        next_point.y = 2.0 * center_y - next_point.y;
+    }
+    
+    // Calculate normalized x position (0.0 = left, 1.0 = right)
+    let normalized_x = clamp(current_point.x / canvas_width, 0.0, 1.0);
+    
+    // Calculate amplitude from the current point's Y position
+    let outline_extra_val = uniforms.config.lines_outline_thickness;
+    let aa_pad_val = 1.5;
+    let max_exp_val = ((line_thickness * 0.5) + outline_extra_val + aa_pad_val) * 4.0;
+    let draw_h = canvas_height - max_exp_val;
+    var amplitude: f32;
+    if (uniforms.config.lines_mirror == 1u) {
+        let center_y = canvas_height * 0.5;
+        // For mirror pass, amplitude is distance from center (works for both halves)
+        amplitude = clamp(abs(center_y - current_point.y) / (center_y - max_exp_val * 0.5), 0.0, 1.0);
+    } else {
+        amplitude = clamp((canvas_height - current_point.y) / draw_h, 0.0, 1.0);
+    }
+    
+    // Get gradient color for this vertex
+    let gradient_color = get_lines_gradient_color(uniforms.config.time, normalized_x, amplitude);
+    
+    // === FILL PASS: triangle strip from curve to baseline ===
+    if (is_fill_pass) {
+        let fill_baseline = get_fill_baseline(canvas_height);
+        var fill_point: vec2<f32>;
+        
+        if (is_even_vertex) {
+            // Even vertex = on the curve
+            fill_point = current_point;
+        } else {
+            // Odd vertex = at the baseline (bottom or center)
+            fill_point = vec2<f32>(current_point.x, fill_baseline);
+        }
+        
+        let ndc = pixel_to_ndc(fill_point.x, fill_point.y);
+        
+        var fill_color = gradient_color;
+        fill_color.a *= uniforms.config.lines_fill_opacity;
+        
+        output.position = vec4<f32>(ndc.x, ndc.y, 0.0, 1.0);
+        output.color = fill_color;
+        output.distance_to_center = 0.0;
+        output.is_outline = 0.0;
+        output.normalized_x = normalized_x;
+        output.amplitude = amplitude;
+        output.is_fill = 1.0;
+        return output;
+    }
+    
+    // === LINE / OUTLINE PASS ===
     // Calculate perpendicular direction for line thickness
     var tangent = next_point - prev_point;
     let tangent_len = length(tangent);
@@ -230,20 +405,17 @@ fn vs_main(
         tangent = vec2<f32>(1.0, 0.0);
     }
     
-    // Perpendicular is 90 degrees rotated
     let perp = vec2<f32>(-tangent.y, tangent.x);
     
     // Determine thickness based on outline vs main line
-    // Outline is 2px thicker on each side (outline_extra already defined above)
     let actual_half_thickness = select(half_thickness, half_thickness + outline_extra, is_outline_pass);
     
-    // Extend line width slightly for antialiasing (aa_padding already defined above)
     let extended_half_thickness = actual_half_thickness + aa_padding;
     
     // Offset vertex to left or right of center line
     var offset_point: vec2<f32>;
     var dist_to_center: f32;
-    if (is_left_side) {
+    if (is_even_vertex) {
         offset_point = current_point + perp * extended_half_thickness;
         dist_to_center = extended_half_thickness;
     } else {
@@ -252,15 +424,16 @@ fn vs_main(
     }
     
     // Clamp offset point to stay within canvas bounds
-    // Line thickness can push vertices outside the visible area
     offset_point.y = clamp(offset_point.y, 0.0, canvas_height);
     
-    // Calculate color - use time-based breathing animation
+    // Calculate color
     var color: vec4<f32>;
     if (is_outline_pass) {
-        color = uniforms.border_color;  // Dark outline
+        var outline_color = uniforms.border_color;
+        outline_color.a *= uniforms.config.lines_outline_opacity;
+        color = outline_color;
     } else {
-        color = get_gradient_color_animated(uniforms.config.time);  // Animated gradient
+        color = gradient_color;
     }
     
     // Convert to NDC
@@ -270,32 +443,34 @@ fn vs_main(
     output.color = color;
     output.distance_to_center = dist_to_center;
     output.is_outline = select(0.0, 1.0, is_outline_pass);
+    output.normalized_x = normalized_x;
+    output.amplitude = amplitude;
+    output.is_fill = 0.0;
     
     return output;
 }
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    // Antialiasing using smoothstep based on distance from center line
-    // Technique from: https://www.shadertoy.com/view/4dcfW8
+    var color = input.color;
+    
+    // Fill pass: no antialiasing needed, just use the fill color directly
+    if (input.is_fill > 0.5) {
+        color.a *= uniforms.config.global_opacity;
+        return color;
+    }
+    
+    // Line/outline pass: antialiased rendering
     let line_thickness = max(uniforms.config.line_thickness, 2.0);
     let half_thickness = line_thickness * 0.5;
     
-    // Add outline thickness if this is the outline pass
-    let outline_extra = 2.0;
+    let outline_extra = uniforms.config.lines_outline_thickness;
     let actual_half_thickness = select(half_thickness, half_thickness + outline_extra, input.is_outline > 0.5);
     
-    // Distance from center line (in pixels)
     let dist = abs(input.distance_to_center);
-    
-    // Smoothstep for antialiasing: fade out at the edges
-    // The 0.75 range creates a smooth transition
     let alpha = smoothstep(actual_half_thickness + 0.75, actual_half_thickness - 0.75, dist);
     
-    var color = input.color;
     color.a *= alpha;
-    
-    // Apply global opacity
     color.a *= uniforms.config.global_opacity;
     
     return color;

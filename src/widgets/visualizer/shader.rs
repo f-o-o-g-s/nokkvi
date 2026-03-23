@@ -31,25 +31,33 @@ pub(crate) struct VisualizerConfig {
     pub peak_thickness: f32,
     pub peak_alpha: f32,
     pub line_thickness: f32,
-    pub bar_width: f32,            // Fixed bar width in pixels
-    pub bar_spacing: f32,          // Fixed spacing between bars in pixels
-    pub edge_spacing: f32,         // Edge spacing for centering bars in pixels
-    pub time: f32,                 // Time in seconds for animation
-    pub led_bars: u32,             // 0 = normal bars, 1 = LED segmented bars
-    pub led_segment_height: f32,   // Height of each LED segment in pixels
-    pub led_border_opacity: f32,   // 0.0 = transparent, 1.0 = opaque (border opacity in LED mode)
-    pub border_opacity: f32, // 0.0 = transparent, 1.0 = opaque (border opacity in non-LED mode)
-    pub gradient_mode: u32,  // 0 = static, 2 = wave, 3 = shimmer, 4 = energy, 5 = alternate
+    pub bar_width: f32,               // Fixed bar width in pixels
+    pub bar_spacing: f32,             // Fixed spacing between bars in pixels
+    pub edge_spacing: f32,            // Edge spacing for centering bars in pixels
+    pub time: f32,                    // Time in seconds for animation
+    pub led_bars: u32,                // 0 = normal bars, 1 = LED segmented bars
+    pub led_segment_height: f32,      // Height of each LED segment in pixels
+    pub led_border_opacity: f32, // 0.0 = transparent, 1.0 = opaque (border opacity in LED mode)
+    pub border_opacity: f32,     // 0.0 = transparent, 1.0 = opaque (border opacity in non-LED mode)
+    pub gradient_mode: u32,      // 0 = static, 2 = wave, 3 = shimmer, 4 = energy, 5 = alternate
     pub peak_gradient_mode: u32, // 0=static, 1=cycle, 2=height, 3=match
-    pub peak_mode: u32,      // 0=none, 1=fade, 2=fall, 3=fall_accel
-    pub peak_hold_time: f32, // Time in seconds for peak to hold
-    pub peak_fade_time: f32, // Time in seconds for peak to fade (fade mode only)
-    pub flash_count: u32,    // Number of bars (for flash data bounds checking)
-    pub bar_depth_3d: f32,   // Isometric 3D depth in pixels (0 = flat)
+    pub peak_mode: u32,          // 0=none, 1=fade, 2=fall, 3=fall_accel
+    pub peak_hold_time: f32,     // Time in seconds for peak to hold
+    pub peak_fade_time: f32,     // Time in seconds for peak to fade (fade mode only)
+    pub flash_count: u32,        // Number of bars (for flash data bounds checking)
+    pub bar_depth_3d: f32,       // Isometric 3D depth in pixels (0 = flat)
     pub gradient_orientation: u32, // 0 = vertical, 1 = horizontal
-    pub average_energy: f32, // Average bar amplitude (0.0-1.0), computed CPU-side
-    pub global_opacity: f32, // Overall visualizer opacity (0.0-1.0)
-    pub _pad: u32,           // Padding for 16-byte alignment before flash_data
+    pub average_energy: f32,     // Average bar amplitude (0.0-1.0), computed CPU-side
+    pub global_opacity: f32,     // Overall visualizer opacity (0.0-1.0)
+    pub lines_outline_thickness: f32, // Lines mode: outline width in pixels (0 = disabled)
+    pub lines_outline_opacity: f32, // Lines mode: outline alpha (0.0-1.0)
+    pub lines_animation_speed: f32, // Lines mode: color cycling speed (0.05-1.0)
+    pub lines_gradient_mode: u32, // Lines mode: 0=breathing, 1=static, 2=position, 3=height
+    pub lines_fill_opacity: f32, // Lines mode: fill under curve (0.0 = disabled)
+    pub lines_mirror: u32,       // Lines mode: 0=normal, 1=mirrored
+    pub lines_glow_intensity: f32, // Lines mode: glow bloom (0.0 = disabled)
+    pub lines_style: u32,        // Lines mode: 0=smooth, 1=angular, 2=stepped
+    pub _pad: [u32; 3],          // Padding for 16-byte alignment before flash_data
     // Flash intensities: one per bar (0.0-1.0), stored as vec4s for GPU efficiency
     // Up to 2048 bars = 512 vec4s
     pub flash_data: [[f32; 4]; 512], // 2048 bars max
@@ -130,6 +138,22 @@ pub(crate) struct ShaderParams {
     pub gradient_orientation: u32,
     /// Overall visualizer opacity (0.0 = invisible, 1.0 = fully opaque)
     pub global_opacity: f32,
+    /// Lines mode: outline thickness in pixels (0.0 = disabled)
+    pub lines_outline_thickness: f32,
+    /// Lines mode: outline opacity (0.0 = invisible, 1.0 = fully opaque)
+    pub lines_outline_opacity: f32,
+    /// Lines mode: color animation cycle speed (0.05 = slow, 1.0 = fast)
+    pub lines_animation_speed: f32,
+    /// Lines mode: gradient mode (0=breathing, 1=static, 2=position, 3=height)
+    pub lines_gradient_mode: u32,
+    /// Lines mode: fill opacity under curve (0.0 = disabled, 1.0 = fully opaque)
+    pub lines_fill_opacity: f32,
+    /// Lines mode: mirror mode (false = normal, true = symmetric oscilloscope)
+    pub lines_mirror: bool,
+    /// Lines mode: glow bloom intensity (0.0 = disabled, 1.0 = full glow)
+    pub lines_glow_intensity: f32,
+    /// Lines mode: interpolation style (0=smooth, 1=angular, 2=stepped)
+    pub lines_style: u32,
 }
 
 impl VisualizerPrimitive {
@@ -214,7 +238,15 @@ impl VisualizerPrimitive {
             gradient_orientation: params.gradient_orientation,
             average_energy,
             global_opacity: params.global_opacity,
-            _pad: 0,
+            lines_outline_thickness: params.lines_outline_thickness,
+            lines_outline_opacity: params.lines_outline_opacity,
+            lines_animation_speed: params.lines_animation_speed,
+            lines_gradient_mode: params.lines_gradient_mode,
+            lines_fill_opacity: params.lines_fill_opacity,
+            lines_mirror: u32::from(params.lines_mirror),
+            lines_glow_intensity: params.lines_glow_intensity,
+            lines_style: params.lines_style,
+            _pad: [0; 3],
             flash_data,
         };
 
@@ -320,7 +352,9 @@ impl VisualizerPrimitive {
                 let vertices_per_spline_point = 2u32;
                 let vertices_per_pass = total_spline_points * vertices_per_spline_point;
 
-                render_pass.draw(0..vertices_per_pass, 0..2);
+                // Mirror mode doubles the instances (3 top + 3 bottom reflection)
+                let instance_count = if config.lines_mirror != 0 { 6 } else { 3 };
+                render_pass.draw(0..vertices_per_pass, 0..instance_count);
             }
             _ => {}
         }

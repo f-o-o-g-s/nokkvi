@@ -368,10 +368,39 @@ impl BarsConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct LinesConfig {
-    /// Number of points to render (default: 32)
+    /// Number of points to render (default: 24)
     pub point_count: usize,
     /// Line thickness as fraction of visualizer height (0.01-0.10, default: 0.05 = 5%)
     pub line_thickness: f32,
+    /// Outline thickness in pixels (0.0 = disabled, up to 5.0).
+    /// The outline is a darker border drawn behind the main line.
+    /// Default: 2.0
+    pub outline_thickness: f32,
+    /// Outline opacity (0.0 = invisible, 1.0 = fully opaque).
+    /// Default: 1.0
+    pub outline_opacity: f32,
+    /// Color animation cycle speed (0.05 = very slow, 1.0 = very fast).
+    /// Controls how quickly the line color cycles through the gradient palette.
+    /// Default: 0.25
+    pub animation_speed: f32,
+    /// Gradient color mode:
+    /// - "breathing": Time-based cycling through all gradient colors (default)
+    /// - "static": Uses first gradient color only (no animation)
+    /// - "position": Color based on horizontal position (bass=left → treble=right)
+    /// - "height": Color based on amplitude (quiet=bottom colors, loud=top colors)
+    ///   Default: "breathing"
+    pub gradient_mode: String,
+    /// Fill opacity under the curve (0.0 = disabled, 1.0 = fully opaque).
+    /// Default: 0.0
+    pub fill_opacity: f32,
+    /// Mirror mode: render waveform symmetrically from center.
+    /// Default: false
+    pub mirror: bool,
+    /// Interpolation style:
+    /// - "smooth": Catmull-Rom spline (default)
+    /// - "angular": Straight line segments between points
+    ///   Default: "smooth"
+    pub style: String,
 }
 
 impl Default for LinesConfig {
@@ -379,6 +408,35 @@ impl Default for LinesConfig {
         Self {
             point_count: 24,
             line_thickness: 0.05,
+            outline_thickness: 2.0,
+            outline_opacity: 1.0,
+            animation_speed: 0.25,
+            gradient_mode: "breathing".to_string(),
+            fill_opacity: 0.0,
+            mirror: false,
+            style: "smooth".to_string(),
+        }
+    }
+}
+
+impl LinesConfig {
+    /// Get the gradient mode as u32 for shader (0=breathing, 1=static, 2=position, 3=height)
+    pub fn get_gradient_mode_value(&self) -> u32 {
+        match self.gradient_mode.to_lowercase().as_str() {
+            "breathing" => 0,
+            "static" => 1,
+            "position" => 2,
+            "height" => 3,
+            _ => 0, // Default to breathing
+        }
+    }
+
+    /// Get the style as u32 for shader (0=smooth, 1=angular)
+    pub fn get_style_value(&self) -> u32 {
+        match self.style.to_lowercase().as_str() {
+            "smooth" => 0,
+            "angular" => 1,
+            _ => 0,
         }
     }
 }
@@ -510,6 +568,10 @@ impl VisualizerConfig {
         // Validate lines config
         self.lines.point_count = self.lines.point_count.clamp(8, 512);
         self.lines.line_thickness = self.lines.line_thickness.clamp(0.01, 0.1);
+        self.lines.outline_thickness = self.lines.outline_thickness.clamp(0.0, 5.0);
+        self.lines.outline_opacity = self.lines.outline_opacity.clamp(0.0, 1.0);
+        self.lines.animation_speed = self.lines.animation_speed.clamp(0.05, 1.0);
+        self.lines.fill_opacity = self.lines.fill_opacity.clamp(0.0, 1.0);
 
         // Validate height_percent (10% to 60% — above 60% the visualizer overlaps the player bar)
         self.height_percent = self.height_percent.clamp(0.1, 0.60);
@@ -564,8 +626,12 @@ pub(crate) fn load_visualizer_config() -> Result<VisualizerConfig> {
         viz_config.bars.led_segment_height
     );
     debug!(
-        " Lines: points={}, thickness={:.3}",
-        viz_config.lines.point_count, viz_config.lines.line_thickness
+        " Lines: points={}, thickness={:.3}, outline={:.1}, anim_speed={:.2}, gradient={}",
+        viz_config.lines.point_count,
+        viz_config.lines.line_thickness,
+        viz_config.lines.outline_thickness,
+        viz_config.lines.animation_speed,
+        viz_config.lines.gradient_mode
     );
 
     Ok(viz_config)

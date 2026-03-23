@@ -412,6 +412,15 @@ impl Visualizer {
             cfg.bars.peak_height_ratio as f32 / 100.0, // Convert percentage to ratio
         );
         let global_opacity = cfg.opacity;
+        let (lines_outline_thickness, lines_outline_opacity, lines_animation_speed) = (
+            cfg.lines.outline_thickness,
+            cfg.lines.outline_opacity,
+            cfg.lines.animation_speed,
+        );
+        let lines_gradient_mode = cfg.lines.get_gradient_mode_value();
+        let lines_fill_opacity = cfg.lines.fill_opacity;
+        let lines_mirror = cfg.lines.mirror;
+        let lines_style = cfg.lines.get_style_value();
         drop(cfg);
 
         // Create shader-based visualizer (GPU accelerated)
@@ -440,6 +449,14 @@ impl Visualizer {
             peak_fade_time,
             bar_depth_3d,
             global_opacity,
+            lines_outline_thickness,
+            lines_outline_opacity,
+            lines_animation_speed,
+            lines_gradient_mode,
+            lines_fill_opacity,
+            lines_mirror,
+            lines_glow_intensity: 0.0,
+            lines_style,
         };
 
         let shader_viz = ShaderVisualizer::new(self.state.clone(), self.mode, params);
