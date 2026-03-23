@@ -4,7 +4,7 @@ A native Rust/Iced client for [Navidrome](https://www.navidrome.org/) music serv
 
 ## Features
 
-- GPU-accelerated audio visualizer (pure-Rust FFT via RustFFT with configurable opacity)
+- GPU-accelerated audio visualizer (bars + lines modes, pure-Rust FFT via RustFFT with configurable opacity)
 - Rodio audio engine with gapless playback and dual-stream crossfade
 - Peak limiter and perceptual volume curve for clean, natural-sounding output
 - MPRIS D-Bus integration for media player controls

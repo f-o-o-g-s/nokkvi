@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.0.7 — 2026-03-23
+
+### Features
+- **Lines visualizer settings** — gradient mode, fill-under-curve opacity,
+  mirror mode, and line style (smooth/angular) are now configurable in
+  Settings → Visualizer → Lines.
+- **Lines gradient mode** — five modes for line coloring: breathing (time-based
+  palette cycling), static (single color), position (horizontal rainbow),
+  height (amplitude-based), and gradient (wave-style position + amplitude
+  blend where peaks shift further along the palette).
+- **Progress track metadata overlay** — new "Progress Track" display mode
+  shows title, artist, and album directly on the progress bar with per-field
+  accent colors.
+- **Per-field colors in progress track** — title, artist, and album text in
+  the progress track overlay uses distinct colors for visual clarity.
+
+### Fixes
+- **Play button cold-start** — the play button now plays the currently
+  selected track instead of always defaulting to the first track in the queue,
+  matching enter-key behavior.
+- **Keyboard navigation in top-packing slot lists** — restored keyboard
+  navigation that broke when lists had fewer items than the visible slot count.
+- **Settings footer description cutoff** — increased the description footer
+  height and removed redundant header text so all gradient mode descriptions
+  are fully visible.
+- **Visible fields wired to progress track** — the metadata strip's "Visible
+  Fields" toggles now also control which fields appear in progress track mode.
+- **Metadata display mode switching** — switching the track info display mode
+  (e.g. from Progress Track to Top Bar) now forces an immediate re-render,
+  fixing stale layout where the previous mode's UI stayed visible.
+
+### Improvements
+- **Unified hover feedback** — refactored the hamburger menu button to use the
+  shared `HoverOverlay` widget, making hover behavior consistent across all
+  interactive elements.
+
+### Internal
+- Agent rules and workflows synced with current codebase.
+
+---
+
 ## v0.0.6 — 2026-03-22
 
 ### Fixes
