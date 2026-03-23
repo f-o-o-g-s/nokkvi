@@ -421,7 +421,7 @@ fn build_slot_list_slots<'a, T, Message: 'a>(
     // top as the user scrolls down.
     let top_packing = total_items < config.slot_count;
     let effective_center = if top_packing {
-        0
+        sl.viewport_offset.min(total_items.saturating_sub(1))
     } else {
         let items_at_and_after = total_items.saturating_sub(sl.viewport_offset);
         let end_push = config.slot_count.saturating_sub(items_at_and_after);
