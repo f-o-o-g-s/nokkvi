@@ -212,6 +212,7 @@ pub(crate) fn track_info_display() -> TrackInfoDisplay {
     match UI_MODE.track_info_display.load(Ordering::Relaxed) {
         1 => TrackInfoDisplay::PlayerBar,
         2 => TrackInfoDisplay::TopBar,
+        3 => TrackInfoDisplay::ProgressTrack,
         _ => TrackInfoDisplay::Off,
     }
 }
@@ -223,6 +224,7 @@ pub(crate) fn set_track_info_display(mode: TrackInfoDisplay) {
         TrackInfoDisplay::Off => 0,
         TrackInfoDisplay::PlayerBar => 1,
         TrackInfoDisplay::TopBar => 2,
+        TrackInfoDisplay::ProgressTrack => 3,
     };
     UI_MODE.track_info_display.store(val, Ordering::Relaxed);
     debug!(" Track info display changed: {}", mode);

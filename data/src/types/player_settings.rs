@@ -168,6 +168,8 @@ pub enum TrackInfoDisplay {
     PlayerBar,
     /// Track info strip at the top of the window (side nav only)
     TopBar,
+    /// Scrolling metadata overlay on the progress bar track
+    ProgressTrack,
 }
 
 impl TrackInfoDisplay {
@@ -176,6 +178,7 @@ impl TrackInfoDisplay {
         match label {
             "Player Bar" => Self::PlayerBar,
             "Top Bar" => Self::TopBar,
+            "Progress Track" => Self::ProgressTrack,
             _ => Self::Off,
         }
     }
@@ -186,6 +189,7 @@ impl TrackInfoDisplay {
             Self::Off => "Off",
             Self::PlayerBar => "Player Bar",
             Self::TopBar => "Top Bar",
+            Self::ProgressTrack => "Progress Track",
         }
     }
 }
@@ -196,6 +200,7 @@ impl std::fmt::Display for TrackInfoDisplay {
             Self::Off => write!(f, "off"),
             Self::PlayerBar => write!(f, "player_bar"),
             Self::TopBar => write!(f, "top_bar"),
+            Self::ProgressTrack => write!(f, "progress_track"),
         }
     }
 }

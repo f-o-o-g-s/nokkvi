@@ -13,18 +13,24 @@ use iced::{
         Shell,
         layout::{self, Layout},
         renderer,
+        text::{Paragraph as _, Renderer as TextRenderer, Shaping, Text, paragraph::Plain},
         widget::{self, Widget},
     },
     mouse, touch,
+    widget::text::Wrapping,
 };
 
 /// State for progress bar interaction
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) struct State {
     is_dragging: bool,
-    drag_progress: f32, // Visual drag position (0.0-1.0) - only used during dragging
-    last_position: f32, // Last known position in seconds
-    last_update: Option<std::time::Instant>, // When last_position was updated
+    drag_progress: f32,
+    last_position: f32,
+    last_update: Option<std::time::Instant>,
+    // Overlay text animation
+    overlay_paragraph: Plain<<iced::Renderer as TextRenderer>::Paragraph>,
+    overlay_full_width: f32,
+    overlay_cycle_start: std::time::Instant,
 }
 
 impl Default for State {
@@ -34,18 +40,22 @@ impl Default for State {
             drag_progress: 0.0,
             last_position: 0.0,
             last_update: None,
+            overlay_paragraph: Plain::default(),
+            overlay_full_width: 0.0,
+            overlay_cycle_start: std::time::Instant::now(),
         }
     }
 }
 
 /// Custom progress bar with 3D styling
 pub struct ProgressBar<'a, Message> {
-    position: f32,    // Current position in seconds
-    duration: f32,    // Total duration in seconds
-    is_playing: bool, // Whether playback is active (for interpolation)
+    position: f32,
+    duration: f32,
+    is_playing: bool,
     on_seek: Box<dyn Fn(f32) -> Message + 'a>,
     width: Length,
     height: f32,
+    overlay_text: Option<String>,
 }
 
 impl<'a, Message> ProgressBar<'a, Message> {
@@ -60,6 +70,7 @@ impl<'a, Message> ProgressBar<'a, Message> {
             on_seek: Box::new(on_seek),
             width: Length::Fill,
             height: 24.0,
+            overlay_text: None,
         }
     }
 
@@ -76,6 +87,14 @@ impl<'a, Message> ProgressBar<'a, Message> {
 
     pub fn height(mut self, height: f32) -> Self {
         self.height = height;
+        self
+    }
+
+    pub fn overlay_text(mut self, text: impl Into<String>) -> Self {
+        let s: String = text.into();
+        if !s.is_empty() {
+            self.overlay_text = Some(s);
+        }
         self
     }
 
@@ -113,11 +132,59 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
 
     fn layout(
         &mut self,
-        _tree: &mut widget::Tree,
-        _renderer: &iced::Renderer,
+        tree: &mut widget::Tree,
+        renderer: &iced::Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        layout::atomic(limits, self.width, self.height)
+        let node = layout::atomic(limits, self.width, self.height);
+
+        // Build overlay text paragraph if configured
+        if let Some(ref overlay) = self.overlay_text {
+            let state = tree.state.downcast_mut::<State>();
+            let track_width = node.size().width;
+            let text_area_width = track_width * 0.80;
+
+            let font = iced::Font {
+                weight: iced::font::Weight::Normal,
+                ..crate::theme::ui_font()
+            };
+            let hint_factor = {
+                use iced::advanced::Renderer as _;
+                renderer.scale_factor()
+            };
+
+            let text_desc = Text {
+                content: overlay.as_str(),
+                bounds: Size::new(text_area_width, self.height),
+                size: iced::Pixels(8.0),
+                line_height: iced::advanced::text::LineHeight::default(),
+                font,
+                align_x: iced::advanced::text::Alignment::Left,
+                align_y: iced::alignment::Vertical::Center,
+                shaping: Shaping::Advanced,
+                wrapping: Wrapping::None,
+                ellipsis: iced::advanced::text::Ellipsis::None,
+                hint_factor,
+            };
+            state.overlay_paragraph.update(text_desc);
+
+            // Measure full unconstrained width
+            let unconstrained = Text {
+                bounds: Size::new(f32::INFINITY, f32::INFINITY),
+                ..text_desc
+            };
+            let full_para =
+                <iced::Renderer as TextRenderer>::Paragraph::with_text(unconstrained);
+            let new_full_width = full_para.min_bounds().width;
+
+            // Only reset scroll animation when text width changes significantly
+            if (new_full_width - state.overlay_full_width).abs() > 5.0 {
+                state.overlay_cycle_start = std::time::Instant::now();
+            }
+            state.overlay_full_width = new_full_width;
+        }
+
+        node
     }
 
     fn update(
@@ -355,6 +422,64 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
             );
         }
 
+        // Overlay text: scrolling metadata centered in the progress bar track
+        if self.overlay_text.is_some() {
+            let color = crate::theme::fg4();
+            let text_area_width = bounds.width * 0.80;
+            let text_x = bounds.x + (bounds.width - text_area_width) / 2.0;
+            let text_height = state.overlay_paragraph.min_bounds().height;
+            let vert_y = bounds.y + (bounds.height - text_height) / 2.0;
+            let content_width = state.overlay_full_width;
+            let clip = Rectangle {
+                x: text_x,
+                y: bounds.y,
+                width: text_area_width,
+                height: bounds.height,
+            };
+
+            const SCROLL_PX_PER_SEC: f32 = 30.0;
+            const LOOP_GAP: f32 = 80.0;
+            const INITIAL_PAUSE_SECS: f32 = 2.0;
+
+            let overflow = (content_width - text_area_width).max(0.0);
+
+            if overflow <= 0.0 {
+                // Text fits — center horizontally
+                let cx = text_x + (text_area_width - content_width) / 2.0;
+                renderer.fill_paragraph(
+                    state.overlay_paragraph.raw(),
+                    Point::new(cx, vert_y),
+                    color,
+                    clip,
+                );
+            } else {
+                // Scrolling ring-buffer animation
+                let elapsed = state.overlay_cycle_start.elapsed().as_secs_f32();
+                let cycle_px = content_width + LOOP_GAP;
+                let offset = if elapsed < INITIAL_PAUSE_SECS {
+                    0.0
+                } else {
+                    ((elapsed - INITIAL_PAUSE_SECS) * SCROLL_PX_PER_SEC) % cycle_px
+                };
+
+                renderer.fill_paragraph(
+                    state.overlay_paragraph.raw(),
+                    Point::new(text_x - offset, vert_y),
+                    color,
+                    clip,
+                );
+                renderer.fill_paragraph(
+                    state.overlay_paragraph.raw(),
+                    Point::new(text_x - offset + cycle_px, vert_y),
+                    color,
+                    clip,
+                );
+            }
+        }
+        // Handle + grip in a separate layer so it renders ON TOP of overlay text.
+        // (Iced's wgpu renderer renders quads before text within the same layer,
+        //  so a new layer is needed to ensure the handle appears above the text.)
+        renderer.with_layer(bounds, |renderer| {
         // Handle background + borders
         let handle_bounds = Rectangle {
             x: handle_x,
@@ -564,6 +689,8 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
                 grip_bottom_right,
             );
         }
+        }); // end handle layer
+
         // Tooltip is now drawn via overlay() for proper z-ordering
     }
 

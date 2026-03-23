@@ -55,7 +55,7 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
             ),
             data.track_info_display,
             "Off",
-            vec!["Off", "Player Bar", "Top Bar"],
+            vec!["Off", "Player Bar", "Top Bar", "Progress Track"],
         ),
         SettingItem::enum_val(
             meta!(

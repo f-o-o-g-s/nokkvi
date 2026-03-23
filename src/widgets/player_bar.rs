@@ -4,7 +4,7 @@
 //! Receives pure view data and emits actions for root to process.
 
 use iced::{
-    Alignment, Element, Length,
+    Alignment, Element, Length, Theme,
     font::{Font, Weight},
     mouse::ScrollDelta,
     widget::{column, container, mouse_area, row, space, text, tooltip},
@@ -43,6 +43,7 @@ pub(crate) fn player_bar_height() -> f32 {
 
 // Responsive breakpoints for element culling (in pixels)
 // These are cumulative - at each narrower breakpoint, more elements are hidden
+const BREAKPOINT_HIDE_FORMAT_INFO: f32 = 1000.0; // Hide format info container (first to go)
 const BREAKPOINT_HIDE_VISUALIZER: f32 = 920.0; // Hide visualizer button
 const BREAKPOINT_HIDE_SFX_SLIDER: f32 = 840.0; // Hide SFX volume slider
 const BREAKPOINT_HIDE_CONSUME: f32 = 680.0; // Hide consume button
@@ -70,6 +71,13 @@ pub(crate) struct PlayerBarViewData {
     pub visualization_mode: nokkvi_data::types::player_settings::VisualizationMode,
     pub window_width: f32,
     pub is_light_mode: bool,
+    // Track metadata for progress bar overlay
+    pub track_title: String,
+    pub track_artist: String,
+    pub track_album: String,
+    pub format_suffix: String,
+    pub sample_rate: u32,
+    pub bitrate: u32,
 }
 
 /// Messages emitted by player bar interactions
@@ -257,28 +265,112 @@ pub(crate) fn player_bar<'a>(
     let duration = data.playback_duration as f32;
     let position = data.playback_position as f32;
 
-    let custom_progress_bar =
+    // Build metadata for scrolling overlay on the progress bar track
+    // Include labels like the metadata strip: "title: X · artist: Y · album: Z"
+    let mut meta_overlay: Option<String> = None;
+    let mut format_info_left = String::new();
+    let mut format_info_right = String::new();
+
+    if !data.track_title.is_empty()
+        && crate::theme::track_info_display()
+            == nokkvi_data::types::player_settings::TrackInfoDisplay::ProgressTrack
+    {
+        let mut meta = String::from("title: ");
+        meta.push_str(&data.track_title);
+        if !data.track_artist.is_empty() {
+            meta.push_str(" · artist: ");
+            meta.push_str(&data.track_artist);
+        }
+        if !data.track_album.is_empty() {
+            meta.push_str(" · album: ");
+            meta.push_str(&data.track_album);
+        }
+        meta_overlay = Some(meta);
+
+        if let Some((left, right)) = super::format_info::format_audio_info_split(
+            &data.format_suffix,
+            data.sample_rate as f32 / 1000.0,
+            data.bitrate,
+        ) {
+            format_info_left = left;
+            if let Some(r) = right {
+                format_info_right = r;
+            }
+        }
+    }
+
+    let mut custom_progress_bar =
         widgets::progress_bar::progress_bar(position, duration, PlayerBarMessage::Seek)
             .is_playing(data.playback_playing && !data.playback_paused)
             .width(Length::Fill)
             .height(24.0);
+    if let Some(meta) = meta_overlay {
+        custom_progress_bar = custom_progress_bar.overlay_text(meta);
+    }
 
-    let progress_row = row![
+    let mut progress_items: Vec<Element<'_, PlayerBarMessage>> = vec![
         text(pos_str.clone())
             .size(11.0)
             .font(theme::ui_font())
             .color(theme::fg4())
             .width(Length::Fixed(40.0))
             .align_x(Alignment::End)
-            .align_y(Alignment::Center),
-        custom_progress_bar,
+            .align_y(Alignment::Center)
+            .into(),
+        custom_progress_bar.into(),
         text(dur_str.clone())
             .size(11.0)
             .font(theme::ui_font())
             .color(theme::fg4())
             .width(Length::Fixed(40.0))
-            .align_y(Alignment::Center),
-    ]
+            .align_y(Alignment::Center)
+            .into(),
+    ];
+    if !format_info_left.is_empty() && data.window_width >= BREAKPOINT_HIDE_FORMAT_INFO {
+        let mut col_items: Vec<Element<'_, PlayerBarMessage>> = vec![
+            text(format_info_left)
+                .size(8.0)
+                .font(theme::ui_font())
+                .color(theme::fg4())
+                .wrapping(text::Wrapping::None)
+                .align_x(Alignment::Center)
+                .into(),
+        ];
+        if !format_info_right.is_empty() {
+            col_items.push(
+                text(format_info_right)
+                    .size(8.0)
+                    .font(theme::ui_font())
+                    .color(theme::fg4())
+                    .wrapping(text::Wrapping::None)
+                    .align_x(Alignment::Center)
+                    .into(),
+            );
+        }
+        let format_col = container(
+            column(col_items)
+                .align_x(Alignment::Center)
+                .spacing(0),
+        )
+        .style(|_: &Theme| {
+            let (inset_tl, _) = theme::border_3d_inset();
+            container::Style {
+                background: Some(theme::bg1().into()),
+                border: iced::Border {
+                    color: inset_tl,
+                    width: 1.0,
+                    radius: theme::ui_border_radius(),
+                },
+                ..Default::default()
+            }
+        })
+        .padding([0, 6])
+        .center_y(BUTTON_SIZE)
+        .align_x(Alignment::Center);
+        progress_items.push(format_col.into());
+    }
+
+    let progress_row = row(progress_items)
     .spacing(8)
     .align_y(Alignment::Center)
     .height(Length::Fixed(CONTROL_ROW_HEIGHT))
@@ -533,7 +625,6 @@ pub(crate) fn player_bar<'a>(
         let main_row = row![
             player_controls,
             progress_row,
-            space().width(Length::Fixed(4.0)),
             mode_toggles,
             volume_control,
         ]
@@ -554,7 +645,6 @@ pub(crate) fn player_bar<'a>(
         row![
             player_controls,
             progress_row,
-            space().width(Length::Fixed(4.0)),
             mode_toggles,
             volume_control,
         ]

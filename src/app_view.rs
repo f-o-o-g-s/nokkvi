@@ -84,6 +84,12 @@ impl Nokkvi {
             visualization_mode: self.engine.visualization_mode,
             window_width: self.window.width,
             is_light_mode: crate::theme::is_light_mode(),
+            track_title: self.playback.title.clone(),
+            track_artist: self.playback.artist.clone(),
+            track_album: self.playback.album.clone(),
+            format_suffix: self.playback.format_suffix.clone(),
+            sample_rate: self.playback.sample_rate,
+            bitrate: self.playback.bitrate,
         };
 
         // Shared strip data — borrows playback state, no clones needed.
