@@ -952,7 +952,7 @@ impl QueuePage {
         use crate::widgets::slot_list::slot_list_background_container;
         let slot_list_content = slot_list_background_container(slot_list_content);
 
-        let slot_list_content: Element<'a, QueueMessage> = slot_list_content.into();
+        let slot_list_content: Element<'a, QueueMessage> = slot_list_content;
 
         // Get large artwork: prioritize currently playing song, fallback to centered song
         let center_artwork_handle: Option<&iced::widget::image::Handle> = if data.is_playing {

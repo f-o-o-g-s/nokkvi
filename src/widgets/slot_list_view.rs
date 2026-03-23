@@ -76,7 +76,11 @@ impl SlotListView {
     pub fn slot_to_item_index(&self, slot_index: usize, total_items: usize) -> Option<usize> {
         // Top-packing: slot N maps directly to item N (viewport_offset is ignored).
         if total_items < self.slot_count {
-            return if slot_index < total_items { Some(slot_index) } else { None };
+            return if slot_index < total_items {
+                Some(slot_index)
+            } else {
+                None
+            };
         }
         let center_slot = self.slot_count / 2;
         let items_at_and_after = total_items.saturating_sub(self.viewport_offset);
@@ -99,7 +103,11 @@ impl SlotListView {
         // Top-packing: slot N maps directly to item N.
         // Allow total_items as a valid drop target (insert-after-last).
         if total_items < self.slot_count {
-            return if slot_index <= total_items { Some(slot_index) } else { None };
+            return if slot_index <= total_items {
+                Some(slot_index)
+            } else {
+                None
+            };
         }
 
         let center_slot = self.slot_count / 2;

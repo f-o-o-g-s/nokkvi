@@ -226,16 +226,13 @@ impl PlaybackController {
         {
             let queue_manager_arc = self.queue_service.queue_manager();
             let mut queue_manager = queue_manager_arc.lock().await;
-            let current_index = queue_manager
-                .get_queue()
-                .current_index
-                .or_else(|| {
-                    if queue_manager.get_queue().song_ids.is_empty() {
-                        None
-                    } else {
-                        Some(0)
-                    }
-                });
+            let current_index = queue_manager.get_queue().current_index.or_else(|| {
+                if queue_manager.get_queue().song_ids.is_empty() {
+                    None
+                } else {
+                    Some(0)
+                }
+            });
             let song = current_index
                 .and_then(|idx| queue_manager.get_queue().song_ids.get(idx))
                 .and_then(|id| queue_manager.get_song(id))

@@ -442,7 +442,11 @@ fn build_slot_list_slots<'a, T, Message: 'a>(
         // In top-packing mode, map slots directly to item indices (slot N → item N),
         // ignoring viewport_offset which is meaningless when all items fit.
         let item_index_opt = if top_packing {
-            if slot_index < total_items { Some(slot_index) } else { None }
+            if slot_index < total_items {
+                Some(slot_index)
+            } else {
+                None
+            }
         } else {
             sl.get_slot_item_index_with_center(slot_index, total_items, effective_center)
         };

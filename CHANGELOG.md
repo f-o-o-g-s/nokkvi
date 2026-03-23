@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.0.6 — 2026-03-22
+
+### Fixes
+- **Play button cold-start** — pressing Play on an empty player after adding tracks
+  to the queue now correctly starts playback and populates the metadata strip;
+  previously the transport would stay in the paused state with no track showing.
+- **Slot list top-packing on scroll** — when the queue or any slot list has fewer
+  items than the visible slot count, scrolling no longer shifts items away from
+  the top of the list.
+- **Slot list top-packing initial render** — lists shorter than the viewport are
+  now packed to the top on first render instead of being vertically centred.
+
+### Improvements
+- **Artwork panel visual cleanup** — internal padding and borders are removed from
+  the artwork panel in the queue, genres, and playlists views; artwork now fills
+  its square space edge-to-edge with no gaps.
+- **Separator alignment** — the column separator between the artwork panel and the
+  slot list is now drawn on the left edge of the artwork column, giving a cleaner
+  visual split consistent with the header divider.
+
+### Internal
+- Removed unused `bg4` theme colour.
+- Agent rules and workflows synced with current codebase.
+
+---
+
 ## v0.0.5 — 2026-03-22
 
 ### Features

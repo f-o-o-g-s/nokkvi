@@ -496,9 +496,7 @@ impl Nokkvi {
             self.queue_page.common.slot_list.flash_center();
             self.suppress_next_auto_center = true;
             return self.shell_task(
-                move |shell| async move {
-                    shell.play_song_from_queue(&song_id, queue_index).await
-                },
+                move |shell| async move { shell.play_song_from_queue(&song_id, queue_index).await },
                 |result| match result {
                     Ok(()) => Message::Playback(PlaybackMessage::Tick),
                     Err(e) => {
@@ -518,7 +516,6 @@ impl Nokkvi {
         self.toast_info("Queue is empty");
         Task::none()
     }
-
 
     pub(crate) fn handle_pause(&mut self) -> Task<Message> {
         // Optimistic UI update: show "paused" immediately
