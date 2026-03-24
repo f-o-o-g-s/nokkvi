@@ -63,6 +63,23 @@ impl Nokkvi {
         Task::none()
     }
 
+    /// Handle edit value up/down hotkey (default: bare ↑/↓).
+    ///
+    /// In Settings, routes to `SlotListUp`/`SlotListDown` which the toggle-cursor
+    /// logic intercepts to enable/disable the cursored ToggleSet badge.
+    /// In other views this is a no-op (arrow up/down are dedicated to MoveTrack
+    /// via Shift+Arrow).
+    pub(crate) fn handle_edit_value(&mut self, up: bool) -> Task<Message> {
+        if self.current_view == View::Settings {
+            return if up {
+                Task::done(Message::Settings(views::SettingsMessage::SlotListUp))
+            } else {
+                Task::done(Message::Settings(views::SettingsMessage::SlotListDown))
+            };
+        }
+        Task::none()
+    }
+
     pub(crate) fn handle_cycle_sort_mode(&mut self, forward: bool) -> Task<Message> {
         // Play backspace navigation sound for combobox cycling (settings handles its own SFX)
         if self.current_view != View::Settings {

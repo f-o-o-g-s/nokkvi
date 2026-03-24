@@ -128,6 +128,9 @@ fn action_to_message(action: HotkeyAction) -> Message {
         HotkeyAction::PrevSortMode => Message::Hotkey(HotkeyMessage::CycleSortMode(false)),
         HotkeyAction::NextSortMode => Message::Hotkey(HotkeyMessage::CycleSortMode(true)),
         HotkeyAction::ToggleSortOrder => Message::SlotList(SlotListMessage::ToggleSortOrder),
+        // Settings edit
+        HotkeyAction::EditUp => Message::Hotkey(HotkeyMessage::EditValue(true)),
+        HotkeyAction::EditDown => Message::Hotkey(HotkeyMessage::EditValue(false)),
         // Global
         HotkeyAction::Escape => Message::Hotkey(HotkeyMessage::ClearSearch),
         HotkeyAction::ResetToDefault => {

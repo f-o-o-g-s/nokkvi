@@ -317,6 +317,8 @@ pub struct SettingsPage {
     pub(crate) nav_stack: Vec<NavLevel>,
     /// Cursor position memory per nav level (keyed by NavLevel::cursor_key())
     pub(crate) level_cursors: HashMap<String, usize>,
+    /// Index of the currently keyboard-cursored badge within a ToggleSet (None = no cursor)
+    pub(crate) toggle_cursor: Option<usize>,
     /// Slot list navigation state
     pub(crate) slot_list: SlotListView,
     /// Index of the entry currently being edited (None = browse mode)
@@ -353,6 +355,7 @@ impl SettingsPage {
             nav_stack: vec![NavLevel::CategoryPicker],
             level_cursors: HashMap::new(),
             slot_list: SlotListView::new(),
+            toggle_cursor: None,
             editing_index: None,
             cached_entries: Vec::new(),
             sub_list: None,
@@ -395,6 +398,7 @@ impl SettingsPage {
     fn reset_and_restore_cursor(&mut self) {
         self.slot_list = SlotListView::new();
         self.editing_index = None;
+        self.toggle_cursor = None;
         self.hex_input.clear();
         let key = self.current_level().cursor_key();
         if let Some(&saved_offset) = self.level_cursors.get(&key) {
@@ -533,14 +537,24 @@ impl SettingsPage {
         let total = self.cached_entries.len().max(1);
         match message {
             SettingsMessage::SlotListUp => {
+                // When toggle cursor is active, Up enables the cursored badge
+                if let Some(cursor_idx) = self.toggle_cursor {
+                    return self.toggle_set_cursor_set(cursor_idx, true);
+                }
                 self.editing_index = None;
+                self.toggle_cursor = None;
                 self.slot_list.move_up(total);
                 self.snap_to_non_header(false);
                 self.update_description();
                 SettingsAction::None
             }
             SettingsMessage::SlotListDown => {
+                // When toggle cursor is active, Down disables the cursored badge
+                if let Some(cursor_idx) = self.toggle_cursor {
+                    return self.toggle_set_cursor_set(cursor_idx, false);
+                }
                 self.editing_index = None;
+                self.toggle_cursor = None;
                 self.slot_list.move_down(total);
                 self.snap_to_non_header(true);
                 self.update_description();
@@ -548,6 +562,7 @@ impl SettingsPage {
             }
             SettingsMessage::SlotListSetOffset(offset) => {
                 self.editing_index = None;
+                self.toggle_cursor = None;
                 self.slot_list.set_offset(offset, total);
                 self.snap_to_non_header(true);
                 self.update_description();
@@ -555,6 +570,7 @@ impl SettingsPage {
             }
             SettingsMessage::SlotListClickItem(offset) => {
                 self.editing_index = None;
+                self.toggle_cursor = None;
                 self.slot_list.set_offset(offset, total);
                 self.snap_to_non_header(true);
                 self.update_description();
@@ -625,6 +641,17 @@ impl SettingsPage {
                                 }
                                 _ => {
                                     match &item.value {
+                                        // ToggleSet with active cursor: Enter toggles the
+                                        // cursored badge on/off
+                                        SettingValue::ToggleSet(items)
+                                            if self.toggle_cursor.is_some() =>
+                                        {
+                                            let cursor_idx = self.toggle_cursor.unwrap_or(0);
+                                            if let Some((_, _, enabled)) = items.get(cursor_idx) {
+                                                return self
+                                                    .toggle_set_cursor_set(cursor_idx, !enabled);
+                                            }
+                                        }
                                         SettingValue::ColorArray(colors) => {
                                             // Enter sub-list for gradient editing
                                             self.sub_list = Some(SubListState {
@@ -685,10 +712,18 @@ impl SettingsPage {
                 SettingsAction::PlayEnter
             }
             SettingsMessage::EditRight => {
+                // ToggleSet: move cursor right instead of increment
+                if self.center_item_is_toggle_set() {
+                    return self.toggle_set_cursor_move(true);
+                }
                 self.auto_enter_edit_if_needed();
                 self.apply_edit(|v| v.increment())
             }
             SettingsMessage::EditLeft => {
+                // ToggleSet: move cursor left instead of decrement
+                if self.center_item_is_toggle_set() {
+                    return self.toggle_set_cursor_move(false);
+                }
                 self.auto_enter_edit_if_needed();
                 self.apply_edit(|v| v.decrement())
             }
@@ -768,6 +803,9 @@ impl SettingsPage {
                     tracing::info!(" [HOTKEY CAPTURE] Escape pressed, cancelling capture");
                     self.capturing_hotkey = None;
                     self.conflict_label = None;
+                    SettingsAction::None
+                } else if self.toggle_cursor.is_some() {
+                    self.toggle_cursor = None;
                     SettingsAction::None
                 } else if self.editing_index.is_some() {
                     self.editing_index = None;
@@ -923,6 +961,79 @@ impl SettingsPage {
         {
             self.editing_index = Some(center_idx);
         }
+    }
+
+    /// Check whether the center item is a ToggleSet.
+    fn center_item_is_toggle_set(&self) -> bool {
+        let total = self.cached_entries.len();
+        if let Some(center_idx) = self.slot_list.get_center_item_index(total)
+            && let Some(SettingsEntry::Item(item)) = self.cached_entries.get(center_idx)
+        {
+            matches!(item.value, SettingValue::ToggleSet(_))
+        } else {
+            false
+        }
+    }
+
+    /// Move the toggle cursor left (forward=false) or right (forward=true).
+    /// Initializes cursor on first press; wraps around at boundaries.
+    fn toggle_set_cursor_move(&mut self, forward: bool) -> SettingsAction {
+        let total = self.cached_entries.len();
+        let Some(center_idx) = self.slot_list.get_center_item_index(total) else {
+            return SettingsAction::None;
+        };
+        let Some(SettingsEntry::Item(item)) = self.cached_entries.get(center_idx) else {
+            return SettingsAction::None;
+        };
+        let SettingValue::ToggleSet(items) = &item.value else {
+            return SettingsAction::None;
+        };
+        let count = items.len();
+        if count == 0 {
+            return SettingsAction::None;
+        }
+
+        let new_idx = match self.toggle_cursor {
+            Some(idx) => {
+                if forward {
+                    (idx + 1) % count
+                } else {
+                    (idx + count - 1) % count
+                }
+            }
+            None => {
+                // First press: Right starts at 0, Left starts at last
+                if forward { 0 } else { count - 1 }
+            }
+        };
+        self.toggle_cursor = Some(new_idx);
+        SettingsAction::None
+    }
+
+    /// Set the cursored toggle badge to a specific on/off state.
+    /// Used by Up (enable) and Down (disable).
+    fn toggle_set_cursor_set(&mut self, cursor_idx: usize, enabled: bool) -> SettingsAction {
+        let total = self.cached_entries.len();
+        let Some(center_idx) = self.slot_list.get_center_item_index(total) else {
+            return SettingsAction::None;
+        };
+        let Some(SettingsEntry::Item(item)) = self.cached_entries.get_mut(center_idx) else {
+            return SettingsAction::None;
+        };
+        let SettingValue::ToggleSet(ref mut items) = item.value else {
+            return SettingsAction::None;
+        };
+        if let Some(entry) = items.get_mut(cursor_idx)
+            && entry.2 != enabled
+        {
+            entry.2 = enabled;
+            let toggle_key = entry.1.clone();
+            return SettingsAction::WriteGeneralSetting {
+                key: toggle_key,
+                value: SettingValue::Bool(enabled),
+            };
+        }
+        SettingsAction::None
     }
 
     /// Apply an edit operation (increment/decrement) to the currently editing item.

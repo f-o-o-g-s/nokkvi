@@ -145,6 +145,8 @@ pub enum HotkeyMessage {
     MoveTrackDown,
     /// Open Get Info modal for centered item (Shift+I)
     GetInfo,
+    /// Settings edit value up (enable) or down (disable)
+    EditValue(bool),
 }
 
 /// Discriminant for genre vs playlist collage artwork pipelines

@@ -59,23 +59,27 @@ impl Nokkvi {
             && !self.settings_page.cached_entries.is_empty()
             && self.settings_page.sub_list.is_none()
             && self.settings_page.font_sub_list.is_none()
+            && self.settings_page.toggle_cursor.is_none()
         {
             let total = self.settings_page.cached_entries.len().max(1);
             match msg {
                 SettingsMessage::SlotListUp => {
                     self.settings_page.editing_index = None;
+                    self.settings_page.toggle_cursor = None;
                     self.settings_page.slot_list.move_up(total);
                     self.settings_page.snap_to_non_header(false);
                     self.settings_page.update_description();
                 }
                 SettingsMessage::SlotListDown => {
                     self.settings_page.editing_index = None;
+                    self.settings_page.toggle_cursor = None;
                     self.settings_page.slot_list.move_down(total);
                     self.settings_page.snap_to_non_header(true);
                     self.settings_page.update_description();
                 }
                 SettingsMessage::SlotListSetOffset(offset) => {
                     self.settings_page.editing_index = None;
+                    self.settings_page.toggle_cursor = None;
                     self.settings_page.slot_list.set_offset(offset, total);
                     self.settings_page.snap_to_non_header(true);
                     self.settings_page.update_description();

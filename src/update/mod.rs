@@ -612,6 +612,7 @@ impl Nokkvi {
                 HotkeyMessage::MoveTrackUp => self.handle_move_track(true),
                 HotkeyMessage::MoveTrackDown => self.handle_move_track(false),
                 HotkeyMessage::GetInfo => self.handle_get_info(),
+                HotkeyMessage::EditValue(up) => self.handle_edit_value(up),
             },
 
             // -----------------------------------------------------------------

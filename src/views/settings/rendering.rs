@@ -143,6 +143,8 @@ pub(crate) struct SlotRenderContext<'a> {
     pub conflict_text: Option<&'a str>,
     /// Whether we're rendering at Level 1 (category picker) — centers headers
     pub is_level1: bool,
+    /// Index of the keyboard-cursored badge within a ToggleSet (center row only)
+    pub toggle_cursor: Option<usize>,
 }
 
 /// Render a single settings slot list slot (either header or item)
@@ -664,7 +666,13 @@ fn render_value_display<'a>(
 
         SettingValue::ToggleSet(items) => {
             // Multi-select: each badge independently toggleable
-            render_toggle_set(items, font_size, is_center, opacity)
+            render_toggle_set(
+                items,
+                font_size,
+                is_center,
+                opacity,
+                if is_center { ctx.toggle_cursor } else { None },
+            )
         }
 
         SettingValue::Hotkey(combo) => {
@@ -921,16 +929,21 @@ fn render_toggle_set<'a>(
     font_size: f32,
     is_center: bool,
     opacity: f32,
+    cursor_index: Option<usize>,
 ) -> Element<'a, SettingsMessage> {
     let opt_size = font_size * 0.75;
     let underline_height = 2.0;
 
     let mut r = row![].spacing(22).align_y(Alignment::Center);
 
-    for (label, key, enabled) in items {
+    for (i, (label, key, enabled)) in items.iter().enumerate() {
         let is_on = *enabled;
+        let is_cursored = cursor_index == Some(i);
 
-        let text_color = if is_center {
+        let text_color = if is_cursored {
+            // Cursored badge: accent color regardless of on/off
+            theme::accent_bright()
+        } else if is_center {
             Color {
                 a: if is_on { 1.0 } else { 0.5 },
                 ..theme::fg0()

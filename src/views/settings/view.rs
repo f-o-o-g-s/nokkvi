@@ -156,6 +156,7 @@ impl SettingsPage {
         let is_capturing = self.capturing_hotkey.is_some();
         let conflict_text_owned = self.conflict_label.as_ref().map(|(s, _)| s.clone());
         let hex_input_owned = self.hex_input.clone();
+        let toggle_cursor = self.toggle_cursor;
 
         let slot_list_content = slot_list::slot_list_view_with_scroll(
             &self.slot_list,
@@ -184,6 +185,7 @@ impl SettingsPage {
                         None
                     },
                     is_level1,
+                    toggle_cursor: if ctx.is_center { toggle_cursor } else { None },
                 };
                 let hi = if is_editing { &hex_input_owned } else { "" };
                 render_settings_slot(&ctx, entry, is_editing, is_collapsed, hi)
@@ -580,6 +582,7 @@ impl SettingsPage {
                         is_capturing: false,
                         conflict_text: None,
                         is_level1: false,
+                        toggle_cursor: None,
                     };
                     render_font_slot(&ctx, font_name)
                 },

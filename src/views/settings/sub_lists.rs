@@ -303,6 +303,7 @@ impl SettingsPage {
                     is_capturing: false,
                     conflict_text: None,
                     is_level1: false,
+                    toggle_cursor: None,
                 };
                 render_color_slot(
                     &ctx,

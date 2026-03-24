@@ -218,6 +218,10 @@ pub enum HotkeyAction {
     NextSortMode,
     ToggleSortOrder,
 
+    // --- Settings edit (vertical) ---
+    EditUp,
+    EditDown,
+
     // --- Global ---
     Escape,
     ResetToDefault,
@@ -266,6 +270,9 @@ impl HotkeyAction {
         HotkeyAction::PrevSortMode,
         HotkeyAction::NextSortMode,
         HotkeyAction::ToggleSortOrder,
+        // Settings edit
+        HotkeyAction::EditUp,
+        HotkeyAction::EditDown,
         // Escape and Delete excluded — reserved, not configurable
     ];
 
@@ -312,6 +319,8 @@ impl HotkeyAction {
             HotkeyAction::PrevSortMode => "Previous Sort Mode",
             HotkeyAction::NextSortMode => "Next Sort Mode",
             HotkeyAction::ToggleSortOrder => "Sort Asc / Desc",
+            HotkeyAction::EditUp => "Edit Value Up",
+            HotkeyAction::EditDown => "Edit Value Down",
             HotkeyAction::Escape => "Escape / Back",
             HotkeyAction::ResetToDefault => "Reset to Default",
         }
@@ -355,6 +364,8 @@ impl HotkeyAction {
             HotkeyAction::PrevSortMode => "Cycle sort mode backward",
             HotkeyAction::NextSortMode => "Cycle sort mode forward",
             HotkeyAction::ToggleSortOrder => "Toggle ascending/descending sort",
+            HotkeyAction::EditUp => "Toggle setting on · enable field",
+            HotkeyAction::EditDown => "Toggle setting off · disable field",
             HotkeyAction::Escape => "Close overlay, clear search, or go back",
             HotkeyAction::ResetToDefault => "Reset focused setting to its default value",
         }
@@ -400,6 +411,8 @@ impl HotkeyAction {
             HotkeyAction::PrevSortMode
             | HotkeyAction::NextSortMode
             | HotkeyAction::ToggleSortOrder => "Sort",
+
+            HotkeyAction::EditUp | HotkeyAction::EditDown => "Settings Edit",
 
             HotkeyAction::Escape | HotkeyAction::ResetToDefault => "Global",
         }
@@ -448,6 +461,9 @@ impl HotkeyAction {
             HotkeyAction::PrevSortMode => KeyCombo::key(KeyCode::ArrowLeft),
             HotkeyAction::NextSortMode => KeyCombo::key(KeyCode::ArrowRight),
             HotkeyAction::ToggleSortOrder => KeyCombo::key(KeyCode::PageUp),
+            // Settings edit
+            HotkeyAction::EditUp => KeyCombo::key(KeyCode::ArrowUp),
+            HotkeyAction::EditDown => KeyCombo::key(KeyCode::ArrowDown),
             // Global
             HotkeyAction::Escape => KeyCombo::key(KeyCode::Escape),
             HotkeyAction::ResetToDefault => KeyCombo::key(KeyCode::Delete),

@@ -70,6 +70,8 @@ fn hotkey_action_to_key(action: &HotkeyAction) -> &'static str {
         HotkeyAction::PrevSortMode => "hotkey.cycle_view_left",
         HotkeyAction::NextSortMode => "hotkey.cycle_view_right",
         HotkeyAction::ToggleSortOrder => "hotkey.toggle_sort_order",
+        HotkeyAction::EditUp => "hotkey.edit_up",
+        HotkeyAction::EditDown => "hotkey.edit_down",
         HotkeyAction::Escape => "hotkey.escape",
         HotkeyAction::ResetToDefault => "hotkey.reset_to_default",
     }
@@ -86,6 +88,7 @@ pub(crate) fn build_hotkeys_items(config: &HotkeyConfig) -> Vec<SettingsEntry> {
     const NAVIGATION: &str = "assets/icons/unfold-vertical.svg";
     const ITEM: &str = "assets/icons/library-big.svg";
     const SORT: &str = "assets/icons/list-filter.svg";
+    const EDIT: &str = "assets/icons/settings.svg";
 
     /// Map category label to its icon path
     fn cat_icon(cat: &str) -> &'static str {
@@ -95,12 +98,20 @@ pub(crate) fn build_hotkeys_items(config: &HotkeyConfig) -> Vec<SettingsEntry> {
             "Navigation" => NAVIGATION,
             "Item Actions" => ITEM,
             "Sort" => SORT,
+            "Settings Edit" => EDIT,
             _ => NAV,
         }
     }
 
     // Category order (must match ALL_SECTION_LABELS)
-    let categories = ["Views", "Playback", "Navigation", "Item Actions", "Sort"];
+    let categories = [
+        "Views",
+        "Playback",
+        "Navigation",
+        "Item Actions",
+        "Sort",
+        "Settings Edit",
+    ];
 
     let mut entries = Vec::new();
     let mut restore_pushed = false;
