@@ -441,28 +441,8 @@ impl Nokkvi {
                 }
             }
             QueueAction::ShowInFolder(index) => {
-                // QueueSongUIViewData doesn't carry the file path, so fetch it
-                // from the API using the same pattern as ShowInfo.
                 if let Some(song_id) = filtered_queue.get(index).map(|s| s.id.clone()) {
-                    return self.shell_task(
-                        move |shell| async move {
-                            let api = shell.songs_api().await?;
-                            let song = api.load_song_by_id(&song_id).await?;
-                            Ok(song.path)
-                        },
-                        |result: Result<String, anyhow::Error>| match result {
-                            Ok(path) => Message::ShowInFolder(path),
-                            Err(e) => {
-                                tracing::error!("Failed to load song path: {e}");
-                                Message::Toast(crate::app_message::ToastMessage::Push(
-                                    nokkvi_data::types::toast::Toast::new(
-                                        format!("Failed to load song path: {e}"),
-                                        nokkvi_data::types::toast::ToastLevel::Error,
-                                    ),
-                                ))
-                            }
-                        },
-                    );
+                    return self.show_song_in_folder_task(song_id);
                 }
             }
             QueueAction::RefreshArtwork(album_id) => {
@@ -619,6 +599,12 @@ impl Nokkvi {
                 .common
                 .slot_list
                 .set_offset(idx, filtered.len());
+        } else if !filtered.is_empty() {
+            // Playing song not in filtered results — clamp to start
+            self.queue_page
+                .common
+                .slot_list
+                .set_offset(0, filtered.len());
         }
         // Physically reorder backend queue so next/prev follows sorted order
         self.shell_spawn("sort_backend_queue", move |shell| async move {

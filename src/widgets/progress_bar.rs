@@ -346,9 +346,12 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
         let progress = if state.is_dragging {
             // During drag, use the visual drag position (not the actual playback position)
             state.drag_progress
-        } else if self.is_playing && state.last_update.is_some() && self.duration > 0.0 {
+        } else if self.is_playing
+            && let Some(last_update) = state.last_update
+            && self.duration > 0.0
+        {
             // Interpolate position based on elapsed time since last update
-            let elapsed = state.last_update.unwrap().elapsed().as_secs_f32();
+            let elapsed = last_update.elapsed().as_secs_f32();
             let interpolated_pos = (state.last_position + elapsed).min(self.duration);
             (interpolated_pos / self.duration).clamp(0.0, 1.0)
         } else if self.duration > 0.0 {

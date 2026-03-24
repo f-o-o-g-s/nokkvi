@@ -442,13 +442,18 @@ where
                 .compute_target_index(*last_cursor, layout, *index)
                 .min(child_count);
 
-            let drag_bounds = layout.children().nth(*index).unwrap().bounds();
+            let Some(drag_layout) = layout.children().nth(*index) else {
+                return;
+            };
+            let drag_bounds = drag_layout.bounds();
             let drag_height = drag_bounds.height + self.spacing;
 
             for i in 0..child_count {
                 let child = &self.children[i];
                 let state = &tree.children[i];
-                let child_layout = layout.children().nth(i).unwrap();
+                let Some(child_layout) = layout.children().nth(i) else {
+                    continue;
+                };
 
                 if i == *index {
                     // Draw dragged item at cursor Y offset

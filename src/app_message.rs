@@ -15,6 +15,28 @@ use nokkvi_data::backend::app_service::AppService;
 
 use crate::{View, services, views, widgets};
 
+/// Kind of playlist mutation — drives toast messages and reload.
+#[derive(Debug, Clone)]
+pub enum PlaylistMutation {
+    Deleted(String),
+    Renamed(String),
+    Created(String),
+    Overwritten(String),
+    Appended(String),
+}
+
+impl std::fmt::Display for PlaylistMutation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Deleted(name) => write!(f, "Deleted '{name}'"),
+            Self::Renamed(name) => write!(f, "Renamed to '{name}'"),
+            Self::Created(name) => write!(f, "Created playlist '{name}'"),
+            Self::Overwritten(name) => write!(f, "Overwritten playlist '{name}'"),
+            Self::Appended(name) => write!(f, "Added songs to '{name}'"),
+        }
+    }
+}
+
 /// Named entry for batch collage artwork results
 #[derive(Debug, Clone)]
 pub struct ArtworkBatchEntry {
@@ -251,16 +273,8 @@ pub enum Message {
     LoadArtists,
     LoadGenres,
     LoadPlaylists,
-    /// Playlist was deleted successfully — toast and reload
-    PlaylistDeleted(String), // playlist name for toast
-    /// Playlist was renamed successfully — toast and reload
-    PlaylistRenamed(String), // new name for toast
-    /// Playlist was created successfully — toast and reload
-    PlaylistCreated(String), // playlist name for toast
-    /// Playlist was overwritten successfully — toast and reload
-    PlaylistOverwritten(String), // playlist name for toast
-    /// Songs appended to existing playlist — toast and reload
-    PlaylistAppended(String), // playlist name for toast
+    /// Playlist was mutated (created/deleted/renamed/overwritten/appended) — toast and reload
+    PlaylistMutated(PlaylistMutation),
     /// Playlists fetched on-demand for Save Queue as Playlist dialog
     PlaylistsFetchedForDialog(Vec<(String, String)>), // (id, name) pairs
     /// Playlists fetched for Add to Playlist dialog (playlists, pre-resolved song_ids)

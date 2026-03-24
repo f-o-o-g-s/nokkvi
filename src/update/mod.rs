@@ -31,6 +31,26 @@ macro_rules! impl_page_loaded_handler {
     }};
 }
 
+/// DRY macro for view message dispatch with scroll-seek timer injection.
+/// All non-Queue slot list views share the same pattern: check if the message
+/// is a `SlotListScrollSeek`, call the handler, then append scrollbar fade
+/// and seek-settled timers when it was a seek event.
+macro_rules! dispatch_view_with_seek {
+    ($self:ident, $msg:ident, $handler:ident, $seek_pat:pat) => {{
+        let is_seek = matches!($msg, $seek_pat);
+        let task = $self.$handler($msg);
+        if is_seek {
+            iced::Task::batch([
+                task,
+                $self.scrollbar_fade_timer(),
+                $self.seek_settled_timer(),
+            ])
+        } else {
+            task
+        }
+    }};
+}
+
 mod albums;
 mod artists;
 mod browsing_panel;
@@ -65,6 +85,44 @@ use crate::{
     app_message::{HotkeyMessage, Message, PlaybackMessage, ScrobbleMessage},
 };
 
+/// Fetch album IDs for a genre from the API.
+/// Used as the `fetch_album_ids_fn` closure for genre collage artwork loading.
+async fn load_genre_album_ids(
+    client: nokkvi_data::services::api::client::ApiClient,
+    server_url: String,
+    subsonic_credential: String,
+    entity_id: String,
+) -> Vec<String> {
+    let service = nokkvi_data::services::api::genres::GenresApiService::new_with_client(
+        client,
+        server_url,
+        subsonic_credential,
+    );
+    service
+        .load_genre_albums(&entity_id)
+        .await
+        .unwrap_or_default()
+}
+
+/// Fetch album IDs for a playlist from the API.
+/// Used as the `fetch_album_ids_fn` closure for playlist collage artwork loading.
+async fn load_playlist_album_ids(
+    client: nokkvi_data::services::api::client::ApiClient,
+    server_url: String,
+    subsonic_credential: String,
+    entity_id: String,
+) -> Vec<String> {
+    let service = nokkvi_data::services::api::playlists::PlaylistsApiService::new_with_client(
+        client,
+        server_url,
+        subsonic_credential,
+    );
+    service
+        .load_playlist_albums(&entity_id)
+        .await
+        .unwrap_or_default()
+}
+
 impl Nokkvi {
     /// Central message handler
     ///
@@ -90,40 +148,24 @@ impl Nokkvi {
             Message::StripClicked => {
                 use nokkvi_data::types::player_settings::StripClickAction;
                 match crate::theme::strip_click_action() {
-                    StripClickAction::GoToQueue => self.handle_switch_view(crate::View::Queue),
-                    StripClickAction::GoToAlbum => self.handle_switch_view(crate::View::Albums),
-                    StripClickAction::GoToArtist => self.handle_switch_view(crate::View::Artists),
-                    StripClickAction::CopyTrackInfo => {
-                        let info = format!("{} — {}", self.playback.artist, self.playback.title);
-                        self.toast_info("Copied to clipboard");
-                        iced::clipboard::write(info).map(|_| Message::NoOp)
+                    StripClickAction::GoToQueue => self.strip_navigate(crate::View::Queue, false),
+                    StripClickAction::GoToAlbum => self.strip_navigate(crate::View::Albums, false),
+                    StripClickAction::GoToArtist => {
+                        self.strip_navigate(crate::View::Artists, false)
                     }
+                    StripClickAction::CopyTrackInfo => self.strip_copy_track_info(),
                     StripClickAction::DoNothing => Task::none(),
                 }
             }
             Message::StripContextAction(entry) => {
                 use crate::widgets::context_menu::StripContextEntry;
                 match entry {
-                    StripContextEntry::GoToQueue => {
-                        let switch = self.handle_switch_view(crate::View::Queue);
-                        let center = self.handle_center_on_playing();
-                        Task::batch([switch, center])
-                    }
-                    StripContextEntry::GoToAlbum => {
-                        let switch = self.handle_switch_view(crate::View::Albums);
-                        let center = self.handle_center_on_playing();
-                        Task::batch([switch, center])
-                    }
+                    StripContextEntry::GoToQueue => self.strip_navigate(crate::View::Queue, true),
+                    StripContextEntry::GoToAlbum => self.strip_navigate(crate::View::Albums, true),
                     StripContextEntry::GoToArtist => {
-                        let switch = self.handle_switch_view(crate::View::Artists);
-                        let center = self.handle_center_on_playing();
-                        Task::batch([switch, center])
+                        self.strip_navigate(crate::View::Artists, true)
                     }
-                    StripContextEntry::CopyTrackInfo => {
-                        let info = format!("{} — {}", self.playback.artist, self.playback.title);
-                        self.toast_info("Copied to clipboard");
-                        iced::clipboard::write(info).map(|_| Message::NoOp)
-                    }
+                    StripContextEntry::CopyTrackInfo => self.strip_copy_track_info(),
                     StripContextEntry::ToggleStar => self.handle_toggle_star_for_playing_track(),
                     StripContextEntry::ShowInFolder => {
                         self.handle_show_in_folder_for_playing_track()
@@ -214,24 +256,8 @@ impl Nokkvi {
             // Data Loading: Playlists
             // -----------------------------------------------------------------
             Message::LoadPlaylists => self.handle_load_playlists(),
-            Message::PlaylistDeleted(name) => {
-                self.toast_success(format!("Deleted '{name}'"));
-                self.handle_load_playlists()
-            }
-            Message::PlaylistRenamed(name) => {
-                self.toast_success(format!("Renamed to '{name}'"));
-                self.handle_load_playlists()
-            }
-            Message::PlaylistCreated(name) => {
-                self.toast_success(format!("Created playlist '{name}'"));
-                self.handle_load_playlists()
-            }
-            Message::PlaylistOverwritten(name) => {
-                self.toast_success(format!("Overwritten playlist '{name}'"));
-                self.handle_load_playlists()
-            }
-            Message::PlaylistAppended(name) => {
-                self.toast_success(format!("Added songs to '{name}'"));
+            Message::PlaylistMutated(mutation) => {
+                self.toast_success(mutation.to_string());
                 self.handle_load_playlists()
             }
             Message::PlaylistsFetchedForDialog(playlists) => {
@@ -251,9 +277,11 @@ impl Nokkvi {
                             let service = shell.playlists_api().await?;
                             service.add_songs_to_playlist(&playlist_id, &song_ids).await
                         },
-                        Message::PlaylistAppended(format!(
-                            "{playlist_name}' ({count} song{})",
-                            if count == 1 { "" } else { "s" }
+                        Message::PlaylistMutated(crate::app_message::PlaylistMutation::Appended(
+                            format!(
+                                "{playlist_name}' ({count} song{})",
+                                if count == 1 { "" } else { "s" }
+                            ),
                         )),
                         "quick-add to default playlist",
                     );
@@ -280,9 +308,7 @@ impl Nokkvi {
                         self.handle_large_artwork_loaded(id, handle)
                     }
                     ArtworkMessage::StartPrefetch => self.handle_start_artwork_prefetch(None),
-                    ArtworkMessage::StartArtistPrefetch => {
-                        self.handle_start_artist_prefetch(None)
-                    }
+                    ArtworkMessage::StartArtistPrefetch => self.handle_start_artist_prefetch(None),
                     ArtworkMessage::RefreshAlbumArtwork(album_id) => {
                         self.handle_refresh_album_artwork(album_id)
                     }
@@ -298,12 +324,7 @@ impl Nokkvi {
                                 server_url,
                                 cred,
                                 album_ids,
-                                |client, server_url, subsonic_credential, entity_id| async move {
-                                    let service = nokkvi_data::services::api::genres::GenresApiService::new_with_client(
-                                        client, server_url, subsonic_credential,
-                                    );
-                                    service.load_genre_albums(&entity_id).await.unwrap_or_default()
-                                },
+                                load_genre_album_ids,
                             ),
                             CollageTarget::Playlist => self.handle_load_collage_artwork(
                                 target,
@@ -311,12 +332,7 @@ impl Nokkvi {
                                 server_url,
                                 cred,
                                 album_ids,
-                                |client, server_url, subsonic_credential, entity_id| async move {
-                                    let service = nokkvi_data::services::api::playlists::PlaylistsApiService::new_with_client(
-                                        client, server_url, subsonic_credential,
-                                    );
-                                    service.load_playlist_albums(&entity_id).await.unwrap_or_default()
-                                },
+                                load_playlist_album_ids,
                             ),
                         }
                     }
@@ -342,22 +358,12 @@ impl Nokkvi {
                             CollageTarget::Genre => self.handle_start_collage_prefetch(
                                 target,
                                 items_needing_ids,
-                                |client, server_url, subsonic_credential, entity_id| async move {
-                                    let service = nokkvi_data::services::api::genres::GenresApiService::new_with_client(
-                                        client, server_url, subsonic_credential,
-                                    );
-                                    service.load_genre_albums(&entity_id).await.unwrap_or_default()
-                                },
+                                load_genre_album_ids,
                             ),
                             CollageTarget::Playlist => self.handle_start_collage_prefetch(
                                 target,
                                 items_needing_ids,
-                                |client, server_url, subsonic_credential, entity_id| async move {
-                                    let service = nokkvi_data::services::api::playlists::PlaylistsApiService::new_with_client(
-                                        client, server_url, subsonic_credential,
-                                    );
-                                    service.load_playlist_albums(&entity_id).await.unwrap_or_default()
-                                },
+                                load_playlist_album_ids,
                             ),
                         }
                     }
@@ -642,50 +648,45 @@ impl Nokkvi {
                 Task::done(Message::Playback(PlaybackMessage::Tick))
             }
             Message::Albums(msg) => {
-                let is_seek = matches!(msg, crate::views::AlbumsMessage::SlotListScrollSeek(_));
-                let task = self.handle_albums(msg);
-                if is_seek {
-                    Task::batch([task, self.scrollbar_fade_timer(), self.seek_settled_timer()])
-                } else {
-                    task
-                }
+                dispatch_view_with_seek!(
+                    self,
+                    msg,
+                    handle_albums,
+                    crate::views::AlbumsMessage::SlotListScrollSeek(_)
+                )
             }
             Message::Queue(msg) => self.handle_queue(msg),
             Message::Artists(msg) => {
-                let is_seek = matches!(msg, crate::views::ArtistsMessage::SlotListScrollSeek(_));
-                let task = self.handle_artists(msg);
-                if is_seek {
-                    Task::batch([task, self.scrollbar_fade_timer(), self.seek_settled_timer()])
-                } else {
-                    task
-                }
+                dispatch_view_with_seek!(
+                    self,
+                    msg,
+                    handle_artists,
+                    crate::views::ArtistsMessage::SlotListScrollSeek(_)
+                )
             }
             Message::Songs(msg) => {
-                let is_seek = matches!(msg, crate::views::SongsMessage::SlotListScrollSeek(_));
-                let task = self.handle_songs(msg);
-                if is_seek {
-                    Task::batch([task, self.scrollbar_fade_timer(), self.seek_settled_timer()])
-                } else {
-                    task
-                }
+                dispatch_view_with_seek!(
+                    self,
+                    msg,
+                    handle_songs,
+                    crate::views::SongsMessage::SlotListScrollSeek(_)
+                )
             }
             Message::Genres(msg) => {
-                let is_seek = matches!(msg, crate::views::GenresMessage::SlotListScrollSeek(_));
-                let task = self.handle_genres(msg);
-                if is_seek {
-                    Task::batch([task, self.scrollbar_fade_timer(), self.seek_settled_timer()])
-                } else {
-                    task
-                }
+                dispatch_view_with_seek!(
+                    self,
+                    msg,
+                    handle_genres,
+                    crate::views::GenresMessage::SlotListScrollSeek(_)
+                )
             }
             Message::Playlists(msg) => {
-                let is_seek = matches!(msg, crate::views::PlaylistsMessage::SlotListScrollSeek(_));
-                let task = self.handle_playlists(msg);
-                if is_seek {
-                    Task::batch([task, self.scrollbar_fade_timer(), self.seek_settled_timer()])
-                } else {
-                    task
-                }
+                dispatch_view_with_seek!(
+                    self,
+                    msg,
+                    handle_playlists,
+                    crate::views::PlaylistsMessage::SlotListScrollSeek(_)
+                )
             }
             Message::Settings(msg) => self.handle_settings(msg),
 

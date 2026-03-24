@@ -624,14 +624,12 @@ impl GenresPage {
                 .and_then(|v| v.first())
                 .or_else(|| genre_artwork.get(&genre_id));
             Some(single_artwork_panel::<GenresMessage>(handle))
-        } else if collage_handles.is_none_or(|v| v.is_empty()) {
+        } else if let Some(handles) = collage_handles.filter(|v| !v.is_empty()) {
+            // Render 3x3 collage grid (2+ albums)
+            Some(collage_artwork_panel::<GenresMessage>(handles))
+        } else {
             // album_count > 1 but collage NOT loaded yet - show placeholder
             Some(single_artwork_panel::<GenresMessage>(None))
-        } else {
-            // Render 3x3 collage grid (2+ albums)
-            Some(collage_artwork_panel::<GenresMessage>(
-                collage_handles.unwrap(),
-            ))
         };
 
         base_slot_list_layout(&layout_config, header, slot_list_content, artwork_content)

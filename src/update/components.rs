@@ -114,7 +114,7 @@ pub(super) fn prefetch_song_artwork_tasks(
         })
         .map(|album_id| {
             let vm = albums_vm.clone();
-            let id = album_id.clone();
+            let id = album_id;
             Task::perform(
                 async move {
                     let (url, cred) = vm.get_server_config().await;
@@ -784,14 +784,9 @@ impl Nokkvi {
         ])
     }
 
-    /// Open the currently playing track's folder in the file manager.
-    /// Uses API lookup since QueueSongUIViewData doesn't carry the file path.
-    pub(crate) fn handle_show_in_folder_for_playing_track(&mut self) -> Task<Message> {
-        let Some(song_id) = self.scrobble.current_song_id.clone() else {
-            self.toast_warn("No track is currently playing");
-            return Task::none();
-        };
-
+    /// Fetch a song's file path from the API and dispatch `ShowInFolder`.
+    /// Shared by queue ShowInFolder and strip context menu ShowInFolder.
+    pub(crate) fn show_song_in_folder_task(&self, song_id: String) -> Task<Message> {
         self.shell_task(
             move |shell| async move {
                 let api = shell.songs_api().await?;
@@ -811,5 +806,38 @@ impl Nokkvi {
                 }
             },
         )
+    }
+
+    /// Open the currently playing track's folder in the file manager.
+    pub(crate) fn handle_show_in_folder_for_playing_track(&mut self) -> Task<Message> {
+        let Some(song_id) = self.scrobble.current_song_id.clone() else {
+            self.toast_warn("No track is currently playing");
+            return Task::none();
+        };
+        self.show_song_in_folder_task(song_id)
+    }
+
+    // -----------------------------------------------------------------
+    // Strip navigation helpers (shared by StripClicked + StripContextAction)
+    // -----------------------------------------------------------------
+
+    /// Navigate to a view from the metadata strip.
+    /// When `center_on_playing` is true (context menu), also scroll the
+    /// target view to the currently playing track.
+    pub(crate) fn strip_navigate(&mut self, view: View, center_on_playing: bool) -> Task<Message> {
+        let switch = self.handle_switch_view(view);
+        if center_on_playing {
+            let center = self.handle_center_on_playing();
+            Task::batch([switch, center])
+        } else {
+            switch
+        }
+    }
+
+    /// Copy "Artist — Title" to clipboard and show a toast.
+    pub(crate) fn strip_copy_track_info(&mut self) -> Task<Message> {
+        let info = format!("{} — {}", self.playback.artist, self.playback.title);
+        self.toast_info("Copied to clipboard");
+        iced::clipboard::write(info).map(|_| Message::NoOp)
     }
 }

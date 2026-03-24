@@ -4,7 +4,7 @@ use iced::Task;
 
 use crate::{
     Nokkvi,
-    app_message::Message,
+    app_message::{Message, PlaylistMutation},
     widgets::text_input_dialog::{PlaylistOption, TextInputDialogAction, TextInputDialogMessage},
 };
 
@@ -79,7 +79,7 @@ impl Nokkvi {
                         let service = shell.playlists_api().await?;
                         service.update_playlist(&playlist_id, &name, None).await
                     },
-                    Message::PlaylistRenamed(value),
+                    Message::PlaylistMutated(PlaylistMutation::Renamed(value)),
                     "rename playlist",
                 )
             }
@@ -97,7 +97,7 @@ impl Nokkvi {
                         let service = shell.playlists_api().await?;
                         service.create_playlist(&name, &song_ids).await
                     },
-                    Message::PlaylistCreated(value),
+                    Message::PlaylistMutated(PlaylistMutation::Created(value)),
                     "create playlist from queue",
                 )
             }
@@ -121,7 +121,7 @@ impl Nokkvi {
                             .replace_playlist_tracks(&playlist_id, &song_ids)
                             .await
                     },
-                    Message::PlaylistOverwritten(playlist_name),
+                    Message::PlaylistMutated(PlaylistMutation::Overwritten(playlist_name)),
                     "overwrite playlist from queue",
                 )
             }
@@ -132,7 +132,7 @@ impl Nokkvi {
                         let service = shell.playlists_api().await?;
                         service.delete_playlist(&playlist_id).await
                     },
-                    Message::PlaylistDeleted(name),
+                    Message::PlaylistMutated(PlaylistMutation::Deleted(name)),
                     "delete playlist",
                 )
             }
@@ -149,7 +149,7 @@ impl Nokkvi {
                         let service = shell.playlists_api().await?;
                         service.create_playlist(&name, &song_ids).await
                     },
-                    Message::PlaylistCreated(value),
+                    Message::PlaylistMutated(PlaylistMutation::Created(value)),
                     "create playlist with songs",
                 )
             }
@@ -169,7 +169,7 @@ impl Nokkvi {
                         let service = shell.playlists_api().await?;
                         service.add_songs_to_playlist(&playlist_id, &song_ids).await
                     },
-                    Message::PlaylistAppended(playlist_name),
+                    Message::PlaylistMutated(PlaylistMutation::Appended(playlist_name)),
                     "add songs to playlist",
                 )
             }

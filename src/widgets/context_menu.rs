@@ -361,7 +361,7 @@ where
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, Theme, iced::Renderer>> {
         // Let the child provide its overlay first
-        let base_state = tree.children.first_mut().unwrap();
+        let base_state = tree.children.first_mut()?;
         let base_overlay =
             self.base
                 .as_widget_mut()
