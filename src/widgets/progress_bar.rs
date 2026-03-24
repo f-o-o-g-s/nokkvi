@@ -214,6 +214,12 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
                 state.overlay_cycle_start = std::time::Instant::now();
             }
             state.overlay_full_width = total_width;
+        } else {
+            // No segments provided — clear any stale state from previous renders
+            // so draw() doesn't render leftover segments after fields are disabled.
+            let state = tree.state.downcast_mut::<State>();
+            state.overlay_segments.clear();
+            state.overlay_full_width = 0.0;
         }
 
         node
