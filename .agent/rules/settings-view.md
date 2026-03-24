@@ -17,7 +17,7 @@ views/settings/
 ├── items_playback.rs    — Playback tab item builders (Playback, Scrobbling, Playlists)
 ├── items_hotkeys.rs     — Hotkeys tab item builders (per-category hotkey entries)
 ├── items_theme.rs       — Theme tab item builders (font, colors, presets, opacity gradient)
-├── items_visualizer.rs  — Visualizer tab item builders (bars, peaks, LED, 3D, gradient)
+├── items_visualizer.rs  — Visualizer tab item builders (bars, peaks, LED, 3D, gradient, lines)
 ├── sub_lists.rs         — Sub-slot-list handling: font picker, color gradient editor
 ├── presets.rs           — 10 embedded preset themes applied inline (no separate sub-slot-list)
 ├── rendering.rs         — Slot rendering: headers, items, color sub-slot-list, presets, hotkey badges, toggle sets, row separators
@@ -50,7 +50,7 @@ views/settings/
 | `Float` / `Int` | ←/→ increment/decrement with step + clamp. Arrow buttons are clickable. |
 | `Bool` | Toggle. Clickable "On"/"Off" badges. |
 | `Enum` | Cycle. Center slot shows all options as clickable badges (`EditSetValue`). |
-| `ToggleSet` | Multi-select badges. Each badge independently toggleable via `ToggleSetToggle(key)`. `Vec<(label, key, enabled)>`. |
+| `ToggleSet` | Multi-select badges. Each badge independently toggleable via `ToggleSetToggle(key)`. `Vec<(label, key, enabled)>`. Keyboard navigation: ←/→ moves cursor between badges, Enter toggles cursored badge, EditUp/EditDown (↑/↓) sets badge on/off. `toggle_set_cursor_index` tracks active cursor (center row only). |
 | `HexColor` | Direct hex input |
 | `ColorArray` | Opens sub-slot-list for gradient editing |
 | `Text` | Read-only (or editable via TextInputDialog for paths) |
@@ -103,8 +103,8 @@ Volume normalization uses rodio's Automatic Gain Control (AGC). `NormalizationLe
 | `Ctrl+E` | Toggle browsing panel from Queue view |
 | `Shift+↑/↓` | Reorder queue tracks |
 | `Tab` | Switch pane focus (queue ↔ browser) during split view |
-
-Legacy `SettingsTab1`–`SettingsTab4` hotkey actions have been removed.
+| `↑` | `EditUp` — toggle setting on / enable ToggleSet field |
+| `↓` | `EditDown` — toggle setting off / disable ToggleSet field |
 
 ## Confirmation Dialogs
 

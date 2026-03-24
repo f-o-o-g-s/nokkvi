@@ -34,7 +34,7 @@ Use this checklist when implementing a new feature end-to-end to avoid missing i
 - [ ] **Scrobbling**: If track-lifecycle related, check `update/scrobbling.rs`.
 - [ ] **Sort mode**: Add `SortMode` variants and persistence. Queue sort is physical.
 - [ ] **Search filtering**: Implement inline filtering (immediate, no debounce).
-- [ ] **Settings**: Add items in the appropriate `views/settings/items_*.rs` file: `items_general.rs` (Application, Mouse, Account, Cache), `items_playback.rs` (Playback, Scrobbling, Playlists), `items_hotkeys.rs`, `items_theme.rs`, `items_visualizer.rs`. Use `SettingMeta` with `subtitle` for auto-documenting TOML comments. General/Playback settings use `WriteGeneralSetting` action.
+- [ ] **Settings**: Add items in the appropriate `views/settings/items_*.rs` file: `items_general.rs` (Application, Mouse, Account, Cache), `items_interface.rs` (Layout, Metadata Strip), `items_playback.rs` (Playback, Scrobbling, Playlists), `items_hotkeys.rs`, `items_theme.rs`, `items_visualizer.rs`. Use `SettingMeta` with `subtitle` for auto-documenting TOML comments. General/Playback/Interface settings use `WriteGeneralSetting` action.
 - [ ] **Stable viewport**: Route non-center clicks through `handle_select_offset` when stable viewport is on.
 - [ ] **Playlist edit guard**: Wrap play actions with `guard_play_action()`.
 - [ ] **Browsing panel**: If view should be accessible, ensure lazy data loading on tab switch.

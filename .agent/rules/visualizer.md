@@ -40,6 +40,7 @@ Two shader files share a common `Config` struct (must stay in sync with `shader.
 | `fade` | Peak fades in place after hold time |
 | `fall` | Peak falls at configurable constant velocity |
 | `fall_accel` | Peak falls with configurable acceleration (gravity) |
+| `fall_fade` | Peak falls at constant speed while simultaneously fading out |
 
 `peak_fall_speed` (1–20, default 5): scales fall/fall_accel velocity.
 

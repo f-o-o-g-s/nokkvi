@@ -128,3 +128,11 @@ Native `button` captures `ButtonPressed` before `HoverOverlay`'s passive event t
 ## 31. Length::Fill Stripe in Unconstrained Row in Column
 
 A `container(Space).height(Length::Fill)` inside a `row![]` that itself has no explicit height will cause the row to expand to fill all remaining column space — not just match sibling element heights. Always set `height(Length::Shrink)` on the wrapper row when adding a right-edge stripe to a header element whose height is determined by its main content (e.g., view_header at 48px). The stripe itself should still use `Fill` so it spans the row's allocated height.
+
+## 32. Stale Progress Track Overlay Segments
+
+When metadata visible-fields toggles change, the progress bar's `overlay_segments` must be rebuilt and the widget must re-render. A `Tick` dispatch forces the re-render; without it, stale segments persist until the next natural tick.
+
+## 33. Play Button Cold-Start Uses Selected Track
+
+The play button cold-start (nothing loaded) must use the selected track index (from `get_effective_center_index`), not `queue_songs.first()`. This matches the Enter-key behavior. The backend `playback_controller::play()` also defaults to the selected index, not index 0.
