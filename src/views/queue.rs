@@ -516,15 +516,24 @@ impl QueuePage {
                 .size(12)
                 .color(crate::theme::fg0());
 
-            // Build name + optional comment as a column
+            // Build name + optional comment as a column, constrained to prevent overflow.
+            // Without a width constraint, long comments expand to intrinsic text width
+            // and push save/edit icons off-screen, cascading layout breakage.
             let name_area: Element<'a, QueueMessage> = if comment.is_empty() {
-                name_label.into()
+                container(name_label)
+                    .width(Length::Fill)
+                    .clip(true)
+                    .into()
             } else {
                 let comment_label = iced::widget::text(comment.clone())
                     .font(crate::theme::ui_font())
                     .size(10)
-                    .color(crate::theme::fg2());
-                column![name_label, comment_label].spacing(1).into()
+                    .color(crate::theme::fg2())
+                    .wrapping(iced::widget::text::Wrapping::None);
+                container(column![name_label, comment_label].spacing(1))
+                    .width(Length::Fill)
+                    .clip(true)
+                    .into()
             };
 
             // Save button — quick-saves the current queue back to this playlist
@@ -586,13 +595,7 @@ impl QueuePage {
             .into();
 
             let playlist_bar = container(
-                row![
-                    playlist_icon,
-                    name_area,
-                    iced::widget::Space::new().width(Length::Fill),
-                    save_btn,
-                    edit_btn
-                ]
+                row![playlist_icon, name_area, save_btn, edit_btn]
                 .spacing(6)
                 .align_y(Alignment::Center)
                 .padding([0, 8])
