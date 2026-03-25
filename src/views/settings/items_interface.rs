@@ -114,7 +114,7 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
             meta!(
                 "general.strip_click_action",
                 "Click Action",
-                "What happens when you click the track info strip"
+                "What happens when you click the track info strip · no effect in Progress Track mode"
             ),
             data.strip_click_action,
             "Go to Queue",
