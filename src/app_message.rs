@@ -223,11 +223,11 @@ pub enum SlotListMessage {
     SetOffset(usize),
     ActivateCenter,
     ToggleSortOrder,
-    /// Timer-triggered: scrollbar fade animation complete (generation_id guard)
-    ScrollbarFadeComplete(u64),
+    /// Timer-triggered: scrollbar fade animation complete (view, generation_id guard)
+    ScrollbarFadeComplete(View, u64),
     /// Timer-triggered: scrollbar seek settled — load artwork for current viewport.
-    /// Fires ~150ms after the last seek event (generation_id guard).
-    SeekSettled(u64),
+    /// Fires ~150ms after the last seek event (view, generation_id guard).
+    SeekSettled(View, u64),
 }
 
 /// Toast notification messages, namespaced under `Message::Toast(..)`

@@ -345,15 +345,22 @@ impl Nokkvi {
             _ => None,
         });
 
-        let window_events = event::listen_with(|event, _status, _window| match event {
+        let window_events = event::listen_with(|event, status, _window| match event {
             Event::Window(iced::window::Event::Resized(size)) => {
                 Some(Message::WindowResized(size.width, size.height))
             }
             Event::Window(iced::window::Event::Rescaled(scale_factor)) => {
                 Some(Message::ScaleFactorChanged(scale_factor))
             }
-            // Cross-pane drag mouse tracking (handlers no-op when panel is closed)
-            Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+            // Cross-pane drag mouse tracking (handlers no-op when panel is closed).
+            // CursorMoved: skip when a widget (e.g. scrollbar) captured the event —
+            // prevents scrollbar drags from exceeding the 5px threshold and
+            // activating the cross-pane drag state machine.
+            // ButtonPressed/Released: always emit — Iced buttons also capture these,
+            // so filtering them would break cross-pane drag initiation.
+            Event::Mouse(iced::mouse::Event::CursorMoved { position })
+                if status != iced::event::Status::Captured =>
+            {
                 Some(Message::CrossPaneDragMoved(position))
             }
             Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {

@@ -40,15 +40,7 @@ impl Nokkvi {
             };
         }
 
-        match self.current_view {
-            View::Albums => Some(&self.albums_page),
-            View::Artists => Some(&self.artists_page),
-            View::Songs => Some(&self.songs_page),
-            View::Genres => Some(&self.genres_page),
-            View::Playlists => Some(&self.playlists_page),
-            View::Queue => Some(&self.queue_page),
-            View::Settings => None,
-        }
+        self.view_page(self.current_view)
     }
 
     /// Get the current view as a `&mut dyn ViewPage` for trait-based dispatch.
@@ -70,7 +62,26 @@ impl Nokkvi {
             };
         }
 
-        match self.current_view {
+        self.view_page_mut(self.current_view)
+    }
+
+    /// Look up a page by explicit `View` — no pane-focus routing.
+    /// Used by scrollbar timer handlers that always target a specific view.
+    pub(crate) fn view_page(&self, view: View) -> Option<&dyn views::ViewPage> {
+        match view {
+            View::Albums => Some(&self.albums_page),
+            View::Artists => Some(&self.artists_page),
+            View::Songs => Some(&self.songs_page),
+            View::Genres => Some(&self.genres_page),
+            View::Playlists => Some(&self.playlists_page),
+            View::Queue => Some(&self.queue_page),
+            View::Settings => None,
+        }
+    }
+
+    /// Look up a page by explicit `View` (mutable) — no pane-focus routing.
+    pub(crate) fn view_page_mut(&mut self, view: View) -> Option<&mut dyn views::ViewPage> {
+        match view {
             View::Albums => Some(&mut self.albums_page),
             View::Artists => Some(&mut self.artists_page),
             View::Songs => Some(&mut self.songs_page),

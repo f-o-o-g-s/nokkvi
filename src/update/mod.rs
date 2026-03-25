@@ -36,14 +36,15 @@ macro_rules! impl_page_loaded_handler {
 /// is a `SlotListScrollSeek`, call the handler, then append scrollbar fade
 /// and seek-settled timers when it was a seek event.
 macro_rules! dispatch_view_with_seek {
-    ($self:ident, $msg:ident, $handler:ident, $seek_pat:pat) => {{
+    ($self:ident, $msg:ident, $handler:ident, $seek_pat:pat, $view:expr) => {{
         let is_seek = matches!($msg, $seek_pat);
         let task = $self.$handler($msg);
         if is_seek {
+            let view = $view;
             iced::Task::batch([
                 task,
-                $self.scrollbar_fade_timer(),
-                $self.seek_settled_timer(),
+                $self.scrollbar_fade_timer(view),
+                $self.seek_settled_timer(view),
             ])
         } else {
             task
@@ -81,7 +82,7 @@ use iced::Task;
 use tracing::debug;
 
 use crate::{
-    Nokkvi,
+    Nokkvi, View,
     app_message::{HotkeyMessage, Message, PlaybackMessage, ScrobbleMessage},
 };
 
@@ -652,7 +653,8 @@ impl Nokkvi {
                     self,
                     msg,
                     handle_albums,
-                    crate::views::AlbumsMessage::SlotListScrollSeek(_)
+                    crate::views::AlbumsMessage::SlotListScrollSeek(_),
+                    View::Albums
                 )
             }
             Message::Queue(msg) => self.handle_queue(msg),
@@ -661,7 +663,8 @@ impl Nokkvi {
                     self,
                     msg,
                     handle_artists,
-                    crate::views::ArtistsMessage::SlotListScrollSeek(_)
+                    crate::views::ArtistsMessage::SlotListScrollSeek(_),
+                    View::Artists
                 )
             }
             Message::Songs(msg) => {
@@ -669,7 +672,8 @@ impl Nokkvi {
                     self,
                     msg,
                     handle_songs,
-                    crate::views::SongsMessage::SlotListScrollSeek(_)
+                    crate::views::SongsMessage::SlotListScrollSeek(_),
+                    View::Songs
                 )
             }
             Message::Genres(msg) => {
@@ -677,7 +681,8 @@ impl Nokkvi {
                     self,
                     msg,
                     handle_genres,
-                    crate::views::GenresMessage::SlotListScrollSeek(_)
+                    crate::views::GenresMessage::SlotListScrollSeek(_),
+                    View::Genres
                 )
             }
             Message::Playlists(msg) => {
@@ -685,7 +690,8 @@ impl Nokkvi {
                     self,
                     msg,
                     handle_playlists,
-                    crate::views::PlaylistsMessage::SlotListScrollSeek(_)
+                    crate::views::PlaylistsMessage::SlotListScrollSeek(_),
+                    View::Playlists
                 )
             }
             Message::Settings(msg) => self.handle_settings(msg),

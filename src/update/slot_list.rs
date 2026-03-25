@@ -16,30 +16,30 @@ impl Nokkvi {
         match msg {
             SlotListMessage::NavigateUp => {
                 let task = self.handle_slot_list_navigate_up();
-                Task::batch([task, self.scrollbar_fade_timer()])
+                Task::batch([task, self.scrollbar_fade_timer(self.current_view)])
             }
             SlotListMessage::NavigateDown => {
                 let task = self.handle_slot_list_navigate_down();
-                Task::batch([task, self.scrollbar_fade_timer()])
+                Task::batch([task, self.scrollbar_fade_timer(self.current_view)])
             }
             SlotListMessage::SetOffset(offset) => {
                 let task = self.handle_slot_list_set_offset(offset);
-                Task::batch([task, self.scrollbar_fade_timer()])
+                Task::batch([task, self.scrollbar_fade_timer(self.current_view)])
             }
             SlotListMessage::ActivateCenter => self.handle_slot_list_activate_center(),
             SlotListMessage::ToggleSortOrder => self.handle_toggle_sort_order(),
-            SlotListMessage::ScrollbarFadeComplete(gen_id) => {
-                self.handle_scrollbar_fade_complete(gen_id)
+            SlotListMessage::ScrollbarFadeComplete(view, gen_id) => {
+                self.handle_scrollbar_fade_complete(view, gen_id)
             }
-            SlotListMessage::SeekSettled(gen_id) => self.handle_seek_settled(gen_id),
+            SlotListMessage::SeekSettled(view, gen_id) => self.handle_seek_settled(view, gen_id),
         }
     }
 
     /// Fire a delayed task that will clear the scrollbar after the fade period.
     /// Uses the same generation-ID guard pattern as `create_percentage_hide_timer`.
-    pub(crate) fn scrollbar_fade_timer(&self) -> Task<Message> {
+    pub(crate) fn scrollbar_fade_timer(&self, view: View) -> Task<Message> {
         let gen_id = self
-            .current_view_page()
+            .view_page(view)
             .map_or(0, |p| p.common().slot_list.scroll_generation_id);
 
         Task::perform(
@@ -47,16 +47,16 @@ impl Nokkvi {
                 tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
                 gen_id
             },
-            |id| Message::SlotList(SlotListMessage::ScrollbarFadeComplete(id)),
+            move |id| Message::SlotList(SlotListMessage::ScrollbarFadeComplete(view, id)),
         )
     }
 
     /// Fire a short debounced task to trigger artwork prefetch after scrollbar
     /// seek settles. Uses the same generation-ID guard — only the last seek's
     /// timer passes the check.
-    pub(crate) fn seek_settled_timer(&self) -> Task<Message> {
+    pub(crate) fn seek_settled_timer(&self, view: View) -> Task<Message> {
         let gen_id = self
-            .current_view_page()
+            .view_page(view)
             .map_or(0, |p| p.common().slot_list.scroll_generation_id);
 
         Task::perform(
@@ -64,12 +64,12 @@ impl Nokkvi {
                 tokio::time::sleep(std::time::Duration::from_millis(150)).await;
                 gen_id
             },
-            |id| Message::SlotList(SlotListMessage::SeekSettled(id)),
+            move |id| Message::SlotList(SlotListMessage::SeekSettled(view, id)),
         )
     }
 
-    fn handle_scrollbar_fade_complete(&mut self, gen_id: u64) -> Task<Message> {
-        if let Some(page) = self.current_view_page_mut() {
+    fn handle_scrollbar_fade_complete(&mut self, view: View, gen_id: u64) -> Task<Message> {
+        if let Some(page) = self.view_page_mut(view) {
             let sl = &mut page.common_mut().slot_list;
             if sl.scroll_generation_id == gen_id {
                 sl.last_scrolled = None;
@@ -79,23 +79,23 @@ impl Nokkvi {
     }
 
     /// When the scrollbar seek settles (150ms idle), trigger artwork prefetch
-    /// for the current viewport. This runs the same artwork-loading logic that
+    /// for the target viewport. This runs the same artwork-loading logic that
     /// the normal navigation path uses, but only once instead of per-event.
-    fn handle_seek_settled(&mut self, gen_id: u64) -> Task<Message> {
+    fn handle_seek_settled(&mut self, view: View, gen_id: u64) -> Task<Message> {
         // Generation-ID guard: only the most recent seek's timer fires
         let current_gen = self
-            .current_view_page()
+            .view_page(view)
             .map_or(0, |p| p.common().slot_list.scroll_generation_id);
         if current_gen != gen_id {
             return Task::none();
         }
 
-        // Dispatch to each view's artwork-loading path.
+        // Dispatch to the target view's artwork-loading path.
         // For queue: dedicated zero-clone helper.
         // For other views: dispatch a synthetic SetOffset(current_offset) which
         // flows through the normal handler and triggers artwork prefetch via
         // the LoadLargeArtwork / prefetch_album_artwork_tasks path.
-        match self.current_view {
+        match view {
             View::Queue => self.load_queue_viewport_artwork(),
             View::Albums => {
                 let offset = self.albums_page.common.slot_list.viewport_offset;
