@@ -520,10 +520,7 @@ impl QueuePage {
             // Without a width constraint, long comments expand to intrinsic text width
             // and push save/edit icons off-screen, cascading layout breakage.
             let name_area: Element<'a, QueueMessage> = if comment.is_empty() {
-                container(name_label)
-                    .width(Length::Fill)
-                    .clip(true)
-                    .into()
+                container(name_label).width(Length::Fill).clip(true).into()
             } else {
                 let comment_label = iced::widget::text(comment.clone())
                     .font(crate::theme::ui_font())
@@ -596,10 +593,10 @@ impl QueuePage {
 
             let playlist_bar = container(
                 row![playlist_icon, name_area, save_btn, edit_btn]
-                .spacing(6)
-                .align_y(Alignment::Center)
-                .padding([0, 8])
-                .width(Length::Fill),
+                    .spacing(6)
+                    .align_y(Alignment::Center)
+                    .padding([0, 8])
+                    .width(Length::Fill),
             )
             .height(Length::Fixed(32.0))
             .style(|_theme| container::Style {

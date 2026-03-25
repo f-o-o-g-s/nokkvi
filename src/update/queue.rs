@@ -119,7 +119,10 @@ impl Nokkvi {
             // Spawn two lightweight timers (no O(n) work, just gen_id guards):
             // 1. Fade timer (1.5s) — hides the scrollbar after drag ends
             // 2. Seek-settled timer (150ms) — loads artwork for final viewport
-            return Task::batch([self.scrollbar_fade_timer(View::Queue), self.seek_settled_timer(View::Queue)]);
+            return Task::batch([
+                self.scrollbar_fade_timer(View::Queue),
+                self.seek_settled_timer(View::Queue),
+            ]);
         }
 
         self.play_view_sfx(

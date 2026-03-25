@@ -185,6 +185,8 @@ All keyboard shortcuts are **user-configurable** via the Settings view (Hotkeys 
 | Key | Action |
 |-----|--------|
 | `Delete` | Reset focused setting to default |
+| `Shift+↑` | Toggle field up in ToggleSet (Visible Fields) |
+| `Shift+↓` | Toggle field down in ToggleSet (Visible Fields) |
 
 ### Item Actions
 

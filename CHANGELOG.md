@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.0.8 — 2026-03-25
+
+### Features
+- **Keyboard navigation for ToggleSet fields** — visible fields in settings can
+  now be toggled via configurable EditUp/EditDown hotkeys.
+- **Fall-fade peak mode** — new visualizer peak mode where peaks fall back down
+  with a fading trail.
+
+### Fixes
+- **Scrollbar drag triggering cross-pane drag** — interacting with the library
+  browser scrollbar no longer incorrectly initiates a cross-pane drag event, and
+  artwork loading now works correctly when the browsing panel is active.
+- **Playlist context bar layout overflow** — long playlist comments are now
+  constrained and clipped, preventing layout overflow that pushed UI elements
+  off-screen and triggered rendering failures.
+- **Stale progress track overlay segments** — disabling metadata fields in the
+  progress track overlay now correctly removes the corresponding segments.
+
+### Improvements
+- **Codebase quality refactor** — eliminated production `.unwrap()` calls,
+  deduplicated message handlers, and consolidated playlist messages for improved
+  robustness and maintainability.
+
+### Docs
+- **Settings metadata strip note** — added a note clarifying that the click
+  action setting has no effect when the metadata strip is in Progress Track mode.
+
+### Internal
+- Agent rules and workflows synced with current codebase.
+
+---
+
 ## v0.0.7 — 2026-03-23
 
 ### Features
