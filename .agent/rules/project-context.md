@@ -56,7 +56,7 @@ The root `Message` enum uses **namespaced sub-enums**:
 | `ScrobbleMessage` | Now playing, submission |
 | `HotkeyMessage` | Keyboard actions, star/rating updates |
 | `ArtworkMessage` | Artwork pipeline, prefetch, collages |
-| `SlotListMessage` | Navigate up/down, set offset, activate center, toggle sort |
+| `SlotListMessage` | Navigate up/down, set offset, activate center, toggle sort, scrollbar timers (carry `View`) |
 | `ToastMessage` | Push / dismiss / dismiss-by-key |
 
 `Message::StripClicked` — centralized left-click handler for the track info strip. Reads `strip_click_action` theme atomic and dispatches: navigate to queue/album/artist, copy track info to clipboard, or do nothing.

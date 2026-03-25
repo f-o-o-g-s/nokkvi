@@ -34,7 +34,8 @@ trigger: always_on
   - `browsing_panel.rs` — split-view playlist editing mode management
   - `cross_pane_drag.rs` — drag state machine (browsing panel → queue)
   - `toast.rs` — notification dispatch
-  - `slot_list.rs` — shared slot list navigation dispatch
+  - `slot_list.rs` — shared slot list navigation dispatch + scrollbar fade/seek-settled timers (view-targeted via explicit `View` parameter)
+  - `SlotListMessage` — Navigate up/down, set offset, activate center, toggle sort, scrollbar timers (carry `View`)
   - `collage.rs` — genre/playlist artwork collage loading
   - `hotkeys/` — directory module: `mod.rs` (core dispatch), `star_rating.rs`, `queue.rs`, `navigation.rs`
   - `navigation.rs` — view switching, browsing panel toggle

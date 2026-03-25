@@ -10,6 +10,8 @@ globs: src/views/**,src/update/**
 All slot-list-based views implement `ViewPage` (in `views/mod.rs`):
 - Explicit `impl ViewPage for XPage` blocks (no macro)
 - Queue is hand-implemented (separate `QueueSortMode`, unique actions)
+- `current_view_page()` / `current_view_page_mut()` — pane-aware routing (delegates to browser pane in edit mode)
+- `view_page(View)` / `view_page_mut(View)` — direct lookup by `View` enum, no pane routing (used by scrollbar timers)
 
 `CommonViewAction` + `HasCommonAction` trait enable generic handling of SearchChanged, SortModeChanged, SortOrderChanged, and None. `impl_expansion_update!` macro deduplicates common expansion update arms.
 
@@ -27,6 +29,8 @@ All views (Albums, Artists, Songs, Genres, Playlists, Queue) use `SlotListPageSt
 - **Dynamic center slot**: active item position adapts near list edges
 - `get_effective_center_index` respects `selected_offset`
 - `SlotListRowContext` bundles per-slot render args
+- **Scrollbar timers**: `ScrollbarFadeComplete(View, u64)` and `SeekSettled(View, u64)` carry the target `View` — fixes browsing panel where `current_view` is Queue but the scrollbar is on a library view
+- `dispatch_view_with_seek!` macro handles `SlotListScrollSeek` messages: calls the view handler, then appends `scrollbar_fade_timer(view)` + `seek_settled_timer(view)` for seek events
 
 ## Click Behavior
 
@@ -75,6 +79,7 @@ All views (Albums, Artists, Songs, Genres, Playlists, Queue) use `SlotListPageSt
 - `CrossPaneDragState`: tracks origin, cursor position, snapshotted center_index, drop_target_slot
 - State machine: Press → threshold (5px) → active drag → release/cancel
 - Drop inserts at position via `pending_queue_insert_position`
+- **Scrollbar guard**: global `event::listen_with` filters `CursorMoved` by `event::Status::Captured` — scrollbar captures cursor moves during drag, preventing the 5px threshold from being exceeded. `ButtonPressed`/`ButtonReleased` are NOT filtered (Iced buttons also capture those).
 
 ## Artwork Prefetch & Pagination
 
