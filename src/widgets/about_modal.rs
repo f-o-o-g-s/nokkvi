@@ -68,6 +68,13 @@ pub(crate) struct AboutViewData<'a> {
 /// Modal dialog width (narrower than the info modal since content is simpler)
 const MODAL_WIDTH: f32 = 400.0;
 
+/// Boat icon size in the header
+const BOAT_ICON_SIZE: f32 = 72.0;
+
+/// The standalone boat SVG (multi-color with gradients — not suitable for
+/// the monochrome `embedded_svg` system, so we include it directly here).
+const BOAT_SVG: &str = include_str!("../../nokkvi_potrace.svg");
+
 /// Render the about modal overlay. Returns `None` if not visible.
 pub(crate) fn about_modal_overlay<'a>(
     state: &'a AboutModalState,
@@ -137,6 +144,16 @@ pub(crate) fn about_modal_overlay<'a>(
 
     let header_sep = separator_line();
 
+    // ── Boat icon (full-color SVG with gradients) ────────────────
+    let boat_handle = svg::Handle::from_memory(BOAT_SVG.as_bytes());
+    let boat_icon = container(
+        svg(boat_handle)
+            .width(BOAT_ICON_SIZE)
+            .height(BOAT_ICON_SIZE),
+    )
+    .width(Length::Fill)
+    .align_x(Alignment::Center);
+
     // ── Etymology ────────────────────────────────────────────────
     let etymology = text("Old Norse nökkvi — a small, humble boat")
         .size(12.0)
@@ -178,10 +195,12 @@ pub(crate) fn about_modal_overlay<'a>(
     let info_table = column(rows).width(Length::Fill);
 
     // ── Dialog content ───────────────────────────────────────────
-    let content = column![header, header_sep, etymology, description, info_table]
-        .spacing(10)
-        .padding(20)
-        .width(Length::Fixed(MODAL_WIDTH));
+    let content = column![
+        header, header_sep, boat_icon, etymology, description, info_table
+    ]
+    .spacing(10)
+    .padding(20)
+    .width(Length::Fixed(MODAL_WIDTH));
 
     // ── Dialog box with themed border ────────────────────────────
     let dialog_box = container(content)
