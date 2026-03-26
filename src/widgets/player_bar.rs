@@ -103,6 +103,7 @@ pub enum PlayerBarMessage {
     /// Track info strip was clicked — dispatch depends on strip_click_action setting
     StripClicked,
     StripContextAction(super::context_menu::StripContextEntry),
+    About,
     Quit,
 }
 
@@ -546,6 +547,7 @@ pub(crate) fn player_bar<'a>(
                     MenuAction::ToggleLightMode => PlayerBarMessage::ToggleLightMode,
                     MenuAction::ToggleSoundEffects => PlayerBarMessage::ToggleSoundEffects,
                     MenuAction::OpenSettings => PlayerBarMessage::OpenSettings,
+                    MenuAction::About => PlayerBarMessage::About,
                     MenuAction::Quit => PlayerBarMessage::Quit,
                 },
                 is_light,

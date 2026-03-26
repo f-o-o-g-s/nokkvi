@@ -37,6 +37,7 @@ pub enum MenuAction {
     ToggleLightMode,
     ToggleSoundEffects,
     OpenSettings,
+    About,
     Quit,
 }
 
@@ -316,8 +317,8 @@ const MENU_TEXT_SIZE: f32 = 13.0;
 const MENU_TEXT_PADDING_LEFT: f32 = 10.0;
 
 /// Number of menu items (3 settings + separator + quit)
-const MENU_ITEM_COUNT: usize = 4;
-const SEPARATOR_INDEX: usize = 3; // Separator drawn before this item
+const MENU_ITEM_COUNT: usize = 5;
+const SEPARATOR_INDEX: usize = 4; // Separator drawn before this item
 
 impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'_, Message> {
     fn layout(&mut self, _renderer: &iced::Renderer, bounds: Size) -> layout::Node {
@@ -393,7 +394,8 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
                         0 => Some(MenuAction::ToggleLightMode),
                         1 => Some(MenuAction::ToggleSoundEffects),
                         2 => Some(MenuAction::OpenSettings),
-                        3 => Some(MenuAction::Quit),
+                        3 => Some(MenuAction::About),
+                        4 => Some(MenuAction::Quit),
                         _ => None,
                     };
 
@@ -461,6 +463,7 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
                 true,
             ),
             ("Settings", true),
+            ("About", true),
             ("Quit", true),
         ];
 

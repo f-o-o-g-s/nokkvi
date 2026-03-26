@@ -76,6 +76,7 @@ pub enum NavBarMessage {
     /// Track info strip was clicked — dispatch depends on strip_click_action setting
     StripClicked,
     StripContextAction(super::context_menu::StripContextEntry),
+    About,
     Quit,
 }
 
@@ -533,6 +534,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                 MenuAction::ToggleLightMode => NavBarMessage::ToggleLightMode,
                 MenuAction::ToggleSoundEffects => NavBarMessage::ToggleSoundEffects,
                 MenuAction::OpenSettings => NavBarMessage::OpenSettings,
+                MenuAction::About => NavBarMessage::About,
                 MenuAction::Quit => NavBarMessage::Quit,
             },
             data.is_light_mode,

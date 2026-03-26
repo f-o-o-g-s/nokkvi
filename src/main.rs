@@ -121,6 +121,7 @@ pub struct Nokkvi {
     pub toast: crate::state::ToastState,
     pub text_input_dialog: crate::widgets::text_input_dialog::TextInputDialogState,
     pub info_modal: crate::widgets::info_modal::InfoModalState,
+    pub about_modal: crate::widgets::about_modal::AboutModalState,
 
     // -------------------------------------------------------------------------
     // Misc State
@@ -298,6 +299,7 @@ impl Default for Nokkvi {
             toast: crate::state::ToastState::default(),
             text_input_dialog: crate::widgets::text_input_dialog::TextInputDialogState::default(),
             info_modal: crate::widgets::info_modal::InfoModalState::default(),
+            about_modal: crate::widgets::about_modal::AboutModalState::default(),
             active_progress: Vec::new(),
         }
     }

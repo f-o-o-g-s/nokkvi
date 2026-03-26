@@ -359,6 +359,9 @@ pub enum Message {
     // --- Info Modal ---
     InfoModal(crate::widgets::info_modal::InfoModalMessage),
 
+    // --- About Modal ---
+    AboutModal(crate::widgets::about_modal::AboutModalMessage),
+
     // --- Playlist Edit Mode (split-view) ---
     BrowsingPanel(views::BrowsingPanelMessage),
     /// Enter split-view playlist editing mode

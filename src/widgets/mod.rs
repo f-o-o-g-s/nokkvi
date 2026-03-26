@@ -22,6 +22,7 @@ pub(crate) mod track_info_strip;
 pub(crate) mod visualizer;
 
 // UI widgets (from old ui/)
+pub(crate) mod about_modal;
 pub(crate) mod context_menu;
 pub(crate) mod hamburger_menu;
 pub(crate) mod info_modal;

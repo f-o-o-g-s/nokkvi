@@ -52,6 +52,7 @@ macro_rules! dispatch_view_with_seek {
     }};
 }
 
+mod about_modal;
 mod albums;
 mod artists;
 mod browsing_panel;
@@ -579,6 +580,11 @@ impl Nokkvi {
             // -----------------------------------------------------------------
             Message::Hotkey(msg) => match msg {
                 HotkeyMessage::ClearSearch => {
+                    // If about modal is visible, Escape closes it first
+                    if self.about_modal.visible {
+                        self.about_modal.close();
+                        return Task::none();
+                    }
                     // If info modal is visible, Escape closes it first
                     if self.info_modal.visible {
                         self.info_modal.close();
@@ -789,6 +795,11 @@ impl Nokkvi {
             // Info Modal
             // -----------------------------------------------------------------
             Message::InfoModal(msg) => self.handle_info_modal(msg),
+
+            // -----------------------------------------------------------------
+            // About Modal
+            // -----------------------------------------------------------------
+            Message::AboutModal(msg) => self.handle_about_modal(msg),
 
             // -----------------------------------------------------------------
             // Cross-Pane Drag (browsing panel → queue)

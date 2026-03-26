@@ -66,6 +66,9 @@ impl Nokkvi {
                 Task::done(Message::StripContextAction(entry))
             }
             PlayerBarMessage::ToggleLightMode => Task::done(Message::ToggleLightMode),
+            PlayerBarMessage::About => Task::done(Message::AboutModal(
+                crate::widgets::about_modal::AboutModalMessage::Open,
+            )),
             PlayerBarMessage::Quit => Task::done(Message::QuitApp),
         }
     }

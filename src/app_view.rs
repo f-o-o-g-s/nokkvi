@@ -37,6 +37,9 @@ fn map_nav_bar_message(msg: widgets::NavBarMessage) -> Message {
         widgets::NavBarMessage::OpenSettings => Message::SwitchView(View::Settings),
         widgets::NavBarMessage::StripClicked => Message::StripClicked,
         widgets::NavBarMessage::StripContextAction(entry) => Message::StripContextAction(entry),
+        widgets::NavBarMessage::About => {
+            Message::AboutModal(crate::widgets::about_modal::AboutModalMessage::Open)
+        }
         widgets::NavBarMessage::Quit => Message::QuitApp,
     }
 }
@@ -259,6 +262,17 @@ impl Nokkvi {
         if let Some(info_overlay) = crate::widgets::info_modal::info_modal_overlay(&self.info_modal)
         {
             stack = stack.push(info_overlay.map(Message::InfoModal));
+        }
+
+        // Add about modal overlay (if visible)
+        if let Some(about_overlay) = crate::widgets::about_modal::about_modal_overlay(
+            &self.about_modal,
+            crate::widgets::about_modal::AboutViewData {
+                server_url: &self.login_page.server_url,
+                username: &self.login_page.username,
+            },
+        ) {
+            stack = stack.push(about_overlay.map(Message::AboutModal));
         }
 
         // Add toast status bar overlay (if any active toast)
