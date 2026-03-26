@@ -71,9 +71,10 @@ const MODAL_WIDTH: f32 = 400.0;
 /// Boat icon size in the header
 const BOAT_ICON_SIZE: f32 = 72.0;
 
-/// The standalone boat SVG (multi-color with gradients — not suitable for
-/// the monochrome `embedded_svg` system, so we include it directly here).
-const BOAT_SVG: &str = include_str!("../../nokkvi_potrace.svg");
+/// The Nokkvi logo SVG (boat + wave bands extracted from the squircle app icon).
+/// Multi-color with hard-coded Gruvbox fills — not suitable for the monochrome
+/// `embedded_svg` system, so we include it directly here.
+const LOGO_SVG: &str = include_str!("../../assets/nokkvi_logo.svg");
 
 /// Render the about modal overlay. Returns `None` if not visible.
 pub(crate) fn about_modal_overlay<'a>(
@@ -144,10 +145,10 @@ pub(crate) fn about_modal_overlay<'a>(
 
     let header_sep = separator_line();
 
-    // ── Boat icon (full-color SVG with gradients) ────────────────
-    let boat_handle = svg::Handle::from_memory(BOAT_SVG.as_bytes());
+    // ── Boat icon (full-color SVG with Gruvbox fills) ──────────────
+    let logo_handle = svg::Handle::from_memory(LOGO_SVG.as_bytes());
     let boat_icon = container(
-        svg(boat_handle)
+        svg(logo_handle)
             .width(BOAT_ICON_SIZE)
             .height(BOAT_ICON_SIZE),
     )
