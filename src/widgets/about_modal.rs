@@ -68,8 +68,8 @@ pub(crate) struct AboutViewData<'a> {
 /// Modal dialog width (narrower than the info modal since content is simpler)
 const MODAL_WIDTH: f32 = 400.0;
 
-/// Boat icon size in the header
-const BOAT_ICON_SIZE: f32 = 72.0;
+/// Logo icon size in the modal
+const LOGO_ICON_SIZE: f32 = 96.0;
 
 /// The Nokkvi logo SVG (boat + wave bands extracted from the squircle app icon).
 /// Multi-color with hard-coded Gruvbox fills — not suitable for the monochrome
@@ -149,8 +149,8 @@ pub(crate) fn about_modal_overlay<'a>(
     let logo_handle = svg::Handle::from_memory(LOGO_SVG.as_bytes());
     let boat_icon = container(
         svg(logo_handle)
-            .width(BOAT_ICON_SIZE)
-            .height(BOAT_ICON_SIZE),
+            .width(LOGO_ICON_SIZE)
+            .height(LOGO_ICON_SIZE),
     )
     .width(Length::Fill)
     .align_x(Alignment::Center);
