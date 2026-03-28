@@ -4,10 +4,6 @@
 # REPLACE THESE WITH YOUR CREDENTIALS
 server_url = "http://localhost:4533"
 username = ""
-
-[theme.font]
-family = "JetBrainsMono Nerd Font"
-
 # ─────────────── DARK THEME ───────────────
 
 [theme.dark.accent]

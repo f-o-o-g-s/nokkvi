@@ -51,10 +51,6 @@ normal = "#cc4f44"
 [theme.dark.yellow]
 bright = "#f6ff4d"
 normal = "#c9d600"
-
-[theme.font]
-family = "JetBrainsMono Nerd Font"
-
 [theme.light.accent]
 border_dark = "#2fdc8b"
 border_light = "#5aff9d"

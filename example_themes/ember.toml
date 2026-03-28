@@ -8,10 +8,6 @@ username = ""
 # =========================
 # Ember Dusk Theme
 # =========================
-
-[theme.font]
-family = "JetBrainsMono Nerd Font"
-
 # -------- DARK THEME --------
 
 [theme.dark.accent]

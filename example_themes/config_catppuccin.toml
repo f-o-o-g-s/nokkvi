@@ -121,10 +121,6 @@ normal = "#d20f39"
 [theme.light.yellow]
 bright = "#df8e1d"
 normal = "#df8e1d"
-
-[theme.font]
-family = "JetBrainsMono Nerd Font"
-
 # ============================================================================
 # VISUALIZER
 # ============================================================================
