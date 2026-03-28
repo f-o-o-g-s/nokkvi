@@ -9,17 +9,21 @@
 server_url = "http://localhost:4533"
 username = ""
 
+[theme]
+light_mode = false
+
 # ============================================================================
 # EVERFOREST DARK MEDIUM
 # ============================================================================
 
 [theme.dark.accent]
-# slightly darker green for playing, brighter green for selected
-border_dark = "#93B070"
+# green accents + now-playing, grey for selected slot
+border_dark = "#8DA101"
 border_light = "#A7C080"
 bright = "#A7C080"
-primary = "#93B070"
-now_playing = "#7FBBB3"
+primary = "#8DA101"
+now_playing = "#A7C080"
+selected = "#8CA16E"
 
 [theme.dark.aqua]
 # aqua from palette
@@ -34,7 +38,7 @@ level1 = "#343F44"
 level2 = "#3D484D"
 level3 = "#475258"
 level4 = "#4F585E"
-soft = "#333C43"
+soft = "#2D353B"
 
 [theme.dark.foreground]
 # Foreground colors
@@ -75,11 +79,13 @@ normal = "#DBBC7F"
 # ============================================================================
 
 [theme.light.accent]
-# green for light mode - adjusted for contrast
+# green accents + now-playing, grey for selected slot
 border_dark = "#5C6A72"
 border_light = "#E6E2CC"
-bright = "#8DA101"
+bright = "#93B259"
 primary = "#8DA101"
+now_playing = "#93B259"
+selected = "#A6B0A0"
 
 [theme.light.aqua]
 # aqua for light mode
@@ -87,13 +93,13 @@ bright = "#35A77C"
 normal = "#35A77C"
 
 [theme.light.background]
-# Light medium backgrounds
-default = "#F4F0D9"
-hard = "#E6E2CC"
+# Light medium backgrounds (spread for contrast)
+default = "#FDF6E3"
+hard = "#EFEBD4"
 level1 = "#E6E2CC"
 level2 = "#E0DCC7"
-level3 = "#D5CFBA"
-level4 = "#BDC3AF"
+level3 = "#BDC3AF"
+level4 = "#A6B0A0"
 soft = "#FDF6E3"
 
 [theme.light.foreground]
@@ -130,80 +136,151 @@ normal = "#F85552"
 bright = "#DFA000"
 normal = "#DFA000"
 
-[theme.font]
-family = "JetBrainsMono Nerd Font"
-
 # ============================================================================
 # VISUALIZER
 # ============================================================================
 
-
 [visualizer]
+# % of window height, 10–60%
+height_percent = 0.15
+# Frequencies below this are hidden
+lower_cutoff_freq = 20
 higher_cutoff_freq = 10000
-
-lower_cutoff_freq = 50
+# 0.0 = raw FFT, 1.0 = fully smoothed
+noise_reduction = 0.66
 monstercat = 0.0
-noise_reduction = 0.77
-waves = false
-
-# Dark mode visualizer: Forest greens and aquas
+# Bars mode only — Catmull-Rom spline smoothing creates smooth rolling hills. Mutually exclusive with Monstercat
+waves = true
+# Scales output to always fill full height
+auto_sensitivity = true
+# 0.0 = invisible, 1.0 = fully opaque
+opacity = 1.0
+# Bars mode only — control point spacing for waves spline. Higher = smoother (fewer control points)
+waves_smoothing = 2
+# Bars mode only — spline basis for waves smoothing
+# catmull_rom: interpolating (passes through data points)
+# b_spline: approximating (smoother curves, attenuated peaks)
+waves_spline_type = "catmull_rom"
 
 [visualizer.bars]
-bar_spacing = 2.0
-gradient_mode = "wave"
-border_width = 1.0
+# Bar width at smallest window size
+bar_width_min = 6
+# Bar width at largest window size
+bar_width_max = 6
+# Gap between bars in pixels
+bar_spacing = 2
+# Outline around each bar; also sets LED gap size
+border_width = 2
+# Render bars as stacked LED segments like a VU meter
 led_bars = true
-led_segment_height = 2.0
+# Height of each LED segment in pixels
+led_segment_height = 6
+# How bar colors shift with amplitude
+# static: height-based gradient (bottom to top)
+# wave: gradient stretching (taller bars show more bottom colors)
+# shimmer: bars cycle through all gradient colors as flat per-bar colors
+# energy: gradient shifts based on overall loudness
+# alternate: bars alternate between first two gradient colors
+gradient_mode = "wave"
+# Axis the gradient colors are mapped along (ignored by alternate mode)
+# vertical: colors map bottom-to-top within each bar
+# horizontal: colors map left-to-right across bars (bass to treble)
+gradient_orientation = "vertical"
+# Color mode for peak indicators
+# static: uses first color in peak gradient only
+# cycle: time-based animation cycling through all peak colors
+# height: color based on peak height position
+# match: uses same color as bar gradient at that height
 peak_gradient_mode = "cycle"
-peak_mode = "fall"
-peak_hold_time = 500
+# none: peak bars disabled
+# fade: hold, then fade out in place (opacity decreases)
+# fall: hold, then fall at constant speed
+# fall_accel: hold, then fall with gravity acceleration
+# fall_fade: hold, then fall at constant speed while fading out
+peak_mode = "fall_fade"
+# How long peaks stay before falling/fading
+peak_hold_time = 1950
+# Duration of fade-out in 'fade' mode
 peak_fade_time = 750
-bar_depth_3d = 0.0
-peak_height_ratio = 66
+# 3D top and side face depth in pixels, 0 = flat
+bar_depth_3d = 0
+bar_perspective = 0.0
+# Peak bar size as % of bar width (ignored in LED mode — peaks are one segment tall)
+peak_height_ratio = 35
+borders = true
+# Maximum number of bars to fit in the window
+max_bars = 2048
+# How fast peaks drop in fall/fall_accel modes. 1 = slow, 20 = fast. No effect in fade mode
+peak_fall_speed = 5
 
+# Dark mode visualizer: Forest Canopy (warm bass → green → cool treble)
 [visualizer.bars.dark]
 border_color = "#232A2E"
 border_opacity = 1.0
 led_border_opacity = 1.0
 bar_gradient_colors = [
-    "#A7C080",
-    "#A7C080",
-    "#83C092",
-    "#83C092",
-    "#7FBBB3",
-    "#7FBBB3",
+    "#A7C080",  # green (bass)
+    "#A7C080",  # green
+    "#A7C080",  # green
+    "#83C092",  # aqua
+    "#7FBBB3",  # blue
+    "#DBBC7F",  # yellow (warm trebel)
 ]
 peak_gradient_colors = [
-    "#DBBC7F",
-    "#DBBC7F",
-    "#E69875",
-    "#E69875",
-    "#E67E80",
-    "#E67E80",
+    "#E67E80",  # red
+    "#E69875",  # orange
+    "#DBBC7F",  # yellow
+    "#D699B6",  # purple
+    "#E67E80",  # red
+    "#E69875",  # orange
 ]
 
+# Light mode visualizer: Forest Floor (green-dominant, blends with UI)
 [visualizer.bars.light]
-border_color = "#FDF6E3"
+border_color = "#EFEBD4"
 border_opacity = 0.0
 led_border_opacity = 0.0
 bar_gradient_colors = [
-    "#8DA101",
-    "#8DA101",
-    "#35A77C",
-    "#35A77C",
-    "#3A94C5",
-    "#3A94C5",
+    "#93B259",  # statusline green (warm bass)
+    "#8DA101",  # green
+    "#8DA101",  # green (dominant)
+    "#35A77C",  # aqua
+    "#35A77C",  # aqua
+    "#3A94C5",  # blue (cool treble)
 ]
 peak_gradient_colors = [
-    "#DFA000",
-    "#DFA000",
-    "#F57D26",
-    "#F57D26",
-    "#F85552",
-    "#F85552",
+    "#F57D26",  # orange
+    "#DFA000",  # yellow
+    "#F57D26",  # orange
+    "#DFA000",  # yellow
+    "#F57D26",  # orange
+    "#DFA000",  # yellow
 ]
 
 [visualizer.lines]
-line_thickness = 0.025
-point_count = 32
-
+# 8–512, more = finer detail
+point_count = 16
+# % of visualizer height, 1–10%
+line_thickness = 0.01
+# Border behind the line in pixels, 0 = disabled
+outline_thickness = 1.0
+# 0.0 = invisible, 1.0 = fully opaque
+outline_opacity = 1.0
+# Color cycling speed. Lower = slower, higher = faster
+animation_speed = 0.1
+# breathing: time-based cycling through gradient palette
+# static: uses first gradient color only
+# position: color by horizontal position (bass → treble rainbow)
+# height: color by amplitude (quiet → loud)
+# gradient: position + amplitude blend (peaks shift palette)
+gradient_mode = "static"
+# Symmetric oscilloscope — line extends from center
+mirror = false
+# Fills under the curve with a gradient. 0 = disabled
+fill_opacity = 0.3
+# Interpolation between data points
+# smooth: Catmull-Rom spline (curvy)
+# angular: straight line segments
+style = "smooth"
+# Soft bloom around the line. 0 = disabled
+glow_intensity = 0.0
