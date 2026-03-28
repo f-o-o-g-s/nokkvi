@@ -1,6 +1,12 @@
 # Nokkvi
 
-A native Rust/Iced client for [Navidrome](https://www.navidrome.org/) music server. Named after Old Norse *nökkvi* — a small, humble boat.
+A native Rust/Iced client for [Navidrome](https://www.navidrome.org/) music server. Named after Old Norse *nökkvi*, a small, humble boat.
+
+> **⚠️ AI-Generated Project**
+>
+> This entire codebase was written by AI (primarily Claude) with my direction. I'm not a developer. I come up with the ideas, test things, and use this as my daily music player, but I don't write code myself. You'll probably find patterns in here that experienced Rust developers would do differently. If you spot something that could be better, issues and PRs are welcome.
+
+**Platform:** Linux only. Tested on Arch Linux with PipeWire and Hyprland (Wayland). No Windows or macOS support.
 
 ## Features
 
@@ -229,3 +235,11 @@ Install `fontconfig` for system font discovery:
 ```bash
 pacman -S fontconfig
 ```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions, guidelines, and the AI disclosure.
+
+## License
+
+[MIT](LICENSE). See [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md) for third-party attribution.
