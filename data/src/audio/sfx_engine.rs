@@ -422,8 +422,9 @@ fn open_preferred_sink() -> Result<ActiveSink> {
         // This ensures desktop volume and node metadata correctly identifies Nokkvi
         // without patching rodio.
         let (mixer_controller, mixer_source) = rodio::mixer::mixer(
-            std::num::NonZeroU16::new(2).unwrap(),
-            std::num::NonZeroU32::new(48000).unwrap(),
+            // SAFETY: These are compile-time constants that are trivially non-zero.
+            std::num::NonZeroU16::new(2).expect("2 is non-zero"),
+            std::num::NonZeroU32::new(48000).expect("48000 is non-zero"),
         );
 
         match crate::audio::pipewire_output::NativePipeWireSink::new(
@@ -473,11 +474,12 @@ impl ActiveSink {
         }
     }
 
-    pub fn set_title(&self, _title: String) {
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
+    pub fn set_title(&self, title: String) {
         match self {
             Self::Cpal(_) => {}
             #[cfg(target_os = "linux")]
-            Self::NativePipewire(p) => p.set_title(_title),
+            Self::NativePipewire(p) => p.set_title(title),
         }
     }
 }

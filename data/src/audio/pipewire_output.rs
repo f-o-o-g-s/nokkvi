@@ -1,10 +1,13 @@
 use std::thread::{self, JoinHandle};
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use pipewire as pw;
 use pipewire::spa::pod::Pod;
 use pw::properties::properties;
 use rodio::Source;
+
+const SAMPLE_RATE: u32 = 48000;
+const CHANNELS: u32 = 2;
 
 pub struct NativePipeWireSink {
     mixer: rodio::mixer::Mixer,
@@ -62,9 +65,7 @@ impl NativePipeWireSink {
                     }
                 };
 
-                let data = UserData {
-                    mixer_source,
-                };
+                let data = UserData { mixer_source };
 
                 let stream = match pw::stream::StreamRc::new(
                     core,
@@ -87,10 +88,15 @@ impl NativePipeWireSink {
                 let stream_clone = stream.clone();
 
                 let _title_receiver = title_rx.attach(mainloop.loop_(), move |title: String| {
-                    tracing::info!("🔊 PipeWire IPC: Updating graph MEDIA_NAME to {:?}", title);
+                    tracing::debug!("🔊 PipeWire IPC: Updating graph MEDIA_NAME to {:?}", title);
                     let props = properties! {
                         *pw::keys::MEDIA_NAME => title.as_str()
                     };
+                    // SAFETY: `stream_clone` is an Rc clone of the stream created above,
+                    // kept alive by this closure. The closure is attached to the same
+                    // mainloop that owns the stream, so the raw pointer is valid for
+                    // the entire lifetime of the mainloop. `props.dict()` is a
+                    // stack-local `SpaPod` that outlives this FFI call.
                     unsafe {
                         pw::sys::pw_stream_update_properties(
                             stream_clone.as_raw_ptr(),
@@ -136,6 +142,10 @@ impl NativePipeWireSink {
                                 *chunk.size_mut() = (frames * stride) as u32;
 
                                 if let Some(out_slice) = data.data() {
+                                    // SAFETY: The stream format was negotiated as F32LE
+                                    // (set_format above), so the buffer is properly aligned
+                                    // for f32. `n_samples` is bounded by maxsize/stride,
+                                    // guaranteeing we stay within the allocated buffer.
                                     let out = unsafe {
                                         std::slice::from_raw_parts_mut(
                                             out_slice.as_mut_ptr() as *mut f32,
@@ -150,13 +160,20 @@ impl NativePipeWireSink {
                             }
                         }
                     })
-                    .register()
-                    .expect("Failed to register stream listener");
+                    .register();
+
+                let listener = match listener {
+                    Ok(l) => l,
+                    Err(e) => {
+                        tracing::error!("Failed to register stream listener: {}", e);
+                        return;
+                    }
+                };
 
                 let mut audio_info = pw::spa::param::audio::AudioInfoRaw::new();
                 audio_info.set_format(pw::spa::param::audio::AudioFormat::F32LE);
-                audio_info.set_rate(48000);
-                audio_info.set_channels(2);
+                audio_info.set_rate(SAMPLE_RATE);
+                audio_info.set_channels(CHANNELS);
 
                 let obj = pw::spa::pod::Object {
                     type_: pw::spa::utils::SpaTypes::ObjectParamFormat.as_raw(),
@@ -164,15 +181,22 @@ impl NativePipeWireSink {
                     properties: audio_info.into(),
                 };
 
-                let values: Vec<u8> = pw::spa::pod::serialize::PodSerializer::serialize(
+                let values: Vec<u8> = match pw::spa::pod::serialize::PodSerializer::serialize(
                     std::io::Cursor::new(Vec::new()),
                     &pw::spa::pod::Value::Object(obj),
-                )
-                .unwrap()
-                .0
-                .into_inner();
+                ) {
+                    Ok((cursor, _)) => cursor.into_inner(),
+                    Err(e) => {
+                        tracing::error!("Failed to serialize audio format pod: {:?}", e);
+                        return;
+                    }
+                };
 
-                let mut params = [Pod::from_bytes(&values).unwrap()];
+                let Some(pod) = Pod::from_bytes(&values) else {
+                    tracing::error!("Failed to parse serialized audio format pod");
+                    return;
+                };
+                let mut params = [pod];
 
                 if let Err(e) = stream.connect(
                     pw::spa::utils::Direction::Output,
@@ -188,12 +212,14 @@ impl NativePipeWireSink {
                 tracing::info!("🔊 Native PipeWire sink activated successfully.");
                 mainloop.run();
 
-                // Keep things alive
+                // Drop order matters: the title_receiver closure captures a clone
+                // of `stream`, so it must be dropped before `stream` to avoid
+                // dangling raw pointers in the FFI update_properties call.
                 drop(_title_receiver);
                 drop(listener);
                 drop(stream);
             })
-            .expect("Failed to spawn native pipewire loop");
+            .map_err(|e| anyhow!("Failed to spawn native pipewire thread: {e}"))?;
 
         Ok(Self {
             mixer: mixer_clone,
@@ -204,7 +230,7 @@ impl NativePipeWireSink {
     }
 
     pub fn set_title(&self, title: String) {
-        tracing::info!("🔊 SfxEngine routing title update downward: {:?}", title);
+        tracing::debug!("🔊 Sending PipeWire title update: {:?}", title);
         let _ = self.title_tx.send(title);
     }
 
