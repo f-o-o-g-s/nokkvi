@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.1.1 — 2026-03-29
+
+### Fixes
+- **Modal icon visibility** — resolved a critical rendering bug where SVG icons were invisible in overlay modals (`EQ` and `About`) by adopting the view-header rendering pattern.
+- **EQ toggle toast** — fixed a bug where enabling/disabling the equalizer from the modal produced an empty toast notification.
+
+### Improvements
+- **EQ visual language** — overhauled the 10-band equalizer modal with themed colors (accent-based instead of status-indicator green/yellow) and a refined **Save Preset** UX.
+- **Preset optimization** — updated all 10-band EQ built-in defaults to better align with modern audio standards.
+- **Nautical branding** — updated the **About** modal with nautical-themed contributor roles and the project tagline: *"A sturdy hull for the endless stream."*
+
+---
+
 ## v0.1.0 — 2026-03-29
 
 ### Features

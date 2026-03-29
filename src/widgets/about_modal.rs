@@ -11,7 +11,7 @@
 
 use iced::{
     Alignment, Element, Length,
-    widget::{button, column, container, mouse_area, opaque, row, space, svg, text},
+    widget::{column, container, mouse_area, opaque, row, space, svg, text},
 };
 
 use crate::{theme, widgets::hover_overlay::HoverOverlay};
