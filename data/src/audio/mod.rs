@@ -8,6 +8,7 @@
 pub mod buffer;
 pub mod decoder;
 pub mod engine;
+pub mod eq;
 pub mod format;
 
 #[cfg(target_os = "linux")]
@@ -22,6 +23,7 @@ pub mod streaming_source;
 
 pub use buffer::AudioBuffer;
 pub use decoder::AudioDecoder;
+pub use eq::{EqProcessor, EqState};
 pub use format::{AudioFormat, SampleFormat};
 pub use renderer::AudioRenderer;
 pub use rodio_output::{ActiveStream, RodioOutput};

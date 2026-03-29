@@ -66,6 +66,7 @@ pub(crate) struct PlayerBarViewData {
     pub is_repeat_mode: bool,
     pub is_repeat_queue_mode: bool,
     pub is_consume_mode: bool,
+    pub eq_enabled: bool,
     pub sound_effects_enabled: bool,
     pub sfx_volume: f32, // 0.0-1.0 for sound effects volume
     pub visualization_mode: nokkvi_data::types::player_settings::VisualizationMode,
@@ -93,6 +94,7 @@ pub enum PlayerBarMessage {
     ToggleRandom,
     ToggleRepeat,
     ToggleConsume,
+    ToggleEq,
     ToggleSoundEffects,
     SfxVolumeChanged(f32),
     CycleVisualization,
@@ -413,6 +415,7 @@ pub(crate) fn player_bar<'a>(
     let is_repeat_mode = data.is_repeat_mode;
     let is_repeat_queue_mode = data.is_repeat_queue_mode;
     let is_consume_mode = data.is_consume_mode;
+    let eq_enabled = data.eq_enabled;
     let sound_effects_enabled = data.sound_effects_enabled;
     let sfx_volume = data.sfx_volume;
     let visualization_mode = data.visualization_mode;
@@ -486,6 +489,21 @@ pub(crate) fn player_bar<'a>(
             PlayerBarMessage::ToggleConsume,
             is_consume_mode,
             consume_label,
+        ));
+    }
+
+    // EQ button
+    if show_consume {
+        let eq_label = if eq_enabled {
+            "Equalizer: Active"
+        } else {
+            "Equalizer: Disabled"
+        };
+        mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
+            "assets/icons/sliders-horizontal.svg",
+            PlayerBarMessage::ToggleEq,
+            eq_enabled,
+            eq_label,
         ));
     }
 

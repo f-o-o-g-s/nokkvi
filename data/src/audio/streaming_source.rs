@@ -136,6 +136,8 @@ pub struct StreamingSource {
     /// Per-sample smoothing coefficient (exponential moving average).
     /// Computed from sample rate to give ~5ms time constant.
     smoothing_coeff: f32,
+    /// Per-stream EQ filter bank. None if EQ is not configured.
+    eq: Option<super::eq::EqProcessor>,
 }
 
 impl StreamingSource {
@@ -151,6 +153,7 @@ impl StreamingSource {
         sample_rate: NonZero<u32>,
         visualizer: SharedVisualizerCallback,
         initial_volume: f32,
+        eq_state: Option<super::eq::EqState>,
     ) -> (Self, StreamHandle) {
         let volume = initial_volume.clamp(0.0, 1.0);
         let handle = StreamHandle {
@@ -169,6 +172,9 @@ impl StreamingSource {
             1.0
         };
 
+        let eq = eq_state
+            .map(|state| super::eq::EqProcessor::new(state, sample_rate.get(), channels.get()));
+
         let source = Self {
             consumer,
             channels,
@@ -179,6 +185,7 @@ impl StreamingSource {
             viz_batch_size: 2048,
             smoothed_volume: volume,
             smoothing_coeff,
+            eq,
         };
 
         (source, handle)
@@ -214,7 +221,13 @@ impl Iterator for StreamingSource {
         }
 
         // Pull one sample from the ring buffer (silence if empty — decoder may still be producing)
-        let sample = self.consumer.try_pop().unwrap_or(0.0);
+        let mut sample = self.consumer.try_pop().unwrap_or(0.0);
+
+        if let Some(ref mut eq) = self.eq
+            && eq.is_enabled()
+        {
+            sample = eq.process_sample(sample);
+        }
 
         // Smoothly interpolate toward target volume (exponential moving average).
         // This converts the 20ms step-function volume updates from crossfade into

@@ -107,7 +107,7 @@ pub enum PlaybackMessage {
     /// Trigger gapless preparation when track is ~80% complete
     PrepareNextForGapless,
     /// Persisted player settings loaded from redb
-    PlayerSettingsLoaded(PlayerSettings),
+    PlayerSettingsLoaded(Box<PlayerSettings>),
     /// Initialize scrobble state with current song ID from persisted queue
     InitializeScrobbleState(Option<String>),
 }
@@ -356,11 +356,12 @@ pub enum Message {
     // --- Text Input Dialog ---
     TextInputDialog(crate::widgets::text_input_dialog::TextInputDialogMessage),
 
-    // --- Info Modal ---
+    // -------------------------------------------------------------------------
+    // Modals
+    // -------------------------------------------------------------------------
     InfoModal(crate::widgets::info_modal::InfoModalMessage),
-
-    // --- About Modal ---
     AboutModal(crate::widgets::about_modal::AboutModalMessage),
+    EqModal(crate::widgets::EqModalMessage),
 
     // --- Playlist Edit Mode (split-view) ---
     BrowsingPanel(views::BrowsingPanelMessage),

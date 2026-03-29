@@ -103,6 +103,7 @@ fn action_to_message(action: HotkeyAction) -> Message {
         HotkeyAction::ToggleConsume => Message::Playback(PlaybackMessage::ToggleConsume),
         HotkeyAction::ToggleSoundEffects => Message::Playback(PlaybackMessage::ToggleSoundEffects),
         HotkeyAction::CycleVisualization => Message::Playback(PlaybackMessage::CycleVisualization),
+        HotkeyAction::ToggleEqModal => Message::EqModal(crate::widgets::EqModalMessage::Toggle),
         // Slot List
         HotkeyAction::SlotListUp => Message::SlotList(SlotListMessage::NavigateUp),
         HotkeyAction::SlotListDown => Message::SlotList(SlotListMessage::NavigateDown),

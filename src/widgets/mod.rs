@@ -7,6 +7,7 @@
 // Components
 pub(crate) mod base_slot_list_layout;
 pub(crate) mod drag_column;
+pub(crate) mod eq_slider;
 pub(crate) mod format_info;
 pub(crate) mod hover_indicator;
 pub(crate) mod hover_overlay;
@@ -24,6 +25,7 @@ pub(crate) mod visualizer;
 // UI widgets (from old ui/)
 pub(crate) mod about_modal;
 pub(crate) mod context_menu;
+pub(crate) mod eq_modal;
 pub(crate) mod hamburger_menu;
 pub(crate) mod info_modal;
 pub(crate) mod progress_bar;
@@ -35,13 +37,12 @@ pub(crate) mod view_header;
 pub(crate) mod volume_slider;
 
 // Re-export commonly used items
+pub(crate) use eq_modal::{EqModalMessage, PresetChoice, eq_modal_overlay};
 pub(crate) use nav_bar::{NavBarMessage, NavBarViewData, NavView, nav_bar};
 pub(crate) use player_bar::{PlayerBarMessage, PlayerBarViewData, player_bar};
 pub(crate) use side_nav_bar::{SideNavBarData, side_nav_bar};
 pub(crate) use slot_list_page::{SlotListPageAction, SlotListPageState};
-// Re-exports from old ui/ module
 pub(crate) use slot_list_view::SlotListView;
-// Re-exports for widget functions (used by player_bar and others)
 pub(crate) use volume_slider::{SliderVariant, volume_slider};
 
 /// 1px light line for 3D inset effect (top of player bar/sections)

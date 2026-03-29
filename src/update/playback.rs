@@ -849,6 +849,15 @@ impl Nokkvi {
         self.engine.volume_normalization = settings.volume_normalization;
         self.engine.normalization_level = settings.normalization_level;
 
+        // Apply EQ settings
+        self.playback.eq_state.set_enabled(settings.eq_enabled);
+        for (i, &gain) in settings.eq_gains.iter().enumerate() {
+            self.playback.eq_state.set_band_gain(i, gain);
+        }
+
+        // Load custom EQ presets into UI cache
+        self.window.custom_eq_presets = settings.custom_eq_presets;
+
         debug!(
             "⚙️ [SETTINGS LOADED] crossfade_enabled={}, crossfade_duration_secs={}, volume_normalization={}, normalization_level={:?}",
             settings.crossfade_enabled,
@@ -864,6 +873,7 @@ impl Nokkvi {
             let duration_secs = settings.crossfade_duration_secs;
             let vol_norm = settings.volume_normalization;
             let norm_target = settings.normalization_level.target_level();
+            let eq_state = self.playback.eq_state.clone();
             Task::perform(
                 async move {
                     let engine = shell.audio_engine();
@@ -871,6 +881,7 @@ impl Nokkvi {
                     engine_guard.set_crossfade_enabled(enabled);
                     engine_guard.set_crossfade_duration(duration_secs);
                     engine_guard.set_volume_normalization(vol_norm, norm_target);
+                    engine_guard.set_eq_state(eq_state);
                 },
                 |_| Message::NoOp,
             )

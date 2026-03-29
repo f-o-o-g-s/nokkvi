@@ -222,6 +222,37 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_eq_enabled(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.eq_enabled = enabled;
+        self.save()
+    }
+
+    pub fn set_eq_gains(&mut self, gains: [f32; 10]) -> Result<()> {
+        self.settings.player.eq_gains = gains;
+        self.save()
+    }
+
+    pub fn save_custom_eq_preset(&mut self, name: String, gains: [f32; 10]) -> Result<()> {
+        self.settings
+            .player
+            .custom_eq_presets
+            .push(crate::audio::eq::CustomEqPreset { name, gains });
+        self.save()
+    }
+
+    pub fn delete_custom_eq_preset(&mut self, index: usize) -> Result<()> {
+        if index < self.settings.player.custom_eq_presets.len() {
+            self.settings.player.custom_eq_presets.remove(index);
+            self.save()
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn get_custom_eq_presets(&self) -> Vec<crate::audio::eq::CustomEqPreset> {
+        self.settings.player.custom_eq_presets.clone()
+    }
+
     // -------------------------------------------------------------------------
     // View Sort Preferences
     // -------------------------------------------------------------------------
@@ -333,6 +364,9 @@ impl SettingsManager {
             active_playlist_id: p.active_playlist_id.clone(),
             active_playlist_name: p.active_playlist_name.clone(),
             active_playlist_comment: p.active_playlist_comment.clone(),
+            eq_enabled: p.eq_enabled,
+            eq_gains: p.eq_gains,
+            custom_eq_presets: p.custom_eq_presets.clone(),
         }
     }
 

@@ -263,7 +263,9 @@ impl Nokkvi {
                     Task::perform(
                         async move { shell_for_player.settings().get_player_settings().await },
                         |settings| {
-                            Message::Playback(PlaybackMessage::PlayerSettingsLoaded(settings))
+                            Message::Playback(PlaybackMessage::PlayerSettingsLoaded(Box::new(
+                                settings,
+                            )))
                         },
                     ),
                     Task::perform(

@@ -74,6 +74,7 @@ fn hotkey_action_to_key(action: &HotkeyAction) -> &'static str {
         HotkeyAction::EditDown => "hotkey.edit_down",
         HotkeyAction::Escape => "hotkey.escape",
         HotkeyAction::ResetToDefault => "hotkey.reset_to_default",
+        HotkeyAction::ToggleEqModal => "hotkey.toggle_eq_modal",
     }
 }
 

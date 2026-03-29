@@ -80,6 +80,8 @@ pub struct PlaybackState {
     pub volume_persist_throttle: Option<std::time::Instant>,
     /// The last title successfully sent to PipeWire via IPC, to prevent redundant cross-thread FFI calls
     pub pw_last_title: Option<String>,
+    /// Shared EQ state — gains and enabled flag. Read by audio thread, written by UI.
+    pub eq_state: nokkvi_data::audio::EqState,
 }
 
 impl PlaybackState {
@@ -107,6 +109,7 @@ impl Default for PlaybackState {
             bitrate: 0,
             volume_persist_throttle: None,
             pw_last_title: None,
+            eq_state: nokkvi_data::audio::EqState::default(),
         }
     }
 }
@@ -304,6 +307,14 @@ pub struct WindowState {
     pub width: f32,
     pub height: f32,
     pub scale_factor: f32,
+    /// Whether the EQ modal overlay is currently visible.
+    pub eq_modal_open: bool,
+    /// Whether the EQ modal is in "save preset" mode (showing name input).
+    pub eq_save_mode: bool,
+    /// Text input content for the preset name being saved.
+    pub eq_save_name: String,
+    /// Cached custom EQ presets (loaded from redb, kept in sync on save/delete).
+    pub custom_eq_presets: Vec<nokkvi_data::audio::eq::CustomEqPreset>,
 }
 
 impl Default for WindowState {
@@ -312,6 +323,10 @@ impl Default for WindowState {
             width: 1200.0,
             height: 800.0,
             scale_factor: 1.0,
+            eq_modal_open: false,
+            eq_save_mode: false,
+            eq_save_name: String::new(),
+            custom_eq_presets: Vec::new(),
         }
     }
 }

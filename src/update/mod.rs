@@ -59,6 +59,7 @@ mod browsing_panel;
 mod collage;
 mod components;
 mod cross_pane_drag;
+mod eq_modal;
 mod genres;
 mod hotkeys;
 mod info_modal;
@@ -533,7 +534,7 @@ impl Nokkvi {
                         self.handle_prepare_next_for_gapless()
                     }
                     PlaybackMessage::PlayerSettingsLoaded(settings) => {
-                        self.handle_player_settings_loaded(settings)
+                        self.handle_player_settings_loaded(*settings)
                     }
                     PlaybackMessage::InitializeScrobbleState(song_id) => {
                         self.handle_initialize_scrobble_state(song_id)
@@ -580,6 +581,11 @@ impl Nokkvi {
             // -----------------------------------------------------------------
             Message::Hotkey(msg) => match msg {
                 HotkeyMessage::ClearSearch => {
+                    // If EQ modal is visible, Escape closes it first
+                    if self.window.eq_modal_open {
+                        self.window.eq_modal_open = false;
+                        return Task::none();
+                    }
                     // If about modal is visible, Escape closes it first
                     if self.about_modal.visible {
                         self.about_modal.close();
@@ -800,6 +806,11 @@ impl Nokkvi {
             // About Modal
             // -----------------------------------------------------------------
             Message::AboutModal(msg) => self.handle_about_modal(msg),
+
+            // -----------------------------------------------------------------
+            // EQ Modal
+            // -----------------------------------------------------------------
+            Message::EqModal(msg) => self.handle_eq_modal(msg),
 
             // -----------------------------------------------------------------
             // Cross-Pane Drag (browsing panel → queue)

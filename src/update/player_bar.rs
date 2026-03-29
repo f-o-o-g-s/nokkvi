@@ -35,6 +35,9 @@ impl Nokkvi {
             PlayerBarMessage::ToggleConsume => {
                 Task::done(Message::Playback(PlaybackMessage::ToggleConsume))
             }
+            PlayerBarMessage::ToggleEq => {
+                Task::done(Message::EqModal(crate::widgets::EqModalMessage::Toggle))
+            }
             PlayerBarMessage::ToggleSoundEffects => {
                 Task::done(Message::Playback(PlaybackMessage::ToggleSoundEffects))
             }

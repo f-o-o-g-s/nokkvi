@@ -131,6 +131,7 @@ impl RodioOutput {
         initial_volume: f32,
         volume_normalization: bool,
         normalization_target_level: f32,
+        eq_state: Option<super::eq::EqState>,
     ) -> ActiveStream {
         // Create lock-free ring buffer
         let rb = HeapRb::<f32>::new(RING_BUFFER_CAPACITY);
@@ -146,6 +147,7 @@ impl RodioOutput {
             sample_rate_nz,
             self.visualizer_callback.clone(),
             initial_volume,
+            eq_state,
         );
 
         // Chain AGC (when enabled) then peak limiter before adding to mixer.

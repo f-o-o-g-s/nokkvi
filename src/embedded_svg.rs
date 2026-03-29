@@ -56,6 +56,7 @@ pub(crate) fn get_svg(path: &str) -> &'static str {
         "assets/icons/trash-2.svg" => TRASH_2,
         "assets/icons/sun-moon.svg" => SUN_MOON,
         "assets/icons/sliders-horizontal.svg" => SLIDERS_HORIZONTAL,
+        "assets/icons/sliders-vertical.svg" => SLIDERS_VERTICAL,
         "assets/icons/palette.svg" => PALETTE,
         "assets/icons/cog.svg" => COG,
         "assets/icons/keyboard.svg" => KEYBOARD,
@@ -144,6 +145,7 @@ const STOP: &str = include_str!("../assets/icons/stop.svg");
 const TRASH_2: &str = include_str!("../assets/icons/trash-2.svg");
 const SUN_MOON: &str = include_str!("../assets/icons/sun-moon.svg");
 const SLIDERS_HORIZONTAL: &str = include_str!("../assets/icons/sliders-horizontal.svg");
+const SLIDERS_VERTICAL: &str = include_str!("../assets/icons/sliders-vertical.svg");
 const PALETTE: &str = include_str!("../assets/icons/palette.svg");
 const COG: &str = include_str!("../assets/icons/cog.svg");
 const KEYBOARD: &str = include_str!("../assets/icons/keyboard.svg");
@@ -222,6 +224,7 @@ fn is_registered(path: &str) -> bool {
         "assets/icons/trash-2.svg",
         "assets/icons/sun-moon.svg",
         "assets/icons/sliders-horizontal.svg",
+        "assets/icons/sliders-vertical.svg",
         "assets/icons/palette.svg",
         "assets/icons/cog.svg",
         "assets/icons/keyboard.svg",
@@ -374,6 +377,7 @@ mod tests {
             "assets/icons/trash-2.svg",
             "assets/icons/sun-moon.svg",
             "assets/icons/sliders-horizontal.svg",
+            "assets/icons/sliders-vertical.svg",
             "assets/icons/palette.svg",
             "assets/icons/cog.svg",
             "assets/icons/keyboard.svg",

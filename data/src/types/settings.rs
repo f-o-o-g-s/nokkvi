@@ -117,6 +117,19 @@ pub struct PlayerSettings {
     /// Active playlist comment/description
     #[serde(default)]
     pub active_playlist_comment: String,
+    /// Whether the 10-band graphic EQ is enabled (master bypass).
+    #[serde(default)]
+    pub eq_enabled: bool,
+    /// Per-band EQ gain values in dB (-12.0 to +12.0). Indexed by band.
+    #[serde(default = "default_eq_gains")]
+    pub eq_gains: [f32; 10],
+    /// User-created custom EQ presets.
+    #[serde(default)]
+    pub custom_eq_presets: Vec<crate::audio::eq::CustomEqPreset>,
+}
+
+fn default_eq_gains() -> [f32; 10] {
+    [0.0; 10]
 }
 
 fn default_volume() -> f64 {
@@ -190,6 +203,9 @@ impl Default for PlayerSettings {
             active_playlist_id: None,
             active_playlist_name: String::new(),
             active_playlist_comment: String::new(),
+            eq_enabled: false,
+            eq_gains: default_eq_gains(),
+            custom_eq_presets: Vec::new(),
         }
     }
 }

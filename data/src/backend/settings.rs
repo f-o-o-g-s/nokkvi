@@ -216,6 +216,29 @@ impl SettingsService {
         sm.set_local_music_path(path)
     }
 
+    pub async fn set_eq_enabled(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_eq_enabled(enabled)
+    }
+
+    pub async fn set_eq_gains(&self, gains: [f32; 10]) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_eq_gains(gains)
+    }
+
+    pub async fn save_custom_eq_preset(
+        &self,
+        name: String,
+        gains: [f32; 10],
+    ) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.save_custom_eq_preset(name, gains)
+    }
+
+    pub async fn delete_custom_eq_preset(&self, index: usize) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.delete_custom_eq_preset(index)
+    }
     /// Set slot row height density and persist
     pub async fn set_slot_row_height(
         &self,

@@ -83,6 +83,8 @@ pub struct AudioRenderer {
     volume_normalization: bool,
     /// AGC target level for new streams.
     normalization_target_level: f32,
+    /// Shared EQ state — passed to each new StreamingSource.
+    eq_state: Option<super::eq::EqState>,
 }
 
 // ---- Volume normalization setters (outside the main impl for visibility) ----
@@ -91,6 +93,11 @@ impl AudioRenderer {
     pub fn set_volume_normalization(&mut self, enabled: bool, target_level: f32) {
         self.volume_normalization = enabled;
         self.normalization_target_level = target_level;
+    }
+
+    /// Update shared EQ state. Replaces existing eq state, taking effect on new streams.
+    pub fn set_eq_state(&mut self, state: super::eq::EqState) {
+        self.eq_state = Some(state);
     }
 }
 
@@ -125,6 +132,7 @@ impl AudioRenderer {
             shared_mixer: None,
             volume_normalization: false,
             normalization_target_level: 1.0,
+            eq_state: None,
         }
     }
 
@@ -200,6 +208,7 @@ impl AudioRenderer {
             self.volume as f32,
             self.volume_normalization,
             self.normalization_target_level,
+            self.eq_state.clone(),
         );
 
         debug!(
@@ -373,6 +382,7 @@ impl AudioRenderer {
                 self.volume as f32,
                 self.volume_normalization,
                 self.normalization_target_level,
+                self.eq_state.clone(),
             );
             self.primary_stream = Some(stream);
         }
@@ -526,6 +536,7 @@ impl AudioRenderer {
             0.0, // Start silent, volume will ramp up
             self.volume_normalization,
             self.normalization_target_level,
+            self.eq_state.clone(),
         );
 
         self.crossfade_stream = Some(cf_stream);

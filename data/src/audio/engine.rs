@@ -1046,6 +1046,12 @@ impl CustomAudioEngine {
         renderer.set_volume_normalization(enabled, target_level);
     }
 
+    /// Update shared EQ state. Replaces existing eq state, taking effect on new streams.
+    pub fn set_eq_state(&mut self, state: super::eq::EqState) {
+        let mut renderer = self.renderer.lock();
+        renderer.set_eq_state(state);
+    }
+
     /// Current crossfade phase
     pub fn crossfade_phase(&self) -> CrossfadePhase {
         self.crossfade_phase

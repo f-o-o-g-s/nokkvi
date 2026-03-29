@@ -447,6 +447,12 @@ pub struct PlayerSettings {
     pub active_playlist_name: String,
     /// Active playlist comment/description
     pub active_playlist_comment: String,
+    /// Whether the 10-band graphic EQ is enabled (master bypass).
+    pub eq_enabled: bool,
+    /// Per-band EQ gain values in dB (-12.0 to +12.0). Indexed by band.
+    pub eq_gains: [f32; 10],
+    /// User-created custom EQ presets.
+    pub custom_eq_presets: Vec<crate::audio::eq::CustomEqPreset>,
 }
 
 #[cfg(test)]

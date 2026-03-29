@@ -81,6 +81,7 @@ impl Nokkvi {
             is_repeat_mode: self.modes.repeat,
             is_repeat_queue_mode: self.modes.repeat_queue,
             is_consume_mode: self.modes.consume,
+            eq_enabled: self.playback.eq_state.is_enabled(),
             sound_effects_enabled: self.sfx.enabled,
             sfx_volume: self.sfx.volume,
             show_sfx_volume_percentage: self.sfx.show_percentage,
@@ -273,6 +274,22 @@ impl Nokkvi {
             },
         ) {
             stack = stack.push(about_overlay.map(Message::AboutModal));
+        }
+
+        // Add EQ modal overlay (if visible)
+        let mut eq_gains = [0.0; 10];
+        for (i, g) in eq_gains.iter_mut().enumerate() {
+            *g = self.playback.eq_state.get_band_gain(i);
+        }
+        if let Some(eq_overlay) = crate::widgets::eq_modal_overlay(
+            self.window.eq_modal_open,
+            self.playback.eq_state.is_enabled(),
+            eq_gains,
+            &self.window.custom_eq_presets,
+            self.window.eq_save_mode,
+            &self.window.eq_save_name,
+        ) {
+            stack = stack.push(eq_overlay.map(Message::EqModal));
         }
 
         // Add toast status bar overlay (if any active toast)
