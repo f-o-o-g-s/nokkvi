@@ -5,10 +5,15 @@
 
 use iced::{
     Alignment, Element, Length,
-    widget::{button, column, container, mouse_area, opaque, pick_list, row, space, svg, text},
+    widget::{
+        button, column, container, mouse_area, opaque, pick_list, row, space, svg, text, tooltip,
+    },
 };
 
-use crate::{theme, widgets::eq_slider::eq_slider};
+use crate::{
+    theme,
+    widgets::{eq_slider::eq_slider, hover_overlay::HoverOverlay},
+};
 
 // =============================================================================
 // State & Messages
@@ -86,6 +91,67 @@ pub(crate) fn eq_modal_overlay<'a>(
             ..theme::ui_font()
         })
         .color(theme::accent_bright());
+    // Icon-only button helper — view header pattern:
+    // mouse_area(HoverOverlay(container(svg).center()))
+    let svg_btn = |icon_path: &'static str,
+                   icon_color: iced::Color,
+                   size: f32,
+                   msg: EqModalMessage|
+     -> Element<'a, EqModalMessage> {
+        let icon = crate::embedded_svg::svg_widget(icon_path)
+            .width(Length::Fixed(size * 0.5))
+            .height(Length::Fixed(size * 0.5))
+            .style(move |_theme, _status| svg::Style {
+                color: Some(icon_color),
+            });
+
+        mouse_area(
+            HoverOverlay::new(
+                container(icon)
+                    .width(Length::Fixed(size))
+                    .height(Length::Fixed(size))
+                    .style(|_theme| container::Style {
+                        background: Some(theme::bg0_hard().into()),
+                        border: iced::Border {
+                            radius: theme::ui_border_radius(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    })
+                    .center(Length::Fixed(size)),
+            )
+            .border_radius(theme::ui_border_radius()),
+        )
+        .on_press(msg)
+        .interaction(iced::mouse::Interaction::Pointer)
+        .into()
+    };
+
+    let text_btn = |label: &'static str,
+                    color: iced::Color,
+                    msg: EqModalMessage|
+     -> Element<'a, EqModalMessage> {
+        button(text(label).size(13.0).font(theme::ui_font()))
+            .on_press(msg)
+            .padding([4, 10])
+            .style(move |_theme, status| {
+                let bg = match status {
+                    button::Status::Hovered | button::Status::Pressed => theme::bg2(),
+                    _ => theme::bg0_hard(),
+                };
+                button::Style {
+                    background: Some(bg.into()),
+                    border: iced::Border {
+                        color,
+                        width: 1.0,
+                        radius: theme::ui_border_radius(),
+                    },
+                    text_color: color,
+                    ..Default::default()
+                }
+            })
+            .into()
+    };
 
     let enable_btn_text = if eq_enabled { "Enabled" } else { "Disabled" };
     let enable_btn_color = if eq_enabled {
@@ -94,68 +160,46 @@ pub(crate) fn eq_modal_overlay<'a>(
         theme::fg4()
     };
 
-    let enable_button = button(text(enable_btn_text).size(14.0).color(enable_btn_color))
-        .on_press(EqModalMessage::ToggleEnabled)
-        .style(move |_theme, _status| button::Style {
-            background: Some(theme::bg0_hard().into()),
-            border: iced::Border {
-                color: enable_btn_color,
-                width: 1.0,
-                radius: theme::ui_border_radius(),
-            },
-            text_color: enable_btn_color,
-            ..Default::default()
-        })
-        .padding([4, 12]);
+    let enable_button = text_btn(
+        enable_btn_text,
+        enable_btn_color,
+        EqModalMessage::ToggleEnabled,
+    );
 
-    let reset_button = button(text("Reset").size(14.0).color(theme::fg4()))
-        .on_press(EqModalMessage::ResetAll)
-        .style(|_theme, _status| button::Style {
-            background: Some(theme::bg0_hard().into()),
-            border: iced::Border {
-                color: theme::fg4(),
-                width: 1.0,
-                radius: theme::ui_border_radius(),
-            },
-            text_color: theme::fg4(),
-            ..Default::default()
-        })
-        .padding([4, 12]);
-
-    let save_button = button(text("Save").size(14.0).color(theme::accent_bright()))
-        .on_press(EqModalMessage::SavePreset)
-        .style(|_theme, _status| button::Style {
-            background: Some(theme::bg0_hard().into()),
-            border: iced::Border {
-                color: theme::accent_bright(),
-                width: 1.0,
-                radius: theme::ui_border_radius(),
-            },
-            text_color: theme::accent_bright(),
-            ..Default::default()
-        })
-        .padding([4, 12]);
-
-    let close_button = button(
-        crate::embedded_svg::svg_widget("assets/icons/x.svg")
-            .width(16)
-            .height(16)
-            .style(|_theme, _status| svg::Style {
-                color: Some(theme::fg3()),
-            }),
+    let save_button: Element<'_, EqModalMessage> = tooltip(
+        svg_btn(
+            "assets/icons/save.svg",
+            theme::accent_bright(),
+            28.0,
+            EqModalMessage::SavePreset,
+        ),
+        container(text("Save Preset").size(11.0).font(theme::ui_font())).padding(4),
+        tooltip::Position::Bottom,
     )
-    .on_press(EqModalMessage::Close)
-    .padding(iced::Padding {
-        top: 4.0,
-        bottom: 4.0,
-        left: 8.0,
-        right: 8.0,
-    })
-    .style(|_theme, _status| button::Style {
-        background: None,
-        border: iced::Border::default(),
-        ..Default::default()
-    });
+    .gap(4)
+    .style(theme::container_tooltip)
+    .into();
+
+    let reset_button: Element<'_, EqModalMessage> = tooltip(
+        svg_btn(
+            "assets/icons/rotate-ccw.svg",
+            theme::fg4(),
+            28.0,
+            EqModalMessage::ResetAll,
+        ),
+        container(text("Reset").size(11.0).font(theme::ui_font())).padding(4),
+        tooltip::Position::Bottom,
+    )
+    .gap(4)
+    .style(theme::container_tooltip)
+    .into();
+
+    let close_button: Element<'_, EqModalMessage> = svg_btn(
+        "assets/icons/x.svg",
+        theme::fg3(),
+        28.0,
+        EqModalMessage::Close,
+    );
 
     // ── Preset Picker ───────────────────────────────────────────
     // Build combined choices: builtins + customs
@@ -237,31 +281,12 @@ pub(crate) fn eq_modal_overlay<'a>(
             }
         })
         .map(|idx| {
-            button(
-                crate::embedded_svg::svg_widget("assets/icons/trash-2.svg")
-                    .width(14)
-                    .height(14)
-                    .style(|_theme, _status| svg::Style {
-                        color: Some(theme::yellow()),
-                    }),
+            svg_btn(
+                "assets/icons/trash-2.svg",
+                theme::fg3(),
+                28.0,
+                EqModalMessage::DeletePreset(idx),
             )
-            .on_press(EqModalMessage::DeletePreset(idx))
-            .padding(iced::Padding {
-                top: 4.0,
-                bottom: 4.0,
-                left: 6.0,
-                right: 6.0,
-            })
-            .style(|_theme, _status| button::Style {
-                background: Some(theme::bg0_hard().into()),
-                border: iced::Border {
-                    color: theme::yellow(),
-                    width: 1.0,
-                    radius: theme::ui_border_radius(),
-                },
-                ..Default::default()
-            })
-            .into()
         });
 
     // Build header row — two modes: normal vs save
@@ -287,33 +312,9 @@ pub(crate) fn eq_modal_overlay<'a>(
                 selection: theme::accent_bright(),
             });
 
-        let ok_button = button(text("OK").size(14.0).color(theme::green()))
-            .on_press(EqModalMessage::SavePresetConfirm)
-            .style(|_theme, _status| button::Style {
-                background: Some(theme::bg0_hard().into()),
-                border: iced::Border {
-                    color: theme::green(),
-                    width: 1.0,
-                    radius: theme::ui_border_radius(),
-                },
-                text_color: theme::green(),
-                ..Default::default()
-            })
-            .padding([4, 12]);
+        let ok_button = text_btn("OK", theme::green(), EqModalMessage::SavePresetConfirm);
 
-        let cancel_button = button(text("Cancel").size(14.0).color(theme::fg4()))
-            .on_press(EqModalMessage::CancelSave)
-            .style(|_theme, _status| button::Style {
-                background: Some(theme::bg0_hard().into()),
-                border: iced::Border {
-                    color: theme::fg4(),
-                    width: 1.0,
-                    radius: theme::ui_border_radius(),
-                },
-                text_color: theme::fg4(),
-                ..Default::default()
-            })
-            .padding([4, 12]);
+        let cancel_button = text_btn("Cancel", theme::fg4(), EqModalMessage::CancelSave);
 
         row![
             text("Save Preset")
@@ -326,8 +327,6 @@ pub(crate) fn eq_modal_overlay<'a>(
             name_input,
             ok_button,
             cancel_button,
-            space::horizontal(),
-            close_button
         ]
         .spacing(8)
         .align_y(Alignment::Center)
@@ -369,11 +368,9 @@ pub(crate) fn eq_modal_overlay<'a>(
         };
 
         let val_color = if gain.abs() < 0.1 {
-            theme::fg4()
-        } else if gain > 0.0 {
-            theme::green()
+            theme::fg3()
         } else {
-            theme::yellow()
+            theme::accent_bright()
         };
 
         let val_label = text(val_text)

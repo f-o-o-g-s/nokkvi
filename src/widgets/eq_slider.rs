@@ -187,23 +187,18 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for EqSlider<'_, Mes
         let bg1 = crate::theme::bg1();
         let (tl, br) = crate::theme::border_3d_inset();
 
-        // Colored accent based on gain (positive = warmer/greenish, negative = cooler/reddish?)
-        // Let's just use the bright accent if it's not 0, and a muted one if it is 0.
-        // Actually, let's use standard Gruvbox accent colors:
+        // Use accent for any non-zero gain, muted fg3 for flat — avoids the
+        // green/yellow split that reads as success/warning status indicators.
         let accent = if gain.abs() < 0.1 {
-            crate::theme::fg4() // Grey out when flat
-        } else if gain > 0.0 {
-            crate::theme::green() // Boost
+            crate::theme::fg3()
         } else {
-            crate::theme::yellow() // Cut
+            crate::theme::accent_bright()
         };
 
         let (handle_tl, handle_br) = if gain.abs() < 0.1 {
-            (crate::theme::fg4(), crate::theme::bg0_hard())
-        } else if gain > 0.0 {
-            crate::theme::border_3d_accent_raised()
+            (crate::theme::fg3(), crate::theme::bg0_hard())
         } else {
-            crate::theme::border_3d_accent_darker_raised()
+            crate::theme::border_3d_accent_raised()
         };
 
         // 1. Draw track background

@@ -14,7 +14,7 @@ use iced::{
     widget::{button, column, container, mouse_area, opaque, row, space, svg, text},
 };
 
-use crate::theme;
+use crate::{theme, widgets::hover_overlay::HoverOverlay};
 
 // =============================================================================
 // State & Messages
@@ -97,47 +97,55 @@ pub(crate) fn about_modal_overlay<'a>(
         })
         .color(theme::accent_bright());
 
-    let close_button = button(
-        crate::embedded_svg::svg_widget("assets/icons/x.svg")
-            .width(16)
-            .height(16)
-            .style(|_theme, _status| svg::Style {
-                color: Some(theme::fg3()),
-            }),
+    let close_button: Element<'_, AboutModalMessage> = mouse_area(
+        HoverOverlay::new(
+            container(
+                crate::embedded_svg::svg_widget("assets/icons/x.svg")
+                    .width(Length::Fixed(16.0))
+                    .height(Length::Fixed(16.0))
+                    .style(|_theme, _status| svg::Style {
+                        color: Some(theme::fg3()),
+                    }),
+            )
+            .width(Length::Fixed(28.0))
+            .height(Length::Fixed(28.0))
+            .style(|_theme| container::Style {
+                background: None,
+                border: iced::Border::default(),
+                ..Default::default()
+            })
+            .center(Length::Fixed(28.0)),
+        )
+        .border_radius(theme::ui_border_radius()),
     )
     .on_press(AboutModalMessage::Close)
-    .padding(iced::Padding {
-        top: 2.0,
-        bottom: 2.0,
-        left: 6.0,
-        right: 6.0,
-    })
-    .style(|_theme, _status| button::Style {
-        background: None,
-        border: iced::Border::default(),
-        ..Default::default()
-    });
+    .interaction(iced::mouse::Interaction::Pointer)
+    .into();
 
-    let copy_button = button(
-        crate::embedded_svg::svg_widget("assets/icons/copy.svg")
-            .width(14)
-            .height(14)
-            .style(|_theme, _status| svg::Style {
-                color: Some(theme::fg3()),
-            }),
+    let copy_button: Element<'_, AboutModalMessage> = mouse_area(
+        HoverOverlay::new(
+            container(
+                crate::embedded_svg::svg_widget("assets/icons/copy.svg")
+                    .width(Length::Fixed(14.0))
+                    .height(Length::Fixed(14.0))
+                    .style(|_theme, _status| svg::Style {
+                        color: Some(theme::fg3()),
+                    }),
+            )
+            .width(Length::Fixed(28.0))
+            .height(Length::Fixed(28.0))
+            .style(|_theme| container::Style {
+                background: None,
+                border: iced::Border::default(),
+                ..Default::default()
+            })
+            .center(Length::Fixed(28.0)),
+        )
+        .border_radius(theme::ui_border_radius()),
     )
     .on_press(AboutModalMessage::CopyAll)
-    .padding(iced::Padding {
-        top: 2.0,
-        bottom: 2.0,
-        left: 6.0,
-        right: 6.0,
-    })
-    .style(|_theme, _status| button::Style {
-        background: None,
-        border: iced::Border::default(),
-        ..Default::default()
-    });
+    .interaction(iced::mouse::Interaction::Pointer)
+    .into();
 
     let etymology = text("Old Norse nökkvi: a small, humble boat")
         .size(12.0)

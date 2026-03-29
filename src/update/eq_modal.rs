@@ -27,9 +27,10 @@ impl Nokkvi {
 
                 // Persist to storage
                 let enabled = !current;
+                let msg = if enabled { "EQ Enabled" } else { "EQ Disabled" };
                 self.shell_fire_and_forget_task(
                     move |shell| async move { shell.settings().set_eq_enabled(enabled).await },
-                    String::new(),
+                    msg.to_string(),
                     "Failed to save EQ state",
                 )
             }
