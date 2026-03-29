@@ -110,9 +110,7 @@ impl SfxEngine {
 
         // Open a dedicated rodio output for SFX
         // (separate from the music output so SFX volume is independent)
-        set_pipewire_props();
-        let mut sink = DeviceSinkBuilder::open_default_sink()
-            .map_err(|e| anyhow!("Failed to open SFX audio output: {e}"))?;
+        let mut sink = open_preferred_sink()?;
         sink.log_on_drop(false);
         let sink = Some(sink);
 
@@ -388,7 +386,7 @@ impl Default for SfxEngine {
             tracing::error!("🔊 SfxEngine: Failed to initialize: {}", e);
             // Return a dummy engine that does nothing — no panic if audio device
             // is unavailable (e.g., headless servers, CI).
-            let sink = DeviceSinkBuilder::open_default_sink().ok();
+            let sink = open_preferred_sink().ok();
             if sink.is_none() {
                 tracing::warn!("🔊 SfxEngine: No audio device available — SFX disabled");
             }
@@ -409,20 +407,67 @@ impl Default for SfxEngine {
     }
 }
 
-/// Set PipeWire stream properties via environment variable so the stream
-/// appears as "Nokkvi (Music)" in PipeWire-aware UIs like Noctalia shell.
-/// This is read by the PipeWire ALSA shim when the stream connects.
-fn set_pipewire_props() {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        // Safety: called once before any audio stream is opened, no concurrent
-        // env reads of this variable from other threads at this point.
+/// Try to open a `MixerDeviceSink` using native PipeWire, falling back to ALSA.
+///
+/// On Linux with the `pipewire` cpal feature enabled, this attempts to initialise
+/// the PipeWire host and open its default output device. If PipeWire is unavailable
+/// (not running, wrong permissions, etc.) it falls back to `open_default_sink()`
+/// which uses the ALSA host.
+///
+/// On non-Linux platforms this is a no-op wrapper around `open_default_sink()`.
+fn open_preferred_sink() -> Result<MixerDeviceSink> {
+    #[cfg(target_os = "linux")]
+    {
+        use rodio::cpal::{self, traits::HostTrait};
+
+        // Set PipeWire stream properties so the stream appears as "Nokkvi"
+        // in PipeWire-aware UIs (e.g., Noctalia shell volume panel).
+        // This is read by libpipewire's pw_context_new() for both native
+        // PipeWire and the ALSA compatibility shim.
+        // Safety: called once before any audio stream is opened.
         unsafe {
             std::env::set_var(
                 "PIPEWIRE_PROPS",
                 "{ application.name=Nokkvi media.name=Music application.icon-name=nokkvi media.role=Music }",
             );
         }
-    });
+
+        // Try PipeWire first
+        match cpal::host_from_id(cpal::HostId::PipeWire) {
+            Ok(pw_host) => {
+                if let Some(device) = pw_host.default_output_device() {
+                    match DeviceSinkBuilder::from_device(device)
+                        .and_then(|b| b.open_stream())
+                    {
+                        Ok(sink) => {
+                            tracing::info!("🔊 Audio output: native PipeWire");
+                            return Ok(sink);
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "🔊 PipeWire device found but stream failed, falling back to ALSA: {e}"
+                            );
+                        }
+                    }
+                } else {
+                    tracing::warn!(
+                        "🔊 PipeWire host available but no default output device, falling back to ALSA"
+                    );
+                }
+            }
+            Err(_) => {
+                tracing::debug!("🔊 PipeWire host not available, using ALSA");
+            }
+        }
+    }
+
+    // Fallback: default host (ALSA on Linux, CoreAudio on macOS, WASAPI on Windows)
+    let sink = DeviceSinkBuilder::open_default_sink()
+        .map_err(|e| anyhow!("Failed to open audio output: {e}"))?;
+    #[cfg(target_os = "linux")]
+    tracing::info!("🔊 Audio output: ALSA (via PipeWire compatibility shim)");
+    #[cfg(not(target_os = "linux"))]
+    tracing::info!("🔊 Audio output: system default");
+    Ok(sink)
 }
+

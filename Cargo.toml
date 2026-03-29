@@ -44,3 +44,4 @@ futures = "0.3.32"
 mpris-server = "0.9"
 notify = "8"
 parking_lot = "0.12.5"
+
