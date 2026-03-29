@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.0.10 — 2026-03-28
+
+### Fixes
+- **PipeWire hardware volume control** — restored native PipeWire stream volume control by explicitly setting the `application.name` and `media.role` stream properties, ensuring the desktop shell and external tools can identify and control Nokkvi's audio node.
+
 ## v0.0.9 — 2026-03-28
 
 ### Features
