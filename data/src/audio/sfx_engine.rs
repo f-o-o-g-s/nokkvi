@@ -80,9 +80,9 @@ pub struct SfxEngine {
     view_select_samples: Arc<Vec<f32>>,
     expand_collapse_samples: Arc<Vec<f32>>,
     escape_samples: Arc<Vec<f32>>,
-    /// Rodio device sink — its mixer() is used to add voices.
+    /// Audio device sink wrapper — its mixer() is used to add voices.
     /// `None` when no audio device is available (graceful degradation).
-    sink: Option<MixerDeviceSink>,
+    sink: Option<ActiveSink>,
     // Throttle: last play timestamps
     last_tab_play: Cell<Instant>,
     last_view_select_play: Cell<Instant>,
@@ -407,54 +407,30 @@ impl Default for SfxEngine {
     }
 }
 
-/// Try to open a `MixerDeviceSink` using native PipeWire, falling back to ALSA.
-///
-/// On Linux with the `pipewire` cpal feature enabled, this attempts to initialise
-/// the PipeWire host and open its default output device. If PipeWire is unavailable
-/// (not running, wrong permissions, etc.) it falls back to `open_default_sink()`
-/// which uses the ALSA host.
-///
-/// On non-Linux platforms this is a no-op wrapper around `open_default_sink()`.
-fn open_preferred_sink() -> Result<MixerDeviceSink> {
+/// Attempt to open the preferred audio sink
+fn open_preferred_sink() -> Result<ActiveSink> {
     #[cfg(target_os = "linux")]
     {
-        use rodio::cpal::{self, traits::HostTrait};
+        // For native PipeWire environments, we spin up our own isolated stream graph
+        // This ensures desktop volume and node metadata correctly identifies Nokkvi
+        // without patching rodio.
+        let (mixer_controller, mixer_source) = rodio::mixer::mixer(
+            std::num::NonZeroU16::new(2).unwrap(),
+            std::num::NonZeroU32::new(48000).unwrap(),
+        );
 
-        // Set PipeWire stream properties so the stream appears as "Nokkvi"
-        // in PipeWire-aware UIs (e.g., Noctalia shell volume panel).
-        // This is read by libpipewire's pw_context_new() for both native
-        // PipeWire and the ALSA compatibility shim.
-        // Safety: called once before any audio stream is opened.
-        unsafe {
-            std::env::set_var(
-                "PIPEWIRE_PROPS",
-                "{ application.name=Nokkvi media.name=Music application.icon-name=nokkvi media.role=Music }",
-            );
-        }
-
-        // Try PipeWire first
-        match cpal::host_from_id(cpal::HostId::PipeWire) {
-            Ok(pw_host) => {
-                if let Some(device) = pw_host.default_output_device() {
-                    match DeviceSinkBuilder::from_device(device).and_then(|b| b.open_stream()) {
-                        Ok(sink) => {
-                            tracing::info!("🔊 Audio output: native PipeWire");
-                            return Ok(sink);
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                "🔊 PipeWire device found but stream failed, falling back to ALSA: {e}"
-                            );
-                        }
-                    }
-                } else {
-                    tracing::warn!(
-                        "🔊 PipeWire host available but no default output device, falling back to ALSA"
-                    );
-                }
+        match crate::audio::pipewire_output::NativePipeWireSink::new(
+            mixer_controller,
+            Box::new(mixer_source),
+        ) {
+            Ok(sink) => {
+                tracing::info!("🔊 Audio output: native PipeWire Custom Sink");
+                return Ok(ActiveSink::NativePipewire(sink));
             }
-            Err(_) => {
-                tracing::debug!("🔊 PipeWire host not available, using ALSA");
+            Err(e) => {
+                tracing::warn!(
+                    "🔊 Native PipeWire device found but stream failed, falling back to ALSA: {e}"
+                );
             }
         }
     }
@@ -463,8 +439,30 @@ fn open_preferred_sink() -> Result<MixerDeviceSink> {
     let sink = DeviceSinkBuilder::open_default_sink()
         .map_err(|e| anyhow!("Failed to open audio output: {e}"))?;
     #[cfg(target_os = "linux")]
-    tracing::info!("🔊 Audio output: ALSA (via PipeWire compatibility shim)");
+    tracing::info!("🔊 Audio output: Default OS Host (ALSA via PipeWire compatibility block)");
     #[cfg(not(target_os = "linux"))]
     tracing::info!("🔊 Audio output: system default");
-    Ok(sink)
+    Ok(ActiveSink::Cpal(sink))
+}
+
+pub enum ActiveSink {
+    Cpal(MixerDeviceSink),
+    #[cfg(target_os = "linux")]
+    NativePipewire(crate::audio::pipewire_output::NativePipeWireSink),
+}
+
+impl ActiveSink {
+    pub fn mixer(&self) -> rodio::mixer::Mixer {
+        match self {
+            Self::Cpal(c) => c.mixer().clone(),
+            #[cfg(target_os = "linux")]
+            Self::NativePipewire(p) => p.mixer(),
+        }
+    }
+
+    pub fn log_on_drop(&mut self, enabled: bool) {
+        if let Self::Cpal(c) = self {
+            c.log_on_drop(enabled);
+        }
+    }
 }

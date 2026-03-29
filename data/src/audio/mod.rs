@@ -10,11 +10,14 @@ pub mod decoder;
 pub mod engine;
 pub mod format;
 
+#[cfg(target_os = "linux")]
+pub mod pipewire_output;
 mod range_http_reader;
 pub mod renderer;
 pub mod rodio_output;
 pub mod sfx_engine;
 pub mod spectrum;
+
 pub mod streaming_source;
 
 pub use buffer::AudioBuffer;
