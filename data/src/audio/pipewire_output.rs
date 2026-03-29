@@ -10,6 +10,7 @@ pub struct NativePipeWireSink {
     mixer: rodio::mixer::Mixer,
     handle: Option<JoinHandle<()>>,
     quit_tx: std::sync::mpsc::Sender<()>,
+    title_tx: pw::channel::Sender<String>,
 }
 
 pub struct UserData {
@@ -22,6 +23,7 @@ impl NativePipeWireSink {
         mixer_source: Box<dyn Source<Item = f32> + Send>,
     ) -> Result<Self> {
         let (quit_tx, quit_rx) = std::sync::mpsc::channel();
+        let (title_tx, title_rx) = pw::channel::channel::<String>();
         let mixer_clone = mixer.clone();
 
         // Spawn the dedicated pw_out thread
@@ -60,7 +62,9 @@ impl NativePipeWireSink {
                     }
                 };
 
-                let data = UserData { mixer_source };
+                let data = UserData {
+                    mixer_source,
+                };
 
                 let stream = match pw::stream::StreamRc::new(
                     core,
@@ -80,6 +84,20 @@ impl NativePipeWireSink {
                 };
 
                 let loop_clone = mainloop.clone();
+                let stream_clone = stream.clone();
+
+                let _title_receiver = title_rx.attach(mainloop.loop_(), move |title: String| {
+                    tracing::info!("🔊 PipeWire IPC: Updating graph MEDIA_NAME to {:?}", title);
+                    let props = properties! {
+                        *pw::keys::MEDIA_NAME => title.as_str()
+                    };
+                    unsafe {
+                        pw::sys::pw_stream_update_properties(
+                            stream_clone.as_raw_ptr(),
+                            props.dict().as_raw_ptr(),
+                        );
+                    }
+                });
 
                 let listener = stream
                     .add_local_listener_with_user_data(data)
@@ -171,6 +189,7 @@ impl NativePipeWireSink {
                 mainloop.run();
 
                 // Keep things alive
+                drop(_title_receiver);
                 drop(listener);
                 drop(stream);
             })
@@ -180,7 +199,13 @@ impl NativePipeWireSink {
             mixer: mixer_clone,
             handle: Some(handle),
             quit_tx,
+            title_tx,
         })
+    }
+
+    pub fn set_title(&self, title: String) {
+        tracing::info!("🔊 SfxEngine routing title update downward: {:?}", title);
+        let _ = self.title_tx.send(title);
     }
 
     pub fn mixer(&self) -> rodio::mixer::Mixer {

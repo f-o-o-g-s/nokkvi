@@ -378,6 +378,13 @@ impl SfxEngine {
     pub fn mixer(&self) -> Option<rodio::mixer::Mixer> {
         self.sink.as_ref().map(|s| s.mixer().clone())
     }
+
+    /// Update the PipeWire stream description externally (only affects NativePipeWire mode)
+    pub fn set_output_title(&self, title: String) {
+        if let Some(ref sink) = self.sink {
+            sink.set_title(title);
+        }
+    }
 }
 
 impl Default for SfxEngine {
@@ -463,6 +470,14 @@ impl ActiveSink {
     pub fn log_on_drop(&mut self, enabled: bool) {
         if let Self::Cpal(c) = self {
             c.log_on_drop(enabled);
+        }
+    }
+
+    pub fn set_title(&self, _title: String) {
+        match self {
+            Self::Cpal(_) => {}
+            #[cfg(target_os = "linux")]
+            Self::NativePipewire(p) => p.set_title(_title),
         }
     }
 }

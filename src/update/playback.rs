@@ -191,6 +191,28 @@ impl Nokkvi {
 
         // Scrobble: song change detection + previous-song submission
         let song_changed = self.scrobble.current_song_id != song_id;
+        
+        let pw_title = if is_stopped || self.playback.title.is_empty() {
+            "Nokkvi".to_string()
+        } else {
+            format!("Nokkvi ({} - {})", self.playback.title, self.playback.artist)
+        };
+
+        // PipeWire stream description update - detect title transitions to catch late-arriving metadata
+        let emit_title_update = if playback_stopped {
+            true
+        } else {
+            match &self.playback.pw_last_title {
+                Some(last) => last != &pw_title,
+                None => true,
+            }
+        };
+
+        if emit_title_update {
+            self.sfx_engine.set_output_title(pw_title.clone());
+            self.playback.pw_last_title = Some(pw_title);
+        }
+
         if song_changed {
             // Reset gapless flag BEFORE scrobble updates current_song_id.
             // Must happen here because consume mode can cause the queue index

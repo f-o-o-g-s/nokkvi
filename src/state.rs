@@ -78,6 +78,8 @@ pub struct PlaybackState {
     pub bitrate: u32,
     /// Throttle timestamp for volume persistence to storage
     pub volume_persist_throttle: Option<std::time::Instant>,
+    /// The last title successfully sent to PipeWire via IPC, to prevent redundant cross-thread FFI calls
+    pub pw_last_title: Option<String>,
 }
 
 impl PlaybackState {
@@ -104,6 +106,7 @@ impl Default for PlaybackState {
             sample_rate: 0,
             bitrate: 0,
             volume_persist_throttle: None,
+            pw_last_title: None,
         }
     }
 }
