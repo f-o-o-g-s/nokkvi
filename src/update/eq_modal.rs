@@ -54,14 +54,20 @@ impl Nokkvi {
                 }
             }
             EqModalMessage::PresetSelected(choice) => {
-                let gains = match &choice {
+                let (gains, preset_name) = match &choice {
                     crate::widgets::PresetChoice::Builtin(idx) => {
-                        nokkvi_data::audio::eq::BUILTIN_PRESETS
-                            .get(*idx)
-                            .map(|p| p.gains)
+                        let preset = nokkvi_data::audio::eq::BUILTIN_PRESETS.get(*idx);
+                        (
+                            preset.map(|p| p.gains),
+                            preset.map(|p| p.name).unwrap_or("Unknown").to_string(),
+                        )
                     }
                     crate::widgets::PresetChoice::Custom(idx) => {
-                        self.window.custom_eq_presets.get(*idx).map(|p| p.gains)
+                        let preset = self.window.custom_eq_presets.get(*idx);
+                        (
+                            preset.map(|p| p.gains),
+                            preset.map(|p| p.name.clone()).unwrap_or_default(),
+                        )
                     }
                 };
 
@@ -69,7 +75,7 @@ impl Nokkvi {
                     self.playback.eq_state.set_all_gains(&gains);
                     self.shell_fire_and_forget_task(
                         move |shell| async move { shell.settings().set_eq_gains(gains).await },
-                        String::new(),
+                        format!("Preset: {preset_name}"),
                         "Failed to save EQ preset",
                     )
                 } else {
