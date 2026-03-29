@@ -436,9 +436,7 @@ fn open_preferred_sink() -> Result<MixerDeviceSink> {
         match cpal::host_from_id(cpal::HostId::PipeWire) {
             Ok(pw_host) => {
                 if let Some(device) = pw_host.default_output_device() {
-                    match DeviceSinkBuilder::from_device(device)
-                        .and_then(|b| b.open_stream())
-                    {
+                    match DeviceSinkBuilder::from_device(device).and_then(|b| b.open_stream()) {
                         Ok(sink) => {
                             tracing::info!("🔊 Audio output: native PipeWire");
                             return Ok(sink);
@@ -470,4 +468,3 @@ fn open_preferred_sink() -> Result<MixerDeviceSink> {
     tracing::info!("🔊 Audio output: system default");
     Ok(sink)
 }
-

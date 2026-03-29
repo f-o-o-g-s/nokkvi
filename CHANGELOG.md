@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.0.9 — 2026-03-28
+
+### Features
+- **Native PipeWire integration** — the audio engine now explicitly selects the native PipeWire host when available, falling back to ALSA, preserving stream metadata (`application.name`, `media.role`).
+- **About modal** — added a new modal accessible from the hamburger menu that displays application version, system information, and a new custom boat icon.
+
+### Fixes
+- **About modal icon** — corrected the logo in the new About modal so the correct dimensions and source are used without upscaling artifacts.
+
+### Improvements
+- **Theme preset updates** — aligned the bundled layout presets by removing hardcoded font overrides and updated the Everforest preset to match the active configuration.
+
+### Docs
+- **Open Source guidelines** — added comprehensive preparation documentation and third-party license notices in preparation for public release.
+
+### Internal
+- Removed old logo iteration files from the root directory.
+
+---
+
 ## v0.0.8 — 2026-03-25
 
 ### Features

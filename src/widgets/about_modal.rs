@@ -197,7 +197,12 @@ pub(crate) fn about_modal_overlay<'a>(
 
     // ── Dialog content ───────────────────────────────────────────
     let content = column![
-        header, header_sep, boat_icon, etymology, description, info_table
+        header,
+        header_sep,
+        boat_icon,
+        etymology,
+        description,
+        info_table
     ]
     .spacing(10)
     .padding(20)

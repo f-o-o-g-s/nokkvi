@@ -11,7 +11,7 @@ A native Rust/Iced client for [Navidrome](https://www.navidrome.org/) music serv
 ## Features
 
 - GPU-accelerated audio visualizer (bars + lines modes, pure-Rust FFT via RustFFT with configurable opacity)
-- Rodio audio engine with gapless playback and dual-stream crossfade
+- Rodio audio engine on native PipeWire (with ALSA fallback), featuring gapless playback and dual-stream crossfade
 - Peak limiter and perceptual volume curve for clean, natural-sounding output
 - MPRIS D-Bus integration for media player controls
 - Scrobbling support (last.fm / ListenBrainz via Navidrome)
@@ -24,6 +24,7 @@ A native Rust/Iced client for [Navidrome](https://www.navidrome.org/) music serv
 - System font picker with live preview
 - File-based logging to `~/.config/nokkvi/nokkvi.log`
 - Get Info modal (Shift+I) — full metadata inspector with selectable text and copy support
+- About modal with system diagnostic information, accessible via hamburger menu
 - Show in File Manager — right-click songs to open their containing folder
 - Inline three-tier expansion (Artist → Album → Track, Genre → Album → Track)
 - Playlist management — create, rename, delete, save queue as playlist
@@ -50,12 +51,12 @@ pacman -S alsa-lib fontconfig pkg-config
 
 | Package | Purpose |
 |---------|---------|
-| `alsa-lib` | ALSA development headers (audio output via cpal) |
+| `alsa-lib` | ALSA development headers (fallback audio output via cpal) |
 | `fontconfig` | Font discovery for the system font picker (used by `font-kit`) |
 | `pkg-config` | Build-time dependency resolution for native libraries |
 
-> **Note:** PipeWire users get audio routing automatically via PipeWire's ALSA compatibility layer (`pipewire-alsa`). No PipeWire development headers are needed to build.
-> **Troubleshooting:** No audio but volume looks correct? Install `alsa-utils` and run `alsamixer` — hardware ALSA channels may be muted beneath PipeWire.
+> **Note:** Nokkvi explicitly targets the native PipeWire host first. The ALSA headers are required to compile the ALSA fallback host.
+> **Troubleshooting:** No audio but volume looks correct? Ensure your desktop environments sound daemon (e.g. PipeWire) is running.
 > **Note:** Assumes you have Rust installed via [rustup](https://rustup.rs/) or the `rust` package. The **nightly toolchain** is required for formatting (`cargo +nightly fmt --all`). Keep your toolchain up to date (`rustup update`) — some dependencies require a recent compiler.
 
 ## Building
