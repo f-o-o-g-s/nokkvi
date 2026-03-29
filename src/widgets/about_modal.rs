@@ -139,7 +139,17 @@ pub(crate) fn about_modal_overlay<'a>(
         ..Default::default()
     });
 
-    let header = row![title_text, space::horizontal(), copy_button, close_button]
+    let etymology = text("Old Norse nökkvi: a small, humble boat")
+        .size(12.0)
+        .font(iced::font::Font {
+            style: iced::font::Style::Italic,
+            ..theme::ui_font()
+        })
+        .color(theme::fg4());
+
+    let title_col = column![title_text, etymology].spacing(2);
+
+    let header = row![title_col, space::horizontal(), copy_button, close_button]
         .spacing(8)
         .align_y(Alignment::Center);
 
@@ -155,25 +165,28 @@ pub(crate) fn about_modal_overlay<'a>(
     .width(Length::Fill)
     .align_x(Alignment::Center);
 
-    // ── Etymology ────────────────────────────────────────────────
-    let etymology = text("Old Norse nökkvi — a small, humble boat")
-        .size(12.0)
+    let tagline = text("A sturdy hull for the endless stream.")
+        .size(14.0)
         .font(iced::font::Font {
-            style: iced::font::Style::Italic,
+            weight: iced::font::Weight::Bold,
             ..theme::ui_font()
         })
-        .color(theme::fg3());
+        .color(theme::fg1());
 
     let description = text("A Rust/Iced desktop client for Navidrome music servers")
         .size(12.0)
         .font(theme::ui_font())
-        .color(theme::fg2());
+        .color(theme::fg3());
 
     // ── Info rows ────────────────────────────────────────────────
-    let mut rows: Vec<Element<'_, AboutModalMessage>> = Vec::new();
-
-    rows.push(info_row("Version", version));
-    rows.push(row_separator());
+    let mut rows: Vec<Element<'_, AboutModalMessage>> = vec![
+        info_row("Captain", "foogs"),
+        row_separator(),
+        info_row("Shipwrights", "Claude Opus 4.6 & Gemini 3.1"),
+        row_separator(),
+        info_row("Version", version),
+        row_separator(),
+    ];
 
     if !git_hash.is_empty() {
         rows.push(info_row("Commit", git_hash));
@@ -200,7 +213,7 @@ pub(crate) fn about_modal_overlay<'a>(
         header,
         header_sep,
         boat_icon,
-        etymology,
+        tagline,
         description,
         info_table
     ]
@@ -247,7 +260,7 @@ pub(crate) fn about_modal_overlay<'a>(
 // =============================================================================
 
 /// Fixed width for the label column in pixels
-const LABEL_COL_WIDTH: f32 = 80.0;
+const LABEL_COL_WIDTH: f32 = 96.0;
 const LABEL_SIZE: f32 = 12.0;
 const VALUE_SIZE: f32 = 13.0;
 

@@ -12,6 +12,7 @@ A native Rust/Iced client for [Navidrome](https://www.navidrome.org/) music serv
 
 - GPU-accelerated audio visualizer (bars + lines modes, pure-Rust FFT via RustFFT with configurable opacity)
 - Rodio audio engine on native PipeWire (with ALSA fallback), featuring gapless playback and dual-stream crossfade
+- 10-band graphic equalizer with custom presets and precision DSP
 - Peak limiter and perceptual volume curve for clean, natural-sounding output
 - MPRIS D-Bus integration for media player controls
 - Scrobbling support (last.fm / ListenBrainz via Navidrome)

@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.1.0 — 2026-03-29
+
+### Features
+- **Graphic Equalizer** — implemented a 10-band graphic equalizer with custom preset management and redb persistence.
+
+### Fixes
+- **PipeWire hardware sync** — synchronized PipeWire stream properties via mainloop IPC to prevent tokio runtime panics and ensure metadata is correctly pushed.
+
+### Improvements
+- **PipeWire backend cleanup** — internal refactoring of the native pipewire implementation for better reliability.
+
+### Internal
+- Removed accidental cpal submodule pointer.
+
+---
+
 ## v0.0.10 — 2026-03-28
 
 ### Fixes
