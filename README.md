@@ -11,7 +11,7 @@ A native Rust/Iced client for [Navidrome](https://www.navidrome.org/) music serv
 ## Features
 
 - GPU-accelerated audio visualizer (bars + lines modes, pure-Rust FFT via RustFFT with configurable opacity)
-- Rodio audio engine on native PipeWire (with ALSA fallback), featuring gapless playback and dual-stream crossfade
+- Native PipeWire audio engine, featuring gapless playback and dual-stream crossfade, with hardware stream volume synchronization
 - 10-band graphic equalizer with custom presets and precision DSP
 - Peak limiter and perceptual volume curve for clean, natural-sounding output
 - MPRIS D-Bus integration for media player controls
@@ -21,7 +21,7 @@ A native Rust/Iced client for [Navidrome](https://www.navidrome.org/) music serv
 - Now-playing metadata strip (player bar or full-width top bar) with marquee scrolling and right-click context menu
 - Optional rounded corners mode for the entire UI
 - User-configurable keyboard shortcuts
-- In-app settings editor with drill-down navigation, inline search, and preset themes
+- In-app settings editor with drill-down navigation, inline search, and preset themes (all preferences hot-reloadable via `config.toml`, including a Verbose Config mode)
 - System font picker with live preview
 - File-based logging to `~/.config/nokkvi/nokkvi.log`
 - Get Info modal (Shift+I) — full metadata inspector with selectable text and copy support
@@ -42,21 +42,20 @@ A native Rust/Iced client for [Navidrome](https://www.navidrome.org/) music serv
 - Confirmation dialogs for destructive actions
 - Queue persistence across app restarts (restores queue contents and current track)
 - Non-wrapping slot list navigation with dynamic center slot
-- Dynamic slot sizing with configurable row height (Settings → General)
+- Dynamic slot sizing with configurable row height (Settings → Interface)
 
 ## Dependencies (Arch Linux)
 
 ```bash
-pacman -S alsa-lib fontconfig pkg-config
+pacman -S pipewire fontconfig pkg-config
 ```
 
 | Package | Purpose |
 |---------|---------|
-| `alsa-lib` | ALSA development headers (fallback audio output via cpal) |
+| `pipewire` | PipeWire development headers (native audio output via `libpipewire-0.3`) |
 | `fontconfig` | Font discovery for the system font picker (used by `font-kit`) |
 | `pkg-config` | Build-time dependency resolution for native libraries |
 
-> **Note:** Nokkvi explicitly targets the native PipeWire host first. The ALSA headers are required to compile the ALSA fallback host.
 > **Troubleshooting:** No audio but volume looks correct? Ensure your desktop environments sound daemon (e.g. PipeWire) is running.
 > **Note:** Assumes you have Rust installed via [rustup](https://rustup.rs/) or the `rust` package. The **nightly toolchain** is required for formatting (`cargo +nightly fmt --all`). Keep your toolchain up to date (`rustup update`) — some dependencies require a recent compiler.
 
@@ -167,6 +166,7 @@ All keyboard shortcuts are **user-configurable** via the Settings view (Hotkeys 
 | `c` | Toggle consume mode |
 | `s` | Toggle sound effects |
 | `v` | Cycle visualization mode |
+| `q` | Toggle 10-band equalizer |
 
 ### Navigation & UI
 
@@ -228,7 +228,7 @@ While expanded, `Shift+L`, `=`/`-`, and `Shift+A` act on the child item when the
 
 ### No audio output
 
-Make sure ALSA or PipeWire is running. PipeWire users should have `pipewire-alsa` installed for ALSA compatibility.
+Make sure PipeWire is running and the correct output device is selected.
 
 ### fontconfig not found
 

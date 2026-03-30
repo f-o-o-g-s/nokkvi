@@ -16,21 +16,16 @@ rustup toolchain install nightly   # only needed for cargo +nightly fmt
 ### 2. System Dependencies (Arch Linux)
 
 ```bash
-sudo pacman -S alsa-lib fontconfig pkg-config
+sudo pacman -S pipewire fontconfig pkg-config
 ```
 
 | Package | Purpose |
 |---------|---------|
-| `alsa-lib` | ALSA development headers (audio output via cpal) |
+| `pipewire` | PipeWire development headers (native audio output via `libpipewire-0.3`) |
 | `fontconfig` | Font discovery for the system font picker (used by `font-kit`) |
 | `pkg-config` | Build-time dependency resolution for native libraries |
 
-> **Note:** PipeWire users get audio routing automatically via PipeWire's ALSA compatibility layer (`pipewire-alsa`), which is installed by default on PipeWire systems. No PipeWire development headers are needed to build.
-
-> **Troubleshooting:** If you have no audio but volume looks correct in pavucontrol, install `alsa-utils` (`sudo pacman -S alsa-utils`) and run `alsamixer` — hardware channels like `Master` or `Auto-Mute` may be muted at the ALSA layer beneath PipeWire.
-
-
-
+> **Note:** Nokkvi uses a native PipeWire audio backend — it links directly against `libpipewire-0.3` at build time. A running PipeWire daemon is required for audio output.
 
 ## Building
 
