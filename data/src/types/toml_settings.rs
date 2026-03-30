@@ -4,7 +4,7 @@
 //! runtime state (queue, active playlist), and sensitive data (credentials)
 //! remain in redb.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 
 use crate::{
     audio::eq::CustomEqPreset,
@@ -56,10 +56,12 @@ pub struct TomlSettings {
     pub normalization_level: NormalizationLevel,
     pub visualization_mode: VisualizationMode,
     pub sound_effects_enabled: bool,
+    #[serde(serialize_with = "round_f32")]
     pub sfx_volume: f32,
 
     // -- Scrobbling --
     pub scrobbling_enabled: bool,
+    #[serde(serialize_with = "round_f32")]
     pub scrobble_threshold: f32,
 
     // -- Playlists --
@@ -67,8 +69,27 @@ pub struct TomlSettings {
 
     // -- Equalizer --
     pub eq_enabled: bool,
+    #[serde(serialize_with = "round_f32_array")]
     pub eq_gains: [f32; 10],
     pub custom_eq_presets: Vec<CustomEqPreset>,
+}
+
+/// Serialize an f32 rounded to 4 decimal places to avoid f32→f64 representation noise
+/// (e.g. 0.8999999761581421 → 0.9).
+fn round_f32<S: Serializer>(val: &f32, s: S) -> Result<S::Ok, S::Error> {
+    let rounded = (f64::from(*val) * 10_000.0).round() / 10_000.0;
+    s.serialize_f64(rounded)
+}
+
+/// Serialize an f32 array with each element rounded to 4 decimal places.
+fn round_f32_array<S: Serializer, const N: usize>(arr: &[f32; N], s: S) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeSeq;
+    let mut seq = s.serialize_seq(Some(N))?;
+    for val in arr {
+        let rounded = (f64::from(*val) * 10_000.0).round() / 10_000.0;
+        seq.serialize_element(&rounded)?;
+    }
+    seq.end()
 }
 
 impl Default for TomlSettings {
