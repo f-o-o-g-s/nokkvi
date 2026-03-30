@@ -263,3 +263,149 @@ pub(crate) fn reset_visualizer_defaults_preserving_colors() -> Result<()> {
 
     write_atomic(&config_path, &doc.to_string())
 }
+
+/// Write full `[theme]` and `[visualizer]` sections to config.toml,
+/// replacing them with a complete serialization of all fields (including defaults).
+///
+/// Used when verbose_config mode is enabled so the user sees every configurable
+/// value in config.toml as a human-readable template.
+pub(crate) fn write_full_theme_and_visualizer(
+    visualizer_config: &crate::visualizer_config::VisualizerConfig,
+) -> Result<()> {
+    let config_path =
+        nokkvi_data::utils::paths::get_config_path().context("Failed to get config path")?;
+
+    let content = if config_path.exists() {
+        std::fs::read_to_string(&config_path).context("Failed to read config.toml")?
+    } else {
+        String::new()
+    };
+
+    let mut doc: DocumentMut = content
+        .parse::<DocumentMut>()
+        .context("Failed to parse config.toml as TOML")?;
+
+    // Serialize full theme with all current values (including defaults for unspecified fields)
+    let current_theme = crate::theme_config::load_dual_theme_config();
+    let theme_toml =
+        toml::to_string_pretty(&current_theme).context("Failed to serialize DualThemeConfig")?;
+    let theme_doc: DocumentMut = theme_toml
+        .parse::<DocumentMut>()
+        .context("Failed to re-parse [theme] as toml_edit")?;
+    doc.insert("theme", Item::Table(theme_doc.as_table().clone()));
+
+    // Serialize full visualizer config with current values
+    let viz_toml = toml::to_string_pretty(visualizer_config)
+        .context("Failed to serialize VisualizerConfig")?;
+    let viz_doc: DocumentMut = viz_toml
+        .parse::<DocumentMut>()
+        .context("Failed to re-parse [visualizer] as toml_edit")?;
+    doc.insert("visualizer", Item::Table(viz_doc.as_table().clone()));
+
+    debug!(" [CONFIG WRITER] Wrote full [theme] + [visualizer] (verbose mode)");
+    write_atomic(&config_path, &doc.to_string())
+}
+
+/// Strip `[theme]` and `[visualizer]` sections back to sparse mode by removing
+/// keys whose values match the default configuration.
+///
+/// Used when verbose_config mode is disabled to clean up the config file.
+pub(crate) fn strip_to_sparse() -> Result<()> {
+    let config_path =
+        nokkvi_data::utils::paths::get_config_path().context("Failed to get config path")?;
+
+    if !config_path.exists() {
+        return Ok(());
+    }
+
+    let content = std::fs::read_to_string(&config_path).context("Failed to read config.toml")?;
+
+    let mut doc: DocumentMut = content
+        .parse::<DocumentMut>()
+        .context("Failed to parse config.toml as TOML")?;
+
+    // Build default reference documents
+    let default_theme = crate::theme_config::DualThemeConfig::default();
+    let default_viz = crate::visualizer_config::VisualizerConfig::default();
+
+    let theme_default_toml =
+        toml::to_string_pretty(&default_theme).context("Failed to serialize default theme")?;
+    let viz_default_toml =
+        toml::to_string_pretty(&default_viz).context("Failed to serialize default visualizer")?;
+
+    let theme_default_doc: DocumentMut = theme_default_toml
+        .parse::<DocumentMut>()
+        .context("Failed to parse default theme")?;
+    let viz_default_doc: DocumentMut = viz_default_toml
+        .parse::<DocumentMut>()
+        .context("Failed to parse default visualizer")?;
+
+    // Strip matching keys from [theme]
+    strip_matching_keys(&mut doc, "theme", theme_default_doc.as_table());
+
+    // Strip matching keys from [visualizer]
+    strip_matching_keys(&mut doc, "visualizer", viz_default_doc.as_table());
+
+    debug!(" [CONFIG WRITER] Stripped [theme] + [visualizer] to sparse (verbose off)");
+    write_atomic(&config_path, &doc.to_string())
+}
+
+/// Recursively remove keys from a section in `doc` that match the `defaults` table.
+///
+/// For nested tables (e.g. `theme.dark.background`), recurses and removes the
+/// parent table if it becomes empty after stripping.
+fn strip_matching_keys(doc: &mut DocumentMut, section_name: &str, defaults: &toml_edit::Table) {
+    let Some(section) = doc.get_mut(section_name) else {
+        return;
+    };
+    let Some(section_tbl) = section.as_table_like_mut() else {
+        return;
+    };
+
+    // Collect keys to process (avoid borrow conflicts)
+    let keys: Vec<String> = section_tbl.iter().map(|(k, _)| k.to_string()).collect();
+
+    for key in &keys {
+        let Some(default_val) = defaults.get(key) else {
+            continue; // User-added key, keep it
+        };
+
+        let Some(current_val) = section_tbl.get(key) else {
+            continue;
+        };
+
+        // Both are tables → recurse
+        if let (Some(sub_defaults), Some(tbl)) = (default_val.as_table(), current_val.as_table()) {
+            // Build a sub-document for recursive stripping
+            let sub_doc_str = format!("[{key}]\n{}", toml_edit::DocumentMut::from(tbl.clone()));
+            let mut sub_doc: DocumentMut = match sub_doc_str.parse::<DocumentMut>() {
+                Ok(d) => d,
+                Err(_) => continue,
+            };
+
+            strip_matching_keys(&mut sub_doc, key, sub_defaults);
+
+            // If the sub-table is now empty, remove the entire key
+            if let Some(sub_section) = sub_doc.get(key)
+                && let Some(sub_tbl) = sub_section.as_table()
+                && sub_tbl.is_empty()
+            {
+                section_tbl.remove(key);
+            } else if let Some(sub_section) = sub_doc.get(key) {
+                section_tbl.insert(key, sub_section.clone());
+            }
+        } else {
+            // Scalar comparison — compare TOML string representation
+            let cur_str = current_val.to_string();
+            let def_str = default_val.to_string();
+            if cur_str == def_str {
+                section_tbl.remove(key);
+            }
+        }
+    }
+
+    // Remove the entire section if it's now empty
+    if section_tbl.is_empty() {
+        doc.remove(section_name);
+    }
+}

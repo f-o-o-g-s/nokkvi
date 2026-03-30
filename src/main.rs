@@ -204,6 +204,8 @@ pub struct Nokkvi {
     pub default_playlist_name: String,
     /// Whether to skip the Add to Playlist dialog and use the default playlist directly
     pub quick_add_to_playlist: bool,
+    /// Whether all settings (including defaults) are written to config.toml
+    pub verbose_config: bool,
 
     // -------------------------------------------------------------------------
     // Progress Tracking (polled from Tick for live toast updates)
@@ -267,6 +269,7 @@ impl Default for Nokkvi {
             default_playlist_id: None,
             default_playlist_name: String::new(),
             quick_add_to_playlist: false,
+            verbose_config: false,
             // Consolidated state structs with defaults
             playback: crate::state::PlaybackState::default(),
             scrobble: crate::state::ScrobbleState::default(),

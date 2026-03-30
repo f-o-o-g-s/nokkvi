@@ -738,6 +738,7 @@ mod tests {
             auto_follow_playing: true,
             enter_behavior: "Play All",
             local_music_path: "",
+            verbose_config: false,
         };
         let entries = build_general_items(&data);
 
@@ -748,8 +749,8 @@ mod tests {
         );
         assert_eq!(
             count_items(&entries),
-            10,
-            "Expected 10 items (start_view, enter_behavior, local_music_path, stable_viewport, auto_follow_playing, server_url, username, logout, rebuild_artwork, rebuild_artist)"
+            11,
+            "Expected 11 items (start_view, enter_behavior, local_music_path, verbose_config, stable_viewport, auto_follow_playing, server_url, username, logout, rebuild_artwork, rebuild_artist)"
         );
     }
 

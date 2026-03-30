@@ -129,6 +129,7 @@ impl Nokkvi {
             strip_show_album: crate::theme::strip_show_album(),
             strip_show_format_info: crate::theme::strip_show_format_info(),
             strip_click_action: crate::theme::strip_click_action().as_label(),
+            verbose_config: self.verbose_config,
         };
         // Only rebuild entries when config has changed or entries are empty
         if self.settings_page.config_dirty || self.settings_page.cached_entries.is_empty() {
@@ -725,6 +726,54 @@ impl Nokkvi {
                         "persist_strip_click_action",
                         move |shell| async move {
                             shell.settings().set_strip_click_action(action).await
+                        },
+                    );
+                }
+                Task::none()
+            }
+            "general.verbose_config" => {
+                if let crate::views::settings::items::SettingValue::Bool(enabled) = value {
+                    self.verbose_config = enabled;
+                    // Persist verbose_config flag to redb (async, no TOML write)
+                    self.shell_spawn("persist_verbose_config", move |shell| async move {
+                        shell.settings().set_verbose_config(enabled).await
+                    });
+
+                    // Write all TOML sections synchronously from the UI thread
+                    // to avoid racing with the async redb persist.
+                    if enabled {
+                        let viz_config = self.visualizer_config.read().clone();
+                        if let Err(e) = crate::config_writer::write_full_theme_and_visualizer(
+                            &viz_config,
+                        ) {
+                            tracing::warn!(" [SETTINGS] Failed to write full config: {e}");
+                            self.toast_warn(format!("Failed to write verbose config: {e}"));
+                        } else {
+                            self.toast_success(
+                                "Config expanded — all defaults written".to_string(),
+                            );
+                        }
+                    } else {
+                        // Strip default values from theme + visualizer sections
+                        if let Err(e) = crate::config_writer::strip_to_sparse() {
+                            tracing::warn!(" [SETTINGS] Failed to strip config: {e}");
+                            self.toast_warn(format!("Failed to strip config: {e}"));
+                        } else {
+                            self.toast_success(
+                                "Config stripped — only non-default values remain".to_string(),
+                            );
+                        }
+                    }
+
+                    // Also write [settings]+[hotkeys]+[views] with the new verbose flag.
+                    // This is a single task that awaits the settings_manager lock,
+                    // so it serializes correctly with the redb persist above.
+                    self.shell_spawn(
+                        "write_verbose_toml_sections",
+                        move |shell| async move {
+                            let mgr = shell.settings().settings_manager();
+                            let sm = mgr.lock().await;
+                            sm.write_all_toml_public()
                         },
                     );
                 }

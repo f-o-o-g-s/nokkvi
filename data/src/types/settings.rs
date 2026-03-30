@@ -126,6 +126,9 @@ pub struct PlayerSettings {
     /// User-created custom EQ presets.
     #[serde(default)]
     pub custom_eq_presets: Vec<crate::audio::eq::CustomEqPreset>,
+    /// When true, all settings (including defaults) are written to config.toml
+    #[serde(default)]
+    pub verbose_config: bool,
 }
 
 fn default_eq_gains() -> [f32; 10] {
@@ -206,6 +209,7 @@ impl Default for PlayerSettings {
             eq_enabled: false,
             eq_gains: default_eq_gains(),
             custom_eq_presets: Vec::new(),
+            verbose_config: false,
         }
     }
 }

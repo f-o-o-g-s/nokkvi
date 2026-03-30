@@ -904,6 +904,7 @@ impl Nokkvi {
         self.default_playlist_id = settings.default_playlist_id.clone();
         self.default_playlist_name = settings.default_playlist_name.clone();
         self.quick_add_to_playlist = settings.quick_add_to_playlist;
+        self.verbose_config = settings.verbose_config;
 
         // Restore active playlist context from persisted settings
         self.active_playlist_info = settings.active_playlist_id.clone().map(|id| {

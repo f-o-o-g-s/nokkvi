@@ -11,6 +11,7 @@ pub(crate) struct GeneralSettingsData<'a> {
     pub auto_follow_playing: bool,
     pub enter_behavior: &'a str,
     pub local_music_path: &'a str,
+    pub verbose_config: bool,
 }
 
 /// Build settings entries for the General tab
@@ -52,6 +53,15 @@ pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEnt
             ),
             data.local_music_path,
             "",
+        ),
+        SettingItem::bool_val(
+            meta!(
+                "general.verbose_config",
+                "Verbose Config",
+                "Write all settings to config.toml, including unchanged defaults"
+            ),
+            data.verbose_config,
+            false,
         ),
         // --- Mouse Behavior ---
         SettingsEntry::Header {

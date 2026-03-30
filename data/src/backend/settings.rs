@@ -352,6 +352,12 @@ impl SettingsService {
         sm.set_normalization_level(level)
     }
 
+    /// Set verbose config mode and persist
+    pub async fn set_verbose_config(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_verbose_config(enabled)
+    }
+
     // =========================================================================
     // Hotkey Bindings
     // =========================================================================

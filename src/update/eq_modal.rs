@@ -59,7 +59,7 @@ impl Nokkvi {
                         let preset = nokkvi_data::audio::eq::BUILTIN_PRESETS.get(*idx);
                         (
                             preset.map(|p| p.gains),
-                            preset.map(|p| p.name).unwrap_or("Unknown").to_string(),
+                            preset.map_or("Unknown", |p| p.name).to_string(),
                         )
                     }
                     crate::widgets::PresetChoice::Custom(idx) => {

@@ -4,16 +4,12 @@
 //! for surgical section replacement that preserves comments and formatting
 //! in other sections.
 
-use std::collections::BTreeMap;
-
 use anyhow::{Context, Result};
 use tracing::debug;
 
 use crate::{
     types::{
-        hotkey_config::HotkeyConfig,
-        toml_settings::TomlSettings,
-        toml_views::TomlViewPreferences,
+        hotkey_config::HotkeyConfig, toml_settings::TomlSettings, toml_views::TomlViewPreferences,
     },
     utils::paths::get_config_path,
 };
@@ -30,9 +26,8 @@ pub fn read_toml_settings() -> Result<Option<TomlSettings>> {
         return Ok(None);
     }
 
-    let content =
-        std::fs::read_to_string(&config_path).context("Failed to read config.toml")?;
-    let doc: toml::Value = content.parse().context("Failed to parse config.toml")?;
+    let content = std::fs::read_to_string(&config_path).context("Failed to read config.toml")?;
+    let doc: toml::Value = toml::from_str(&content).context("Failed to parse config.toml")?;
 
     match doc.get("settings") {
         Some(section) => {
@@ -54,20 +49,146 @@ pub fn read_toml_hotkeys() -> Result<Option<HotkeyConfig>> {
         return Ok(None);
     }
 
-    let content =
-        std::fs::read_to_string(&config_path).context("Failed to read config.toml")?;
-    let doc: toml::Value = content.parse().context("Failed to parse config.toml")?;
+    let content = std::fs::read_to_string(&config_path).context("Failed to read config.toml")?;
+    let doc: toml::Value = toml::from_str(&content).context("Failed to parse config.toml")?;
 
     match doc.get("hotkeys") {
         Some(section) => {
-            // The [hotkeys] section is a flat map of action_key = "combo_string"
-            let map: BTreeMap<String, String> = section
+            let map: std::collections::BTreeMap<String, String> = section
                 .clone()
                 .try_into()
-                .context("Failed to deserialize [hotkeys] as string map")?;
-            Ok(Some(HotkeyConfig::from_toml_map(&map)))
+                .context("Failed to deserialize [hotkeys] section")?;
+            Ok(Some(
+                crate::types::hotkey_config::HotkeyConfig::from_toml_map(&map),
+            ))
         }
         None => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn test_hotkeys_parsing() {
+        let toml_str = r#"[hotkeys]
+switch_to_settings = "F1"
+"#;
+        let doc: toml::Value = toml::from_str(toml_str).unwrap();
+        let section = doc.get("hotkeys").unwrap();
+        let map: std::collections::BTreeMap<String, String> = section.clone().try_into().unwrap();
+        assert_eq!(map.get("switch_to_settings").unwrap(), "F1");
+
+        let config = crate::types::hotkey_config::HotkeyConfig::from_toml_map(&map);
+        let action = crate::types::hotkey_config::HotkeyAction::SwitchToSettings;
+        let binding = config.get_binding(&action);
+
+        assert_eq!(format!("{}", binding), "F1");
+    }
+
+    #[test]
+    fn test_settings_parsing() {
+        let toml_str = r#"[settings]
+auto_follow_playing = true
+crossfade_duration_secs = 12
+crossfade_enabled = true
+custom_eq_presets = []
+enter_behavior = "play_all"
+eq_enabled = true
+eq_gains = [
+    4.0,
+    3.5,
+    1.5,
+    0.0,
+    -1.5,
+    -0.5,
+    0.5,
+    2.0,
+    3.5,
+    4.0,
+]
+horizontal_volume = false
+light_mode = false
+local_music_path = "/music/Library"
+nav_display_mode = "text_only"
+nav_layout = "top"
+normalization_level = "normal"
+opacity_gradient = false
+quick_add_to_playlist = false
+rounded_mode = true
+scrobble_threshold = 0.8999999761581421
+scrobbling_enabled = true
+sfx_volume = 0.3758544921875
+slot_row_height = "compact"
+sound_effects_enabled = false
+stable_viewport = true
+start_view = "Queue"
+strip_click_action = "go_to_queue"
+strip_show_album = true
+strip_show_artist = true
+strip_show_format_info = true
+strip_show_title = true
+track_info_display = "top_bar"
+verbose_config = true
+visualization_mode = "lines"
+volume_normalization = true
+"#;
+        let doc: toml::Value = toml::from_str(toml_str).unwrap();
+        let section = doc.get("settings").unwrap();
+        let settings: crate::types::toml_settings::TomlSettings =
+            section.clone().try_into().unwrap();
+        assert_eq!(settings.verbose_config, true);
+    }
+
+    #[test]
+    fn test_hotkeys_roundtrip_verbose() {
+        use std::str::FromStr;
+
+        use crate::types::hotkey_config::{HotkeyAction, HotkeyConfig, KeyCombo};
+
+        // Custom binding: SwitchToSettings → F1
+        let mut config = HotkeyConfig::default();
+        config.set_binding(
+            HotkeyAction::SwitchToSettings,
+            KeyCombo::from_str("F1").unwrap(),
+        );
+
+        // Verbose mode: all bindings serialized
+        let map = config.to_toml_map(true);
+        assert!(map.len() > 1, "verbose mode should serialize all bindings");
+        assert_eq!(map.get("switch_to_settings").unwrap(), "F1");
+
+        // Round-trip: deserialize back and verify
+        let roundtrip = HotkeyConfig::from_toml_map(&map);
+        assert_eq!(
+            format!("{}", roundtrip.get_binding(&HotkeyAction::SwitchToSettings)),
+            "F1"
+        );
+
+        // Sparse mode: only non-default bindings
+        let sparse = config.to_toml_map(false);
+        assert_eq!(
+            sparse.get("switch_to_settings").unwrap(),
+            "F1",
+            "non-default binding should always appear"
+        );
+        assert!(
+            sparse.len() < map.len(),
+            "sparse mode should have fewer entries than verbose"
+        );
+    }
+
+    #[test]
+    fn test_settings_roundtrip_verbose_config_flag() {
+        use crate::types::toml_settings::TomlSettings;
+
+        let mut settings = TomlSettings::default();
+        settings.verbose_config = true;
+
+        // Serialize → parse → verify flag survives
+        let toml_str = toml::to_string_pretty(&settings).unwrap();
+        let roundtrip: TomlSettings = toml::from_str(&toml_str).unwrap();
+        assert!(roundtrip.verbose_config);
     }
 }
 
@@ -79,9 +200,8 @@ pub fn read_toml_views() -> Result<Option<TomlViewPreferences>> {
         return Ok(None);
     }
 
-    let content =
-        std::fs::read_to_string(&config_path).context("Failed to read config.toml")?;
-    let doc: toml::Value = content.parse().context("Failed to parse config.toml")?;
+    let content = std::fs::read_to_string(&config_path).context("Failed to read config.toml")?;
+    let doc: toml::Value = toml::from_str(&content).context("Failed to parse config.toml")?;
 
     match doc.get("views") {
         Some(section) => {
@@ -105,9 +225,9 @@ pub fn write_toml_settings(settings: &TomlSettings) -> Result<()> {
 }
 
 /// Write the `[hotkeys]` section to config.toml, preserving all other content.
-/// Only non-default bindings are written.
-pub fn write_toml_hotkeys(hotkeys: &HotkeyConfig) -> Result<()> {
-    let map = hotkeys.to_toml_map();
+/// If `verbose` is true, all bindings are written; otherwise, only non-default bindings.
+pub fn write_toml_hotkeys(hotkeys: &HotkeyConfig, verbose: bool) -> Result<()> {
+    let map = hotkeys.to_toml_map(verbose);
     write_section("hotkeys", &toml::Value::try_from(map)?)
 }
 
@@ -161,12 +281,11 @@ fn write_section(section_name: &str, value: &toml::Value) -> Result<()> {
     Ok(())
 }
 
-/// Write all three sections at once (used during migration).
-/// Single read-modify-write cycle to avoid multiple file I/Os.
 pub fn write_all_toml_sections(
     settings: &TomlSettings,
     hotkeys: &HotkeyConfig,
     views: &TomlViewPreferences,
+    verbose: bool,
 ) -> Result<()> {
     use toml_edit::{DocumentMut, Item};
 
@@ -197,7 +316,7 @@ pub fn write_all_toml_sections(
     insert_section(
         &mut doc,
         "hotkeys",
-        &toml::Value::try_from(hotkeys.to_toml_map())?,
+        &toml::Value::try_from(hotkeys.to_toml_map(verbose))?,
     )?;
     insert_section(&mut doc, "views", &toml::Value::try_from(views)?)?;
 

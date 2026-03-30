@@ -5,7 +5,7 @@
 
 use std::{
     path::PathBuf,
-    sync::{mpsc, Arc},
+    sync::{Arc, mpsc},
     time::Duration,
 };
 
@@ -706,12 +706,13 @@ impl ConfigWatcher {
 
         if should_reload {
             // Check if this reload was triggered by our own internal write
-            let last_write = nokkvi_data::utils::paths::LAST_INTERNAL_WRITE.load(std::sync::atomic::Ordering::Acquire);
-            if let Ok(now) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-                if now.as_millis() as u64 - last_write < 500 {
-                    debug!(" Ignoring config file change triggered by internal write");
-                    return None;
-                }
+            let last_write = nokkvi_data::utils::paths::LAST_INTERNAL_WRITE
+                .load(std::sync::atomic::Ordering::Acquire);
+            if let Ok(now) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                && now.as_millis() as u64 - last_write < 500
+            {
+                debug!(" Ignoring config file change triggered by internal write");
+                return None;
             }
 
             match load_visualizer_config() {

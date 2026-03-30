@@ -25,6 +25,8 @@ pub struct TomlSettings {
     pub start_view: String,
     pub enter_behavior: EnterBehavior,
     pub local_music_path: String,
+    /// When true, all settings (including defaults) are written to config.toml
+    pub verbose_config: bool,
 
     // -- Behavior --
     pub stable_viewport: bool,
@@ -75,6 +77,7 @@ impl Default for TomlSettings {
             start_view: "Queue".to_string(),
             enter_behavior: EnterBehavior::default(),
             local_music_path: String::new(),
+            verbose_config: false,
             stable_viewport: true,
             auto_follow_playing: true,
             light_mode: false,
@@ -114,6 +117,7 @@ impl TomlSettings {
             start_view: ps.start_view.clone(),
             enter_behavior: ps.enter_behavior,
             local_music_path: ps.local_music_path.clone(),
+            verbose_config: ps.verbose_config,
             stable_viewport: ps.stable_viewport,
             auto_follow_playing: ps.auto_follow_playing,
             light_mode: false, // Will be read from theme.light_mode or fresh default

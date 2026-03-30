@@ -63,6 +63,7 @@ impl SettingsPage {
                     auto_follow_playing: data.auto_follow_playing,
                     enter_behavior: data.enter_behavior,
                     local_music_path: &data.local_music_path,
+                    verbose_config: data.verbose_config,
                 };
                 items::build_general_items(&gdata)
             }

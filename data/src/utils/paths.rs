@@ -8,9 +8,11 @@
 //!   - `artist_artwork/`: Artist artwork cache
 //! - `sfx/`: User-customizable sound effects (WAV files, seeded from bundled defaults)
 
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use anyhow::{Context, Result};
 

@@ -757,15 +757,15 @@ impl HotkeyConfig {
         &self.bindings
     }
 
-    /// Serialize only non-default bindings for TOML output.
+    /// Serialize bindings for TOML output.
+    /// If `verbose` is false, only non-default bindings are written.
     ///
-    /// Returns a `BTreeMap<String, String>` of `action_toml_key → combo_display`
-    /// for bindings that differ from `HotkeyAction::default_binding()`.
+    /// Returns a `BTreeMap<String, String>` of `action_toml_key → combo_display`.
     /// Using BTreeMap for deterministic key ordering in the TOML file.
-    pub fn to_toml_map(&self) -> std::collections::BTreeMap<String, String> {
+    pub fn to_toml_map(&self, verbose: bool) -> std::collections::BTreeMap<String, String> {
         let mut map = std::collections::BTreeMap::new();
         for (action, combo) in &self.bindings {
-            if *combo != action.default_binding() {
+            if verbose || *combo != action.default_binding() {
                 map.insert(action.to_toml_key().to_string(), combo.to_string());
             }
         }

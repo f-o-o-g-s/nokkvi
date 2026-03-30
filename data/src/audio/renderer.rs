@@ -485,7 +485,11 @@ impl AudioRenderer {
     /// Returns 1.0 when PipeWire handles the user's volume, otherwise
     /// returns the stored user volume.
     fn stream_volume(&self) -> f32 {
-        if self.pw_volume_active { 1.0 } else { self.volume as f32 }
+        if self.pw_volume_active {
+            1.0
+        } else {
+            self.volume as f32
+        }
     }
 
     // =========================================================================

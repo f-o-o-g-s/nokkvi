@@ -5,9 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::types::{
-    queue::SortPreferences,
-    queue_sort_mode::QueueSortMode,
-    sort_mode::SortMode,
+    queue::SortPreferences, queue_sort_mode::QueueSortMode, sort_mode::SortMode,
     view_preferences::AllViewPreferences,
 };
 

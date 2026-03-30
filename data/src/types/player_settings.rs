@@ -453,6 +453,8 @@ pub struct PlayerSettings {
     pub eq_gains: [f32; 10],
     /// User-created custom EQ presets.
     pub custom_eq_presets: Vec<crate::audio::eq::CustomEqPreset>,
+    /// Whether all settings (including defaults) are written to config.toml.
+    pub verbose_config: bool,
 }
 
 #[cfg(test)]

@@ -814,6 +814,7 @@ impl Nokkvi {
                     strip_show_album: crate::theme::strip_show_album(),
                     strip_show_format_info: crate::theme::strip_show_format_info(),
                     strip_click_action: crate::theme::strip_click_action().as_label(),
+                    verbose_config: self.verbose_config,
                 };
                 self.settings_page
                     .view(settings_data)

@@ -341,10 +341,10 @@ pub(crate) fn eq_modal_overlay<'a>(
         if let Some(del_btn) = delete_button {
             header_items.push(del_btn);
         }
-        header_items.push(enable_button.into());
-        header_items.push(save_button.into());
-        header_items.push(reset_button.into());
-        header_items.push(close_button.into());
+        header_items.push(enable_button);
+        header_items.push(save_button);
+        header_items.push(reset_button);
+        header_items.push(close_button);
 
         iced::widget::Row::with_children(header_items)
             .spacing(12)

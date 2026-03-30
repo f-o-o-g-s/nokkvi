@@ -63,6 +63,12 @@ impl SettingsManager {
         });
 
         let has_toml = toml_settings.is_some();
+        tracing::debug!(
+            "⚙️ [SETTINGS] TOML sections: [settings]={}, [hotkeys]={}, [views]={}",
+            toml_settings.is_some(),
+            toml_hotkeys.is_some(),
+            toml_views.is_some()
+        );
 
         // Phase 2: Load from redb (always needed for volume, playlist IDs, etc.)
         let redb_settings = match storage.load::<UserSettings>("user_settings") {
@@ -127,7 +133,7 @@ impl SettingsManager {
 
     /// Write [hotkeys] section to config.toml from current internal state.
     fn write_hotkeys_toml(&self) -> Result<()> {
-        write_toml_hotkeys(&self.settings.hotkeys)
+        write_toml_hotkeys(&self.settings.hotkeys, self.is_verbose_config())
     }
 
     /// Write [views] section to config.toml from current internal state.
@@ -140,7 +146,12 @@ impl SettingsManager {
     fn write_all_toml(&self) -> Result<()> {
         let ts = TomlSettings::from_player_settings(&self.get_player_settings());
         let tv = TomlViewPreferences::from_all_view_prefs(&self.get_view_preferences());
-        write_all_toml_sections(&ts, &self.settings.hotkeys, &tv)
+        write_all_toml_sections(&ts, &self.settings.hotkeys, &tv, self.is_verbose_config())
+    }
+
+    /// Public entry point for writing all TOML sections (used by verbose_config toggle).
+    pub fn write_all_toml_public(&self) -> Result<()> {
+        self.write_all_toml()
     }
 
     /// Hot-reload settings from config.toml and update the in-memory state.
@@ -356,6 +367,17 @@ impl SettingsManager {
         self.settings.player.custom_eq_presets.clone()
     }
 
+    pub fn set_verbose_config(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.verbose_config = enabled;
+        // Only persist to redb — the UI handler writes all TOML sections
+        // in a single atomic pass to avoid racing with write_full_theme_and_visualizer.
+        self.save_redb_only()
+    }
+
+    pub fn is_verbose_config(&self) -> bool {
+        self.settings.player.verbose_config
+    }
+
     // -------------------------------------------------------------------------
     // View Sort Preferences
     // -------------------------------------------------------------------------
@@ -484,6 +506,7 @@ impl SettingsManager {
             eq_enabled: p.eq_enabled,
             eq_gains: p.eq_gains,
             custom_eq_presets: p.custom_eq_presets.clone(),
+            verbose_config: p.verbose_config,
         }
     }
 
@@ -544,6 +567,7 @@ fn apply_toml_settings_to_internal(
     p.eq_enabled = ts.eq_enabled;
     p.eq_gains = ts.eq_gains;
     p.custom_eq_presets = ts.custom_eq_presets.clone();
+    p.verbose_config = ts.verbose_config;
 }
 
 /// Convert `AllViewPreferences` into the internal `ViewPreferences` for redb storage.
