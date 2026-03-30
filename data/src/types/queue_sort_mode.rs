@@ -23,6 +23,31 @@ impl QueueSortMode {
             QueueSortMode::Rating,
         ]
     }
+
+    /// Convert to a snake_case TOML key string.
+    pub fn to_toml_key(self) -> &'static str {
+        match self {
+            QueueSortMode::Album => "album",
+            QueueSortMode::Artist => "artist",
+            QueueSortMode::Title => "title",
+            QueueSortMode::Duration => "duration",
+            QueueSortMode::Genre => "genre",
+            QueueSortMode::Rating => "rating",
+        }
+    }
+
+    /// Parse from a snake_case TOML key string. Falls back to `Title` for unknown values.
+    pub fn from_toml_key(s: &str) -> QueueSortMode {
+        match s {
+            "album" => QueueSortMode::Album,
+            "artist" => QueueSortMode::Artist,
+            "title" => QueueSortMode::Title,
+            "duration" => QueueSortMode::Duration,
+            "genre" => QueueSortMode::Genre,
+            "rating" => QueueSortMode::Rating,
+            _ => QueueSortMode::Title,
+        }
+    }
 }
 
 impl std::fmt::Display for QueueSortMode {

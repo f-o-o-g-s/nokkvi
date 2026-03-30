@@ -41,10 +41,15 @@ impl SettingsService {
     // View Sort Preferences
     // =========================================================================
 
-    /// Get all persisted view sort preferences
     pub async fn get_view_preferences(&self) -> crate::types::view_preferences::AllViewPreferences {
         let sm = self.settings_manager.lock().await;
         sm.get_view_preferences()
+    }
+
+    /// Reload settings from config.toml
+    pub async fn reload_from_toml(&self) {
+        let mut sm = self.settings_manager.lock().await;
+        sm.reload_from_toml();
     }
 
     /// Save albums view sort preferences

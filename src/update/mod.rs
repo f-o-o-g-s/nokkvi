@@ -755,6 +755,38 @@ impl Nokkvi {
             }
 
             // -----------------------------------------------------------------
+            // Settings Hot-Reload
+            // -----------------------------------------------------------------
+            Message::SettingsConfigReloaded => {
+                tracing::info!(" [SETTINGS] Config file modified, reloading settings");
+                return self.shell_task(
+                    |shell| async move {
+                        shell.settings().reload_from_toml().await;
+                        let vp = shell.settings().get_view_preferences().await;
+                        let hotkeys = shell.settings().settings_manager().lock().await.get_hotkey_config_owned();
+                        let settings = shell.settings().settings_manager().lock().await.get_player_settings();
+                        Ok((vp, hotkeys, settings))
+                    },
+                    |result: Result<_, anyhow::Error>| match result {
+                        Ok((vp, hotkeys, settings)) => Message::SettingsReloadDataLoaded(vp, hotkeys, Box::new(settings)),
+                        Err(e) => {
+                            tracing::error!("Failed to reload settings: {}", e);
+                            Message::NoOp
+                        }
+                    },
+                );
+            }
+            Message::SettingsReloadDataLoaded(vp, hotkeys, settings) => {
+                // Settings loaded from TOML re-apply to the UI
+                self.settings_page.config_dirty = true;
+                Task::batch([
+                    self.handle_view_preferences_loaded(vp),
+                    self.update(Message::HotkeyConfigUpdated(hotkeys)),
+                    self.update(Message::Playback(crate::app_message::PlaybackMessage::PlayerSettingsLoaded(settings))),
+                ])
+            }
+
+            // -----------------------------------------------------------------
             // Raw Keyboard Events → HotkeyConfig dispatch
             // -----------------------------------------------------------------
             Message::RawKeyEvent(key, modifiers) => {

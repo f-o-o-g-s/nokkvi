@@ -22,4 +22,6 @@ pub mod song;
 pub mod song_pool;
 pub mod sort_mode;
 pub mod toast;
+pub mod toml_settings;
+pub mod toml_views;
 pub mod view_preferences;

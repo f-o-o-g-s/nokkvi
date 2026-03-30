@@ -197,7 +197,7 @@ fn write_atomic(path: &Path, content: &str) -> Result<()> {
     std::fs::write(&temp_path, content)
         .with_context(|| format!("Failed to write temp file: {}", temp_path.display()))?;
 
-    std::fs::rename(&temp_path, path)
+    nokkvi_data::utils::paths::suppress_config_reload(|| std::fs::rename(&temp_path, path))
         .with_context(|| format!("Failed to rename temp file to: {}", path.display()))?;
 
     debug!(" [CONFIG WRITER] Atomic write to {}", path.display());

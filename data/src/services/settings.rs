@@ -1,7 +1,13 @@
 use anyhow::Result;
 
 use crate::{
-    services::state_storage::StateStorage,
+    services::{
+        state_storage::StateStorage,
+        toml_settings_io::{
+            read_toml_hotkeys, read_toml_settings, read_toml_views, write_all_toml_sections,
+            write_toml_hotkeys, write_toml_settings, write_toml_views,
+        },
+    },
     types::{
         hotkey_config::{HotkeyAction, HotkeyConfig, KeyCombo},
         player_settings::{
@@ -12,13 +18,20 @@ use crate::{
         queue_sort_mode::QueueSortMode,
         settings::UserSettings,
         sort_mode::SortMode,
+        toml_settings::TomlSettings,
+        toml_views::TomlViewPreferences,
     },
 };
 
-/// Manages user settings persistence (volume, theme, view preferences, hotkeys)
+/// Manages user settings persistence with hybrid storage:
 ///
-/// Separated from QueueManager to follow Single Responsibility Principle.
-/// Settings are stored under the "user_settings" key in StateStorage.
+/// - **config.toml** (`[settings]`, `[hotkeys]`, `[views]`): Source of truth for
+///   user-facing preferences. Human-readable, hot-reloadable, version-controllable.
+/// - **redb** (`user_settings` key): Backward compat + high-frequency data (volume,
+///   active playlist, credentials).
+///
+/// On startup, config.toml is read first. If absent, redb values are auto-exported
+/// (one-time migration). All writes go to both stores (dual-write).
 pub struct SettingsManager {
     settings: UserSettings,
     storage: StateStorage,
@@ -35,26 +48,116 @@ impl std::fmt::Debug for SettingsManager {
 
 impl SettingsManager {
     pub fn new(storage: StateStorage) -> Result<Self> {
-        // Try to load existing settings; if deserialization fails (e.g. removed
-        // enum variants after an update), fall back to defaults and re-persist.
-        let settings = match storage.load::<UserSettings>("user_settings") {
+        // Phase 1: Try to read from config.toml (new source of truth)
+        let toml_settings = read_toml_settings().unwrap_or_else(|e| {
+            tracing::warn!("Error reading [settings] from config.toml: {e}");
+            None
+        });
+        let toml_hotkeys = read_toml_hotkeys().unwrap_or_else(|e| {
+            tracing::warn!("Error reading [hotkeys] from config.toml: {e}");
+            None
+        });
+        let toml_views = read_toml_views().unwrap_or_else(|e| {
+            tracing::warn!("Error reading [views] from config.toml: {e}");
+            None
+        });
+
+        let has_toml = toml_settings.is_some();
+
+        // Phase 2: Load from redb (always needed for volume, playlist IDs, etc.)
+        let redb_settings = match storage.load::<UserSettings>("user_settings") {
             Ok(Some(s)) => s,
             Ok(None) => UserSettings::default(),
             Err(e) => {
-                tracing::warn!(" Settings deserialization failed, resetting to defaults: {e}");
+                tracing::warn!("Settings deserialization failed, resetting to defaults: {e}");
                 let defaults = UserSettings::default();
-                // Overwrite the corrupt stored data so this only happens once
                 let _ = storage.save("user_settings", &defaults);
                 defaults
             }
         };
 
-        Ok(Self { settings, storage })
+        // Phase 3: Merge — TOML overrides redb for user-facing settings,
+        // redb retains volume, playlist IDs, and other runtime state.
+        let mut settings = redb_settings;
+
+        if let Some(ts) = toml_settings {
+            apply_toml_settings_to_internal(&ts, &mut settings.player);
+        }
+        if let Some(hk) = toml_hotkeys {
+            settings.hotkeys = hk;
+        }
+        if let Some(tv) = toml_views {
+            settings.views = tv.to_all_view_prefs().into();
+        }
+
+        let manager = Self { settings, storage };
+
+        // Phase 4: Migration — if config.toml had no [settings], export redb values
+        if !has_toml {
+            tracing::info!("No [settings] section in config.toml — migrating from redb");
+            if let Err(e) = manager.write_all_toml() {
+                tracing::error!("Failed to migrate settings to config.toml: {e}");
+            }
+        }
+
+        Ok(manager)
     }
 
+    /// Save to redb (always) + config.toml sections (for user-facing settings).
     fn save(&self) -> Result<()> {
+        // 1. Always write to redb (volume, playlist IDs, backward compat)
+        self.storage.save("user_settings", &self.settings)?;
+        // 2. Write user-facing settings to config.toml
+        self.write_settings_toml()?;
+        Ok(())
+    }
+
+    /// Save only to redb — used for high-frequency operations (volume) and
+    /// runtime state (active playlist) that don't belong in config.toml.
+    fn save_redb_only(&self) -> Result<()> {
         self.storage.save("user_settings", &self.settings)?;
         Ok(())
+    }
+
+    /// Write [settings] section to config.toml from current internal state.
+    fn write_settings_toml(&self) -> Result<()> {
+        let ts = TomlSettings::from_player_settings(&self.get_player_settings());
+        write_toml_settings(&ts)
+    }
+
+    /// Write [hotkeys] section to config.toml from current internal state.
+    fn write_hotkeys_toml(&self) -> Result<()> {
+        write_toml_hotkeys(&self.settings.hotkeys)
+    }
+
+    /// Write [views] section to config.toml from current internal state.
+    fn write_views_toml(&self) -> Result<()> {
+        let tv = TomlViewPreferences::from_all_view_prefs(&self.get_view_preferences());
+        write_toml_views(&tv)
+    }
+
+    /// Write all three TOML sections at once (used during migration).
+    fn write_all_toml(&self) -> Result<()> {
+        let ts = TomlSettings::from_player_settings(&self.get_player_settings());
+        let tv = TomlViewPreferences::from_all_view_prefs(&self.get_view_preferences());
+        write_all_toml_sections(&ts, &self.settings.hotkeys, &tv)
+    }
+
+    /// Hot-reload settings from config.toml and update the in-memory state.
+    /// Does NOT save to redb, to prevent feedback loops where a TOML read
+    /// triggers a database write. The new values will be propagated to redb
+    /// automatically whenever the user next modifies a setting.
+    pub fn reload_from_toml(&mut self) {
+        if let Some(ts) = read_toml_settings().unwrap_or(None) {
+            apply_toml_settings_to_internal(&ts, &mut self.settings.player);
+        }
+        if let Some(hk) = read_toml_hotkeys().unwrap_or(None) {
+            self.settings.hotkeys = hk;
+        }
+        if let Some(tv) = read_toml_views().unwrap_or(None) {
+            self.settings.views = tv.to_all_view_prefs().into();
+        }
+        tracing::debug!(" [SETTINGS] Manager state hot-reloaded from config.toml");
     }
 
     // -------------------------------------------------------------------------
@@ -63,7 +166,7 @@ impl SettingsManager {
 
     pub fn set_volume(&mut self, volume: f64) -> Result<()> {
         self.settings.player.volume = volume;
-        self.save()
+        self.save_redb_only()
     }
 
     pub fn set_sfx_volume(&mut self, sfx_volume: f64) -> Result<()> {
@@ -219,7 +322,7 @@ impl SettingsManager {
         self.settings.player.active_playlist_id = id;
         self.settings.player.active_playlist_name = name;
         self.settings.player.active_playlist_comment = comment;
-        self.save()
+        self.save_redb_only()
     }
 
     pub fn set_eq_enabled(&mut self, enabled: bool) -> Result<()> {
@@ -259,27 +362,27 @@ impl SettingsManager {
 
     pub fn set_albums_prefs(&mut self, sort_mode: SortMode, sort_ascending: bool) -> Result<()> {
         self.settings.views.albums = SortPreferences::new(sort_mode, sort_ascending);
-        self.save()
+        self.save_with_views()
     }
 
     pub fn set_artists_prefs(&mut self, sort_mode: SortMode, sort_ascending: bool) -> Result<()> {
         self.settings.views.artists = SortPreferences::new(sort_mode, sort_ascending);
-        self.save()
+        self.save_with_views()
     }
 
     pub fn set_songs_prefs(&mut self, sort_mode: SortMode, sort_ascending: bool) -> Result<()> {
         self.settings.views.songs = SortPreferences::new(sort_mode, sort_ascending);
-        self.save()
+        self.save_with_views()
     }
 
     pub fn set_genres_prefs(&mut self, sort_mode: SortMode, sort_ascending: bool) -> Result<()> {
         self.settings.views.genres = SortPreferences::new(sort_mode, sort_ascending);
-        self.save()
+        self.save_with_views()
     }
 
     pub fn set_playlists_prefs(&mut self, sort_mode: SortMode, sort_ascending: bool) -> Result<()> {
         self.settings.views.playlists = SortPreferences::new(sort_mode, sort_ascending);
-        self.save()
+        self.save_with_views()
     }
 
     pub fn set_queue_prefs(
@@ -288,7 +391,14 @@ impl SettingsManager {
         sort_ascending: bool,
     ) -> Result<()> {
         self.settings.views.queue = QueueSortPreferences::new(sort_mode, sort_ascending);
-        self.save()
+        self.save_with_views()
+    }
+
+    /// Save redb + [views] section in config.toml.
+    fn save_with_views(&self) -> Result<()> {
+        self.storage.save("user_settings", &self.settings)?;
+        self.write_views_toml()?;
+        Ok(())
     }
 
     // -------------------------------------------------------------------------
@@ -308,19 +418,26 @@ impl SettingsManager {
     /// Set a single hotkey binding and persist.
     pub fn set_hotkey_binding(&mut self, action: HotkeyAction, combo: KeyCombo) -> Result<()> {
         self.settings.hotkeys.set_binding(action, combo);
-        self.save()
+        self.save_with_hotkeys()
     }
 
     /// Reset a single hotkey to its default binding and persist.
     pub fn reset_hotkey(&mut self, action: &HotkeyAction) -> Result<()> {
         self.settings.hotkeys.reset_binding(action);
-        self.save()
+        self.save_with_hotkeys()
     }
 
     /// Reset all hotkeys to defaults and persist.
     pub fn reset_all_hotkeys(&mut self) -> Result<()> {
         self.settings.hotkeys.reset_all();
-        self.save()
+        self.save_with_hotkeys()
+    }
+
+    /// Save redb + [hotkeys] section in config.toml.
+    fn save_with_hotkeys(&self) -> Result<()> {
+        self.storage.save("user_settings", &self.settings)?;
+        self.write_hotkeys_toml()?;
+        Ok(())
     }
 
     // -------------------------------------------------------------------------
@@ -380,6 +497,67 @@ impl SettingsManager {
             genres: v.genres.clone(),
             playlists: v.playlists.clone(),
             queue: v.queue.clone(),
+        }
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+/// Apply TOML settings values onto the internal redb `PlayerSettings` struct.
+///
+/// Only overwrites user-facing preference fields — volume, playlist IDs, and
+/// other runtime state are left untouched.
+fn apply_toml_settings_to_internal(
+    ts: &TomlSettings,
+    p: &mut crate::types::settings::PlayerSettings,
+) {
+    p.start_view = ts.start_view.clone();
+    p.enter_behavior = ts.enter_behavior;
+    p.local_music_path = ts.local_music_path.clone();
+    p.stable_viewport = ts.stable_viewport;
+    p.auto_follow_playing = ts.auto_follow_playing;
+    p.light_mode = ts.light_mode;
+    p.rounded_mode = ts.rounded_mode;
+    p.nav_layout = ts.nav_layout;
+    p.nav_display_mode = ts.nav_display_mode;
+    p.track_info_display = ts.track_info_display;
+    p.slot_row_height = ts.slot_row_height;
+    p.opacity_gradient = ts.opacity_gradient;
+    p.horizontal_volume = ts.horizontal_volume;
+    p.strip_show_title = ts.strip_show_title;
+    p.strip_show_artist = ts.strip_show_artist;
+    p.strip_show_album = ts.strip_show_album;
+    p.strip_show_format_info = ts.strip_show_format_info;
+    p.strip_click_action = ts.strip_click_action;
+    p.crossfade_enabled = ts.crossfade_enabled;
+    p.crossfade_duration_secs = ts.crossfade_duration_secs;
+    p.volume_normalization = ts.volume_normalization;
+    p.normalization_level = ts.normalization_level;
+    p.visualization_mode = ts.visualization_mode;
+    p.sound_effects_enabled = ts.sound_effects_enabled;
+    p.sfx_volume = ts.sfx_volume as f64;
+    p.scrobbling_enabled = ts.scrobbling_enabled;
+    p.scrobble_threshold = ts.scrobble_threshold as f64;
+    p.quick_add_to_playlist = ts.quick_add_to_playlist;
+    p.eq_enabled = ts.eq_enabled;
+    p.eq_gains = ts.eq_gains;
+    p.custom_eq_presets = ts.custom_eq_presets.clone();
+}
+
+/// Convert `AllViewPreferences` into the internal `ViewPreferences` for redb storage.
+impl From<crate::types::view_preferences::AllViewPreferences>
+    for crate::types::settings::ViewPreferences
+{
+    fn from(avp: crate::types::view_preferences::AllViewPreferences) -> Self {
+        Self {
+            albums: avp.albums,
+            artists: avp.artists,
+            songs: avp.songs,
+            genres: avp.genres,
+            playlists: avp.playlists,
+            queue: avp.queue,
         }
     }
 }

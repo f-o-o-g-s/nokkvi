@@ -9,10 +9,26 @@
 //! - `sfx/`: User-customizable sound effects (WAV files, seeded from bundled defaults)
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 
 const APP_NAME: &str = "nokkvi";
+
+/// Timestamp (ms since epoch) of the last config.toml write initiated by the app itself.
+/// Used to prevent hot-reload feedback loops when the UI updates a setting.
+pub static LAST_INTERNAL_WRITE: AtomicU64 = AtomicU64::new(0);
+
+/// Wrapper to execute a config write and record its timestamp, suppressing
+/// the hot-reload file watcher for the next 500ms.
+pub fn suppress_config_reload<T>(f: impl FnOnce() -> T) -> T {
+    let result = f();
+    if let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) {
+        LAST_INTERNAL_WRITE.store(now.as_millis() as u64, Ordering::Release);
+    }
+    result
+}
 
 /// Get the base application directory (~/.config/nokkvi)
 pub fn get_app_dir() -> Result<PathBuf> {

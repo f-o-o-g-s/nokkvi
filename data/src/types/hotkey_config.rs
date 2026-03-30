@@ -5,7 +5,7 @@
 //! `HotkeyConfig` stores the full binding map, supports lookup by key event,
 //! conflict detection, and serde for persistence in redb.
 
-use std::{collections::HashMap, fmt};
+use std::{collections::HashMap, fmt, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 
@@ -93,6 +93,52 @@ impl fmt::Display for KeyCode {
     }
 }
 
+impl KeyCode {
+    /// Parse a key name string (from Display output) back to a KeyCode.
+    ///
+    /// Handles uppercase/lowercase chars, arrow symbols, and named keys.
+    /// Returns `Err` for unrecognized key names.
+    pub fn from_name(s: &str) -> Result<Self, String> {
+        let s = s.trim();
+        // Single ASCII character → Char variant (lowercase)
+        if s.chars().count() == 1 && s.is_ascii() {
+            let c = s.chars().next().unwrap();
+            return Ok(KeyCode::Char(c.to_lowercase().next().unwrap_or(c)));
+        }
+        // Named keys (case-insensitive)
+        match s.to_lowercase().as_str() {
+            "space" => Ok(KeyCode::Space),
+            "enter" | "return" => Ok(KeyCode::Enter),
+            "escape" | "esc" => Ok(KeyCode::Escape),
+            "backspace" => Ok(KeyCode::Backspace),
+            "tab" => Ok(KeyCode::Tab),
+            "↑" | "arrowup" | "up" => Ok(KeyCode::ArrowUp),
+            "↓" | "arrowdown" | "down" => Ok(KeyCode::ArrowDown),
+            "←" | "arrowleft" | "left" => Ok(KeyCode::ArrowLeft),
+            "→" | "arrowright" | "right" => Ok(KeyCode::ArrowRight),
+            "page up" | "pageup" => Ok(KeyCode::PageUp),
+            "page down" | "pagedown" => Ok(KeyCode::PageDown),
+            "home" => Ok(KeyCode::Home),
+            "end" => Ok(KeyCode::End),
+            "delete" | "del" => Ok(KeyCode::Delete),
+            "insert" | "ins" => Ok(KeyCode::Insert),
+            "f1" => Ok(KeyCode::F1),
+            "f2" => Ok(KeyCode::F2),
+            "f3" => Ok(KeyCode::F3),
+            "f4" => Ok(KeyCode::F4),
+            "f5" => Ok(KeyCode::F5),
+            "f6" => Ok(KeyCode::F6),
+            "f7" => Ok(KeyCode::F7),
+            "f8" => Ok(KeyCode::F8),
+            "f9" => Ok(KeyCode::F9),
+            "f10" => Ok(KeyCode::F10),
+            "f11" => Ok(KeyCode::F11),
+            "f12" => Ok(KeyCode::F12),
+            _ => Err(format!("unknown key: {s}")),
+        }
+    }
+}
+
 // ============================================================================
 // KeyCombo — key + modifiers
 // ============================================================================
@@ -160,6 +206,45 @@ impl KeyCombo {
 impl fmt::Display for KeyCombo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.display())
+    }
+}
+
+impl FromStr for KeyCombo {
+    type Err = String;
+
+    /// Parse a human-readable key combo string back to a `KeyCombo`.
+    ///
+    /// Accepts the format produced by `KeyCombo::display()`: `"Shift + L"`,
+    /// `"Ctrl + E"`, `"Space"`, `"Shift + ↑"`, etc.
+    fn from_str(s: &str) -> Result<Self, String> {
+        let parts: Vec<&str> = s.split('+').map(str::trim).collect();
+        if parts.is_empty() {
+            return Err("empty key combo".to_string());
+        }
+
+        let mut shift = false;
+        let mut ctrl = false;
+        let mut alt = false;
+
+        // All parts except the last are modifiers
+        for &part in &parts[..parts.len() - 1] {
+            match part.to_lowercase().as_str() {
+                "shift" => shift = true,
+                "ctrl" | "control" => ctrl = true,
+                "alt" => alt = true,
+                _ => return Err(format!("unknown modifier: {part}")),
+            }
+        }
+
+        let key_str = parts.last().ok_or_else(|| "no key specified".to_string())?;
+        let key = KeyCode::from_name(key_str)?;
+
+        Ok(KeyCombo {
+            key,
+            shift,
+            ctrl,
+            alt,
+        })
     }
 }
 
@@ -475,6 +560,95 @@ impl HotkeyAction {
             HotkeyAction::ResetToDefault => KeyCombo::key(KeyCode::Delete),
         }
     }
+
+    /// Convert to a snake_case TOML key string.
+    pub fn to_toml_key(self) -> &'static str {
+        match self {
+            HotkeyAction::SwitchToQueue => "switch_to_queue",
+            HotkeyAction::SwitchToAlbums => "switch_to_albums",
+            HotkeyAction::SwitchToArtists => "switch_to_artists",
+            HotkeyAction::SwitchToSongs => "switch_to_songs",
+            HotkeyAction::SwitchToGenres => "switch_to_genres",
+            HotkeyAction::SwitchToPlaylists => "switch_to_playlists",
+            HotkeyAction::SwitchToSettings => "switch_to_settings",
+            HotkeyAction::TogglePlay => "toggle_play",
+            HotkeyAction::ToggleRandom => "toggle_random",
+            HotkeyAction::ToggleRepeat => "toggle_repeat",
+            HotkeyAction::ToggleConsume => "toggle_consume",
+            HotkeyAction::ToggleSoundEffects => "toggle_sound_effects",
+            HotkeyAction::CycleVisualization => "cycle_visualization",
+            HotkeyAction::ToggleEqModal => "toggle_eq_modal",
+            HotkeyAction::SlotListUp => "slot_list_up",
+            HotkeyAction::SlotListDown => "slot_list_down",
+            HotkeyAction::Activate => "activate",
+            HotkeyAction::ExpandCenter => "expand_center",
+            HotkeyAction::ToggleBrowsingPanel => "toggle_browsing_panel",
+            HotkeyAction::CenterOnPlaying => "center_on_playing",
+            HotkeyAction::ToggleStar => "toggle_star",
+            HotkeyAction::AddToQueue => "add_to_queue",
+            HotkeyAction::RemoveFromQueue => "remove_from_queue",
+            HotkeyAction::ClearQueue => "clear_queue",
+            HotkeyAction::FocusSearch => "focus_search",
+            HotkeyAction::IncreaseRating => "increase_rating",
+            HotkeyAction::DecreaseRating => "decrease_rating",
+            HotkeyAction::GetInfo => "get_info",
+            HotkeyAction::MoveTrackUp => "move_track_up",
+            HotkeyAction::MoveTrackDown => "move_track_down",
+            HotkeyAction::SaveQueueAsPlaylist => "save_queue_as_playlist",
+            HotkeyAction::PrevSortMode => "prev_sort_mode",
+            HotkeyAction::NextSortMode => "next_sort_mode",
+            HotkeyAction::ToggleSortOrder => "toggle_sort_order",
+            HotkeyAction::EditUp => "edit_up",
+            HotkeyAction::EditDown => "edit_down",
+            HotkeyAction::Escape => "escape",
+            HotkeyAction::ResetToDefault => "reset_to_default",
+        }
+    }
+
+    /// Parse from a snake_case TOML key string. Returns None for unknown keys.
+    pub fn from_toml_key(s: &str) -> Option<HotkeyAction> {
+        Some(match s {
+            "switch_to_queue" => HotkeyAction::SwitchToQueue,
+            "switch_to_albums" => HotkeyAction::SwitchToAlbums,
+            "switch_to_artists" => HotkeyAction::SwitchToArtists,
+            "switch_to_songs" => HotkeyAction::SwitchToSongs,
+            "switch_to_genres" => HotkeyAction::SwitchToGenres,
+            "switch_to_playlists" => HotkeyAction::SwitchToPlaylists,
+            "switch_to_settings" => HotkeyAction::SwitchToSettings,
+            "toggle_play" => HotkeyAction::TogglePlay,
+            "toggle_random" => HotkeyAction::ToggleRandom,
+            "toggle_repeat" => HotkeyAction::ToggleRepeat,
+            "toggle_consume" => HotkeyAction::ToggleConsume,
+            "toggle_sound_effects" => HotkeyAction::ToggleSoundEffects,
+            "cycle_visualization" => HotkeyAction::CycleVisualization,
+            "toggle_eq_modal" => HotkeyAction::ToggleEqModal,
+            "slot_list_up" => HotkeyAction::SlotListUp,
+            "slot_list_down" => HotkeyAction::SlotListDown,
+            "activate" => HotkeyAction::Activate,
+            "expand_center" => HotkeyAction::ExpandCenter,
+            "toggle_browsing_panel" => HotkeyAction::ToggleBrowsingPanel,
+            "center_on_playing" => HotkeyAction::CenterOnPlaying,
+            "toggle_star" => HotkeyAction::ToggleStar,
+            "add_to_queue" => HotkeyAction::AddToQueue,
+            "remove_from_queue" => HotkeyAction::RemoveFromQueue,
+            "clear_queue" => HotkeyAction::ClearQueue,
+            "focus_search" => HotkeyAction::FocusSearch,
+            "increase_rating" => HotkeyAction::IncreaseRating,
+            "decrease_rating" => HotkeyAction::DecreaseRating,
+            "get_info" => HotkeyAction::GetInfo,
+            "move_track_up" => HotkeyAction::MoveTrackUp,
+            "move_track_down" => HotkeyAction::MoveTrackDown,
+            "save_queue_as_playlist" => HotkeyAction::SaveQueueAsPlaylist,
+            "prev_sort_mode" => HotkeyAction::PrevSortMode,
+            "next_sort_mode" => HotkeyAction::NextSortMode,
+            "toggle_sort_order" => HotkeyAction::ToggleSortOrder,
+            "edit_up" => HotkeyAction::EditUp,
+            "edit_down" => HotkeyAction::EditDown,
+            "escape" => HotkeyAction::Escape,
+            "reset_to_default" => HotkeyAction::ResetToDefault,
+            _ => return None,
+        })
+    }
 }
 
 // ============================================================================
@@ -581,6 +755,49 @@ impl HotkeyConfig {
     /// Get a reference to the inner bindings map.
     pub fn bindings(&self) -> &HashMap<HotkeyAction, KeyCombo> {
         &self.bindings
+    }
+
+    /// Serialize only non-default bindings for TOML output.
+    ///
+    /// Returns a `BTreeMap<String, String>` of `action_toml_key → combo_display`
+    /// for bindings that differ from `HotkeyAction::default_binding()`.
+    /// Using BTreeMap for deterministic key ordering in the TOML file.
+    pub fn to_toml_map(&self) -> std::collections::BTreeMap<String, String> {
+        let mut map = std::collections::BTreeMap::new();
+        for (action, combo) in &self.bindings {
+            if *combo != action.default_binding() {
+                map.insert(action.to_toml_key().to_string(), combo.to_string());
+            }
+        }
+        map
+    }
+
+    /// Deserialize from a TOML map of `action_key → combo_string`.
+    ///
+    /// Starts with defaults, then overrides any entries found in the map.
+    /// Unknown action keys or unparseable combos are warned and skipped.
+    pub fn from_toml_map(map: &std::collections::BTreeMap<String, String>) -> Self {
+        let mut config = Self::default();
+        for (action_key, combo_str) in map {
+            if let Some(action) = HotkeyAction::from_toml_key(action_key) {
+                match combo_str.parse::<KeyCombo>() {
+                    Ok(combo) => {
+                        config.set_binding(action, combo);
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to parse hotkey combo '{}' for {}: {}",
+                            combo_str,
+                            action_key,
+                            e
+                        );
+                    }
+                }
+            } else {
+                tracing::warn!("Unknown hotkey action in config.toml: {}", action_key);
+            }
+        }
+        config
     }
 }
 

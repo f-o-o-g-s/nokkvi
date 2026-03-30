@@ -389,11 +389,11 @@ impl Nokkvi {
             futures::stream::StreamExt::flat_map(
                 crate::visualizer_config::config_watcher_subscription(),
                 |opt| {
-                    // When config changes, emit both visualizer AND theme reload messages
                     if let Some(config) = opt {
                         futures::stream::iter(vec![
                             Message::VisualizerConfigChanged(config),
                             Message::ThemeConfigReloaded,
+                            Message::SettingsConfigReloaded,
                         ])
                     } else {
                         futures::stream::iter(vec![])

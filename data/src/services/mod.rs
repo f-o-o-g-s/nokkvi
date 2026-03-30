@@ -13,3 +13,4 @@ pub mod queue;
 pub mod settings;
 pub mod state_storage;
 pub mod task_manager;
+pub mod toml_settings_io;

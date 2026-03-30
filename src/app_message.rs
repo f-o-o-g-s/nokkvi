@@ -342,6 +342,14 @@ pub enum Message {
     /// Config file changed, apply new visualizer settings
     VisualizerConfigChanged(crate::visualizer_config::VisualizerConfig),
 
+    // --- Settings Hot-Reload ---
+    SettingsConfigReloaded,
+    SettingsReloadDataLoaded(
+        nokkvi_data::types::view_preferences::AllViewPreferences,
+        nokkvi_data::types::hotkey_config::HotkeyConfig,
+        Box<nokkvi_data::types::player_settings::PlayerSettings>,
+    ),
+
     // --- Theme Hot-Reload ---
     /// Config file changed, reload theme colors
     ThemeConfigReloaded,
