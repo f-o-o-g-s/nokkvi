@@ -385,6 +385,28 @@ impl SfxEngine {
             sink.set_title(title);
         }
     }
+
+    /// Mirror the user's volume to the PipeWire stream (only affects NativePipeWire mode).
+    ///
+    /// PipeWire shells (pavucontrol, Quickshell) display `cbrt(linear_volume)`
+    /// as the percentage. To make the shell match Nokkvi's slider position,
+    /// we send `val³` so the shell's `cbrt(val³) = val`. The cubic curve
+    /// also provides natural perceptual volume feel — the same curve
+    /// PulseAudio was designed around. No-op for cpal/ALSA fallback.
+    pub fn set_output_volume(&self, volume: f32) {
+        if let Some(ref sink) = self.sink {
+            let v = volume.clamp(0.0, 1.0);
+            sink.set_output_volume(v * v * v);
+        }
+    }
+
+    /// Whether the audio sink supports native PipeWire volume control.
+    ///
+    /// When `true`, the renderer should keep software volume at 1.0 (unity)
+    /// and let PipeWire handle the user's volume via `channelVolumes`.
+    pub fn has_native_volume(&self) -> bool {
+        self.sink.as_ref().is_some_and(|s| s.has_native_volume())
+    }
 }
 
 impl Default for SfxEngine {
@@ -480,6 +502,25 @@ impl ActiveSink {
             Self::Cpal(_) => {}
             #[cfg(target_os = "linux")]
             Self::NativePipewire(p) => p.set_title(title),
+        }
+    }
+
+    /// Mirror volume to PipeWire stream (no-op for cpal).
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
+    pub fn set_output_volume(&self, volume: f32) {
+        match self {
+            Self::Cpal(_) => {}
+            #[cfg(target_os = "linux")]
+            Self::NativePipewire(p) => p.set_volume(volume),
+        }
+    }
+
+    /// Whether this sink supports native PipeWire volume.
+    pub fn has_native_volume(&self) -> bool {
+        match self {
+            Self::Cpal(_) => false,
+            #[cfg(target_os = "linux")]
+            Self::NativePipewire(_) => true,
         }
     }
 }

@@ -1436,6 +1436,15 @@ impl CustomAudioEngine {
         renderer.set_shared_mixer(mixer);
     }
 
+    /// Enable/disable PipeWire-native volume control on the renderer.
+    ///
+    /// When `true`, the renderer keeps software volume at 1.0 and the
+    /// caller is responsible for mirroring volume changes to PipeWire.
+    pub fn set_pw_volume_active(&mut self, active: bool) {
+        let mut renderer = self.renderer.lock();
+        renderer.set_pw_volume_active(active);
+    }
+
     /// Set engine reference in renderer
     pub fn set_engine_reference(&mut self, engine: Weak<tokio::sync::Mutex<CustomAudioEngine>>) {
         let mut renderer = self.renderer.lock();

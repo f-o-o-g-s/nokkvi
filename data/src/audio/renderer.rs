@@ -85,6 +85,10 @@ pub struct AudioRenderer {
     normalization_target_level: f32,
     /// Shared EQ state — passed to each new StreamingSource.
     eq_state: Option<super::eq::EqState>,
+    /// When `true`, PipeWire handles the user's volume via `channelVolumes`.
+    /// Software volume is kept at 1.0 during normal playback; crossfade
+    /// ramps use only the fade factor (PipeWire applies user volume on top).
+    pw_volume_active: bool,
 }
 
 // ---- Volume normalization setters (outside the main impl for visibility) ----
@@ -133,6 +137,7 @@ impl AudioRenderer {
             volume_normalization: false,
             normalization_target_level: 1.0,
             eq_state: None,
+            pw_volume_active: false,
         }
     }
 
@@ -205,7 +210,7 @@ impl AudioRenderer {
         let stream = output.create_stream(
             format.sample_rate(),
             format.channel_count() as u16,
-            self.volume as f32,
+            self.stream_volume(),
             self.volume_normalization,
             self.normalization_target_level,
             self.eq_state.clone(),
@@ -294,7 +299,7 @@ impl AudioRenderer {
         // must be cleared — otherwise the source returns silence).
         if let Some(ref stream) = self.primary_stream {
             stream.resume();
-            stream.set_volume(self.volume as f32);
+            stream.set_volume(self.stream_volume());
         }
         if let Some(ref stream) = self.crossfade_stream {
             stream.resume();
@@ -356,7 +361,7 @@ impl AudioRenderer {
         if !self.crossfade_active
             && let Some(ref stream) = self.primary_stream
         {
-            stream.set_volume(self.volume as f32);
+            stream.set_volume(self.stream_volume());
         }
         // If crossfade is active, volumes are managed by the crossfade tick
     }
@@ -379,7 +384,7 @@ impl AudioRenderer {
             let stream = output.create_stream(
                 self.format.sample_rate(),
                 self.format.channel_count() as u16,
-                self.volume as f32,
+                self.stream_volume(),
                 self.volume_normalization,
                 self.normalization_target_level,
                 self.eq_state.clone(),
@@ -389,8 +394,17 @@ impl AudioRenderer {
     }
 
     /// Set volume (0.0–1.0).
+    ///
+    /// When `pw_volume_active` is true, only stores the volume — actual
+    /// attenuation is handled by PipeWire channelVolumes. Software volume
+    /// on the stream stays at 1.0 during normal playback.
     pub fn set_volume(&mut self, volume: f64) {
         self.volume = volume.clamp(0.0, 1.0);
+        if self.pw_volume_active {
+            // PipeWire handles user volume — software stays at unity.
+            // Nothing to do here; PipeWire volume is set via SfxEngine.
+            return;
+        }
         if self.crossfade_active {
             // During crossfade, volumes are managed by the crossfade tick.
             // Just store the new volume — next tick applies it proportionally.
@@ -450,6 +464,28 @@ impl AudioRenderer {
     /// Must be called before the first `init()` / `play()`.
     pub fn set_shared_mixer(&mut self, mixer: rodio::mixer::Mixer) {
         self.shared_mixer = Some(mixer);
+    }
+
+    /// Enable/disable PipeWire-native volume control.
+    ///
+    /// When `true`, the renderer keeps software volume at 1.0 (unity) and
+    /// expects the caller to mirror volume changes to PipeWire via
+    /// `SfxEngine::set_output_volume()`. Crossfade ramps use only the
+    /// fade coefficient — PipeWire applies the user's volume uniformly
+    /// to the entire mixed output.
+    pub fn set_pw_volume_active(&mut self, active: bool) {
+        self.pw_volume_active = active;
+        tracing::info!(
+            "🔊 Renderer: PipeWire native volume {}",
+            if active { "ENABLED" } else { "disabled" }
+        );
+    }
+
+    /// The software volume to apply to streams during normal playback.
+    /// Returns 1.0 when PipeWire handles the user's volume, otherwise
+    /// returns the stored user volume.
+    fn stream_volume(&self) -> f32 {
+        if self.pw_volume_active { 1.0 } else { self.volume as f32 }
     }
 
     // =========================================================================
@@ -574,7 +610,7 @@ impl AudioRenderer {
         if !self.paused
             && let Some(ref stream) = self.primary_stream
         {
-            stream.set_volume(self.volume as f32);
+            stream.set_volume(self.stream_volume());
         }
     }
 
@@ -628,8 +664,14 @@ impl AudioRenderer {
         let fade_out = (progress * std::f64::consts::FRAC_PI_2).cos().powi(2);
         let fade_in = (progress * std::f64::consts::FRAC_PI_2).sin().powi(2);
 
-        // Apply user volume on top of the crossfade curve
-        let user_vol = self.volume as f32;
+        // When PipeWire handles user volume, software only applies the fade
+        // coefficient. PipeWire applies the user's volume uniformly to the
+        // combined mixer output, so the product is correctly fade × user_vol.
+        let user_vol = if self.pw_volume_active {
+            1.0
+        } else {
+            self.volume as f32
+        };
         if let Some(ref stream) = self.primary_stream {
             stream.set_volume((fade_out * user_vol as f64) as f32);
         }
@@ -664,7 +706,7 @@ impl AudioRenderer {
 
         // Set new primary to full user volume
         if let Some(ref stream) = self.primary_stream {
-            stream.set_volume(self.volume as f32);
+            stream.set_volume(self.stream_volume());
         }
 
         // Update format to the incoming track's format

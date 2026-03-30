@@ -208,6 +208,7 @@ impl Nokkvi {
                 // one cpal output stream (avoids dual-ALSA-stream silence bug).
                 // Returns None if no audio device is available — music will also be disabled.
                 let shared_mixer = self.sfx_engine.mixer();
+                let pw_volume = self.sfx_engine.has_native_volume();
                 shell
                     .task_manager()
                     .spawn("setup_audio", move || async move {
@@ -216,6 +217,7 @@ impl Nokkvi {
                         if let Some(mixer) = shared_mixer {
                             engine.set_shared_mixer(mixer);
                         }
+                        engine.set_pw_volume_active(pw_volume);
                     });
 
                 self.app_service = Some(shell.clone());

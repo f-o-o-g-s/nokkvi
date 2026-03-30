@@ -9,11 +9,16 @@ use rodio::Source;
 const SAMPLE_RATE: u32 = 48000;
 const CHANNELS: u32 = 2;
 
+/// PipeWire SPA property ID for per-channel volume array.
+/// From `spa/param/props.h`: `SPA_PROP_channelVolumes = SPA_PROP_START_Audio + 8 = 0x10008`.
+const SPA_PROP_CHANNEL_VOLUMES: u32 = 0x10008;
+
 pub struct NativePipeWireSink {
     mixer: rodio::mixer::Mixer,
     handle: Option<JoinHandle<()>>,
     quit_tx: std::sync::mpsc::Sender<()>,
     title_tx: pw::channel::Sender<String>,
+    volume_tx: pw::channel::Sender<f32>,
 }
 
 pub struct UserData {
@@ -27,6 +32,7 @@ impl NativePipeWireSink {
     ) -> Result<Self> {
         let (quit_tx, quit_rx) = std::sync::mpsc::channel();
         let (title_tx, title_rx) = pw::channel::channel::<String>();
+        let (volume_tx, volume_rx) = pw::channel::channel::<f32>();
         let mixer_clone = mixer.clone();
 
         // Spawn the dedicated pw_out thread
@@ -104,6 +110,36 @@ impl NativePipeWireSink {
                         );
                     }
                 });
+
+                let stream_vol_clone = stream.clone();
+                let _volume_receiver =
+                    volume_rx.attach(mainloop.loop_(), move |linear_vol: f32| {
+                        let vol = linear_vol.clamp(0.0, 1.0);
+                        tracing::debug!(
+                            "🔊 PipeWire IPC: Setting channelVolumes to [{:.3}, {:.3}]",
+                            vol,
+                            vol
+                        );
+                        let volumes = [vol, vol];
+                        // SAFETY: `stream_vol_clone` is an Rc clone of the stream,
+                        // kept alive by this closure attached to the same mainloop.
+                        // The raw pointer is valid for the mainloop's lifetime.
+                        // `pw_stream_set_control` reads `values` synchronously.
+                        let result = unsafe {
+                            pw::sys::pw_stream_set_control(
+                                stream_vol_clone.as_raw_ptr(),
+                                SPA_PROP_CHANNEL_VOLUMES,
+                                volumes.len() as u32,
+                                volumes.as_ptr() as *mut f32,
+                            )
+                        };
+                        if result < 0 {
+                            tracing::warn!(
+                                "🔊 PipeWire: set_control(channelVolumes) failed: {}",
+                                result
+                            );
+                        }
+                    });
 
                 let listener = stream
                     .add_local_listener_with_user_data(data)
@@ -212,10 +248,11 @@ impl NativePipeWireSink {
                 tracing::info!("🔊 Native PipeWire sink activated successfully.");
                 mainloop.run();
 
-                // Drop order matters: the title_receiver closure captures a clone
-                // of `stream`, so it must be dropped before `stream` to avoid
-                // dangling raw pointers in the FFI update_properties call.
+                // Drop order matters: the title/volume receiver closures capture clones
+                // of `stream`, so they must be dropped before `stream` to avoid
+                // dangling raw pointers in the FFI calls.
                 drop(_title_receiver);
+                drop(_volume_receiver);
                 drop(listener);
                 drop(stream);
             })
@@ -226,12 +263,22 @@ impl NativePipeWireSink {
             handle: Some(handle),
             quit_tx,
             title_tx,
+            volume_tx,
         })
     }
 
     pub fn set_title(&self, title: String) {
         tracing::debug!("🔊 Sending PipeWire title update: {:?}", title);
         let _ = self.title_tx.send(title);
+    }
+
+    /// Set the PipeWire stream channel volume (0.0–1.0, linear).
+    ///
+    /// Updates `SPA_PROP_channelVolumes` on the stream so the system mixer
+    /// (pavucontrol, Quickshell audio panel, etc.) reflects Nokkvi's volume.
+    pub fn set_volume(&self, volume: f32) {
+        tracing::debug!("🔊 Sending PipeWire volume update: {:.3}", volume);
+        let _ = self.volume_tx.send(volume);
     }
 
     pub fn mixer(&self) -> rodio::mixer::Mixer {

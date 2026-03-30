@@ -769,6 +769,10 @@ impl Nokkvi {
             conn.set_volume(f64::from(val));
         }
 
+        // Mirror volume to PipeWire stream (updates shell mixer display).
+        // Non-blocking: sends via pw::channel, processed on the PW thread.
+        self.sfx_engine.set_output_volume(val);
+
         // Set volume on the audio engine (atomic via rodio stream handle).
         // With rodio, set_volume() is non-blocking — no channel needed.
         // Throttle the async persist to storage (engine volume is instant regardless).
@@ -940,6 +944,10 @@ impl Nokkvi {
         // Apply settings to engines
         self.sfx_engine.set_enabled(self.sfx.enabled);
         self.sfx_engine.set_volume(self.sfx.volume);
+
+        // Send initial volume to PipeWire so the shell mixer shows the
+        // correct percentage from startup (before user drags the slider).
+        self.sfx_engine.set_output_volume(self.playback.volume);
 
         // Apply theme mode from config.toml (single source of truth)
         let config_light_mode = crate::theme_config::load_light_mode_from_config();
