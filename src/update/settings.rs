@@ -734,13 +734,8 @@ impl Nokkvi {
             "general.verbose_config" => {
                 if let crate::views::settings::items::SettingValue::Bool(enabled) = value {
                     self.verbose_config = enabled;
-                    // Persist verbose_config flag to redb (async, no TOML write)
-                    self.shell_spawn("persist_verbose_config", move |shell| async move {
-                        shell.settings().set_verbose_config(enabled).await
-                    });
 
-                    // Write all TOML sections synchronously from the UI thread
-                    // to avoid racing with the async redb persist.
+                    // Write [theme]+[visualizer] synchronously (doesn't need settings_manager)
                     if enabled {
                         let viz_config = self.visualizer_config.read().clone();
                         if let Err(e) = crate::config_writer::write_full_theme_and_visualizer(
@@ -765,12 +760,13 @@ impl Nokkvi {
                         }
                     }
 
-                    // Also write [settings]+[hotkeys]+[views] with the new verbose flag.
-                    // This is a single task that awaits the settings_manager lock,
-                    // so it serializes correctly with the redb persist above.
+                    // Single async task: persist to redb THEN write all TOML sections.
+                    // Must be one task so the verbose flag is set before write_all_toml
+                    // reads it via is_verbose_config().
                     self.shell_spawn(
-                        "write_verbose_toml_sections",
+                        "persist_and_write_verbose_config",
                         move |shell| async move {
+                            shell.settings().set_verbose_config(enabled).await?;
                             let mgr = shell.settings().settings_manager();
                             let sm = mgr.lock().await;
                             sm.write_all_toml_public()
