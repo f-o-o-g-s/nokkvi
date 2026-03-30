@@ -196,7 +196,12 @@ impl Nokkvi {
                 {
                     tracing::warn!(" [SETTINGS] Failed to write font family: {e}");
                 }
-                Task::none()
+                // Explicitly reload theme so the font change takes effect immediately.
+                // The config file watcher suppresses internal writes (LAST_INTERNAL_WRITE guard),
+                // so ThemeConfigReloaded won't fire — we must reload inline.
+                crate::theme::reload_theme();
+                self.settings_page.config_dirty = true;
+                Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
             }
 
             // Hotkey actions
