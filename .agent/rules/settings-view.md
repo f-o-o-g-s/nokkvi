@@ -60,11 +60,11 @@ views/settings/
 
 ## General Tab
 
-4 sections persisted to redb via `SettingsManager`: **Application** (start view, enter behavior, local music path), **Mouse Behavior** (stable viewport, auto-follow playing), **Account** (read-only server URL + username, logout), **Cache** (rebuild artwork/artist cache action buttons).
+4 sections persisted to `config.toml` (hot-reloadable) via `SettingsManager`: **Application** (start view, enter behavior, local music path, verbose configuration mode), **Mouse Behavior** (stable viewport, auto-follow playing), **Account** (read-only server URL + username, logout), **Cache** (rebuild artwork/artist cache action buttons). 11 items total.
 
 ## Interface Tab
 
-2 sections persisted to redb via `SettingsManager`: **Layout** (nav layout, nav display, track info display, row density, horizontal volume controls), **Metadata Strip** (visible fields as `ToggleSet`, click action enum).
+2 sections persisted to `config.toml` via `SettingsManager`: **Layout** (nav layout, nav display, track info display, row density, horizontal volume controls), **Metadata Strip** (visible fields as `ToggleSet`, click action enum).
 
 `TrackInfoDisplay` enum: `Off | Player Bar | Top Bar | Progress Track`. The `ProgressTrack` variant shows scrolling metadata overlay + format info container on the progress bar track instead of a separate strip. These four modes are **mutually exclusive**.
 
@@ -74,7 +74,7 @@ Strip visibility toggles (`strip_show_title`, `strip_show_artist`, `strip_show_a
 
 ## Playback Tab
 
-3 sections persisted to redb via `SettingsManager`: **Playback** (crossfade enabled, crossfade duration, volume normalization toggle, normalization level), **Scrobbling** (enabled toggle, threshold — percentage-based, no 4-minute floor), **Playlists** (quick add to playlist toggle, default playlist name — set via right-click context menu on playlists).
+3 sections persisted to `config.toml` via `SettingsManager`: **Playback** (crossfade enabled, crossfade duration, volume normalization toggle, normalization level), **Scrobbling** (enabled toggle, threshold — percentage-based, no 4-minute floor), **Playlists** (quick add to playlist toggle, default playlist name — set via right-click context menu on playlists).
 
 Volume normalization uses rodio's Automatic Gain Control (AGC). `NormalizationLevel` enum (Quiet/Normal/Loud) maps to AGC target levels (0.6/1.0/1.4).
 
@@ -87,7 +87,7 @@ Volume normalization uses rodio's Automatic Gain Control (AGC). `NormalizationLe
 ## Hotkey Capture Mode
 
 1. User activates hotkey item (Enter) → enters capture mode
-2. Next key press is recorded as new binding
+2. Next key press is recorded as new binding (saved to `config.toml` using ASCII names e.g. `"Shift + DownArrow"`, `"Ctrl + R"`)
 3. Escape cancels capture, Delete resets to default
 4. **Steal-on-conflict**: if the new combo is already bound, it steals the binding — "Swapped with {action}" label shows (auto-dismissed after 2s)
 
@@ -119,12 +119,12 @@ Volume normalization uses rodio's Automatic Gain Control (AGC). `NormalizationLe
 
 ## Config Write-Back
 
-- **TOML settings** (theme, visualizer): write to `config.toml` via `config_writer.rs`
-  - `WriteConfig` action carries `description: Option<String>` from `SettingMeta.subtitle` — injected as a TOML comment above the key via `leaf_decor`
-  - Hot-reload picks up changes automatically
-- **General/Playback settings**: persist to redb via `SettingsManager` (`WriteGeneralSetting` action, `general.` key prefix)
-- **Hotkey bindings**: persist to redb via `SettingsManager`
+- **ALL settings** (theme, visualizer, general, playback, hotkeys): write to `config.toml` via `SettingsManager`.
+  - `verbose_config` toggle (Settings → General → Application): when enabled, `write_full_theme_and_visualizer()` writes all settings including defaults; when disabled, `strip_to_sparse()` removes default-value entries.
+  - Toggling verbose_config triggers a combined persist + TOML write in a single async task to avoid race conditions.
+  - Hot-reload picks up changes automatically.
 - **`theme.light_mode`**: written to TOML, triggers theme reload
+- Passwords remain in `redb`.
 
 ## Icons
 

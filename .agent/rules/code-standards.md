@@ -31,12 +31,14 @@ trigger: always_on
 - Complex services use directory modules (`services/queue/mod.rs` + `order.rs`, `navigation.rs`).
 - Complex handlers use directory modules (`update/hotkeys/mod.rs` + `star_rating.rs`, `queue.rs`, `navigation.rs`).
 - Handler files in `update/` correspond 1:1 to views, plus specialized handlers:
+  - `about_modal.rs` — about modal open/close/copy dispatch
   - `browsing_panel.rs` — split-view playlist editing mode management
   - `cross_pane_drag.rs` — drag state machine (browsing panel → queue)
   - `toast.rs` — notification dispatch
   - `slot_list.rs` — shared slot list navigation dispatch + scrollbar fade/seek-settled timers (view-targeted via explicit `View` parameter)
   - `SlotListMessage` — Navigate up/down, set offset, activate center, toggle sort, scrollbar timers (carry `View`)
   - `collage.rs` — genre/playlist artwork collage loading
+  - `eq_modal.rs` — equalizer modal open/close/band/preset/save dispatch
   - `hotkeys/` — directory module: `mod.rs` (core dispatch), `star_rating.rs`, `queue.rs`, `navigation.rs`
   - `navigation.rs` — view switching, browsing panel toggle
   - `playback.rs` — playback tick, transport, gapless transitions
@@ -54,7 +56,7 @@ trigger: always_on
 
 - **Hold the audio engine lock during decoder operations.** Create fresh decoders on track change.
 - **Change the root widget type between renders** (e.g., Row→Column). Destroys `text_input` focus.
-- **Install unnecessary dependencies.** Core deps: `reqwest`, `serde`, `bincode`, `redb`, `toml_edit`, `font-kit`, `lru`, `rodio`, `ringbuf`, `bytemuck`, `rustfft`. Don't add alternatives.
+- **Install unnecessary dependencies.** Core deps: `reqwest`, `serde`, `bincode`, `redb`, `toml_edit`, `font-kit`, `lru`, `rodio`, `ringbuf`, `bytemuck`, `rustfft`, `pipewire`. Don't add alternatives.
 - **Use debounce on search.** Fires immediately on query change.
 - **Use `lock()` in the visualizer FFT processing thread.** FFT thread uses `try_lock()`; render thread uses `lock()`.
 - **Allow play actions from the browsing panel.** Use `guard_play_action()`.
@@ -72,14 +74,14 @@ cargo test                    # Unit tests
 cargo build --release         # Release build verification
 ```
 
-Tests live in inline `#[cfg(test)]` modules. Key test locations: `update/tests.rs`, `data/src/services/queue/mod.rs`, `data/src/services/queue/navigation.rs`, `data/src/types/hotkey_config.rs`, `data/src/types/paged_buffer.rs`, `data/src/types/player_settings.rs`, `data/src/credentials.rs`, `data/src/audio/spectrum.rs`, `src/embedded_svg.rs`, `src/widgets/format_info.rs`, `src/views/settings/items.rs` (general + interface + playback structure tests). Additional `#[cfg(test)]` modules exist in various type/utility files (`data/src/types/song_pool.rs`, `data/src/utils/`, `src/widgets/slot_list*.rs`, `src/views/expansion.rs`, `src/update/mod.rs`).
+Tests live in inline `#[cfg(test)]` modules. Key test locations: `update/tests.rs`, `data/src/services/queue/mod.rs`, `data/src/services/queue/navigation.rs`, `data/src/services/toml_settings_io.rs`, `data/src/types/hotkey_config.rs`, `data/src/types/paged_buffer.rs`, `data/src/types/player_settings.rs`, `data/src/types/toml_settings.rs`, `data/src/types/toml_views.rs`, `data/src/credentials.rs`, `data/src/audio/spectrum.rs`, `data/src/audio/eq.rs`, `src/embedded_svg.rs`, `src/widgets/format_info.rs`, `src/views/settings/items.rs` (general + interface + playback structure tests), `src/test_helpers.rs`. Additional `#[cfg(test)]` modules exist in various type/utility files (`data/src/types/song_pool.rs`, `data/src/types/playlist_edit.rs`, `data/src/types/toast.rs`, `data/src/types/progress.rs`, `data/src/types/song.rs`, `data/src/utils/`, `data/src/services/state_storage.rs`, `data/src/services/api/subsonic.rs`, `src/widgets/slot_list*.rs`, `src/views/expansion.rs`, `src/update/mod.rs`, `src/main.rs`).
 
 ## Config & Persistence
 
 | Store | What | How |
 |-------|------|-----|
-| `config.toml` | Theme + visualizer settings | Hot-reloadable, writes via `config_writer.rs` (preserves comments, auto-injects descriptions). No secrets. |
-| redb | Queue, player settings, hotkey bindings, encrypted password | Via `state_storage.rs`, `queue/`, `SettingsManager`. |
+| `config.toml` | All user preferences (Theme, Visualizer, Hotkeys, Playback, Interface, General) | Hot-reloadable via `SettingsManager` & `config_writer.rs`. `verbose_config` mode ensures defaults are output. |
+| redb | Queue, encrypted password | Via `state_storage.rs`, `queue/`. |
 | Credentials | Server URL, username, password | AES-256-GCM encrypted, password in redb |
 
 ## Rule Maintenance

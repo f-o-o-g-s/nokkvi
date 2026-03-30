@@ -71,17 +71,30 @@ Playing from Songs view: first 500-song page plays immediately. Remaining pages 
 
 | Store | Location | Pattern |
 |-------|----------|---------|
-| **redb** | `services/state_storage.rs` | Single DB: queue, settings, hotkeys, encrypted password |
+| **redb** | `services/state_storage.rs` | Single DB: queue ordering, encrypted password (API keys) |
 | **Queue songs** | `services/queue/` | `SongPool` + `Queue` ordering. Native `bincode::Encode`/`Decode` (~3× faster than JSON). `load_binary_or_json()` migrates legacy data. Directory module: `mod.rs` (mutations/persistence), `order.rs` (order array), `navigation.rs` (peek/transition/next/previous). |
-| **TOML config** | `config_writer.rs` (UI crate) | Atomic updates via `toml_edit`, preserves comments. Auto-injects description comments from `SettingMeta.subtitle` via `leaf_decor`. |
+| **TOML config** | `services/toml_settings_io.rs` | All user preferences (General, Interface, Playback, Hotkeys, Theme, Visualizer). Atomic updates via `toml_edit`, hot-reloadable. `verbose_config` mode writes all settings including defaults. |
 | **Credentials** | `credentials.rs` (at `data/src/`) | AES-256-GCM + PBKDF2. Password stored in redb. |
+
+### SettingsManager (`services/settings.rs`)
+
+Central orchestrator for all user preferences:
+- Owns `PlayerSettings`, `TomlSettings`, `TomlViewSettings`, `HotkeyConfig`, `StateStorage`
+- Loads from `config.toml` → merges with redb state → `PlayerSettings`
+- Per-field setters (e.g., `set_volume()`, `set_crossfade_enabled()`) persist to TOML atomically
+- `write_all_toml_public()` — writes all sections (used by verbose_config toggle)
+- `reload_from_toml()` — re-reads config.toml for hot-reload
+- `is_verbose_config()` / `set_verbose_config()` — controls whether default values are written to TOML
 
 ## Domain Types (`types/`)
 
 - Types are **iced-free** — no UI framework dependencies in the data crate
 - `PagedBuffer<T>`: generic windowed buffer for server-side pagination
 - `HotkeyConfig`: `HashMap<HotkeyAction, KeyCombo>` with `lookup()` for O(1) dispatch
-- `PlayerSettings`: persisted to redb with serde defaults. Fields include: volume, sfx_volume, sound_effects_enabled, visualization_mode, scrobbling_enabled, scrobble_threshold, start_view, stable_viewport, auto_follow_playing, enter_behavior, local_music_path, rounded_mode, nav_layout, nav_display_mode, track_info_display (`TrackInfoDisplay` enum: Off/PlayerBar/TopBar/ProgressTrack), slot_row_height (`SlotRowHeight` enum: Compact/Default/Comfortable/Spacious), opacity_gradient, crossfade_enabled, crossfade_duration_secs, default_playlist_id/name, quick_add_to_playlist, horizontal_volume, volume_normalization, normalization_level (`NormalizationLevel` enum: Quiet/Normal/Loud), strip_show_title/artist/album/format_info (visible fields toggles), strip_click_action (`StripClickAction` enum: GoToQueue/GoToAlbum/GoToArtist/CopyTrackInfo/DoNothing), active_playlist_id/name/comment (persisted across restarts)
+- `PlayerSettings`: persisted to `config.toml` (hot-reloadable) via TOML IO. Fields include: volume, sfx_volume, sound_effects_enabled, visualization_mode, scrobbling_enabled, scrobble_threshold, start_view, stable_viewport, auto_follow_playing, enter_behavior, local_music_path, rounded_mode, nav_layout, nav_display_mode, track_info_display (`TrackInfoDisplay` enum: Off/PlayerBar/TopBar/ProgressTrack), slot_row_height (`SlotRowHeight` enum: Compact/Default/Comfortable/Spacious), opacity_gradient, crossfade_enabled, crossfade_duration_secs, default_playlist_id/name, quick_add_to_playlist, horizontal_volume, volume_normalization, normalization_level (`NormalizationLevel` enum: Quiet/Normal/Loud), strip_show_title/artist/album/format_info (visible fields toggles), strip_click_action (`StripClickAction` enum: GoToQueue/GoToAlbum/GoToArtist/CopyTrackInfo/DoNothing), active_playlist_id/name/comment (persisted across restarts), verbose_config (bool)
+- `TomlSettings`: intermediate struct for TOML parsing — maps `[general]`/`[interface]`/`[playback]` sections
+- `TomlViewSettings`: per-section TOML mappings for theme and visualizer
+- `ViewPreferences`: per-view sort/search persistence
 - `Queue`: lightweight ordering struct — `song_ids`, `order` (play-order array), `current_index`, `current_order`, `queued`, mode flags. Bincode-serialized.
 - `QueueSortMode`: physical sort (no QueueOrder)
 - `PlaylistEditState`: tracks playlist snapshot for dirty detection (name, comment, track order). `is_dirty()`, `is_name_dirty()`, `is_comment_dirty()`.

@@ -13,20 +13,20 @@ CustomAudioEngine
 │   └── RangeHttpReader (range_http_reader.rs) → sparse chunk-cached HTTP Range requests
 ├── AudioRenderer (ring buffers) → Visualizer callback from StreamingSource
 │   └── RodioOutput (shared rodio Mixer) → creates ActiveStream per track
-│       └── StreamingSource (rodio::Source) → lock-free ring buffer → cpal callback
-└── CrossfadePhase state machine: Idle → Active → OutgoingFinished
+│       └── StreamingSource (rodio::Source) → EqProcessor → lock-free ring buffer → pipewire callback
+├── CrossfadePhase state machine: Idle → Active → OutgoingFinished
+└── EqState (eq.rs) → shared atomic gains passed to each StreamingSource
 ```
 
-## Audio Output (rodio/cpal)
+## Audio Output (native PipeWire)
 
-All audio flows through **one cpal stream** via a shared `rodio::Mixer`:
-- `MixerDeviceSink` creates a single `(mixer, queue)` → `DeviceSink`
+All audio flows through **one native PipeWire stream** via a shared `rodio::Mixer`:
+- `SfxEngine` owns the app-wide `ActiveSink` (either `NativePipewire` or `Cpal` fallback)
+- `ActiveSink::NativePipewire(NativePipeWireSink)` runs a dedicated `pw_nokkvi_out` thread with its own PipeWire mainloop
 - Music renderer receives a `Mixer` clone via `set_shared_mixer()`
 - Each track gets an `ActiveStream`: ring buffer (480K samples ≈ 5s at 48kHz stereo) + `StreamingSource` added to mixer
-- `StreamingSource` implements `rodio::Source` (pull model) — cpal callback pulls f32 samples
-- **Perceptual volume curve**: linear 0.0–1.0 input → exponential amplitude (same as rodio's `amplify_normalized()`)
-- Volume applied per-sample with exponential smoothing (~5ms time constant) to avoid crossfade crackle
-- Position tracked via atomic sample counter in `StreamHandle`
+- `StreamingSource` implements `rodio::Source` (pull model) — pipewire callback pulls f32 samples
+- PipeWire stream properties: `MEDIA_ROLE = "Music"`, `MEDIA_NAME = "Nokkvi"`
 
 ## Deadlock Prevention (Critical)
 
@@ -50,15 +50,37 @@ All audio flows through **one cpal stream** via a shared `rodio::Mixer`:
 Audio control logic runs on a dedicated `std::thread` at 20ms intervals (50Hz):
 - Crossfade tick + completion detection
 - Started via `engine.start_render_thread()`, stopped via `engine.stop_render_thread()`
-- Actual audio rendering is done by cpal callback (pulls from ring buffers)
+- Actual audio rendering is done by pipewire callback (pulls from ring buffers)
 
 ## Volume Control
 
-Lock-free via atomic volume on `StreamHandle`:
+Dual-path volume: PipeWire native (preferred) or software fallback.
+
+**PipeWire-native path** (when `pw_volume_active = true`):
 ```
-UI → engine.set_volume() → renderer.set_volume() → stream.set_volume() → AtomicU32
+UI → engine.set_volume() → renderer stores volume (software at 1.0)
+                         → sfx_engine.set_output_volume(v³) → PipeWire channelVolumes via IPC
 ```
-`StreamingSource` reads the atomic per-sample and applies exponential smoothing.
+- Renderer keeps software volume at 1.0 (unity) during normal playback
+- SfxEngine sends cubic volume (`v³`) to PipeWire — system mixer shows `cbrt(v³) = v` matching the slider
+- Crossfade ramps use only the fade coefficient; PipeWire applies user volume uniformly on top
+
+**Software fallback** (when `pw_volume_active = false`):
+```
+UI → engine.set_volume() → renderer.set_volume() → StreamHandle AtomicU32
+```
+- **Perceptual volume curve**: linear 0.0–1.0 input → exponential amplitude
+- Volume applied per-sample with exponential smoothing (~5ms time constant) to avoid crossfade crackle
+- Position tracked via atomic sample counter in `StreamHandle`
+
+## Equalizer
+
+- 10-band graphic equalizer via `data/src/audio/eq.rs`
+- `EqState`: shared atomic gains (`Arc<[AtomicU32; 10]>`) — updated from UI, read by StreamingSource
+- `EqProcessor`: per-stream biquad filter bank (10 bands × 2 channels), processes inline with `StreamingSource::next()`
+- `EqPreset`: built-in presets, `CustomEqPreset`: user-saved name + gains
+- Bands: 31Hz, 62Hz, 125Hz, 250Hz, 500Hz, 1kHz, 2kHz, 4kHz, 8kHz, 16kHz
+- Range: ±15 dB per band — 0 dB = bypass
 
 ## Volume Normalization (AGC)
 
@@ -95,7 +117,7 @@ Two concurrent `ActiveStream` instances on the shared mixer:
    - Both songs must be ≥ `MIN_CROSSFADE_TRACK_MS` (10s) — shorter songs fall back to gapless
    - Effective duration clamped to `min(xfade, shorter_track / 2)` so outgoing track always has real audio for at least half the fade
 3. **Position-based triggering**: `render_tick()` checks `position >= track_duration - crossfade_duration`. Triggered **synchronously** (sets `crossfade_active = true`) then signals engine async
-4. **Blending**: `tick_crossfade()` ramps volumes using equal-power cos²/sin² curves
+4. **Blending**: `tick_crossfade()` ramps volumes using equal-power cos²/sin² curves. When `pw_volume_active`, fade uses only the coefficient (× 1.0); PipeWire applies user volume on top.
 5. **Finalization**: crossfade stream promoted to primary, old primary stopped, decoders swapped
 
 Settings: `crossfade_enabled` (bool) and `crossfade_duration_secs` (u32) in `PlayerSettings`, exposed in Settings → Playback.
@@ -105,10 +127,11 @@ Mode toggles (shuffle/repeat/consume) call `reset_next_track()` to clear any arm
 
 ## Sound Effects Engine (`sfx_engine.rs`)
 
-- Owns the app-wide `MixerDeviceSink` (shared mixer)
-- Polyphonic voice mixing, pre-loaded WAV samples at 48kHz
-- Uses rodio `Decoder` + mixer for SFX playback
-- **Media role is `"Game"`**, not `"Notification"` — avoids WirePlumber ducking
+- Owns the app-wide `ActiveSink` (shared mixer) — `NativePipewire` or `Cpal` fallback
+- Polyphonic voice mixing, pre-loaded WAV samples at 48kHz (bundled + user-customizable from config dir)
+- Uses rodio `SamplesBuffer` + mixer for SFX playback
+- Volume synced to PipeWire via `set_output_volume()` (cubic curve for perceptual match)
+- `has_native_volume()` tells the renderer whether to use PipeWire or software volume
 
 ## Sparse Chunk Cache (Decoder)
 

@@ -103,7 +103,6 @@ These are external repos cloned locally — **not** part of this project:
 | `reference-saxon/` | Saxon (Rust audio player) | Audio playback patterns, player architecture |
 | `reference-wireplumber/` | WirePlumber Rust bindings | PipeWire session management, policy scripting |
 | `reference-mpd/` | MPD (Music Player Daemon) C source | Crossfade behavior, consume/shuffle logic, queue management |
-| `reference-cpal/` | cpal (Cross-Platform Audio Library) | Audio device enumeration, stream creation, sample formats |
 | `reference-rodio/` | rodio audio playback library | Mixer API, source chaining, volume control |
 | `reference-rustfft/` | RustFFT library source | FFT plan creation, threading, performance |
 | `reference-cava/` | CAVA audio visualizer (C) | Spectrum analysis, smoothing algorithms, bar rendering |

@@ -11,7 +11,8 @@ globs: src/widgets/**
 - `is_rounded_mode()` — read anywhere in widget/view code
 - `set_rounded_mode(bool)` — called on startup restore and on settings change
 - `ui_border_radius()` — returns `6.0` when rounded, `0.0` when squared; **use this everywhere instead of hardcoding**
-- `three_d_button.rs` / `three_d_icon_button.rs`: single bordered quad when rounded, original 5-quad 3D bevel when squared. **Pressed scaling animation**: `AnimatedPress` wrapper scales down (e.g. 0.92×) on mouse press with smooth spring-back.
+- `three_d_button.rs` / `three_d_icon_button.rs`: single bordered quad when rounded, original 5-quad 3D bevel when squared. **Pressed scaling animation**: `AnimatedPress` (`three_d_helpers.rs`) wrapper scales down (e.g. 0.92×) on mouse press with smooth spring-back.
+- `three_d_helpers.rs`: shared helpers for 3D-style button widgets — `AnimatedPress` state machine, common styling utilities.
 - **Transparent-border clipping gotcha**: Iced clips a container's background to its border radius **even when the border is transparent and 0px wide**. For full-width strip-style bars that sit flush against the window edge, do **not** set a border radius.
 
 ## Opacity Gradient & Slot Row Height
@@ -104,6 +105,19 @@ globs: src/widgets/**
 - Enabled via `NavLayout::Side` setting
 - `NavDisplayMode` controls content: TextOnly, TextAndIcons, IconsOnly
 - Uses `HoverIndicator` with `HoverExpand` for active tab indicators in icon-only mode
+
+## Modals
+
+- **Equalizer Modal** (`eq_modal.rs`): 10-band graphic equalizer with interactive sliders (`eq_slider.rs`). Uses standard headers. Preset picker, save/load custom presets. See `update/eq_modal.rs` for message handling.
+- **About Modal** (`about_modal.rs`): App metadata and diagnostics, accessible via hamburger menu. See `update/about_modal.rs` for message handling.
+- Both modals are wrapped in an overlay container ensuring SVG icon rendering is correct using `mouse_area`.
+
+## Equalizer Slider (`eq_slider.rs`)
+
+- Custom `iced::advanced` vertical slider for the 10-band EQ
+- Symmetric [-15.0, +15.0] dB range with center detent line at 0 dB
+- 20×180px default size, 14px handle
+- Used exclusively by `eq_modal.rs`
 
 ## Nav Bar (`nav_bar.rs`)
 

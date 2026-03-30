@@ -144,3 +144,9 @@ Each `update/{name}.rs` handles data loading and message routing:
 - **Albums/Artists**: async API fetch via `load_album_songs()` → first song's path → `Message::ShowInFolder`
 - Context menu: `LibraryContextEntry::ShowInFolder` — Songs, Albums, Artists views use `library_entries_with_folder()`
 - Info modal: `FetchAndOpenAlbumFolder(album_id)` message triggers async fetch for albums without a pre-loaded path
+
+## Modals
+
+- **Equalizer Modal**: 10-band graphic equalizer with interactive sliders (`widgets/eq_slider.rs`). Opened via `Q` hotkey or player bar EQ button. Widget: `widgets/eq_modal.rs`, handler: `update/eq_modal.rs`. Built-in presets + user-saved custom presets.
+- **About Modal**: App metadata and diagnostics, accessible via hamburger menu. Widget: `widgets/about_modal.rs`, handler: `update/about_modal.rs`.
+- Both modals are wrapped in an overlay container ensuring SVG icon rendering is correct using `mouse_area`.
