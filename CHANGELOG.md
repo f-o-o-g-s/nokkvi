@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Features
+- **Verbose Configuration** — Introduced a verbose configuration mode that saves even default settings to `config.toml`, guaranteeing total consistency between UI controls and the persistence file.
+- **Configurable Settings Migration** — All user configuration preferences (Playback, Hotkeys, General, Theme, Visualizer) are now entirely hosted in the hot-reloadable `config.toml` file, eliminating reliance on local `redb` state for settings.
+- **Hardware Volume Integration** — Real-time volume synchronization with PipeWire stream channel volumes (`SPA_PROP_channelVolumes`).
+
+### Improvements
+- **Standardized Hotkey Formats** — Upgraded from legacy non-standard Unicode artifacts (e.g., arrows) to formal ASCII identifiers (e.g., `RightArrow`, `UpArrow`) for resilient TOML parity.
+
+---
+
 ## v0.1.1 — 2026-03-29
 
 ### Fixes
