@@ -519,7 +519,17 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
         // Handle + grip in a separate layer so it renders ON TOP of overlay text.
         // (Iced's wgpu renderer renders quads before text within the same layer,
         //  so a new layer is needed to ensure the handle appears above the text.)
-        renderer.with_layer(bounds, |renderer| {
+        //
+        // Expand the clip rect downward so the handle's drop shadow
+        // (offset 2.5 + blur 3.0 = 5.5px below bounds) is not clipped.
+        let shadow_overflow = 6.0; // ceil(2.5 + 3.0)
+        let handle_clip = Rectangle {
+            x: bounds.x,
+            y: bounds.y,
+            width: bounds.width,
+            height: bounds.height + shadow_overflow,
+        };
+        renderer.with_layer(handle_clip, |renderer| {
             // Handle background + borders
             let handle_bounds = Rectangle {
                 x: handle_x,
