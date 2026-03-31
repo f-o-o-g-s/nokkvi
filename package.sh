@@ -46,7 +46,7 @@ fi
 
 # Configuration examples
 cp config.toml.example "${TEMP_DIR}/"
-cp -r example_themes "${TEMP_DIR}/"
+cp -r themes "${TEMP_DIR}/"
 
 # Build/format config
 if [ -f rustfmt.toml ]; then
@@ -96,7 +96,7 @@ echo ""
 echo "🎉 Done! Your friend can now:"
 echo "   1. Extract the zip file: unzip $(basename ${ZIP_FILE})"
 echo "   2. cd into the directory: cd ${PACKAGE_NAME}-${VERSION}"
-echo "   3. Install dependencies (Arch): sudo pacman -S alsa-lib fontconfig pkg-config"
+echo "   3. Install dependencies (Arch): sudo pacman -S pipewire fontconfig pkg-config"
 echo "   4. Build with: cargo build --release"
 echo "   5. Binary will be at: target/release/nokkvi"
 echo "   6. Install desktop entry + icon: ./install.sh"

@@ -2,13 +2,32 @@
 
 ## [Unreleased]
 
+---
+
+## v0.2.0 — 2026-03-31
+
+> **⚠️ Breaking Change:** The configuration architecture has been completely overhauled to use a global `config.toml` file and named theme files. It is highly recommended to delete your existing `~/.config/nokkvi/config.toml` file before running this version to prevent parsing errors and ensure clean defaults.
+
 ### Features
-- **Verbose Configuration** — Introduced a verbose configuration mode that saves even default settings to `config.toml`, guaranteeing total consistency between UI controls and the persistence file.
-- **Configurable Settings Migration** — All user configuration preferences (Playback, Hotkeys, General, Theme, Visualizer) are now entirely hosted in the hot-reloadable `config.toml` file, eliminating reliance on local `redb` state for settings.
-- **Hardware Volume Integration** — Real-time volume synchronization with PipeWire stream channel volumes (`SPA_PROP_channelVolumes`).
+- **Verbose Configuration** — introduced a verbose configuration mode that saves even default settings to `config.toml`, guaranteeing total consistency between UI controls and the persistence file.
+- **Configurable Settings Migration** — all user configuration preferences (Playback, Hotkeys, General, Theme, Visualizer) are now entirely hosted in the hot-reloadable `config.toml` file, eliminating reliance on local `redb` state for settings.
+- **Hardware Volume Integration** — real-time volume synchronization with PipeWire stream channel volumes (`SPA_PROP_channelVolumes`).
+- **Named Theme System** — migrated to named TOML file themes (`~/.config/nokkvi/themes/`) for robust theme management and live configuration reloading.
+- **Queue Album Column** — the queue view now always shows the album column for better context during playback.
+
+### Fixes
+- **Settings color editors** — editing color fields intuitively applies the hex code on "Enter" without needing a secondary confirmation click.
+- **Visualizer hot-reload** — visualizer settings such as "fill opacity" and "noise reduction" now hot-reload instantly.
+- **Theme default restoration** — "Restore Defaults" now correctly pulls values specific to the active named theme instead of global application defaults.
+- **Equalizer flat mode** — flat presets now synchronize with the EQ's global toggle state, rather than fighting it.
+- **Progress bar rendering** — expanded the render clip bounds so the progress bar thumb handle no longer cuts off at the bottom.
+- **Font picker** — selecting a new font now instantly hot-reloads the application without requiring a restart.
+- **Float serialization noise** — floating-point values are now clipped to 4 decimal places when serialized to `config.toml`.
 
 ### Improvements
-- **Standardized Hotkey Formats** — Upgraded from legacy non-standard Unicode artifacts (e.g., arrows) to formal ASCII identifiers (e.g., `RightArrow`, `UpArrow`) for resilient TOML parity.
+- **Standardized Hotkey Formats** — upgraded from legacy non-standard Unicode artifacts (e.g., arrows) to formal ASCII identifiers (e.g., `RightArrow`, `UpArrow`) for resilient TOML parity.
+- **Equalizer UX** — removed the redundant 'Flat' preset and implemented auto-enable logic when selecting any non-flat preset.
+- **Performance & Linting** — significant codebase auditing to resolve clippy lints, remove dead code, and improve DRY architecture.
 
 ---
 
