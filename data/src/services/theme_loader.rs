@@ -70,8 +70,13 @@ const BUILTIN_THEMES: &[BuiltinTheme] = &[
 ];
 
 /// Lazy map from stem → TOML content for O(1) lookup.
-fn builtin_registry() -> HashMap<&'static str, &'static str> {
-    BUILTIN_THEMES.iter().map(|t| (t.stem, t.content)).collect()
+/// Built once (on first access) via `LazyLock` to avoid reconstructing the
+/// `HashMap` every time `load_builtin_theme()` or `discover_themes()` is called.
+fn builtin_registry() -> &'static HashMap<&'static str, &'static str> {
+    use std::sync::LazyLock;
+    static REGISTRY: LazyLock<HashMap<&'static str, &'static str>> =
+        LazyLock::new(|| BUILTIN_THEMES.iter().map(|t| (t.stem, t.content)).collect());
+    &REGISTRY
 }
 
 // ============================================================================

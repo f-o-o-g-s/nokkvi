@@ -44,6 +44,19 @@ impl Nokkvi {
             Task::none()
         }
     }
+
+    /// Reload the visualizer config from disk and apply it to the live engine.
+    /// Used after any visualizer TOML write to keep the UI and audio in sync.
+    pub(crate) fn reload_visualizer_config(&mut self) {
+        if let Ok(new_config) = crate::visualizer_config::load_visualizer_config() {
+            *self.visualizer_config.write() = new_config;
+            self.settings_page.config_dirty = true;
+            if let Some(ref vis) = self.visualizer {
+                vis.apply_config();
+            }
+        }
+    }
+
     pub(crate) fn handle_settings(&mut self, msg: crate::views::SettingsMessage) -> Task<Message> {
         use crate::views::SettingsMessage;
 
@@ -171,13 +184,7 @@ impl Nokkvi {
                     crate::theme::reload_theme();
                     self.settings_page.config_dirty = true;
                 } else {
-                    if let Ok(new_config) = crate::visualizer_config::load_visualizer_config() {
-                        *self.visualizer_config.write() = new_config;
-                        self.settings_page.config_dirty = true;
-                        if let Some(ref vis) = self.visualizer {
-                            vis.apply_config();
-                        }
-                    }
+                    self.reload_visualizer_config();
                 }
                 Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
             }
@@ -316,14 +323,8 @@ impl Nokkvi {
         {
             tracing::warn!(" [SETTINGS] Failed to write config: {e}");
             self.toast_warn(format!("Failed to save setting: {e}"));
-        } else if key.starts_with("visualizer.")
-            && let Ok(new_config) = crate::visualizer_config::load_visualizer_config()
-        {
-            *self.visualizer_config.write() = new_config;
-            self.settings_page.config_dirty = true;
-            if let Some(ref vis) = self.visualizer {
-                vis.apply_config();
-            }
+        } else if key.starts_with("visualizer.") {
+            self.reload_visualizer_config();
         }
         // Mutual exclusivity: waves and monstercat can't both be active.
         // When one is enabled, auto-disable the other in config AND update the

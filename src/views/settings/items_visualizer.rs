@@ -90,8 +90,8 @@ pub(crate) fn build_visualizer_items(
     active_stem: &str,
 ) -> Vec<SettingsEntry> {
     let d = VisualizerConfig::default();
-    let dt = nokkvi_data::services::theme_loader::load_builtin_theme(active_stem)
-        .unwrap_or_else(ThemeFile::default);
+    let dt =
+        nokkvi_data::services::theme_loader::load_builtin_theme(active_stem).unwrap_or_default();
     const S: &str = "assets/icons/sliders-horizontal.svg";
     const B: &str = "assets/icons/audio-lines.svg";
     const P: &str = "assets/icons/palette.svg";

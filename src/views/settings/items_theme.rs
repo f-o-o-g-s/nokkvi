@@ -32,8 +32,8 @@ pub(crate) fn build_theme_items(
     let palette_prefix = if is_light { "light" } else { "dark" };
     let palette_label = if is_light { "Light" } else { "Dark" };
     let palette = if is_light { &theme.light } else { &theme.dark };
-    let defaults = nokkvi_data::services::theme_loader::load_builtin_theme(active_stem)
-        .unwrap_or_else(ThemeFile::default);
+    let defaults =
+        nokkvi_data::services::theme_loader::load_builtin_theme(active_stem).unwrap_or_default();
     let default_palette = if is_light {
         &defaults.light
     } else {
