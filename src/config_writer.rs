@@ -48,6 +48,70 @@ pub(crate) fn update_config_value(
     write_atomic(&config_path, &doc.to_string())
 }
 
+/// Update a single value in the active theme file, preserving all other content.
+///
+/// Reads `theme = "name"` from config.toml, resolves the path
+/// `~/.config/nokkvi/themes/{name}.toml`, and edits in-place.
+pub(crate) fn update_theme_value(toml_key: &str, value: &SettingValue) -> Result<()> {
+    let theme_path = get_active_theme_path()?;
+
+    let content =
+        std::fs::read_to_string(&theme_path).context("Failed to read active theme file")?;
+
+    let mut doc: DocumentMut = content
+        .parse::<DocumentMut>()
+        .context("Failed to parse theme file as TOML")?;
+
+    set_dotted_value(&mut doc, toml_key, value, None)?;
+
+    debug!(" [CONFIG WRITER] Updated {toml_key} in theme file");
+
+    write_atomic(&theme_path, &doc.to_string())
+}
+
+/// Update a color in a color array at a specific index inside the active theme file.
+pub(crate) fn update_theme_color_array_entry(
+    toml_key: &str,
+    index: usize,
+    hex_color: &str,
+) -> Result<()> {
+    let theme_path = get_active_theme_path()?;
+
+    let content =
+        std::fs::read_to_string(&theme_path).context("Failed to read active theme file")?;
+
+    let mut doc: DocumentMut = content
+        .parse::<DocumentMut>()
+        .context("Failed to parse theme file as TOML")?;
+
+    let parts: Vec<&str> = toml_key.split('.').collect();
+    let item = navigate_to_item_mut(&mut doc, &parts)?;
+
+    if let Some(arr) = item.as_array_mut() {
+        if index < arr.len() {
+            arr.replace(index, hex_color);
+            debug!(" [CONFIG WRITER] Updated {toml_key}[{index}] = {hex_color} in theme file");
+        } else {
+            anyhow::bail!(
+                "Index {index} out of bounds for array {toml_key} (len={})",
+                arr.len()
+            );
+        }
+    } else {
+        anyhow::bail!("{toml_key} is not an array");
+    }
+
+    write_atomic(&theme_path, &doc.to_string())
+}
+
+/// Resolve the filesystem path to the active theme file.
+fn get_active_theme_path() -> Result<std::path::PathBuf> {
+    let name = nokkvi_data::services::theme_loader::read_theme_name_from_config();
+    let themes_dir =
+        nokkvi_data::utils::paths::get_themes_dir().context("Failed to get themes dir")?;
+    Ok(themes_dir.join(format!("{name}.toml")))
+}
+
 /// Update a color in a color array at a specific index.
 ///
 /// e.g. `update_color_array_entry("visualizer.bars.dark.bar_gradient_colors", 2, "#ff0000")`
@@ -264,12 +328,13 @@ pub(crate) fn reset_visualizer_defaults_preserving_colors() -> Result<()> {
     write_atomic(&config_path, &doc.to_string())
 }
 
-/// Write full `[theme]` and `[visualizer]` sections to config.toml,
-/// replacing them with a complete serialization of all fields (including defaults).
+/// Write full `[visualizer]` section to config.toml,
+/// replacing it with a complete serialization of all behavior fields (excluding colors,
+/// which now live in theme files).
 ///
 /// Used when verbose_config mode is enabled so the user sees every configurable
 /// value in config.toml as a human-readable template.
-pub(crate) fn write_full_theme_and_visualizer(
+pub(crate) fn write_full_visualizer(
     visualizer_config: &crate::visualizer_config::VisualizerConfig,
 ) -> Result<()> {
     let config_path =
@@ -285,28 +350,36 @@ pub(crate) fn write_full_theme_and_visualizer(
         .parse::<DocumentMut>()
         .context("Failed to parse config.toml as TOML")?;
 
-    // Serialize full theme with all current values (including defaults for unspecified fields)
-    let current_theme = crate::theme_config::load_dual_theme_config();
-    let theme_toml =
-        toml::to_string_pretty(&current_theme).context("Failed to serialize DualThemeConfig")?;
-    let theme_doc: DocumentMut = theme_toml
-        .parse::<DocumentMut>()
-        .context("Failed to re-parse [theme] as toml_edit")?;
-    doc.insert("theme", Item::Table(theme_doc.as_table().clone()));
-
     // Serialize full visualizer config with current values
     let viz_toml = toml::to_string_pretty(visualizer_config)
         .context("Failed to serialize VisualizerConfig")?;
-    let viz_doc: DocumentMut = viz_toml
+    let mut viz_doc: DocumentMut = viz_toml
         .parse::<DocumentMut>()
         .context("Failed to re-parse [visualizer] as toml_edit")?;
+
+    // Strip color sub-tables — those live in theme files now
+    strip_color_subtables(&mut viz_doc);
+
     doc.insert("visualizer", Item::Table(viz_doc.as_table().clone()));
 
-    debug!(" [CONFIG WRITER] Wrote full [theme] + [visualizer] (verbose mode)");
+    debug!(" [CONFIG WRITER] Wrote full [visualizer] (verbose mode)");
     write_atomic(&config_path, &doc.to_string())
 }
 
-/// Strip `[theme]` and `[visualizer]` sections back to sparse mode by removing
+/// Strip dark/light color sub-tables from a visualizer document.
+/// These now live in theme files, not config.toml.
+fn strip_color_subtables(doc: &mut DocumentMut) {
+    for section in ["bars", "lines"] {
+        if let Some(s) = doc.get_mut(section)
+            && let Some(tbl) = s.as_table_like_mut()
+        {
+            tbl.remove("dark");
+            tbl.remove("light");
+        }
+    }
+}
+
+/// Strip `[visualizer]` section back to sparse mode by removing
 /// keys whose values match the default configuration.
 ///
 /// Used when verbose_config mode is disabled to clean up the config file.
@@ -324,29 +397,26 @@ pub(crate) fn strip_to_sparse() -> Result<()> {
         .parse::<DocumentMut>()
         .context("Failed to parse config.toml as TOML")?;
 
-    // Build default reference documents
-    let default_theme = crate::theme_config::DualThemeConfig::default();
+    // Build default reference for visualizer (no theme — theme is separate files)
     let default_viz = crate::visualizer_config::VisualizerConfig::default();
 
-    let theme_default_toml =
-        toml::to_string_pretty(&default_theme).context("Failed to serialize default theme")?;
     let viz_default_toml =
         toml::to_string_pretty(&default_viz).context("Failed to serialize default visualizer")?;
 
-    let theme_default_doc: DocumentMut = theme_default_toml
-        .parse::<DocumentMut>()
-        .context("Failed to parse default theme")?;
     let viz_default_doc: DocumentMut = viz_default_toml
         .parse::<DocumentMut>()
         .context("Failed to parse default visualizer")?;
 
-    // Strip matching keys from [theme]
-    strip_matching_keys(&mut doc, "theme", theme_default_doc.as_table());
-
     // Strip matching keys from [visualizer]
     strip_matching_keys(&mut doc, "visualizer", viz_default_doc.as_table());
 
-    debug!(" [CONFIG WRITER] Stripped [theme] + [visualizer] to sparse (verbose off)");
+    // Also remove any leftover [theme] section (themes now live in separate files)
+    if doc.contains_key("theme") {
+        doc.remove("theme");
+        debug!(" [CONFIG WRITER] Removed leftover [theme] section from config.toml");
+    }
+
+    debug!(" [CONFIG WRITER] Stripped [visualizer] to sparse (verbose off)");
     write_atomic(&config_path, &doc.to_string())
 }
 

@@ -1,0 +1,110 @@
+name = "Catppuccin"
+font_family = ""
+
+[dark.background]
+default = "#1e1e2e"
+hard = "#11111b"
+level1 = "#313244"
+level2 = "#45475a"
+level3 = "#585b70"
+level4 = "#6c7086"
+soft = "#181825"
+
+[dark.foreground]
+bright = "#cdd6f4"
+gray = "#6c7086"
+level1 = "#cdd6f4"
+level2 = "#bac2de"
+level3 = "#a6adc8"
+level4 = "#9399b2"
+
+[dark.accent]
+border_dark = "#b4befe"
+border_light = "#cdd6f4"
+bright = "#cdd6f4"
+primary = "#b4befe"
+
+[dark.red]
+bright = "#f38ba8"
+normal = "#ed8796"
+
+[dark.green]
+bright = "#a6e3a1"
+normal = "#a6da95"
+
+[dark.yellow]
+bright = "#f9e2af"
+normal = "#eed49f"
+
+[dark.purple]
+bright = "#cba6f7"
+normal = "#c6a0f6"
+
+[dark.aqua]
+bright = "#94e2d5"
+normal = "#8bd5ca"
+
+[dark.orange]
+bright = "#fab387"
+normal = "#f5a97f"
+
+[dark.visualizer]
+bar_gradient_colors = ["#b4befe", "#b4befe", "#f5c2e7", "#f5c2e7", "#74c7ec", "#74c7ec"]
+border_color = "#11111b"
+border_opacity = 1.0
+led_border_opacity = 1.0
+peak_gradient_colors = ["#f9e2af", "#f9e2af", "#fab387", "#fab387", "#fab387", "#fab387"]
+
+[light.background]
+default = "#e6e9ef"
+hard = "#dce0e8"
+level1 = "#ccd0da"
+level2 = "#bcc0cc"
+level3 = "#acb0be"
+level4 = "#9ca0b0"
+soft = "#eff1f5"
+
+[light.foreground]
+bright = "#4c4f69"
+gray = "#9ca0b0"
+level1 = "#4c4f69"
+level2 = "#5c5f77"
+level3 = "#6c6f85"
+level4 = "#7c7f93"
+
+[light.accent]
+border_dark = "#5c5f77"
+border_light = "#bcc0cc"
+bright = "#7287fd"
+primary = "#7287fd"
+
+[light.red]
+bright = "#d20f39"
+normal = "#d20f39"
+
+[light.green]
+bright = "#40a02b"
+normal = "#40a02b"
+
+[light.yellow]
+bright = "#df8e1d"
+normal = "#df8e1d"
+
+[light.purple]
+bright = "#8839ef"
+normal = "#8839ef"
+
+[light.aqua]
+bright = "#179299"
+normal = "#209fb5"
+
+[light.orange]
+bright = "#fe640b"
+normal = "#fe640b"
+
+[light.visualizer]
+bar_gradient_colors = ["#7287fd", "#7287fd", "#ea76cb", "#ea76cb", "#209fb5", "#209fb5"]
+border_color = "#eff1f5"
+border_opacity = 0.0
+led_border_opacity = 0.0
+peak_gradient_colors = ["#df8e1d", "#df8e1d", "#fe640b", "#fe640b", "#fe640b", "#fe640b"]

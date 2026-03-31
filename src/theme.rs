@@ -1,8 +1,7 @@
-//! Gruvbox Dark/Light theme colors and styling helpers
-//! Colors from: https://github.com/morhetz/gruvbox
+//! Theme colors and styling helpers
 //!
-//! This module provides centralized color definitions matching the Slint/QML reference implementations.
-//! Colors are loaded from config.toml at startup. Light/dark mode can be toggled at runtime.
+//! Colors are loaded from named theme files at `~/.config/nokkvi/themes/`.
+//! Light/dark mode can be toggled at runtime.
 //!
 //! All color accessors are functions (not statics) so they react to hot-reload via `reload_theme()`.
 
@@ -12,18 +11,32 @@ use std::sync::{
 };
 
 use iced::{Color, Font};
+use nokkvi_data::types::theme_file::{ThemeFile, VisualizerColors};
 use parking_lot::RwLock;
 use tracing::debug;
 
-use crate::theme_config::{ResolvedDualTheme, ResolvedTheme, load_resolved_dual_theme};
+use crate::theme_config::{
+    ResolvedDualTheme, ResolvedTheme, load_active_theme_file, load_resolved_dual_theme,
+};
 
 // ============================================================================
-// LazyLock Theme Loading (with hot-reload support via RwLock)
+// Global theme state (with hot-reload support via RwLock)
 // ============================================================================
 
-/// Global resolved dual theme (can be reloaded at runtime)
-static DUAL_THEME: LazyLock<RwLock<ResolvedDualTheme>> =
-    LazyLock::new(|| RwLock::new(load_resolved_dual_theme()));
+/// Global resolved dual theme — parsed `iced::Color` values for rendering.
+static DUAL_THEME: LazyLock<RwLock<ResolvedDualTheme>> = LazyLock::new(|| {
+    // Seed any missing built-in themes to ~/.config/nokkvi/themes/ on first access
+    if let Err(e) = nokkvi_data::services::theme_loader::seed_builtin_themes() {
+        tracing::warn!("Failed to seed built-in themes: {e}");
+    }
+    RwLock::new(load_resolved_dual_theme())
+});
+
+/// Global raw theme file — hex strings for visualizer colors and UI that
+/// needs the original color values (not parsed `iced::Color`).
+static THEME_FILE: LazyLock<RwLock<ThemeFile>> = LazyLock::new(|| {
+    RwLock::new(load_active_theme_file())
+});
 
 // ============================================================================
 // UI Mode Flags (grouped to avoid scattered statics)
@@ -76,13 +89,34 @@ static UI_MODE: UiModeFlags = UiModeFlags {
     strip_click_action: AtomicU8::new(0), // GoToQueue
 };
 
-/// Reload theme from config.toml (hot-reload support)
-/// Call this when config file changes to update colors without restart
+/// Reload theme from theme file (hot-reload support).
+/// Call this when the theme file or `theme` key in config.toml changes.
 pub(crate) fn reload_theme() {
-    let new_theme = load_resolved_dual_theme();
-    let mut theme = DUAL_THEME.write();
-    *theme = new_theme;
-    debug!(" Theme hot-reloaded from config.toml");
+    let new_file = load_active_theme_file();
+    let new_resolved = ResolvedDualTheme::from_theme_file(&new_file);
+
+    {
+        let mut theme = DUAL_THEME.write();
+        *theme = new_resolved;
+    }
+    {
+        let mut file = THEME_FILE.write();
+        *file = new_file;
+    }
+
+    debug!(" Theme hot-reloaded from theme file");
+}
+
+/// Get the active mode's visualizer colors (hex strings).
+/// Returns a clone — safe to call from the render loop.
+#[inline]
+pub(crate) fn get_visualizer_colors() -> VisualizerColors {
+    let guard = THEME_FILE.read();
+    if is_light_mode() {
+        guard.light.visualizer.clone()
+    } else {
+        guard.dark.visualizer.clone()
+    }
 }
 
 /// Get a clone of current theme based on light mode

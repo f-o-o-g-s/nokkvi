@@ -372,10 +372,11 @@ impl Visualizer {
     pub fn view<'a, Message: 'a>(&self) -> Element<'a, Message> {
         use iced::widget::shader;
 
-        // Read bar config from shared config for hot-reload support
-        // All bar settings are now under cfg.bars, with colors from cfg.bars.get_active_colors()
+        // Read behavior config from shared config (hot-reload from config.toml)
+        // Colors now come from the theme system (not config.toml)
         let cfg = self.config.read();
-        let colors = cfg.bars.get_active_colors();
+        let colors: crate::visualizer_config::ThemeBarColors =
+            crate::theme::get_visualizer_colors().into();
         let (
             border_width,
             led_bars,

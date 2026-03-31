@@ -1,0 +1,110 @@
+name = "Kanagawa"
+font_family = ""
+
+[dark.background]
+default = "#1F1F28"
+hard = "#16161D"
+level1 = "#2A2A37"
+level2 = "#363646"
+level3 = "#54546D"
+level4 = "#727169"
+soft = "#1F1F28"
+
+[dark.foreground]
+bright = "#DCD7BA"
+gray = "#727169"
+level1 = "#DCD7BA"
+level2 = "#C8C093"
+level3 = "#9CABCA"
+level4 = "#938AA9"
+
+[dark.accent]
+border_dark = "#658594"
+border_light = "#7E9CD8"
+bright = "#7E9CD8"
+primary = "#7E9CD8"
+
+[dark.red]
+bright = "#FF5D62"
+normal = "#E46876"
+
+[dark.green]
+bright = "#98BB6C"
+normal = "#76946A"
+
+[dark.yellow]
+bright = "#E6C384"
+normal = "#C0A36E"
+
+[dark.purple]
+bright = "#957FB8"
+normal = "#957FB8"
+
+[dark.aqua]
+bright = "#7AA89F"
+normal = "#6A9589"
+
+[dark.orange]
+bright = "#FFA066"
+normal = "#DCA561"
+
+[dark.visualizer]
+bar_gradient_colors = ["#7E9CD8", "#7E9CD8", "#7FB4CA", "#7FB4CA", "#7AA89F", "#6A9589"]
+border_color = "#16161D"
+border_opacity = 1.0
+led_border_opacity = 1.0
+peak_gradient_colors = ["#E6C384", "#E6C384", "#FFA066", "#FFA066", "#FF5D62", "#E46876"]
+
+[light.background]
+default = "#f2ecbc"
+hard = "#e5ddb0"
+level1 = "#e7dba0"
+level2 = "#d5cea3"
+level3 = "#c9c19e"
+level4 = "#b5ada4"
+soft = "#f9f3c3"
+
+[light.foreground]
+bright = "#545464"
+gray = "#8a8980"
+level1 = "#545464"
+level2 = "#5d5d5d"
+level3 = "#716e61"
+level4 = "#8a8980"
+
+[light.accent]
+border_dark = "#4d699b"
+border_light = "#c8c8c8"
+bright = "#4d699b"
+primary = "#4d699b"
+
+[light.red]
+bright = "#d7474b"
+normal = "#c84053"
+
+[light.green]
+bright = "#6f894e"
+normal = "#6f894e"
+
+[light.yellow]
+bright = "#de9800"
+normal = "#a07400"
+
+[light.purple]
+bright = "#b35b79"
+normal = "#8a4f7d"
+
+[light.aqua]
+bright = "#6693bf"
+normal = "#597b8c"
+
+[light.orange]
+bright = "#e98a00"
+normal = "#cc6d00"
+
+[light.visualizer]
+bar_gradient_colors = ["#4d699b", "#4d699b", "#597b8c", "#597b8c", "#6693bf", "#6693bf"]
+border_color = "#f9f3c3"
+border_opacity = 0.0
+led_border_opacity = 0.0
+peak_gradient_colors = ["#a07400", "#a07400", "#cc6d00", "#cc6d00", "#c84053", "#c84053"]

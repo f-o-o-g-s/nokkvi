@@ -49,7 +49,8 @@ impl SettingsPage {
         match tab {
             SettingsTab::Visualizer => items::build_visualizer_items(&data.visualizer_config),
             SettingsTab::Theme => items::build_theme_items(
-                &data.theme_config,
+                &data.theme_file,
+                &data.active_theme_stem,
                 data.rounded_mode,
                 data.opacity_gradient,
                 data.is_light_mode,

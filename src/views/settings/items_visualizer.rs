@@ -365,29 +365,34 @@ pub(crate) fn build_visualizer_items(config: &VisualizerConfig) -> Vec<SettingsE
     ));
 
     // --- Bar Colors (Dark) ---
+    // These keys are theme-file-relative — they write to the active theme file,
+    // not config.toml. The handler routes them via update_theme_value().
+    let theme = crate::theme_config::load_active_theme_file();
+    let dt = nokkvi_data::types::theme_file::ThemeFile::default();
+
     e.push(SettingsEntry::Header {
         label: "Bar Colors (Dark)",
         icon: P,
     });
     e.push(SettingItem::hex_color(
         meta!(
-            "visualizer.bars.dark.border_color",
+            "dark.visualizer.border_color",
             "Border Color",
             "Bar Colors (Dark)",
             "Color of bar borders and LED gaps"
         ),
-        &config.bars.dark.border_color,
-        &d.bars.dark.border_color,
+        &theme.dark.visualizer.border_color,
+        &dt.dark.visualizer.border_color,
     ));
     e.push(SettingItem::float(
         meta!(
-            "visualizer.bars.dark.border_opacity",
+            "dark.visualizer.border_opacity",
             "Border Opacity",
             "Bar Colors (Dark)",
             "Transparency of bar outlines in non-LED mode"
         ),
-        config.bars.dark.border_opacity as f64,
-        d.bars.dark.border_opacity as f64,
+        theme.dark.visualizer.border_opacity as f64,
+        dt.dark.visualizer.border_opacity as f64,
         0.0,
         1.0,
         0.1,
@@ -395,13 +400,13 @@ pub(crate) fn build_visualizer_items(config: &VisualizerConfig) -> Vec<SettingsE
     ));
     e.push(SettingItem::float(
         meta!(
-            "visualizer.bars.dark.led_border_opacity",
+            "dark.visualizer.led_border_opacity",
             "LED Border Opacity",
             "Bar Colors (Dark)",
             "Opacity of gaps between LED segments"
         ),
-        config.bars.dark.led_border_opacity as f64,
-        d.bars.dark.led_border_opacity as f64,
+        theme.dark.visualizer.led_border_opacity as f64,
+        dt.dark.visualizer.led_border_opacity as f64,
         0.0,
         1.0,
         0.1,
@@ -409,23 +414,23 @@ pub(crate) fn build_visualizer_items(config: &VisualizerConfig) -> Vec<SettingsE
     ));
     e.push(SettingItem::color_array(
         meta!(
-            "visualizer.bars.dark.bar_gradient_colors",
+            "dark.visualizer.bar_gradient_colors",
             "Bar Gradient",
             "Bar Colors (Dark)",
             "6 colors from low to high frequency"
         ),
-        config.bars.dark.bar_gradient_colors.clone(),
-        d.bars.dark.bar_gradient_colors.clone(),
+        theme.dark.visualizer.bar_gradient_colors.clone(),
+        dt.dark.visualizer.bar_gradient_colors.clone(),
     ));
     e.push(SettingItem::color_array(
         meta!(
-            "visualizer.bars.dark.peak_gradient_colors",
+            "dark.visualizer.peak_gradient_colors",
             "Peak Gradient",
             "Bar Colors (Dark)",
             "6 colors cycling for peak indicators"
         ),
-        config.bars.dark.peak_gradient_colors.clone(),
-        d.bars.dark.peak_gradient_colors.clone(),
+        theme.dark.visualizer.peak_gradient_colors.clone(),
+        dt.dark.visualizer.peak_gradient_colors.clone(),
     ));
 
     // --- Bar Colors (Light) ---
@@ -435,23 +440,23 @@ pub(crate) fn build_visualizer_items(config: &VisualizerConfig) -> Vec<SettingsE
     });
     e.push(SettingItem::hex_color(
         meta!(
-            "visualizer.bars.light.border_color",
+            "light.visualizer.border_color",
             "Border Color",
             "Bar Colors (Light)",
             "Color of bar borders and LED gaps"
         ),
-        &config.bars.light.border_color,
-        &d.bars.light.border_color,
+        &theme.light.visualizer.border_color,
+        &dt.light.visualizer.border_color,
     ));
     e.push(SettingItem::float(
         meta!(
-            "visualizer.bars.light.border_opacity",
+            "light.visualizer.border_opacity",
             "Border Opacity",
             "Bar Colors (Light)",
             "Transparency of bar outlines in non-LED mode"
         ),
-        config.bars.light.border_opacity as f64,
-        d.bars.light.border_opacity as f64,
+        theme.light.visualizer.border_opacity as f64,
+        dt.light.visualizer.border_opacity as f64,
         0.0,
         1.0,
         0.1,
@@ -459,13 +464,13 @@ pub(crate) fn build_visualizer_items(config: &VisualizerConfig) -> Vec<SettingsE
     ));
     e.push(SettingItem::float(
         meta!(
-            "visualizer.bars.light.led_border_opacity",
+            "light.visualizer.led_border_opacity",
             "LED Border Opacity",
             "Bar Colors (Light)",
             "Opacity of gaps between LED segments"
         ),
-        config.bars.light.led_border_opacity as f64,
-        d.bars.light.led_border_opacity as f64,
+        theme.light.visualizer.led_border_opacity as f64,
+        dt.light.visualizer.led_border_opacity as f64,
         0.0,
         1.0,
         0.1,
@@ -473,23 +478,23 @@ pub(crate) fn build_visualizer_items(config: &VisualizerConfig) -> Vec<SettingsE
     ));
     e.push(SettingItem::color_array(
         meta!(
-            "visualizer.bars.light.bar_gradient_colors",
+            "light.visualizer.bar_gradient_colors",
             "Bar Gradient",
             "Bar Colors (Light)",
             "6 colors from low to high frequency"
         ),
-        config.bars.light.bar_gradient_colors.clone(),
-        d.bars.light.bar_gradient_colors.clone(),
+        theme.light.visualizer.bar_gradient_colors.clone(),
+        dt.light.visualizer.bar_gradient_colors.clone(),
     ));
     e.push(SettingItem::color_array(
         meta!(
-            "visualizer.bars.light.peak_gradient_colors",
+            "light.visualizer.peak_gradient_colors",
             "Peak Gradient",
             "Bar Colors (Light)",
             "6 colors cycling for peak indicators"
         ),
-        config.bars.light.peak_gradient_colors.clone(),
-        d.bars.light.peak_gradient_colors.clone(),
+        theme.light.visualizer.peak_gradient_colors.clone(),
+        dt.light.visualizer.peak_gradient_colors.clone(),
     ));
 
     // --- Lines section ---

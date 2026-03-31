@@ -89,12 +89,15 @@ impl Nokkvi {
             return Task::none();
         }
 
-        // Full path: build SettingsViewData (reads config.toml from disk)
+        // Full path: build SettingsViewData (reads from theme system + config.toml)
         let viz_config = self.visualizer_config.read().clone();
-        let theme_config = crate::theme_config::load_dual_theme_config();
+        let theme_file = crate::theme_config::load_active_theme_file();
+        let active_theme_stem =
+            nokkvi_data::services::theme_loader::read_theme_name_from_config();
         let data = crate::views::SettingsViewData {
             visualizer_config: viz_config,
-            theme_config,
+            theme_file,
+            active_theme_stem,
             window_height: self.window.height,
             hotkey_config: self.hotkey_config.clone(),
             server_url: self.login_page.server_url.clone(),
@@ -157,32 +160,54 @@ impl Nokkvi {
                 index,
                 hex_color,
             } => {
-                if let Err(e) =
+                let is_theme_key = key.starts_with("dark.") || key.starts_with("light.");
+                let result = if is_theme_key {
+                    crate::config_writer::update_theme_color_array_entry(&key, index, &hex_color)
+                } else {
                     crate::config_writer::update_color_array_entry(&key, index, &hex_color)
-                {
+                };
+                if let Err(e) = result {
                     tracing::warn!(" [SETTINGS] Failed to write color entry: {e}");
-                }
-                Task::none()
-            }
-            crate::views::SettingsAction::ApplyPreset(preset_index) => {
-                let presets = crate::views::settings::presets::all_presets();
-                if let Some(preset) = presets.get(preset_index) {
-                    if let Err(e) = crate::views::settings::presets::apply_preset(preset) {
-                        tracing::warn!(" [SETTINGS] Failed to apply preset '{}': {e}", preset.name);
-                        self.toast_warn(format!("Failed to apply preset '{}': {e}", preset.name));
-                    } else {
-                        tracing::info!(" [SETTINGS] Applied preset: {}", preset.name);
-                        self.toast_success(format!("Applied preset: {}", preset.name));
+                } else if is_theme_key {
+                    crate::theme::reload_theme();
+                    self.settings_page.config_dirty = true;
+                } else {
+                    if let Ok(new_config) = crate::visualizer_config::load_visualizer_config() {
+                        *self.visualizer_config.write() = new_config;
+                        self.settings_page.config_dirty = true;
                     }
                 }
-                Task::none()
+                Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
+            }
+            crate::views::SettingsAction::ApplyPreset(preset_index) => {
+                let themes = crate::views::settings::presets::all_themes();
+                if let Some(info) = themes.get(preset_index) {
+                    if let Err(e) = crate::views::settings::presets::apply_theme(&info.stem) {
+                        tracing::warn!(
+                            " [SETTINGS] Failed to apply theme '{}': {e}",
+                            info.display_name
+                        );
+                        self.toast_warn(format!(
+                            "Failed to apply theme '{}': {e}",
+                            info.display_name
+                        ));
+                    } else {
+                        tracing::info!(" [SETTINGS] Applied theme: {}", info.display_name);
+                        // Reload theme immediately (watcher suppresses internal writes)
+                        crate::theme::reload_theme();
+                        self.settings_page.config_dirty = true;
+                        self.toast_success(format!("Applied theme: {}", info.display_name));
+                    }
+                }
+                Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
             }
             crate::views::SettingsAction::RestoreColorGroup { entries } => {
                 self.sfx_engine.play(nokkvi_data::audio::SfxType::Backspace);
                 for (key, default_hex) in &entries {
                     let value =
                         crate::views::settings::items::SettingValue::HexColor(default_hex.clone());
-                    if let Err(e) = crate::config_writer::update_config_value(key, &value, None) {
+                    // Color keys are theme-file-relative (e.g. dark.background.hard)
+                    if let Err(e) = crate::config_writer::update_theme_value(key, &value) {
                         tracing::warn!(" [SETTINGS] Failed to restore default for {key}: {e}");
                     }
                 }
@@ -191,9 +216,8 @@ impl Nokkvi {
             crate::views::SettingsAction::WriteFontFamily(family) => {
                 self.sfx_engine.play(nokkvi_data::audio::SfxType::Backspace);
                 let value = crate::views::settings::items::SettingValue::Text(family);
-                if let Err(e) =
-                    crate::config_writer::update_config_value("theme.font.family", &value, None)
-                {
+                // Font family lives in the theme file
+                if let Err(e) = crate::config_writer::update_theme_value("font_family", &value) {
                     tracing::warn!(" [SETTINGS] Failed to write font family: {e}");
                 }
                 // Explicitly reload theme so the font change takes effect immediately.
@@ -270,11 +294,29 @@ impl Nokkvi {
         description: Option<String>,
     ) -> Task<Message> {
         self.sfx_engine.play(nokkvi_data::audio::SfxType::Backspace);
-        if let Err(e) =
+
+        // Route theme-file-relative keys to the theme file writer
+        let is_theme_key =
+            key.starts_with("dark.") || key.starts_with("light.") || key == "font_family";
+
+        if is_theme_key {
+            if let Err(e) = crate::config_writer::update_theme_value(&key, &value) {
+                tracing::warn!(" [SETTINGS] Failed to write theme value: {e}");
+                self.toast_warn(format!("Failed to save setting: {e}"));
+            } else {
+                crate::theme::reload_theme();
+                self.settings_page.config_dirty = true;
+            }
+        } else if let Err(e) =
             crate::config_writer::update_config_value(&key, &value, description.as_deref())
         {
             tracing::warn!(" [SETTINGS] Failed to write config: {e}");
             self.toast_warn(format!("Failed to save setting: {e}"));
+        } else if key.starts_with("visualizer.") {
+            if let Ok(new_config) = crate::visualizer_config::load_visualizer_config() {
+                *self.visualizer_config.write() = new_config;
+                self.settings_page.config_dirty = true;
+            }
         }
         // Mutual exclusivity: waves and monstercat can't both be active.
         // When one is enabled, auto-disable the other in config AND update the
@@ -329,7 +371,7 @@ impl Nokkvi {
             }
             _ => {}
         }
-        Task::none()
+        Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
     }
 
     /// Patch a single cached settings entry by key, updating its value in-place.
@@ -740,12 +782,11 @@ impl Nokkvi {
                 if let crate::views::settings::items::SettingValue::Bool(enabled) = value {
                     self.verbose_config = enabled;
 
-                    // Write [theme]+[visualizer] synchronously (doesn't need settings_manager)
+                    // Write [visualizer] synchronously (doesn't need settings_manager)
                     if enabled {
                         let viz_config = self.visualizer_config.read().clone();
-                        if let Err(e) = crate::config_writer::write_full_theme_and_visualizer(
-                            &viz_config,
-                        ) {
+                        if let Err(e) =
+                            crate::config_writer::write_full_visualizer(&viz_config) {
                             tracing::warn!(" [SETTINGS] Failed to write full config: {e}");
                             self.toast_warn(format!("Failed to write verbose config: {e}"));
                         } else {

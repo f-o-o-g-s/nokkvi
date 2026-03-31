@@ -111,6 +111,24 @@ pub fn get_sfx_dir() -> Result<PathBuf> {
     Ok(sfx_dir)
 }
 
+/// Get the themes directory (~/.config/nokkvi/themes)
+///
+/// Contains color-only theme TOML files. Built-in themes are seeded
+/// here on first run; users can edit in-place or add custom themes.
+pub fn get_themes_dir() -> Result<PathBuf> {
+    let themes_dir = get_app_dir()?.join("themes");
+
+    // Ensure directory exists
+    if !themes_dir.exists() {
+        std::fs::create_dir_all(&themes_dir).context(format!(
+            "Failed to create themes directory: {}",
+            themes_dir.display()
+        ))?;
+    }
+
+    Ok(themes_dir)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,0 +1,114 @@
+name = "Everforest"
+font_family = ""
+
+[dark.background]
+default = "#2D353B"
+hard = "#232A2E"
+level1 = "#343F44"
+level2 = "#3D484D"
+level3 = "#475258"
+level4 = "#4F585E"
+soft = "#2D353B"
+
+[dark.foreground]
+bright = "#D3C6AA"
+gray = "#7A8478"
+level1 = "#D3C6AA"
+level2 = "#9DA9A0"
+level3 = "#859289"
+level4 = "#7A8478"
+
+[dark.accent]
+border_dark = "#8DA101"
+border_light = "#A7C080"
+bright = "#A7C080"
+now_playing = "#A7C080"
+primary = "#8DA101"
+selected = "#8CA16E"
+
+[dark.red]
+bright = "#E67E80"
+normal = "#E67E80"
+
+[dark.green]
+bright = "#A7C080"
+normal = "#A7C080"
+
+[dark.yellow]
+bright = "#DBBC7F"
+normal = "#DBBC7F"
+
+[dark.purple]
+bright = "#D699B6"
+normal = "#D699B6"
+
+[dark.aqua]
+bright = "#83C092"
+normal = "#83C092"
+
+[dark.orange]
+bright = "#E69875"
+normal = "#E69875"
+
+[dark.visualizer]
+bar_gradient_colors = ["#A7C080", "#A7C080", "#A7C080", "#83C092", "#7FBBB3", "#DBBC7F"]
+border_color = "#232A2E"
+border_opacity = 1.0
+led_border_opacity = 1.0
+peak_gradient_colors = ["#E67E80", "#E69875", "#DBBC7F", "#D699B6", "#E67E80", "#E69875"]
+
+[light.background]
+default = "#FDF6E3"
+hard = "#EFEBD4"
+level1 = "#E6E2CC"
+level2 = "#E0DCC7"
+level3 = "#BDC3AF"
+level4 = "#A6B0A0"
+soft = "#FDF6E3"
+
+[light.foreground]
+bright = "#5C6A72"
+gray = "#A6B0A0"
+level1 = "#5C6A72"
+level2 = "#708089"
+level3 = "#829181"
+level4 = "#939F91"
+
+[light.accent]
+border_dark = "#5C6A72"
+border_light = "#E6E2CC"
+bright = "#93B259"
+now_playing = "#93B259"
+primary = "#8DA101"
+selected = "#A6B0A0"
+
+[light.red]
+bright = "#F85552"
+normal = "#F85552"
+
+[light.green]
+bright = "#8DA101"
+normal = "#8DA101"
+
+[light.yellow]
+bright = "#DFA000"
+normal = "#DFA000"
+
+[light.purple]
+bright = "#DF69BA"
+normal = "#DF69BA"
+
+[light.aqua]
+bright = "#35A77C"
+normal = "#35A77C"
+
+[light.orange]
+bright = "#F57D26"
+normal = "#F57D26"
+
+[light.visualizer]
+bar_gradient_colors = ["#93B259", "#8DA101", "#8DA101", "#35A77C", "#35A77C", "#3A94C5"]
+border_color = "#EFEBD4"
+border_opacity = 0.0
+led_border_opacity = 0.0
+peak_gradient_colors = ["#F57D26", "#DFA000", "#F57D26", "#DFA000", "#F57D26", "#DFA000"]

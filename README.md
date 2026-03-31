@@ -92,28 +92,28 @@ This creates `dist/nokkvi-<version>-<commit>.zip` containing only the essential 
 
 Configuration is stored in `~/.config/nokkvi/config.toml` (hot-reloadable).
 
-### Example Themes
+### Built-in Themes
 
-The `example_themes/` directory contains pre-configured theme files you can use as a starting point:
+Nokkvi ships with several pre-configured built-in themes that are automatically seeded to `~/.config/nokkvi/themes/` on first launch:
 
-- **Catppuccin** (`config_catppuccin.toml`) - Mocha (dark) / Latte (light)
-- **Cryo** (`cryo.toml`) - Cool icy blue palette
-- **Dracula** (`config_dracula.toml`) - Classic dark / Alucard light
-- **Ember** (`ember.toml`) - Warm orange/red palette
-- **Everforest** (`config_everforest.toml`) - Comfortable green/forest palette
-- **Kanagawa** (`config_kanagawa.toml`) - Wave (dark) / Lotus (light)
-- **Nord** (`config_nord.toml`) - Arctic, north-bluish palette
-- **Gruvbox Blue** (`gruvbox_dark_hard_blue.toml`) - Gruvbox with blue accents
-- **Gruvbox Red** (`gruvbox_dark_hard_red.toml`) - Gruvbox with red accents
-- **Bio Luminal Swamplab** (`config_bio_luminal_swamplab.toml`) - Custom bioluminescent theme
+- **Gruvbox** (default)
+- **Gruvbox Blue**
+- **Gruvbox Red**
+- **Catppuccin** (Mocha / Latte)
+- **Cryo** (Cool icy blue palette)
+- **Dracula** (Classic dark / Alucard light)
+- **Ember** (Warm orange/red palette)
+- **Everforest** (Comfortable green/forest palette)
+- **Kanagawa** (Wave / Lotus)
+- **Nord** (Arctic, north-bluish palette)
+- **Bio Luminal Swamplab** (Custom bioluminescent theme)
 
-To use a theme, copy it to `~/.config/nokkvi/config.toml` and add your server credentials:
+**To change your theme:** Simply open the in-app **Settings -> Theme** menu, and pick one from the "Select Theme" dropdown. It will apply instantly.
 
-```bash
-cp example_themes/config_catppuccin.toml ~/.config/nokkvi/config.toml
-# Edit the file to add your server_url and username
-# Password is encrypted and stored by the app on first login
-```
+**To create a custom theme:**
+1. Copy an existing file in `~/.config/nokkvi/themes/` to a new name (e.g. `my_theme.toml`).
+2. Edit the hex colors in your new file.
+3. Open Nokkvi Settings, and your custom theme will automatically appear in the dropdown!
 
 ## Media Controls (MPRIS)
 

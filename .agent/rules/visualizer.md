@@ -84,7 +84,7 @@ Line rendering with Catmull-Rom spline interpolation, per-vertex coloring, and o
 | `height` | 3 | Color by amplitude (quiet → loud, all 8 colors) |
 | `gradient` | 4 | Position + amplitude blend — peaks shift palette further |
 
-Lines mode reuses the bar gradient colors palette (`dark.bar_gradient_colors` / `light.bar_gradient_colors`).
+Lines mode reuses the bar gradient colors palette (`dark.visualizer.bar_gradient_colors` / `light.visualizer.bar_gradient_colors`).
 
 ### Lines Shader Architecture
 
@@ -102,7 +102,7 @@ Under `[visualizer]` and `[visualizer.bars]` in `config.toml`:
 - `max_bars`: 16–2048, default 2048
 - `auto_sensitivity`: bool toggle (hot-reloadable)
 - LED mode: `led_bars`, `led_segment_height`
-- Border opacities (per-theme in `[visualizer.bars.dark]` / `[visualizer.bars.light]`):
+- Border opacities (per-theme in `[dark.visualizer]` / `[light.visualizer]`):
   - `led_border_opacity` (0.0–1.0): LED mode segment gap opacity
   - `border_opacity` (0.0–1.0): regular bar border opacity
   - Dark defaults: 1.0 (visible); Light defaults: 0.0 (hidden)

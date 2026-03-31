@@ -111,19 +111,20 @@ Volume normalization uses rodio's Automatic Gain Control (AGC). `NormalizationLe
 - **Visualizer reset** and **hotkey reset** use `TextInputDialog` in confirmation mode (no text input — just confirm/cancel)
 - Visualizer restore preserves user-modified colors when restoring non-color defaults
 
-## Preset Themes
+## Themes
 
-- 10 compile-time-embedded themes in `presets.rs`
-- Displayed as inline entries in the main settings slot list
-- Atomic apply: replaces all theme + visualizer settings at once
+- Discovered automatically by `theme_loader.rs` from `~/.config/nokkvi/themes/`
+- Displayed as a modal sub-slot-list picker from the Theme tab
+- Switching themes rewrites the `theme = "name"` pointer in `config.toml`, triggering an automatic hot-reload of the active theme and its visualizer colors
 
 ## Config Write-Back
 
-- **ALL settings** (theme, visualizer, general, playback, hotkeys): write to `config.toml` via `SettingsManager`.
-  - `verbose_config` toggle (Settings → General → Application): when enabled, `write_full_theme_and_visualizer()` writes all settings including defaults; when disabled, `strip_to_sparse()` removes default-value entries.
+- **Application settings** (visualizer behavior, general, playback, hotkeys): write to `config.toml` via `SettingsManager`.
+  - `verbose_config` toggle (Settings → General → Application): when enabled, settings files write all settings including defaults; when disabled, files are stripped to sparse format (defaults omitted).
   - Toggling verbose_config triggers a combined persist + TOML write in a single async task to avoid race conditions.
   - Hot-reload picks up changes automatically.
-- **`theme.light_mode`**: written to TOML, triggers theme reload
+- **Theme settings** (colors, font, border opacities): write directly to the active theme file (e.g. `~/.config/nokkvi/themes/catppuccin.toml`) via `config_writer::update_theme_value()`.
+- **`light_mode`**: written to `config.toml` (under `[settings]`), triggers reload.
 - Passwords remain in `redb`.
 
 ## Icons

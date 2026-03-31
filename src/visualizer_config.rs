@@ -55,30 +55,18 @@ fn default_border_opacity() -> f32 {
 
 impl Default for ThemeBarColors {
     fn default() -> Self {
+        Self::from(nokkvi_data::types::theme_file::VisualizerColors::default())
+    }
+}
+
+impl From<nokkvi_data::types::theme_file::VisualizerColors> for ThemeBarColors {
+    fn from(v: nokkvi_data::types::theme_file::VisualizerColors) -> Self {
         Self {
-            // Border color: Gruvbox BG0_HARD
-            border_color: "#1d2021".to_string(),
-            // Dark mode: borders visible by default
-            led_border_opacity: 1.0,
-            border_opacity: 1.0,
-            // Bar gradient: Gruvbox rainbow (red → orange → yellow → green → aqua → blue)
-            bar_gradient_colors: vec![
-                "#fb4934".to_string(), // red_bright (bass)
-                "#fe8019".to_string(), // orange_bright
-                "#fabd2f".to_string(), // yellow_bright
-                "#b8bb26".to_string(), // green_bright
-                "#8ec07c".to_string(), // aqua_bright
-                "#83a598".to_string(), // blue_bright (treble)
-            ],
-            // Peak gradient: Blue/aqua accent
-            peak_gradient_colors: vec![
-                "#458588".to_string(),
-                "#458588".to_string(),
-                "#83a598".to_string(),
-                "#83a598".to_string(),
-                "#83a598".to_string(),
-                "#458588".to_string(),
-            ],
+            border_color: v.border_color,
+            led_border_opacity: v.led_border_opacity,
+            border_opacity: v.border_opacity,
+            bar_gradient_colors: v.bar_gradient_colors,
+            peak_gradient_colors: v.peak_gradient_colors,
         }
     }
 }
@@ -86,31 +74,7 @@ impl Default for ThemeBarColors {
 impl ThemeBarColors {
     /// Light mode default colors
     pub fn light_default() -> Self {
-        Self {
-            // Light mode uses lightest background as border
-            border_color: "#f9f5d7".to_string(),
-            // Light mode: borders hidden by default
-            led_border_opacity: 0.0,
-            border_opacity: 0.0,
-            // Bar gradient: Gruvbox rainbow (same as dark mode)
-            bar_gradient_colors: vec![
-                "#fb4934".to_string(), // red_bright (bass)
-                "#fe8019".to_string(), // orange_bright
-                "#fabd2f".to_string(), // yellow_bright
-                "#b8bb26".to_string(), // green_bright
-                "#8ec07c".to_string(), // aqua_bright
-                "#83a598".to_string(), // blue_bright (treble)
-            ],
-            // Peak gradient: Blue/aqua accent (same as dark mode)
-            peak_gradient_colors: vec![
-                "#458588".to_string(),
-                "#458588".to_string(),
-                "#83a598".to_string(),
-                "#83a598".to_string(),
-                "#83a598".to_string(),
-                "#458588".to_string(),
-            ],
-        }
+        Self::from(nokkvi_data::types::theme_file::VisualizerColors::light_default())
     }
 
     /// Parse a hex color string (e.g., "#458588") to iced::Color
@@ -313,15 +277,6 @@ impl Default for BarsConfig {
 }
 
 impl BarsConfig {
-    /// Get the active bar colors based on current theme mode
-    pub fn get_active_colors(&self) -> &ThemeBarColors {
-        if crate::theme::is_light_mode() {
-            &self.light
-        } else {
-            &self.dark
-        }
-    }
-
     /// Get the gradient mode as u32 for shader (0=static, 2=wave, 3=shimmer, 4=energy, 5=alternate)
     pub fn get_gradient_mode_value(&self) -> u32 {
         match self.gradient_mode.to_lowercase().as_str() {
@@ -646,15 +601,17 @@ pub(crate) fn create_shared_config() -> SharedVisualizerConfig {
     Arc::new(RwLock::new(config))
 }
 
-/// File watcher for hot-reloading config changes
+/// File watcher for hot-reloading config.toml AND theme file changes
 pub(crate) struct ConfigWatcher {
     receiver: mpsc::Receiver<Result<Event, notify::Error>>,
     _watcher: RecommendedWatcher,
     config_path: PathBuf,
+    /// Themes directory — changes here also trigger ThemeConfigReloaded
+    themes_dir: Option<PathBuf>,
 }
 
 impl ConfigWatcher {
-    /// Create a new config watcher
+    /// Create a new config watcher that monitors both config.toml and themes/
     pub(crate) fn new() -> Result<Self> {
         let config_path = nokkvi_data::utils::paths::get_config_path()?;
         // Canonicalize the path so it matches what inotify reports
@@ -672,10 +629,28 @@ impl ConfigWatcher {
             watcher.watch(parent, RecursiveMode::NonRecursive)?;
         }
 
+        // Also watch the themes directory for hot-reload on theme file edits
+        let themes_dir = nokkvi_data::utils::paths::get_themes_dir()
+            .ok()
+            .and_then(|dir| {
+                if dir.exists() {
+                    watcher
+                        .watch(&dir, RecursiveMode::NonRecursive)
+                        .map(|()| {
+                            debug!(" Watching themes dir: {}", dir.display());
+                            dir
+                        })
+                        .ok()
+                } else {
+                    None
+                }
+            });
+
         Ok(Self {
             receiver: rx,
             _watcher: watcher,
             config_path,
+            themes_dir,
         })
     }
 
@@ -694,10 +669,18 @@ impl ConfigWatcher {
                     matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_));
 
                 if is_modification {
-                    // Check if event affects our config file
-                    for path in event.paths {
-                        if path == self.config_path {
+                    for path in &event.paths {
+                        // config.toml changed
+                        if *path == self.config_path {
                             should_reload = true;
+                        }
+                        // a .toml file inside themes/ changed
+                        if let Some(ref themes_dir) = self.themes_dir {
+                            if path.starts_with(themes_dir)
+                                && path.extension().is_some_and(|e| e == "toml")
+                            {
+                                should_reload = true;
+                            }
                         }
                     }
                 }

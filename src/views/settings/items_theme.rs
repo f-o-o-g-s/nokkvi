@@ -1,17 +1,22 @@
 //! Theme tab setting entries
+//!
+//! Builds the settings UI for the Theme tab using the active `ThemeFile`.
+//! Color keys use theme-file-relative paths (e.g. `dark.background.hard`)
+//! and are written to the active theme file via `config_writer::update_theme_value`.
+
+use nokkvi_data::types::theme_file::ThemeFile;
 
 use super::items::{SettingItem, SettingsEntry};
-use crate::theme_config::DualThemeConfig;
 
-/// Build settings entries for the Theme tab from dual theme config.
+/// Build settings entries for the Theme tab from the active theme file.
 /// Shows the active palette (dark or light) colors based on current mode.
 ///
-/// Each hex color entry has a real TOML key (e.g. `theme.dark.background.hard`)
-/// and a real default from `DualThemeConfig::default()`, making them editable
-/// and persisted. Each color subgroup includes a "⟲ Restore Defaults" entry.
-/// Presets are listed inline (no sub-list).
+/// Keys are theme-file-relative (e.g. `dark.background.hard`), not config.toml
+/// paths. The settings handler routes these through `update_theme_value`.
+/// Presets display discovered themes from `~/.config/nokkvi/themes/`.
 pub(crate) fn build_theme_items(
-    config: &DualThemeConfig,
+    theme: &ThemeFile,
+    active_stem: &str,
     rounded_mode: bool,
     opacity_gradient: bool,
     is_light_mode: bool,
@@ -24,44 +29,52 @@ pub(crate) fn build_theme_items(
     let mut e = Vec::new();
 
     let is_light = crate::theme::is_light_mode();
-    let palette_prefix = if is_light {
-        "theme.light"
-    } else {
-        "theme.dark"
-    };
+    let palette_prefix = if is_light { "light" } else { "dark" };
     let palette_label = if is_light { "Light" } else { "Dark" };
-    let palette = if is_light {
-        &config.light
-    } else {
-        &config.dark
-    };
-    let defaults = DualThemeConfig::default();
+    let palette = if is_light { &theme.light } else { &theme.dark };
+    let defaults = ThemeFile::default();
     let default_palette = if is_light {
         &defaults.light
     } else {
         &defaults.dark
     };
 
-    // ── Presets (inline — no sub-list) ──────────────────────────────
+    // ── Theme Picker ─────────────────────────────────────────────────
     e.push(SettingsEntry::Header {
-        label: "Presets",
+        label: "Select Theme",
         icon: PR,
     });
+
+    // Restore Defaults (only for built-in themes)
     e.push(SettingItem::text(
         meta!(
             "__restore_theme",
             "⟲ Restore Defaults",
-            "Presets",
-            "Restore all theme colors to the default palette. Overrides any color customizations."
+            "Select Theme",
+            "Restore this theme to its original built-in colors"
         ),
         "Press Enter",
         "Press Enter",
     ));
-    for (i, preset) in presets::all_presets().iter().enumerate() {
+
+    // List all discovered themes
+    let themes = presets::all_themes();
+    for (i, info) in themes.iter().enumerate() {
         let key = format!("__preset_{i}");
+        let suffix = if info.stem == active_stem {
+            " ● active"
+        } else {
+            ""
+        };
+        let label = format!("{}{suffix}", info.display_name);
+        let sub = if info.is_builtin {
+            "Built-in"
+        } else {
+            "Custom"
+        };
         e.push(SettingItem::text(
-            meta!(key, preset.name, "Presets"),
-            preset.description,
+            meta!(key, &label, "Select Theme"),
+            sub,
             "",
         ));
     }
@@ -71,14 +84,14 @@ pub(crate) fn build_theme_items(
         label: "Font",
         icon: F,
     });
-    let font_display = if config.font.family.is_empty() {
+    let font_display = if theme.font_family.is_empty() {
         "(system default)"
     } else {
-        &config.font.family
+        &theme.font_family
     };
     e.push(SettingItem::text(
         meta!(
-            "theme.font.family",
+            "font_family",
             "Font Family",
             "Font",
             "Enter to browse installed fonts"

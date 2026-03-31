@@ -81,7 +81,6 @@ Flat `Message` variants remain for cross-cutting concerns. See `src/app_message.
 - `target/` — Build artifacts
 - `dist/` — Distribution packages
 - `docs/` — Documentation (inspirations, design notes)
-- `example_themes/` — Example TOML theme files (read-only reference)
 - `scripts/` — Theme showcase scripts
 
 ## Reference Codebases (browse when needed)

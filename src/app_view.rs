@@ -776,10 +776,13 @@ impl Nokkvi {
             }
             View::Settings => {
                 let viz_config = self.visualizer_config.read().clone();
-                let theme_config = crate::theme_config::load_dual_theme_config();
+                let theme_file = crate::theme_config::load_active_theme_file();
+                let active_theme_stem =
+                    nokkvi_data::services::theme_loader::read_theme_name_from_config();
                 let settings_data = views::SettingsViewData {
                     visualizer_config: viz_config,
-                    theme_config,
+                    theme_file,
+                    active_theme_stem,
                     window_height: self.window.height,
                     hotkey_config: self.hotkey_config.clone(),
                     server_url: self.login_page.server_url.clone(),

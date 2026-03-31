@@ -13,4 +13,5 @@ pub mod queue;
 pub mod settings;
 pub mod state_storage;
 pub mod task_manager;
+pub mod theme_loader;
 pub mod toml_settings_io;

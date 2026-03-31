@@ -1,0 +1,110 @@
+name = "Nord"
+font_family = ""
+
+[dark.background]
+default = "#2e3440"
+hard = "#242933"
+level1 = "#3b4252"
+level2 = "#434c5e"
+level3 = "#4c566a"
+level4 = "#5a657a"
+soft = "#2e3440"
+
+[dark.foreground]
+bright = "#eceff4"
+gray = "#4c566a"
+level1 = "#eceff4"
+level2 = "#e5e9f0"
+level3 = "#d8dee9"
+level4 = "#c8ceda"
+
+[dark.accent]
+border_dark = "#5e81ac"
+border_light = "#88c0d0"
+bright = "#88c0d0"
+primary = "#81a1c1"
+
+[dark.red]
+bright = "#bf616a"
+normal = "#bf616a"
+
+[dark.green]
+bright = "#a3be8c"
+normal = "#a3be8c"
+
+[dark.yellow]
+bright = "#ebcb8b"
+normal = "#ebcb8b"
+
+[dark.purple]
+bright = "#b48ead"
+normal = "#b48ead"
+
+[dark.aqua]
+bright = "#8fbcbb"
+normal = "#8fbcbb"
+
+[dark.orange]
+bright = "#d08770"
+normal = "#d08770"
+
+[dark.visualizer]
+bar_gradient_colors = ["#5e81ac", "#5e81ac", "#81a1c1", "#81a1c1", "#88c0d0", "#8fbcbb"]
+border_color = "#242933"
+border_opacity = 1.0
+led_border_opacity = 1.0
+peak_gradient_colors = ["#ebcb8b", "#ebcb8b", "#d08770", "#d08770", "#bf616a", "#bf616a"]
+
+[light.background]
+default = "#e5e9f0"
+hard = "#d8dee9"
+level1 = "#d8dee9"
+level2 = "#c8ceda"
+level3 = "#b8c4d4"
+level4 = "#a8b4c4"
+soft = "#eceff4"
+
+[light.foreground]
+bright = "#2e3440"
+gray = "#7b88a1"
+level1 = "#2e3440"
+level2 = "#3b4252"
+level3 = "#434c5e"
+level4 = "#4c566a"
+
+[light.accent]
+border_dark = "#5e81ac"
+border_light = "#d8dee9"
+bright = "#5e81ac"
+primary = "#5e81ac"
+
+[light.red]
+bright = "#bf616a"
+normal = "#a5414a"
+
+[light.green]
+bright = "#a3be8c"
+normal = "#7b9a5e"
+
+[light.yellow]
+bright = "#ebcb8b"
+normal = "#dbbb7b"
+
+[light.purple]
+bright = "#b48ead"
+normal = "#a47e9d"
+
+[light.aqua]
+bright = "#8fbcbb"
+normal = "#8fbcbb"
+
+[light.orange]
+bright = "#d08770"
+normal = "#c06050"
+
+[light.visualizer]
+bar_gradient_colors = ["#5e81ac", "#5e81ac", "#81a1c1", "#81a1c1", "#88c0d0", "#8fbcbb"]
+border_color = "#eceff4"
+border_opacity = 0.0
+led_border_opacity = 0.0
+peak_gradient_colors = ["#ebcb8b", "#ebcb8b", "#d08770", "#d08770", "#bf616a", "#bf616a"]

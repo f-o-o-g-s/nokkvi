@@ -24,4 +24,5 @@ pub mod sort_mode;
 pub mod toast;
 pub mod toml_settings;
 pub mod toml_views;
+pub mod theme_file;
 pub mod view_preferences;

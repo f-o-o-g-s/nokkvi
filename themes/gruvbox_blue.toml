@@ -1,0 +1,110 @@
+name = "Gruvbox Blue"
+font_family = ""
+
+[dark.background]
+default = "#282828"
+hard = "#1d2021"
+level1 = "#3c3836"
+level2 = "#504945"
+level3 = "#665c54"
+level4 = "#7c6f64"
+soft = "#32302f"
+
+[dark.foreground]
+bright = "#fbf1c7"
+gray = "#928374"
+level1 = "#ebdbb2"
+level2 = "#d5c4a1"
+level3 = "#bdae93"
+level4 = "#a89984"
+
+[dark.accent]
+border_dark = "#458588"
+border_light = "#83a598"
+bright = "#83a598"
+primary = "#458588"
+
+[dark.red]
+bright = "#fb4934"
+normal = "#cc241d"
+
+[dark.green]
+bright = "#b8bb26"
+normal = "#98971a"
+
+[dark.yellow]
+bright = "#fabd2f"
+normal = "#d79921"
+
+[dark.purple]
+bright = "#d3869b"
+normal = "#b16286"
+
+[dark.aqua]
+bright = "#8ec07c"
+normal = "#689d6a"
+
+[dark.orange]
+bright = "#fe8019"
+normal = "#d65d0e"
+
+[dark.visualizer]
+bar_gradient_colors = ["#458588", "#458588", "#83a598", "#689d6a", "#8ec07c", "#8ec07c"]
+border_color = "#1d2021"
+border_opacity = 1.0
+led_border_opacity = 1.0
+peak_gradient_colors = ["#d79921", "#d79921", "#fabd2f", "#fabd2f", "#fabd2f", "#fabd2f"]
+
+[light.background]
+default = "#ebdbb2"
+hard = "#fbf1c7"
+level1 = "#ebdbb2"
+level2 = "#d5c4a1"
+level3 = "#bdae93"
+level4 = "#a89984"
+soft = "#fbf1c7"
+
+[light.foreground]
+bright = "#282828"
+gray = "#928374"
+level1 = "#3c3836"
+level2 = "#504945"
+level3 = "#665c54"
+level4 = "#7c6f64"
+
+[light.accent]
+border_dark = "#458588"
+border_light = "#83a598"
+bright = "#83a598"
+primary = "#458588"
+
+[light.red]
+bright = "#fb4934"
+normal = "#cc241d"
+
+[light.green]
+bright = "#b8bb26"
+normal = "#98971a"
+
+[light.yellow]
+bright = "#fabd2f"
+normal = "#d79921"
+
+[light.purple]
+bright = "#d3869b"
+normal = "#b16286"
+
+[light.aqua]
+bright = "#8ec07c"
+normal = "#689d6a"
+
+[light.orange]
+bright = "#fe8019"
+normal = "#d65d0e"
+
+[light.visualizer]
+bar_gradient_colors = ["#458588", "#458588", "#83a598", "#689d6a", "#8ec07c", "#8ec07c"]
+border_color = "#fbf1c7"
+border_opacity = 0.0
+led_border_opacity = 0.0
+peak_gradient_colors = ["#d79921", "#d79921", "#fabd2f", "#fabd2f", "#fabd2f", "#fabd2f"]

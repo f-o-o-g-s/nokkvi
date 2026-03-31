@@ -570,7 +570,7 @@ mod tests {
         // Spot-check the border_opacity setting (now per-theme under dark/light)
         let keys = extract_keys(&entries);
         assert!(
-            keys.contains(&"visualizer.bars.dark.border_opacity"),
+            keys.contains(&"dark.visualizer.border_opacity"),
             "Missing dark border_opacity key"
         );
 
@@ -581,8 +581,8 @@ mod tests {
                 continue;
             }
             assert!(
-                key.starts_with("visualizer."),
-                "All visualizer keys should start with 'visualizer.', got: {key}"
+                key.starts_with("visualizer.") || key.starts_with("dark.") || key.starts_with("light."),
+                "All visualizer keys should start with 'visualizer.', 'dark.', or 'light.', got: {key}"
             );
         }
     }
@@ -619,11 +619,11 @@ mod tests {
             "Missing bar_depth_3d key"
         );
         assert!(
-            keys.contains(&"visualizer.bars.dark.bar_gradient_colors"),
+            keys.contains(&"dark.visualizer.bar_gradient_colors"),
             "Missing dark bar_gradient_colors key"
         );
         assert!(
-            keys.contains(&"visualizer.bars.light.bar_gradient_colors"),
+            keys.contains(&"light.visualizer.bar_gradient_colors"),
             "Missing light bar_gradient_colors key"
         );
     }
@@ -710,21 +710,21 @@ mod tests {
 
     #[test]
     fn theme_items_structure() {
-        let config = crate::theme_config::DualThemeConfig::default();
-        let entries = build_theme_items(&config, false, true, false);
+        let theme = nokkvi_data::types::theme_file::ThemeFile::default();
+        let entries = build_theme_items(&theme, "gruvbox", false, true, false);
 
         // Verify section headers
         assert_eq!(
             count_headers(&entries),
             7,
-            "Expected 7 theme sections: Presets, Font, Appearance, Background Colors, Foreground Colors, Accent Colors, Named Colors"
+            "Expected 7 theme sections: Select Theme, Font, Appearance, Background Colors, Foreground Colors, Accent Colors, Named Colors"
         );
 
         // Verify we have a reasonable number of items
         let item_count = count_items(&entries);
         assert!(
             item_count >= 26,
-            "Expected at least 26 theme items (7 bg + 6 fg + 6 accent + 12 named + presets/font/rounded), got {item_count}"
+            "Expected at least 26 theme items (7 bg + 6 fg + 6 accent + 12 named + themes/font/rounded), got {item_count}"
         );
     }
 

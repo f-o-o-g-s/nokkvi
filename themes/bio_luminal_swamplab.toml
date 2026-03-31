@@ -1,0 +1,110 @@
+name = "Bio-Luminal Swamplab"
+font_family = ""
+
+[dark.background]
+default = "#070d0b"
+hard = "#040807"
+level1 = "#13241d"
+level2 = "#1a332a"
+level3 = "#244a3c"
+level4 = "#2f6250"
+soft = "#0d1814"
+
+[dark.foreground]
+bright = "#eafff4"
+gray = "#7fb3a1"
+level1 = "#c8f5e4"
+level2 = "#a6e3cf"
+level3 = "#84cbb6"
+level4 = "#6bb09c"
+
+[dark.accent]
+border_dark = "#0b1612"
+border_light = "#5aff9d"
+bright = "#5aff9d"
+primary = "#2fdc8b"
+
+[dark.red]
+bright = "#ff6f61"
+normal = "#cc4f44"
+
+[dark.green]
+bright = "#7dff7a"
+normal = "#3fdc66"
+
+[dark.yellow]
+bright = "#f6ff4d"
+normal = "#c9d600"
+
+[dark.purple]
+bright = "#b38cff"
+normal = "#7e5bd6"
+
+[dark.aqua]
+bright = "#4fffd2"
+normal = "#22bfa3"
+
+[dark.orange]
+bright = "#ffb347"
+normal = "#d9911e"
+
+[dark.visualizer]
+bar_gradient_colors = ["#5aff9d", "#2fdc8b", "#22bfa3", "#7dff7a"]
+border_color = "#040807"
+border_opacity = 1.0
+led_border_opacity = 0.6
+peak_gradient_colors = ["#f6ff4d", "#ffb347", "#ff6f61"]
+
+[light.background]
+default = "#f2fff9"
+hard = "#e6fff4"
+level1 = "#d6f5e8"
+level2 = "#bfe8d8"
+level3 = "#a8dac8"
+level4 = "#91cbb8"
+soft = "#ecfff7"
+
+[light.foreground]
+bright = "#070d0b"
+gray = "#5e8f80"
+level1 = "#13241d"
+level2 = "#1a332a"
+level3 = "#244a3c"
+level4 = "#2f6250"
+
+[light.accent]
+border_dark = "#2fdc8b"
+border_light = "#5aff9d"
+bright = "#2fdc8b"
+primary = "#1aa36a"
+
+[light.red]
+bright = "#cc4f44"
+normal = "#a84037"
+
+[light.green]
+bright = "#3fdc66"
+normal = "#2fb354"
+
+[light.yellow]
+bright = "#c9d600"
+normal = "#a8b300"
+
+[light.purple]
+bright = "#7e5bd6"
+normal = "#6545b8"
+
+[light.aqua]
+bright = "#22bfa3"
+normal = "#18947f"
+
+[light.orange]
+bright = "#d9911e"
+normal = "#b87616"
+
+[light.visualizer]
+bar_gradient_colors = ["#2fdc8b", "#1aa36a", "#18947f", "#3fdc66"]
+border_color = "#e6fff4"
+border_opacity = 0.0
+led_border_opacity = 0.0
+peak_gradient_colors = ["#c9d600", "#d9911e", "#cc4f44"]
