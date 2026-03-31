@@ -552,7 +552,7 @@ mod tests {
     fn visualizer_items_structure() {
         let config = VisualizerConfig::default();
         let theme = nokkvi_data::types::theme_file::ThemeFile::default();
-        let entries = build_visualizer_items(&config, &theme);
+        let entries = build_visualizer_items(&config, &theme, "gruvbox");
 
         // Verify section headers
         assert_eq!(
@@ -594,7 +594,7 @@ mod tests {
     fn visualizer_items_key_paths() {
         let config = VisualizerConfig::default();
         let theme = nokkvi_data::types::theme_file::ThemeFile::default();
-        let entries = build_visualizer_items(&config, &theme);
+        let entries = build_visualizer_items(&config, &theme, "gruvbox");
         let keys = extract_keys(&entries);
 
         // Spot-check critical key paths that config_writer depends on
@@ -636,7 +636,7 @@ mod tests {
     fn visualizer_items_value_types() {
         let config = VisualizerConfig::default();
         let theme = nokkvi_data::types::theme_file::ThemeFile::default();
-        let entries = build_visualizer_items(&config, &theme);
+        let entries = build_visualizer_items(&config, &theme, "gruvbox");
 
         for entry in &entries {
             if let SettingsEntry::Item(item) = entry {
@@ -694,7 +694,7 @@ mod tests {
     fn visualizer_items_defaults_match_config() {
         let config = VisualizerConfig::default();
         let theme = nokkvi_data::types::theme_file::ThemeFile::default();
-        let entries = build_visualizer_items(&config, &theme);
+        let entries = build_visualizer_items(&config, &theme, "gruvbox");
 
         // When built from defaults, value should equal default for every item
         // (skip __ sentinel keys — they're action buttons, not config values)

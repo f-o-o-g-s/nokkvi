@@ -213,7 +213,9 @@ impl Nokkvi {
                         tracing::warn!(" [SETTINGS] Failed to restore default for {key}: {e}");
                     }
                 }
-                Task::none()
+                crate::theme::reload_theme();
+                self.settings_page.config_dirty = true;
+                Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
             }
             crate::views::SettingsAction::WriteFontFamily(family) => {
                 self.sfx_engine.play(nokkvi_data::audio::SfxType::Backspace);

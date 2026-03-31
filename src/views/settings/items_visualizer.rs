@@ -87,9 +87,11 @@ fn push_visualizer_color_entries(
 pub(crate) fn build_visualizer_items(
     config: &VisualizerConfig,
     theme: &ThemeFile,
+    active_stem: &str,
 ) -> Vec<SettingsEntry> {
     let d = VisualizerConfig::default();
-    let dt = ThemeFile::default();
+    let dt = nokkvi_data::services::theme_loader::load_builtin_theme(active_stem)
+        .unwrap_or_else(ThemeFile::default);
     const S: &str = "assets/icons/sliders-horizontal.svg";
     const B: &str = "assets/icons/audio-lines.svg";
     const P: &str = "assets/icons/palette.svg";

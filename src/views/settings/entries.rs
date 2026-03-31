@@ -47,9 +47,11 @@ impl SettingsPage {
         data: &SettingsViewData,
     ) -> Vec<SettingsEntry> {
         match tab {
-            SettingsTab::Visualizer => {
-                items::build_visualizer_items(&data.visualizer_config, &data.theme_file)
-            }
+            SettingsTab::Visualizer => items::build_visualizer_items(
+                &data.visualizer_config,
+                &data.theme_file,
+                &data.active_theme_stem,
+            ),
             SettingsTab::Theme => items::build_theme_items(
                 &data.theme_file,
                 &data.active_theme_stem,

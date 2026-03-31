@@ -211,6 +211,14 @@ fn try_load_theme(name: &str) -> Result<ThemeFile> {
         .with_context(|| format!("Failed to parse theme file: {}", path.display()))
 }
 
+/// Load the original default values for a built-in theme by stem name.
+/// Returns `None` if the theme is not built-in or fails to parse.
+pub fn load_builtin_theme(name: &str) -> Option<ThemeFile> {
+    builtin_registry()
+        .get(name)
+        .and_then(|content| ThemeFile::load(content).ok())
+}
+
 /// Save a theme to `~/.config/nokkvi/themes/{name}.toml`.
 pub fn save_theme(name: &str, theme: &ThemeFile) -> Result<()> {
     let themes_dir = get_themes_dir()?;

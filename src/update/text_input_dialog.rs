@@ -202,10 +202,18 @@ impl Nokkvi {
                 {
                     tracing::warn!(" [SETTINGS] Failed to reset visualizer settings: {e}");
                     self.toast_warn(format!("Failed to reset visualizer settings: {e}"));
+                    Task::none()
                 } else {
+                    if let Ok(new_config) = crate::visualizer_config::load_visualizer_config() {
+                        *self.visualizer_config.write() = new_config;
+                        self.settings_page.config_dirty = true;
+                        if let Some(ref vis) = self.visualizer {
+                            vis.apply_config();
+                        }
+                    }
                     self.toast_success("Visualizer settings reset to defaults");
+                    Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
                 }
-                Task::none()
             }
             None => Task::none(),
         }
