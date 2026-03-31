@@ -653,11 +653,8 @@ impl QueuePage {
         let album_art = data.album_art; // Move artwork maps
         let large_artwork = data.large_artwork;
         let queue_songs = data.queue_songs; // Move ownership to extend lifetime
-        // Only show album column when sorting by Album or Genre (which shows album+genre)
-        let show_album_column = matches!(
-            current_sort_mode,
-            QueueSortMode::Album | QueueSortMode::Genre
-        );
+        // Always show the album column to provide context across all sort modes
+        let show_album_column = true;
 
         // Build the render_item closure (shared between drag and non-drag paths)
         let render_item = |song: &QueueSongUIViewData,
@@ -701,12 +698,7 @@ impl QueuePage {
 
             // Dynamic column proportions: title gets more space when album/rating columns are hidden
             let show_rating_column = current_sort_mode == QueueSortMode::Rating;
-            let title_portion: u16 = match (show_album_column, show_rating_column) {
-                (true, true) => 35,
-                (true, false) => 40,
-                (false, true) => 55,
-                (false, false) => 70,
-            };
+            let title_portion: u16 = if show_rating_column { 35 } else { 40 };
 
             // Layout: [Index] [Art] [Title/Artist] [Album?] [Rating?] [Duration] [Heart]
             let mut content_row = row![
@@ -740,7 +732,7 @@ impl QueuePage {
             .spacing(6.0)
             .align_y(Alignment::Center);
 
-            // 3. Album column — only shown for Album and Genre sort modes
+            // 3. Album column — always shown
             if show_album_column {
                 content_row = content_row.push(
                     container({
