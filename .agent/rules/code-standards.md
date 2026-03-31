@@ -14,7 +14,7 @@ trigger: always_on
 
 - **No `.unwrap()` in production code.** Use `?`, `.unwrap_or_default()`, or explicit error handling.
 - **No `clone()` without justification.** Prefer references or `Cow<>`.
-- **Structured logging** via `tracing`: `error!` (failures), `warn!` (recoverable), `info!` (milestones), `debug!` (flow control), `trace!` (per-frame, per-packet, startup enumeration). Audio modules and queue service use `trace!` for high-frequency operations.
+- **Structured logging** via `tracing`: `error!` (failures), `warn!` (recoverable), `info!` (milestones), `debug!` (flow control), `trace!` (per-frame, per-packet, startup enumeration).
 - **Use `Arc` + atomics** for cross-thread shared state, never raw `Mutex` around simple values.
 
 ## Error Handling
@@ -27,30 +27,9 @@ trigger: always_on
 ## File Organization
 
 - Keep files focused: one view per file, one service per file.
-- Complex views use directory modules (`views/settings/mod.rs`).
-- Complex services use directory modules (`services/queue/mod.rs` + `order.rs`, `navigation.rs`).
-- Complex handlers use directory modules (`update/hotkeys/mod.rs` + `star_rating.rs`, `queue.rs`, `navigation.rs`).
-- Handler files in `update/` correspond 1:1 to views, plus specialized handlers:
-  - `about_modal.rs` — about modal open/close/copy dispatch
-  - `browsing_panel.rs` — split-view playlist editing mode management
-  - `cross_pane_drag.rs` — drag state machine (browsing panel → queue)
-  - `toast.rs` — notification dispatch
-  - `slot_list.rs` — shared slot list navigation dispatch + scrollbar fade/seek-settled timers (view-targeted via explicit `View` parameter)
-  - `SlotListMessage` — Navigate up/down, set offset, activate center, toggle sort, scrollbar timers (carry `View`)
-  - `collage.rs` — genre/playlist artwork collage loading
-  - `eq_modal.rs` — equalizer modal open/close/band/preset/save dispatch
-  - `hotkeys/` — directory module: `mod.rs` (core dispatch), `star_rating.rs`, `queue.rs`, `navigation.rs`
-  - `navigation.rs` — view switching, browsing panel toggle
-  - `playback.rs` — playback tick, transport, gapless transitions
-  - `player_bar.rs` — player bar action dispatch (transport, volume, visualization)
-  - `scrobbling.rs` — scrobble submission and now-playing notifications
-  - `mpris.rs` — MPRIS D-Bus event handling
-  - `window.rs` — window resize handling and centralized artwork prefetch dispatch
-  - `settings.rs` — settings action dispatch (config writes, theme writes, general settings, hotkeys, presets, cache rebuild, logout)
-  - `progressive_queue.rs` — progressive queue page append chain
-  - `info_modal.rs` — info modal open/close dispatch
-  - `text_input_dialog.rs` — text input dialog open/submit/cancel dispatch
-  - `components.rs` — shared helpers (`shell_action_task`, `guard_play_action`, `set_item_rating_task`, etc.)
+- Complex views/services/handlers use directory modules (e.g., `views/settings/mod.rs`, `services/queue/mod.rs`, `update/hotkeys/mod.rs`).
+- Handler files in `update/` correspond 1:1 to views, plus specialized handlers for cross-cutting concerns. `ls src/update/` to see them.
+- Shared helpers live in `update/components.rs`.
 
 ## Anti-Patterns — Do NOT
 
@@ -74,7 +53,7 @@ cargo test                    # Unit tests
 cargo build --release         # Release build verification
 ```
 
-Tests live in inline `#[cfg(test)]` modules. Key test locations: `update/tests.rs`, `data/src/services/queue/mod.rs`, `data/src/services/queue/navigation.rs`, `data/src/services/toml_settings_io.rs`, `data/src/services/theme_loader.rs`, `data/src/types/hotkey_config.rs`, `data/src/types/paged_buffer.rs`, `data/src/types/player_settings.rs`, `data/src/types/toml_settings.rs`, `data/src/types/toml_views.rs`, `data/src/types/theme_file.rs`, `data/src/credentials.rs`, `data/src/audio/spectrum.rs`, `data/src/audio/eq.rs`, `src/embedded_svg.rs`, `src/widgets/format_info.rs`, `src/views/settings/items.rs` (general + interface + playback structure tests), `src/test_helpers.rs`. Additional `#[cfg(test)]` modules exist in various type/utility files (`data/src/types/song_pool.rs`, `data/src/types/playlist_edit.rs`, `data/src/types/toast.rs`, `data/src/types/progress.rs`, `data/src/types/song.rs`, `data/src/utils/`, `data/src/services/state_storage.rs`, `data/src/services/api/subsonic.rs`, `src/widgets/slot_list*.rs`, `src/views/expansion.rs`, `src/update/mod.rs`, `src/main.rs`).
+Tests live in inline `#[cfg(test)]` modules. Grep for `#[cfg(test)]` to find them.
 
 ## Config & Persistence
 

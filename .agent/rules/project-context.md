@@ -4,7 +4,7 @@ trigger: always_on
 
 # Project Context — Nokkvi
 
-A Rust/Iced desktop client for [Navidrome](https://www.navidrome.org/) music servers. Named after Old Norse *nökkvi* (a small, humble boat).
+A Rust/Iced desktop client for [Navidrome](https://www.navidrome.org/) music servers.
 
 ## Crate Structure
 
@@ -13,7 +13,7 @@ A Rust/Iced desktop client for [Navidrome](https://www.navidrome.org/) music ser
 | **UI** | `src/` | Iced frontend: views, widgets, update handlers, subscriptions, theme |
 | **Data** | `data/` | Iced-free backend: domain types, services, audio engine, API client, persistence |
 
-**Entry points:** `src/main.rs` (Nokkvi), `src/app_message.rs` (root Message enum), `src/update/mod.rs` (central dispatcher), `data/src/backend/app_service.rs` (backend orchestrator).
+**Entry points:** `src/main.rs`, `src/app_message.rs` (root Message enum), `src/update/mod.rs` (central dispatcher), `data/src/backend/app_service.rs` (backend orchestrator).
 
 **Key data structure:** `PagedBuffer<T>` (`data/src/types/paged_buffer.rs`) — replaces `Vec<T>` for all library data. `Deref<Target = [T]>` makes it a drop-in replacement. Load state tracked via `set_loading()` / `needs_fetch()`.
 
@@ -48,22 +48,7 @@ fn view<'a>(&'a self, data: AlbumsViewData<'a>) -> Element<'a, AlbumsMessage>
 
 ## Message Architecture
 
-The root `Message` enum uses **namespaced sub-enums**:
-
-| Sub-Enum | Domain |
-|----------|--------|
-| `PlaybackMessage` | Playback control, ticks, audio render |
-| `ScrobbleMessage` | Now playing, submission |
-| `HotkeyMessage` | Keyboard actions, star/rating updates |
-| `ArtworkMessage` | Artwork pipeline, prefetch, collages |
-| `SlotListMessage` | Navigate up/down, set offset, activate center, toggle sort, scrollbar timers (carry `View`) |
-| `ToastMessage` | Push / dismiss / dismiss-by-key |
-
-`Message::StripClicked` — centralized left-click handler for the track info strip. Reads `strip_click_action` theme atomic and dispatches: navigate to queue/album/artist, copy track info to clipboard, or do nothing.
-
-`Message::StripContextAction(StripContextEntry)` — right-click context menu handler for the strip. Actions: GoToQueue, GoToAlbum, GoToArtist, CopyTrackInfo, ToggleStar, ShowInFolder.
-
-Flat `Message` variants remain for cross-cutting concerns. See `src/app_message.rs`.
+The root `Message` enum uses **namespaced sub-enums**: `PlaybackMessage`, `ScrobbleMessage`, `HotkeyMessage`, `ArtworkMessage`, `SlotListMessage` (carries `View`), `ToastMessage`. Flat variants remain for cross-cutting concerns. See `src/app_message.rs`.
 
 ## Naming Conventions
 
@@ -76,39 +61,12 @@ Flat `Message` variants remain for cross-cutting concerns. See `src/app_message.
 | Domain types | `data/src/types/{name}.rs` |
 | Slot list widgets | `widgets/slot_list.rs` (rendering), `widgets/slot_list_view.rs` (scroll state), `widgets/slot_list_page.rs` (page state) |
 
-## Directories to Skip (not project code)
+## Directories to Skip
 
-- `target/` — Build artifacts
-- `dist/` — Distribution packages
-- `docs/` — Documentation (inspirations, design notes)
-- `scripts/` — Theme showcase scripts
+`target/`, `dist/`, `docs/`, `scripts/` — not project code.
 
-## Reference Codebases (browse when needed)
+## Reference Codebases
 
-These are external repos cloned locally — **not** part of this project:
+External repos cloned locally for reference (not part of this project). Browse `reference-{name}/` when needed:
 
-| Directory | What | When to browse |
-|-----------|------|----------------|
-| `reference-iced/` | Iced GUI framework source + examples | Widget APIs, layout, subscription patterns, custom shader widgets |
-| `reference-iced-apps/` | Community Iced applications | Real-world patterns, complex widget composition |
-| `reference-symphonia/` | Symphonia audio decoding library source | Codec APIs, packet/frame handling, format probing |
-| `reference-feishin/` | Feishin (TypeScript Navidrome client) | Subsonic/Navidrome API usage patterns, feature ideas |
-| `reference-lucide/` | Lucide icon library (1500+ SVGs) | Browse `icons/` dir for new SVG icons to embed |
-| `reference-navidrome/` | Navidrome server source (Go) | Server-side API behavior, database schema |
-| `reference-pipewire/` | PipeWire Rust bindings source | PipeWire API, stream setup, spa pod construction |
-| `reference-pipewire-rs/` | PipeWire Rust crate source | PipeWire Rust API patterns |
-| `reference-rmpc/` | rmpc (Rust MPD client, Iced-based) | Iced patterns, MPD protocol, TUI/GUI hybrid |
-| `reference-ferrosonic/` | Ferrosonic (Rust Subsonic client) | Subsonic API patterns in Rust |
-| `reference-saxon/` | Saxon (Rust audio player) | Audio playback patterns, player architecture |
-| `reference-wireplumber/` | WirePlumber Rust bindings | PipeWire session management, policy scripting |
-| `reference-mpd/` | MPD (Music Player Daemon) C source | Crossfade behavior, consume/shuffle logic, queue management |
-| `reference-rodio/` | rodio audio playback library | Mixer API, source chaining, volume control |
-| `reference-rustfft/` | RustFFT library source | FFT plan creation, threading, performance |
-| `reference-cava/` | CAVA audio visualizer (C) | Spectrum analysis, smoothing algorithms, bar rendering |
-| `reference-bincode/` | bincode serialization library | Encode/Decode traits, binary format |
-| `reference-toml/` | toml/toml_edit crate source | TOML parsing, preserving comments on edit |
-| `reference-musikcube/` | musikcube (C++ music player) | Player architecture, audio engine patterns |
-
-## Key References
-
-- `.agent/rules/` — Domain-specific rules (auto-attached by file glob)
+`iced`, `iced-apps`, `symphonia`, `feishin`, `lucide` (icons), `navidrome`, `pipewire`, `pipewire-rs`, `rmpc`, `ferrosonic`, `saxon`, `wireplumber`, `mpd`, `rodio`, `rustfft`, `cava`, `bincode`, `toml`, `musikcube`
