@@ -265,14 +265,12 @@ pub(crate) fn set_track_info_display(mode: TrackInfoDisplay) {
 
 /// Whether the player bar should show the track info strip below controls.
 ///
-/// True when `TrackInfoDisplay::PlayerBar` AND side-nav layout are both active.
-/// In top-nav mode the nav bar already surfaces track/format info, so the strip
-/// is suppressed to avoid redundancy.
+/// True when `TrackInfoDisplay::PlayerBar` is active.
 ///
 /// **Single source of truth** — use this instead of ad-hoc compound checks.
 #[inline]
 pub(crate) fn show_player_bar_strip() -> bool {
-    track_info_display() == TrackInfoDisplay::PlayerBar && is_side_nav()
+    track_info_display() == TrackInfoDisplay::PlayerBar
 }
 
 /// Whether the top bar track info strip should be rendered above content.

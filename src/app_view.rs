@@ -106,6 +106,37 @@ impl Nokkvi {
             bitrate: self.playback.bitrate,
         };
 
+        // Build the player bar info strip if PlayerBar mode is active
+        let player_strip: Option<Element<'_, widgets::PlayerBarMessage>> =
+            if crate::theme::show_player_bar_strip() {
+                Some(widgets::track_info_strip::track_info_strip_with_separator(
+                    &strip_data,
+                    Some(widgets::PlayerBarMessage::StripClicked),
+                ))
+            } else {
+                None
+            };
+
+        // Wrap player bar strip in context menu for right-click actions
+        let player_strip: Option<Element<'_, widgets::PlayerBarMessage>> =
+            player_strip.map(|strip| {
+                let has_local_path = !self.local_music_path.is_empty();
+                let is_starred = self.is_current_track_starred();
+                widgets::context_menu::context_menu(
+                    strip,
+                    widgets::context_menu::strip_entries(has_local_path),
+                    move |entry, length| {
+                        widgets::context_menu::strip_entry_view(
+                            entry,
+                            length,
+                            is_starred,
+                            widgets::PlayerBarMessage::StripContextAction,
+                        )
+                    },
+                )
+                .into()
+            });
+
         // Base layout: nav bar + content + player bar
         // In Side mode, add vertical sidebar next to content
 
@@ -152,37 +183,6 @@ impl Nokkvi {
                 outer = outer.push(crate::theme::horizontal_separator::<Message>(1.0));
             }
 
-            // Build the player bar info strip if PlayerBar mode is active
-            let player_strip: Option<Element<'_, widgets::PlayerBarMessage>> =
-                if crate::theme::show_player_bar_strip() {
-                    Some(widgets::track_info_strip::track_info_strip_with_separator(
-                        &strip_data,
-                        Some(widgets::PlayerBarMessage::StripClicked),
-                    ))
-                } else {
-                    None
-                };
-
-            // Wrap player bar strip in context menu for right-click actions
-            let player_strip: Option<Element<'_, widgets::PlayerBarMessage>> =
-                player_strip.map(|strip| {
-                    let has_local_path = !self.local_music_path.is_empty();
-                    let is_starred = self.is_current_track_starred();
-                    widgets::context_menu::context_menu(
-                        strip,
-                        widgets::context_menu::strip_entries(has_local_path),
-                        move |entry, length| {
-                            widgets::context_menu::strip_entry_view(
-                                entry,
-                                length,
-                                is_starred,
-                                widgets::PlayerBarMessage::StripContextAction,
-                            )
-                        },
-                    )
-                    .into()
-                });
-
             // Sidebar + content row
             outer = outer.push(iced::widget::row![
                 widgets::side_nav_bar(side_data).map(map_nav_bar_message),
@@ -198,7 +198,7 @@ impl Nokkvi {
             iced::widget::column![
                 self.navigation_bar(),
                 self.main_content(),
-                widgets::player_bar(&player_bar_data, None).map(Message::PlayerBar),
+                widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar),
             ]
             .into()
         };

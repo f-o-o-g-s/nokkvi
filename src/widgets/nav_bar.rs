@@ -360,11 +360,11 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     }
 
     // Only show nav bar metadata when the display mode targets the top/nav bar.
-    // Off and ProgressTrack modes shouldn't show metadata here.
+    // Off, PlayerBar, and ProgressTrack modes shouldn't show metadata here.
     let show_nav_metadata = {
         use nokkvi_data::types::player_settings::TrackInfoDisplay;
         let mode = theme::track_info_display();
-        mode == TrackInfoDisplay::TopBar || (!is_side_nav && mode == TrackInfoDisplay::PlayerBar)
+        mode == TrackInfoDisplay::TopBar
     };
 
     // Responsive visibility flags — fields collapse progressively.

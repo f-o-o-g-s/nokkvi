@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+### Fixes
+- **Track info display layout** — setting the metadata strip to "Player Bar" now works correctly when using the top navigation layout instead of remaining in the top bar.
 ---
 
 ## v0.2.0 — 2026-03-31
@@ -14,8 +16,6 @@
 - **Hardware Volume Integration** — real-time volume synchronization with PipeWire stream channel volumes (`SPA_PROP_channelVolumes`).
 - **Named Theme System** — migrated to named TOML file themes (`~/.config/nokkvi/themes/`) for robust theme management and live configuration reloading.
 - **Queue Album Column** — the queue view now always shows the album column for better context during playback.
-
-### Fixes
 - **Settings color editors** — editing color fields intuitively applies the hex code on "Enter" without needing a secondary confirmation click.
 - **Visualizer hot-reload** — visualizer settings such as "fill opacity" and "noise reduction" now hot-reload instantly.
 - **Theme default restoration** — "Restore Defaults" now correctly pulls values specific to the active named theme instead of global application defaults.
