@@ -84,7 +84,7 @@ Line rendering with Catmull-Rom spline interpolation, per-vertex coloring, and o
 | `height` | 3 | Color by amplitude (quiet → loud, all 8 colors) |
 | `gradient` | 4 | Position + amplitude blend — peaks shift palette further |
 
-Lines mode reuses the bar gradient colors palette (`dark.visualizer.bar_gradient_colors` / `light.visualizer.bar_gradient_colors`).
+Lines mode reuses the bar gradient colors palette (`dark.visualizer.bar_gradient_colors` / `light.visualizer.bar_gradient_colors` in the active theme file).
 
 ### Lines Shader Architecture
 
@@ -102,7 +102,17 @@ Under `[visualizer]` and `[visualizer.bars]` in `config.toml`:
 - `max_bars`: 16–2048, default 2048
 - `auto_sensitivity`: bool toggle (hot-reloadable)
 - LED mode: `led_bars`, `led_segment_height`
-- Border opacities (per-theme in `[dark.visualizer]` / `[light.visualizer]`):
+- 3D depth: `bar_depth_3d` (0 = flat)
+- Pixel-based settings use **integer steps** ("1 px", not "1.00 px")
+- `opacity` (float, 0.0–1.0): overall visualizer transparency via `global_opacity` uniform
+
+### Visualizer Colors (Theme File)
+
+Visualizer colors are stored in the active theme file (`~/.config/nokkvi/themes/{name}.toml`) under `[dark.visualizer]` and `[light.visualizer]`:
+- `bar_gradient_colors` (array of hex strings, 1-8 entries)
+- `peak_gradient_colors` (array of hex strings, 1-8 entries)
+- `border_color` (hex string)
+- Border opacities:
   - `led_border_opacity` (0.0–1.0): LED mode segment gap opacity
   - `border_opacity` (0.0–1.0): regular bar border opacity
   - Dark defaults: 1.0 (visible); Light defaults: 0.0 (hidden)

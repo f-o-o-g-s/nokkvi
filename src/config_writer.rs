@@ -353,30 +353,14 @@ pub(crate) fn write_full_visualizer(
     // Serialize full visualizer config with current values
     let viz_toml = toml::to_string_pretty(visualizer_config)
         .context("Failed to serialize VisualizerConfig")?;
-    let mut viz_doc: DocumentMut = viz_toml
+    let viz_doc: DocumentMut = viz_toml
         .parse::<DocumentMut>()
         .context("Failed to re-parse [visualizer] as toml_edit")?;
-
-    // Strip color sub-tables — those live in theme files now
-    strip_color_subtables(&mut viz_doc);
 
     doc.insert("visualizer", Item::Table(viz_doc.as_table().clone()));
 
     debug!(" [CONFIG WRITER] Wrote full [visualizer] (verbose mode)");
     write_atomic(&config_path, &doc.to_string())
-}
-
-/// Strip dark/light color sub-tables from a visualizer document.
-/// These now live in theme files, not config.toml.
-fn strip_color_subtables(doc: &mut DocumentMut) {
-    for section in ["bars", "lines"] {
-        if let Some(s) = doc.get_mut(section)
-            && let Some(tbl) = s.as_table_like_mut()
-        {
-            tbl.remove("dark");
-            tbl.remove("light");
-        }
-    }
 }
 
 /// Strip `[visualizer]` section back to sparse mode by removing
@@ -410,10 +394,15 @@ pub(crate) fn strip_to_sparse() -> Result<()> {
     // Strip matching keys from [visualizer]
     strip_matching_keys(&mut doc, "visualizer", viz_default_doc.as_table());
 
-    // Also remove any leftover [theme] section (themes now live in separate files)
-    if doc.contains_key("theme") {
+    // Remove any leftover [theme] TABLE section from pre-refactor configs.
+    // The new architecture uses `theme = "name"` (a string key), NOT a [theme] table.
+    // Guard: only remove if it's actually a table, not the string key we need.
+    if doc
+        .get("theme")
+        .is_some_and(|v| v.is_table() || v.is_table_like())
+    {
         doc.remove("theme");
-        debug!(" [CONFIG WRITER] Removed leftover [theme] section from config.toml");
+        debug!(" [CONFIG WRITER] Removed leftover [theme] table section from config.toml");
     }
 
     debug!(" [CONFIG WRITER] Stripped [visualizer] to sparse (verbose off)");

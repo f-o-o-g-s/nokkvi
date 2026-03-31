@@ -80,9 +80,9 @@ impl Default for ResolvedTheme {
 impl ResolvedTheme {
     /// Create resolved theme from the data-crate `ThemePalette`.
     pub(crate) fn from_theme_palette(palette: &ThemePalette) -> Self {
-        let fallback_bg = parse_hex_color("#282828").unwrap();
-        let fallback_fg = parse_hex_color("#fbf1c7").unwrap();
-        let fallback_accent = parse_hex_color("#458588").unwrap();
+        let fallback_bg = parse_hex_color("#282828").expect("valid hardcoded hex");
+        let fallback_fg = parse_hex_color("#fbf1c7").expect("valid hardcoded hex");
+        let fallback_accent = parse_hex_color("#458588").expect("valid hardcoded hex");
 
         Self {
             bg0_hard: parse_hex_or_default(&palette.background.hard, fallback_bg),
@@ -115,22 +115,25 @@ impl ResolvedTheme {
                 parse_hex_or_default(&palette.accent.selected, fallback_accent)
             },
 
-            red: parse_hex_or_default(&palette.red.normal, parse_hex_color("#cc241d").unwrap()),
+            red: parse_hex_or_default(
+                &palette.red.normal,
+                parse_hex_color("#cc241d").expect("valid hardcoded hex"),
+            ),
             red_bright: parse_hex_or_default(
                 &palette.red.bright,
-                parse_hex_color("#fb4934").unwrap(),
+                parse_hex_color("#fb4934").expect("valid hardcoded hex"),
             ),
             green: parse_hex_or_default(
                 &palette.green.normal,
-                parse_hex_color("#98971a").unwrap(),
+                parse_hex_color("#98971a").expect("valid hardcoded hex"),
             ),
             yellow: parse_hex_or_default(
                 &palette.yellow.normal,
-                parse_hex_color("#d79921").unwrap(),
+                parse_hex_color("#d79921").expect("valid hardcoded hex"),
             ),
             yellow_bright: parse_hex_or_default(
                 &palette.yellow.bright,
-                parse_hex_color("#fabd2f").unwrap(),
+                parse_hex_color("#fabd2f").expect("valid hardcoded hex"),
             ),
         }
     }

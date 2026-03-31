@@ -34,9 +34,8 @@ static DUAL_THEME: LazyLock<RwLock<ResolvedDualTheme>> = LazyLock::new(|| {
 
 /// Global raw theme file — hex strings for visualizer colors and UI that
 /// needs the original color values (not parsed `iced::Color`).
-static THEME_FILE: LazyLock<RwLock<ThemeFile>> = LazyLock::new(|| {
-    RwLock::new(load_active_theme_file())
-});
+static THEME_FILE: LazyLock<RwLock<ThemeFile>> =
+    LazyLock::new(|| RwLock::new(load_active_theme_file()));
 
 // ============================================================================
 // UI Mode Flags (grouped to avoid scattered statics)

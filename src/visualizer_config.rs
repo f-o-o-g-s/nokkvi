@@ -18,7 +18,7 @@ use tracing::{debug, warn};
 /// Theme-specific bar color configuration (colors only)
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
-pub struct ThemeBarColors {
+pub(crate) struct ThemeBarColors {
     /// Border color for bars as a hex string.
     /// Example: "#1d2021" (Gruvbox BG0_HARD dark)
     /// Default: "#1d2021"
@@ -72,31 +72,13 @@ impl From<nokkvi_data::types::theme_file::VisualizerColors> for ThemeBarColors {
 }
 
 impl ThemeBarColors {
-    /// Light mode default colors
-    pub fn light_default() -> Self {
-        Self::from(nokkvi_data::types::theme_file::VisualizerColors::light_default())
-    }
-
-    /// Parse a hex color string (e.g., "#458588") to iced::Color
+    /// Parse a hex color string via the canonical implementation in theme_config
     fn parse_hex_color(hex: &str) -> Option<iced::Color> {
-        let hex = hex.trim_start_matches('#');
-        if hex.len() != 6 {
-            return None;
-        }
-
-        let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
-        let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
-        let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-
-        Some(iced::Color::from_rgb(
-            f32::from(r) / 255.0,
-            f32::from(g) / 255.0,
-            f32::from(b) / 255.0,
-        ))
+        crate::theme_config::parse_hex_color(hex)
     }
 
     /// Get bar gradient colors as iced::Color (padded to 8 colors for shader)
-    pub fn get_bar_gradient_colors(&self) -> Vec<iced::Color> {
+    pub(crate) fn get_bar_gradient_colors(&self) -> Vec<iced::Color> {
         let mut colors: Vec<iced::Color> = self
             .bar_gradient_colors
             .iter()
@@ -117,7 +99,7 @@ impl ThemeBarColors {
     }
 
     /// Get peak gradient colors as iced::Color (padded to 8 colors for shader)
-    pub fn get_peak_gradient_colors(&self) -> Vec<iced::Color> {
+    pub(crate) fn get_peak_gradient_colors(&self) -> Vec<iced::Color> {
         let mut colors: Vec<iced::Color> = self
             .peak_gradient_colors
             .iter()
@@ -138,7 +120,7 @@ impl ThemeBarColors {
     }
 
     /// Get border color as iced::Color
-    pub fn get_border_color(&self) -> iced::Color {
+    pub(crate) fn get_border_color(&self) -> iced::Color {
         Self::parse_hex_color(&self.border_color).unwrap_or(iced::Color::from_rgb(0.11, 0.13, 0.13))
     }
 }
@@ -239,16 +221,6 @@ pub struct BarsConfig {
     /// The dynamic layout algorithm will try to fit up to this many bars in the window.
     /// Default: 256, range 16–2048
     pub max_bars: usize,
-
-    /// Dark mode bar colors
-    /// Use [visualizer.bars.dark] in config.toml
-    #[serde(default)]
-    pub dark: ThemeBarColors,
-
-    /// Light mode bar colors
-    /// Use [visualizer.bars.light] in config.toml
-    #[serde(default = "ThemeBarColors::light_default")]
-    pub light: ThemeBarColors,
 }
 
 impl Default for BarsConfig {
@@ -270,8 +242,6 @@ impl Default for BarsConfig {
             peak_fall_speed: 5,            // Medium speed (1=slow, 10=fast)
             bar_depth_3d: 0.0,             // Flat by default (no 3D effect)
             max_bars: 2048,                // Maximum bars to try fitting
-            dark: ThemeBarColors::default(),
-            light: ThemeBarColors::light_default(),
         }
     }
 }
@@ -514,10 +484,6 @@ impl VisualizerConfig {
         self.bars.bar_spacing = self.bars.bar_spacing.max(0.0);
         self.bars.border_width = self.bars.border_width.clamp(0.0, 5.0);
         self.bars.led_segment_height = self.bars.led_segment_height.clamp(2.0, 20.0);
-        self.bars.dark.led_border_opacity = self.bars.dark.led_border_opacity.clamp(0.0, 1.0);
-        self.bars.dark.border_opacity = self.bars.dark.border_opacity.clamp(0.0, 1.0);
-        self.bars.light.led_border_opacity = self.bars.light.led_border_opacity.clamp(0.0, 1.0);
-        self.bars.light.border_opacity = self.bars.light.border_opacity.clamp(0.0, 1.0);
         self.bars.bar_depth_3d = self.bars.bar_depth_3d.clamp(0.0, 20.0);
         self.bars.peak_height_ratio = self.bars.peak_height_ratio.clamp(10, 100);
         self.bars.peak_fall_speed = self.bars.peak_fall_speed.clamp(1, 20);
@@ -675,12 +641,11 @@ impl ConfigWatcher {
                             should_reload = true;
                         }
                         // a .toml file inside themes/ changed
-                        if let Some(ref themes_dir) = self.themes_dir {
-                            if path.starts_with(themes_dir)
-                                && path.extension().is_some_and(|e| e == "toml")
-                            {
-                                should_reload = true;
-                            }
+                        if let Some(ref themes_dir) = self.themes_dir
+                            && path.starts_with(themes_dir)
+                            && path.extension().is_some_and(|e| e == "toml")
+                        {
+                            should_reload = true;
                         }
                     }
                 }

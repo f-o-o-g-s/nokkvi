@@ -4,14 +4,12 @@
 //! to `~/.config/nokkvi/themes/` on first run. All runtime I/O reads/writes
 //! from the user's themes directory.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use anyhow::{Context, Result};
 use tracing::{debug, info, warn};
 
-use crate::types::theme_file::ThemeFile;
-use crate::utils::paths::get_themes_dir;
+use crate::{types::theme_file::ThemeFile, utils::paths::get_themes_dir};
 
 // ============================================================================
 // Built-in theme registry (compiled into the binary)
@@ -108,7 +106,11 @@ pub fn seed_builtin_themes() -> Result<()> {
         let path = themes_dir.join(format!("{}.toml", builtin.stem));
         if !path.exists() {
             std::fs::write(&path, builtin.content).with_context(|| {
-                format!("Failed to seed theme '{}' to {}", builtin.stem, path.display())
+                format!(
+                    "Failed to seed theme '{}' to {}",
+                    builtin.stem,
+                    path.display()
+                )
             })?;
             info!(theme = builtin.stem, "Seeded built-in theme");
         }
@@ -168,7 +170,11 @@ pub fn discover_themes() -> Result<Vec<ThemeInfo>> {
         });
     }
 
-    themes.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
+    themes.sort_by(|a, b| {
+        a.display_name
+            .to_lowercase()
+            .cmp(&b.display_name.to_lowercase())
+    });
     Ok(themes)
 }
 
@@ -226,7 +232,7 @@ pub fn restore_builtin(name: &str) -> Result<()> {
     let registry = builtin_registry();
     let content = registry
         .get(name)
-        .ok_or_else(|| anyhow::anyhow!("'{}' is not a built-in theme", name))?;
+        .ok_or_else(|| anyhow::anyhow!("'{name}' is not a built-in theme"))?;
 
     let themes_dir = get_themes_dir()?;
     let path = themes_dir.join(format!("{name}.toml"));
@@ -279,15 +285,14 @@ pub fn write_theme_name_to_config(name: &str) -> Result<()> {
 
     let content = std::fs::read_to_string(&config_path).unwrap_or_default();
 
-    let mut doc: toml_edit::DocumentMut =
-        content.parse().context("Failed to parse config.toml for editing")?;
+    let mut doc: toml_edit::DocumentMut = content
+        .parse()
+        .context("Failed to parse config.toml for editing")?;
 
     doc["theme"] = toml_edit::value(name);
 
-    crate::utils::paths::suppress_config_reload(|| {
-        std::fs::write(&config_path, doc.to_string())
-    })
-    .with_context(|| format!("Failed to write theme name to config.toml"))?;
+    crate::utils::paths::suppress_config_reload(|| std::fs::write(&config_path, doc.to_string()))
+        .with_context(|| "Failed to write theme name to config.toml")?;
 
     info!(theme = name, "Updated theme name in config.toml");
     Ok(())
@@ -299,9 +304,11 @@ pub fn write_theme_name_to_config(name: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs;
+
     use tempfile::TempDir;
+
+    use super::*;
 
     /// Override themes dir for test isolation.
     fn seed_to_temp() -> (TempDir, Vec<ThemeInfo>) {
@@ -333,7 +340,11 @@ mod tests {
                 path,
             });
         }
-        themes.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
+        themes.sort_by(|a, b| {
+            a.display_name
+                .to_lowercase()
+                .cmp(&b.display_name.to_lowercase())
+        });
 
         (tmp, themes)
     }
@@ -387,7 +398,11 @@ mod tests {
                     builtin.stem, e, serialized
                 );
             });
-            assert_eq!(theme.name, reparsed.name, "Name mismatch for {}", builtin.stem);
+            assert_eq!(
+                theme.name, reparsed.name,
+                "Name mismatch for {}",
+                builtin.stem
+            );
             assert_eq!(
                 theme.dark.background.hard, reparsed.dark.background.hard,
                 "dark.background.hard mismatch for {}",

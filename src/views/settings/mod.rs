@@ -8,7 +8,10 @@
 
 use std::{collections::HashMap, time::Instant};
 
-use nokkvi_data::types::{hotkey_config::{HotkeyAction, KeyCombo}, theme_file::ThemeFile};
+use nokkvi_data::types::{
+    hotkey_config::{HotkeyAction, KeyCombo},
+    theme_file::ThemeFile,
+};
 
 use crate::{visualizer_config::VisualizerConfig, widgets::SlotListView};
 

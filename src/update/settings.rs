@@ -92,8 +92,7 @@ impl Nokkvi {
         // Full path: build SettingsViewData (reads from theme system + config.toml)
         let viz_config = self.visualizer_config.read().clone();
         let theme_file = crate::theme_config::load_active_theme_file();
-        let active_theme_stem =
-            nokkvi_data::services::theme_loader::read_theme_name_from_config();
+        let active_theme_stem = nokkvi_data::services::theme_loader::read_theme_name_from_config();
         let data = crate::views::SettingsViewData {
             visualizer_config: viz_config,
             theme_file,
@@ -175,6 +174,9 @@ impl Nokkvi {
                     if let Ok(new_config) = crate::visualizer_config::load_visualizer_config() {
                         *self.visualizer_config.write() = new_config;
                         self.settings_page.config_dirty = true;
+                        if let Some(ref vis) = self.visualizer {
+                            vis.apply_config();
+                        }
                     }
                 }
                 Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
@@ -312,10 +314,13 @@ impl Nokkvi {
         {
             tracing::warn!(" [SETTINGS] Failed to write config: {e}");
             self.toast_warn(format!("Failed to save setting: {e}"));
-        } else if key.starts_with("visualizer.") {
-            if let Ok(new_config) = crate::visualizer_config::load_visualizer_config() {
-                *self.visualizer_config.write() = new_config;
-                self.settings_page.config_dirty = true;
+        } else if key.starts_with("visualizer.")
+            && let Ok(new_config) = crate::visualizer_config::load_visualizer_config()
+        {
+            *self.visualizer_config.write() = new_config;
+            self.settings_page.config_dirty = true;
+            if let Some(ref vis) = self.visualizer {
+                vis.apply_config();
             }
         }
         // Mutual exclusivity: waves and monstercat can't both be active.

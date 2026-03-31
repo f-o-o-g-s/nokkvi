@@ -551,7 +551,8 @@ mod tests {
     #[test]
     fn visualizer_items_structure() {
         let config = VisualizerConfig::default();
-        let entries = build_visualizer_items(&config);
+        let theme = nokkvi_data::types::theme_file::ThemeFile::default();
+        let entries = build_visualizer_items(&config, &theme);
 
         // Verify section headers
         assert_eq!(
@@ -581,7 +582,9 @@ mod tests {
                 continue;
             }
             assert!(
-                key.starts_with("visualizer.") || key.starts_with("dark.") || key.starts_with("light."),
+                key.starts_with("visualizer.")
+                    || key.starts_with("dark.")
+                    || key.starts_with("light."),
                 "All visualizer keys should start with 'visualizer.', 'dark.', or 'light.', got: {key}"
             );
         }
@@ -590,7 +593,8 @@ mod tests {
     #[test]
     fn visualizer_items_key_paths() {
         let config = VisualizerConfig::default();
-        let entries = build_visualizer_items(&config);
+        let theme = nokkvi_data::types::theme_file::ThemeFile::default();
+        let entries = build_visualizer_items(&config, &theme);
         let keys = extract_keys(&entries);
 
         // Spot-check critical key paths that config_writer depends on
@@ -631,7 +635,8 @@ mod tests {
     #[test]
     fn visualizer_items_value_types() {
         let config = VisualizerConfig::default();
-        let entries = build_visualizer_items(&config);
+        let theme = nokkvi_data::types::theme_file::ThemeFile::default();
+        let entries = build_visualizer_items(&config, &theme);
 
         for entry in &entries {
             if let SettingsEntry::Item(item) = entry {
@@ -688,7 +693,8 @@ mod tests {
     #[test]
     fn visualizer_items_defaults_match_config() {
         let config = VisualizerConfig::default();
-        let entries = build_visualizer_items(&config);
+        let theme = nokkvi_data::types::theme_file::ThemeFile::default();
+        let entries = build_visualizer_items(&config, &theme);
 
         // When built from defaults, value should equal default for every item
         // (skip __ sentinel keys — they're action buttons, not config values)
