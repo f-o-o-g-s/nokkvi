@@ -105,10 +105,6 @@ impl std::fmt::Display for CustomEqPreset {
 
 pub const BUILTIN_PRESETS: &[EqPreset] = &[
     EqPreset {
-        name: "Flat",
-        gains: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    },
-    EqPreset {
         name: "Bass Boost",
         gains: [5.0, 4.0, 3.0, 1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     },

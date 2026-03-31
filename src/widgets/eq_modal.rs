@@ -210,19 +210,24 @@ pub(crate) fn eq_modal_overlay<'a>(
         choices.push(PresetChoice::Custom(i));
     }
 
-    // Find current match
-    let current_choice = nokkvi_data::audio::eq::BUILTIN_PRESETS
-        .iter()
-        .enumerate()
-        .find(|(_, p)| p.gains == eq_gains)
-        .map(|(i, _)| PresetChoice::Builtin(i))
-        .or_else(|| {
-            custom_presets
-                .iter()
-                .enumerate()
-                .find(|(_, p)| p.gains == eq_gains)
-                .map(|(i, _)| PresetChoice::Custom(i))
-        });
+    // Find current match — hide selection when EQ is disabled so the
+    // placeholder ("EQ Off") shows instead of a misleading preset name.
+    let current_choice = if eq_enabled {
+        nokkvi_data::audio::eq::BUILTIN_PRESETS
+            .iter()
+            .enumerate()
+            .find(|(_, p)| p.gains == eq_gains)
+            .map(|(i, _)| PresetChoice::Builtin(i))
+            .or_else(|| {
+                custom_presets
+                    .iter()
+                    .enumerate()
+                    .find(|(_, p)| p.gains == eq_gains)
+                    .map(|(i, _)| PresetChoice::Custom(i))
+            })
+    } else {
+        None
+    };
 
     // Custom display for pick_list items showing custom preset names
     let custom_presets_owned: Vec<nokkvi_data::audio::eq::CustomEqPreset> = custom_presets.to_vec();
@@ -241,7 +246,7 @@ pub(crate) fn eq_modal_overlay<'a>(
     .on_select(EqModalMessage::PresetSelected)
     .font(theme::ui_font())
     .text_size(14.0)
-    .placeholder("Custom")
+    .placeholder(if eq_enabled { "Custom" } else { "EQ Off" })
     .padding([4, 8])
     .style(move |_theme, status| pick_list::Style {
         text_color: theme::fg1(),

@@ -73,8 +73,12 @@ impl Nokkvi {
 
                 if let Some(gains) = gains {
                     self.playback.eq_state.set_all_gains(&gains);
+                    self.playback.eq_state.set_enabled(true);
                     self.shell_fire_and_forget_task(
-                        move |shell| async move { shell.settings().set_eq_gains(gains).await },
+                        move |shell| async move {
+                            shell.settings().set_eq_gains(gains).await?;
+                            shell.settings().set_eq_enabled(true).await
+                        },
                         format!("Preset: {preset_name}"),
                         "Failed to save EQ preset",
                     )
