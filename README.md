@@ -108,12 +108,12 @@ Nokkvi ships with several pre-configured built-in themes that are automatically 
 - **Nord** (Arctic, north-bluish palette)
 - **Bio Luminal Swamplab** (Custom bioluminescent theme)
 
-**To change your theme:** Simply open the in-app **Settings -> Theme** menu, and pick one from the "Select Theme" dropdown. It will apply instantly.
+**To change your theme:** Simply open the in-app **Settings -> Theme** menu, and pick one from the "Select Theme" list. It will apply instantly.
 
 **To create a custom theme:**
 1. Copy an existing file in `~/.config/nokkvi/themes/` to a new name (e.g. `my_theme.toml`).
 2. Edit the hex colors in your new file.
-3. Open Nokkvi Settings, and your custom theme will automatically appear in the dropdown!
+3. Open Nokkvi Settings, and your custom theme will automatically appear in the list!
 
 ## Media Controls (MPRIS)
 
