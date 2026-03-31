@@ -18,9 +18,9 @@ globs: src/widgets/**
 ## Opacity Gradient & Slot Row Height
 
 - `opacity_gradient` (`AtomicBool` in `src/theme.rs`): global toggle for non-center slot opacity fade
-- Persisted as a `PlayerSettings` field; exposed in Settings → Theme
+- Persisted as a `PlayerSettings` field; exposed in Settings → Theme → Appearance
 - `slot_row_height`: `SlotRowHeight` enum stored as `AtomicU8` variant index in `src/theme.rs`. Variants: Compact (50px), Default (70px), Comfortable (90px), Spacious (110px).
-- Persisted as a `PlayerSettings` field; exposed in Settings → General → Application
+- Persisted as a `PlayerSettings` field; exposed in Settings → Interface → Layout
 
 ## Player Bar (`player_bar.rs`)
 

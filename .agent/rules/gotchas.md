@@ -136,3 +136,15 @@ When metadata visible-fields toggles change, the progress bar's `overlay_segment
 ## 33. Play Button Cold-Start Uses Selected Track
 
 The play button cold-start (nothing loaded) must use the selected track index (from `get_effective_center_index`), not `queue_songs.first()`. This matches the Enter-key behavior. The backend `playback_controller::play()` also defaults to the selected index, not index 0.
+
+## 34. Config Writer: Theme vs Config Paths
+
+`config_writer.rs` has two write targets: `update_config_value()` writes to `config.toml`, while `update_theme_value()` / `update_theme_color_array_entry()` write to the active theme file (`~/.config/nokkvi/themes/{name}.toml`). Settings handler routes based on key prefix — misrouting writes to the wrong file.
+
+## 35. Config Reload Suppression Scope
+
+`suppress_config_reload()` wraps file writes to prevent the file watcher from triggering a hot-reload feedback loop. However, GUI-initiated changes to theme/visualizer settings need to manually trigger `ThemeConfigReloaded` / visualizer reload *after* the write, since the watcher won't fire. Missing this manual trigger causes settings to appear applied only after restart.
+
+## 36. Theme File Font Propagation
+
+`font_family` is stored in the theme file, not `config.toml`. Font changes via `update_theme_value("font_family", ...)` must also trigger `ThemeConfigReloaded` to propagate to the running app. The EQ modal's `pick_list` must explicitly receive the theme font or it falls back to system defaults.

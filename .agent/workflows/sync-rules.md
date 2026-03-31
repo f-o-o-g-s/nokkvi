@@ -29,7 +29,7 @@ done
 For files with significant commits since their last update, get the commit summaries:
 
 ```bash
-git log --oneline <last_hash>..HEAD
+git --no-pager log --oneline <last_hash>..HEAD
 ```
 
 Focus on commits that touch areas each file documents (use `-- <path>` filters as needed).

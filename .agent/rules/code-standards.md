@@ -46,7 +46,7 @@ trigger: always_on
   - `scrobbling.rs` — scrobble submission and now-playing notifications
   - `mpris.rs` — MPRIS D-Bus event handling
   - `window.rs` — window resize handling and centralized artwork prefetch dispatch
-  - `settings.rs` — settings action dispatch (config writes, general settings, hotkeys, presets, cache rebuild, logout)
+  - `settings.rs` — settings action dispatch (config writes, theme writes, general settings, hotkeys, presets, cache rebuild, logout)
   - `progressive_queue.rs` — progressive queue page append chain
   - `info_modal.rs` — info modal open/close dispatch
   - `text_input_dialog.rs` — text input dialog open/submit/cancel dispatch
@@ -74,13 +74,14 @@ cargo test                    # Unit tests
 cargo build --release         # Release build verification
 ```
 
-Tests live in inline `#[cfg(test)]` modules. Key test locations: `update/tests.rs`, `data/src/services/queue/mod.rs`, `data/src/services/queue/navigation.rs`, `data/src/services/toml_settings_io.rs`, `data/src/types/hotkey_config.rs`, `data/src/types/paged_buffer.rs`, `data/src/types/player_settings.rs`, `data/src/types/toml_settings.rs`, `data/src/types/toml_views.rs`, `data/src/credentials.rs`, `data/src/audio/spectrum.rs`, `data/src/audio/eq.rs`, `src/embedded_svg.rs`, `src/widgets/format_info.rs`, `src/views/settings/items.rs` (general + interface + playback structure tests), `src/test_helpers.rs`. Additional `#[cfg(test)]` modules exist in various type/utility files (`data/src/types/song_pool.rs`, `data/src/types/playlist_edit.rs`, `data/src/types/toast.rs`, `data/src/types/progress.rs`, `data/src/types/song.rs`, `data/src/utils/`, `data/src/services/state_storage.rs`, `data/src/services/api/subsonic.rs`, `src/widgets/slot_list*.rs`, `src/views/expansion.rs`, `src/update/mod.rs`, `src/main.rs`).
+Tests live in inline `#[cfg(test)]` modules. Key test locations: `update/tests.rs`, `data/src/services/queue/mod.rs`, `data/src/services/queue/navigation.rs`, `data/src/services/toml_settings_io.rs`, `data/src/services/theme_loader.rs`, `data/src/types/hotkey_config.rs`, `data/src/types/paged_buffer.rs`, `data/src/types/player_settings.rs`, `data/src/types/toml_settings.rs`, `data/src/types/toml_views.rs`, `data/src/types/theme_file.rs`, `data/src/credentials.rs`, `data/src/audio/spectrum.rs`, `data/src/audio/eq.rs`, `src/embedded_svg.rs`, `src/widgets/format_info.rs`, `src/views/settings/items.rs` (general + interface + playback structure tests), `src/test_helpers.rs`. Additional `#[cfg(test)]` modules exist in various type/utility files (`data/src/types/song_pool.rs`, `data/src/types/playlist_edit.rs`, `data/src/types/toast.rs`, `data/src/types/progress.rs`, `data/src/types/song.rs`, `data/src/utils/`, `data/src/services/state_storage.rs`, `data/src/services/api/subsonic.rs`, `src/widgets/slot_list*.rs`, `src/views/expansion.rs`, `src/update/mod.rs`, `src/main.rs`).
 
 ## Config & Persistence
 
 | Store | What | How |
 |-------|------|-----|
-| `config.toml` | All user preferences (Theme, Visualizer, Hotkeys, Playback, Interface, General) | Hot-reloadable via `SettingsManager` & `config_writer.rs`. `verbose_config` mode ensures defaults are output. |
+| `config.toml` | User preferences (General, Interface, Playback, Hotkeys, Views, Visualizer behavior) | Hot-reloadable via `SettingsManager` & `config_writer.rs`. `verbose_config` mode ensures defaults are output. |
+| Theme files | Named `.toml` files in `~/.config/nokkvi/themes/` | Palette colors, visualizer colors, font family. 11 built-in themes. `config.toml` stores `theme = "name"` key. |
 | redb | Queue, encrypted password | Via `state_storage.rs`, `queue/`. |
 | Credentials | Server URL, username, password | AES-256-GCM encrypted, password in redb |
 

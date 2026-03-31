@@ -19,7 +19,7 @@ views/settings/
 ├── items_theme.rs       — Theme tab item builders (font, colors, presets, opacity gradient)
 ├── items_visualizer.rs  — Visualizer tab item builders (bars, peaks, LED, 3D, gradient, lines)
 ├── sub_lists.rs         — Sub-slot-list handling: font picker, color gradient editor
-├── presets.rs           — 10 embedded preset themes applied inline (no separate sub-slot-list)
+├── presets.rs           — Theme discovery/application: delegates to `theme_loader` for 11 built-in themes + user custom themes
 ├── rendering.rs         — Slot rendering: headers, items, color sub-slot-list, presets, hotkey badges, toggle sets, row separators
 └── view.rs              — Layout: breadcrumb/search bar, footer, font modal overlay, exit button
 ```
