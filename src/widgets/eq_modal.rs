@@ -239,6 +239,7 @@ pub(crate) fn eq_modal_overlay<'a>(
         }
     })
     .on_select(EqModalMessage::PresetSelected)
+    .font(theme::ui_font())
     .text_size(14.0)
     .placeholder("Custom")
     .padding([4, 8])
