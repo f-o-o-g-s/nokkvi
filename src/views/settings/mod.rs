@@ -8,11 +8,9 @@
 
 use std::{collections::HashMap, time::Instant};
 
-use nokkvi_data::types::hotkey_config::{HotkeyAction, KeyCombo};
+use nokkvi_data::types::{hotkey_config::{HotkeyAction, KeyCombo}, theme_file::ThemeFile};
 
-use crate::{
-    theme_config::DualThemeConfig, visualizer_config::VisualizerConfig, widgets::SlotListView,
-};
+use crate::{visualizer_config::VisualizerConfig, widgets::SlotListView};
 
 #[macro_use]
 pub(crate) mod items;
@@ -255,7 +253,8 @@ pub(crate) enum SettingsAction {
 /// Read-only data passed in from the parent for rendering
 pub(crate) struct SettingsViewData {
     pub visualizer_config: VisualizerConfig,
-    pub theme_config: DualThemeConfig,
+    pub theme_file: ThemeFile,
+    pub active_theme_stem: String,
     pub window_height: f32,
     pub hotkey_config: nokkvi_data::types::hotkey_config::HotkeyConfig,
     // --- General tab data ---
@@ -684,7 +683,7 @@ impl SettingsPage {
                                         }
                                         // Font family: open font picker sub-list
                                         SettingValue::Text(_)
-                                            if item.key.as_ref() == "theme.font.family" =>
+                                            if item.key.as_ref() == "font_family" =>
                                         {
                                             let fonts = self.system_fonts().to_vec();
                                             self.font_sub_list = Some(FontSubListState::new(
@@ -890,21 +889,11 @@ impl SettingsPage {
     /// Collect (key, default_hex) pairs for a __restore_* group key.
     /// Walks the cached entries and collects all HexColor items in the same category.
     fn handle_restore_defaults(&mut self, restore_key: &str) -> SettingsAction {
-        // Special: __restore_theme applies a full default preset
+        // Special: __restore_theme restores the active built-in theme to its original
         if restore_key == "__restore_theme" {
-            // Write the default DualThemeConfig as TOML (same as presets::apply_default)
-            let default_config = crate::theme_config::DualThemeConfig::default();
-            let toml_str = toml::to_string_pretty(&default_config).unwrap_or_default();
-            // Use the preset writer path to overwrite [theme] section
-            if let Ok(config_path) = nokkvi_data::utils::paths::get_config_path() {
-                let content = std::fs::read_to_string(&config_path).unwrap_or_default();
-                let mut doc: toml_edit::DocumentMut = content.parse().unwrap_or_default();
-                let default_doc: toml_edit::DocumentMut =
-                    format!("[theme]\n{toml_str}").parse().unwrap_or_default();
-                if let Some(theme_table) = default_doc.get("theme") {
-                    doc.insert("theme", theme_table.clone());
-                }
-                let _ = std::fs::write(&config_path, doc.to_string());
+            let stem = presets::active_theme_stem();
+            if let Err(e) = presets::restore_theme(&stem) {
+                tracing::warn!(" [SETTINGS] Failed to restore theme '{stem}': {e}");
             }
             return SettingsAction::RestoreColorGroup { entries: vec![] };
         }
