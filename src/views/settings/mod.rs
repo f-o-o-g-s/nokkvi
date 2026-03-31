@@ -208,6 +208,8 @@ pub(crate) enum SettingsAction {
 
     /// Play enter sound effect (items only — headers use ExpandCollapse)
     PlayEnter,
+    /// Focus the hex editor text input
+    FocusHexInput,
     /// Focus the settings search input
     FocusSearch,
     /// Write a hotkey binding to redb
@@ -312,6 +314,9 @@ pub(crate) const FONT_SEARCH_INPUT_ID: &str = "settings_font_search";
 
 /// Unique text_input ID for the main settings search field
 pub(crate) const SETTINGS_SEARCH_INPUT_ID: &str = "settings_search";
+
+/// Unique text_input ID for the hex color editor
+pub(crate) const HEX_EDITOR_INPUT_ID: &str = "hex_editor_input";
 
 /// Settings page state
 pub struct SettingsPage {
@@ -671,6 +676,7 @@ impl SettingsPage {
                                             // Enter hex input mode for single color editing
                                             self.editing_index = Some(center_idx);
                                             self.hex_input = hex.clone();
+                                            return SettingsAction::FocusHexInput;
                                         }
                                         SettingValue::Hotkey(_) => {
                                             // Enter hotkey capture mode

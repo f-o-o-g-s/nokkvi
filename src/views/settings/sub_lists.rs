@@ -134,6 +134,7 @@ impl SettingsPage {
                     if let Some(color) = sub.colors.get(center_idx) {
                         sub.editing_color_index = Some(center_idx);
                         sub.hex_input = color.clone();
+                        return SettingsAction::FocusHexInput;
                     }
                 }
                 SettingsAction::None

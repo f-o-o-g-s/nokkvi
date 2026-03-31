@@ -94,6 +94,7 @@ fn render_hex_editor<'a>(
     swatch_size: f32,
 ) -> Element<'a, SettingsMessage> {
     let input = text_input("e.g. #458588", hex_input)
+        .id(super::HEX_EDITOR_INPUT_ID)
         .on_input(SettingsMessage::HexInputChanged)
         .on_submit(SettingsMessage::HexInputSubmit)
         .size(font_size)
