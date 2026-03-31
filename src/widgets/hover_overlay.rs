@@ -70,7 +70,7 @@ where
     pub(crate) fn new(content: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
         Self {
             content: content.into(),
-            border_radius: iced::border::Radius::default(),
+            border_radius: crate::theme::ui_border_radius(),
             flash_at: None,
         }
     }
