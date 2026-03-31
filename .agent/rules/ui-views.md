@@ -117,7 +117,7 @@ Each `update/{name}.rs` handles data loading and message routing:
 ## Queue Sort
 
 - **Physical**: `QueueManager::sort_queue()` reorders in place, persists to redb
-- Sort modes: Album, Artist, Title, Duration, Genre, Rating
+- Sort modes: Album, Artist, Title, Duration, Genre, Rating (Album column remains visible across all configurations)
 
 ## Progressive Queue Loading
 
@@ -147,6 +147,6 @@ Each `update/{name}.rs` handles data loading and message routing:
 
 ## Modals
 
-- **Equalizer Modal**: 10-band graphic equalizer with interactive sliders (`widgets/eq_slider.rs`). Opened via `Q` hotkey or player bar EQ button. Widget: `widgets/eq_modal.rs`, handler: `update/eq_modal.rs`. Built-in presets + user-saved custom presets.
+- **Equalizer Modal**: 10-band graphic equalizer with interactive sliders (`widgets/eq_slider.rs`). Opened via `Q` hotkey or player bar EQ button. Widget: `widgets/eq_modal.rs`, handler: `update/eq_modal.rs`. Built-in presets (selecting one auto-enables the EQ) + user-saved custom presets. Visually resets sliders to 0 dB when EQ is disabled to indicate bypass state.
 - **About Modal**: App metadata and diagnostics, accessible via hamburger menu. Widget: `widgets/about_modal.rs`, handler: `update/about_modal.rs`.
 - Both modals are wrapped in an overlay container ensuring SVG icon rendering is correct using `mouse_area`.

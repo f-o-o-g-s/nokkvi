@@ -37,7 +37,7 @@ globs: src/widgets/**
 - Custom `iced::advanced` seekable progress/scrub bar widget
 - Click-to-seek with smooth visual feedback
 - **Overlay segments**: optional scrolling colored metadata rendered inside the progress bar track via `Vec<OverlaySegment>` (each segment has `text`, `color`, `separator`). Built during `layout()` as `Plain` paragraphs per segment, animated in `draw()` with ring-buffer scroll (2s initial pause, 30px/s, 80px loop gap). Text fits → centered; overflows → scrolls.
-- **Handle layering**: handle + grip rendered in a separate `with_layer()` call so they draw ON TOP of overlay text
+- **Handle layering**: handle + grip rendered in a separate `with_layer()` call so they draw ON TOP of overlay text. The clip rectangle is expanded downward to prevent handle shadow clipping.
 - **Stale segment clearing**: when metadata fields are toggled off, the caller must rebuild `overlay_segments` to exclude disabled fields — stale segments persist otherwise
 
 ## Volume Slider (`volume_slider.rs`)

@@ -78,7 +78,7 @@ UI → engine.set_volume() → renderer.set_volume() → StreamHandle AtomicU32
 - 10-band graphic equalizer via `data/src/audio/eq.rs`
 - `EqState`: shared atomic gains (`Arc<[AtomicU32; 10]>`) — updated from UI, read by StreamingSource
 - `EqProcessor`: per-stream biquad filter bank (10 bands × 2 channels), processes inline with `StreamingSource::next()`
-- `EqPreset`: built-in presets, `CustomEqPreset`: user-saved name + gains
+- `EqPreset`: built-in presets (selecting one auto-enables the EQ), `CustomEqPreset`: user-saved name + gains
 - Bands: 31Hz, 62Hz, 125Hz, 250Hz, 500Hz, 1kHz, 2kHz, 4kHz, 8kHz, 16kHz
 - Range: ±15 dB per band — 0 dB = bypass
 

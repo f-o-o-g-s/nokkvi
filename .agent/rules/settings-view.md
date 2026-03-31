@@ -109,7 +109,7 @@ Volume normalization uses rodio's Automatic Gain Control (AGC). `NormalizationLe
 ## Confirmation Dialogs
 
 - **Visualizer reset** and **hotkey reset** use `TextInputDialog` in confirmation mode (no text input — just confirm/cancel)
-- Visualizer restore preserves user-modified colors when restoring non-color defaults
+- Restore defaults correctly resets both values and colors to the active theme's original defaults, triggering an immediate UI hot-reload.
 
 ## Themes
 
