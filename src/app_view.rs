@@ -276,14 +276,22 @@ impl Nokkvi {
             stack = stack.push(about_overlay.map(Message::AboutModal));
         }
 
-        // Add EQ modal overlay (if visible)
-        let mut eq_gains = [0.0; 10];
-        for (i, g) in eq_gains.iter_mut().enumerate() {
-            *g = self.playback.eq_state.get_band_gain(i);
-        }
+        // When EQ is disabled, show flat gains in the UI so sliders read 0 —
+        // avoids the misleading appearance of active boosts. Real gains are
+        // preserved in EqState and restore visually when re-enabled.
+        let eq_enabled = self.playback.eq_state.is_enabled();
+        let eq_gains = if eq_enabled {
+            let mut gains = [0.0; 10];
+            for (i, g) in gains.iter_mut().enumerate() {
+                *g = self.playback.eq_state.get_band_gain(i);
+            }
+            gains
+        } else {
+            [0.0; 10]
+        };
         if let Some(eq_overlay) = crate::widgets::eq_modal_overlay(
             self.window.eq_modal_open,
-            self.playback.eq_state.is_enabled(),
+            eq_enabled,
             eq_gains,
             &self.window.custom_eq_presets,
             self.window.eq_save_mode,
