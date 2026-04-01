@@ -10,6 +10,7 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 - **Queue peek/transition pattern**: All track transitions must use `peek_next_song()` → `transition_to_queued()`. Never set `current_index` directly for transitions. Use `set_current_index()` only for non-transition updates (play-from-here).
 - **Progressive queue generation**: `ProgressiveQueueAppendPage` chains must check `progressive_queue_generation` before appending — stale chains silently stop.
 - **Play button cold-start**: Uses `get_effective_center_index` (selected track), not `queue_songs.first()`.
+- **Gapless re-peek on mutation**: If a queue mutation (add/remove) calls `clear_queued()` between gapless prep and `on_track_finished`, `transition_to_queued()` would return `None` → playback stalls. The navigator now re-peeks when `queued.is_none() && !needs_load` before transitioning.
 
 ## Optimistic UI & Race Conditions
 - **Tick handler race**: The 10Hz tick can overwrite optimistic state with stale backend state. Use pending flags to prevent reversion before API response.

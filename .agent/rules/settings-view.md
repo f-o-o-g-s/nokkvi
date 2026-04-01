@@ -39,7 +39,7 @@ views/settings/
 | `Bool` | Toggle with clickable On/Off badges |
 | `Enum` | Cycle with clickable option badges (`EditSetValue`) |
 | `ToggleSet` | Multi-select badges. ←/→ cursor, Enter toggles, ↑/↓ sets on/off. `toggle_set_cursor_index` tracks cursor. |
-| `HexColor` | Direct hex input |
+| `HexColor` | Direct hex input. `HEX_EDITOR_INPUT_ID` + `FocusHexInput` action for auto-focus on edit activation. |
 | `ColorArray` | Opens sub-slot-list for gradient editing |
 | `Hotkey` | Badge display + key capture mode (Escape cancels, Delete resets, steal-on-conflict) |
 

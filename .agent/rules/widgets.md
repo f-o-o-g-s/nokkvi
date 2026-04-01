@@ -28,7 +28,7 @@ Custom `iced::advanced` seekable widget. `Vec<OverlaySegment>` for scrolling col
 | View Header | `view_header.rs` | Sort mode selector, search bar, shuffle button |
 | Base Slot List | `base_slot_list_layout.rs` | Shared layout scaffolding, `base_slot_list_empty_state()` |
 | Scroll Indicator | `scroll_indicator.rs` | Transient scrollbar overlay, `wrap_with_scroll_indicator()`, drag-to-seek |
-| Hover Overlay | `hover_overlay.rs` | Per-slot hover darkening + press scale animation + external `flash_at()` |
+| Hover Overlay | `hover_overlay.rs` | Per-slot hover darkening + press scale animation + external `flash_at()`. Default border radius = `ui_border_radius()` (theme-aware). |
 | Track Info Strip | `track_info_strip.rs` | Now-playing metadata, used by player bar and top bar, `info_field_widget()` shared helper |
 | Marquee Text | `marquee_text.rs` | Scrolling overflow text, generic over message type |
 | Hover Indicator | `hover_indicator.rs` | Canvas-based hover underline, `HoverExpand` for hot zone expansion |
@@ -44,7 +44,7 @@ Custom `iced::advanced` seekable widget. `Vec<OverlaySegment>` for scrolling col
 
 ## Nav Bars
 
-- **Top** (`nav_bar.rs`): tabs + format stats + hamburger menu. Progressive metadata collapsing (album <900, artist <750, title <600). Hover underlines via `HoverIndicator`.
+- **Top** (`nav_bar.rs`): tabs + format stats + hamburger menu. Metadata only shown for `TrackInfoDisplay::TopBar` mode. Progressive metadata collapsing (album <900, artist <750, title <600). Hover underlines via `HoverIndicator`.
 - **Side** (`side_nav_bar.rs`): `NavLayout::Side`, `NavDisplayMode` (TextOnly/TextAndIcons/IconsOnly).
 
 ## Layout Constants (`slot_list.rs`)
