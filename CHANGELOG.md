@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+## v0.2.1 — 2026-04-01
+
 ### Fixes
+- **Playback transitions** — correctly re-peeks the next song after a gapless transition if the queue was mutated mid-playback.
+- **UI borders** — the hover overlay border radius now correctly defaults to the theme's standard, fixing square highlights in rounded UI mode.
 - **Track info display layout** — setting the metadata strip to "Player Bar" now works correctly when using the top navigation layout instead of remaining in the top bar.
+
 ---
 
 ## v0.2.0 — 2026-03-31
