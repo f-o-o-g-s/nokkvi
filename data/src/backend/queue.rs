@@ -191,9 +191,15 @@ impl QueueService {
                 let song = qm.get_song(id)?;
                 let track_number = (index + 1) as i32;
                 let album_id = song.album_id.clone().unwrap_or_default();
-                let cover_art_id = song.cover_art.as_deref().unwrap_or(&album_id);
+                // Always use album_id for the artwork URL, NOT song.cover_art.
+                // The Subsonic API returns cover_art as "mf-{mediafile_id}" for
+                // playlist songs, but the background prefetch caches thumbnails
+                // under "al-{album_id}_80". Using cover_art here creates a cache
+                // key mismatch, causing every playlist song to miss the disk cache
+                // and trigger a network fetch — overwhelming the connection and
+                // leaving ~90% of thumbnails blank.
                 let url = artwork_url::build_cover_art_url(
-                    cover_art_id,
+                    &album_id,
                     server_url,
                     subsonic_credential,
                     Some(artwork_url::THUMBNAIL_SIZE),
