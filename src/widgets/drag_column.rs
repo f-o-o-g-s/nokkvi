@@ -55,6 +55,8 @@ pub struct DragColumn<'a, Message, Theme = iced::Theme, Renderer = iced::Rendere
     clip: bool,
     children: Vec<Element<'a, Message, Theme, Renderer>>,
     on_drag: Option<Box<dyn Fn(DragEvent) -> Message + 'a>>,
+    /// When > 1, a count badge is drawn on top of the dragged item.
+    drag_badge_count: usize,
 }
 
 impl<'a, Message, Theme, Renderer> DragColumn<'a, Message, Theme, Renderer>
@@ -87,6 +89,7 @@ where
             clip: false,
             children,
             on_drag: None,
+            drag_badge_count: 1,
         }
     }
 
@@ -146,6 +149,12 @@ where
     /// Set the callback for drag events. When `None`, the widget acts as a normal column.
     pub fn on_drag(mut self, on_drag: impl Fn(DragEvent) -> Message + 'a) -> Self {
         self.on_drag = Some(Box::new(on_drag));
+        self
+    }
+
+    /// Set the drag badge count. When > 1, a "×N" badge is overlaid on the dragged item.
+    pub fn drag_badge_count(mut self, count: usize) -> Self {
+        self.drag_badge_count = count;
         self
     }
 
@@ -209,7 +218,7 @@ impl<'a, Message, Theme, Renderer: renderer::Renderer>
 impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
     for DragColumn<'_, Message, Theme, Renderer>
 where
-    Renderer: renderer::Renderer,
+    Renderer: renderer::Renderer + iced::advanced::text::Renderer<Font = iced::Font>,
 {
     fn tag(&self) -> tree::Tag {
         tree::Tag::of::<DragState>()
@@ -474,6 +483,68 @@ where
                                     cursor,
                                     viewport,
                                 );
+
+                                // Badge overlay for multi-selection drags
+                                if self.drag_badge_count > 1 {
+                                    let badge_text = format!("\u{00d7}{}", self.drag_badge_count);
+                                    let badge_bounds = child_layout.bounds();
+
+                                    let font = crate::theme::ui_font();
+                                    let badge_font_size: Pixels = 13.0.into();
+
+                                    // Fixed pill width based on digit count
+                                    let digit_count = if self.drag_badge_count >= 100 {
+                                        3
+                                    } else if self.drag_badge_count >= 10 {
+                                        2
+                                    } else {
+                                        1
+                                    };
+                                    let pill_h = 18.0_f32;
+                                    let pill_w = 16.0 + digit_count as f32 * 8.0; // × + digits
+                                    let pill_x = badge_bounds.x + badge_bounds.width - pill_w - 8.0;
+                                    let pill_y = badge_bounds.y + 4.0;
+                                    let pill_rect = Rectangle {
+                                        x: pill_x,
+                                        y: pill_y,
+                                        width: pill_w,
+                                        height: pill_h,
+                                    };
+
+                                    // Draw pill background
+                                    renderer.fill_quad(
+                                        renderer::Quad {
+                                            bounds: pill_rect,
+                                            border: iced::Border {
+                                                radius: 8.0.into(),
+                                                ..Default::default()
+                                            },
+                                            ..Default::default()
+                                        },
+                                        iced::Background::Color(crate::theme::accent()),
+                                    );
+
+                                    // Draw badge text centered in pill
+                                    renderer.fill_text(
+                                        iced::advanced::text::Text {
+                                            content: badge_text,
+                                            bounds: Size::new(pill_w, pill_h),
+                                            size: badge_font_size,
+                                            font,
+                                            align_x: alignment::Horizontal::Center.into(),
+                                            align_y: alignment::Vertical::Center,
+                                            line_height: iced::advanced::text::LineHeight::default(
+                                            ),
+                                            shaping: iced::advanced::text::Shaping::Advanced,
+                                            wrapping: iced::advanced::text::Wrapping::None,
+                                            ellipsis: iced::advanced::text::Ellipsis::default(),
+                                            hint_factor: Some(1.0),
+                                        },
+                                        Point::new(pill_rect.center_x(), pill_rect.center_y()),
+                                        crate::theme::fg0(),
+                                        pill_rect,
+                                    );
+                                }
                             });
                         },
                     );
@@ -538,7 +609,7 @@ impl<'a, Message, Theme, Renderer> From<DragColumn<'a, Message, Theme, Renderer>
 where
     Message: 'a,
     Theme: 'a,
-    Renderer: renderer::Renderer + 'a,
+    Renderer: renderer::Renderer + iced::advanced::text::Renderer<Font = iced::Font> + 'a,
 {
     fn from(column: DragColumn<'a, Message, Theme, Renderer>) -> Self {
         Self::new(column)

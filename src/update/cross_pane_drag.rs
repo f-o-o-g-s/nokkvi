@@ -3,8 +3,12 @@
 //! Handles the application-level drag state machine:
 //! 1. Press in browser pane → record origin
 //! 2. Move past threshold (5px) → activate drag with browsing panel's centered item
-//! 3. Release over queue pane → add to queue
+//! 3. Release over queue pane → add to queue (single or batch)
 //! 4. Release elsewhere / Escape → cancel
+//!
+//! Multi-selection aware: if the pressed item is within an active multi-selection,
+//! the entire selection set is dragged. Otherwise, the selection is cleared and
+//! only the pressed item is dragged (matching context menu semantics).
 
 use iced::Task;
 use tracing::debug;
@@ -112,11 +116,41 @@ impl Nokkvi {
             return Task::none();
         }
 
-        self.cross_pane_drag_pressed_item = Some(target_index as usize);
+        let pressed_index = target_index as usize;
+        self.cross_pane_drag_pressed_item = Some(pressed_index);
+
+        // Determine if the pressed item is within an active multi-selection.
+        // If it is, the whole selection batch will be dragged.
+        // If it is NOT, clear the selection and drag only this item
+        // (same semantics as evaluate_context_menu).
+        let selection_count = match panel.active_view {
+            views::BrowsingView::Albums => &mut self.albums_page.common,
+            views::BrowsingView::Songs => &mut self.songs_page.common,
+            views::BrowsingView::Artists => &mut self.artists_page.common,
+            views::BrowsingView::Genres => &mut self.genres_page.common,
+        };
+        let count = if selection_count
+            .slot_list
+            .selected_indices
+            .contains(&pressed_index)
+        {
+            // Pressed item IS in the selection — drag the whole batch
+            selection_count.slot_list.selected_indices.len()
+        } else {
+            // Pressed item is NOT in the selection — clear and drag single
+            selection_count.clear_multi_selection();
+            selection_count
+                .slot_list
+                .selected_indices
+                .insert(pressed_index);
+            selection_count.slot_list.anchor_index = Some(pressed_index);
+            1
+        };
+        self.cross_pane_drag_selection_count = count;
 
         debug!(
-            " [DRAG] Press on browser pane: slot={}, item_index={} (viewport={}, effective_center={})",
-            clicked_slot, target_index, viewport_offset, effective_center
+            " [DRAG] Press on browser pane: slot={}, item_index={}, selection_count={} (viewport={}, effective_center={})",
+            clicked_slot, target_index, count, viewport_offset, effective_center
         );
 
         Task::none()
@@ -147,6 +181,7 @@ impl Nokkvi {
                         cursor: position,
                         center_index: self.cross_pane_drag_pressed_item,
                         drop_target_slot: None,
+                        selection_count: self.cross_pane_drag_selection_count,
                     });
                 }
             } else if self.cross_pane_drag.is_some() {
@@ -173,6 +208,7 @@ impl Nokkvi {
         // Clear press state regardless
         self.cross_pane_drag_press_origin = None;
         self.cross_pane_drag_pressed_item = None;
+        self.cross_pane_drag_selection_count = 1;
 
         let drag = match self.cross_pane_drag.take() {
             Some(d) => d,
@@ -200,10 +236,17 @@ impl Nokkvi {
 
         debug!(" [DRAG] Drop target queue index: {:?}", queue_insert_index);
 
-        // Set selected_offset to the dragged item index so that AddCenterToQueue
-        // picks up the correct item. This is necessary because the button's
-        // SlotListSetOffset never fired (Iced buttons fire on release, not press).
-        if let (Some(center_idx), Some(panel)) = (drag.center_index, self.browsing_panel.as_ref()) {
+        // For single-item drags: set selected_offset so AddCenterToQueue picks up
+        // the correct item. This is necessary because the button's SlotListSetOffset
+        // never fired (Iced buttons fire on release, not press).
+        //
+        // For multi-selection drags (selection_count > 1): skip this — the
+        // selected_indices are already populated from handle_cross_pane_drag_pressed
+        // and AddCenterToQueue will resolve the batch from them.
+        if drag.selection_count <= 1
+            && let (Some(center_idx), Some(panel)) =
+                (drag.center_index, self.browsing_panel.as_ref())
+        {
             match panel.active_view {
                 views::BrowsingView::Albums => {
                     let total = self.library.albums.len();
@@ -251,6 +294,7 @@ impl Nokkvi {
         self.cross_pane_drag = None;
         self.cross_pane_drag_press_origin = None;
         self.cross_pane_drag_pressed_item = None;
+        self.cross_pane_drag_selection_count = 1;
         Task::none()
     }
 
@@ -289,7 +333,10 @@ impl Nokkvi {
             }
         };
 
-        let center_idx = match self.cross_pane_drag.as_ref().and_then(|d| d.center_index) {
+        let drag = self.cross_pane_drag.as_ref().unwrap();
+        let selection_count = drag.selection_count;
+
+        let center_idx = match drag.center_index {
             Some(idx) => idx,
             None => {
                 return iced::widget::text("Drag to queue")
@@ -349,11 +396,58 @@ impl Nokkvi {
         // Wrap in center-slot styled container
         use crate::widgets::slot_list::SlotListSlotStyle;
         let style = SlotListSlotStyle::for_slot(true, false, false, 1.0);
-        iced::widget::container(slot_content)
-            .style(move |_theme| style.to_container_style())
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+
+        // For multi-selection drags, overlay a count badge
+        if selection_count > 1 {
+            let badge = iced::widget::container(
+                iced::widget::text(format!("×{selection_count}"))
+                    .size(13)
+                    .font(crate::theme::ui_font())
+                    .color(crate::theme::fg0()),
+            )
+            .padding(iced::Padding {
+                left: 6.0,
+                right: 6.0,
+                top: 2.0,
+                bottom: 2.0,
+            })
+            .style(|_theme: &iced::Theme| iced::widget::container::Style {
+                background: Some(crate::theme::accent().into()),
+                border: iced::Border {
+                    radius: 8.0.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+
+            let stack = iced::widget::Stack::new()
+                .push(
+                    iced::widget::container(slot_content)
+                        .style(move |_theme| style.to_container_style())
+                        .width(Length::Fill)
+                        .height(Length::Fill),
+                )
+                .push(
+                    iced::widget::container(badge)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .align_x(iced::alignment::Horizontal::Right)
+                        .align_y(iced::alignment::Vertical::Top)
+                        .padding(iced::Padding {
+                            top: 4.0,
+                            right: 8.0,
+                            ..Default::default()
+                        }),
+                );
+
+            stack.into()
+        } else {
+            iced::widget::container(slot_content)
+                .style(move |_theme| style.to_container_style())
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+        }
     }
 
     /// Build a drag preview row with artwork, text columns, and metadata.

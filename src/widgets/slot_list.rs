@@ -401,6 +401,11 @@ pub(crate) fn slot_list_view_with_drag<'a, T, Message: Clone + 'a>(
 
     let total_items = items.len();
     let row_height = config.row_height();
+    let badge_count = if sl.selected_indices.len() > 1 {
+        sl.selected_indices.len()
+    } else {
+        1
+    };
     let slots = build_slot_list_slots(sl, items, config, &mut render_item);
 
     let inner: Element<'a, Message> = container(
@@ -408,7 +413,8 @@ pub(crate) fn slot_list_view_with_drag<'a, T, Message: Clone + 'a>(
             .spacing(3)
             .width(Length::Fill)
             .height(Length::Fill)
-            .on_drag(on_drag_event),
+            .on_drag(on_drag_event)
+            .drag_badge_count(badge_count),
     )
     .width(Length::Fill)
     .height(Length::Fill)

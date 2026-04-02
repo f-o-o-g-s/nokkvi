@@ -110,31 +110,32 @@ pub enum QueueMessage {
 /// Actions that bubble up to root for global state mutation
 #[derive(Debug, Clone)]
 pub enum QueueAction {
-    PlaySong(usize),                     // song index in queue
-    FocusOnSong(usize, bool),            // queue index to scroll to (bubbles up to handler), flash
-    SortModeChanged(QueueSortMode),      // trigger reload/resort
-    SortOrderChanged(bool),              // trigger resort
-    ShuffleQueue,                        // shuffle queue order
-    SearchChanged(String),               // trigger filter
-    SetRating(String, usize),            // (song_id, rating) - set absolute rating
-    ToggleStar(String, bool),            // (song_id, new_starred) - toggle starred state
+    PlaySong(usize),                                  // song index in queue
+    FocusOnSong(usize, bool), // queue index to scroll to (bubbles up to handler), flash
+    SortModeChanged(QueueSortMode), // trigger reload/resort
+    SortOrderChanged(bool),   // trigger resort
+    ShuffleQueue,             // shuffle queue order
+    SearchChanged(String),    // trigger filter
+    SetRating(String, usize), // (song_id, rating) - set absolute rating
+    ToggleStar(String, bool), // (song_id, new_starred) - toggle starred state
     MoveItem { from: usize, to: usize }, // drag-and-drop reorder (absolute item indices)
-    RemoveFromQueue(Vec<usize>),         // remove songs at indices
-    MoveToTop(Vec<usize>),               // move songs to top of queue
-    MoveToBottom(Vec<usize>),            // move songs to bottom of queue
-    PlayNext(Vec<usize>),                // insert songs after currently playing
-    ShowToast(String),                   // informational toast (e.g. drag disabled reason)
-    SaveAsPlaylist,                      // open dialog to save queue as new playlist
-    OpenBrowsingPanel,                   // toggle the library browser panel
-    AddToPlaylist(Vec<String>),          // song_ids - add to playlist dialog
-    SavePlaylist,                        // save playlist edits (edit mode)
-    DiscardEdits,                        // discard edits and exit edit mode
-    PlaylistNameChanged(String),         // playlist name edited inline
-    PlaylistCommentChanged(String),      // playlist comment edited inline
-    EditPlaylist,                        // enter edit mode from playlist context bar
-    ShowInfo(usize),                     // Open info modal (queue index for full Song lookup)
-    ShowInFolder(usize), // Open containing folder (queue index, path fetched via API)
-    RefreshArtwork(String), // album_id - refresh artwork from server
+    MoveBatch { indices: Vec<usize>, target: usize }, // multi-selection drag reorder
+    RemoveFromQueue(Vec<usize>), // remove songs at indices
+    MoveToTop(Vec<usize>),    // move songs to top of queue
+    MoveToBottom(Vec<usize>), // move songs to bottom of queue
+    PlayNext(Vec<usize>),     // insert songs after currently playing
+    ShowToast(String),        // informational toast (e.g. drag disabled reason)
+    SaveAsPlaylist,           // open dialog to save queue as new playlist
+    OpenBrowsingPanel,        // toggle the library browser panel
+    AddToPlaylist(Vec<String>), // song_ids - add to playlist dialog
+    SavePlaylist,             // save playlist edits (edit mode)
+    DiscardEdits,             // discard edits and exit edit mode
+    PlaylistNameChanged(String), // playlist name edited inline
+    PlaylistCommentChanged(String), // playlist comment edited inline
+    EditPlaylist,             // enter edit mode from playlist context bar
+    ShowInfo(usize),          // Open info modal (queue index for full Song lookup)
+    ShowInFolder(usize),      // Open containing folder (queue index, path fetched via API)
+    RefreshArtwork(String),   // album_id - refresh artwork from server
     None,
 }
 
@@ -275,7 +276,7 @@ impl QueuePage {
                             .slot_list
                             .slot_to_item_index_for_drop(target_index, total_items);
                         debug!(
-                            "📦 [QUEUE] Drag reorder: slot {}→{} → item {:?}→{:?} \
+                            "\u{1f4e6} [QUEUE] Drag reorder: slot {}\u{2192}{} \u{2192} item {:?}\u{2192}{:?} \\
                              (viewport_offset={}, slot_count={}, total={})",
                             index,
                             target_index,
@@ -285,23 +286,41 @@ impl QueuePage {
                             self.common.slot_list.slot_count,
                             total_items,
                         );
-                        match (from, to) {
-                            (Some(f), Some(t)) => {
-                                // Keep highlight on the moved item at its new position
-                                let insert_at = if f < t { t - 1 } else { t };
-                                self.common.slot_list.set_selected(insert_at, total_items);
-                                (Task::none(), QueueAction::MoveItem { from: f, to: t })
-                            }
-                            _ => {
-                                debug!("📦 [QUEUE] Drag dropped on empty slot, ignoring");
-                                (Task::none(), QueueAction::None)
+
+                        // Multi-selection batch drag: if selected_indices has multiple
+                        // items and the dragged item is one of them, move the whole batch.
+                        let selected = &self.common.slot_list.selected_indices;
+                        if selected.len() > 1
+                            && from.is_some_and(|f| selected.contains(&f))
+                            && let Some(t) = to
+                        {
+                            let indices: Vec<usize> = selected.iter().copied().collect();
+                            self.common.clear_multi_selection();
+                            (Task::none(), QueueAction::MoveBatch { indices, target: t })
+                        } else {
+                            match (from, to) {
+                                (Some(f), Some(t)) => {
+                                    // Keep highlight on the moved item at its new position
+                                    let insert_at = if f < t { t - 1 } else { t };
+                                    self.common.slot_list.set_selected(insert_at, total_items);
+                                    (Task::none(), QueueAction::MoveItem { from: f, to: t })
+                                }
+                                _ => {
+                                    debug!(
+                                        "\u{1f4e6} [QUEUE] Drag dropped on empty slot, ignoring"
+                                    );
+                                    (Task::none(), QueueAction::None)
+                                }
                             }
                         }
                     }
                     DragEvent::Picked { index } if drag_allowed => {
-                        // Highlight the dragged item so it gets "center" styling
+                        // Check if the picked item is part of an active multi-selection.
+                        // If yes, preserve the selection (batch drag). If not, highlight
+                        // only the dragged item (single drag).
                         if let Some(item_index) =
                             self.common.slot_list.slot_to_item_index(index, total_items)
+                            && !self.common.slot_list.selected_indices.contains(&item_index)
                         {
                             self.common.slot_list.set_selected(item_index, total_items);
                         }
@@ -696,8 +715,11 @@ impl QueuePage {
 
             // Match on both song ID AND queue position (track_number) to
             // disambiguate duplicate tracks sharing the same song ID.
-            let is_current = current_playing_queue_index
-                .is_some_and(|idx| idx == song.track_number as usize - 1)
+            // Suppressed while ctrl/shift is held (active multi-selection) so
+            // users can clearly see which items are selected.
+            let is_current = !(ctx.modifiers.shift() || ctx.modifiers.control())
+                && current_playing_queue_index
+                    .is_some_and(|idx| idx == song.track_number as usize - 1)
                 && current_playing_song_id.as_ref() == Some(&song.id);
 
             // Get centralized slot list slot styling

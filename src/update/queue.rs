@@ -273,6 +273,77 @@ impl Nokkvi {
                     shell.queue().refresh_from_queue().await
                 });
             }
+            QueueAction::MoveBatch { indices, target } => {
+                // Multi-selection drag reorder: extract selected songs,
+                // remove in descending order, then insert at target.
+                let mut raw_indices_desc: Vec<usize> = indices
+                    .iter()
+                    .filter_map(|&idx| filtered_queue.get(idx).map(|s| s.track_number as usize - 1))
+                    .collect();
+                if raw_indices_desc.is_empty() {
+                    return Task::none();
+                }
+                // Target also needs raw conversion
+                let raw_target = filtered_queue.get(target).map_or_else(
+                    || self.library.queue_songs.len(),
+                    |s| s.track_number as usize - 1,
+                );
+
+                raw_indices_desc.sort_unstable_by(|a, b| b.cmp(a)); // Descending
+
+                debug!(
+                    "📦 [QUEUE] Batch move: {} items → target {}",
+                    raw_indices_desc.len(),
+                    raw_target
+                );
+
+                // Optimistic local reorder
+                let mut moved = Vec::new();
+                for &qi in &raw_indices_desc {
+                    if qi < self.library.queue_songs.len() {
+                        moved.push(self.library.queue_songs.remove(qi));
+                    }
+                }
+                moved.reverse(); // Now original ascending order
+
+                // Calculate adjusted insertion point after removals
+                let removed_before_target = raw_indices_desc
+                    .iter()
+                    .filter(|&&qi| qi < raw_target)
+                    .count();
+                let adjusted_target = raw_target.saturating_sub(removed_before_target);
+                let insert_pos = adjusted_target.min(self.library.queue_songs.len());
+
+                for (i, song) in moved.into_iter().enumerate() {
+                    self.library.queue_songs.insert(insert_pos + i, song);
+                }
+
+                self.shell_spawn("queue_move_batch", move |shell| async move {
+                    let qm_arc = shell.queue().queue_manager();
+                    let mut qm = qm_arc.lock().await;
+                    let mut extracted = Vec::new();
+                    for &qi in &raw_indices_desc {
+                        if let Some(id) = qm.get_queue().song_ids.get(qi).cloned()
+                            && let Some(song) = qm.get_song(&id)
+                        {
+                            extracted.push(song.clone());
+                        }
+                    }
+                    for &qi in &raw_indices_desc {
+                        qm.remove_song(qi).ok();
+                    }
+                    extracted.reverse();
+                    let removed_before = raw_indices_desc
+                        .iter()
+                        .filter(|&&qi| qi < raw_target)
+                        .count();
+                    let adj = raw_target.saturating_sub(removed_before);
+                    let pos = adj.min(qm.get_queue().song_ids.len());
+                    qm.insert_songs_at(pos, extracted).ok();
+                    drop(qm);
+                    shell.queue().refresh_from_queue().await
+                });
+            }
             QueueAction::RemoveFromQueue(indices) => {
                 let mut raw_indices_desc: Vec<usize> = indices
                     .iter()

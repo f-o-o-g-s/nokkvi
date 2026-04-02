@@ -148,6 +148,8 @@ pub struct Nokkvi {
     /// messages run before subscription messages in Iced), so selected_offset
     /// is guaranteed accurate. Immune to auto-follow or viewport mutations.
     pub cross_pane_drag_pressed_item: Option<usize>,
+    /// Snapshotted selection count at press time. 1 = single item, >1 = batch.
+    pub cross_pane_drag_selection_count: usize,
     /// Pending queue insertion position for cross-pane drag drop.
     /// Set by `handle_cross_pane_drag_released` before dispatching the
     /// `AddCenterToQueue` message; consumed by the update handler to
@@ -293,6 +295,7 @@ impl Default for Nokkvi {
             last_cursor_position: iced::Point::ORIGIN,
             cross_pane_drag_press_origin: None,
             cross_pane_drag_pressed_item: None,
+            cross_pane_drag_selection_count: 1,
             pending_queue_insert_position: None,
             visualizer: None,
             visualizer_config: crate::visualizer_config::create_shared_config(),
