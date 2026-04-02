@@ -477,9 +477,18 @@ fn build_slot_list_slots<'a, T, Message: 'a>(
 
         let slot_content: Element<'a, Message> = if let Some(item_index) = item_index_opt {
             if let Some(item) = items.get(item_index) {
+                let disable_fallback_center = config.modifiers.shift()
+                    || config.modifiers.control()
+                    || sl.selected_indices.len() > 1;
                 let is_center = match sl.selected_offset {
                     Some(sel) => item_index == sel,
-                    None => slot_index == effective_center,
+                    None => {
+                        if disable_fallback_center {
+                            false
+                        } else {
+                            slot_index == effective_center
+                        }
+                    }
                 };
                 is_center_slot = is_center;
                 let is_selected = sl.selected_indices.contains(&item_index);
