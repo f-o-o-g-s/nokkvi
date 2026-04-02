@@ -44,7 +44,7 @@ Owns `PlayerSettings`, `TomlSettings`, `TomlViewPreferences`, `HotkeyConfig`, `S
 
 ## Theme System
 
-- `ThemeFile`: `name`, `font_family`, `dark: ThemePalette`, `light: ThemePalette`
+- `ThemeFile`: `name`, `dark: ThemePalette`, `light: ThemePalette`
 - `ThemePalette`: background (7 levels), foreground (5 + gray), accent colors, 6 named color pairs, `VisualizerColors`
 - `config.toml` stores `theme = "name"` — points to `~/.config/nokkvi/themes/{name}.toml`
 

@@ -35,11 +35,11 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 ## Config & Persistence
 - **Config writer routing**: `update_config_value()` → `config.toml`; `update_theme_value()` / `update_theme_color_array_entry()` → active theme file. Misrouting writes to the wrong file.
 - **Config reload suppression**: `suppress_config_reload()` prevents file watcher feedback loops, but GUI-initiated theme/visualizer changes need manual `ThemeConfigReloaded` trigger after write.
-- **Font propagation**: `font_family` is in the theme file. Changes must trigger `ThemeConfigReloaded`. EQ modal `pick_list` must explicitly receive the theme font.
+- **Font propagation**: `font_family` is now a global setting, not tied to `ThemeFile`. Font changes are routed to `PlayerSettings`. EQ modal `pick_list` must explicitly receive the active app font.
 
 ## Artwork
 - **Handle::from_bytes for refresh**: `Handle::from_path` uses file path as ID → stale GPU texture on overwrite. Use `Handle::from_bytes(data)` for content-derived IDs.
-- **Queue song mini vs large artwork**: Queue songs request 80px thumbnails. Large artwork fallback must construct full-size URL (`size=1000`), not reuse the 80px thumbnail URL.
+- **Queue song mini vs large artwork**: Queue songs must request 80px thumbnails using the `album_id` (not `cover_art` ID) to hit the prefetch cache. Large artwork fallback must construct full-size URL (`size=1000`), not reuse the 80px thumbnail URL.
 
 ## Misc
 - **CenterOnPlaying (Shift+C)**: Must directly call `handle_set_offset()`, not dispatch `SlotListMessage::SetOffset` (which routes through click-to-highlight path).
