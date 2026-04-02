@@ -92,7 +92,10 @@ impl Nokkvi {
                 // Also trigger collage load for initially centered playlist (index 0)
                 if !self.library.playlists.is_empty() {
                     tasks.push(Task::done(Message::Playlists(
-                        views::PlaylistsMessage::SlotListSetOffset(0, iced::keyboard::Modifiers::default()),
+                        views::PlaylistsMessage::SlotListSetOffset(
+                            0,
+                            iced::keyboard::Modifiers::default(),
+                        ),
                     )));
                 }
 

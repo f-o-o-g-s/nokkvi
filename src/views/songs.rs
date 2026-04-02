@@ -80,15 +80,15 @@ pub enum SongsAction {
     LoadLargeArtwork(String), // album_id for artwork
     LoadPage(usize),          // offset - trigger fetch of next page
 
-    SearchChanged(String),                           // trigger reload
-    SortModeChanged(widgets::view_header::SortMode), // trigger reload
-    SortOrderChanged(bool),                          // trigger reload
+    SearchChanged(String),                                  // trigger reload
+    SortModeChanged(widgets::view_header::SortMode),        // trigger reload
+    SortOrderChanged(bool),                                 // trigger reload
     PlayNextBatch(nokkvi_data::types::batch::BatchPayload), // Batch payload
-    PlayBatch(nokkvi_data::types::batch::BatchPayload), // Play immediately
-    AddToPlaylist(String),                           // song_id - add to playlist dialog
+    PlayBatch(nokkvi_data::types::batch::BatchPayload),     // Play immediately
+    AddToPlaylist(String),                                  // song_id - add to playlist dialog
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
-    ShowInFolder(String),                            // relative path - open containing folder
-    RefreshArtwork(String),                          // album_id - refresh artwork from server
+    ShowInFolder(String),   // relative path - open containing folder
+    RefreshArtwork(String), // album_id - refresh artwork from server
     None,
 }
 
@@ -156,7 +156,8 @@ impl SongsPage {
                 (Task::none(), SongsAction::None)
             }
             SongsMessage::SlotListSetOffset(offset, modifiers) => {
-                self.common.handle_slot_click(offset, total_items, modifiers);
+                self.common
+                    .handle_slot_click(offset, total_items, modifiers);
                 if let Some(center_idx) = self.common.get_center_item_index(total_items)
                     && let Some(song) = songs.get(center_idx)
                     && let Some(album_id) = &song.album_id
@@ -175,12 +176,17 @@ impl SongsPage {
             SongsMessage::SlotListActivateCenter => {
                 if !self.common.slot_list.selected_indices.is_empty() {
                     use nokkvi_data::types::batch::{BatchItem, BatchPayload};
-                    let payload = self.common.slot_list.selected_indices
+                    let payload = self
+                        .common
+                        .slot_list
+                        .selected_indices
                         .iter()
-                        .filter_map(|&index| songs.get(index).map(|s| {
-                            let item: nokkvi_data::types::song::Song = s.clone().into();
-                            BatchItem::Song(Box::new(item))
-                        }))
+                        .filter_map(|&index| {
+                            songs.get(index).map(|s| {
+                                let item: nokkvi_data::types::song::Song = s.clone().into();
+                                BatchItem::Song(Box::new(item))
+                            })
+                        })
                         .fold(BatchPayload::new(), |p, i| p.with_item(i));
                     (Task::none(), SongsAction::PlayBatch(payload))
                 } else if let Some(center_idx) = self.common.get_center_item_index(total_items) {
@@ -197,13 +203,20 @@ impl SongsPage {
             SongsMessage::AddCenterToQueue => {
                 use nokkvi_data::types::batch::{BatchItem, BatchPayload};
 
-                let target_indices: Vec<usize> = if !self.common.slot_list.selected_indices.is_empty() {
-                    self.common.slot_list.selected_indices.iter().copied().collect()
-                } else if let Some(center_idx) = self.common.get_center_item_index(total_items) {
-                    vec![center_idx]
-                } else {
-                    vec![]
-                };
+                let target_indices: Vec<usize> =
+                    if !self.common.slot_list.selected_indices.is_empty() {
+                        self.common
+                            .slot_list
+                            .selected_indices
+                            .iter()
+                            .copied()
+                            .collect()
+                    } else if let Some(center_idx) = self.common.get_center_item_index(total_items)
+                    {
+                        vec![center_idx]
+                    } else {
+                        vec![]
+                    };
 
                 if target_indices.is_empty() {
                     return (Task::none(), SongsAction::None);
@@ -217,7 +230,9 @@ impl SongsPage {
                             BatchItem::Song(Box::new(item))
                         })
                     })
-                    .fold(BatchPayload::new(), |p: BatchPayload, item| p.with_item(item));
+                    .fold(BatchPayload::new(), |p: BatchPayload, item| {
+                        p.with_item(item)
+                    });
 
                 (Task::none(), SongsAction::AddBatchToQueue(payload))
             }
@@ -291,10 +306,12 @@ impl SongsPage {
             }
 
             SongsMessage::ContextMenuAction(clicked_idx, entry) => {
-                use crate::widgets::context_menu::LibraryContextEntry;
                 use nokkvi_data::types::batch::{BatchItem, BatchPayload};
 
+                use crate::widgets::context_menu::LibraryContextEntry;
+
                 let target_indices = self.common.evaluate_context_menu(clicked_idx);
+                self.common.clear_multi_selection();
 
                 let payload = target_indices
                     .into_iter()
@@ -304,7 +321,9 @@ impl SongsPage {
                             BatchItem::Song(Box::new(item))
                         })
                     })
-                    .fold(BatchPayload::new(), |p: BatchPayload, item| p.with_item(item));
+                    .fold(BatchPayload::new(), |p: BatchPayload, item| {
+                        p.with_item(item)
+                    });
 
                 if let Some(song) = songs.get(clicked_idx) {
                     match entry {
@@ -413,7 +432,8 @@ impl SongsPage {
         };
 
         let config =
-            SlotListConfig::with_dynamic_slots(data.window_height, chrome_height_with_header()).with_modifiers(data.modifiers);
+            SlotListConfig::with_dynamic_slots(data.window_height, chrome_height_with_header())
+                .with_modifiers(data.modifiers);
 
         // Capture values needed in closure
         let songs = data.songs;
@@ -453,7 +473,8 @@ impl SongsPage {
                     SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column,
                     slot_list_text,
                 };
-                let style = SlotListSlotStyle::for_slot(ctx.is_center, false, ctx.is_selected, ctx.opacity);
+                let style =
+                    SlotListSlotStyle::for_slot(ctx.is_center, false, ctx.is_selected, ctx.opacity);
 
                 // Dynamic scaling based on row height AND scale factor
                 let base_artwork_size = (ctx.row_height - 16.0).max(32.0);

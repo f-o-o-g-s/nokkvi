@@ -168,17 +168,18 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ThreeDButton<'_,
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
             | Event::Touch(touch::Event::FingerLifted { .. })
-                if state.is_pressed => {
-                    if cursor.is_over(bounds) {
-                        // Publish the click action
-                        if let Some(on_press) = &self.on_press {
-                            shell.publish(on_press.clone());
-                        }
+                if state.is_pressed =>
+            {
+                if cursor.is_over(bounds) {
+                    // Publish the click action
+                    if let Some(on_press) = &self.on_press {
+                        shell.publish(on_press.clone());
                     }
-                    // Always clear pressed state on release to prevent stuck buttons
-                    state.is_pressed = false;
-                    shell.request_redraw();
                 }
+                // Always clear pressed state on release to prevent stuck buttons
+                state.is_pressed = false;
+                shell.request_redraw();
+            }
             Event::Touch(touch::Event::FingerLost { .. }) => {
                 state.is_pressed = false;
             }

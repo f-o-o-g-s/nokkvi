@@ -108,7 +108,7 @@ impl SlotListPageState {
             if let Some(anchor) = self.slot_list.anchor_index {
                 let start = anchor.min(offset);
                 let end = anchor.max(offset);
-                
+
                 // Clear existing selection except anchor, then add range
                 self.slot_list.selected_indices.clear();
                 for i in start..=end {
@@ -132,7 +132,8 @@ impl SlotListPageState {
 
     /// Clear current multi-selection and return true if anything was cleared.
     pub fn clear_multi_selection(&mut self) -> bool {
-        let has_selection = !self.slot_list.selected_indices.is_empty() || self.slot_list.anchor_index.is_some();
+        let has_selection =
+            !self.slot_list.selected_indices.is_empty() || self.slot_list.anchor_index.is_some();
         self.slot_list.selected_indices.clear();
         self.slot_list.anchor_index = None;
         has_selection

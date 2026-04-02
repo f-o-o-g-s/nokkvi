@@ -91,12 +91,12 @@ pub enum ArtistsMessage {
 /// Actions that bubble up to root for global state mutation
 #[derive(Debug, Clone)]
 pub enum ArtistsAction {
-    PlayArtist(String),              // artist_id - clear queue and play all songs
+    PlayArtist(String), // artist_id - clear queue and play all songs
     AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
-    PlayAlbum(String),               // album_id - play child album
-    PlayTrack(String),               // song_id - play single expanded track
-    StarArtist(String),              // artist_id - star the artist
-    UnstarArtist(String),            // artist_id - unstar the artist
+    PlayAlbum(String),    // album_id - play child album
+    PlayTrack(String),    // song_id - play single expanded track
+    StarArtist(String),   // artist_id - star the artist
+    UnstarArtist(String), // artist_id - unstar the artist
     /// Set absolute rating on item (item_id, item_type, rating)
     SetRating(String, &'static str, usize),
     /// Star/unstar item by click (item_id, item_type, new_starred)
@@ -113,7 +113,7 @@ pub enum ArtistsAction {
     AddBatchToPlaylist(nokkvi_data::types::batch::BatchPayload),
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
     ShowAlbumInFolder(String), // album_id - fetch a song path and open containing folder
-    ShowSongInFolder(String), // song path - open containing folder directly
+    ShowSongInFolder(String),  // song path - open containing folder directly
     None,
 }
 
@@ -353,14 +353,20 @@ impl ArtistsPage {
                         &self.expansion,
                         self.sub_expansion.children.len(),
                     );
-                    
-                    let target_indices: Vec<usize> = if !self.common.slot_list.selected_indices.is_empty() {
-                        self.common.slot_list.selected_indices.iter().copied().collect()
-                    } else if let Some(center_idx) = self.common.get_center_item_index(total) {
-                        vec![center_idx]
-                    } else {
-                        vec![]
-                    };
+
+                    let target_indices: Vec<usize> =
+                        if !self.common.slot_list.selected_indices.is_empty() {
+                            self.common
+                                .slot_list
+                                .selected_indices
+                                .iter()
+                                .copied()
+                                .collect()
+                        } else if let Some(center_idx) = self.common.get_center_item_index(total) {
+                            vec![center_idx]
+                        } else {
+                            vec![]
+                        };
 
                     if target_indices.is_empty() {
                         return (Task::none(), ArtistsAction::None);
@@ -377,8 +383,12 @@ impl ArtistsPage {
                                 |a| &a.id,
                                 |a| &a.id,
                             ) {
-                                Some(ThreeTierEntry::Parent(artist)) => Some(BatchItem::Artist(artist.id.clone())),
-                                Some(ThreeTierEntry::Child(album, _)) => Some(BatchItem::Album(album.id.clone())),
+                                Some(ThreeTierEntry::Parent(artist)) => {
+                                    Some(BatchItem::Artist(artist.id.clone()))
+                                }
+                                Some(ThreeTierEntry::Child(album, _)) => {
+                                    Some(BatchItem::Album(album.id.clone()))
+                                }
                                 Some(ThreeTierEntry::Grandchild(song, _)) => {
                                     let item: nokkvi_data::types::song::Song = song.clone().into();
                                     Some(BatchItem::Song(Box::new(item)))
@@ -386,7 +396,9 @@ impl ArtistsPage {
                                 None => None,
                             }
                         })
-                        .fold(BatchPayload::new(), |p: BatchPayload, item| p.with_item(item));
+                        .fold(BatchPayload::new(), |p: BatchPayload, item| {
+                            p.with_item(item)
+                        });
 
                     (Task::none(), ArtistsAction::AddBatchToQueue(payload))
                 }
@@ -485,12 +497,14 @@ impl ArtistsPage {
                     }
                 }
                 ArtistsMessage::ContextMenuAction(clicked_idx, entry) => {
-                    use crate::widgets::context_menu::LibraryContextEntry;
                     use nokkvi_data::types::batch::{BatchItem, BatchPayload};
+
+                    use crate::widgets::context_menu::LibraryContextEntry;
 
                     match entry {
                         LibraryContextEntry::AddToQueue | LibraryContextEntry::AddToPlaylist => {
                             let target_indices = self.common.evaluate_context_menu(clicked_idx);
+                            self.common.clear_multi_selection();
                             let payload = target_indices
                                 .into_iter()
                                 .filter_map(|i| {
@@ -509,13 +523,16 @@ impl ArtistsPage {
                                             Some(BatchItem::Album(album.id.clone()))
                                         }
                                         Some(ThreeTierEntry::Grandchild(song, _)) => {
-                                            let item: nokkvi_data::types::song::Song = song.clone().into();
+                                            let item: nokkvi_data::types::song::Song =
+                                                song.clone().into();
                                             Some(BatchItem::Song(Box::new(item)))
                                         }
                                         None => None,
                                     }
                                 })
-                                .fold(BatchPayload::new(), |p: BatchPayload, item| p.with_item(item));
+                                .fold(BatchPayload::new(), |p: BatchPayload, item| {
+                                    p.with_item(item)
+                                });
 
                             match entry {
                                 LibraryContextEntry::AddToQueue => {
@@ -556,7 +573,8 @@ impl ArtistsPage {
                                         };
                                         (Task::none(), ArtistsAction::ShowInfo(Box::new(item)))
                                     }
-                                    LibraryContextEntry::ShowInFolder | LibraryContextEntry::Separator => {
+                                    LibraryContextEntry::ShowInFolder
+                                    | LibraryContextEntry::Separator => {
                                         (Task::none(), ArtistsAction::None)
                                     }
                                     _ => (Task::none(), ArtistsAction::None),
@@ -598,7 +616,9 @@ impl ArtistsPage {
                                         Task::none(),
                                         ArtistsAction::ShowAlbumInFolder(album.id.clone()),
                                     ),
-                                    LibraryContextEntry::Separator => (Task::none(), ArtistsAction::None),
+                                    LibraryContextEntry::Separator => {
+                                        (Task::none(), ArtistsAction::None)
+                                    }
                                     _ => (Task::none(), ArtistsAction::None),
                                 },
                                 Some(ThreeTierEntry::Grandchild(song, _)) => match entry {
@@ -611,7 +631,9 @@ impl ArtistsPage {
                                         Task::none(),
                                         ArtistsAction::ShowSongInFolder(song.path.clone()),
                                     ),
-                                    LibraryContextEntry::Separator => (Task::none(), ArtistsAction::None),
+                                    LibraryContextEntry::Separator => {
+                                        (Task::none(), ArtistsAction::None)
+                                    }
                                     _ => (Task::none(), ArtistsAction::None),
                                 },
                                 None => (Task::none(), ArtistsAction::None),
@@ -674,7 +696,9 @@ impl ArtistsPage {
             SlotListConfig, chrome_height_with_header, slot_list_view_with_scroll,
         };
 
-        let config = SlotListConfig::with_dynamic_slots(data.window_height, chrome_height_with_header()).with_modifiers(data.modifiers);
+        let config =
+            SlotListConfig::with_dynamic_slots(data.window_height, chrome_height_with_header())
+                .with_modifiers(data.modifiers);
         let artists = data.artists; // Borrow slice to extend lifetime
         let artist_art = data.artist_art;
         let current_sort_mode = self.common.current_sort_mode;
@@ -779,7 +803,8 @@ impl ArtistsPage {
 
         // Check if this artist is the expanded one (gives it the group highlight)
         let is_expanded = self.expansion.is_expanded_parent(&artist.id);
-        let style = SlotListSlotStyle::for_slot(ctx.is_center, is_expanded, ctx.is_selected, ctx.opacity);
+        let style =
+            SlotListSlotStyle::for_slot(ctx.is_center, is_expanded, ctx.is_selected, ctx.opacity);
 
         let base_artwork_size = (ctx.row_height - 16.0).max(32.0);
         let artwork_size = base_artwork_size * ctx.scale_factor;

@@ -43,7 +43,12 @@ pub(crate) struct SlotListSlotStyle {
 
 impl SlotListSlotStyle {
     /// Get slot styling based on state
-    pub(crate) fn for_slot(is_center: bool, is_highlighted: bool, is_selected: bool, opacity: f32) -> Self {
+    pub(crate) fn for_slot(
+        is_center: bool,
+        is_highlighted: bool,
+        is_selected: bool,
+        opacity: f32,
+    ) -> Self {
         if is_highlighted {
             // Currently playing/selected state (e.g., current song in queue)
             Self {
@@ -59,7 +64,11 @@ impl SlotListSlotStyle {
             // decoupled from the now-playing highlight color.
             Self {
                 bg_color: theme::selected_color(),
-                border_color: if is_center { theme::accent_bright() } else { theme::selected_color() },
+                border_color: if is_center {
+                    theme::accent_bright()
+                } else {
+                    theme::selected_color()
+                },
                 border_width: 2.0,
                 border_radius: slot_list_border_radius(),
                 text_color: theme::bg0_hard(),
@@ -209,7 +218,7 @@ pub(crate) struct SlotListConfig {
     /// When true, slots with no corresponding item are skipped (not rendered).
     /// Used by settings to avoid showing empty placeholder rows.
     pub cull_empty: bool,
-    /// The global keyboard modifiers state (for shift/ctrl clicking) 
+    /// The global keyboard modifiers state (for shift/ctrl clicking)
     pub modifiers: iced::keyboard::Modifiers,
 }
 

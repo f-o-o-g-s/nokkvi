@@ -99,23 +99,38 @@ impl Nokkvi {
             View::Queue => self.load_queue_viewport_artwork(),
             View::Albums => {
                 let offset = self.albums_page.common.slot_list.viewport_offset;
-                self.handle_albums(views::AlbumsMessage::SlotListSetOffset(offset, iced::keyboard::Modifiers::default()))
+                self.handle_albums(views::AlbumsMessage::SlotListSetOffset(
+                    offset,
+                    iced::keyboard::Modifiers::default(),
+                ))
             }
             View::Songs => {
                 let offset = self.songs_page.common.slot_list.viewport_offset;
-                self.handle_songs(views::SongsMessage::SlotListSetOffset(offset, iced::keyboard::Modifiers::default()))
+                self.handle_songs(views::SongsMessage::SlotListSetOffset(
+                    offset,
+                    iced::keyboard::Modifiers::default(),
+                ))
             }
             View::Genres => {
                 let offset = self.genres_page.common.slot_list.viewport_offset;
-                self.handle_genres(views::GenresMessage::SlotListSetOffset(offset, iced::keyboard::Modifiers::default()))
+                self.handle_genres(views::GenresMessage::SlotListSetOffset(
+                    offset,
+                    iced::keyboard::Modifiers::default(),
+                ))
             }
             View::Artists => {
                 let offset = self.artists_page.common.slot_list.viewport_offset;
-                self.handle_artists(views::ArtistsMessage::SlotListSetOffset(offset, iced::keyboard::Modifiers::default()))
+                self.handle_artists(views::ArtistsMessage::SlotListSetOffset(
+                    offset,
+                    iced::keyboard::Modifiers::default(),
+                ))
             }
             View::Playlists => {
                 let offset = self.playlists_page.common.slot_list.viewport_offset;
-                self.handle_playlists(views::PlaylistsMessage::SlotListSetOffset(offset, iced::keyboard::Modifiers::default()))
+                self.handle_playlists(views::PlaylistsMessage::SlotListSetOffset(
+                    offset,
+                    iced::keyboard::Modifiers::default(),
+                ))
             }
             View::Settings => Task::none(),
         }
@@ -194,9 +209,12 @@ impl Nokkvi {
                 offset,
                 iced::keyboard::Modifiers::default(),
             ))),
-            View::Artists => Task::done(Message::Artists(
-                views::ArtistsMessage::SlotListSetOffset(offset, iced::keyboard::Modifiers::default()),
-            )),
+            View::Artists => {
+                Task::done(Message::Artists(views::ArtistsMessage::SlotListSetOffset(
+                    offset,
+                    iced::keyboard::Modifiers::default(),
+                )))
+            }
             View::Queue => Task::done(Message::Queue(views::QueueMessage::SlotListSetOffset(
                 offset,
                 iced::keyboard::Modifiers::default(),
@@ -210,10 +228,16 @@ impl Nokkvi {
                 iced::keyboard::Modifiers::default(),
             ))),
             View::Playlists => Task::done(Message::Playlists(
-                views::PlaylistsMessage::SlotListSetOffset(offset, iced::keyboard::Modifiers::default()),
+                views::PlaylistsMessage::SlotListSetOffset(
+                    offset,
+                    iced::keyboard::Modifiers::default(),
+                ),
             )),
             View::Settings => Task::done(Message::Settings(
-                views::SettingsMessage::SlotListSetOffset(offset, iced::keyboard::Modifiers::default()),
+                views::SettingsMessage::SlotListSetOffset(
+                    offset,
+                    iced::keyboard::Modifiers::default(),
+                ),
             )),
         }
     }

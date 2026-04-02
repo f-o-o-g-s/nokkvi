@@ -169,7 +169,8 @@ impl QueuePage {
                 (Task::none(), QueueAction::None)
             }
             QueueMessage::SlotListSetOffset(offset, modifiers) => {
-                self.common.handle_slot_click(offset, total_items, modifiers);
+                self.common
+                    .handle_slot_click(offset, total_items, modifiers);
                 (Task::none(), QueueAction::None)
             }
             QueueMessage::SlotListScrollSeek(offset) => {
@@ -319,6 +320,7 @@ impl QueuePage {
                 | QueueContextEntry::MoveToBottom
                 | QueueContextEntry::PlayNext => {
                     let target_indices = self.common.evaluate_context_menu(clicked_idx);
+                    self.common.clear_multi_selection();
 
                     match entry {
                         QueueContextEntry::RemoveFromQueue => {
@@ -338,6 +340,7 @@ impl QueuePage {
                 }
                 QueueContextEntry::AddToPlaylist => {
                     let target_indices = self.common.evaluate_context_menu(clicked_idx);
+                    self.common.clear_multi_selection();
                     let target_songs: Vec<String> = target_indices
                         .iter()
                         .filter_map(|&idx| queue_songs.get(idx).map(|s| s.id.clone()))
@@ -663,7 +666,8 @@ impl QueuePage {
         } else {
             chrome_height_with_header()
         };
-        let config = SlotListConfig::with_dynamic_slots(data.window_height, chrome_height).with_modifiers(data.modifiers);
+        let config = SlotListConfig::with_dynamic_slots(data.window_height, chrome_height)
+            .with_modifiers(data.modifiers);
 
         // Capture values needed in closure
         let _scale_factor = data.scale_factor;
@@ -700,7 +704,12 @@ impl QueuePage {
             use crate::widgets::slot_list::{
                 SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column, slot_list_text,
             };
-            let style = SlotListSlotStyle::for_slot(ctx.is_center, is_current, ctx.is_selected, ctx.opacity);
+            let style = SlotListSlotStyle::for_slot(
+                ctx.is_center,
+                is_current,
+                ctx.is_selected,
+                ctx.opacity,
+            );
 
             // Dynamic scaling - match albums view font sizes, apply scale_factor
             // Calculate artwork directly from row_height and apply slot scale_factor

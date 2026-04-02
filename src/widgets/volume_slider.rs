@@ -200,14 +200,15 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for VolumeSlider<'_,
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
             | Event::Touch(touch::Event::FingerLifted { .. } | touch::Event::FingerLost { .. })
-                if state.is_dragging => {
-                    // Always publish final volume on release to ensure target value is set
-                    if (state.drag_volume - state.last_published_volume).abs() > 0.001 {
-                        shell.publish((self.on_change)(state.drag_volume));
-                        state.last_published_volume = state.drag_volume;
-                    }
-                    state.is_dragging = false;
+                if state.is_dragging =>
+            {
+                // Always publish final volume on release to ensure target value is set
+                if (state.drag_volume - state.last_published_volume).abs() > 0.001 {
+                    shell.publish((self.on_change)(state.drag_volume));
+                    state.last_published_volume = state.drag_volume;
                 }
+                state.is_dragging = false;
+            }
             Event::Mouse(mouse::Event::CursorMoved { .. })
             | Event::Touch(touch::Event::FingerMoved { .. }) => {
                 if state.is_dragging
@@ -230,18 +231,17 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for VolumeSlider<'_,
                     shell.request_redraw();
                 }
             }
-            Event::Mouse(mouse::Event::WheelScrolled { delta })
-                if cursor.is_over(bounds) => {
-                    // Calculate scroll delta (positive = up = increase volume)
-                    let scroll_delta = match delta {
-                        mouse::ScrollDelta::Lines { y, .. } => y * 0.01, // 1% per line
-                        mouse::ScrollDelta::Pixels { y, .. } => y * 0.001, // Finer control for pixels
-                    };
-                    let new_volume = (self.volume + scroll_delta).clamp(0.0, 1.0);
-                    shell.publish((self.on_change)(new_volume));
-                    shell.capture_event();
-                    shell.request_redraw();
-                }
+            Event::Mouse(mouse::Event::WheelScrolled { delta }) if cursor.is_over(bounds) => {
+                // Calculate scroll delta (positive = up = increase volume)
+                let scroll_delta = match delta {
+                    mouse::ScrollDelta::Lines { y, .. } => y * 0.01, // 1% per line
+                    mouse::ScrollDelta::Pixels { y, .. } => y * 0.001, // Finer control for pixels
+                };
+                let new_volume = (self.volume + scroll_delta).clamp(0.0, 1.0);
+                shell.publish((self.on_change)(new_volume));
+                shell.capture_event();
+                shell.request_redraw();
+            }
             _ => {}
         }
     }

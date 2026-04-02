@@ -299,13 +299,14 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
             | Event::Touch(touch::Event::FingerLifted { .. } | touch::Event::FingerLost { .. })
-                if state.is_dragging => {
-                    // C++ pattern: ONLY seek to final position when user releases after drag
-                    // This prevents seek spam during dragging
-                    let seek_pos = state.drag_progress * self.duration;
-                    shell.publish((self.on_seek)(seek_pos));
-                    state.is_dragging = false;
-                }
+                if state.is_dragging =>
+            {
+                // C++ pattern: ONLY seek to final position when user releases after drag
+                // This prevents seek spam during dragging
+                let seek_pos = state.drag_progress * self.duration;
+                shell.publish((self.on_seek)(seek_pos));
+                state.is_dragging = false;
+            }
             Event::Mouse(mouse::Event::CursorMoved { .. })
             | Event::Touch(touch::Event::FingerMoved { .. }) => {
                 if state.is_dragging

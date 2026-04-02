@@ -741,8 +741,9 @@ impl AppService {
         &self,
         batch: crate::types::batch::BatchPayload,
     ) -> Result<Vec<crate::types::song::Song>> {
-        use crate::types::batch::BatchItem;
         use std::collections::HashSet;
+
+        use crate::types::batch::BatchItem;
 
         let mut resolved_songs = Vec::new();
         let mut seen_ids = HashSet::new();
@@ -751,7 +752,9 @@ impl AppService {
             let songs_result = match item {
                 BatchItem::Song(song) => Ok(vec![*song]),
                 BatchItem::Album(album_id) => self.albums_service.load_album_songs(&album_id).await,
-                BatchItem::Artist(artist_id) => self.artists_service.load_artist_songs(&artist_id).await,
+                BatchItem::Artist(artist_id) => {
+                    self.artists_service.load_artist_songs(&artist_id).await
+                }
                 BatchItem::Genre(genre) => self.load_genre_songs(&genre).await,
                 BatchItem::Playlist(playlist_id) => self.load_playlist_songs(&playlist_id).await,
             };
@@ -777,10 +780,16 @@ impl AppService {
         let songs = self.resolve_batch(batch).await?;
         self.playback_songs(songs, 0).await
     }
-    
+
     // helper wrapper to call internal logic bypassing self-clone if possible:
-    async fn playback_songs(&self, songs: Vec<crate::types::song::Song>, start_index: usize) -> Result<()> {
-        self.playback.play_songs_from_index(songs, start_index).await
+    async fn playback_songs(
+        &self,
+        songs: Vec<crate::types::song::Song>,
+        start_index: usize,
+    ) -> Result<()> {
+        self.playback
+            .play_songs_from_index(songs, start_index)
+            .await
     }
 
     /// Add a batch to the queue (append).
@@ -798,7 +807,11 @@ impl AppService {
     }
 
     /// Insert a batch at a specific position in the queue.
-    pub async fn insert_batch_at_position(&self, batch: crate::types::batch::BatchPayload, position: usize) -> Result<()> {
+    pub async fn insert_batch_at_position(
+        &self,
+        batch: crate::types::batch::BatchPayload,
+        position: usize,
+    ) -> Result<()> {
         let songs = self.resolve_batch(batch).await?;
         self.queue_service.insert_songs_at(position, songs).await?;
         debug!("📌 Inserted batch at queue position {}", position);
@@ -810,7 +823,7 @@ impl AppService {
     pub async fn remove_batch_from_queue(&self, mut indices: Vec<usize>) -> Result<()> {
         // Sort in descending order
         indices.sort_unstable_by(|a, b| b.cmp(a));
-        
+
         let mut count = 0;
         for idx in indices {
             // Log individually but we're removing sequentially
@@ -818,7 +831,7 @@ impl AppService {
                 count += 1;
             }
         }
-        
+
         if count > 0 {
             debug!("➖ Removed {} songs from queue via batch", count);
         }

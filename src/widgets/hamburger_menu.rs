@@ -132,11 +132,12 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Hambur
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
             | Event::Touch(touch::Event::FingerPressed { .. })
-                if cursor.is_over(bounds) => {
-                    state.is_open = !state.is_open;
-                    shell.capture_event();
-                    shell.request_redraw();
-                }
+                if cursor.is_over(bounds) =>
+            {
+                state.is_open = !state.is_open;
+                shell.capture_event();
+                shell.request_redraw();
+            }
             _ => {}
         }
     }

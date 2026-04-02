@@ -84,7 +84,10 @@ impl Nokkvi {
                 // Also trigger collage load for initially centered genre (index 0)
                 if !self.library.genres.is_empty() {
                     tasks.push(Task::done(Message::Genres(
-                        views::GenresMessage::SlotListSetOffset(0, iced::keyboard::Modifiers::default()),
+                        views::GenresMessage::SlotListSetOffset(
+                            0,
+                            iced::keyboard::Modifiers::default(),
+                        ),
                     )));
                 }
 

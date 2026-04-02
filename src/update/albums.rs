@@ -748,7 +748,7 @@ impl Nokkvi {
                 // To support PlayNext for albums, we just wrap it into a BatchItem
                 use nokkvi_data::types::batch::{BatchItem, BatchPayload};
                 let payload = BatchPayload::new().with_item(BatchItem::Album(id));
-                
+
                 if self.modes.random {
                     self.toast_warn("Shuffle is on — next tracks will be random, not these");
                 }

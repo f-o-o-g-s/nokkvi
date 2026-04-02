@@ -274,14 +274,21 @@ impl Nokkvi {
                 });
             }
             QueueAction::RemoveFromQueue(indices) => {
-                let mut raw_indices_desc: Vec<usize> = indices.iter()
+                let mut raw_indices_desc: Vec<usize> = indices
+                    .iter()
                     .filter_map(|&idx| filtered_queue.get(idx).map(|s| s.track_number as usize - 1))
                     .collect();
-                if raw_indices_desc.is_empty() { return Task::none(); }
+                if raw_indices_desc.is_empty() {
+                    return Task::none();
+                }
                 raw_indices_desc.sort_unstable_by(|a, b| b.cmp(a)); // Descending
 
                 let title_text = if raw_indices_desc.len() == 1 {
-                    self.library.queue_songs.get(raw_indices_desc[0]).map(|s| format!("\"{}\"", s.title)).unwrap_or_default()
+                    self.library
+                        .queue_songs
+                        .get(raw_indices_desc[0])
+                        .map(|s| format!("\"{}\"", s.title))
+                        .unwrap_or_default()
                 } else {
                     format!("{} songs", raw_indices_desc.len())
                 };
@@ -305,10 +312,13 @@ impl Nokkvi {
                 });
             }
             QueueAction::MoveToTop(indices) => {
-                let mut raw_indices_desc: Vec<usize> = indices.iter()
+                let mut raw_indices_desc: Vec<usize> = indices
+                    .iter()
                     .filter_map(|&idx| filtered_queue.get(idx).map(|s| s.track_number as usize - 1))
                     .collect();
-                if raw_indices_desc.is_empty() { return Task::none(); }
+                if raw_indices_desc.is_empty() {
+                    return Task::none();
+                }
                 raw_indices_desc.sort_unstable_by(|a, b| b.cmp(a)); // Descending
 
                 // Optimistic UI
@@ -329,11 +339,14 @@ impl Nokkvi {
                     let mut extracted = Vec::new();
                     for &qi in &raw_indices_desc {
                         if let Some(id) = qm.get_queue().song_ids.get(qi).cloned()
-                            && let Some(song) = qm.get_song(&id) {
-                                extracted.push(song.clone());
-                            }
+                            && let Some(song) = qm.get_song(&id)
+                        {
+                            extracted.push(song.clone());
+                        }
                     }
-                    for &qi in &raw_indices_desc { qm.remove_song(qi).ok(); }
+                    for &qi in &raw_indices_desc {
+                        qm.remove_song(qi).ok();
+                    }
                     extracted.reverse();
                     qm.insert_songs_at(0, extracted).ok();
                     drop(qm);
@@ -341,10 +354,13 @@ impl Nokkvi {
                 });
             }
             QueueAction::MoveToBottom(indices) => {
-                let mut raw_indices_desc: Vec<usize> = indices.iter()
+                let mut raw_indices_desc: Vec<usize> = indices
+                    .iter()
                     .filter_map(|&idx| filtered_queue.get(idx).map(|s| s.track_number as usize - 1))
                     .collect();
-                if raw_indices_desc.is_empty() { return Task::none(); }
+                if raw_indices_desc.is_empty() {
+                    return Task::none();
+                }
                 raw_indices_desc.sort_unstable_by(|a, b| b.cmp(a)); // Descending
 
                 // Optimistic UI
@@ -365,11 +381,14 @@ impl Nokkvi {
                     let mut extracted = Vec::new();
                     for &qi in &raw_indices_desc {
                         if let Some(id) = qm.get_queue().song_ids.get(qi).cloned()
-                            && let Some(song) = qm.get_song(&id) {
-                                extracted.push(song.clone());
-                            }
+                            && let Some(song) = qm.get_song(&id)
+                        {
+                            extracted.push(song.clone());
+                        }
                     }
-                    for &qi in &raw_indices_desc { qm.remove_song(qi).ok(); }
+                    for &qi in &raw_indices_desc {
+                        qm.remove_song(qi).ok();
+                    }
                     extracted.reverse();
                     let target_idx = qm.get_queue().song_ids.len();
                     qm.insert_songs_at(target_idx, extracted).ok();
@@ -378,14 +397,21 @@ impl Nokkvi {
                 });
             }
             QueueAction::PlayNext(indices) => {
-                let mut raw_indices_desc: Vec<usize> = indices.iter()
+                let mut raw_indices_desc: Vec<usize> = indices
+                    .iter()
                     .filter_map(|&idx| filtered_queue.get(idx).map(|s| s.track_number as usize - 1))
                     .collect();
-                if raw_indices_desc.is_empty() { return Task::none(); }
+                if raw_indices_desc.is_empty() {
+                    return Task::none();
+                }
                 raw_indices_desc.sort_unstable_by(|a, b| b.cmp(a)); // Descending
 
                 let title_text = if raw_indices_desc.len() == 1 {
-                    self.library.queue_songs.get(raw_indices_desc[0]).map(|s| format!("\"{}\"", s.title)).unwrap_or_default()
+                    self.library
+                        .queue_songs
+                        .get(raw_indices_desc[0])
+                        .map(|s| format!("\"{}\"", s.title))
+                        .unwrap_or_default()
                 } else {
                     format!("{} songs", raw_indices_desc.len())
                 };
@@ -402,11 +428,14 @@ impl Nokkvi {
                     let mut extracted = Vec::new();
                     for &qi in &raw_indices_desc {
                         if let Some(id) = qm.get_queue().song_ids.get(qi).cloned()
-                            && let Some(song) = qm.get_song(&id) {
-                                extracted.push(song.clone());
-                            }
+                            && let Some(song) = qm.get_song(&id)
+                        {
+                            extracted.push(song.clone());
+                        }
                     }
-                    for &qi in &raw_indices_desc { qm.remove_song(qi).ok(); }
+                    for &qi in &raw_indices_desc {
+                        qm.remove_song(qi).ok();
+                    }
                     extracted.reverse(); // Now ascending
                     qm.insert_after_current(extracted).ok();
                     drop(qm);

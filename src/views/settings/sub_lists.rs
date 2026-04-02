@@ -291,7 +291,12 @@ impl SettingsPage {
             SettingsMessage::SlotListDown,
             {
                 let total = total_colors;
-                move |f| SettingsMessage::SlotListSetOffset((f * total as f32) as usize, iced::keyboard::Modifiers::default())
+                move |f| {
+                    SettingsMessage::SlotListSetOffset(
+                        (f * total as f32) as usize,
+                        iced::keyboard::Modifiers::default(),
+                    )
+                }
             },
             move |hex_color, ctx| {
                 let is_editing = editing_color_index == Some(ctx.item_index);

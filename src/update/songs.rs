@@ -464,12 +464,12 @@ impl Nokkvi {
                 return self.handle_songs_load_page(offset);
             }
             SongsAction::AddBatchToPlaylist(payload) => {
-                // Wait! To add to playlist we need a flat list of `song_ids`. 
+                // Wait! To add to playlist we need a flat list of `song_ids`.
                 // Currently `fetch_playlists_for_add_to_playlist` takes a `Vec<String>` of song_ids!
                 // To cleanly integrate, we can resolve the payload strings.
                 // However, resolving full batches (Artists/Albums) requires an async call before we show
                 // the "Choose a playlist" dialog?
-                // Let's resolve the batch *after* the user chooses a playlist, but `fetch_playlists_for_add_to_playlist` 
+                // Let's resolve the batch *after* the user chooses a playlist, but `fetch_playlists_for_add_to_playlist`
                 // just stores the IDs in `self.pending_add_to_playlist`.
                 return self.handle_add_batch_to_playlist(payload);
             }

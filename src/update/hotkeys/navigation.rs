@@ -219,7 +219,10 @@ impl Nokkvi {
                 View::Queue => {
                     let total = self.filter_queue_songs().len();
                     self.queue_page.common.handle_set_offset(i, total);
-                    Task::done(Message::Queue(views::QueueMessage::SlotListSetOffset(i, iced::keyboard::Modifiers::default())))
+                    Task::done(Message::Queue(views::QueueMessage::SlotListSetOffset(
+                        i,
+                        iced::keyboard::Modifiers::default(),
+                    )))
                 }
                 View::Albums => {
                     self.albums_page.expansion.handle_set_offset(
@@ -227,7 +230,10 @@ impl Nokkvi {
                         &self.library.albums,
                         &mut self.albums_page.common,
                     );
-                    Task::done(Message::Albums(views::AlbumsMessage::SlotListSetOffset(i, iced::keyboard::Modifiers::default())))
+                    Task::done(Message::Albums(views::AlbumsMessage::SlotListSetOffset(
+                        i,
+                        iced::keyboard::Modifiers::default(),
+                    )))
                 }
                 View::Artists => {
                     self.artists_page.expansion.handle_set_offset(
@@ -243,7 +249,10 @@ impl Nokkvi {
                 View::Songs => {
                     let total = self.library.songs.len();
                     self.songs_page.common.handle_set_offset(i, total);
-                    Task::done(Message::Songs(views::SongsMessage::SlotListSetOffset(i, iced::keyboard::Modifiers::default())))
+                    Task::done(Message::Songs(views::SongsMessage::SlotListSetOffset(
+                        i,
+                        iced::keyboard::Modifiers::default(),
+                    )))
                 }
                 View::Genres => {
                     self.genres_page.expansion.handle_set_offset(
@@ -251,7 +260,10 @@ impl Nokkvi {
                         &self.library.genres,
                         &mut self.genres_page.common,
                     );
-                    Task::done(Message::Genres(views::GenresMessage::SlotListSetOffset(i, iced::keyboard::Modifiers::default())))
+                    Task::done(Message::Genres(views::GenresMessage::SlotListSetOffset(
+                        i,
+                        iced::keyboard::Modifiers::default(),
+                    )))
                 }
                 _ => Task::none(),
             }
