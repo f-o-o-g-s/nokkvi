@@ -28,7 +28,7 @@ pub struct ThemeFile {
 impl Default for ThemeFile {
     fn default() -> Self {
         Self {
-            name: "Gruvbox".to_string(),
+            name: "Adwaita".to_string(),
             dark: ThemePalette::default(),
             light: ThemePalette::light_default(),
         }
@@ -105,45 +105,45 @@ impl ThemePalette {
     pub fn light_default() -> Self {
         Self {
             background: BackgroundConfig {
-                hard: "#e7deb7".to_string(),
-                default: "#fbf1c7".to_string(),
-                soft: "#f1e7bd".to_string(),
-                level1: "#e4dab1".to_string(),
-                level2: "#dad0a7".to_string(),
-                level3: "#d2c89f".to_string(),
-                level4: "#cac097".to_string(),
+                hard: "#ffffff".to_string(),
+                default: "#fafafb".to_string(),
+                soft: "#ebebed".to_string(),
+                level1: "#ebebed".to_string(),
+                level2: "#deddda".to_string(),
+                level3: "#c0bfbc".to_string(),
+                level4: "#9a9996".to_string(),
             },
             foreground: ForegroundConfig {
-                bright: "#282828".to_string(),
-                level1: "#282828".to_string(),
-                level2: "#282828".to_string(),
-                level3: "#282828".to_string(),
-                level4: "#282828".to_string(),
-                gray: "#cac097".to_string(),
+                bright: "#000000".to_string(),
+                level1: "#241f31".to_string(),
+                level2: "#3d3846".to_string(),
+                level3: "#5e5c64".to_string(),
+                level4: "#77767b".to_string(),
+                gray: "#9a9996".to_string(),
             },
             accent: AccentConfig {
-                primary: "#458588".to_string(),
-                bright: "#49a8ac".to_string(),
-                border_dark: "#49a8ac".to_string(),
-                border_light: "#aebaa5".to_string(),
-                now_playing: String::new(),
-                selected: "#49a8ac".to_string(),
+                primary: "#3584e4".to_string(),
+                bright: "#62a0ea".to_string(),
+                border_dark: "#1a5fb4".to_string(),
+                border_light: "#99c1f1".to_string(),
+                now_playing: "#1c71d8".to_string(),
+                selected: "#3584e4".to_string(),
             },
             danger: SemanticColorConfig {
-                base: "#cc241d".to_string(),
-                bright: "#ff0000".to_string(),
+                base: "#c01c28".to_string(),
+                bright: "#ed333b".to_string(),
             },
             success: SemanticColorConfig {
-                base: "#98971a".to_string(),
-                bright: "#7c7900".to_string(),
+                base: "#26a269".to_string(),
+                bright: "#33d17a".to_string(),
             },
             warning: SemanticColorConfig {
-                base: "#d79921".to_string(),
-                bright: "#b67a00".to_string(),
+                base: "#e5a50a".to_string(),
+                bright: "#f6d32d".to_string(),
             },
             star: SemanticColorConfig {
-                base: "#d79921".to_string(),
-                bright: "#b67a00".to_string(),
+                base: "#e5a50a".to_string(),
+                bright: "#f6d32d".to_string(),
             },
             visualizer: VisualizerColors::light_default(),
         }
@@ -177,13 +177,13 @@ pub struct BackgroundConfig {
 impl Default for BackgroundConfig {
     fn default() -> Self {
         Self {
-            hard: "#1e1e1e".to_string(),
-            default: "#282828".to_string(),
-            soft: "#2f2f2f".to_string(),
-            level1: "#3a3a3a".to_string(),
-            level2: "#414141".to_string(),
-            level3: "#484848".to_string(),
-            level4: "#4f4f4f".to_string(),
+            hard: "#1d1d20".to_string(),
+            default: "#222226".to_string(),
+            soft: "#2e2e32".to_string(),
+            level1: "#2e2e32".to_string(),
+            level2: "#36363a".to_string(),
+            level3: "#3d3846".to_string(),
+            level4: "#5e5c64".to_string(),
         }
     }
 }
@@ -209,12 +209,12 @@ pub struct ForegroundConfig {
 impl Default for ForegroundConfig {
     fn default() -> Self {
         Self {
-            bright: "#fbf1c7".to_string(),
-            level1: "#fbf1c7".to_string(),
-            level2: "#fbf1c7".to_string(),
-            level3: "#fbf1c7".to_string(),
-            level4: "#fbf1c7".to_string(),
-            gray: "#4f4f4f".to_string(),
+            bright: "#ffffff".to_string(),
+            level1: "#f6f5f4".to_string(),
+            level2: "#deddda".to_string(),
+            level3: "#c0bfbc".to_string(),
+            level4: "#9a9996".to_string(),
+            gray: "#77767b".to_string(),
         }
     }
 }
@@ -242,12 +242,12 @@ pub struct AccentConfig {
 impl Default for AccentConfig {
     fn default() -> Self {
         Self {
-            primary: "#458588".to_string(),
-            bright: "#49a8ac".to_string(),
-            border_dark: "#49a8ac".to_string(),
-            border_light: "#3b6c6e".to_string(),
-            now_playing: String::new(),
-            selected: "#49a8ac".to_string(),
+            primary: "#3584e4".to_string(),
+            bright: "#62a0ea".to_string(),
+            border_dark: "#000000".to_string(),
+            border_light: "#1c71d8".to_string(),
+            now_playing: "#3584e4".to_string(),
+            selected: "#3584e4".to_string(),
         }
     }
 }
@@ -265,10 +265,10 @@ pub struct SemanticColorConfig {
 
 impl Default for SemanticColorConfig {
     fn default() -> Self {
-        // Generic fallback — matches Gruvbox danger
+        // Generic fallback — matches Adwaita danger
         Self {
-            base: "#cc241d".to_string(),
-            bright: "#ff0000".to_string(),
+            base: "#e01b24".to_string(),
+            bright: "#f66151".to_string(),
         }
     }
 }
@@ -303,24 +303,18 @@ pub struct VisualizerColors {
 impl Default for VisualizerColors {
     fn default() -> Self {
         Self {
-            border_color: "#1e1e1e".to_string(),
+            border_color: "#1d1d20".to_string(),
             border_opacity: 1.0,
             led_border_opacity: 1.0,
             bar_gradient_colors: vec![
-                "#83a598".to_string(), // Blue
-                "#8ec07c".to_string(), // Aqua
-                "#b8bb26".to_string(), // Green
-                "#fabd2f".to_string(), // Yellow
-                "#fe8019".to_string(), // Orange
-                "#fb4934".to_string(), // Red
+                "#3584e4".to_string(),
+                "#1c71d8".to_string(),
+                "#62a0ea".to_string(),
             ],
             peak_gradient_colors: vec![
-                "#83a598".to_string(),
-                "#83a598".to_string(),
-                "#b8bb26".to_string(),
-                "#b8bb26".to_string(),
-                "#fb4934".to_string(),
-                "#fb4934".to_string(),
+                "#ed333b".to_string(),
+                "#ff7800".to_string(),
+                "#f6d32d".to_string(),
             ],
         }
     }
@@ -330,24 +324,18 @@ impl VisualizerColors {
     /// Gruvbox light mode default colors.
     pub fn light_default() -> Self {
         Self {
-            border_color: "#e7deb7".to_string(),
+            border_color: "#ffffff".to_string(),
             border_opacity: 0.0,
             led_border_opacity: 0.0,
             bar_gradient_colors: vec![
-                "#83a598".to_string(),
-                "#8ec07c".to_string(),
-                "#b8bb26".to_string(),
-                "#fabd2f".to_string(),
-                "#fe8019".to_string(),
-                "#fb4934".to_string(),
+                "#3584e4".to_string(),
+                "#1a5fb4".to_string(),
+                "#1c71d8".to_string(),
             ],
             peak_gradient_colors: vec![
-                "#83a598".to_string(),
-                "#83a598".to_string(),
-                "#b8bb26".to_string(),
-                "#b8bb26".to_string(),
-                "#fb4934".to_string(),
-                "#fb4934".to_string(),
+                "#e66100".to_string(),
+                "#f5c211".to_string(),
+                "#ff7800".to_string(),
             ],
         }
     }
@@ -373,10 +361,10 @@ mod tests {
         let theme = ThemeFile::default();
         let toml_str = theme.save().expect("serialize");
         let parsed = ThemeFile::load(&toml_str).expect("deserialize");
-        assert_eq!(parsed.name, "Gruvbox");
-        assert_eq!(parsed.dark.background.hard, "#1d2021");
-        assert_eq!(parsed.light.background.hard, "#f9f5d7");
-        assert_eq!(parsed.dark.visualizer.bar_gradient_colors.len(), 6);
+        assert_eq!(parsed.name, "Adwaita");
+        assert_eq!(parsed.dark.background.hard, "#1d1d20");
+        assert_eq!(parsed.light.background.hard, "#ffffff");
+        assert_eq!(parsed.dark.visualizer.bar_gradient_colors.len(), 3);
         assert_eq!(parsed.light.visualizer.border_opacity, 0.0);
     }
 
@@ -390,17 +378,17 @@ mod tests {
         let theme = ThemeFile::load(partial).expect("parse partial");
         assert_eq!(theme.name, "Minimal");
         assert_eq!(theme.dark.background.hard, "#000000");
-        // Everything else falls back to Gruvbox defaults
-        assert_eq!(theme.dark.background.default, "#282828");
-        assert_eq!(theme.dark.foreground.bright, "#fbf1c7");
-        assert_eq!(theme.dark.accent.primary, "#458588");
+        // Everything else falls back to Adwaita defaults
+        assert_eq!(theme.dark.background.default, "#222226");
+        assert_eq!(theme.dark.foreground.bright, "#ffffff");
+        assert_eq!(theme.dark.accent.primary, "#3584e4");
     }
 
     #[test]
     fn test_visualizer_colors_round_trip() {
         let colors = VisualizerColors::default();
-        assert_eq!(colors.bar_gradient_colors.len(), 6);
-        assert_eq!(colors.peak_gradient_colors.len(), 6);
+        assert_eq!(colors.bar_gradient_colors.len(), 3);
+        assert_eq!(colors.peak_gradient_colors.len(), 3);
         assert_eq!(colors.border_opacity, 1.0);
         assert_eq!(colors.led_border_opacity, 1.0);
 
@@ -412,7 +400,7 @@ mod tests {
     #[test]
     fn test_semantic_color_default() {
         let palette = ThemePalette::default();
-        assert_eq!(palette.danger.base, "#cc241d");
+        assert_eq!(palette.danger.base, "#e01b24");
         assert_eq!(palette.success.base, "#98971a");
         assert_eq!(palette.warning.base, "#d79921");
         assert_eq!(palette.star.base, "#d79921");
