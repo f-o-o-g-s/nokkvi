@@ -94,15 +94,19 @@ impl SlotListPageState {
             // Toggle selection for clicked item
             if self.slot_list.selected_indices.contains(&offset) {
                 self.slot_list.selected_indices.remove(&offset);
-                // If we removed the anchor, there's no intelligent recalculation. Just leave it or clear it.
                 if self.slot_list.anchor_index == Some(offset) {
                     self.slot_list.anchor_index = None;
+                }
+                // Clear focus cursor when the selection set empties, otherwise
+                // the deselected slot keeps its center-highlight.
+                if self.slot_list.selected_indices.is_empty() {
+                    self.slot_list.selected_offset = None;
                 }
             } else {
                 self.slot_list.selected_indices.insert(offset);
                 self.slot_list.anchor_index = Some(offset);
+                self.slot_list.selected_offset = Some(offset);
             }
-            self.slot_list.selected_offset = Some(offset);
         } else if modifiers.shift() {
             // Range selection
             if let Some(anchor) = self.slot_list.anchor_index {
