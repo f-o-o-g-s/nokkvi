@@ -473,8 +473,13 @@ impl SongsPage {
                     SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column,
                     slot_list_text,
                 };
-                let style =
-                    SlotListSlotStyle::for_slot(ctx.is_center, false, ctx.is_selected, ctx.has_multi_selection, ctx.opacity);
+                let style = SlotListSlotStyle::for_slot(
+                    ctx.is_center,
+                    false,
+                    ctx.is_selected,
+                    ctx.has_multi_selection,
+                    ctx.opacity,
+                );
 
                 // Dynamic scaling based on row height AND scale factor
                 let base_artwork_size = (ctx.row_height - 16.0).max(32.0);

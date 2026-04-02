@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## v0.2.4 — 2026-04-02
+
+### Features
+- **Multi-Selection** — added multi-selection batch action support to the library and queue views. You can now select multiple items using Ctrl/Shift and apply context menu actions or hotkeys (e.g. Play Next, Remove from Queue) to the entire selection at once.
+- **Batch Drag-and-Drop** — drag a multi-selection batch to reorder multiple tracks simultaneously natively within the queue, or drag a batch of songs from the library browser into the queue. A `×N` badge provides visual feedback for the batch size during the drag.
+
+### Fixes
+- **Library Multi-Selection Reliability** — prevented the cross-pane drag handler from improperly intercepting mouse clicks during multi-selection, ensuring that Ctrl and Shift-clicking consistently preserves selection state instead of reverting to single-item bounds.
+- **Multi-Selection UI States** — the now-playing track highlight is suppressed cleanly while actively making multi-selections (holding Ctrl or Shift) to ensure selection limits are clearly readable. Batch operations clear the selection correctly afterward to prevent stale selections on the next action.
+- **Multi-Selection Action Guards** — suppressed accidental play actions while building selections via Ctrl/Shift clicks, keeping UI state resilient.
+- **Multi-Selection Deselection** — cleared the visual selection focus correctly when removing the last remaining item from a multi-selection batch using Ctrl+Click.
+
 ## v0.2.3 — 2026-04-02
 
 ### Fixes

@@ -667,8 +667,13 @@ impl PlaylistsPage {
         };
 
         let is_expanded = self.expansion.is_expanded_parent(&playlist.id);
-        let style =
-            SlotListSlotStyle::for_slot(ctx.is_center, is_expanded, ctx.is_selected, ctx.has_multi_selection, ctx.opacity);
+        let style = SlotListSlotStyle::for_slot(
+            ctx.is_center,
+            is_expanded,
+            ctx.is_selected,
+            ctx.has_multi_selection,
+            ctx.opacity,
+        );
 
         let base_artwork_size = (ctx.row_height - 16.0).max(32.0);
         let artwork_size = base_artwork_size * ctx.scale_factor;

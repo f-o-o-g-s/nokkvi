@@ -75,7 +75,7 @@ impl SlotListSlotStyle {
                 text_color: theme::bg0_hard(),
                 subtext_color: theme::bg0_hard(),
             }
-// Removed redundant else if is_center branch as it matches the default fallback exactly
+        // Removed redundant else if is_center branch as it matches the default fallback exactly
         } else {
             // Regular slot with opacity fade (both background and text)
             Self {
