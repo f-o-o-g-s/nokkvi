@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## v0.2.3 — 2026-04-02
+
+### Fixes
+- **Repeat track** — resolved an issue where playback would stop instead of continuously looping a single track, and fixed manual track skipping when repeat mode is active.
+
 ## v0.2.2 — 2026-04-01
 
 ### Features

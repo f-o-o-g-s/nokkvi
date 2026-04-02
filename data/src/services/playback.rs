@@ -145,7 +145,8 @@ impl QueueNavigator {
         // ── Single queue transition path ──
         let mut queue_manager = self.queue_manager.lock().await;
 
-        let is_repeat_track = queue_manager.get_queue().repeat == crate::types::queue::RepeatMode::Track;
+        let is_repeat_track =
+            queue_manager.get_queue().repeat == crate::types::queue::RepeatMode::Track;
 
         if is_repeat_track {
             // Clear queued just in case
@@ -155,16 +156,21 @@ impl QueueNavigator {
             let song = if let Some(idx) = idx {
                 if let Some(id) = queue_manager.get_queue().song_ids.get(idx) {
                     queue_manager.get_song(id).cloned()
-                } else { None }
-            } else { None };
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
 
             if let Some(song) = song {
                 // Do NOT consume the track since we are repeating it
                 queue_manager.add_to_history(song.clone());
-                
+
                 // For path 3: need to load and play the track
                 if needs_load {
-                    let stream_url = Self::build_stream_url(&song.id, server_url, subsonic_credential);
+                    let stream_url =
+                        Self::build_stream_url(&song.id, server_url, subsonic_credential);
                     drop(queue_manager);
                     engine.load_track(&stream_url).await;
                     engine.play().await?;
@@ -179,7 +185,7 @@ impl QueueNavigator {
                 debug!("▶️ Now Playing: {} - {} (repeat)", song.title, song.artist);
                 return Ok(Some((song, "repeat".to_string())));
             }
-            
+
             drop(queue_manager);
             engine.stop().await;
             return Ok(None);

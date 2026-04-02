@@ -437,7 +437,7 @@ mod tests {
         assert_eq!(next.index, 2);
         assert_eq!(next.song.id, "c");
         assert_eq!(next.reason, "next");
-        
+
         // Ensure repeat mode remains active
         assert_eq!(qm.queue.repeat, RepeatMode::Track);
         // current_index should be advanced

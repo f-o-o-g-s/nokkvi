@@ -595,11 +595,11 @@ impl Nokkvi {
                     let mut tasks = Vec::new();
 
                     // Resolve the actual album ID using the expansion state and the passed index
-                    if let Some(entry) = self.albums_page.expansion.get_entry_at(
-                        _index,
-                        &self.library.albums,
-                        |a| &a.id,
-                    ) {
+                    if let Some(entry) =
+                        self.albums_page
+                            .expansion
+                            .get_entry_at(_index, &self.library.albums, |a| &a.id)
+                    {
                         let album_id = match entry {
                             crate::views::expansion::SlotListEntry::Parent(album) => {
                                 album.id.clone()
