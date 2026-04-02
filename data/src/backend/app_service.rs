@@ -759,11 +759,16 @@ impl AppService {
                 BatchItem::Playlist(playlist_id) => self.load_playlist_songs(&playlist_id).await,
             };
 
-            if let Ok(songs) = songs_result {
-                for song in songs {
-                    if seen_ids.insert(song.id.clone()) {
-                        resolved_songs.push(song);
+            match songs_result {
+                Ok(songs) => {
+                    for song in songs {
+                        if seen_ids.insert(song.id.clone()) {
+                            resolved_songs.push(song);
+                        }
                     }
+                }
+                Err(e) => {
+                    tracing::warn!("Batch item resolution failed, skipping: {e}");
                 }
             }
         }

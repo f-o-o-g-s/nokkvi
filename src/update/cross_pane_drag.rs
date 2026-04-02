@@ -88,44 +88,35 @@ impl Nokkvi {
             return Task::none();
         }
 
-        // Get viewport offset and total items for the active view
-        let (viewport_offset, total_items) = match panel.active_view {
+        // Get the active view's SlotListView and total items.
+        // Sync slot_count so slot_to_item_index uses the same layout as rendering.
+        let (slot_list, total_items) = match panel.active_view {
             views::BrowsingView::Albums => (
-                self.albums_page.common.slot_list.viewport_offset,
+                &mut self.albums_page.common.slot_list,
                 self.library.albums.len(),
             ),
             views::BrowsingView::Songs => (
-                self.songs_page.common.slot_list.viewport_offset,
+                &mut self.songs_page.common.slot_list,
                 self.library.songs.len(),
             ),
             views::BrowsingView::Artists => (
-                self.artists_page.common.slot_list.viewport_offset,
+                &mut self.artists_page.common.slot_list,
                 self.library.artists.len(),
             ),
             views::BrowsingView::Genres => (
-                self.genres_page.common.slot_list.viewport_offset,
+                &mut self.genres_page.common.slot_list,
                 self.library.genres.len(),
             ),
         };
+        slot_list.slot_count = config.slot_count;
+        let viewport_offset = slot_list.viewport_offset;
 
-        // Compute effective center (same logic as build_slot_list_slots in slot_list.rs)
-        let effective_center = if total_items < config.slot_count {
-            let block_start = (config.slot_count.saturating_sub(total_items)) / 2;
-            (block_start + viewport_offset).min(config.slot_count.saturating_sub(1))
-        } else {
-            let items_at_and_after = total_items.saturating_sub(viewport_offset);
-            let end_push = config.slot_count.saturating_sub(items_at_and_after);
-            config.center_slot.min(viewport_offset).max(end_push)
+        // Delegate to slot_to_item_index — single source of truth for the
+        // effective_center calculation, matching build_slot_list_slots exactly.
+        let pressed_index = match slot_list.slot_to_item_index(clicked_slot, total_items) {
+            Some(idx) => idx,
+            None => return Task::none(),
         };
-
-        // Convert slot index → item index
-        let offset_from_center = clicked_slot as i32 - effective_center as i32;
-        let target_index = viewport_offset as i32 + offset_from_center;
-        if target_index < 0 || target_index >= total_items as i32 {
-            return Task::none();
-        }
-
-        let pressed_index = target_index as usize;
         self.cross_pane_drag_pressed_item = Some(pressed_index);
 
         // Determine if the pressed item is within an active multi-selection.
@@ -158,8 +149,8 @@ impl Nokkvi {
         self.cross_pane_drag_selection_count = count;
 
         debug!(
-            " [DRAG] Press on browser pane: slot={}, item_index={}, selection_count={} (viewport={}, effective_center={})",
-            clicked_slot, target_index, count, viewport_offset, effective_center
+            " [DRAG] Press on browser pane: slot={}, item_index={}, selection_count={} (viewport={})",
+            clicked_slot, pressed_index, count, viewport_offset
         );
 
         Task::none()
