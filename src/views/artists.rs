@@ -804,7 +804,7 @@ impl ArtistsPage {
         // Check if this artist is the expanded one (gives it the group highlight)
         let is_expanded = self.expansion.is_expanded_parent(&artist.id);
         let style =
-            SlotListSlotStyle::for_slot(ctx.is_center, is_expanded, ctx.is_selected, ctx.opacity);
+            SlotListSlotStyle::for_slot(ctx.is_center, is_expanded, ctx.is_selected, ctx.has_multi_selection, ctx.opacity);
 
         let base_artwork_size = (ctx.row_height - 16.0).max(32.0);
         let artwork_size = base_artwork_size * ctx.scale_factor;
@@ -917,7 +917,9 @@ impl ArtistsPage {
             .width(Length::Fill);
 
         let slot_button = button(clickable)
-            .on_press(if ctx.is_center {
+            .on_press(if ctx.modifiers.control() || ctx.modifiers.shift() {
+                ArtistsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
+            } else if ctx.is_center {
                 ArtistsMessage::SlotListActivateCenter
             } else if stable_viewport {
                 ArtistsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)

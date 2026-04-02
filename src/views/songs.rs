@@ -474,7 +474,7 @@ impl SongsPage {
                     slot_list_text,
                 };
                 let style =
-                    SlotListSlotStyle::for_slot(ctx.is_center, false, ctx.is_selected, ctx.opacity);
+                    SlotListSlotStyle::for_slot(ctx.is_center, false, ctx.is_selected, ctx.has_multi_selection, ctx.opacity);
 
                 // Dynamic scaling based on row height AND scale factor
                 let base_artwork_size = (ctx.row_height - 16.0).max(32.0);
@@ -606,7 +606,9 @@ impl SongsPage {
                     .width(Length::Fill);
 
                 let slot_button = button(clickable)
-                    .on_press(if ctx.is_center {
+                    .on_press(if ctx.modifiers.control() || ctx.modifiers.shift() {
+                        SongsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
+                    } else if ctx.is_center {
                         SongsMessage::SlotListActivateCenter
                     } else if data.stable_viewport {
                         SongsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)

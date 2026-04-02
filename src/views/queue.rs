@@ -730,6 +730,7 @@ impl QueuePage {
                 ctx.is_center,
                 is_current,
                 ctx.is_selected,
+                ctx.has_multi_selection,
                 ctx.opacity,
             );
 
@@ -881,7 +882,9 @@ impl QueuePage {
 
             // Make it interactive
             let slot_button = button(clickable)
-                .on_press(if ctx.is_center {
+                .on_press(if ctx.modifiers.control() || ctx.modifiers.shift() {
+                    QueueMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
+                } else if ctx.is_center {
                     QueueMessage::SlotListActivateCenter
                 } else if data.stable_viewport {
                     QueueMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)

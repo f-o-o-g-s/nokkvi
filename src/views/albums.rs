@@ -638,7 +638,7 @@ impl AlbumsPage {
         // Check if this album is the expanded one
         let is_expanded = self.expansion.is_expanded_parent(&album.id);
         let style =
-            SlotListSlotStyle::for_slot(ctx.is_center, is_expanded, ctx.is_selected, ctx.opacity);
+            SlotListSlotStyle::for_slot(ctx.is_center, is_expanded, ctx.is_selected, ctx.has_multi_selection, ctx.opacity);
 
         let base_artwork_size = (ctx.row_height - 16.0).max(32.0);
         let artwork_size = base_artwork_size * ctx.scale_factor;
@@ -747,7 +747,9 @@ impl AlbumsPage {
             .width(Length::Fill);
 
         let slot_button = button(clickable)
-            .on_press(if ctx.is_center {
+            .on_press(if ctx.modifiers.control() || ctx.modifiers.shift() {
+                AlbumsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
+            } else if ctx.is_center {
                 AlbumsMessage::SlotListActivateCenter
             } else if stable_viewport {
                 AlbumsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)

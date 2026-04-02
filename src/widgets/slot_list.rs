@@ -21,6 +21,7 @@ pub(crate) struct SlotListRowContext {
     pub item_index: usize,
     pub is_center: bool,
     pub is_selected: bool,
+    pub has_multi_selection: bool,
     pub opacity: f32,
     /// Window scale factor
     pub scale_factor: f32,
@@ -47,6 +48,7 @@ impl SlotListSlotStyle {
         is_center: bool,
         is_highlighted: bool,
         is_selected: bool,
+        has_multi_selection: bool,
         opacity: f32,
     ) -> Self {
         if is_highlighted {
@@ -59,9 +61,8 @@ impl SlotListSlotStyle {
                 text_color: theme::bg0_hard(),
                 subtext_color: theme::bg0_hard(),
             }
-        } else if is_selected || is_center {
-            // Selected item or center slot highlighting
-            // decoupled from the now-playing highlight color.
+        } else if is_selected || (is_center && !has_multi_selection) {
+            // Selected item, or center slot when there is NO explicit multi-selection.
             Self {
                 bg_color: theme::selected_color(),
                 border_color: if is_center {
@@ -74,6 +75,7 @@ impl SlotListSlotStyle {
                 text_color: theme::bg0_hard(),
                 subtext_color: theme::bg0_hard(),
             }
+// Removed redundant else if is_center branch as it matches the default fallback exactly
         } else {
             // Regular slot with opacity fade (both background and text)
             Self {
@@ -502,6 +504,7 @@ fn build_slot_list_slots<'a, T, Message: 'a>(
                     item_index,
                     is_center,
                     is_selected,
+                    has_multi_selection: !sl.selected_indices.is_empty(),
                     opacity,
                     row_height,
                     scale_factor,
@@ -952,7 +955,7 @@ pub(crate) fn slot_list_favorite_icon<'a, Message: Clone + 'a>(
 fn empty_slot<'a, Message: 'a>(opacity: f32) -> Element<'a, Message> {
     use iced::Alignment;
 
-    let style = SlotListSlotStyle::for_slot(false, false, false, opacity);
+    let style = SlotListSlotStyle::for_slot(false, false, false, false, opacity);
 
     container(
         iced::widget::text("· · ·")
