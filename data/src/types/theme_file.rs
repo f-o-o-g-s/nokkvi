@@ -105,45 +105,45 @@ impl ThemePalette {
     pub fn light_default() -> Self {
         Self {
             background: BackgroundConfig {
-                hard: "#f9f5d7".to_string(),
+                hard: "#e7deb7".to_string(),
                 default: "#fbf1c7".to_string(),
-                soft: "#f2e5bc".to_string(),
-                level1: "#ebdbb2".to_string(),
-                level2: "#d5c4a1".to_string(),
-                level3: "#bdae93".to_string(),
-                level4: "#a89984".to_string(),
+                soft: "#f1e7bd".to_string(),
+                level1: "#e4dab1".to_string(),
+                level2: "#dad0a7".to_string(),
+                level3: "#d2c89f".to_string(),
+                level4: "#cac097".to_string(),
             },
             foreground: ForegroundConfig {
                 bright: "#282828".to_string(),
-                level1: "#3c3836".to_string(),
-                level2: "#504945".to_string(),
-                level3: "#665c54".to_string(),
-                level4: "#7c6f64".to_string(),
-                gray: "#928374".to_string(),
+                level1: "#282828".to_string(),
+                level2: "#282828".to_string(),
+                level3: "#282828".to_string(),
+                level4: "#282828".to_string(),
+                gray: "#cac097".to_string(),
             },
             accent: AccentConfig {
                 primary: "#458588".to_string(),
-                bright: "#83a598".to_string(),
-                border_dark: "#458588".to_string(),
-                border_light: "#d5c4a1".to_string(),
+                bright: "#49a8ac".to_string(),
+                border_dark: "#49a8ac".to_string(),
+                border_light: "#aebaa5".to_string(),
                 now_playing: String::new(),
-                selected: String::new(),
+                selected: "#49a8ac".to_string(),
             },
             danger: SemanticColorConfig {
                 base: "#cc241d".to_string(),
-                bright: "#fb4934".to_string(),
+                bright: "#ff0000".to_string(),
             },
             success: SemanticColorConfig {
                 base: "#98971a".to_string(),
-                bright: "#b8bb26".to_string(),
+                bright: "#7c7900".to_string(),
             },
             warning: SemanticColorConfig {
                 base: "#d79921".to_string(),
-                bright: "#fabd2f".to_string(),
+                bright: "#b67a00".to_string(),
             },
             star: SemanticColorConfig {
                 base: "#d79921".to_string(),
-                bright: "#fabd2f".to_string(),
+                bright: "#b67a00".to_string(),
             },
             visualizer: VisualizerColors::light_default(),
         }
@@ -177,13 +177,13 @@ pub struct BackgroundConfig {
 impl Default for BackgroundConfig {
     fn default() -> Self {
         Self {
-            hard: "#1d2021".to_string(),
+            hard: "#1e1e1e".to_string(),
             default: "#282828".to_string(),
-            soft: "#32302f".to_string(),
-            level1: "#3c3836".to_string(),
-            level2: "#504945".to_string(),
-            level3: "#665c54".to_string(),
-            level4: "#7c6f64".to_string(),
+            soft: "#2f2f2f".to_string(),
+            level1: "#3a3a3a".to_string(),
+            level2: "#414141".to_string(),
+            level3: "#484848".to_string(),
+            level4: "#4f4f4f".to_string(),
         }
     }
 }
@@ -210,11 +210,11 @@ impl Default for ForegroundConfig {
     fn default() -> Self {
         Self {
             bright: "#fbf1c7".to_string(),
-            level1: "#ebdbb2".to_string(),
-            level2: "#d5c4a1".to_string(),
-            level3: "#bdae93".to_string(),
-            level4: "#a89984".to_string(),
-            gray: "#928374".to_string(),
+            level1: "#fbf1c7".to_string(),
+            level2: "#fbf1c7".to_string(),
+            level3: "#fbf1c7".to_string(),
+            level4: "#fbf1c7".to_string(),
+            gray: "#4f4f4f".to_string(),
         }
     }
 }
@@ -243,11 +243,11 @@ impl Default for AccentConfig {
     fn default() -> Self {
         Self {
             primary: "#458588".to_string(),
-            bright: "#83a598".to_string(),
-            border_dark: "#458588".to_string(),
-            border_light: "#83a598".to_string(),
+            bright: "#49a8ac".to_string(),
+            border_dark: "#49a8ac".to_string(),
+            border_light: "#3b6c6e".to_string(),
             now_playing: String::new(),
-            selected: String::new(),
+            selected: "#49a8ac".to_string(),
         }
     }
 }
@@ -265,11 +265,10 @@ pub struct SemanticColorConfig {
 
 impl Default for SemanticColorConfig {
     fn default() -> Self {
-        // Generic fallback — callers should construct with explicit colors.
-        // This default matches Gruvbox danger for backwards compatibility.
+        // Generic fallback — matches Gruvbox danger
         Self {
             base: "#cc241d".to_string(),
-            bright: "#fb4934".to_string(),
+            bright: "#ff0000".to_string(),
         }
     }
 }
@@ -304,7 +303,7 @@ pub struct VisualizerColors {
 impl Default for VisualizerColors {
     fn default() -> Self {
         Self {
-            border_color: "#1d2021".to_string(),
+            border_color: "#1e1e1e".to_string(),
             border_opacity: 1.0,
             led_border_opacity: 1.0,
             bar_gradient_colors: vec![
@@ -331,7 +330,7 @@ impl VisualizerColors {
     /// Gruvbox light mode default colors.
     pub fn light_default() -> Self {
         Self {
-            border_color: "#f9f5d7".to_string(),
+            border_color: "#e7deb7".to_string(),
             border_opacity: 0.0,
             led_border_opacity: 0.0,
             bar_gradient_colors: vec![

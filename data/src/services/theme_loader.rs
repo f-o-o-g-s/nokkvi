@@ -28,20 +28,16 @@ const BUILTIN_THEMES: &[BuiltinTheme] = &[
         content: include_str!("../../../themes/adwaita.toml"),
     },
     BuiltinTheme {
-        stem: "gruvbox",
-        content: include_str!("../../../themes/gruvbox.toml"),
-    },
-    BuiltinTheme {
-        stem: "gruvbox_blue",
-        content: include_str!("../../../themes/gruvbox_blue.toml"),
-    },
-    BuiltinTheme {
-        stem: "gruvbox_red",
-        content: include_str!("../../../themes/gruvbox_red.toml"),
-    },
-    BuiltinTheme {
         stem: "bio_luminal_swamplab",
         content: include_str!("../../../themes/bio_luminal_swamplab.toml"),
+    },
+    BuiltinTheme {
+        stem: "catppuccin_frappe",
+        content: include_str!("../../../themes/catppuccin_frappe.toml"),
+    },
+    BuiltinTheme {
+        stem: "catppuccin_macchiato",
+        content: include_str!("../../../themes/catppuccin_macchiato.toml"),
     },
     BuiltinTheme {
         stem: "catppuccin",
@@ -64,12 +60,52 @@ const BUILTIN_THEMES: &[BuiltinTheme] = &[
         content: include_str!("../../../themes/everforest.toml"),
     },
     BuiltinTheme {
+        stem: "ferra",
+        content: include_str!("../../../themes/ferra.toml"),
+    },
+    BuiltinTheme {
+        stem: "gruvbox",
+        content: include_str!("../../../themes/gruvbox.toml"),
+    },
+    BuiltinTheme {
+        stem: "iced",
+        content: include_str!("../../../themes/iced.toml"),
+    },
+    BuiltinTheme {
+        stem: "kanagawa_dragon",
+        content: include_str!("../../../themes/kanagawa_dragon.toml"),
+    },
+    BuiltinTheme {
         stem: "kanagawa",
         content: include_str!("../../../themes/kanagawa.toml"),
     },
     BuiltinTheme {
+        stem: "moonfly",
+        content: include_str!("../../../themes/moonfly.toml"),
+    },
+    BuiltinTheme {
+        stem: "nightfly",
+        content: include_str!("../../../themes/nightfly.toml"),
+    },
+    BuiltinTheme {
         stem: "nord",
         content: include_str!("../../../themes/nord.toml"),
+    },
+    BuiltinTheme {
+        stem: "oxocarbon",
+        content: include_str!("../../../themes/oxocarbon.toml"),
+    },
+    BuiltinTheme {
+        stem: "solarized",
+        content: include_str!("../../../themes/solarized.toml"),
+    },
+    BuiltinTheme {
+        stem: "tokyo_night_storm",
+        content: include_str!("../../../themes/tokyo_night_storm.toml"),
+    },
+    BuiltinTheme {
+        stem: "tokyo_night",
+        content: include_str!("../../../themes/tokyo_night.toml"),
     },
 ];
 
@@ -369,7 +405,7 @@ mod tests {
     #[test]
     fn test_all_builtin_themes_parse() {
         let registry = builtin_registry();
-        assert_eq!(registry.len(), 12, "Expected 12 built-in themes");
+        assert_eq!(registry.len(), 21, "Expected 21 built-in themes");
 
         for builtin in BUILTIN_THEMES {
             let theme = ThemeFile::load(builtin.content).unwrap_or_else(|e| {
@@ -396,7 +432,7 @@ mod tests {
     #[test]
     fn test_seed_and_discover() {
         let (_tmp, themes) = seed_to_temp();
-        assert_eq!(themes.len(), 12);
+        assert_eq!(themes.len(), 21);
         assert!(themes.iter().all(|t| t.is_builtin));
 
         // Check a specific one
