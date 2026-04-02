@@ -89,7 +89,7 @@ impl SettingsTab {
     /// SVG icon path for the tab
     pub(crate) fn icon_path(&self) -> &'static str {
         match self {
-            SettingsTab::Visualizer => "assets/icons/sliders-horizontal.svg",
+            SettingsTab::Visualizer => "assets/icons/audio-lines.svg",
             SettingsTab::Theme => "assets/icons/palette.svg",
             SettingsTab::General => "assets/icons/cog.svg",
             SettingsTab::Interface => "assets/icons/panels-top-left.svg",

@@ -597,12 +597,16 @@ impl Nokkvi {
                     // Resolve the actual album ID using the expansion state and the passed index
                     if let Some(entry) = self.albums_page.expansion.get_entry_at(
                         _index,
-                        &*self.library.albums,
+                        &self.library.albums,
                         |a| &a.id,
                     ) {
                         let album_id = match entry {
-                            crate::views::expansion::SlotListEntry::Parent(album) => album.id.clone(),
-                            crate::views::expansion::SlotListEntry::Child(_song, parent_id) => parent_id.clone(),
+                            crate::views::expansion::SlotListEntry::Parent(album) => {
+                                album.id.clone()
+                            }
+                            crate::views::expansion::SlotListEntry::Child(_song, parent_id) => {
+                                parent_id.clone()
+                            }
                         };
                         tasks.push(Task::done(Message::Artwork(ArtworkMessage::LoadLarge(
                             album_id,

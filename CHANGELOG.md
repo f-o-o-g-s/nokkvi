@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## v0.2.2 — 2026-04-01
+
+### Features
+- **Theme Font Decoupling** — decoupled font configuration from themes and introduced iced framework parity color palettes.
+
+### Fixes
+- **Large Artwork Loading** — resolved explicit slot index resolution for large album art to ensure consistent loading from UI interactions.
+- **Theme Syncing** — synchronized internal ThemeFile defaults with the generated gruvbox parity theme and corrected the gruvbox visualizer gradient direction to cool-to-warm.
+
+### Improvements
+- **Theme Engine** — migrated the core ThemeFile struct defaults to Adwaita, and cleaned up legacy gruvbox color variants across the codebase.
+
+### Internal
+- Synced agent rules and workflows with current codebase.
+
+---
+
 ## v0.2.1 — 2026-04-01
 
 ### Fixes
