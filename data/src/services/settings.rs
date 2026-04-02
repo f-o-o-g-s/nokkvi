@@ -379,6 +379,14 @@ impl SettingsManager {
         self.save_redb_only()
     }
 
+    pub fn set_library_page_size(
+        &mut self,
+        size: crate::types::player_settings::LibraryPageSize,
+    ) -> Result<()> {
+        self.settings.player.library_page_size = size;
+        self.save()
+    }
+
     pub fn is_verbose_config(&self) -> bool {
         self.settings.player.verbose_config
     }
@@ -486,6 +494,7 @@ impl SettingsManager {
             auto_follow_playing: p.auto_follow_playing,
             enter_behavior: p.enter_behavior,
             local_music_path: p.local_music_path.clone(),
+            library_page_size: p.library_page_size,
             rounded_mode: p.rounded_mode,
             nav_layout: p.nav_layout,
             nav_display_mode: p.nav_display_mode,
@@ -575,6 +584,7 @@ fn apply_toml_settings_to_internal(
     p.eq_gains = ts.eq_gains;
     p.custom_eq_presets = ts.custom_eq_presets.clone();
     p.verbose_config = ts.verbose_config;
+    p.library_page_size = ts.library_page_size;
 }
 
 /// Convert `AllViewPreferences` into the internal `ViewPreferences` for redb storage.

@@ -69,6 +69,7 @@ impl SettingsPage {
                     enter_behavior: data.enter_behavior,
                     local_music_path: &data.local_music_path,
                     verbose_config: data.verbose_config,
+                    library_page_size: data.library_page_size,
                 };
                 items::build_general_items(&gdata)
             }

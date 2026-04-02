@@ -814,6 +814,7 @@ impl Nokkvi {
                     auto_follow_playing: self.auto_follow_playing,
                     enter_behavior: self.enter_behavior.as_label(),
                     local_music_path: self.local_music_path.clone(),
+                    library_page_size: self.library_page_size.as_label(),
                     rounded_mode: crate::theme::is_rounded_mode(),
                     nav_layout: if crate::theme::is_side_nav() {
                         "Side"

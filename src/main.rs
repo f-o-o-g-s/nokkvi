@@ -193,6 +193,8 @@ pub struct Nokkvi {
     pub enter_behavior: nokkvi_data::types::player_settings::EnterBehavior,
     /// Local filesystem prefix for opening files in the file manager (default: empty = not set)
     pub local_music_path: String,
+    /// Page size for library pagination chunks
+    pub library_page_size: nokkvi_data::types::player_settings::LibraryPageSize,
     /// Transient flag: suppress the next auto-center triggered by a track change.
     /// Set when a click-initiated play fires, cleared after consumption.
     pub suppress_next_auto_center: bool,
@@ -266,6 +268,7 @@ impl Default for Nokkvi {
             auto_follow_playing: true,
             enter_behavior: nokkvi_data::types::player_settings::EnterBehavior::default(),
             local_music_path: String::new(),
+            library_page_size: nokkvi_data::types::player_settings::LibraryPageSize::Default,
             suppress_next_auto_center: false,
             pending_center_on_playing: false,
             default_playlist_id: None,

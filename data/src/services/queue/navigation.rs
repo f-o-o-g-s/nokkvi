@@ -654,7 +654,10 @@ mod tests {
         let mut sorted_new = new_order.clone();
         sorted_initial.sort();
         sorted_new.sort();
-        assert_eq!(sorted_initial, sorted_new, "Order arrays should contain the same indices");
+        assert_eq!(
+            sorted_initial, sorted_new,
+            "Order arrays should contain the same indices"
+        );
     }
 
     #[test]
@@ -666,8 +669,10 @@ mod tests {
 
         // Single song + shuffle + repeat-playlist — should wrap and return the same song
         let next = qm.get_next_song();
-        assert!(next.is_some(), "Single-song repeat-playlist should still work");
+        assert!(
+            next.is_some(),
+            "Single-song repeat-playlist should still work"
+        );
         assert_eq!(next.unwrap().song.id, "a");
     }
 }
-

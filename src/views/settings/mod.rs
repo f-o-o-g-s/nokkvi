@@ -273,6 +273,7 @@ pub(crate) struct SettingsViewData {
     pub auto_follow_playing: bool,
     pub enter_behavior: &'static str,
     pub local_music_path: String,
+    pub library_page_size: &'static str,
     pub rounded_mode: bool,
     pub nav_layout: &'static str,
     pub nav_display_mode: &'static str,

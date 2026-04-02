@@ -745,6 +745,7 @@ mod tests {
             enter_behavior: "Play All",
             local_music_path: "",
             verbose_config: false,
+            library_page_size: "Default (500)",
         };
         let entries = build_general_items(&data);
 
@@ -753,11 +754,7 @@ mod tests {
             4,
             "Expected 4 sections: Application, Mouse Behavior, Account, Cache"
         );
-        assert_eq!(
-            count_items(&entries),
-            11,
-            "Expected 11 items (start_view, enter_behavior, local_music_path, verbose_config, stable_viewport, auto_follow_playing, server_url, username, logout, rebuild_artwork, rebuild_artist)"
-        );
+        assert_eq!(count_items(&entries), 12, "Expected 12 items");
     }
 
     #[test]

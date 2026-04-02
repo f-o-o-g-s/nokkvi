@@ -12,6 +12,7 @@ pub(crate) struct GeneralSettingsData<'a> {
     pub enter_behavior: &'a str,
     pub local_music_path: &'a str,
     pub verbose_config: bool,
+    pub library_page_size: &'a str,
 }
 
 /// Build settings entries for the General tab
@@ -53,6 +54,21 @@ pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEnt
             ),
             data.local_music_path,
             "",
+        ),
+        SettingItem::enum_val(
+            meta!(
+                "general.library_page_size",
+                "Library Page Size",
+                "Items fetched per API request · larger = fewer loads, more memory"
+            ),
+            data.library_page_size,
+            "Default (500)",
+            vec![
+                "Small (100)",
+                "Default (500)",
+                "Large (1,000)",
+                "Massive (5,000)",
+            ],
         ),
         SettingItem::bool_val(
             meta!(

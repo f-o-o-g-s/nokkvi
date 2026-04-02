@@ -901,6 +901,7 @@ impl Nokkvi {
         self.auto_follow_playing = settings.auto_follow_playing;
         self.enter_behavior = settings.enter_behavior;
         self.local_music_path = settings.local_music_path.clone();
+        self.library_page_size = settings.library_page_size;
         self.default_playlist_id = settings.default_playlist_id.clone();
         self.default_playlist_name = settings.default_playlist_name.clone();
         self.quick_add_to_playlist = settings.quick_add_to_playlist;

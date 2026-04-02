@@ -122,6 +122,7 @@ impl Nokkvi {
             auto_follow_playing: self.auto_follow_playing,
             enter_behavior: self.enter_behavior.as_label(),
             local_music_path: self.local_music_path.clone(),
+            library_page_size: self.library_page_size.as_label(),
             rounded_mode: crate::theme::is_rounded_mode(),
             nav_layout: if crate::theme::is_side_nav() {
                 "Side"
@@ -605,7 +606,19 @@ impl Nokkvi {
                     let path = path.trim().to_string();
                     self.local_music_path = path.clone();
                     self.shell_spawn("persist_local_music_path", move |shell| async move {
-                        shell.settings().set_local_music_path(path).await
+                        shell.settings().set_local_music_path(path).await?;
+                        Ok(())
+                    });
+                }
+                Task::none()
+            }
+            "general.library_page_size" => {
+                if let crate::views::settings::items::SettingValue::Enum { ref val, .. } = value {
+                    let size = nokkvi_data::types::player_settings::LibraryPageSize::from_label(val);
+                    self.library_page_size = size;
+                    self.shell_spawn("persist_library_page_size", move |shell| async move {
+                        shell.settings().set_library_page_size(size).await?;
+                        Ok(())
                     });
                 }
                 Task::none()

@@ -27,6 +27,7 @@ impl Nokkvi {
 
         // Mark buffer as loading to prevent duplicate fetches
         self.library.songs.set_loading(true);
+        let page_size = self.library_page_size.to_usize();
 
         self.shell_task(
             move |shell| async move {
@@ -41,7 +42,13 @@ impl Nokkvi {
                     view_str, sort_order, search_query
                 );
                 match songs_vm
-                    .load_raw_songs(Some(view_str), Some(sort_order), search_query)
+                    .load_raw_songs_page(
+                        Some(view_str),
+                        Some(sort_order),
+                        search_query,
+                        0,
+                        page_size,
+                    )
                     .await
                 {
                     Ok(songs) => {
@@ -61,8 +68,8 @@ impl Nokkvi {
 
     /// Load a subsequent page of songs (triggered by scroll near edge of loaded data)
     pub(crate) fn handle_songs_load_page(&mut self, offset: usize) -> Task<Message> {
-        use nokkvi_data::types::paged_buffer::PAGE_SIZE;
-        debug!(" LoadSongsPage: offset={}, page_size={}", offset, PAGE_SIZE);
+        let page_size = self.library_page_size.to_usize();
+        debug!(" LoadSongsPage: offset={}, page_size={}", offset, page_size);
 
         let view_str =
             views::SongsPage::sort_mode_to_api_string(self.songs_page.common.current_sort_mode);
@@ -90,7 +97,7 @@ impl Nokkvi {
                         Some(sort_order),
                         search_query,
                         offset,
-                        PAGE_SIZE,
+                        page_size,
                     )
                     .await
                 {
@@ -450,10 +457,11 @@ impl Nokkvi {
                 }
 
                 // Check if we need to fetch more pages while scrolling
+                let page_size = self.library_page_size.to_usize();
                 if let Some((offset, _)) = self
                     .library
                     .songs
-                    .needs_fetch(self.songs_page.common.slot_list.viewport_offset)
+                    .needs_fetch(self.songs_page.common.slot_list.viewport_offset, page_size)
                 {
                     tasks.push(self.handle_songs_load_page(offset));
                 }

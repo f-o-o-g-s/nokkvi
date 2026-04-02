@@ -15,11 +15,6 @@ use std::{
 /// Default page size for API requests (items per page).
 pub const PAGE_SIZE: usize = 500;
 
-/// How many items from the edge of loaded data before triggering a prefetch.
-/// With PAGE_SIZE=500, this means we start fetching the next page when the
-/// viewport is within 100 items of the boundary.
-const FETCH_THRESHOLD: usize = 100;
-
 /// A windowed buffer that loads data from the server in pages.
 ///
 /// Items are stored contiguously from index 0, with new pages appended
@@ -88,23 +83,26 @@ impl<T> PagedBuffer<T> {
     /// Check if the viewport position requires fetching more data.
     ///
     /// Returns `Some((start, end))` pagination params if the viewport
-    /// is within `FETCH_THRESHOLD` items of the edge of loaded data
+    /// is within the dynamic threshold of the edge of loaded data
     /// and there are more items on the server.
+    ///
+    /// The threshold is calculated dynamically based on `page_size`.
     ///
     /// Returns `None` if no fetch is needed (data already loaded,
     /// already fetching, or all data loaded).
-    pub fn needs_fetch(&self, viewport_offset: usize) -> Option<(usize, usize)> {
+    pub fn needs_fetch(&self, viewport_offset: usize, page_size: usize) -> Option<(usize, usize)> {
         // Don't fetch if already loading or fully loaded
         if self.loading || self.fully_loaded() {
             return None;
         }
 
         let loaded = self.items.len();
+        let fetch_threshold = (page_size / 5).clamp(20, 500);
 
-        // Trigger fetch when viewport is within FETCH_THRESHOLD of the edge
-        if loaded == 0 || viewport_offset + FETCH_THRESHOLD >= loaded {
+        // Trigger fetch when viewport is within fetch_threshold of the edge
+        if loaded == 0 || viewport_offset + fetch_threshold >= loaded {
             let start = loaded;
-            let end = (loaded + PAGE_SIZE).min(self.total_count);
+            let end = (loaded + page_size).min(self.total_count);
             if start < end {
                 return Some((start, end));
             }
@@ -240,8 +238,8 @@ mod tests {
         let items: Vec<u32> = (0..500).collect();
         buf.set_first_page(items, 2000);
 
-        // Viewport at 450 — within FETCH_THRESHOLD (100) of edge (500)
-        let result = buf.needs_fetch(450);
+        // Viewport at 450 — within threshold (implicit 100) of edge (500)
+        let result = buf.needs_fetch(450, PAGE_SIZE);
         assert!(result.is_some());
         let (start, end) = result.expect("should need fetch");
         assert_eq!(start, 500);
@@ -255,7 +253,7 @@ mod tests {
         buf.set_first_page(items, 2000);
 
         // Viewport at 100 — far from edge
-        assert!(buf.needs_fetch(100).is_none());
+        assert!(buf.needs_fetch(100, PAGE_SIZE).is_none());
     }
 
     #[test]
@@ -263,7 +261,7 @@ mod tests {
         let mut buf: PagedBuffer<u32> = PagedBuffer::new();
         buf.set_first_page(vec![1, 2, 3], 3);
 
-        assert!(buf.needs_fetch(2).is_none());
+        assert!(buf.needs_fetch(2, PAGE_SIZE).is_none());
     }
 
     #[test]
@@ -273,7 +271,7 @@ mod tests {
         buf.set_first_page(items, 2000);
         buf.set_loading(true);
 
-        assert!(buf.needs_fetch(499).is_none());
+        assert!(buf.needs_fetch(499, PAGE_SIZE).is_none());
     }
 
     #[test]
@@ -326,7 +324,7 @@ mod tests {
         let mut buf: PagedBuffer<u32> = PagedBuffer::new();
         buf.total_count = 1000; // Server knows there are items but none loaded
 
-        let result = buf.needs_fetch(0);
+        let result = buf.needs_fetch(0, PAGE_SIZE);
         assert!(result.is_some());
         let (start, end) = result.expect("should need fetch");
         assert_eq!(start, 0);

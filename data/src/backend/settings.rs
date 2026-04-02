@@ -221,6 +221,15 @@ impl SettingsService {
         sm.set_local_music_path(path)
     }
 
+    /// Set library page size and persist
+    pub async fn set_library_page_size(
+        &self,
+        size: crate::types::player_settings::LibraryPageSize,
+    ) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_library_page_size(size)
+    }
+
     pub async fn set_eq_enabled(&self, enabled: bool) -> anyhow::Result<()> {
         let mut sm = self.settings_manager.lock().await;
         sm.set_eq_enabled(enabled)

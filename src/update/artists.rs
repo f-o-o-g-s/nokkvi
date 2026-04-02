@@ -75,10 +75,10 @@ impl Nokkvi {
 
     /// Load a subsequent page of artists (triggered by scroll near edge of loaded data)
     pub(crate) fn handle_artists_load_page(&mut self, offset: usize) -> Task<Message> {
-        use nokkvi_data::types::paged_buffer::PAGE_SIZE;
+        let page_size = self.library_page_size.to_usize();
         debug!(
             " LoadArtistsPage: offset={}, page_size={}",
-            offset, PAGE_SIZE
+            offset, page_size
         );
 
         let view_str =
@@ -108,7 +108,7 @@ impl Nokkvi {
                         Some(sort_order),
                         search_query,
                         offset,
-                        PAGE_SIZE,
+                        page_size,
                     )
                     .await
                 {
@@ -674,11 +674,12 @@ impl Nokkvi {
         }
 
         // Check if we need to fetch more pages while scrolling
+        let page_size = self.library_page_size.to_usize();
         if !self.library.artists.is_empty()
-            && let Some((offset, _)) = self
-                .library
-                .artists
-                .needs_fetch(self.artists_page.common.slot_list.viewport_offset)
+            && let Some((offset, _)) = self.library.artists.needs_fetch(
+                self.artists_page.common.slot_list.viewport_offset,
+                page_size,
+            )
         {
             let page_task = self.handle_artists_load_page(offset);
             return Task::batch(vec![cmd.map(Message::Artists), page_task]);
