@@ -308,20 +308,20 @@ impl Default for VisualizerColors {
             border_opacity: 1.0,
             led_border_opacity: 1.0,
             bar_gradient_colors: vec![
-                "#fb4934".to_string(),
-                "#fe8019".to_string(),
-                "#fabd2f".to_string(),
-                "#b8bb26".to_string(),
-                "#8ec07c".to_string(),
-                "#83a598".to_string(),
+                "#83a598".to_string(), // Blue
+                "#8ec07c".to_string(), // Aqua
+                "#b8bb26".to_string(), // Green
+                "#fabd2f".to_string(), // Yellow
+                "#fe8019".to_string(), // Orange
+                "#fb4934".to_string(), // Red
             ],
             peak_gradient_colors: vec![
-                "#458588".to_string(),
-                "#458588".to_string(),
                 "#83a598".to_string(),
                 "#83a598".to_string(),
-                "#83a598".to_string(),
-                "#458588".to_string(),
+                "#b8bb26".to_string(),
+                "#b8bb26".to_string(),
+                "#fb4934".to_string(),
+                "#fb4934".to_string(),
             ],
         }
     }
@@ -335,20 +335,20 @@ impl VisualizerColors {
             border_opacity: 0.0,
             led_border_opacity: 0.0,
             bar_gradient_colors: vec![
-                "#fb4934".to_string(),
-                "#fe8019".to_string(),
-                "#fabd2f".to_string(),
-                "#b8bb26".to_string(),
-                "#8ec07c".to_string(),
                 "#83a598".to_string(),
+                "#8ec07c".to_string(),
+                "#b8bb26".to_string(),
+                "#fabd2f".to_string(),
+                "#fe8019".to_string(),
+                "#fb4934".to_string(),
             ],
             peak_gradient_colors: vec![
-                "#458588".to_string(),
-                "#458588".to_string(),
                 "#83a598".to_string(),
                 "#83a598".to_string(),
-                "#83a598".to_string(),
-                "#458588".to_string(),
+                "#b8bb26".to_string(),
+                "#b8bb26".to_string(),
+                "#fb4934".to_string(),
+                "#fb4934".to_string(),
             ],
         }
     }
