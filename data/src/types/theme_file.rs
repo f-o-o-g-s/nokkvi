@@ -19,9 +19,6 @@ use serde::{Deserialize, Serialize};
 pub struct ThemeFile {
     /// Human-readable theme name (shown in the UI picker)
     pub name: String,
-    /// Font family override. Empty = system default sans-serif.
-    #[serde(default)]
-    pub font_family: String,
     /// Dark mode palette + visualizer colors
     pub dark: ThemePalette,
     /// Light mode palette + visualizer colors
@@ -32,7 +29,6 @@ impl Default for ThemeFile {
     fn default() -> Self {
         Self {
             name: "Gruvbox".to_string(),
-            font_family: String::new(),
             dark: ThemePalette::default(),
             light: ThemePalette::light_default(),
         }
@@ -65,18 +61,14 @@ pub struct ThemePalette {
     pub foreground: ForegroundConfig,
     /// Primary accent colors
     pub accent: AccentConfig,
-    /// Red colors
-    pub red: NamedColorConfig,
-    /// Green colors
-    pub green: NamedColorConfig,
-    /// Yellow colors
-    pub yellow: NamedColorConfig,
-    /// Purple colors
-    pub purple: NamedColorConfig,
-    /// Aqua colors
-    pub aqua: NamedColorConfig,
-    /// Orange colors
-    pub orange: NamedColorConfig,
+    /// Danger/error state colors (e.g. error text, conflict badges)
+    pub danger: SemanticColorConfig,
+    /// Success state colors (e.g. enabled indicators, toast success)
+    pub success: SemanticColorConfig,
+    /// Warning state colors (e.g. capture prompts, toast warnings)
+    pub warning: SemanticColorConfig,
+    /// Star rating fill colors
+    pub star: SemanticColorConfig,
     /// Visualizer bar/peak/border colors
     pub visualizer: VisualizerColors,
 }
@@ -87,29 +79,21 @@ impl Default for ThemePalette {
             background: BackgroundConfig::default(),
             foreground: ForegroundConfig::default(),
             accent: AccentConfig::default(),
-            red: NamedColorConfig {
-                normal: "#cc241d".to_string(),
+            danger: SemanticColorConfig {
+                base: "#cc241d".to_string(),
                 bright: "#fb4934".to_string(),
             },
-            green: NamedColorConfig {
-                normal: "#98971a".to_string(),
+            success: SemanticColorConfig {
+                base: "#98971a".to_string(),
                 bright: "#b8bb26".to_string(),
             },
-            yellow: NamedColorConfig {
-                normal: "#d79921".to_string(),
+            warning: SemanticColorConfig {
+                base: "#d79921".to_string(),
                 bright: "#fabd2f".to_string(),
             },
-            purple: NamedColorConfig {
-                normal: "#b16286".to_string(),
-                bright: "#d3869b".to_string(),
-            },
-            aqua: NamedColorConfig {
-                normal: "#689d6a".to_string(),
-                bright: "#8ec07c".to_string(),
-            },
-            orange: NamedColorConfig {
-                normal: "#d65d0e".to_string(),
-                bright: "#fe8019".to_string(),
+            star: SemanticColorConfig {
+                base: "#d79921".to_string(),
+                bright: "#fabd2f".to_string(),
             },
             visualizer: VisualizerColors::default(),
         }
@@ -145,29 +129,21 @@ impl ThemePalette {
                 now_playing: String::new(),
                 selected: String::new(),
             },
-            red: NamedColorConfig {
-                normal: "#cc241d".to_string(),
+            danger: SemanticColorConfig {
+                base: "#cc241d".to_string(),
                 bright: "#fb4934".to_string(),
             },
-            green: NamedColorConfig {
-                normal: "#98971a".to_string(),
+            success: SemanticColorConfig {
+                base: "#98971a".to_string(),
                 bright: "#b8bb26".to_string(),
             },
-            yellow: NamedColorConfig {
-                normal: "#d79921".to_string(),
+            warning: SemanticColorConfig {
+                base: "#d79921".to_string(),
                 bright: "#fabd2f".to_string(),
             },
-            purple: NamedColorConfig {
-                normal: "#b16286".to_string(),
-                bright: "#d3869b".to_string(),
-            },
-            aqua: NamedColorConfig {
-                normal: "#689d6a".to_string(),
-                bright: "#8ec07c".to_string(),
-            },
-            orange: NamedColorConfig {
-                normal: "#d65d0e".to_string(),
-                bright: "#fe8019".to_string(),
+            star: SemanticColorConfig {
+                base: "#d79921".to_string(),
+                bright: "#fabd2f".to_string(),
             },
             visualizer: VisualizerColors::light_default(),
         }
@@ -276,24 +252,23 @@ impl Default for AccentConfig {
     }
 }
 
-/// A named color pair (normal + bright variant).
-/// Used for red, green, yellow, purple, aqua, orange.
+/// A semantic color pair (base + bright variant).
+/// Used for danger, success, warning, star.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
-pub struct NamedColorConfig {
-    /// Normal variant
-    pub normal: String,
+pub struct SemanticColorConfig {
+    /// Base variant
+    pub base: String,
     /// Bright variant
     pub bright: String,
 }
 
-// Per-color defaults (Gruvbox dark)
-impl Default for NamedColorConfig {
+impl Default for SemanticColorConfig {
     fn default() -> Self {
         // Generic fallback — callers should construct with explicit colors.
-        // This default matches Gruvbox red for backwards compatibility.
+        // This default matches Gruvbox danger for backwards compatibility.
         Self {
-            normal: "#cc241d".to_string(),
+            base: "#cc241d".to_string(),
             bright: "#fb4934".to_string(),
         }
     }
@@ -380,12 +355,11 @@ impl VisualizerColors {
 }
 
 // ============================================================================
-// Gruvbox named color defaults (used by ThemePalette::default)
+// Semantic color defaults (used by ThemePalette::default)
 // ============================================================================
 
-/// Helper to create a Gruvbox dark palette's named color defaults.
-/// The `Default` impl on `ThemePalette` uses this implicitly through
-/// each color group's `Default` impl, which produces Gruvbox dark values.
+/// The `Default` impl on `ThemePalette` uses Gruvbox dark values
+/// for all semantic colors.
 
 // ============================================================================
 // Tests
@@ -437,13 +411,12 @@ mod tests {
     }
 
     #[test]
-    fn test_named_color_default() {
+    fn test_semantic_color_default() {
         let palette = ThemePalette::default();
-        assert_eq!(palette.red.normal, "#cc241d");
-        assert_eq!(palette.green.normal, "#98971a");
-        assert_eq!(palette.yellow.normal, "#d79921");
-        assert_eq!(palette.purple.normal, "#b16286");
-        assert_eq!(palette.aqua.normal, "#689d6a");
-        assert_eq!(palette.orange.normal, "#d65d0e");
+        assert_eq!(palette.danger.base, "#cc241d");
+        assert_eq!(palette.success.base, "#98971a");
+        assert_eq!(palette.warning.base, "#d79921");
+        assert_eq!(palette.star.base, "#d79921");
+        assert_eq!(palette.star.bright, "#fabd2f");
     }
 }

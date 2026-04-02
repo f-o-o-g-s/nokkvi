@@ -1,0 +1,95 @@
+name = "Oxocarbon"
+
+[dark.background]
+default = "#232323"
+hard = "#1a1a1a"
+level1 = "#343434"
+level2 = "#3c3c3c"
+level3 = "#434343"
+level4 = "#494949"
+soft = "#2a2a2a"
+
+[dark.foreground]
+bright = "#d0d0d0"
+gray = "#494949"
+level1 = "#d0d0d0"
+level2 = "#d0d0d0"
+level3 = "#d0d0d0"
+level4 = "#d0d0d0"
+
+[dark.accent]
+border_dark = "#0094dd"
+border_light = "#1390cc"
+bright = "#0094dd"
+primary = "#00b4ff"
+selected = "#0094dd"
+
+[dark.danger]
+bright = "#d10000"
+base = "#f62d0f"
+
+[dark.success]
+bright = "#00a13b"
+base = "#00c15a"
+
+[dark.warning]
+bright = "#9f76dd"
+base = "#be95ff"
+
+[dark.star]
+bright = "#9f76dd"
+base = "#be95ff"
+
+[dark.visualizer]
+bar_gradient_colors = ["#00b4ff", "#00b4ff", "#1390cc", "#1390cc", "#0094dd", "#0094dd"]
+border_color = "#1a1a1a"
+border_opacity = 1.0
+led_border_opacity = 1.0
+peak_gradient_colors = ["#be95ff", "#be95ff", "#9878cc", "#9878cc", "#9f76dd", "#9f76dd"]
+
+[light.background]
+default = "#232323"
+hard = "#1a1a1a"
+level1 = "#343434"
+level2 = "#3c3c3c"
+level3 = "#434343"
+level4 = "#494949"
+soft = "#2a2a2a"
+
+[light.foreground]
+bright = "#d0d0d0"
+gray = "#494949"
+level1 = "#d0d0d0"
+level2 = "#d0d0d0"
+level3 = "#d0d0d0"
+level4 = "#d0d0d0"
+
+[light.accent]
+border_dark = "#0094dd"
+border_light = "#1390cc"
+bright = "#0094dd"
+primary = "#00b4ff"
+selected = "#0094dd"
+
+[light.danger]
+bright = "#d10000"
+base = "#f62d0f"
+
+[light.success]
+bright = "#00a13b"
+base = "#00c15a"
+
+[light.warning]
+bright = "#9f76dd"
+base = "#be95ff"
+
+[light.star]
+bright = "#9f76dd"
+base = "#be95ff"
+
+[light.visualizer]
+bar_gradient_colors = ["#00b4ff", "#00b4ff", "#1390cc", "#1390cc", "#0094dd", "#0094dd"]
+border_color = "#1a1a1a"
+border_opacity = 0.0
+led_border_opacity = 0.0
+peak_gradient_colors = ["#be95ff", "#be95ff", "#9878cc", "#9878cc", "#9f76dd", "#9f76dd"]

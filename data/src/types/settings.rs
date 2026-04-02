@@ -87,6 +87,9 @@ pub struct PlayerSettings {
     /// Whether volume sliders in the player bar are horizontal (default: false = vertical)
     #[serde(default)]
     pub horizontal_volume: bool,
+    /// Font family override (default: empty = system default sans-serif)
+    #[serde(default)]
+    pub font_family: String,
     /// Whether volume normalization (AGC) is enabled (default: false)
     #[serde(default)]
     pub volume_normalization: bool,
@@ -196,6 +199,7 @@ impl Default for PlayerSettings {
             default_playlist_name: String::new(),
             quick_add_to_playlist: false,
             horizontal_volume: false,
+            font_family: String::new(),
             volume_normalization: false,
             normalization_level: NormalizationLevel::default(),
             strip_show_title: true,

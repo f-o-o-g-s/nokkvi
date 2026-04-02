@@ -722,15 +722,15 @@ mod tests {
         // Verify section headers
         assert_eq!(
             count_headers(&entries),
-            7,
-            "Expected 7 theme sections: Select Theme, Font, Appearance, Background Colors, Foreground Colors, Accent Colors, Named Colors"
+            6,
+            "Expected 6 theme sections: Select Theme, Appearance, Background Colors, Foreground Colors, Accent Colors, Semantic Colors"
         );
 
         // Verify we have a reasonable number of items
         let item_count = count_items(&entries);
         assert!(
-            item_count >= 26,
-            "Expected at least 26 theme items (7 bg + 6 fg + 6 accent + 12 named + themes/font/rounded), got {item_count}"
+            item_count >= 23,
+            "Expected at least 23 theme items (7 bg + 6 fg + 6 accent + 8 semantic + themes/rounded), got {item_count}"
         );
     }
 
@@ -769,6 +769,7 @@ mod tests {
             track_info_display: "Off",
             slot_row_height: "Default",
             horizontal_volume: false,
+            font_family: "",
             strip_show_title: true,
             strip_show_artist: true,
             strip_show_album: true,
@@ -779,13 +780,13 @@ mod tests {
 
         assert_eq!(
             count_headers(&entries),
-            2,
-            "Expected 2 sections: Layout, Metadata Strip"
+            3,
+            "Expected 3 sections: Layout, Font, Metadata Strip"
         );
         assert_eq!(
             count_items(&entries),
-            7,
-            "Expected 7 items (nav_layout, nav_display_mode, track_info_display, slot_row_height, horizontal_volume, visible_fields, click_action)"
+            8,
+            "Expected 8 items (nav_layout, nav_display_mode, track_info_display, slot_row_height, horizontal_volume, font_family, visible_fields, click_action)"
         );
     }
 

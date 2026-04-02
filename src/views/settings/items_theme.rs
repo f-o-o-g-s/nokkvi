@@ -25,7 +25,6 @@ pub(crate) fn build_theme_items(
 
     const P: &str = "assets/icons/palette.svg";
     const PR: &str = "assets/icons/swatch-book.svg";
-    const F: &str = "assets/icons/type.svg";
     let mut e = Vec::new();
 
     let is_light = crate::theme::is_light_mode();
@@ -79,27 +78,6 @@ pub(crate) fn build_theme_items(
             "",
         ));
     }
-
-    // ── Font ─────────────────────────────────────────────────────────
-    e.push(SettingsEntry::Header {
-        label: "Font",
-        icon: F,
-    });
-    let font_display = if theme.font_family.is_empty() {
-        "(system default)"
-    } else {
-        &theme.font_family
-    };
-    e.push(SettingItem::text(
-        meta!(
-            "font_family",
-            "Font Family",
-            "Font",
-            "Enter to browse installed fonts"
-        ),
-        font_display,
-        "(system default)",
-    ));
 
     // ── Appearance ───────────────────────────────────────────────────
     const A: &str = "assets/icons/monitor.svg";
@@ -307,82 +285,70 @@ pub(crate) fn build_theme_items(
         ));
     }
 
-    // ── Named Colors ─────────────────────────────────────────────────
+    // ── Semantic Colors ──────────────────────────────────────────────
     e.push(SettingsEntry::Header {
-        label: "Named Colors",
+        label: "Semantic Colors",
         icon: P,
     });
     e.push(SettingItem::text(
-        meta!("__restore_named", "⟲ Restore Defaults", "Named Colors"),
+        meta!(
+            "__restore_semantic",
+            "⟲ Restore Defaults",
+            "Semantic Colors"
+        ),
         "Press Enter",
         "Press Enter",
     ));
-    for (color_name, section, normal, bright, def_normal, def_bright) in [
+    for (color_name, section, base, bright, def_base, def_bright) in [
         (
-            "Red",
-            "red",
-            &palette.red.normal,
-            &palette.red.bright,
-            &default_palette.red.normal,
-            &default_palette.red.bright,
+            "Danger",
+            "danger",
+            &palette.danger.base,
+            &palette.danger.bright,
+            &default_palette.danger.base,
+            &default_palette.danger.bright,
         ),
         (
-            "Green",
-            "green",
-            &palette.green.normal,
-            &palette.green.bright,
-            &default_palette.green.normal,
-            &default_palette.green.bright,
+            "Success",
+            "success",
+            &palette.success.base,
+            &palette.success.bright,
+            &default_palette.success.base,
+            &default_palette.success.bright,
         ),
         (
-            "Yellow",
-            "yellow",
-            &palette.yellow.normal,
-            &palette.yellow.bright,
-            &default_palette.yellow.normal,
-            &default_palette.yellow.bright,
+            "Warning",
+            "warning",
+            &palette.warning.base,
+            &palette.warning.bright,
+            &default_palette.warning.base,
+            &default_palette.warning.bright,
         ),
         (
-            "Purple",
-            "purple",
-            &palette.purple.normal,
-            &palette.purple.bright,
-            &default_palette.purple.normal,
-            &default_palette.purple.bright,
-        ),
-        (
-            "Aqua",
-            "aqua",
-            &palette.aqua.normal,
-            &palette.aqua.bright,
-            &default_palette.aqua.normal,
-            &default_palette.aqua.bright,
-        ),
-        (
-            "Orange",
-            "orange",
-            &palette.orange.normal,
-            &palette.orange.bright,
-            &default_palette.orange.normal,
-            &default_palette.orange.bright,
+            "Star",
+            "star",
+            &palette.star.base,
+            &palette.star.bright,
+            &default_palette.star.base,
+            &default_palette.star.bright,
         ),
     ] {
-        let key_normal = format!("{palette_prefix}.{section}.normal");
+        let key_base = format!("{palette_prefix}.{section}.base");
         let key_bright = format!("{palette_prefix}.{section}.bright");
         e.push(SettingItem::hex_color(
             meta!(
-                key_normal,
-                &format!("{color_name} Normal ({palette_label})"),
-                "Named Colors"
+                key_base,
+                &format!("{color_name} Base ({palette_label})"),
+                "Semantic Colors"
             ),
-            normal,
-            def_normal,
+            base,
+            def_base,
         ));
         e.push(SettingItem::hex_color(
             meta!(
                 key_bright,
                 &format!("{color_name} Bright ({palette_label})"),
-                "Named Colors"
+                "Semantic Colors"
             ),
             bright,
             def_bright,

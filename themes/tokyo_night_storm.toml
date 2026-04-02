@@ -1,0 +1,95 @@
+name = "Tokyo Night Storm"
+
+[dark.background]
+default = "#24283b"
+hard = "#1b1e2c"
+level1 = "#333957"
+level2 = "#394063"
+level3 = "#3f466e"
+level4 = "#444d79"
+soft = "#2a2f47"
+
+[dark.foreground]
+bright = "#b6c4fa"
+gray = "#444d79"
+level1 = "#b6c4fa"
+level2 = "#b6c4fa"
+level3 = "#d2e4ff"
+level4 = "#d2e4ff"
+
+[dark.accent]
+border_dark = "#00a3bd"
+border_light = "#289db4"
+bright = "#00a3bd"
+primary = "#2ac3de"
+selected = "#00a3bd"
+
+[dark.danger]
+bright = "#d45670"
+base = "#f7768e"
+
+[dark.success]
+bright = "#80ae4a"
+base = "#9ece6a"
+
+[dark.warning]
+bright = "#c68d30"
+base = "#e0af68"
+
+[dark.star]
+bright = "#c68d30"
+base = "#e0af68"
+
+[dark.visualizer]
+bar_gradient_colors = ["#2ac3de", "#2ac3de", "#289db4", "#289db4", "#00a3bd", "#00a3bd"]
+border_color = "#1b1e2c"
+border_opacity = 1.0
+led_border_opacity = 1.0
+peak_gradient_colors = ["#e0af68", "#e0af68", "#b48d59", "#b48d59", "#c68d30", "#c68d30"]
+
+[light.background]
+default = "#d5d6db"
+hard = "#c4c5c9"
+level1 = "#bcbfce"
+level2 = "#b2b5c8"
+level3 = "#a9adc3"
+level4 = "#a0a5be"
+soft = "#caccd5"
+
+[light.foreground]
+bright = "#393e5c"
+gray = "#a0a5be"
+level1 = "#393e5c"
+level2 = "#1e224a"
+level3 = "#1e224a"
+level4 = "#1e224a"
+
+[light.accent]
+border_dark = "#00899e"
+border_light = "#8ea0a8"
+bright = "#00899e"
+primary = "#166775"
+selected = "#00899e"
+
+[light.danger]
+bright = "#be5168"
+base = "#8c4351"
+
+[light.success]
+bright = "#5d7e36"
+base = "#485e30"
+
+[light.warning]
+bright = "#bc7500"
+base = "#8f5e15"
+
+[light.star]
+bright = "#bc7500"
+base = "#8f5e15"
+
+[light.visualizer]
+bar_gradient_colors = ["#166775", "#166775", "#8ea0a8", "#8ea0a8", "#00899e", "#00899e"]
+border_color = "#c4c5c9"
+border_opacity = 0.0
+led_border_opacity = 0.0
+peak_gradient_colors = ["#8f5e15", "#8f5e15", "#af9d92", "#af9d92", "#bc7500", "#bc7500"]

@@ -131,8 +131,12 @@ fn current_theme() -> ResolvedTheme {
 }
 
 // ============================================================================
-// Font Configuration
+// Font Configuration (independent of theme — stored in config.toml)
 // ============================================================================
+
+/// Font family name, stored separately from themes so theme switches
+/// don't change the user's font preference.
+static FONT_FAMILY: LazyLock<RwLock<String>> = LazyLock::new(|| RwLock::new(String::new()));
 
 /// Cached font storage to avoid leaking memory on every reload.
 /// Stores (font_name, resolved_font) pairs.
@@ -143,10 +147,7 @@ static FONT_CACHE: LazyLock<RwLock<(String, Font)>> =
 /// Default: System sans-serif font (works on all systems)
 #[inline]
 pub(crate) fn ui_font() -> Font {
-    let current_family = {
-        let guard = DUAL_THEME.read();
-        guard.font_family.clone()
-    };
+    let current_family = { FONT_FAMILY.read().clone() };
 
     // Fast path: check if cached font matches current config
     {
@@ -168,6 +169,17 @@ pub(crate) fn ui_font() -> Font {
     *cache = (current_family, new_font);
 
     new_font
+}
+
+/// Set the font family (called on startup and when changed in settings).
+pub(crate) fn set_font_family(family: String) {
+    let mut guard = FONT_FAMILY.write();
+    *guard = family;
+}
+
+/// Get the current font family name (for settings UI display).
+pub(crate) fn font_family() -> String {
+    FONT_FAMILY.read().clone()
 }
 
 // ============================================================================
@@ -597,28 +609,37 @@ pub(crate) fn selection_color() -> Color {
 }
 
 // ============================================================================
-// Named Palette Colors
+// Semantic Colors
 // ============================================================================
 
 #[inline]
-pub(crate) fn red() -> Color {
-    current_theme().red
+pub(crate) fn danger() -> Color {
+    current_theme().danger
 }
 #[inline]
-pub(crate) fn red_bright() -> Color {
-    current_theme().red_bright
+pub(crate) fn danger_bright() -> Color {
+    current_theme().danger_bright
 }
 #[inline]
-pub(crate) fn green() -> Color {
-    current_theme().green
+pub(crate) fn success() -> Color {
+    current_theme().success
 }
 #[inline]
-pub(crate) fn yellow() -> Color {
-    current_theme().yellow
+pub(crate) fn warning() -> Color {
+    current_theme().warning
 }
 #[inline]
-pub(crate) fn yellow_bright() -> Color {
-    current_theme().yellow_bright
+pub(crate) fn warning_bright() -> Color {
+    current_theme().warning_bright
+}
+#[inline]
+#[allow(dead_code)] // Base variant available for future use (bright variant used by star ratings)
+pub(crate) fn star() -> Color {
+    current_theme().star
+}
+#[inline]
+pub(crate) fn star_bright() -> Color {
+    current_theme().star_bright
 }
 
 // ============================================================================
@@ -831,12 +852,12 @@ pub(crate) fn iced_theme() -> Theme {
         background: bg0_hard(),
         text: fg0(),
         primary: accent_bright(),
-        success: green(),
-        warning: yellow(),
-        danger: red(),
+        success: success(),
+        warning: warning(),
+        danger: danger(),
     };
 
-    Theme::custom("Gruvbox".to_string(), palette)
+    Theme::custom("Nokkvi".to_string(), palette)
 }
 
 // ============================================================================
@@ -844,16 +865,16 @@ pub(crate) fn iced_theme() -> Theme {
 // ============================================================================
 
 /// Map toast notification level to a theme-appropriate text color.
-/// Uses the `normal` (non-bright) color variants because:
-/// - In Gruvbox dark, `normal` colors (#98971a, #d79921) are still vivid and readable
-/// - In Gruvbox light, `bright` colors (#b8bb26, #fabd2f) wash out against light backgrounds
-/// - Theme authors set `normal` variants to be readable against their chosen bg colors
+/// Uses the `base` (non-bright) color variants because:
+/// - In dark themes, `base` colors are still vivid and readable
+/// - In light themes, `bright` colors wash out against light backgrounds
+/// - Theme authors set `base` variants to be readable against their chosen bg colors
 pub(crate) fn toast_level_color(level: nokkvi_data::types::toast::ToastLevel) -> Color {
     use nokkvi_data::types::toast::ToastLevel;
     match level {
         ToastLevel::Info => fg1(),
-        ToastLevel::Success => green(),
-        ToastLevel::Warning => yellow(),
-        ToastLevel::Error => red(),
+        ToastLevel::Success => success(),
+        ToastLevel::Warning => warning(),
+        ToastLevel::Error => danger(),
     }
 }

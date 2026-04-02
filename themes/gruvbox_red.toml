@@ -1,5 +1,4 @@
 name = "Gruvbox Red"
-font_family = ""
 
 [dark.background]
 default = "#282828"
@@ -24,29 +23,21 @@ border_light = "#fb4934"
 bright = "#fb4934"
 primary = "#cc241d"
 
-[dark.red]
+[dark.danger]
 bright = "#fb4934"
-normal = "#cc241d"
+base = "#cc241d"
 
-[dark.green]
+[dark.success]
 bright = "#b8bb26"
-normal = "#98971a"
+base = "#98971a"
 
-[dark.yellow]
+[dark.warning]
 bright = "#fabd2f"
-normal = "#d79921"
+base = "#d79921"
 
-[dark.purple]
-bright = "#d3869b"
-normal = "#b16286"
-
-[dark.aqua]
-bright = "#8ec07c"
-normal = "#689d6a"
-
-[dark.orange]
-bright = "#fe8019"
-normal = "#d65d0e"
+[dark.star]
+bright = "#fabd2f"
+base = "#d79921"
 
 [dark.visualizer]
 bar_gradient_colors = ["#cc241d", "#cc241d", "#fb4934", "#d65d0e", "#fe8019", "#fe8019"]
@@ -78,29 +69,21 @@ border_light = "#fb4934"
 bright = "#fb4934"
 primary = "#cc241d"
 
-[light.red]
+[light.danger]
 bright = "#fb4934"
-normal = "#cc241d"
+base = "#cc241d"
 
-[light.green]
+[light.success]
 bright = "#b8bb26"
-normal = "#98971a"
+base = "#98971a"
 
-[light.yellow]
+[light.warning]
 bright = "#fabd2f"
-normal = "#d79921"
+base = "#d79921"
 
-[light.purple]
-bright = "#d3869b"
-normal = "#b16286"
-
-[light.aqua]
-bright = "#8ec07c"
-normal = "#689d6a"
-
-[light.orange]
-bright = "#fe8019"
-normal = "#d65d0e"
+[light.star]
+bright = "#fabd2f"
+base = "#d79921"
 
 [light.visualizer]
 bar_gradient_colors = ["#cc241d", "#cc241d", "#fb4934", "#d65d0e", "#fe8019", "#fe8019"]

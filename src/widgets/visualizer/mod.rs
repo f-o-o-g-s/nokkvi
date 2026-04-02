@@ -177,7 +177,7 @@ impl Visualizer {
             border_width,              // From config
             peak_enabled: true,
             peak_alpha: 1.0,
-            peak_color: crate::theme::yellow_bright(),
+            peak_color: Color::TRANSPARENT,
             // Lines mode config
             line_thickness, // From config
             // Dynamic bars enabled

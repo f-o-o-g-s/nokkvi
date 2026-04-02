@@ -63,12 +63,15 @@ pub(crate) struct ResolvedTheme {
     pub now_playing: Color,
     pub selected: Color,
 
-    // Named colors
-    pub red: Color,
-    pub red_bright: Color,
-    pub green: Color,
-    pub yellow: Color,
-    pub yellow_bright: Color,
+    // Semantic colors
+    pub danger: Color,
+    pub danger_bright: Color,
+    pub success: Color,
+    pub warning: Color,
+    pub warning_bright: Color,
+    #[allow(dead_code)] // Base variant available for future use
+    pub star: Color,
+    pub star_bright: Color,
 }
 
 impl Default for ResolvedTheme {
@@ -115,36 +118,43 @@ impl ResolvedTheme {
                 parse_hex_or_default(&palette.accent.selected, fallback_accent)
             },
 
-            red: parse_hex_or_default(
-                &palette.red.normal,
+            danger: parse_hex_or_default(
+                &palette.danger.base,
                 parse_hex_color("#cc241d").expect("valid hardcoded hex"),
             ),
-            red_bright: parse_hex_or_default(
-                &palette.red.bright,
+            danger_bright: parse_hex_or_default(
+                &palette.danger.bright,
                 parse_hex_color("#fb4934").expect("valid hardcoded hex"),
             ),
-            green: parse_hex_or_default(
-                &palette.green.normal,
+            success: parse_hex_or_default(
+                &palette.success.base,
                 parse_hex_color("#98971a").expect("valid hardcoded hex"),
             ),
-            yellow: parse_hex_or_default(
-                &palette.yellow.normal,
+            warning: parse_hex_or_default(
+                &palette.warning.base,
                 parse_hex_color("#d79921").expect("valid hardcoded hex"),
             ),
-            yellow_bright: parse_hex_or_default(
-                &palette.yellow.bright,
+            warning_bright: parse_hex_or_default(
+                &palette.warning.bright,
+                parse_hex_color("#fabd2f").expect("valid hardcoded hex"),
+            ),
+            star: parse_hex_or_default(
+                &palette.star.base,
+                parse_hex_color("#d79921").expect("valid hardcoded hex"),
+            ),
+            star_bright: parse_hex_or_default(
+                &palette.star.bright,
                 parse_hex_color("#fabd2f").expect("valid hardcoded hex"),
             ),
         }
     }
 }
 
-/// Resolved dual themes (dark + light) with font
+/// Resolved dual themes (dark + light)
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ResolvedDualTheme {
     pub dark: ResolvedTheme,
     pub light: ResolvedTheme,
-    pub font_family: String,
 }
 
 impl ResolvedDualTheme {
@@ -153,7 +163,6 @@ impl ResolvedDualTheme {
         Self {
             dark: ResolvedTheme::from_theme_palette(&theme.dark),
             light: ResolvedTheme::from_theme_palette(&theme.light),
-            font_family: theme.font_family.clone(),
         }
     }
 }
@@ -173,10 +182,7 @@ pub(crate) fn load_resolved_dual_theme() -> ResolvedDualTheme {
     let theme = load_active_theme_file();
     let resolved = ResolvedDualTheme::from_theme_file(&theme);
 
-    debug!(
-        " Loaded theme '{}': font=\"{}\"",
-        theme.name, resolved.font_family
-    );
+    debug!(" Loaded theme '{}'", theme.name);
 
     resolved
 }

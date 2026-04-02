@@ -304,6 +304,12 @@ impl SettingsService {
         sm.set_horizontal_volume(enabled)
     }
 
+    /// Set font family and persist
+    pub async fn set_font_family(&self, family: String) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_font_family(family)
+    }
+
     /// Set strip show title and persist
     pub async fn set_strip_show_title(&self, enabled: bool) -> anyhow::Result<()> {
         let mut sm = self.settings_manager.lock().await;

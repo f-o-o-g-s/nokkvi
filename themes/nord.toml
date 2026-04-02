@@ -1,110 +1,95 @@
 name = "Nord"
-font_family = ""
 
 [dark.background]
 default = "#2e3440"
-hard = "#242933"
-level1 = "#3b4252"
-level2 = "#434c5e"
-level3 = "#4c566a"
-level4 = "#5a657a"
-soft = "#2e3440"
+hard = "#232730"
+level1 = "#3d4658"
+level2 = "#444e63"
+level3 = "#4a556c"
+level4 = "#4f5c75"
+soft = "#343c4a"
 
 [dark.foreground]
 bright = "#eceff4"
-gray = "#4c566a"
+gray = "#4f5c75"
 level1 = "#eceff4"
-level2 = "#e5e9f0"
-level3 = "#d8dee9"
-level4 = "#c8ceda"
+level2 = "#eceff4"
+level3 = "#eceff4"
+level4 = "#eceff4"
 
 [dark.accent]
-border_dark = "#5e81ac"
-border_light = "#88c0d0"
-bright = "#88c0d0"
-primary = "#81a1c1"
+border_dark = "#5ea09f"
+border_light = "#749899"
+bright = "#5ea09f"
+primary = "#8fbcbb"
+selected = "#5ea09f"
 
-[dark.red]
-bright = "#bf616a"
-normal = "#bf616a"
+[dark.danger]
+bright = "#a63b4a"
+base = "#bf616a"
 
-[dark.green]
-bright = "#a3be8c"
-normal = "#a3be8c"
+[dark.success]
+bright = "#80a162"
+base = "#a3be8c"
 
-[dark.yellow]
-bright = "#ebcb8b"
-normal = "#ebcb8b"
+[dark.warning]
+bright = "#caab6c"
+base = "#ebcb8b"
 
-[dark.purple]
-bright = "#b48ead"
-normal = "#b48ead"
-
-[dark.aqua]
-bright = "#8fbcbb"
-normal = "#8fbcbb"
-
-[dark.orange]
-bright = "#d08770"
-normal = "#d08770"
+[dark.star]
+bright = "#caab6c"
+base = "#ebcb8b"
 
 [dark.visualizer]
-bar_gradient_colors = ["#5e81ac", "#5e81ac", "#81a1c1", "#81a1c1", "#88c0d0", "#8fbcbb"]
-border_color = "#242933"
+bar_gradient_colors = ["#8fbcbb", "#8fbcbb", "#749899", "#749899", "#5ea09f", "#5ea09f"]
+border_color = "#232730"
 border_opacity = 1.0
 led_border_opacity = 1.0
-peak_gradient_colors = ["#ebcb8b", "#ebcb8b", "#d08770", "#d08770", "#bf616a", "#bf616a"]
+peak_gradient_colors = ["#ebcb8b", "#ebcb8b", "#bda474", "#bda474", "#caab6c", "#caab6c"]
 
 [light.background]
-default = "#e5e9f0"
-hard = "#d8dee9"
-level1 = "#d8dee9"
-level2 = "#c8ceda"
-level3 = "#b8c4d4"
-level4 = "#a8b4c4"
-soft = "#eceff4"
+default = "#2e3440"
+hard = "#232730"
+level1 = "#3d4658"
+level2 = "#444e63"
+level3 = "#4a556c"
+level4 = "#4f5c75"
+soft = "#343c4a"
 
 [light.foreground]
-bright = "#2e3440"
-gray = "#7b88a1"
-level1 = "#2e3440"
-level2 = "#3b4252"
-level3 = "#434c5e"
-level4 = "#4c566a"
+bright = "#eceff4"
+gray = "#4f5c75"
+level1 = "#eceff4"
+level2 = "#eceff4"
+level3 = "#eceff4"
+level4 = "#eceff4"
 
 [light.accent]
-border_dark = "#5e81ac"
-border_light = "#d8dee9"
-bright = "#5e81ac"
-primary = "#5e81ac"
+border_dark = "#5ea09f"
+border_light = "#749899"
+bright = "#5ea09f"
+primary = "#8fbcbb"
+selected = "#5ea09f"
 
-[light.red]
-bright = "#bf616a"
-normal = "#a5414a"
+[light.danger]
+bright = "#a63b4a"
+base = "#bf616a"
 
-[light.green]
-bright = "#a3be8c"
-normal = "#7b9a5e"
+[light.success]
+bright = "#80a162"
+base = "#a3be8c"
 
-[light.yellow]
-bright = "#ebcb8b"
-normal = "#dbbb7b"
+[light.warning]
+bright = "#caab6c"
+base = "#ebcb8b"
 
-[light.purple]
-bright = "#b48ead"
-normal = "#a47e9d"
-
-[light.aqua]
-bright = "#8fbcbb"
-normal = "#8fbcbb"
-
-[light.orange]
-bright = "#d08770"
-normal = "#c06050"
+[light.star]
+bright = "#caab6c"
+base = "#ebcb8b"
 
 [light.visualizer]
-bar_gradient_colors = ["#5e81ac", "#5e81ac", "#81a1c1", "#81a1c1", "#88c0d0", "#8fbcbb"]
-border_color = "#eceff4"
+bar_gradient_colors = ["#8fbcbb", "#8fbcbb", "#749899", "#749899", "#5ea09f", "#5ea09f"]
+border_color = "#232730"
 border_opacity = 0.0
 led_border_opacity = 0.0
-peak_gradient_colors = ["#ebcb8b", "#ebcb8b", "#d08770", "#d08770", "#bf616a", "#bf616a"]
+peak_gradient_colors = ["#ebcb8b", "#ebcb8b", "#bda474", "#bda474", "#caab6c", "#caab6c"]

@@ -1,0 +1,95 @@
+name = "Iced Built-in"
+
+[dark.background]
+default = "#2b2d31"
+hard = "#202225"
+level1 = "#3c3f45"
+level2 = "#43474e"
+level3 = "#4a4e56"
+level4 = "#50545d"
+soft = "#323539"
+
+[dark.foreground]
+bright = "#e6e6e6"
+gray = "#50545d"
+level1 = "#e6e6e6"
+level2 = "#e6e6e6"
+level3 = "#e6e6e6"
+level4 = "#e6e6e6"
+
+[dark.accent]
+border_dark = "#6b75ff"
+border_light = "#4a54c3"
+bright = "#6b75ff"
+primary = "#5865f2"
+selected = "#6b75ff"
+
+[dark.danger]
+bright = "#ff4244"
+base = "#c3423f"
+
+[dark.success]
+bright = "#008a67"
+base = "#12664f"
+
+[dark.warning]
+bright = "#dda123"
+base = "#ffc14e"
+
+[dark.star]
+bright = "#dda123"
+base = "#ffc14e"
+
+[dark.visualizer]
+bar_gradient_colors = ["#5865f2", "#5865f2", "#4a54c3", "#4a54c3", "#6b75ff", "#6b75ff"]
+border_color = "#202225"
+border_opacity = 1.0
+led_border_opacity = 1.0
+peak_gradient_colors = ["#ffc14e", "#ffc14e", "#cd9c44", "#cd9c44", "#dda123", "#dda123"]
+
+[light.background]
+default = "#ffffff"
+hard = "#ebebeb"
+level1 = "#e8e8e8"
+level2 = "#dedede"
+level3 = "#d6d6d6"
+level4 = "#cecece"
+soft = "#f5f5f5"
+
+[light.foreground]
+bright = "#000000"
+gray = "#cecece"
+level1 = "#000000"
+level2 = "#000000"
+level3 = "#000000"
+level4 = "#000000"
+
+[light.accent]
+border_dark = "#6b75ff"
+border_light = "#b4b8f7"
+bright = "#6b75ff"
+primary = "#5865f2"
+selected = "#6b75ff"
+
+[light.danger]
+bright = "#ff4244"
+base = "#c3423f"
+
+[light.success]
+bright = "#008a67"
+base = "#12664f"
+
+[light.warning]
+bright = "#9e5d00"
+base = "#b77e33"
+
+[light.star]
+bright = "#9e5d00"
+base = "#b77e33"
+
+[light.visualizer]
+bar_gradient_colors = ["#5865f2", "#5865f2", "#b4b8f7", "#b4b8f7", "#6b75ff", "#6b75ff"]
+border_color = "#ebebeb"
+border_opacity = 0.0
+led_border_opacity = 0.0
+peak_gradient_colors = ["#b77e33", "#b77e33", "#d8c0ad", "#d8c0ad", "#9e5d00", "#9e5d00"]

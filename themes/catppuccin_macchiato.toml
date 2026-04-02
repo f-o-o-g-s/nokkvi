@@ -1,51 +1,51 @@
-name = "Catppuccin"
+name = "Catppuccin Macchiato"
 
 [dark.background]
-default = "#1e1e2e"
-hard = "#171723"
-level1 = "#2e2e49"
-level2 = "#353554"
-level3 = "#3b3a5f"
-level4 = "#414069"
-soft = "#252539"
+default = "#24273a"
+hard = "#1b1d2c"
+level1 = "#333756"
+level2 = "#3a3f62"
+level3 = "#3f456d"
+level4 = "#454b77"
+soft = "#2a2e46"
 
 [dark.foreground]
-bright = "#cdd6f4"
-gray = "#414069"
-level1 = "#cdd6f4"
-level2 = "#cdd6f4"
-level3 = "#cdd6f4"
-level4 = "#cdd6f4"
+bright = "#cad3f5"
+gray = "#454b77"
+level1 = "#cad3f5"
+level2 = "#cad3f5"
+level3 = "#cad3f5"
+level4 = "#cad3f5"
 
 [dark.accent]
-border_dark = "#6394e4"
-border_light = "#6e90c9"
-bright = "#6394e4"
-primary = "#89b4fa"
-selected = "#6394e4"
+border_dark = "#668dde"
+border_light = "#6f8bc5"
+bright = "#668dde"
+primary = "#8aadf4"
+selected = "#668dde"
 
 [dark.danger]
-bright = "#d16c89"
-base = "#f38ba8"
+bright = "#d36175"
+base = "#ed8796"
 
 [dark.success]
-bright = "#87c282"
-base = "#a6e3a1"
+bright = "#87ba76"
+base = "#a6da95"
 
 [dark.warning]
-bright = "#d8c190"
-base = "#f9e2af"
+bright = "#cdb480"
+base = "#eed49f"
 
 [dark.star]
-bright = "#d8c190"
-base = "#f9e2af"
+bright = "#cdb480"
+base = "#eed49f"
 
 [dark.visualizer]
-bar_gradient_colors = ["#89b4fa", "#89b4fa", "#6e90c9", "#6e90c9", "#6394e4", "#6394e4"]
-border_color = "#171723"
+bar_gradient_colors = ["#8aadf4", "#8aadf4", "#6f8bc5", "#6f8bc5", "#668dde", "#668dde"]
+border_color = "#1b1d2c"
 border_opacity = 1.0
 led_border_opacity = 1.0
-peak_gradient_colors = ["#f9e2af", "#f9e2af", "#c7b58d", "#c7b58d", "#d8c190", "#d8c190"]
+peak_gradient_colors = ["#eed49f", "#eed49f", "#bfaa82", "#bfaa82", "#cdb480", "#cdb480"]
 
 [light.background]
 default = "#eff1f5"

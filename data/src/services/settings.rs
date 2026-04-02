@@ -289,6 +289,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_font_family(&mut self, family: String) -> Result<()> {
+        self.settings.player.font_family = family;
+        self.save()
+    }
+
     pub fn set_volume_normalization(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.volume_normalization = enabled;
         self.save()
@@ -493,6 +498,7 @@ impl SettingsManager {
             default_playlist_name: p.default_playlist_name.clone(),
             quick_add_to_playlist: p.quick_add_to_playlist,
             horizontal_volume: p.horizontal_volume,
+            font_family: p.font_family.clone(),
             volume_normalization: p.volume_normalization,
             normalization_level: p.normalization_level,
             strip_show_title: p.strip_show_title,
@@ -549,6 +555,7 @@ fn apply_toml_settings_to_internal(
     p.slot_row_height = ts.slot_row_height;
     p.opacity_gradient = ts.opacity_gradient;
     p.horizontal_volume = ts.horizontal_volume;
+    p.font_family = ts.font_family.clone();
     p.strip_show_title = ts.strip_show_title;
     p.strip_show_artist = ts.strip_show_artist;
     p.strip_show_album = ts.strip_show_album;

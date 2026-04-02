@@ -1,0 +1,95 @@
+name = "Solarized"
+
+[dark.background]
+default = "#002b36"
+hard = "#002029"
+level1 = "#003f51"
+level2 = "#00485e"
+level3 = "#005068"
+level4 = "#005873"
+soft = "#003441"
+
+[dark.foreground]
+bright = "#9db4b7"
+gray = "#005873"
+level1 = "#9db4b7"
+level2 = "#b8d5d9"
+level3 = "#b8d5d9"
+level4 = "#f9fafa"
+
+[dark.accent]
+border_dark = "#00857c"
+border_light = "#1f827c"
+bright = "#00857c"
+primary = "#2aa198"
+selected = "#00857c"
+
+[dark.danger]
+bright = "#ff0d24"
+base = "#dc322f"
+
+[dark.success]
+bright = "#687b00"
+base = "#859900"
+
+[dark.warning]
+bright = "#9b6900"
+base = "#b58900"
+
+[dark.star]
+bright = "#9b6900"
+base = "#b58900"
+
+[dark.visualizer]
+bar_gradient_colors = ["#2aa198", "#2aa198", "#1f827c", "#1f827c", "#00857c", "#00857c"]
+border_color = "#002029"
+border_opacity = 1.0
+led_border_opacity = 1.0
+peak_gradient_colors = ["#b58900", "#b58900", "#906f20", "#906f20", "#9b6900", "#9b6900"]
+
+[light.background]
+default = "#fdf6e3"
+hard = "#e9e2d1"
+level1 = "#e6dfcc"
+level2 = "#dcd5c3"
+level3 = "#d4cdbb"
+level4 = "#ccc5b3"
+soft = "#f3ecd9"
+
+[light.foreground]
+bright = "#3a616e"
+gray = "#ccc5b3"
+level1 = "#004759"
+level2 = "#004759"
+level3 = "#004759"
+level4 = "#004759"
+
+[light.accent]
+border_dark = "#00857c"
+border_light = "#abc9bb"
+bright = "#00857c"
+primary = "#2aa198"
+selected = "#00857c"
+
+[light.danger]
+bright = "#ff0d24"
+base = "#dc322f"
+
+[light.success]
+bright = "#687b00"
+base = "#859900"
+
+[light.warning]
+bright = "#9b6900"
+base = "#b58900"
+
+[light.star]
+bright = "#9b6900"
+base = "#b58900"
+
+[light.visualizer]
+bar_gradient_colors = ["#2aa198", "#2aa198", "#abc9bb", "#abc9bb", "#00857c", "#00857c"]
+border_color = "#e9e2d1"
+border_opacity = 0.0
+led_border_opacity = 0.0
+peak_gradient_colors = ["#b58900", "#b58900", "#d6bf97", "#d6bf97", "#9b6900", "#9b6900"]

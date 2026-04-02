@@ -1,0 +1,97 @@
+name = "Adwaita"
+
+[dark.background]
+hard = "#1d1d20"
+default = "#222226"
+soft = "#2e2e32"
+level1 = "#2e2e32"
+level2 = "#36363a"
+level3 = "#3d3846"
+level4 = "#5e5c64"
+
+[dark.foreground]
+bright = "#ffffff"
+level1 = "#f6f5f4"
+level2 = "#deddda"
+level3 = "#c0bfbc"
+level4 = "#9a9996"
+gray = "#77767b"
+
+[dark.accent]
+primary = "#3584e4"
+bright = "#62a0ea"
+border_dark = "#000000"
+border_light = "#1c71d8"
+now_playing = "#3584e4"
+selected = "#3584e4"
+
+[dark.danger]
+base = "#e01b24"
+bright = "#f66151"
+
+[dark.success]
+base = "#33d17a"
+bright = "#8ff0a4"
+
+[dark.warning]
+base = "#f6d32d"
+bright = "#f9f06b"
+
+[dark.star]
+base = "#f6d32d"
+bright = "#f9f06b"
+
+[dark.visualizer]
+bar_gradient_colors = ["#3584e4", "#1c71d8", "#62a0ea"]
+border_color = "#1d1d20"
+border_opacity = 1.0
+led_border_opacity = 1.0
+peak_gradient_colors = ["#ed333b", "#ff7800", "#f6d32d"]
+
+[light.background]
+hard = "#ffffff"
+default = "#fafafb"
+soft = "#ebebed"
+level1 = "#ebebed"
+level2 = "#deddda"
+level3 = "#c0bfbc"
+level4 = "#9a9996"
+
+[light.foreground]
+bright = "#000000"
+level1 = "#241f31"
+level2 = "#3d3846"
+level3 = "#5e5c64"
+level4 = "#77767b"
+gray = "#9a9996"
+
+[light.accent]
+primary = "#3584e4"
+bright = "#62a0ea"
+border_dark = "#1a5fb4"
+border_light = "#99c1f1"
+now_playing = "#1c71d8"
+selected = "#3584e4"
+
+[light.danger]
+base = "#c01c28"
+bright = "#ed333b"
+
+[light.success]
+base = "#26a269"
+bright = "#33d17a"
+
+[light.warning]
+base = "#e5a50a"
+bright = "#f6d32d"
+
+[light.star]
+base = "#e5a50a"
+bright = "#f6d32d"
+
+[light.visualizer]
+bar_gradient_colors = ["#3584e4", "#1a5fb4", "#1c71d8"]
+border_color = "#ffffff"
+border_opacity = 0.0
+led_border_opacity = 0.0
+peak_gradient_colors = ["#e66100", "#f5c211", "#ff7800"]

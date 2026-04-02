@@ -155,7 +155,7 @@ pub(crate) fn eq_modal_overlay<'a>(
 
     let enable_btn_text = if eq_enabled { "Enabled" } else { "Disabled" };
     let enable_btn_color = if eq_enabled {
-        theme::green()
+        theme::success()
     } else {
         theme::fg4()
     };
@@ -318,7 +318,7 @@ pub(crate) fn eq_modal_overlay<'a>(
                 selection: theme::accent_bright(),
             });
 
-        let ok_button = text_btn("OK", theme::green(), EqModalMessage::SavePresetConfirm);
+        let ok_button = text_btn("OK", theme::success(), EqModalMessage::SavePresetConfirm);
 
         let cancel_button = text_btn("Cancel", theme::fg4(), EqModalMessage::CancelSave);
 

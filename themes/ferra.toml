@@ -1,0 +1,95 @@
+name = "Ferra"
+
+[dark.background]
+default = "#2b292d"
+hard = "#201f22"
+level1 = "#3d3a40"
+level2 = "#454249"
+level3 = "#4c4850"
+level4 = "#534f58"
+soft = "#333035"
+
+[dark.foreground]
+bright = "#fecdb2"
+gray = "#534f58"
+level1 = "#fecdb2"
+level2 = "#fecdb2"
+level3 = "#fecdb2"
+level4 = "#fecdb2"
+
+[dark.accent]
+border_dark = "#b0afcc"
+border_light = "#a8a8b4"
+bright = "#b0afcc"
+primary = "#d1d1e0"
+selected = "#b0afcc"
+
+[dark.danger]
+bright = "#c54354"
+base = "#e06b75"
+
+[dark.success]
+bright = "#929869"
+base = "#b1b695"
+
+[dark.warning]
+bright = "#d4b74c"
+base = "#f5d76e"
+
+[dark.star]
+bright = "#d4b74c"
+base = "#f5d76e"
+
+[dark.visualizer]
+bar_gradient_colors = ["#d1d1e0", "#d1d1e0", "#a8a8b4", "#a8a8b4", "#b0afcc", "#b0afcc"]
+border_color = "#201f22"
+border_opacity = 1.0
+led_border_opacity = 1.0
+peak_gradient_colors = ["#f5d76e", "#f5d76e", "#c5ad5b", "#c5ad5b", "#d4b74c", "#d4b74c"]
+
+[light.background]
+default = "#2b292d"
+hard = "#201f22"
+level1 = "#3d3a40"
+level2 = "#454249"
+level3 = "#4c4850"
+level4 = "#534f58"
+soft = "#333035"
+
+[light.foreground]
+bright = "#fecdb2"
+gray = "#534f58"
+level1 = "#fecdb2"
+level2 = "#fecdb2"
+level3 = "#fecdb2"
+level4 = "#fecdb2"
+
+[light.accent]
+border_dark = "#b0afcc"
+border_light = "#a8a8b4"
+bright = "#b0afcc"
+primary = "#d1d1e0"
+selected = "#b0afcc"
+
+[light.danger]
+bright = "#c54354"
+base = "#e06b75"
+
+[light.success]
+bright = "#929869"
+base = "#b1b695"
+
+[light.warning]
+bright = "#d4b74c"
+base = "#f5d76e"
+
+[light.star]
+bright = "#d4b74c"
+base = "#f5d76e"
+
+[light.visualizer]
+bar_gradient_colors = ["#d1d1e0", "#d1d1e0", "#a8a8b4", "#a8a8b4", "#b0afcc", "#b0afcc"]
+border_color = "#201f22"
+border_opacity = 0.0
+led_border_opacity = 0.0
+peak_gradient_colors = ["#f5d76e", "#f5d76e", "#c5ad5b", "#c5ad5b", "#d4b74c", "#d4b74c"]

@@ -41,6 +41,9 @@ pub struct TomlSettings {
     pub slot_row_height: SlotRowHeight,
     pub opacity_gradient: bool,
     pub horizontal_volume: bool,
+    /// Font family override. Empty = system default sans-serif.
+    #[serde(default)]
+    pub font_family: String,
 
     // -- Metadata Strip --
     pub strip_show_title: bool,
@@ -109,6 +112,7 @@ impl Default for TomlSettings {
             slot_row_height: SlotRowHeight::default(),
             opacity_gradient: true,
             horizontal_volume: false,
+            font_family: String::new(),
             strip_show_title: true,
             strip_show_artist: true,
             strip_show_album: true,
@@ -149,6 +153,7 @@ impl TomlSettings {
             slot_row_height: ps.slot_row_height,
             opacity_gradient: ps.opacity_gradient,
             horizontal_volume: ps.horizontal_volume,
+            font_family: ps.font_family.clone(),
             strip_show_title: ps.strip_show_title,
             strip_show_artist: ps.strip_show_artist,
             strip_show_album: ps.strip_show_album,

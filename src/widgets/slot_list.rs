@@ -785,7 +785,7 @@ pub(crate) fn slot_list_star_rating<'a, Message: Clone + 'a>(
     };
 
     let svg_opacity = if is_center { 1.0 } else { opacity };
-    let filled_color = theme::yellow_bright();
+    let filled_color = theme::star_bright();
     let empty_color = if is_center {
         theme::bg0_hard()
     } else {
@@ -872,9 +872,9 @@ pub(crate) fn slot_list_favorite_icon<'a, Message: Clone + 'a>(
     let svg_element: Element<'a, Message> = if is_starred {
         // Starred: layer filled icon + outline on top for contrast
         let fill_color = match icon_type {
-            "heart" => theme::red_bright(),
-            "star" => theme::yellow_bright(),
-            _ => theme::red_bright(),
+            "heart" => theme::danger_bright(),
+            "star" => theme::star_bright(),
+            _ => theme::danger_bright(),
         };
         outlined_svg_icon(filled_icon, empty_icon, icon_size, fill_color, svg_opacity)
     } else {

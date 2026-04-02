@@ -820,6 +820,7 @@ impl Nokkvi {
                     default_playlist_name: self.default_playlist_name.clone(),
                     quick_add_to_playlist: self.quick_add_to_playlist,
                     horizontal_volume: crate::theme::is_horizontal_volume(),
+                    font_family: crate::theme::font_family(),
                     strip_show_title: crate::theme::strip_show_title(),
                     strip_show_artist: crate::theme::strip_show_artist(),
                     strip_show_album: crate::theme::strip_show_album(),

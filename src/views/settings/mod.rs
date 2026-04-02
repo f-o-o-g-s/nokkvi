@@ -286,6 +286,7 @@ pub(crate) struct SettingsViewData {
     pub default_playlist_name: String,
     pub quick_add_to_playlist: bool,
     pub horizontal_volume: bool,
+    pub font_family: String,
     pub strip_show_title: bool,
     pub strip_show_artist: bool,
     pub strip_show_album: bool,

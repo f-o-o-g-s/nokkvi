@@ -1,5 +1,4 @@
 name = "Bio-Luminal Swamplab"
-font_family = ""
 
 [dark.background]
 default = "#070d0b"
@@ -24,29 +23,21 @@ border_light = "#5aff9d"
 bright = "#5aff9d"
 primary = "#2fdc8b"
 
-[dark.red]
+[dark.danger]
 bright = "#ff6f61"
-normal = "#cc4f44"
+base = "#cc4f44"
 
-[dark.green]
+[dark.success]
 bright = "#7dff7a"
-normal = "#3fdc66"
+base = "#3fdc66"
 
-[dark.yellow]
+[dark.warning]
 bright = "#f6ff4d"
-normal = "#c9d600"
+base = "#c9d600"
 
-[dark.purple]
-bright = "#b38cff"
-normal = "#7e5bd6"
-
-[dark.aqua]
-bright = "#4fffd2"
-normal = "#22bfa3"
-
-[dark.orange]
-bright = "#ffb347"
-normal = "#d9911e"
+[dark.star]
+bright = "#f6ff4d"
+base = "#c9d600"
 
 [dark.visualizer]
 bar_gradient_colors = ["#5aff9d", "#2fdc8b", "#22bfa3", "#7dff7a"]
@@ -78,29 +69,21 @@ border_light = "#5aff9d"
 bright = "#2fdc8b"
 primary = "#1aa36a"
 
-[light.red]
+[light.danger]
 bright = "#cc4f44"
-normal = "#a84037"
+base = "#a84037"
 
-[light.green]
+[light.success]
 bright = "#3fdc66"
-normal = "#2fb354"
+base = "#2fb354"
 
-[light.yellow]
+[light.warning]
 bright = "#c9d600"
-normal = "#a8b300"
+base = "#a8b300"
 
-[light.purple]
-bright = "#7e5bd6"
-normal = "#6545b8"
-
-[light.aqua]
-bright = "#22bfa3"
-normal = "#18947f"
-
-[light.orange]
-bright = "#d9911e"
-normal = "#b87616"
+[light.star]
+bright = "#c9d600"
+base = "#a8b300"
 
 [light.visualizer]
 bar_gradient_colors = ["#2fdc8b", "#1aa36a", "#18947f", "#3fdc66"]

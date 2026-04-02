@@ -1,0 +1,95 @@
+name = "Nightfly"
+
+[dark.background]
+default = "#011627"
+hard = "#01111d"
+level1 = "#002747"
+level2 = "#002e56"
+level3 = "#003562"
+level4 = "#003b6f"
+soft = "#001d34"
+
+[dark.foreground]
+bright = "#bdc1c6"
+gray = "#003b6f"
+level1 = "#bdc1c6"
+level2 = "#bdc1c6"
+level3 = "#bdc1c6"
+level4 = "#bdc1c6"
+
+[dark.accent]
+border_dark = "#658bdd"
+border_light = "#6688cd"
+bright = "#658bdd"
+primary = "#82aaff"
+selected = "#658bdd"
+
+[dark.danger]
+bright = "#d72a2f"
+base = "#fc514e"
+
+[dark.success]
+bright = "#83ad3c"
+base = "#a1cd5e"
+
+[dark.warning]
+bright = "#c3b16b"
+base = "#e3d18a"
+
+[dark.star]
+bright = "#c3b16b"
+base = "#e3d18a"
+
+[dark.visualizer]
+bar_gradient_colors = ["#82aaff", "#82aaff", "#6688cd", "#6688cd", "#658bdd", "#658bdd"]
+border_color = "#01111d"
+border_opacity = 1.0
+led_border_opacity = 1.0
+peak_gradient_colors = ["#e3d18a", "#e3d18a", "#b5a770", "#b5a770", "#c3b16b", "#c3b16b"]
+
+[light.background]
+default = "#011627"
+hard = "#01111d"
+level1 = "#002747"
+level2 = "#002e56"
+level3 = "#003562"
+level4 = "#003b6f"
+soft = "#001d34"
+
+[light.foreground]
+bright = "#bdc1c6"
+gray = "#003b6f"
+level1 = "#bdc1c6"
+level2 = "#bdc1c6"
+level3 = "#bdc1c6"
+level4 = "#bdc1c6"
+
+[light.accent]
+border_dark = "#658bdd"
+border_light = "#6688cd"
+bright = "#658bdd"
+primary = "#82aaff"
+selected = "#658bdd"
+
+[light.danger]
+bright = "#d72a2f"
+base = "#fc514e"
+
+[light.success]
+bright = "#83ad3c"
+base = "#a1cd5e"
+
+[light.warning]
+bright = "#c3b16b"
+base = "#e3d18a"
+
+[light.star]
+bright = "#c3b16b"
+base = "#e3d18a"
+
+[light.visualizer]
+bar_gradient_colors = ["#82aaff", "#82aaff", "#6688cd", "#6688cd", "#658bdd", "#658bdd"]
+border_color = "#01111d"
+border_opacity = 0.0
+led_border_opacity = 0.0
+peak_gradient_colors = ["#e3d18a", "#e3d18a", "#b5a770", "#b5a770", "#c3b16b", "#c3b16b"]

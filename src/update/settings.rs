@@ -139,6 +139,7 @@ impl Nokkvi {
             default_playlist_name: self.default_playlist_name.clone(),
             quick_add_to_playlist: self.quick_add_to_playlist,
             horizontal_volume: crate::theme::is_horizontal_volume(),
+            font_family: crate::theme::font_family(),
             strip_show_title: crate::theme::strip_show_title(),
             strip_show_artist: crate::theme::strip_show_artist(),
             strip_show_album: crate::theme::strip_show_album(),
@@ -230,15 +231,12 @@ impl Nokkvi {
             }
             crate::views::SettingsAction::WriteFontFamily(family) => {
                 self.sfx_engine.play(nokkvi_data::audio::SfxType::Backspace);
-                let value = crate::views::settings::items::SettingValue::Text(family);
-                // Font family lives in the theme file
-                if let Err(e) = crate::config_writer::update_theme_value("font_family", &value) {
-                    tracing::warn!(" [SETTINGS] Failed to write font family: {e}");
-                }
-                // Explicitly reload theme so the font change takes effect immediately.
-                // The config file watcher suppresses internal writes (LAST_INTERNAL_WRITE guard),
-                // so ThemeConfigReloaded won't fire — we must reload inline.
-                crate::theme::reload_theme();
+                // Font is now an app-level setting, not part of the theme
+                crate::theme::set_font_family(family.clone());
+                let family_owned = family;
+                self.shell_spawn("persist_font_family", move |shell| async move {
+                    shell.settings().set_font_family(family_owned).await
+                });
                 self.settings_page.config_dirty = true;
                 Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
             }
@@ -311,8 +309,7 @@ impl Nokkvi {
         self.sfx_engine.play(nokkvi_data::audio::SfxType::Backspace);
 
         // Route theme-file-relative keys to the theme file writer
-        let is_theme_key =
-            key.starts_with("dark.") || key.starts_with("light.") || key == "font_family";
+        let is_theme_key = key.starts_with("dark.") || key.starts_with("light.");
 
         if is_theme_key {
             if let Err(e) = crate::config_writer::update_theme_value(&key, &value) {

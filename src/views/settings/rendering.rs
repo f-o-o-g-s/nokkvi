@@ -682,8 +682,8 @@ fn render_value_display<'a>(
                 if let Some(conflict) = ctx.conflict_text {
                     // Conflict warning: inverted red badge (red bg, dark text)
                     let text_color = theme::bg0_hard();
-                    let badge_bg = theme::red_bright();
-                    let badge_border = theme::red();
+                    let badge_bg = theme::danger_bright();
+                    let badge_border = theme::danger();
                     let badge_size = font_size * 0.9;
                     return container(slot_list::slot_list_text(conflict, badge_size, text_color))
                         .padding(Padding::new(2.0).left(8.0).right(8.0))
@@ -704,8 +704,8 @@ fn render_value_display<'a>(
                     a: 0.7,
                     ..theme::bg0_hard()
                 };
-                let badge_bg = theme::yellow();
-                let badge_border = theme::yellow_bright();
+                let badge_bg = theme::warning();
+                let badge_border = theme::warning_bright();
                 let badge_size = font_size * 0.9;
                 let hint_size = font_size * 0.7;
                 return container(

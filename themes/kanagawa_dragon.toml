@@ -1,36 +1,36 @@
-name = "Kanagawa"
+name = "Kanagawa Dragon"
 
 [dark.background]
-default = "#1f1f28"
-hard = "#17171e"
-level1 = "#2f2f3e"
-level2 = "#373749"
-level3 = "#3d3d51"
-level4 = "#43435a"
-soft = "#262631"
+default = "#181616"
+hard = "#121111"
+level1 = "#2a2626"
+level2 = "#322d2d"
+level3 = "#383333"
+level4 = "#3f3a3a"
+soft = "#1f1d1d"
 
 [dark.foreground]
-bright = "#dcd7ba"
-gray = "#43435a"
-level1 = "#dcd7ba"
-level2 = "#dcd7ba"
-level3 = "#dcd7ba"
-level4 = "#dcd7ba"
+bright = "#c5c9c5"
+gray = "#3f3a3a"
+level1 = "#c5c9c5"
+level2 = "#c5c9c5"
+level3 = "#c5c9c5"
+level4 = "#c5c9c5"
 
 [dark.accent]
-border_dark = "#4e97b3"
-border_light = "#6690a2"
-bright = "#4e97b3"
-primary = "#7fb4ca"
-selected = "#4e97b3"
+border_dark = "#304c75"
+border_light = "#1e293b"
+bright = "#304c75"
+primary = "#223249"
+selected = "#304c75"
 
 [dark.danger]
-bright = "#ff3e4a"
-base = "#c34043"
+bright = "#ac504b"
+base = "#c4746e"
 
 [dark.success]
-bright = "#537843"
-base = "#76946a"
+bright = "#697e53"
+base = "#8a9a7b"
 
 [dark.warning]
 bright = "#dd7e00"
@@ -41,11 +41,11 @@ bright = "#dd7e00"
 base = "#ff9e3b"
 
 [dark.visualizer]
-bar_gradient_colors = ["#7fb4ca", "#7fb4ca", "#6690a2", "#6690a2", "#4e97b3", "#4e97b3"]
-border_color = "#17171e"
+bar_gradient_colors = ["#223249", "#223249", "#1e293b", "#1e293b", "#304c75", "#304c75"]
+border_color = "#121111"
 border_opacity = 1.0
 led_border_opacity = 1.0
-peak_gradient_colors = ["#ff9e3b", "#ff9e3b", "#cc7f34", "#cc7f34", "#dd7e00", "#dd7e00"]
+peak_gradient_colors = ["#ff9e3b", "#ff9e3b", "#cc7e30", "#cc7e30", "#dd7e00", "#dd7e00"]
 
 [light.background]
 default = "#f2ecbc"

@@ -1,5 +1,4 @@
 name = "Ember"
-font_family = ""
 
 [dark.background]
 default = "#181412"
@@ -24,29 +23,21 @@ border_light = "#292524"
 bright = "#f59e0b"
 primary = "#b45309"
 
-[dark.red]
+[dark.danger]
 bright = "#f87171"
-normal = "#dc2626"
+base = "#dc2626"
 
-[dark.green]
+[dark.success]
 bright = "#4ade80"
-normal = "#15803d"
+base = "#15803d"
 
-[dark.yellow]
+[dark.warning]
 bright = "#fde047"
-normal = "#ca8a04"
+base = "#ca8a04"
 
-[dark.purple]
-bright = "#c2410c"
-normal = "#7c2d12"
-
-[dark.aqua]
-bright = "#2dd4bf"
-normal = "#0f766e"
-
-[dark.orange]
-bright = "#fb923c"
-normal = "#ea580c"
+[dark.star]
+bright = "#fde047"
+base = "#ca8a04"
 
 [dark.visualizer]
 bar_gradient_colors = ["#92400e", "#b45309", "#d97706", "#f59e0b", "#fde047", "#4ade80"]
@@ -78,29 +69,21 @@ border_light = "#a8a29e"
 bright = "#b45309"
 primary = "#92400e"
 
-[light.red]
+[light.danger]
 bright = "#dc2626"
-normal = "#b91c1c"
+base = "#b91c1c"
 
-[light.green]
+[light.success]
 bright = "#22c55e"
-normal = "#166534"
+base = "#166534"
 
-[light.yellow]
+[light.warning]
 bright = "#ca8a04"
-normal = "#a16207"
+base = "#a16207"
 
-[light.purple]
-bright = "#b45309"
-normal = "#78350f"
-
-[light.aqua]
-bright = "#06b6d4"
-normal = "#155e75"
-
-[light.orange]
-bright = "#ea580c"
-normal = "#c2410c"
+[light.star]
+bright = "#ca8a04"
+base = "#a16207"
 
 [light.visualizer]
 bar_gradient_colors = ["#a16207", "#b45309", "#c2410c", "#ea580c", "#ca8a04", "#22c55e"]

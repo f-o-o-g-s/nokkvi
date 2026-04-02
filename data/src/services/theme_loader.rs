@@ -24,6 +24,10 @@ struct BuiltinTheme {
 /// All built-in themes. Order matters — first is the default.
 const BUILTIN_THEMES: &[BuiltinTheme] = &[
     BuiltinTheme {
+        stem: "adwaita",
+        content: include_str!("../../../themes/adwaita.toml"),
+    },
+    BuiltinTheme {
         stem: "gruvbox",
         content: include_str!("../../../themes/gruvbox.toml"),
     },
@@ -262,7 +266,7 @@ pub fn restore_builtin(name: &str) -> Result<()> {
 // ============================================================================
 
 /// Default theme name when none is configured.
-pub const DEFAULT_THEME: &str = "gruvbox";
+pub const DEFAULT_THEME: &str = "adwaita";
 
 /// Read the `theme = "..."` key from config.toml.
 ///
@@ -365,7 +369,7 @@ mod tests {
     #[test]
     fn test_all_builtin_themes_parse() {
         let registry = builtin_registry();
-        assert_eq!(registry.len(), 11, "Expected 11 built-in themes");
+        assert_eq!(registry.len(), 12, "Expected 12 built-in themes");
 
         for builtin in BUILTIN_THEMES {
             let theme = ThemeFile::load(builtin.content).unwrap_or_else(|e| {
@@ -392,7 +396,7 @@ mod tests {
     #[test]
     fn test_seed_and_discover() {
         let (_tmp, themes) = seed_to_temp();
-        assert_eq!(themes.len(), 11);
+        assert_eq!(themes.len(), 12);
         assert!(themes.iter().all(|t| t.is_builtin));
 
         // Check a specific one
@@ -440,6 +444,6 @@ mod tests {
 
     #[test]
     fn test_default_theme_name() {
-        assert_eq!(DEFAULT_THEME, "gruvbox");
+        assert_eq!(DEFAULT_THEME, "adwaita");
     }
 }

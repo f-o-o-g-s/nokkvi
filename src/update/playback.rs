@@ -975,6 +975,9 @@ impl Nokkvi {
         // Apply horizontal volume mode from persisted settings
         crate::theme::set_horizontal_volume(settings.horizontal_volume);
 
+        // Apply font family from persisted settings
+        crate::theme::set_font_family(settings.font_family.clone());
+
         // Apply strip field visibility from persisted settings
         crate::theme::set_strip_show_title(settings.strip_show_title);
         crate::theme::set_strip_show_artist(settings.strip_show_artist);

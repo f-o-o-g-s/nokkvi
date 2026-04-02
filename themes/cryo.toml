@@ -1,5 +1,4 @@
 name = "Cryo"
-font_family = ""
 
 [dark.background]
 default = "#0e141b"
@@ -24,29 +23,21 @@ border_light = "#3b6ea8"
 bright = "#5cc8ff"
 primary = "#3a86c6"
 
-[dark.red]
+[dark.danger]
 bright = "#ff6b81"
-normal = "#d6455d"
+base = "#d6455d"
 
-[dark.green]
+[dark.success]
 bright = "#6be6a6"
-normal = "#3fbf8e"
+base = "#3fbf8e"
 
-[dark.yellow]
+[dark.warning]
 bright = "#ffd866"
-normal = "#e6b84f"
+base = "#e6b84f"
 
-[dark.purple]
-bright = "#bfa6ff"
-normal = "#8a74d6"
-
-[dark.aqua]
-bright = "#4fd6c8"
-normal = "#2aa198"
-
-[dark.orange]
-bright = "#ff9f6e"
-normal = "#e07a3f"
+[dark.star]
+bright = "#ffd866"
+base = "#e6b84f"
 
 [dark.visualizer]
 bar_gradient_colors = ["#5cc8ff", "#3a86c6", "#3a86c6", "#2aa198", "#4fd6c8"]
@@ -78,29 +69,21 @@ border_light = "#5cc8ff"
 bright = "#3a86c6"
 primary = "#245a8d"
 
-[light.red]
+[light.danger]
 bright = "#d6455d"
-normal = "#b3364a"
+base = "#b3364a"
 
-[light.green]
+[light.success]
 bright = "#3fbf8e"
-normal = "#2e9d73"
+base = "#2e9d73"
 
-[light.yellow]
+[light.warning]
 bright = "#e6b84f"
-normal = "#c9a13f"
+base = "#c9a13f"
 
-[light.purple]
-bright = "#8a74d6"
-normal = "#6f5ab3"
-
-[light.aqua]
-bright = "#2aa198"
-normal = "#1f7f78"
-
-[light.orange]
-bright = "#e07a3f"
-normal = "#c76532"
+[light.star]
+bright = "#e6b84f"
+base = "#c9a13f"
 
 [light.visualizer]
 bar_gradient_colors = ["#3a86c6", "#245a8d", "#245a8d", "#1f7f78", "#2aa198"]

@@ -1,5 +1,4 @@
 name = "Everforest"
-font_family = ""
 
 [dark.background]
 default = "#2D353B"
@@ -26,29 +25,21 @@ now_playing = "#A7C080"
 primary = "#8DA101"
 selected = "#8CA16E"
 
-[dark.red]
+[dark.danger]
 bright = "#E67E80"
-normal = "#E67E80"
+base = "#E67E80"
 
-[dark.green]
+[dark.success]
 bright = "#A7C080"
-normal = "#A7C080"
+base = "#A7C080"
 
-[dark.yellow]
+[dark.warning]
 bright = "#DBBC7F"
-normal = "#DBBC7F"
+base = "#DBBC7F"
 
-[dark.purple]
-bright = "#D699B6"
-normal = "#D699B6"
-
-[dark.aqua]
-bright = "#83C092"
-normal = "#83C092"
-
-[dark.orange]
-bright = "#E69875"
-normal = "#E69875"
+[dark.star]
+bright = "#DBBC7F"
+base = "#DBBC7F"
 
 [dark.visualizer]
 bar_gradient_colors = ["#A7C080", "#A7C080", "#A7C080", "#83C092", "#7FBBB3", "#DBBC7F"]
@@ -82,29 +73,21 @@ now_playing = "#93B259"
 primary = "#8DA101"
 selected = "#A6B0A0"
 
-[light.red]
+[light.danger]
 bright = "#F85552"
-normal = "#F85552"
+base = "#F85552"
 
-[light.green]
+[light.success]
 bright = "#8DA101"
-normal = "#8DA101"
+base = "#8DA101"
 
-[light.yellow]
+[light.warning]
 bright = "#DFA000"
-normal = "#DFA000"
+base = "#DFA000"
 
-[light.purple]
-bright = "#DF69BA"
-normal = "#DF69BA"
-
-[light.aqua]
-bright = "#35A77C"
-normal = "#35A77C"
-
-[light.orange]
-bright = "#F57D26"
-normal = "#F57D26"
+[light.star]
+bright = "#DFA000"
+base = "#DFA000"
 
 [light.visualizer]
 bar_gradient_colors = ["#93B259", "#8DA101", "#8DA101", "#35A77C", "#35A77C", "#3A94C5"]

@@ -1,0 +1,95 @@
+name = "Tokyo Night"
+
+[dark.background]
+default = "#1a1b26"
+hard = "#14141d"
+level1 = "#292b3e"
+level2 = "#303249"
+level3 = "#363852"
+level4 = "#3c3e5b"
+soft = "#202230"
+
+[dark.foreground]
+bright = "#9aa5ce"
+gray = "#3c3e5b"
+level1 = "#9aa5ce"
+level2 = "#b6c4fa"
+level3 = "#b6c4fa"
+level4 = "#b6c4fa"
+
+[dark.accent]
+border_dark = "#00a3bd"
+border_light = "#249cb2"
+bright = "#00a3bd"
+primary = "#2ac3de"
+selected = "#00a3bd"
+
+[dark.danger]
+bright = "#d45670"
+base = "#f7768e"
+
+[dark.success]
+bright = "#80ae4a"
+base = "#9ece6a"
+
+[dark.warning]
+bright = "#c68d30"
+base = "#e0af68"
+
+[dark.star]
+bright = "#c68d30"
+base = "#e0af68"
+
+[dark.visualizer]
+bar_gradient_colors = ["#2ac3de", "#2ac3de", "#249cb2", "#249cb2", "#00a3bd", "#00a3bd"]
+border_color = "#14141d"
+border_opacity = 1.0
+led_border_opacity = 1.0
+peak_gradient_colors = ["#e0af68", "#e0af68", "#b38c55", "#b38c55", "#c68d30", "#c68d30"]
+
+[light.background]
+default = "#d5d6db"
+hard = "#c4c5c9"
+level1 = "#bcbfce"
+level2 = "#b2b5c8"
+level3 = "#a9adc3"
+level4 = "#a0a5be"
+soft = "#caccd5"
+
+[light.foreground]
+bright = "#393e5c"
+gray = "#a0a5be"
+level1 = "#393e5c"
+level2 = "#1e224a"
+level3 = "#1e224a"
+level4 = "#1e224a"
+
+[light.accent]
+border_dark = "#00899e"
+border_light = "#8ea0a8"
+bright = "#00899e"
+primary = "#166775"
+selected = "#00899e"
+
+[light.danger]
+bright = "#be5168"
+base = "#8c4351"
+
+[light.success]
+bright = "#5d7e36"
+base = "#485e30"
+
+[light.warning]
+bright = "#bc7500"
+base = "#8f5e15"
+
+[light.star]
+bright = "#bc7500"
+base = "#8f5e15"
+
+[light.visualizer]
+bar_gradient_colors = ["#166775", "#166775", "#8ea0a8", "#8ea0a8", "#00899e", "#00899e"]
+border_color = "#c4c5c9"
+border_opacity = 0.0
+led_border_opacity = 0.0
+peak_gradient_colors = ["#8f5e15", "#8f5e15", "#af9d92", "#af9d92", "#bc7500", "#bc7500"]

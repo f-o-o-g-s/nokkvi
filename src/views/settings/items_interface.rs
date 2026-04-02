@@ -9,6 +9,7 @@ pub(crate) struct InterfaceSettingsData<'a> {
     pub track_info_display: &'a str,
     pub slot_row_height: &'a str,
     pub horizontal_volume: bool,
+    pub font_family: &'a str,
     pub strip_show_title: bool,
     pub strip_show_artist: bool,
     pub strip_show_album: bool,
@@ -19,7 +20,14 @@ pub(crate) struct InterfaceSettingsData<'a> {
 /// Build settings entries for the Interface tab
 pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<SettingsEntry> {
     const LAYOUT: &str = "assets/icons/panels-top-left.svg";
+    const FONT: &str = "assets/icons/type.svg";
     const STRIP: &str = "assets/icons/radio-tower.svg";
+
+    let font_display = if data.font_family.is_empty() {
+        "(system default)"
+    } else {
+        data.font_family
+    };
 
     vec![
         // --- Layout ---
@@ -75,6 +83,21 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
             ),
             data.horizontal_volume,
             false,
+        ),
+        // --- Font ---
+        SettingsEntry::Header {
+            label: "Font",
+            icon: FONT,
+        },
+        SettingItem::text(
+            meta!(
+                "font_family",
+                "Font Family",
+                "Font",
+                "Enter to browse installed fonts"
+            ),
+            font_display,
+            "(system default)",
         ),
         // --- Metadata Strip ---
         SettingsEntry::Header {

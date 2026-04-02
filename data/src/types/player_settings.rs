@@ -427,6 +427,8 @@ pub struct PlayerSettings {
     pub quick_add_to_playlist: bool,
     /// Whether volume sliders in the player bar are horizontal (default: false = vertical)
     pub horizontal_volume: bool,
+    /// Font family override. Empty = system default sans-serif.
+    pub font_family: String,
     /// Whether volume normalization (AGC) is enabled
     pub volume_normalization: bool,
     /// Volume normalization target level (Quiet / Normal / Loud)

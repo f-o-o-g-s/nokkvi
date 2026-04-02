@@ -1,0 +1,95 @@
+name = "Moonfly"
+
+[dark.background]
+default = "#080808"
+hard = "#060606"
+level1 = "#171717"
+level2 = "#1e1e1e"
+level3 = "#242424"
+level4 = "#2a2a2a"
+soft = "#0e0e0e"
+
+[dark.foreground]
+bright = "#bdbdbd"
+gray = "#2a2a2a"
+level1 = "#bdbdbd"
+level2 = "#bdbdbd"
+level3 = "#bdbdbd"
+level4 = "#bdbdbd"
+
+[dark.accent]
+border_dark = "#6381dd"
+border_light = "#657fcc"
+bright = "#6381dd"
+primary = "#80a0ff"
+selected = "#6381dd"
+
+[dark.danger]
+bright = "#da2e36"
+base = "#ff5454"
+
+[dark.success]
+bright = "#6ea83e"
+base = "#8cc85f"
+
+[dark.warning]
+bright = "#c2a76b"
+base = "#e3c78a"
+
+[dark.star]
+bright = "#c2a76b"
+base = "#e3c78a"
+
+[dark.visualizer]
+bar_gradient_colors = ["#80a0ff", "#80a0ff", "#657fcc", "#657fcc", "#6381dd", "#6381dd"]
+border_color = "#060606"
+border_opacity = 1.0
+led_border_opacity = 1.0
+peak_gradient_colors = ["#e3c78a", "#e3c78a", "#b59e6d", "#b59e6d", "#c2a76b", "#c2a76b"]
+
+[light.background]
+default = "#080808"
+hard = "#060606"
+level1 = "#171717"
+level2 = "#1e1e1e"
+level3 = "#242424"
+level4 = "#2a2a2a"
+soft = "#0e0e0e"
+
+[light.foreground]
+bright = "#bdbdbd"
+gray = "#2a2a2a"
+level1 = "#bdbdbd"
+level2 = "#bdbdbd"
+level3 = "#bdbdbd"
+level4 = "#bdbdbd"
+
+[light.accent]
+border_dark = "#6381dd"
+border_light = "#657fcc"
+bright = "#6381dd"
+primary = "#80a0ff"
+selected = "#6381dd"
+
+[light.danger]
+bright = "#da2e36"
+base = "#ff5454"
+
+[light.success]
+bright = "#6ea83e"
+base = "#8cc85f"
+
+[light.warning]
+bright = "#c2a76b"
+base = "#e3c78a"
+
+[light.star]
+bright = "#c2a76b"
+base = "#e3c78a"
+
+[light.visualizer]
+bar_gradient_colors = ["#80a0ff", "#80a0ff", "#657fcc", "#657fcc", "#6381dd", "#6381dd"]
+border_color = "#060606"
+border_opacity = 0.0
+led_border_opacity = 0.0
+peak_gradient_colors = ["#e3c78a", "#e3c78a", "#b59e6d", "#b59e6d", "#c2a76b", "#c2a76b"]

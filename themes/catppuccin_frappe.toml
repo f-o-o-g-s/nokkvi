@@ -1,51 +1,51 @@
-name = "Catppuccin"
+name = "Catppuccin Frappé"
 
 [dark.background]
-default = "#1e1e2e"
-hard = "#171723"
-level1 = "#2e2e49"
-level2 = "#353554"
-level3 = "#3b3a5f"
-level4 = "#414069"
-soft = "#252539"
+default = "#303446"
+hard = "#242735"
+level1 = "#404661"
+level2 = "#474d6c"
+level3 = "#4d5476"
+level4 = "#535b81"
+soft = "#373b51"
 
 [dark.foreground]
-bright = "#cdd6f4"
-gray = "#414069"
-level1 = "#cdd6f4"
-level2 = "#cdd6f4"
-level3 = "#cdd6f4"
-level4 = "#cdd6f4"
+bright = "#c6d0f5"
+gray = "#535b81"
+level1 = "#c6d0f5"
+level2 = "#c6d0f5"
+level3 = "#e4f0ff"
+level4 = "#e4f0ff"
 
 [dark.accent]
-border_dark = "#6394e4"
-border_light = "#6e90c9"
-bright = "#6394e4"
-primary = "#89b4fa"
-selected = "#6394e4"
+border_dark = "#688ad8"
+border_light = "#728ac2"
+bright = "#688ad8"
+primary = "#8caaee"
+selected = "#688ad8"
 
 [dark.danger]
-bright = "#d16c89"
-base = "#f38ba8"
+bright = "#cd5c61"
+base = "#e78284"
 
 [dark.success]
-bright = "#87c282"
-base = "#a6e3a1"
+bright = "#87b16a"
+base = "#a6d189"
 
 [dark.warning]
-bright = "#d8c190"
-base = "#f9e2af"
+bright = "#c4a871"
+base = "#e5c890"
 
 [dark.star]
-bright = "#d8c190"
-base = "#f9e2af"
+bright = "#c4a871"
+base = "#e5c890"
 
 [dark.visualizer]
-bar_gradient_colors = ["#89b4fa", "#89b4fa", "#6e90c9", "#6e90c9", "#6394e4", "#6394e4"]
-border_color = "#171723"
+bar_gradient_colors = ["#8caaee", "#8caaee", "#728ac2", "#728ac2", "#688ad8", "#688ad8"]
+border_color = "#242735"
 border_opacity = 1.0
 led_border_opacity = 1.0
-peak_gradient_colors = ["#f9e2af", "#f9e2af", "#c7b58d", "#c7b58d", "#d8c190", "#d8c190"]
+peak_gradient_colors = ["#e5c890", "#e5c890", "#b8a279", "#b8a279", "#c4a871", "#c4a871"]
 
 [light.background]
 default = "#eff1f5"

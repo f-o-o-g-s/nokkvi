@@ -259,7 +259,7 @@ impl LoginPage {
             ]
             .spacing(5),
             if let Some(err) = &self.error_message {
-                text(err).color(theme::red_bright()).size(14)
+                text(err).color(theme::danger_bright()).size(14)
             } else {
                 text("")
             },
