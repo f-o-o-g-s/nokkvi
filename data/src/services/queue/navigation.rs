@@ -196,8 +196,20 @@ impl QueueManager {
             return None;
         }
 
+        // Bypass RepeatTrack for manual skip
+        let was_repeat_track = self.queue.repeat == RepeatMode::Track;
+        if was_repeat_track {
+            self.queue.repeat = RepeatMode::None;
+        }
+
         // Ensure queued is set
-        self.peek_next_song()?;
+        let peek_res = self.peek_next_song();
+
+        if was_repeat_track {
+            self.queue.repeat = RepeatMode::Track;
+        }
+
+        peek_res?;
 
         // Transition (consumes queued, updates indices)
         let transition = self.transition_to_queued()?;
@@ -205,9 +217,7 @@ impl QueueManager {
         Some(NextSongResult {
             song: transition.song,
             index: transition.new_index,
-            reason: if self.queue.repeat == RepeatMode::Track {
-                "repeat"
-            } else if self.queue.shuffle {
+            reason: if self.queue.shuffle {
                 "shuffle"
             } else {
                 "next"
@@ -413,11 +423,8 @@ mod tests {
     }
 
     #[test]
-    fn get_next_repeat_track_returns_none() {
-        // RepeatMode::Track is handled by the engine via peek_next_song (which
-        // returns the current song for decoder preparation). get_next_song
-        // returns None because peek doesn't set `queued` — there's no order
-        // array transition to perform for repeat track.
+    fn get_next_repeat_track_bypasses_repeat() {
+        // Manual skip (get_next_song) should bypass Repeat Track and advance to the next song.
         let songs = vec![
             make_test_song("a"),
             make_test_song("b"),
@@ -426,10 +433,15 @@ mod tests {
         let mut qm = make_test_manager(songs, Some(1));
         qm.set_repeat(RepeatMode::Track).unwrap();
 
-        let next = qm.get_next_song();
-        assert!(next.is_none());
-        // current_index unchanged — engine replays via peek
-        assert_eq!(qm.queue.current_index, Some(1));
+        let next = qm.get_next_song().unwrap();
+        assert_eq!(next.index, 2);
+        assert_eq!(next.song.id, "c");
+        assert_eq!(next.reason, "next");
+        
+        // Ensure repeat mode remains active
+        assert_eq!(qm.queue.repeat, RepeatMode::Track);
+        // current_index should be advanced
+        assert_eq!(qm.queue.current_index, Some(2));
     }
 
     #[test]

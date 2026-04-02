@@ -142,8 +142,48 @@ impl QueueNavigator {
             true
         };
 
-        // ── Single queue transition path for ALL cases ──
+        // ── Single queue transition path ──
         let mut queue_manager = self.queue_manager.lock().await;
+
+        let is_repeat_track = queue_manager.get_queue().repeat == crate::types::queue::RepeatMode::Track;
+
+        if is_repeat_track {
+            // Clear queued just in case
+            queue_manager.clear_queued();
+
+            let idx = queue_manager.get_queue().current_index;
+            let song = if let Some(idx) = idx {
+                if let Some(id) = queue_manager.get_queue().song_ids.get(idx) {
+                    queue_manager.get_song(id).cloned()
+                } else { None }
+            } else { None };
+
+            if let Some(song) = song {
+                // Do NOT consume the track since we are repeating it
+                queue_manager.add_to_history(song.clone());
+                
+                // For path 3: need to load and play the track
+                if needs_load {
+                    let stream_url = Self::build_stream_url(&song.id, server_url, subsonic_credential);
+                    drop(queue_manager);
+                    engine.load_track(&stream_url).await;
+                    engine.play().await?;
+                } else {
+                    // For paths 1 & 2: engine already has the track, just ensure playing
+                    drop(queue_manager);
+                    if !engine.immediate_playing() {
+                        engine.play().await?;
+                    }
+                }
+
+                debug!("▶️ Now Playing: {} - {} (repeat)", song.title, song.artist);
+                return Ok(Some((song, "repeat".to_string())));
+            }
+            
+            drop(queue_manager);
+            engine.stop().await;
+            return Ok(None);
+        }
 
         // For path 3, ensure queued is set
         if needs_load && queue_manager.peek_next_song().is_none() {
