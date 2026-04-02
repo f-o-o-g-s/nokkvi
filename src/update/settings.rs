@@ -66,7 +66,7 @@ impl Nokkvi {
             msg,
             SettingsMessage::SlotListUp
                 | SettingsMessage::SlotListDown
-                | SettingsMessage::SlotListSetOffset(_)
+                | SettingsMessage::SlotListSetOffset(..)
         );
         if is_nav_only
             && !self.settings_page.cached_entries.is_empty()
@@ -90,7 +90,7 @@ impl Nokkvi {
                     self.settings_page.snap_to_non_header(true);
                     self.settings_page.update_description();
                 }
-                SettingsMessage::SlotListSetOffset(offset) => {
+                SettingsMessage::SlotListSetOffset(offset, _) => {
                     self.settings_page.editing_index = None;
                     self.settings_page.toggle_cursor = None;
                     self.settings_page.slot_list.set_offset(offset, total);

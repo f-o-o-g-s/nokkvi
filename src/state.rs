@@ -315,6 +315,8 @@ pub struct WindowState {
     pub eq_save_name: String,
     /// Cached custom EQ presets (loaded from redb, kept in sync on save/delete).
     pub custom_eq_presets: Vec<nokkvi_data::audio::eq::CustomEqPreset>,
+    /// Global keyboard modifiers tracked for mouse interaction (e.g. shift-clicking)
+    pub keyboard_modifiers: iced::keyboard::Modifiers,
 }
 
 impl Default for WindowState {
@@ -327,6 +329,7 @@ impl Default for WindowState {
             eq_save_mode: false,
             eq_save_name: String::new(),
             custom_eq_presets: Vec::new(),
+            keyboard_modifiers: iced::keyboard::Modifiers::default(),
         }
     }
 }

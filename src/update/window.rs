@@ -85,14 +85,14 @@ impl Nokkvi {
                 // Re-dispatch a SetOffset to trigger collage artwork loading
                 let offset = self.genres_page.common.slot_list.viewport_offset;
                 Task::done(Message::Genres(
-                    crate::views::GenresMessage::SlotListSetOffset(offset),
+                    crate::views::GenresMessage::SlotListSetOffset(offset, iced::keyboard::Modifiers::default()),
                 ))
             }
             View::Playlists if !self.library.playlists.is_empty() => {
                 // Re-dispatch a SetOffset to trigger collage artwork loading
                 let offset = self.playlists_page.common.slot_list.viewport_offset;
                 Task::done(Message::Playlists(
-                    crate::views::PlaylistsMessage::SlotListSetOffset(offset),
+                    crate::views::PlaylistsMessage::SlotListSetOffset(offset, iced::keyboard::Modifiers::default()),
                 ))
             }
             _ => Task::none(),

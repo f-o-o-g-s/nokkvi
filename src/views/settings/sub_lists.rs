@@ -116,7 +116,7 @@ impl SettingsPage {
                 }
                 SettingsAction::None
             }
-            SettingsMessage::SlotListSetOffset(offset)
+            SettingsMessage::SlotListSetOffset(offset, _)
             | SettingsMessage::SlotListClickItem(offset) => {
                 if sub.editing_color_index.is_none() {
                     sub.slot_list.set_offset(offset, total);
@@ -206,7 +206,7 @@ impl SettingsPage {
                 fsw.slot_list.move_down(total);
                 SettingsAction::None
             }
-            SettingsMessage::SlotListSetOffset(offset)
+            SettingsMessage::SlotListSetOffset(offset, _)
             | SettingsMessage::SlotListClickItem(offset) => {
                 fsw.slot_list.set_offset(offset, total);
                 SettingsAction::None
@@ -291,7 +291,7 @@ impl SettingsPage {
             SettingsMessage::SlotListDown,
             {
                 let total = total_colors;
-                move |f| SettingsMessage::SlotListSetOffset((f * total as f32) as usize)
+                move |f| SettingsMessage::SlotListSetOffset((f * total as f32) as usize, iced::keyboard::Modifiers::default())
             },
             move |hex_color, ctx| {
                 let is_editing = editing_color_index == Some(ctx.item_index);

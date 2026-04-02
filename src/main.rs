@@ -347,6 +347,9 @@ impl Nokkvi {
             keyboard::Event::KeyPressed { key, modifiers, .. } => {
                 Some(Message::RawKeyEvent(key, modifiers))
             }
+            keyboard::Event::ModifiersChanged(modifiers) => {
+                Some(Message::ModifiersChanged(modifiers))
+            }
             _ => None,
         });
 

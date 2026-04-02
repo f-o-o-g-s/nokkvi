@@ -566,28 +566,44 @@ impl Nokkvi {
                     |shell, id| async move { shell.play_album(&id).await },
                 );
             }
-            AlbumsAction::AddAlbumToQueue(album_id_str) => {
-                // Check if this was triggered by a cross-pane drag drop with a target position
+            AlbumsAction::AddBatchToQueue(payload) => {
+                let len = payload.items.len();
+                debug!(" Adding batch of {} items to queue", len);
                 if let Some(pos) = self.pending_queue_insert_position.take() {
-                    return self.insert_entity_to_queue_at_position_task(
-                        &self.library.albums,
-                        &album_id_str,
-                        "album",
-                        pos,
-                        |a| a.id.clone(),
-                        |a| a.name.clone(),
-                        |shell, id, position| async move {
-                            shell.insert_album_at_position(&id, position).await
+                    return self.shell_fire_and_forget_task(
+                        move |shell| async move {
+                            shell.insert_batch_at_position(payload, pos).await
                         },
+                        format!("Inserted {} items at position {}", len, pos + 1),
+                        "insert batch to queue",
                     );
                 }
-                return self.add_entity_to_queue_task(
-                    &self.library.albums,
-                    &album_id_str,
-                    "album",
-                    |a| a.id.clone(),
-                    |a| a.name.clone(),
-                    |shell, id| async move { shell.add_album_to_queue(&id).await },
+                return self.shell_fire_and_forget_task(
+                    move |shell| async move { shell.add_batch_to_queue(payload).await },
+                    format!("Added {len} items to queue"),
+                    "add batch to queue",
+                );
+            }
+            AlbumsAction::PlayBatch(payload) => {
+                let len = payload.items.len();
+                debug!(" Playing batch of {} items", len);
+                self.active_playlist_info = None;
+                self.persist_active_playlist_info();
+                self.albums_page.common.slot_list.selected_indices.clear();
+                return self.shell_task(
+                    move |shell| async move { shell.play_batch(payload).await },
+                    move |result| match result {
+                        Ok(()) => Message::SwitchView(View::Queue),
+                        Err(e) => {
+                            error!(" Failed to play batch: {}", e);
+                            Message::Toast(crate::app_message::ToastMessage::Push(
+                                nokkvi_data::types::toast::Toast::new(
+                                    format!("Failed to play batch: {e}"),
+                                    nokkvi_data::types::toast::ToastLevel::Error,
+                                ),
+                            ))
+                        }
+                    },
                 );
             }
             AlbumsAction::LoadLargeArtwork(album_id_str) => {
@@ -697,31 +713,7 @@ impl Nokkvi {
                     Message::SwitchView(View::Queue), "play album from track",
                 );
             }
-            AlbumsAction::AddSongToQueue(song_id, album_id) => {
-                let title = self
-                    .albums_page
-                    .expansion
-                    .children
-                    .iter()
-                    .find(|s| s.id == song_id)
-                    .map_or_else(|| "song".to_string(), |s| s.title.clone());
-                if let Some(pos) = self.pending_queue_insert_position.take() {
-                    return self.shell_fire_and_forget_task(
-                        move |shell| async move {
-                            shell
-                                .insert_song_by_id_at_position(&song_id, &album_id, pos)
-                                .await
-                        },
-                        format!("Inserted '{title}' at position {}", pos + 1),
-                        "insert song to queue",
-                    );
-                }
-                return self.shell_fire_and_forget_task(
-                    move |shell| async move { shell.add_song_to_queue_by_id(&song_id, &album_id).await },
-                    format!("Added '{title}' to queue"),
-                    "add song to queue",
-                );
-            }
+
             AlbumsAction::SetRating(item_id, item_type, new_rating) => {
                 let current = if item_type == "album" {
                     self.library
@@ -749,35 +741,21 @@ impl Nokkvi {
                     self.star_item_task(item_id, item_type, star),
                 ]);
             }
-            AlbumsAction::AddToPlaylist(id) => {
-                // Check if this is a song ID from expansion children
-                if self
-                    .albums_page
-                    .expansion
-                    .children
-                    .iter()
-                    .any(|s| s.id == id)
-                {
-                    // Single song — no need to resolve
-                    return self.fetch_playlists_for_add_to_playlist(vec![id]);
-                }
-                // Album — resolve song IDs from server
-                return self.resolve_and_add_to_playlist(
-                    move |shell| async move {
-                        let songs = shell.albums().load_album_songs(&id).await?;
-                        Ok(songs.into_iter().map(|s| s.id).collect())
-                    },
-                    "resolve album songs for add to playlist",
-                );
+            AlbumsAction::AddBatchToPlaylist(payload) => {
+                return self.handle_add_batch_to_playlist(payload);
             }
             AlbumsAction::PlayNext(id) => {
+                // To support PlayNext for albums, we just wrap it into a BatchItem
+                use nokkvi_data::types::batch::{BatchItem, BatchPayload};
+                let payload = BatchPayload::new().with_item(BatchItem::Album(id));
+                
                 if self.modes.random {
-                    self.toast_warn("Shuffle is on — next track will be random, not this one");
+                    self.toast_warn("Shuffle is on — next tracks will be random, not these");
                 }
                 return self.shell_fire_and_forget_task(
-                    move |shell| async move { shell.play_next_album(&id).await },
-                    "Playing next".to_string(),
-                    "play next album",
+                    move |shell| async move { shell.play_next_batch(payload).await },
+                    "Added batch to play next".to_string(),
+                    "play next batch",
                 );
             }
             AlbumsAction::ShowInfo(item) => {

@@ -433,27 +433,22 @@ impl Nokkvi {
                     |shell, id| async move { shell.play_artist(&id).await },
                 );
             }
-            ArtistsAction::AddArtistToQueue(artist_id_str) => {
+            ArtistsAction::AddBatchToQueue(payload) => {
+                let len = payload.items.len();
+                debug!(" Adding batch of {} items to queue", len);
                 if let Some(pos) = self.pending_queue_insert_position.take() {
-                    return self.insert_entity_to_queue_at_position_task(
-                        &self.library.artists,
-                        &artist_id_str,
-                        "artist",
-                        pos,
-                        |a| a.id.clone(),
-                        |a| a.name.clone(),
-                        |shell, id, position| async move {
-                            shell.insert_artist_at_position(&id, position).await
+                    return self.shell_fire_and_forget_task(
+                        move |shell| async move {
+                            shell.insert_batch_at_position(payload, pos).await
                         },
+                        format!("Inserted {} items at position {}", len, pos + 1),
+                        "insert batch to queue",
                     );
                 }
-                return self.add_entity_to_queue_task(
-                    &self.library.artists,
-                    &artist_id_str,
-                    "artist",
-                    |a| a.id.clone(),
-                    |a| a.name.clone(),
-                    |shell, id| async move { shell.add_artist_to_queue(&id).await },
+                return self.shell_fire_and_forget_task(
+                    move |shell| async move { shell.add_batch_to_queue(payload).await },
+                    format!("Added {len} items to queue"),
+                    "add batch to queue",
                 );
             }
             ArtistsAction::PlayAlbum(album_id) => {
@@ -481,20 +476,7 @@ impl Nokkvi {
                     "play album",
                 );
             }
-            ArtistsAction::AddAlbumToQueue(album_id, _artist_id) => {
-                let name = self
-                    .artists_page
-                    .expansion
-                    .children
-                    .iter()
-                    .find(|a| a.id == album_id)
-                    .map_or_else(|| "album".to_string(), |a| a.name.clone());
-                return self.shell_fire_and_forget_task(
-                    move |shell| async move { shell.add_album_to_queue(&album_id).await },
-                    format!("Added '{name}' to queue"),
-                    "add album to queue",
-                );
-            }
+
             ArtistsAction::ExpandArtist(artist_id) => {
                 // Load albums for the artist and send them back to the view
                 let id = artist_id.clone();
@@ -638,41 +620,17 @@ impl Nokkvi {
             ArtistsAction::LoadPage(offset) => {
                 return self.handle_artists_load_page(offset);
             }
-            ArtistsAction::AddToPlaylist(id) => {
-                // Check if this is an album ID from expansion children
-                let is_child_album = self
-                    .artists_page
-                    .expansion
-                    .children
-                    .iter()
-                    .any(|a| a.id == id);
-                if is_child_album {
-                    // Album — resolve its song IDs
-                    return self.resolve_and_add_to_playlist(
-                        move |shell| async move {
-                            let songs = shell.albums().load_album_songs(&id).await?;
-                            Ok(songs.into_iter().map(|s| s.id).collect())
-                        },
-                        "resolve album songs for add to playlist",
-                    );
-                }
-                // Artist — resolve all songs from all albums
-                return self.resolve_and_add_to_playlist(
-                    move |shell| async move {
-                        let songs = shell.artists().load_artist_songs(&id).await?;
-                        Ok(songs.into_iter().map(|s| s.id).collect())
-                    },
-                    "resolve artist songs for add to playlist",
-                );
+            ArtistsAction::AddBatchToPlaylist(payload) => {
+                return self.handle_add_batch_to_playlist(payload);
             }
-            ArtistsAction::PlayNext(id) => {
+            ArtistsAction::PlayNextBatch(payload) => {
                 if self.modes.random {
-                    self.toast_warn("Shuffle is on — next track will be random, not this one");
+                    self.toast_warn("Shuffle is on — next tracks will be random, not these");
                 }
                 return self.shell_fire_and_forget_task(
-                    move |shell| async move { shell.play_next_artist(&id).await },
-                    "Playing next".to_string(),
-                    "play next artist",
+                    move |shell| async move { shell.play_next_batch(payload).await },
+                    "Added batch to play next".to_string(),
+                    "play next batch",
                 );
             }
             ArtistsAction::ShowInfo(item) => {

@@ -84,7 +84,7 @@ impl Nokkvi {
                 // Also trigger collage load for initially centered genre (index 0)
                 if !self.library.genres.is_empty() {
                     tasks.push(Task::done(Message::Genres(
-                        views::GenresMessage::SlotListSetOffset(0),
+                        views::GenresMessage::SlotListSetOffset(0, iced::keyboard::Modifiers::default()),
                     )));
                 }
 
@@ -180,23 +180,22 @@ impl Nokkvi {
                     "play genre",
                 );
             }
-            GenresAction::AddGenreToQueue(genre_name) => {
+            GenresAction::AddBatchToQueue(payload) => {
+                let len = payload.items.len();
+                debug!(" Adding batch of {} items to queue", len);
                 if let Some(pos) = self.pending_queue_insert_position.take() {
-                    let label = format!("Inserted '{genre_name}' at position {}", pos + 1);
-                    let name = genre_name.clone();
                     return self.shell_fire_and_forget_task(
                         move |shell| async move {
-                            shell.insert_genre_at_position(&name, pos).await
+                            shell.insert_batch_at_position(payload, pos).await
                         },
-                        label,
-                        "insert genre to queue",
+                        format!("Inserted {} items at position {}", len, pos + 1),
+                        "insert batch to queue",
                     );
                 }
-                let label = format!("Added '{genre_name}' to queue");
                 return self.shell_fire_and_forget_task(
-                    move |shell| async move { shell.add_genre_to_queue(&genre_name).await },
-                    label,
-                    "add genre to queue",
+                    move |shell| async move { shell.add_batch_to_queue(payload).await },
+                    format!("Added {len} items to queue"),
+                    "add batch to queue",
                 );
             }
             GenresAction::PlayAlbum(album_id) => {
@@ -224,20 +223,7 @@ impl Nokkvi {
                     "play album from genre",
                 );
             }
-            GenresAction::AddAlbumToQueue(album_id, _genre_name) => {
-                let name = self
-                    .genres_page
-                    .expansion
-                    .children
-                    .iter()
-                    .find(|a| a.id == album_id)
-                    .map_or_else(|| "album".to_string(), |a| a.name.clone());
-                return self.shell_fire_and_forget_task(
-                    move |shell| async move { shell.add_album_to_queue(&album_id).await },
-                    format!("Added '{name}' to queue"),
-                    "add album to queue from genre",
-                );
-            }
+
             GenresAction::ExpandGenre(genre_name, genre_id) => {
                 // Load albums for the genre and send them back to the view
                 let name = genre_name.clone();
@@ -426,44 +412,17 @@ impl Nokkvi {
                     self.star_item_task(item_id, item_type, star),
                 ]);
             }
-            GenresAction::AddToPlaylist(id_or_name) => {
-                // Check if this is an album ID from expansion children
-                let is_child_album = self
-                    .genres_page
-                    .expansion
-                    .children
-                    .iter()
-                    .any(|a| a.id == id_or_name);
-                if is_child_album {
-                    // Album — resolve its song IDs
-                    let album_id = id_or_name;
-                    return self.resolve_and_add_to_playlist(
-                        move |shell| async move {
-                            let songs = shell.albums().load_album_songs(&album_id).await?;
-                            Ok(songs.into_iter().map(|s| s.id).collect())
-                        },
-                        "resolve album songs for add to playlist",
-                    );
-                }
-                // Genre — resolve songs by genre name
-                let genre_name = id_or_name;
-                return self.resolve_and_add_to_playlist(
-                    move |shell| async move {
-                        let songs_service = shell.songs_api().await?;
-                        let (songs, _) = songs_service.load_songs_by_genre(&genre_name).await?;
-                        Ok(songs.into_iter().map(|s| s.id).collect())
-                    },
-                    "resolve genre songs for add to playlist",
-                );
+            GenresAction::AddBatchToPlaylist(payload) => {
+                return self.handle_add_batch_to_playlist(payload);
             }
-            GenresAction::PlayNext(name) => {
+            GenresAction::PlayNextBatch(payload) => {
                 if self.modes.random {
-                    self.toast_warn("Shuffle is on — next track will be random, not this one");
+                    self.toast_warn("Shuffle is on — next tracks will be random, not these");
                 }
                 return self.shell_fire_and_forget_task(
-                    move |shell| async move { shell.play_next_genre(&name).await },
-                    "Playing next".to_string(),
-                    "play next genre",
+                    move |shell| async move { shell.play_next_batch(payload).await },
+                    "Added batch to play next".to_string(),
+                    "play next batch",
                 );
             }
             _ => {} // None + already-handled common actions

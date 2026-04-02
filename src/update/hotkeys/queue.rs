@@ -45,57 +45,14 @@ impl Nokkvi {
             }
         };
 
-        // Look up the song from the filtered list, then find its position in the
-        // unfiltered queue for the actual removal
-        let song = match filtered_queue.get(center_idx) {
-            Some(s) => s,
-            None => return Task::none(),
-        };
-        let song_id = song.id.clone();
-        debug!(
-            "Removing: {} - {} (filtered index {})",
-            song.title, song.artist, center_idx
-        );
-
-        let unfiltered_idx = match self
-            .library
-            .queue_songs
-            .iter()
-            .position(|s| s.id == song_id)
-        {
-            Some(idx) => idx,
-            None => {
-                error!("Song {} not found in unfiltered queue", song_id);
-                return Task::none();
-            }
-        };
-
-        let song_title = song.title.clone();
-        self.toast_success(format!("Removed '{song_title}' from queue"));
-        self.shell_task(
-            move |shell| async move {
-                let queue_vm = shell.queue().clone();
-                let binding = queue_vm.queue_manager();
-                let mut qm = binding.lock().await;
-                qm.remove_song(unfiltered_idx)?;
-                Ok::<_, anyhow::Error>(())
-            },
-            |result| match result {
-                Ok(()) => {
-                    info!(" Item removed from queue");
-                    Message::LoadQueue
-                }
-                Err(e) => {
-                    error!(" Failed to remove from queue: {}", e);
-                    Message::Toast(crate::app_message::ToastMessage::Push(
-                        nokkvi_data::types::toast::Toast::new(
-                            format!("Failed to remove from queue: {e}"),
-                            nokkvi_data::types::toast::ToastLevel::Error,
-                        ),
-                    ))
-                }
-            },
-        )
+        // Dispatch directly to the Queue view's context menu handler which
+        // implements all the multi-selection batch resolution logic.
+        Task::done(Message::Queue(
+            crate::views::QueueMessage::ContextMenuAction(
+                center_idx,
+                crate::views::queue::QueueContextEntry::RemoveFromQueue,
+            ),
+        ))
     }
 
     pub(crate) fn handle_clear_queue(&mut self) -> Task<Message> {

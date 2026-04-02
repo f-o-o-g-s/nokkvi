@@ -817,6 +817,10 @@ impl Nokkvi {
                     None => Task::none(),
                 }
             }
+            Message::ModifiersChanged(modifiers) => {
+                self.window.keyboard_modifiers = modifiers;
+                Task::none()
+            }
 
             // -----------------------------------------------------------------
             // Toast Notifications

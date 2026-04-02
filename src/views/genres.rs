@@ -38,6 +38,7 @@ pub struct GenresViewData<'a> {
     pub window_width: f32,
     pub window_height: f32,
     pub scale_factor: f32,
+    pub modifiers: iced::keyboard::Modifiers,
     pub total_genre_count: usize,
     pub loading: bool,
     pub stable_viewport: bool,
@@ -49,7 +50,7 @@ pub enum GenresMessage {
     // Slot list navigation
     SlotListNavigateUp,
     SlotListNavigateDown,
-    SlotListSetOffset(usize),
+    SlotListSetOffset(usize, iced::keyboard::Modifiers),
     SlotListScrollSeek(usize),
     SlotListActivateCenter,
     SlotListClickPlay(usize), // Click non-center to play directly (skip focus)
@@ -87,10 +88,9 @@ pub enum GenresMessage {
 #[derive(Debug, Clone)]
 pub enum GenresAction {
     PlayGenre(String),       // genre_id - clear queue and play all songs in genre
-    AddGenreToQueue(String), // genre_id - add all songs to queue without clearing
+    AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
     PlayAlbum(String),       // album_id - play child album
     PlayTrack(String),       // song_id - play single expanded track
-    AddAlbumToQueue(String, String), // (album_id, genre_name) - add child album to queue
     /// Expand genre inline — root should load albums (genre_name, genre_id)
     ExpandGenre(String, String),
     /// Expand album inline — root should load tracks (album_id)
@@ -101,8 +101,8 @@ pub enum GenresAction {
     SortModeChanged(widgets::view_header::SortMode), // trigger reload
     SortOrderChanged(bool), // trigger reload
     ToggleStar(String, &'static str, bool), // (item_id, item_type, starred)
-    PlayNext(String),    // genre_name - insert after currently playing
-    AddToPlaylist(String), // genre_name or album_id - add to playlist dialog
+    PlayNextBatch(nokkvi_data::types::batch::BatchPayload),
+    AddBatchToPlaylist(nokkvi_data::types::batch::BatchPayload),
     None,
 }
 
@@ -306,13 +306,13 @@ impl GenresPage {
                     let action = self.resolve_artwork_action(genres);
                     (Task::none(), action)
                 }
-                GenresMessage::SlotListSetOffset(offset) => {
+                GenresMessage::SlotListSetOffset(offset, modifiers) => {
                     let len = super::expansion::three_tier_flattened_len(
                         genres,
                         &self.expansion,
                         self.sub_expansion.children.len(),
                     );
-                    self.common.handle_select_offset(offset, len);
+                    self.common.handle_slot_click(offset, len, modifiers);
                     let action = self.resolve_artwork_action(genres);
                     (Task::none(), action)
                 }
@@ -366,40 +366,48 @@ impl GenresPage {
                     }
                 }
                 GenresMessage::AddCenterToQueue => {
+                    use nokkvi_data::types::batch::{BatchItem, BatchPayload};
                     let total = super::expansion::three_tier_flattened_len(
                         genres,
                         &self.expansion,
                         self.sub_expansion.children.len(),
                     );
-                    if let Some(center_idx) = self.common.get_center_item_index(total) {
-                        match super::expansion::three_tier_get_entry_at(
-                            center_idx,
-                            genres,
-                            &self.expansion,
-                            &self.sub_expansion,
-                            |g| &g.id,
-                            |a| &a.id,
-                        ) {
-                            Some(ThreeTierEntry::Grandchild(song, _)) => (
-                                Task::none(),
-                                GenresAction::AddAlbumToQueue(
-                                    song.album_id.clone().unwrap_or_default(),
-                                    String::new(),
-                                ),
-                            ),
-                            Some(ThreeTierEntry::Child(album, parent_id)) => (
-                                Task::none(),
-                                GenresAction::AddAlbumToQueue(album.id.clone(), parent_id),
-                            ),
-                            Some(ThreeTierEntry::Parent(genre)) => (
-                                Task::none(),
-                                GenresAction::AddGenreToQueue(genre.name.clone()),
-                            ),
-                            None => (Task::none(), GenresAction::None),
-                        }
+                    
+                    let target_indices: Vec<usize> = if !self.common.slot_list.selected_indices.is_empty() {
+                        self.common.slot_list.selected_indices.iter().copied().collect()
+                    } else if let Some(center_idx) = self.common.get_center_item_index(total) {
+                        vec![center_idx]
                     } else {
-                        (Task::none(), GenresAction::None)
+                        vec![]
+                    };
+
+                    if target_indices.is_empty() {
+                        return (Task::none(), GenresAction::None);
                     }
+
+                    let payload = target_indices
+                        .into_iter()
+                        .filter_map(|i| {
+                            match super::expansion::three_tier_get_entry_at(
+                                i,
+                                genres,
+                                &self.expansion,
+                                &self.sub_expansion,
+                                |g| &g.id,
+                                |a| &a.id,
+                            ) {
+                                Some(ThreeTierEntry::Parent(genre)) => Some(BatchItem::Genre(genre.name.clone())),
+                                Some(ThreeTierEntry::Child(album, _)) => Some(BatchItem::Album(album.id.clone())),
+                                Some(ThreeTierEntry::Grandchild(song, _)) => {
+                                    let item: nokkvi_data::types::song::Song = song.clone().into();
+                                    Some(BatchItem::Song(Box::new(item)))
+                                }
+                                None => None,
+                            }
+                        })
+                        .fold(BatchPayload::new(), |p: BatchPayload, item| p.with_item(item));
+
+                    (Task::none(), GenresAction::AddBatchToQueue(payload))
                 }
                 GenresMessage::ClickToggleStar(item_index) => {
                     match super::expansion::three_tier_get_entry_at(
@@ -427,63 +435,81 @@ impl GenresPage {
                 }
                 // Data loading messages (handled at root level, no action needed here)
                 GenresMessage::GenresLoaded(_, _) => (Task::none(), GenresAction::None),
-                GenresMessage::ContextMenuAction(item_index, entry) => {
+                GenresMessage::ContextMenuAction(clicked_idx, entry) => {
                     use crate::widgets::context_menu::LibraryContextEntry;
-                    match super::expansion::three_tier_get_entry_at(
-                        item_index,
-                        genres,
-                        &self.expansion,
-                        &self.sub_expansion,
-                        |g| &g.id,
-                        |a| &a.id,
-                    ) {
-                        Some(ThreeTierEntry::Parent(genre)) => match entry {
-                            LibraryContextEntry::AddToQueue => (
-                                Task::none(),
-                                GenresAction::AddGenreToQueue(genre.name.clone()),
-                            ),
-                            LibraryContextEntry::AddToPlaylist => (
-                                Task::none(),
-                                GenresAction::AddToPlaylist(genre.name.clone()),
-                            ),
-                            LibraryContextEntry::Separator
-                            | LibraryContextEntry::GetInfo
-                            | LibraryContextEntry::ShowInFolder => {
-                                (Task::none(), GenresAction::None)
+                    use nokkvi_data::types::batch::{BatchItem, BatchPayload};
+
+                    match entry {
+                        LibraryContextEntry::AddToQueue | LibraryContextEntry::AddToPlaylist => {
+                            let target_indices = self.common.evaluate_context_menu(clicked_idx);
+                            let payload = target_indices
+                                .into_iter()
+                                .filter_map(|i| {
+                                    match super::expansion::three_tier_get_entry_at(
+                                        i,
+                                        genres,
+                                        &self.expansion,
+                                        &self.sub_expansion,
+                                        |g| &g.id,
+                                        |a| &a.id,
+                                    ) {
+                                        Some(ThreeTierEntry::Parent(genre)) => {
+                                            Some(BatchItem::Genre(genre.name.clone()))
+                                        }
+                                        Some(ThreeTierEntry::Child(album, _)) => {
+                                            Some(BatchItem::Album(album.id.clone()))
+                                        }
+                                        Some(ThreeTierEntry::Grandchild(song, _)) => {
+                                            let item: nokkvi_data::types::song::Song = song.clone().into();
+                                            Some(BatchItem::Song(Box::new(item)))
+                                        }
+                                        None => None,
+                                    }
+                                })
+                                .fold(BatchPayload::new(), |p: BatchPayload, item| p.with_item(item));
+
+                            match entry {
+                                LibraryContextEntry::AddToQueue => {
+                                    (Task::none(), GenresAction::AddBatchToQueue(payload))
+                                }
+                                LibraryContextEntry::AddToPlaylist => {
+                                    (Task::none(), GenresAction::AddBatchToPlaylist(payload))
+                                }
+                                _ => unreachable!(),
                             }
-                        },
-                        Some(ThreeTierEntry::Child(album, parent_id)) => match entry {
-                            LibraryContextEntry::AddToQueue => (
-                                Task::none(),
-                                GenresAction::AddAlbumToQueue(album.id.clone(), parent_id),
-                            ),
-                            LibraryContextEntry::AddToPlaylist => {
-                                (Task::none(), GenresAction::AddToPlaylist(album.id.clone()))
+                        }
+                        // Non-batched actions (apply only to the clicked item)
+                        _ => {
+                            match super::expansion::three_tier_get_entry_at(
+                                clicked_idx,
+                                genres,
+                                &self.expansion,
+                                &self.sub_expansion,
+                                |g| &g.id,
+                                |a| &a.id,
+                            ) {
+                                Some(ThreeTierEntry::Parent(_genre)) => {
+                                    (Task::none(), GenresAction::None)
+                                },
+                                Some(ThreeTierEntry::Child(_album, _)) => match entry {
+                                    LibraryContextEntry::Separator
+                                    | LibraryContextEntry::GetInfo
+                                    | LibraryContextEntry::ShowInFolder => {
+                                        (Task::none(), GenresAction::None)
+                                    }
+                                    _ => (Task::none(), GenresAction::None),
+                                },
+                                Some(ThreeTierEntry::Grandchild(_song, _)) => match entry {
+                                    LibraryContextEntry::Separator
+                                    | LibraryContextEntry::GetInfo
+                                    | LibraryContextEntry::ShowInFolder => {
+                                        (Task::none(), GenresAction::None)
+                                    }
+                                    _ => (Task::none(), GenresAction::None),
+                                },
+                                None => (Task::none(), GenresAction::None),
                             }
-                            LibraryContextEntry::Separator
-                            | LibraryContextEntry::GetInfo
-                            | LibraryContextEntry::ShowInFolder => {
-                                (Task::none(), GenresAction::None)
-                            }
-                        },
-                        Some(ThreeTierEntry::Grandchild(song, _)) => match entry {
-                            LibraryContextEntry::AddToQueue => (
-                                Task::none(),
-                                GenresAction::AddAlbumToQueue(
-                                    song.album_id.clone().unwrap_or_default(),
-                                    String::new(),
-                                ),
-                            ),
-                            LibraryContextEntry::AddToPlaylist => {
-                                (Task::none(), GenresAction::AddToPlaylist(song.id.clone()))
-                            }
-                            LibraryContextEntry::Separator
-                            | LibraryContextEntry::GetInfo
-                            | LibraryContextEntry::ShowInFolder => {
-                                (Task::none(), GenresAction::None)
-                            }
-                        },
-                        None => (Task::none(), GenresAction::None),
+                        }
                     }
                 }
                 // Common arms already handled by macro above
@@ -539,9 +565,8 @@ impl GenresPage {
             SlotListConfig, chrome_height_with_header, slot_list_view_with_scroll,
         };
 
-        let config =
-            SlotListConfig::with_dynamic_slots(data.window_height, chrome_height_with_header());
-
+        let config = SlotListConfig::with_dynamic_slots(data.window_height, chrome_height_with_header()).with_modifiers(data.modifiers);
+        
         // Capture values needed in closure
         let genres = data.genres; // Borrow slice to extend lifetime
         let genre_artwork = data.genre_artwork;
@@ -581,7 +606,7 @@ impl GenresPage {
                         &ctx,
                         GenresMessage::SlotListActivateCenter,
                         if data.stable_viewport {
-                            GenresMessage::SlotListSetOffset(ctx.item_index)
+                            GenresMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
                         } else {
                             GenresMessage::SlotListClickPlay(ctx.item_index)
                         },
@@ -648,7 +673,7 @@ impl GenresPage {
         };
 
         let is_expanded = self.expansion.is_expanded_parent(&genre.id);
-        let style = SlotListSlotStyle::for_slot(ctx.is_center, is_expanded, ctx.opacity);
+        let style = SlotListSlotStyle::for_slot(ctx.is_center, is_expanded, ctx.is_selected, ctx.opacity);
 
         let base_artwork_size = (ctx.row_height - 16.0).max(32.0);
         let artwork_size = base_artwork_size * ctx.scale_factor;
@@ -718,7 +743,7 @@ impl GenresPage {
             .on_press(if ctx.is_center {
                 GenresMessage::SlotListActivateCenter
             } else if stable_viewport {
-                GenresMessage::SlotListSetOffset(ctx.item_index)
+                GenresMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
             } else {
                 GenresMessage::SlotListClickPlay(ctx.item_index)
             })
@@ -752,7 +777,7 @@ impl GenresPage {
             ctx,
             GenresMessage::SlotListActivateCenter,
             if stable_viewport {
-                GenresMessage::SlotListSetOffset(ctx.item_index)
+                GenresMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
             } else {
                 GenresMessage::SlotListClickPlay(ctx.item_index)
             },

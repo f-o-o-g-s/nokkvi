@@ -35,6 +35,7 @@ pub struct PlaylistsViewData<'a> {
     pub window_width: f32,
     pub window_height: f32,
     pub scale_factor: f32,
+    pub modifiers: iced::keyboard::Modifiers,
     pub total_playlist_count: usize,
     pub loading: bool,
     pub stable_viewport: bool,
@@ -116,7 +117,7 @@ pub enum PlaylistsMessage {
     // Slot list navigation
     SlotListNavigateUp,
     SlotListNavigateDown,
-    SlotListSetOffset(usize),
+    SlotListSetOffset(usize, iced::keyboard::Modifiers),
     SlotListScrollSeek(usize),
     SlotListActivateCenter,
     SlotListClickPlay(usize), // Click non-center to play directly (skip focus)
@@ -149,17 +150,16 @@ pub enum PlaylistsMessage {
 #[derive(Debug, Clone)]
 pub enum PlaylistsAction {
     PlayPlaylist(String), // playlist_id - clear queue and play all songs in playlist
-    AddPlaylistToQueue(String), // playlist_id - add all songs to queue without clearing
+    AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
     ExpandPlaylist(String), // playlist_id - load tracks for expansion
     PlayPlaylistFromTrack(String, usize), // playlist_id, track_index - play from clicked track
-    AddSongToQueue(String, String), // song_id, album_id - add single child track to queue
     LoadArtwork(String),  // playlist_id - load artwork for centered playlist on slot list scroll
     PreloadArtwork(usize), // viewport_offset - preload artwork for visible + buffer
     SearchChanged(String), // trigger reload
     SortModeChanged(widgets::view_header::SortMode), // trigger reload
     SortOrderChanged(bool), // trigger reload
     ToggleStar(String, &'static str, bool), // (item_id, item_type, starred)
-    PlayNext(String),     // playlist_id - insert after currently playing
+    PlayNextBatch(nokkvi_data::types::batch::BatchPayload),
     DeletePlaylist(String), // playlist_id
     RenamePlaylist(String), // playlist_id — triggers rename flow
     EditPlaylist(String, String, String), // (playlist_id, playlist_name, comment) — enter split-view edit mode
@@ -250,10 +250,10 @@ impl PlaylistsPage {
                         None => (Task::none(), PlaylistsAction::None),
                     }
                 }
-                PlaylistsMessage::SlotListSetOffset(offset) => {
+                PlaylistsMessage::SlotListSetOffset(offset, modifiers) => {
                     let center =
                         self.expansion
-                            .handle_select_offset(offset, playlists, &mut self.common);
+                            .handle_select_offset(offset, modifiers, playlists, &mut self.common);
                     match center {
                         Some(idx) => (Task::none(), PlaylistsAction::LoadArtwork(idx.to_string())),
                         None => (Task::none(), PlaylistsAction::None),
@@ -307,28 +307,36 @@ impl PlaylistsPage {
                     }
                 }
                 PlaylistsMessage::AddCenterToQueue => {
+                    use nokkvi_data::types::batch::{BatchItem, BatchPayload};
                     let total = self.expansion.flattened_len(playlists);
-                    if let Some(center_idx) = self.common.get_center_item_index(total) {
-                        match self
-                            .expansion
-                            .get_entry_at(center_idx, playlists, |p| &p.id)
-                        {
-                            Some(SlotListEntry::Child(song, parent_id)) => {
-                                // Add single song to queue
-                                (
-                                    Task::none(),
-                                    PlaylistsAction::AddSongToQueue(song.id.clone(), parent_id),
-                                )
-                            }
-                            Some(SlotListEntry::Parent(playlist)) => (
-                                Task::none(),
-                                PlaylistsAction::AddPlaylistToQueue(playlist.id.clone()),
-                            ),
-                            None => (Task::none(), PlaylistsAction::None),
-                        }
+                    
+                    let target_indices: Vec<usize> = if !self.common.slot_list.selected_indices.is_empty() {
+                        self.common.slot_list.selected_indices.iter().copied().collect()
+                    } else if let Some(center_idx) = self.common.get_center_item_index(total) {
+                        vec![center_idx]
                     } else {
-                        (Task::none(), PlaylistsAction::None)
+                        vec![]
+                    };
+
+                    if target_indices.is_empty() {
+                        return (Task::none(), PlaylistsAction::None);
                     }
+
+                    let payload = target_indices
+                        .into_iter()
+                        .filter_map(|i| {
+                            match self.expansion.get_entry_at(i, playlists, |p| &p.id) {
+                                Some(SlotListEntry::Parent(playlist)) => Some(BatchItem::Playlist(playlist.id.clone())),
+                                Some(SlotListEntry::Child(song, _)) => {
+                                    let item: nokkvi_data::types::song::Song = song.clone().into();
+                                    Some(BatchItem::Song(Box::new(item)))
+                                }
+                                None => None,
+                            }
+                        })
+                        .fold(BatchPayload::new(), |p: BatchPayload, item| p.with_item(item));
+
+                    (Task::none(), PlaylistsAction::AddBatchToQueue(payload))
                 }
                 PlaylistsMessage::ClickToggleStar(item_index) => {
                     if let Some(entry) = self
@@ -355,45 +363,88 @@ impl PlaylistsPage {
                 }
                 // Data loading messages (handled at root level, no action needed here)
                 PlaylistsMessage::PlaylistsLoaded(_, _) => (Task::none(), PlaylistsAction::None),
-                PlaylistsMessage::ContextMenuAction(item_index, entry) => {
+                PlaylistsMessage::ContextMenuAction(clicked_idx, entry) => {
                     // Context menu for child tracks (uses shared LibraryContextEntry)
                     use crate::widgets::context_menu::LibraryContextEntry;
-                    match self
-                        .expansion
-                        .get_entry_at(item_index, playlists, |p| &p.id)
-                    {
-                        Some(SlotListEntry::Child(song, parent_id)) => match entry {
-                            LibraryContextEntry::AddToQueue => (
-                                Task::none(),
-                                PlaylistsAction::AddSongToQueue(song.id.clone(), parent_id),
-                            ),
-                            LibraryContextEntry::AddToPlaylist => {
-                                (Task::none(), PlaylistsAction::None)
+                    use nokkvi_data::types::batch::{BatchItem, BatchPayload};
+
+                    if matches!(entry, LibraryContextEntry::AddToQueue | LibraryContextEntry::AddToPlaylist) {
+                        let target_indices = self.common.evaluate_context_menu(clicked_idx);
+                        let payload = target_indices
+                            .into_iter()
+                            .filter_map(|i| {
+                                match self.expansion.get_entry_at(i, playlists, |p| &p.id) {
+                                    Some(SlotListEntry::Parent(playlist)) => {
+                                        Some(BatchItem::Playlist(playlist.id.clone()))
+                                    }
+                                    Some(SlotListEntry::Child(song, _)) => {
+                                        let item: nokkvi_data::types::song::Song = song.clone().into();
+                                        Some(BatchItem::Song(Box::new(item)))
+                                    }
+                                    None => None,
+                                }
+                            })
+                            .fold(BatchPayload::new(), |p: BatchPayload, item| p.with_item(item));
+
+                        match entry {
+                            LibraryContextEntry::AddToQueue => {
+                                return (Task::none(), PlaylistsAction::AddBatchToQueue(payload));
                             }
+                            LibraryContextEntry::AddToPlaylist => {
+                                return (Task::none(), PlaylistsAction::None); // Handle AddToPlaylist if needed later, right now playlists might not be addable into playlists?
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+
+                    match self.expansion.get_entry_at(clicked_idx, playlists, |p| &p.id) {
+                        Some(SlotListEntry::Child(song, _)) => match entry {
                             LibraryContextEntry::GetInfo => {
                                 use nokkvi_data::types::info_modal::InfoModalItem;
                                 let item = InfoModalItem::from_song_view_data(song);
                                 (Task::none(), PlaylistsAction::ShowInfo(Box::new(item)))
                             }
-                            LibraryContextEntry::Separator | LibraryContextEntry::ShowInFolder => {
-                                (Task::none(), PlaylistsAction::None)
-                            }
+                            _ => (Task::none(), PlaylistsAction::None),
                         },
                         _ => (Task::none(), PlaylistsAction::None),
                     }
                 }
-                PlaylistsMessage::PlaylistContextAction(item_index, entry) => {
+                PlaylistsMessage::PlaylistContextAction(clicked_idx, entry) => {
                     // Context menu for parent playlists (extended entries)
                     use crate::widgets::context_menu::LibraryContextEntry;
-                    match self
-                        .expansion
-                        .get_entry_at(item_index, playlists, |p| &p.id)
-                    {
+                    use nokkvi_data::types::batch::{BatchItem, BatchPayload};
+
+                    if matches!(entry, PlaylistContextEntry::Library(LibraryContextEntry::AddToQueue | LibraryContextEntry::AddToPlaylist)) {
+                        let target_indices = self.common.evaluate_context_menu(clicked_idx);
+                        let payload = target_indices
+                            .into_iter()
+                            .filter_map(|i| {
+                                match self.expansion.get_entry_at(i, playlists, |p| &p.id) {
+                                    Some(SlotListEntry::Parent(playlist)) => {
+                                        Some(BatchItem::Playlist(playlist.id.clone()))
+                                    }
+                                    Some(SlotListEntry::Child(song, _)) => {
+                                        let item: nokkvi_data::types::song::Song = song.clone().into();
+                                        Some(BatchItem::Song(Box::new(item)))
+                                    }
+                                    None => None,
+                                }
+                            })
+                            .fold(BatchPayload::new(), |p: BatchPayload, item| p.with_item(item));
+
+                        match entry {
+                            PlaylistContextEntry::Library(LibraryContextEntry::AddToQueue) => {
+                                return (Task::none(), PlaylistsAction::AddBatchToQueue(payload));
+                            }
+                            PlaylistContextEntry::Library(LibraryContextEntry::AddToPlaylist) => {
+                                return (Task::none(), PlaylistsAction::None);
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+
+                    match self.expansion.get_entry_at(clicked_idx, playlists, |p| &p.id) {
                         Some(SlotListEntry::Parent(playlist)) => match entry {
-                            PlaylistContextEntry::Library(LibraryContextEntry::AddToQueue) => (
-                                Task::none(),
-                                PlaylistsAction::AddPlaylistToQueue(playlist.id.clone()),
-                            ),
                             PlaylistContextEntry::Delete => (
                                 Task::none(),
                                 PlaylistsAction::DeletePlaylist(playlist.id.clone()),
@@ -410,9 +461,6 @@ impl PlaylistsPage {
                                     playlist.comment.clone(),
                                 ),
                             ),
-                            PlaylistContextEntry::Separator => {
-                                (Task::none(), PlaylistsAction::None)
-                            }
                             PlaylistContextEntry::SetAsDefault => (
                                 Task::none(),
                                 PlaylistsAction::SetAsDefaultPlaylist(
@@ -420,9 +468,6 @@ impl PlaylistsPage {
                                     playlist.name.clone(),
                                 ),
                             ),
-                            PlaylistContextEntry::Library(LibraryContextEntry::AddToPlaylist) => {
-                                (Task::none(), PlaylistsAction::None)
-                            }
                             PlaylistContextEntry::Library(LibraryContextEntry::GetInfo) => {
                                 use nokkvi_data::types::info_modal::InfoModalItem;
                                 let item = InfoModalItem::Playlist {
@@ -439,12 +484,7 @@ impl PlaylistsPage {
                                 };
                                 (Task::none(), PlaylistsAction::ShowInfo(Box::new(item)))
                             }
-                            PlaylistContextEntry::Library(LibraryContextEntry::Separator) => {
-                                (Task::none(), PlaylistsAction::None)
-                            }
-                            PlaylistContextEntry::Library(LibraryContextEntry::ShowInFolder) => {
-                                (Task::none(), PlaylistsAction::None)
-                            }
+                            _ => (Task::none(), PlaylistsAction::None),
                         },
                         _ => (Task::none(), PlaylistsAction::None),
                     }
@@ -502,8 +542,8 @@ impl PlaylistsPage {
             SlotListConfig, chrome_height_with_header, slot_list_view_with_scroll,
         };
 
-        let config =
-            SlotListConfig::with_dynamic_slots(data.window_height, chrome_height_with_header());
+        let config = SlotListConfig::with_dynamic_slots(data.window_height, chrome_height_with_header())
+            .with_modifiers(data.modifiers);
 
         // Capture values needed in closure
         let playlists = data.playlists; // Borrow slice to extend lifetime
@@ -589,7 +629,7 @@ impl PlaylistsPage {
         };
 
         let is_expanded = self.expansion.is_expanded_parent(&playlist.id);
-        let style = SlotListSlotStyle::for_slot(ctx.is_center, is_expanded, ctx.opacity);
+        let style = SlotListSlotStyle::for_slot(ctx.is_center, is_expanded, ctx.is_selected, ctx.opacity);
 
         let base_artwork_size = (ctx.row_height - 16.0).max(32.0);
         let artwork_size = base_artwork_size * ctx.scale_factor;
@@ -707,7 +747,7 @@ impl PlaylistsPage {
             .on_press(if ctx.is_center {
                 PlaylistsMessage::SlotListActivateCenter
             } else if stable_viewport {
-                PlaylistsMessage::SlotListSetOffset(ctx.item_index)
+                PlaylistsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
             } else {
                 PlaylistsMessage::SlotListClickPlay(ctx.item_index)
             })
@@ -745,7 +785,7 @@ impl PlaylistsPage {
             ctx,
             PlaylistsMessage::SlotListActivateCenter,
             if stable_viewport {
-                PlaylistsMessage::SlotListSetOffset(ctx.item_index)
+                PlaylistsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
             } else {
                 PlaylistsMessage::SlotListClickPlay(ctx.item_index)
             },

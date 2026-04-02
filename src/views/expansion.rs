@@ -249,11 +249,12 @@ impl<C: Clone> ExpansionState<C> {
     pub fn handle_select_offset<P>(
         &self,
         offset: usize,
+        modifiers: iced::keyboard::Modifiers,
         parents: &[P],
         common: &mut SlotListPageState,
     ) -> Option<usize> {
         let len = self.flattened_len(parents);
-        common.handle_select_offset(offset, len);
+        common.handle_slot_click(offset, len, modifiers);
         common.get_center_item_index(len)
     }
 
@@ -496,7 +497,7 @@ pub(crate) fn render_child_track_row<'a, M: Clone + 'a>(
     on_star_click: Option<M>,
 ) -> Element<'a, M> {
     // Center slot gets bright center style; non-center children get highlighted (blue) group look
-    let style = SlotListSlotStyle::for_slot(ctx.is_center, !ctx.is_center, ctx.opacity);
+    let style = SlotListSlotStyle::for_slot(ctx.is_center, !ctx.is_center, ctx.is_selected, ctx.opacity);
 
     let title_size = calculate_font_size(14.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
     let meta_size = calculate_font_size(12.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
@@ -576,7 +577,7 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a>(
     show_artist: bool,
     on_star_click: Option<M>,
 ) -> Element<'a, M> {
-    let style = SlotListSlotStyle::for_slot(ctx.is_center, !ctx.is_center, ctx.opacity);
+    let style = SlotListSlotStyle::for_slot(ctx.is_center, !ctx.is_center, ctx.is_selected, ctx.opacity);
 
     let title_size = calculate_font_size(14.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
     let meta_size = calculate_font_size(12.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;

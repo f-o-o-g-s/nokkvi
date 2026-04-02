@@ -728,4 +728,100 @@ impl AppService {
     pub async fn play_next_preloaded(&self, songs: Vec<crate::types::song::Song>) -> Result<()> {
         self.play_next_songs(songs).await
     }
+
+    // =========================================================================
+    // Batch Orchestration Methods
+    //
+    // These methods receive a `BatchPayload` and resolve it continuously, flattening
+    // the ordered batch items into a de-duplicated `Vec<Song>`.
+    // =========================================================================
+
+    /// Resolve a `BatchPayload` into a flat, ordered, de-duplicated Vec of Songs.
+    pub async fn resolve_batch(
+        &self,
+        batch: crate::types::batch::BatchPayload,
+    ) -> Result<Vec<crate::types::song::Song>> {
+        use crate::types::batch::BatchItem;
+        use std::collections::HashSet;
+
+        let mut resolved_songs = Vec::new();
+        let mut seen_ids = HashSet::new();
+
+        for item in batch.items {
+            let songs_result = match item {
+                BatchItem::Song(song) => Ok(vec![*song]),
+                BatchItem::Album(album_id) => self.albums_service.load_album_songs(&album_id).await,
+                BatchItem::Artist(artist_id) => self.artists_service.load_artist_songs(&artist_id).await,
+                BatchItem::Genre(genre) => self.load_genre_songs(&genre).await,
+                BatchItem::Playlist(playlist_id) => self.load_playlist_songs(&playlist_id).await,
+            };
+
+            if let Ok(songs) = songs_result {
+                for song in songs {
+                    if seen_ids.insert(song.id.clone()) {
+                        resolved_songs.push(song);
+                    }
+                }
+            }
+        }
+
+        if resolved_songs.is_empty() {
+            Err(anyhow::anyhow!("No songs found in batch payload"))
+        } else {
+            Ok(resolved_songs)
+        }
+    }
+
+    /// Play a batch. Replaces the current queue and starts playing.
+    pub async fn play_batch(&self, batch: crate::types::batch::BatchPayload) -> Result<()> {
+        let songs = self.resolve_batch(batch).await?;
+        self.playback_songs(songs, 0).await
+    }
+    
+    // helper wrapper to call internal logic bypassing self-clone if possible:
+    async fn playback_songs(&self, songs: Vec<crate::types::song::Song>, start_index: usize) -> Result<()> {
+        self.playback.play_songs_from_index(songs, start_index).await
+    }
+
+    /// Add a batch to the queue (append).
+    pub async fn add_batch_to_queue(&self, batch: crate::types::batch::BatchPayload) -> Result<()> {
+        let songs = self.resolve_batch(batch).await?;
+        self.queue_service.add_songs(songs).await?;
+        debug!("➕ Added batch to queue");
+        Ok(())
+    }
+
+    /// Add a batch right after the currently playing track.
+    pub async fn play_next_batch(&self, batch: crate::types::batch::BatchPayload) -> Result<()> {
+        let songs = self.resolve_batch(batch).await?;
+        self.play_next_songs(songs).await
+    }
+
+    /// Insert a batch at a specific position in the queue.
+    pub async fn insert_batch_at_position(&self, batch: crate::types::batch::BatchPayload, position: usize) -> Result<()> {
+        let songs = self.resolve_batch(batch).await?;
+        self.queue_service.insert_songs_at(position, songs).await?;
+        debug!("📌 Inserted batch at queue position {}", position);
+        Ok(())
+    }
+
+    /// Remove a batch of indices from the queue. Indices must be provided as a Vec.
+    /// They will be sorted in descending order to prevent index shifting during removal.
+    pub async fn remove_batch_from_queue(&self, mut indices: Vec<usize>) -> Result<()> {
+        // Sort in descending order
+        indices.sort_unstable_by(|a, b| b.cmp(a));
+        
+        let mut count = 0;
+        for idx in indices {
+            // Log individually but we're removing sequentially
+            if self.queue_service.remove_song(idx).await.is_ok() {
+                count += 1;
+            }
+        }
+        
+        if count > 0 {
+            debug!("➖ Removed {} songs from queue via batch", count);
+        }
+        Ok(())
+    }
 }

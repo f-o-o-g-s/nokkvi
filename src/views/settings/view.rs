@@ -166,7 +166,7 @@ impl SettingsPage {
             SettingsMessage::SlotListDown,
             {
                 let total = entries_owned.len();
-                move |f| SettingsMessage::SlotListSetOffset((f * total as f32) as usize)
+                move |f| SettingsMessage::SlotListSetOffset((f * total as f32) as usize, iced::keyboard::Modifiers::default())
             },
             move |entry, ctx| {
                 let is_editing = editing_index == Some(ctx.item_index);
@@ -570,7 +570,7 @@ impl SettingsPage {
                 SettingsMessage::SlotListDown,
                 {
                     let total = fonts_owned.len();
-                    move |f| SettingsMessage::SlotListSetOffset((f * total as f32) as usize)
+                    move |f| SettingsMessage::SlotListSetOffset((f * total as f32) as usize, iced::keyboard::Modifiers::default())
                 },
                 move |font_name, ctx| {
                     let ctx = SlotRenderContext {

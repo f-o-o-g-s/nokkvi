@@ -24,6 +24,10 @@ pub struct SlotListView {
     /// When set, the center slot's `HoverOverlay` shows the press animation.
     /// Auto-expires after the overlay's animation duration.
     pub flash_center_at: Option<Instant>,
+    /// Multi-selection set of selected item indices (e.g. via Shift/Ctrl-click)
+    pub selected_indices: std::collections::BTreeSet<usize>,
+    /// The index where a shift-click range selection starts from
+    pub anchor_index: Option<usize>,
 }
 
 impl SlotListView {
@@ -35,6 +39,8 @@ impl SlotListView {
             last_scrolled: None,
             scroll_generation_id: 0,
             flash_center_at: None,
+            selected_indices: std::collections::BTreeSet::new(),
+            anchor_index: None,
         }
     }
 

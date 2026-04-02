@@ -92,7 +92,7 @@ impl Nokkvi {
                 // Also trigger collage load for initially centered playlist (index 0)
                 if !self.library.playlists.is_empty() {
                     tasks.push(Task::done(Message::Playlists(
-                        views::PlaylistsMessage::SlotListSetOffset(0),
+                        views::PlaylistsMessage::SlotListSetOffset(0, iced::keyboard::Modifiers::default()),
                     )));
                 }
 
@@ -187,17 +187,22 @@ impl Nokkvi {
                     "play playlist",
                 );
             }
-            views::PlaylistsAction::AddPlaylistToQueue(playlist_id) => {
-                let name = self
-                    .library
-                    .playlists
-                    .iter()
-                    .find(|p| p.id == playlist_id)
-                    .map_or_else(|| "playlist".to_string(), |p| p.name.clone());
+            views::PlaylistsAction::AddBatchToQueue(payload) => {
+                let len = payload.items.len();
+                debug!(" Adding batch of {} items to queue", len);
+                if let Some(pos) = self.pending_queue_insert_position.take() {
+                    return self.shell_fire_and_forget_task(
+                        move |shell| async move {
+                            shell.insert_batch_at_position(payload, pos).await
+                        },
+                        format!("Inserted {} items at position {}", len, pos + 1),
+                        "insert batch to queue",
+                    );
+                }
                 return self.shell_fire_and_forget_task(
-                    move |shell| async move { shell.add_playlist_to_queue(&playlist_id).await },
-                    format!("Added '{name}' to queue"),
-                    "add playlist to queue",
+                    move |shell| async move { shell.add_batch_to_queue(payload).await },
+                    format!("Added {len} items to queue"),
+                    "add batch to queue",
                 );
             }
             views::PlaylistsAction::ExpandPlaylist(playlist_id) => {
@@ -243,33 +248,7 @@ impl Nokkvi {
                     "play playlist from track",
                 );
             }
-            views::PlaylistsAction::AddSongToQueue(song_id, album_id) => {
-                let title = self
-                    .playlists_page
-                    .expansion
-                    .children
-                    .iter()
-                    .find(|s| s.id == song_id)
-                    .map_or_else(|| "song".to_string(), |s| s.title.clone());
-                if let Some(pos) = self.pending_queue_insert_position.take() {
-                    return self.shell_fire_and_forget_task(
-                        move |shell| async move {
-                            shell
-                                .insert_song_by_id_at_position(&song_id, &album_id, pos)
-                                .await
-                        },
-                        format!("Inserted '{title}' at position {}", pos + 1),
-                        "insert song to queue",
-                    );
-                }
-                return self.shell_fire_and_forget_task(
-                    move |shell| async move {
-                        shell.add_song_to_queue_by_id(&song_id, &album_id).await
-                    },
-                    format!("Added '{title}' to queue"),
-                    "add song to queue",
-                );
-            }
+
             views::PlaylistsAction::LoadArtwork(playlist_index_str) => {
                 // Load artwork for all visible slot list slots using collage artwork service
                 use crate::services::collage_artwork::{self, CollageArtworkContext};
@@ -369,14 +348,14 @@ impl Nokkvi {
                     self.star_item_task(item_id, item_type, star),
                 ]);
             }
-            PlaylistsAction::PlayNext(id) => {
+            PlaylistsAction::PlayNextBatch(payload) => {
                 if self.modes.random {
-                    self.toast_warn("Shuffle is on — next track will be random, not this one");
+                    self.toast_warn("Shuffle is on — next tracks will be random, not these");
                 }
                 return self.shell_fire_and_forget_task(
-                    move |shell| async move { shell.play_next_playlist(&id).await },
-                    "Playing next".to_string(),
-                    "play next playlist",
+                    move |shell| async move { shell.play_next_batch(payload).await },
+                    "Added batch to play next".to_string(),
+                    "play next batch",
                 );
             }
             PlaylistsAction::DeletePlaylist(playlist_id) => {

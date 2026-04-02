@@ -30,6 +30,7 @@ pub struct SongsViewData<'a> {
     pub window_width: f32,
     pub window_height: f32,
     pub scale_factor: f32,
+    pub modifiers: iced::keyboard::Modifiers,
     pub total_song_count: usize,
     pub loading: bool,
     pub stable_viewport: bool,
@@ -41,7 +42,7 @@ pub enum SongsMessage {
     // Slot list navigation
     SlotListNavigateUp,
     SlotListNavigateDown,
-    SlotListSetOffset(usize),
+    SlotListSetOffset(usize, iced::keyboard::Modifiers),
     SlotListScrollSeek(usize),
     SlotListActivateCenter,
     SlotListClickPlay(usize), // Click non-center to play directly (skip focus)
@@ -72,7 +73,8 @@ pub enum SongsMessage {
 #[derive(Debug, Clone)]
 pub enum SongsAction {
     PlaySongFromIndex(usize), // Play songs starting from index
-    AddSongToQueue(String),   // song_id - add to queue without clearing
+    AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
+    AddBatchToPlaylist(nokkvi_data::types::batch::BatchPayload),
     ToggleStar(String, bool), // (song_id, star)
     SetRating(String, usize), // (song_id, rating) - set absolute rating
     LoadLargeArtwork(String), // album_id for artwork
@@ -81,7 +83,8 @@ pub enum SongsAction {
     SearchChanged(String),                           // trigger reload
     SortModeChanged(widgets::view_header::SortMode), // trigger reload
     SortOrderChanged(bool),                          // trigger reload
-    PlayNext(String),                                // song_id - insert after currently playing
+    PlayNextBatch(nokkvi_data::types::batch::BatchPayload), // Batch payload
+    PlayBatch(nokkvi_data::types::batch::BatchPayload), // Play immediately
     AddToPlaylist(String),                           // song_id - add to playlist dialog
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
     ShowInFolder(String),                            // relative path - open containing folder
@@ -152,8 +155,8 @@ impl SongsPage {
                 }
                 (Task::none(), SongsAction::None)
             }
-            SongsMessage::SlotListSetOffset(offset) => {
-                self.common.handle_select_offset(offset, total_items);
+            SongsMessage::SlotListSetOffset(offset, modifiers) => {
+                self.common.handle_slot_click(offset, total_items, modifiers);
                 if let Some(center_idx) = self.common.get_center_item_index(total_items)
                     && let Some(song) = songs.get(center_idx)
                     && let Some(album_id) = &song.album_id
@@ -170,7 +173,17 @@ impl SongsPage {
                 (Task::none(), SongsAction::None)
             }
             SongsMessage::SlotListActivateCenter => {
-                if let Some(center_idx) = self.common.get_center_item_index(total_items) {
+                if !self.common.slot_list.selected_indices.is_empty() {
+                    use nokkvi_data::types::batch::{BatchItem, BatchPayload};
+                    let payload = self.common.slot_list.selected_indices
+                        .iter()
+                        .filter_map(|&index| songs.get(index).map(|s| {
+                            let item: nokkvi_data::types::song::Song = s.clone().into();
+                            BatchItem::Song(Box::new(item))
+                        }))
+                        .fold(BatchPayload::new(), |p, i| p.with_item(i));
+                    (Task::none(), SongsAction::PlayBatch(payload))
+                } else if let Some(center_idx) = self.common.get_center_item_index(total_items) {
                     self.common.slot_list.flash_center();
                     (Task::none(), SongsAction::PlaySongFromIndex(center_idx))
                 } else {
@@ -182,12 +195,31 @@ impl SongsPage {
                 self.update(SongsMessage::SlotListActivateCenter, songs)
             }
             SongsMessage::AddCenterToQueue => {
-                if let Some(center_idx) = self.common.get_center_item_index(total_items)
-                    && let Some(song) = songs.get(center_idx)
-                {
-                    return (Task::none(), SongsAction::AddSongToQueue(song.id.clone()));
+                use nokkvi_data::types::batch::{BatchItem, BatchPayload};
+
+                let target_indices: Vec<usize> = if !self.common.slot_list.selected_indices.is_empty() {
+                    self.common.slot_list.selected_indices.iter().copied().collect()
+                } else if let Some(center_idx) = self.common.get_center_item_index(total_items) {
+                    vec![center_idx]
+                } else {
+                    vec![]
+                };
+
+                if target_indices.is_empty() {
+                    return (Task::none(), SongsAction::None);
                 }
-                (Task::none(), SongsAction::None)
+
+                let payload = target_indices
+                    .into_iter()
+                    .filter_map(|i| {
+                        songs.get(i).map(|s| {
+                            let item: nokkvi_data::types::song::Song = s.clone().into();
+                            BatchItem::Song(Box::new(item))
+                        })
+                    })
+                    .fold(BatchPayload::new(), |p: BatchPayload, item| p.with_item(item));
+
+                (Task::none(), SongsAction::AddBatchToQueue(payload))
             }
             SongsMessage::ToggleCenterStar => {
                 if let Some(center_idx) = self.common.get_center_item_index(total_items)
@@ -258,15 +290,32 @@ impl SongsPage {
                 (Task::none(), SongsAction::None)
             }
 
-            SongsMessage::ContextMenuAction(item_index, entry) => {
+            SongsMessage::ContextMenuAction(clicked_idx, entry) => {
                 use crate::widgets::context_menu::LibraryContextEntry;
-                if let Some(song) = songs.get(item_index) {
+                use nokkvi_data::types::batch::{BatchItem, BatchPayload};
+
+                let target_indices = self.common.evaluate_context_menu(clicked_idx);
+
+                let payload = target_indices
+                    .into_iter()
+                    .filter_map(|i| {
+                        songs.get(i).map(|s| {
+                            let item: nokkvi_data::types::song::Song = s.clone().into();
+                            BatchItem::Song(Box::new(item))
+                        })
+                    })
+                    .fold(BatchPayload::new(), |p: BatchPayload, item| p.with_item(item));
+
+                if let Some(song) = songs.get(clicked_idx) {
                     match entry {
                         LibraryContextEntry::AddToQueue => {
-                            (Task::none(), SongsAction::AddSongToQueue(song.id.clone()))
+                            (Task::none(), SongsAction::AddBatchToQueue(payload))
                         }
                         LibraryContextEntry::AddToPlaylist => {
-                            (Task::none(), SongsAction::AddToPlaylist(song.id.clone()))
+                            // AddToPlaylist backend takes a Vec<String> of song IDs, or a batch?
+                            // We will emit AddBatchToPlaylist but for now, if Batch doesn't fit AddToPlaylist perfectly,
+                            // we can map payload -> IDs. Let's just pass payload.
+                            (Task::none(), SongsAction::AddBatchToPlaylist(payload))
                         }
                         LibraryContextEntry::GetInfo => {
                             use nokkvi_data::types::info_modal::InfoModalItem;
@@ -364,7 +413,7 @@ impl SongsPage {
         };
 
         let config =
-            SlotListConfig::with_dynamic_slots(data.window_height, chrome_height_with_header());
+            SlotListConfig::with_dynamic_slots(data.window_height, chrome_height_with_header()).with_modifiers(data.modifiers);
 
         // Capture values needed in closure
         let songs = data.songs;
@@ -404,7 +453,7 @@ impl SongsPage {
                     SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column,
                     slot_list_text,
                 };
-                let style = SlotListSlotStyle::for_slot(ctx.is_center, false, ctx.opacity);
+                let style = SlotListSlotStyle::for_slot(ctx.is_center, false, ctx.is_selected, ctx.opacity);
 
                 // Dynamic scaling based on row height AND scale factor
                 let base_artwork_size = (ctx.row_height - 16.0).max(32.0);
@@ -539,7 +588,7 @@ impl SongsPage {
                     .on_press(if ctx.is_center {
                         SongsMessage::SlotListActivateCenter
                     } else if data.stable_viewport {
-                        SongsMessage::SlotListSetOffset(ctx.item_index)
+                        SongsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
                     } else {
                         SongsMessage::SlotListClickPlay(ctx.item_index)
                     })

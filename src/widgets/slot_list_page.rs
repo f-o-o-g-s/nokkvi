@@ -79,9 +79,77 @@ impl SlotListPageState {
 
     /// Handle click-to-focus: highlight the item without moving the viewport.
     /// Sets `selected_offset` so the item gets center styling in-place.
-    pub fn handle_select_offset(&mut self, offset: usize, total_items: usize) {
-        self.slot_list.set_selected(offset, total_items);
-        self.slot_list.record_scroll();
+    /// Handles Shift and Ctrl modifiers to manage the multi-selection set.
+    pub fn handle_slot_click(
+        &mut self,
+        offset: usize,
+        total_items: usize,
+        modifiers: iced::keyboard::Modifiers,
+    ) {
+        if offset >= total_items {
+            return;
+        }
+
+        if modifiers.control() {
+            // Toggle selection for clicked item
+            if self.slot_list.selected_indices.contains(&offset) {
+                self.slot_list.selected_indices.remove(&offset);
+                // If we removed the anchor, there's no intelligent recalculation. Just leave it or clear it.
+                if self.slot_list.anchor_index == Some(offset) {
+                    self.slot_list.anchor_index = None;
+                }
+            } else {
+                self.slot_list.selected_indices.insert(offset);
+                self.slot_list.anchor_index = Some(offset);
+            }
+            self.slot_list.selected_offset = Some(offset);
+        } else if modifiers.shift() {
+            // Range selection
+            if let Some(anchor) = self.slot_list.anchor_index {
+                let start = anchor.min(offset);
+                let end = anchor.max(offset);
+                
+                // Clear existing selection except anchor, then add range
+                self.slot_list.selected_indices.clear();
+                for i in start..=end {
+                    self.slot_list.selected_indices.insert(i);
+                }
+            } else {
+                // No anchor yet, behave like a normal click
+                self.slot_list.selected_indices.clear();
+                self.slot_list.selected_indices.insert(offset);
+                self.slot_list.anchor_index = Some(offset);
+            }
+            self.slot_list.selected_offset = Some(offset);
+        } else {
+            // Normal click: clear multi-selection, select only this
+            self.clear_multi_selection();
+            self.slot_list.selected_indices.insert(offset);
+            self.slot_list.anchor_index = Some(offset);
+            self.slot_list.selected_offset = Some(offset);
+        }
+    }
+
+    /// Clear current multi-selection and return true if anything was cleared.
+    pub fn clear_multi_selection(&mut self) -> bool {
+        let has_selection = !self.slot_list.selected_indices.is_empty() || self.slot_list.anchor_index.is_some();
+        self.slot_list.selected_indices.clear();
+        self.slot_list.anchor_index = None;
+        has_selection
+    }
+
+    /// Evaluate a context menu click. If the clicked index is not in the selection,
+    /// the selection is cleared and the clicked index becomes the solely selected item.
+    /// Returns the target indices intended for batch operations.
+    pub fn evaluate_context_menu(&mut self, clicked_index: usize) -> Vec<usize> {
+        if self.slot_list.selected_indices.contains(&clicked_index) {
+            self.slot_list.selected_indices.iter().copied().collect()
+        } else {
+            self.clear_multi_selection();
+            self.slot_list.selected_indices.insert(clicked_index);
+            self.slot_list.anchor_index = Some(clicked_index);
+            vec![clicked_index]
+        }
     }
 
     /// Handle sort mode selection

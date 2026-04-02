@@ -396,26 +396,23 @@ impl Nokkvi {
                     }
                 }
             }
-            SongsAction::AddSongToQueue(song_id) => {
-                debug!(" Adding song to queue: {}", song_id);
-                if let Some(song) = self.library.songs.iter().find(|s| s.id == song_id) {
-                    let title = song.title.clone();
-                    let song: nokkvi_data::types::song::Song = song.clone().into();
-                    if let Some(pos) = self.pending_queue_insert_position.take() {
-                        return self.shell_fire_and_forget_task(
-                            move |shell| async move {
-                                shell.insert_song_at_position(song, pos).await
-                            },
-                            format!("Inserted '{title}' at position {}", pos + 1),
-                            "insert song to queue",
-                        );
-                    }
+            SongsAction::AddBatchToQueue(payload) => {
+                let len = payload.items.len();
+                debug!(" Adding batch of {} items to queue", len);
+                if let Some(pos) = self.pending_queue_insert_position.take() {
                     return self.shell_fire_and_forget_task(
-                        move |shell| async move { shell.add_song_to_queue(song).await },
-                        format!("Added '{title}' to queue"),
-                        "add song to queue",
+                        move |shell| async move {
+                            shell.insert_batch_at_position(payload, pos).await
+                        },
+                        format!("Inserted {} items at position {}", len, pos + 1),
+                        "insert batch to queue",
                     );
                 }
+                return self.shell_fire_and_forget_task(
+                    move |shell| async move { shell.add_batch_to_queue(payload).await },
+                    format!("Added {len} items to queue"),
+                    "add batch to queue",
+                );
             }
             SongsAction::ToggleStar(song_id, star) => {
                 let optimistic_msg = Self::starred_revert_message(song_id.clone(), "song", star);
@@ -424,6 +421,7 @@ impl Nokkvi {
                     self.star_item_task(song_id, "song", star),
                 ]);
             }
+
             SongsAction::SetRating(song_id, new_rating) => {
                 let current = self
                     .library
@@ -465,26 +463,48 @@ impl Nokkvi {
             SongsAction::LoadPage(offset) => {
                 return self.handle_songs_load_page(offset);
             }
-            SongsAction::AddToPlaylist(song_id) => {
-                let song_ids = vec![song_id];
-                return self.fetch_playlists_for_add_to_playlist(song_ids);
+            SongsAction::AddBatchToPlaylist(payload) => {
+                // Wait! To add to playlist we need a flat list of `song_ids`. 
+                // Currently `fetch_playlists_for_add_to_playlist` takes a `Vec<String>` of song_ids!
+                // To cleanly integrate, we can resolve the payload strings.
+                // However, resolving full batches (Artists/Albums) requires an async call before we show
+                // the "Choose a playlist" dialog?
+                // Let's resolve the batch *after* the user chooses a playlist, but `fetch_playlists_for_add_to_playlist` 
+                // just stores the IDs in `self.pending_add_to_playlist`.
+                return self.handle_add_batch_to_playlist(payload);
             }
-            SongsAction::PlayNext(song_id) => {
-                // Find the song in the current songs buffer to get album_id
-                if let Some(song) = self.library.songs.iter().find(|s| s.id == song_id) {
-                    let album_id = song.album_id.clone().unwrap_or_default();
-                    let sid = song_id.clone();
-                    if self.modes.random {
-                        self.toast_warn("Shuffle is on — next track will be random, not this one");
-                    }
-                    return self.shell_fire_and_forget_task(
-                        move |shell| async move {
-                            shell.play_next_song_by_id(&sid, &album_id).await
-                        },
-                        "Playing next".to_string(),
-                        "play next song",
-                    );
+            SongsAction::PlayNextBatch(payload) => {
+                debug!(" Playing batch of {} items next", payload.items.len());
+                if self.modes.random {
+                    self.toast_warn("Shuffle is on — next tracks will be random, not these");
                 }
+                return self.shell_fire_and_forget_task(
+                    move |shell| async move { shell.play_next_batch(payload).await },
+                    "Added batch to play next".to_string(),
+                    "play next batch",
+                );
+            }
+            SongsAction::PlayBatch(payload) => {
+                let len = payload.items.len();
+                debug!(" Playing batch of {} items", len);
+                self.active_playlist_info = None;
+                self.persist_active_playlist_info();
+                self.songs_page.common.slot_list.selected_indices.clear();
+                return self.shell_task(
+                    move |shell| async move { shell.play_batch(payload).await },
+                    move |result| match result {
+                        Ok(()) => Message::SwitchView(View::Queue),
+                        Err(e) => {
+                            error!(" Failed to play batch: {}", e);
+                            Message::Toast(crate::app_message::ToastMessage::Push(
+                                nokkvi_data::types::toast::Toast::new(
+                                    format!("Failed to play batch: {e}"),
+                                    nokkvi_data::types::toast::ToastLevel::Error,
+                                ),
+                            ))
+                        }
+                    },
+                );
             }
             SongsAction::ShowInfo(item) => {
                 return self.update(Message::InfoModal(

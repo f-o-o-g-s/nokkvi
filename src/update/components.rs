@@ -641,6 +641,22 @@ impl Nokkvi {
         )
     }
 
+    /// Resolve a `BatchPayload` into song IDs, fetch playlists, and open the dialog.
+    pub(crate) fn handle_add_batch_to_playlist(
+        &self,
+        batch: nokkvi_data::types::batch::BatchPayload,
+    ) -> Task<Message> {
+        let len = batch.items.len();
+        debug!(" Fetching playlists for batch of {} items", len);
+        self.resolve_and_add_to_playlist(
+            move |shell| async move {
+                let songs = shell.resolve_batch(batch).await?;
+                Ok(songs.into_iter().map(|s| s.id).collect())
+            },
+            "resolve batch for playlist",
+        )
+    }
+
     /// Map the result of a combined "resolve songs + fetch playlists" async task
     /// into the appropriate `Message`.
     ///

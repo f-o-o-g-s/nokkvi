@@ -355,8 +355,11 @@ pub enum Message {
     ThemeConfigReloaded,
 
     // --- Raw Keyboard Event ---
+    // --- Raw Keyboard Event ---
     /// Raw key press forwarded from subscription; dispatched via HotkeyConfig in update()
     RawKeyEvent(iced::keyboard::Key, iced::keyboard::Modifiers),
+    /// Tracks global keyboard modifiers (shift/ctrl/alt/logo) for mouse interaction (e.g. shift+click)
+    ModifiersChanged(iced::keyboard::Modifiers),
 
     // --- Toast Notifications ---
     Toast(ToastMessage),

@@ -273,79 +273,151 @@ impl Nokkvi {
                     shell.queue().refresh_from_queue().await
                 });
             }
-            QueueAction::RemoveFromQueue(index) => {
-                // Map filtered index → real queue index via track_number
-                if let Some(song) = filtered_queue.get(index) {
-                    let queue_index = song.track_number as usize - 1;
-                    let song_title = song.title.clone();
-                    // Optimistic local removal using real queue index
-                    if queue_index < self.library.queue_songs.len() {
-                        self.library.queue_songs.remove(queue_index);
+            QueueAction::RemoveFromQueue(indices) => {
+                let mut raw_indices_desc: Vec<usize> = indices.iter()
+                    .filter_map(|&idx| filtered_queue.get(idx).map(|s| s.track_number as usize - 1))
+                    .collect();
+                if raw_indices_desc.is_empty() { return Task::none(); }
+                raw_indices_desc.sort_unstable_by(|a, b| b.cmp(a)); // Descending
+
+                let title_text = if raw_indices_desc.len() == 1 {
+                    self.library.queue_songs.get(raw_indices_desc[0]).map(|s| format!("\"{}\"", s.title)).unwrap_or_default()
+                } else {
+                    format!("{} songs", raw_indices_desc.len())
+                };
+
+                // Optimistic local removal
+                for &qi in &raw_indices_desc {
+                    if qi < self.library.queue_songs.len() {
+                        self.library.queue_songs.remove(qi);
                     }
-                    self.toast_info(format!("Removed \"{song_title}\" from queue"));
-                    self.shell_spawn("queue_remove", move |shell| async move {
-                        shell.queue().remove_song(queue_index).await?;
-                        shell.queue().refresh_from_queue().await
-                    });
                 }
+                self.toast_info(format!("Removed {title_text} from queue"));
+
+                self.shell_spawn("queue_remove_batch", move |shell| async move {
+                    let qm_arc = shell.queue().queue_manager();
+                    let mut qm = qm_arc.lock().await;
+                    for &qi in &raw_indices_desc {
+                        qm.remove_song(qi).ok();
+                    }
+                    drop(qm);
+                    shell.queue().refresh_from_queue().await
+                });
             }
-            QueueAction::MoveToTop(index) => {
-                // Map filtered index → real queue index via track_number
-                if let Some(song) = filtered_queue.get(index) {
-                    let queue_index = song.track_number as usize - 1;
-                    // Optimistic local move using real queue index
-                    let len = self.library.queue_songs.len();
-                    if queue_index > 0 && queue_index < len {
-                        let item = self.library.queue_songs.remove(queue_index);
-                        self.library.queue_songs.insert(0, item);
+            QueueAction::MoveToTop(indices) => {
+                let mut raw_indices_desc: Vec<usize> = indices.iter()
+                    .filter_map(|&idx| filtered_queue.get(idx).map(|s| s.track_number as usize - 1))
+                    .collect();
+                if raw_indices_desc.is_empty() { return Task::none(); }
+                raw_indices_desc.sort_unstable_by(|a, b| b.cmp(a)); // Descending
+
+                // Optimistic UI
+                let mut moved = Vec::new();
+                for &qi in &raw_indices_desc {
+                    if qi < self.library.queue_songs.len() {
+                        moved.push(self.library.queue_songs.remove(qi));
                     }
-                    self.shell_spawn("queue_move_top", move |shell| async move {
-                        shell.queue().move_to_top(queue_index).await?;
-                        shell.queue().refresh_from_queue().await
-                    });
                 }
+                moved.reverse(); // Now original ascending order
+                for song in moved.into_iter().rev() {
+                    self.library.queue_songs.insert(0, song);
+                }
+
+                self.shell_spawn("queue_move_top_batch", move |shell| async move {
+                    let qm_arc = shell.queue().queue_manager();
+                    let mut qm = qm_arc.lock().await;
+                    let mut extracted = Vec::new();
+                    for &qi in &raw_indices_desc {
+                        if let Some(id) = qm.get_queue().song_ids.get(qi).cloned()
+                            && let Some(song) = qm.get_song(&id) {
+                                extracted.push(song.clone());
+                            }
+                    }
+                    for &qi in &raw_indices_desc { qm.remove_song(qi).ok(); }
+                    extracted.reverse();
+                    qm.insert_songs_at(0, extracted).ok();
+                    drop(qm);
+                    shell.queue().refresh_from_queue().await
+                });
             }
-            QueueAction::MoveToBottom(index) => {
-                // Map filtered index → real queue index via track_number
-                if let Some(song) = filtered_queue.get(index) {
-                    let queue_index = song.track_number as usize - 1;
-                    // Optimistic local move using real queue index
-                    let len = self.library.queue_songs.len();
-                    if queue_index < len {
-                        let item = self.library.queue_songs.remove(queue_index);
-                        self.library.queue_songs.push(item);
+            QueueAction::MoveToBottom(indices) => {
+                let mut raw_indices_desc: Vec<usize> = indices.iter()
+                    .filter_map(|&idx| filtered_queue.get(idx).map(|s| s.track_number as usize - 1))
+                    .collect();
+                if raw_indices_desc.is_empty() { return Task::none(); }
+                raw_indices_desc.sort_unstable_by(|a, b| b.cmp(a)); // Descending
+
+                // Optimistic UI
+                let mut moved = Vec::new();
+                for &qi in &raw_indices_desc {
+                    if qi < self.library.queue_songs.len() {
+                        moved.push(self.library.queue_songs.remove(qi));
                     }
-                    self.shell_spawn("queue_move_bottom", move |shell| async move {
-                        shell.queue().move_to_bottom(queue_index).await?;
-                        shell.queue().refresh_from_queue().await
-                    });
                 }
+                moved.reverse(); // Now original ascending order
+                for song in moved {
+                    self.library.queue_songs.push(song);
+                }
+
+                self.shell_spawn("queue_move_bottom_batch", move |shell| async move {
+                    let qm_arc = shell.queue().queue_manager();
+                    let mut qm = qm_arc.lock().await;
+                    let mut extracted = Vec::new();
+                    for &qi in &raw_indices_desc {
+                        if let Some(id) = qm.get_queue().song_ids.get(qi).cloned()
+                            && let Some(song) = qm.get_song(&id) {
+                                extracted.push(song.clone());
+                            }
+                    }
+                    for &qi in &raw_indices_desc { qm.remove_song(qi).ok(); }
+                    extracted.reverse();
+                    let target_idx = qm.get_queue().song_ids.len();
+                    qm.insert_songs_at(target_idx, extracted).ok();
+                    drop(qm);
+                    shell.queue().refresh_from_queue().await
+                });
             }
-            QueueAction::PlayNext(index) => {
-                // Map filtered index → real queue index via track_number
-                if let Some(song) = filtered_queue.get(index) {
-                    let queue_index = song.track_number as usize - 1;
-                    let song_title = song.title.clone();
-                    self.toast_info(format!("\"{song_title}\" will play next"));
-                    if self.modes.random {
-                        self.toast_warn("Shuffle is on — next track will be random, not this one");
-                    }
-                    self.shell_spawn("queue_play_next", move |shell| async move {
-                        let current_idx = shell.queue().current_index().await;
-                        let target = current_idx.map_or(0, |i| i + 1);
-                        // Only move if not already at the target position
-                        if queue_index != target {
-                            shell.queue().move_item(queue_index, target).await?;
-                        }
-                        shell.queue().refresh_from_queue().await
-                    });
+            QueueAction::PlayNext(indices) => {
+                let mut raw_indices_desc: Vec<usize> = indices.iter()
+                    .filter_map(|&idx| filtered_queue.get(idx).map(|s| s.track_number as usize - 1))
+                    .collect();
+                if raw_indices_desc.is_empty() { return Task::none(); }
+                raw_indices_desc.sort_unstable_by(|a, b| b.cmp(a)); // Descending
+
+                let title_text = if raw_indices_desc.len() == 1 {
+                    self.library.queue_songs.get(raw_indices_desc[0]).map(|s| format!("\"{}\"", s.title)).unwrap_or_default()
+                } else {
+                    format!("{} songs", raw_indices_desc.len())
+                };
+
+                self.toast_info(format!("{title_text} will play next"));
+                if self.modes.random {
+                    self.toast_warn("Shuffle is on — next tracks will be random, not these");
                 }
+
+                // Skip optimistic UI for PlayNext as it requires dynamic target resolution, just rely on backend sync
+                self.shell_spawn("queue_play_next_batch", move |shell| async move {
+                    let qm_arc = shell.queue().queue_manager();
+                    let mut qm = qm_arc.lock().await;
+                    let mut extracted = Vec::new();
+                    for &qi in &raw_indices_desc {
+                        if let Some(id) = qm.get_queue().song_ids.get(qi).cloned()
+                            && let Some(song) = qm.get_song(&id) {
+                                extracted.push(song.clone());
+                            }
+                    }
+                    for &qi in &raw_indices_desc { qm.remove_song(qi).ok(); }
+                    extracted.reverse(); // Now ascending
+                    qm.insert_after_current(extracted).ok();
+                    drop(qm);
+                    shell.queue().refresh_from_queue().await
+                });
             }
             QueueAction::ShowToast(msg) => {
                 self.toast_info(msg);
             }
-            QueueAction::AddToPlaylist(song_id) => {
-                return self.fetch_playlists_for_add_to_playlist(vec![song_id]);
+            QueueAction::AddToPlaylist(song_ids) => {
+                return self.fetch_playlists_for_add_to_playlist(song_ids);
             }
             QueueAction::SaveAsPlaylist => {
                 if self.library.queue_songs.is_empty() {

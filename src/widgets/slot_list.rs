@@ -20,9 +20,14 @@ use crate::{theme, widgets::SlotListView};
 pub(crate) struct SlotListRowContext {
     pub item_index: usize,
     pub is_center: bool,
+    pub is_selected: bool,
     pub opacity: f32,
-    pub row_height: f32,
+    /// Window scale factor
     pub scale_factor: f32,
+    /// Layout row height
+    pub row_height: f32,
+    /// Global keyboard modifiers
+    pub modifiers: iced::keyboard::Modifiers,
 }
 
 /// Styling for slot list slots (backgrounds, borders, text colors)
@@ -38,7 +43,7 @@ pub(crate) struct SlotListSlotStyle {
 
 impl SlotListSlotStyle {
     /// Get slot styling based on state
-    pub(crate) fn for_slot(is_center: bool, is_highlighted: bool, opacity: f32) -> Self {
+    pub(crate) fn for_slot(is_center: bool, is_highlighted: bool, is_selected: bool, opacity: f32) -> Self {
         if is_highlighted {
             // Currently playing/selected state (e.g., current song in queue)
             Self {
@@ -49,12 +54,12 @@ impl SlotListSlotStyle {
                 text_color: theme::bg0_hard(),
                 subtext_color: theme::bg0_hard(),
             }
-        } else if is_center {
-            // Center slot — uses dedicated selected_color for visual hierarchy,
+        } else if is_selected || is_center {
+            // Selected item or center slot highlighting
             // decoupled from the now-playing highlight color.
             Self {
                 bg_color: theme::selected_color(),
-                border_color: theme::selected_color(),
+                border_color: if is_center { theme::accent_bright() } else { theme::selected_color() },
                 border_width: 2.0,
                 border_radius: slot_list_border_radius(),
                 text_color: theme::bg0_hard(),
@@ -204,6 +209,8 @@ pub(crate) struct SlotListConfig {
     /// When true, slots with no corresponding item are skipped (not rendered).
     /// Used by settings to avoid showing empty placeholder rows.
     pub cull_empty: bool,
+    /// The global keyboard modifiers state (for shift/ctrl clicking) 
+    pub modifiers: iced::keyboard::Modifiers,
 }
 
 impl Default for SlotListConfig {
@@ -214,6 +221,7 @@ impl Default for SlotListConfig {
             window_height: 800.0,
             chrome_height: chrome_height_with_header(),
             cull_empty: false,
+            modifiers: iced::keyboard::Modifiers::default(),
         }
     }
 }
@@ -273,7 +281,14 @@ impl SlotListConfig {
             window_height,
             chrome_height,
             cull_empty: false,
+            modifiers: iced::keyboard::Modifiers::default(),
         }
+    }
+
+    /// Builder method to set global keyboard modifiers for slot interactions
+    pub(crate) fn with_modifiers(mut self, modifiers: iced::keyboard::Modifiers) -> Self {
+        self.modifiers = modifiers;
+        self
     }
 
     /// Calculate row height based on window size
@@ -458,12 +473,15 @@ fn build_slot_list_slots<'a, T, Message: 'a>(
                     None => slot_index == effective_center,
                 };
                 is_center_slot = is_center;
+                let is_selected = sl.selected_indices.contains(&item_index);
                 let ctx = SlotListRowContext {
                     item_index,
                     is_center,
+                    is_selected,
                     opacity,
                     row_height,
                     scale_factor,
+                    modifiers: config.modifiers,
                 };
                 render_item(item, ctx)
             } else if config.cull_empty {
@@ -910,7 +928,7 @@ pub(crate) fn slot_list_favorite_icon<'a, Message: Clone + 'a>(
 fn empty_slot<'a, Message: 'a>(opacity: f32) -> Element<'a, Message> {
     use iced::Alignment;
 
-    let style = SlotListSlotStyle::for_slot(false, false, opacity);
+    let style = SlotListSlotStyle::for_slot(false, false, false, opacity);
 
     container(
         iced::widget::text("· · ·")
@@ -962,6 +980,7 @@ mod tests {
             slot_count: 9,
             center_slot: 0,
             cull_empty: false,
+            modifiers: iced::keyboard::Modifiers::default(),
         };
 
         let row_height = config.row_height();
@@ -980,6 +999,7 @@ mod tests {
             slot_count: 9,
             center_slot: 4,
             cull_empty: false,
+            modifiers: iced::keyboard::Modifiers::default(),
         };
 
         let row_height = config.row_height();

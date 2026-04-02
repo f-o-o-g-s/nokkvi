@@ -163,18 +163,16 @@ where
         match event {
             // Mouse press/release tracking (passive — never captures).
             // Request redraws so the scale-down effect is painted immediately.
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                if cursor.is_over(layout.bounds()) {
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+                if cursor.is_over(layout.bounds()) => {
                     state.is_mouse_pressed = true;
                     shell.request_redraw();
                 }
-            }
-            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                if state.is_mouse_pressed {
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+                if state.is_mouse_pressed => {
                     state.is_mouse_pressed = false;
                     shell.request_redraw();
                 }
-            }
 
             // During a flash animation, request redraws to keep it alive
             Event::Window(window::Event::RedrawRequested(_)) => {

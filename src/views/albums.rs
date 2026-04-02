@@ -37,6 +37,7 @@ pub struct AlbumsViewData<'a> {
     pub window_width: f32,
     pub window_height: f32,
     pub scale_factor: f32,
+    pub modifiers: iced::keyboard::Modifiers,
     pub total_album_count: usize,
     pub loading: bool,
     pub stable_viewport: bool,
@@ -48,7 +49,7 @@ pub enum AlbumsMessage {
     // Slot list navigation
     SlotListNavigateUp,
     SlotListNavigateDown,
-    SlotListSetOffset(usize),
+    SlotListSetOffset(usize, iced::keyboard::Modifiers),
     SlotListScrollSeek(usize),
     SlotListActivateCenter,
     SlotListClickPlay(usize), // Click non-center to play directly (skip focus)
@@ -90,12 +91,12 @@ pub enum AlbumsMessage {
 #[derive(Debug, Clone)]
 pub enum AlbumsAction {
     PlayAlbum(String),              // album_id - clear queue and play
-    AddAlbumToQueue(String),        // album_id - add to queue without clearing
-    AddSongToQueue(String, String), // (song_id, album_id) - add individual song to queue
+    PlayBatch(nokkvi_data::types::batch::BatchPayload),
+    AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
     LoadLargeArtwork(String),       // center_idx as string
     /// Expand album inline — root should load tracks (album_id)
     ExpandAlbum(String),
-    /// Play album starting from a specific track (album_id, track_index)
+    /// Play batch starting from a specific track (album_id, track_index)
     PlayAlbumFromTrack(String, usize),
     /// Set rating on item (item_id, item_type "album"|"song", rating)
     SetRating(String, &'static str, usize),
@@ -107,7 +108,7 @@ pub enum AlbumsAction {
     SortModeChanged(widgets::view_header::SortMode), // trigger reload
     SortOrderChanged(bool), // trigger reload
     PlayNext(String),      // album_id - insert after currently playing
-    AddToPlaylist(String), // album_id or song_id - add to playlist dialog
+    AddBatchToPlaylist(nokkvi_data::types::batch::BatchPayload),
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
     ShowInFolder(String),  // album_id - fetch a song path and open containing folder
     ShowSongInFolder(String), // song path - open containing folder directly (expansion child)
@@ -211,10 +212,8 @@ impl AlbumsPage {
                         None => (Task::none(), AlbumsAction::None),
                     }
                 }
-                AlbumsMessage::SlotListSetOffset(offset) => {
-                    let center =
-                        self.expansion
-                            .handle_select_offset(offset, albums, &mut self.common);
+                AlbumsMessage::SlotListSetOffset(offset, modifiers) => {
+                    let center = self.expansion.handle_select_offset(offset, modifiers, albums, &mut self.common);
                     match center {
                         Some(idx) => (
                             Task::none(),
@@ -236,7 +235,26 @@ impl AlbumsPage {
                 }
                 AlbumsMessage::SlotListActivateCenter => {
                     let total = self.expansion.flattened_len(albums);
-                    if let Some(center_idx) = self.common.get_center_item_index(total) {
+                    let center_idx = self.common.get_center_item_index(total);
+                    let target_indices = self.common.slot_list.selected_indices.iter().copied().collect::<Vec<_>>();
+
+                    if !target_indices.is_empty() {
+                        use nokkvi_data::types::batch::{BatchItem, BatchPayload};
+                        let payload = target_indices
+                            .into_iter()
+                            .filter_map(|i| match self.expansion.get_entry_at(i, albums, |a| &a.id) {
+                                Some(SlotListEntry::Parent(album)) => Some(BatchItem::Album(album.id.clone())),
+                                Some(SlotListEntry::Child(song, _)) => {
+                                    let item: nokkvi_data::types::song::Song = song.clone().into();
+                                    Some(BatchItem::Song(Box::new(item)))
+                                }
+                                None => None,
+                            })
+                            .fold(BatchPayload::new(), |p, item| p.with_item(item));
+                        return (Task::none(), AlbumsAction::PlayBatch(payload));
+                    }
+
+                    if let Some(center_idx) = center_idx {
                         self.common.slot_list.flash_center();
                         match self.expansion.get_entry_at(center_idx, albums, |a| &a.id) {
                             Some(SlotListEntry::Child(_song, parent_album_id)) => {
@@ -259,22 +277,36 @@ impl AlbumsPage {
                     }
                 }
                 AlbumsMessage::AddCenterToQueue => {
+                    use nokkvi_data::types::batch::{BatchItem, BatchPayload};
+
                     let total = self.expansion.flattened_len(albums);
-                    if let Some(center_idx) = self.common.get_center_item_index(total) {
-                        match self.expansion.get_entry_at(center_idx, albums, |a| &a.id) {
-                            Some(SlotListEntry::Child(song, parent_id)) => (
-                                Task::none(),
-                                AlbumsAction::AddSongToQueue(song.id.clone(), parent_id),
-                            ),
-                            Some(SlotListEntry::Parent(_)) => (
-                                Task::none(),
-                                AlbumsAction::AddAlbumToQueue(center_idx.to_string()),
-                            ),
-                            None => (Task::none(), AlbumsAction::None),
-                        }
+                    let target_indices: Vec<usize> = if !self.common.slot_list.selected_indices.is_empty() {
+                        self.common.slot_list.selected_indices.iter().copied().collect()
+                    } else if let Some(center_idx) = self.common.get_center_item_index(total) {
+                        vec![center_idx]
                     } else {
-                        (Task::none(), AlbumsAction::None)
+                        vec![]
+                    };
+
+                    if target_indices.is_empty() {
+                        return (Task::none(), AlbumsAction::None);
                     }
+
+                    let payload = target_indices
+                        .into_iter()
+                        .filter_map(|i| match self.expansion.get_entry_at(i, albums, |a| &a.id) {
+                            Some(SlotListEntry::Parent(album)) => {
+                                Some(BatchItem::Album(album.id.clone()))
+                            }
+                            Some(SlotListEntry::Child(song, _)) => {
+                                let item: nokkvi_data::types::song::Song = song.clone().into();
+                                Some(BatchItem::Song(Box::new(item)))
+                            }
+                            None => None,
+                        })
+                        .fold(BatchPayload::new(), |p: BatchPayload, item| p.with_item(item));
+
+                    (Task::none(), AlbumsAction::AddBatchToQueue(payload))
                 }
                 // Data loading messages (handled at root level, no action needed here)
                 AlbumsMessage::AlbumsLoaded(_, _) => (Task::none(), AlbumsAction::None),
@@ -338,78 +370,97 @@ impl AlbumsPage {
                         (Task::none(), AlbumsAction::None)
                     }
                 }
-                AlbumsMessage::ContextMenuAction(item_index, entry) => {
+                AlbumsMessage::ContextMenuAction(clicked_idx, entry) => {
                     use crate::widgets::context_menu::LibraryContextEntry;
-                    match self.expansion.get_entry_at(item_index, albums, |a| &a.id) {
-                        Some(SlotListEntry::Parent(album)) => match entry {
-                            LibraryContextEntry::AddToQueue => {
-                                let idx = albums.iter().position(|a| a.id == album.id);
-                                if let Some(i) = idx {
-                                    (Task::none(), AlbumsAction::AddAlbumToQueue(i.to_string()))
-                                } else {
-                                    (Task::none(), AlbumsAction::None)
+                    use nokkvi_data::types::batch::{BatchItem, BatchPayload};
+
+                    match entry {
+                        LibraryContextEntry::AddToQueue | LibraryContextEntry::AddToPlaylist => {
+                            let target_indices = self.common.evaluate_context_menu(clicked_idx);
+                            let payload = target_indices
+                                .into_iter()
+                                .filter_map(|i| {
+                                    match self.expansion.get_entry_at(i, albums, |a| &a.id) {
+                                        Some(SlotListEntry::Parent(album)) => {
+                                            Some(BatchItem::Album(album.id.clone()))
+                                        }
+                                        Some(SlotListEntry::Child(song, _)) => {
+                                            let item: nokkvi_data::types::song::Song = song.clone().into();
+                                            Some(BatchItem::Song(Box::new(item)))
+                                        }
+                                        None => None,
+                                    }
+                                })
+                                .fold(BatchPayload::new(), |p: BatchPayload, item| p.with_item(item));
+
+                            match entry {
+                                LibraryContextEntry::AddToQueue => {
+                                    (Task::none(), AlbumsAction::AddBatchToQueue(payload))
                                 }
+                                LibraryContextEntry::AddToPlaylist => {
+                                    (Task::none(), AlbumsAction::AddBatchToPlaylist(payload))
+                                }
+                                _ => unreachable!(),
                             }
-                            LibraryContextEntry::AddToPlaylist => {
-                                (Task::none(), AlbumsAction::AddToPlaylist(album.id.clone()))
+                        }
+                        // Non-batched actions (apply only to the clicked item)
+                        _ => {
+                            match self.expansion.get_entry_at(clicked_idx, albums, |a| &a.id) {
+                                Some(SlotListEntry::Parent(album)) => match entry {
+                                    LibraryContextEntry::GetInfo => {
+                                        use nokkvi_data::types::info_modal::InfoModalItem;
+                                        let item = InfoModalItem::Album {
+                                            name: album.name.clone(),
+                                            album_artist: Some(album.artist.clone()),
+                                            release_type: album.release_type.clone(),
+                                            genre: album.genre.clone(),
+                                            genres: album.genres.clone(),
+                                            duration: album.duration,
+                                            year: album.year,
+                                            song_count: Some(album.song_count),
+                                            compilation: album.compilation,
+                                            size: album.size,
+                                            is_starred: album.is_starred,
+                                            rating: album.rating,
+                                            play_count: album.play_count,
+                                            play_date: album.play_date.clone(),
+                                            updated_at: album.updated_at.clone(),
+                                            created_at: album.created_at.clone(),
+                                            mbz_album_id: album.mbz_album_id.clone(),
+                                            comment: album.comment.clone(),
+                                            id: album.id.clone(),
+                                            tags: album.tags.clone(),
+                                            participants: album.participants.clone(),
+                                            representative_path: self
+                                                .expansion
+                                                .children
+                                                .first()
+                                                .map(|s| s.path.clone()),
+                                        };
+                                        (Task::none(), AlbumsAction::ShowInfo(Box::new(item)))
+                                    }
+                                    LibraryContextEntry::ShowInFolder => {
+                                        (Task::none(), AlbumsAction::ShowInFolder(album.id.clone()))
+                                    }
+                                    LibraryContextEntry::Separator => (Task::none(), AlbumsAction::None),
+                                    _ => (Task::none(), AlbumsAction::None),
+                                },
+                                Some(SlotListEntry::Child(song, _)) => match entry {
+                                    LibraryContextEntry::GetInfo => {
+                                        use nokkvi_data::types::info_modal::InfoModalItem;
+                                        let item = InfoModalItem::from_song_view_data(song);
+                                        (Task::none(), AlbumsAction::ShowInfo(Box::new(item)))
+                                    }
+                                    LibraryContextEntry::ShowInFolder => (
+                                        Task::none(),
+                                        AlbumsAction::ShowSongInFolder(song.path.clone()),
+                                    ),
+                                    LibraryContextEntry::Separator => (Task::none(), AlbumsAction::None),
+                                    _ => (Task::none(), AlbumsAction::None),
+                                },
+                                None => (Task::none(), AlbumsAction::None),
                             }
-                            LibraryContextEntry::GetInfo => {
-                                use nokkvi_data::types::info_modal::InfoModalItem;
-                                let item = InfoModalItem::Album {
-                                    name: album.name.clone(),
-                                    album_artist: Some(album.artist.clone()),
-                                    release_type: album.release_type.clone(),
-                                    genre: album.genre.clone(),
-                                    genres: album.genres.clone(),
-                                    duration: album.duration,
-                                    year: album.year,
-                                    song_count: Some(album.song_count),
-                                    compilation: album.compilation,
-                                    size: album.size,
-                                    is_starred: album.is_starred,
-                                    rating: album.rating,
-                                    play_count: album.play_count,
-                                    play_date: album.play_date.clone(),
-                                    updated_at: album.updated_at.clone(),
-                                    created_at: album.created_at.clone(),
-                                    mbz_album_id: album.mbz_album_id.clone(),
-                                    comment: album.comment.clone(),
-                                    id: album.id.clone(),
-                                    tags: album.tags.clone(),
-                                    participants: album.participants.clone(),
-                                    representative_path: self
-                                        .expansion
-                                        .children
-                                        .first()
-                                        .map(|s| s.path.clone()),
-                                };
-                                (Task::none(), AlbumsAction::ShowInfo(Box::new(item)))
-                            }
-                            LibraryContextEntry::ShowInFolder => {
-                                (Task::none(), AlbumsAction::ShowInFolder(album.id.clone()))
-                            }
-                            LibraryContextEntry::Separator => (Task::none(), AlbumsAction::None),
-                        },
-                        Some(SlotListEntry::Child(song, _parent_id)) => match entry {
-                            LibraryContextEntry::AddToQueue => (
-                                Task::none(),
-                                AlbumsAction::AddSongToQueue(song.id.clone(), _parent_id),
-                            ),
-                            LibraryContextEntry::AddToPlaylist => {
-                                (Task::none(), AlbumsAction::AddToPlaylist(song.id.clone()))
-                            }
-                            LibraryContextEntry::GetInfo => {
-                                use nokkvi_data::types::info_modal::InfoModalItem;
-                                let item = InfoModalItem::from_song_view_data(song);
-                                (Task::none(), AlbumsAction::ShowInfo(Box::new(item)))
-                            }
-                            LibraryContextEntry::ShowInFolder => (
-                                Task::none(),
-                                AlbumsAction::ShowSongInFolder(song.path.clone()),
-                            ),
-                            LibraryContextEntry::Separator => (Task::none(), AlbumsAction::None),
-                        },
-                        None => (Task::none(), AlbumsAction::None),
+                        }
                     }
                 }
                 // Common arms already handled by macro above
@@ -467,8 +518,7 @@ impl AlbumsPage {
             SlotListConfig, chrome_height_with_header, slot_list_view_with_scroll,
         };
 
-        let config =
-            SlotListConfig::with_dynamic_slots(data.window_height, chrome_height_with_header());
+        let config = SlotListConfig::with_dynamic_slots(data.window_height, chrome_height_with_header()).with_modifiers(data.modifiers);
 
         // Capture values needed in closure
         let _scale_factor = data.scale_factor;
@@ -552,7 +602,7 @@ impl AlbumsPage {
 
         // Check if this album is the expanded one
         let is_expanded = self.expansion.is_expanded_parent(&album.id);
-        let style = SlotListSlotStyle::for_slot(ctx.is_center, is_expanded, ctx.opacity);
+        let style = SlotListSlotStyle::for_slot(ctx.is_center, is_expanded, ctx.is_selected, ctx.opacity);
 
         let base_artwork_size = (ctx.row_height - 16.0).max(32.0);
         let artwork_size = base_artwork_size * ctx.scale_factor;
@@ -664,7 +714,7 @@ impl AlbumsPage {
             .on_press(if ctx.is_center {
                 AlbumsMessage::SlotListActivateCenter
             } else if stable_viewport {
-                AlbumsMessage::SlotListSetOffset(ctx.item_index)
+                AlbumsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
             } else {
                 AlbumsMessage::SlotListClickPlay(ctx.item_index)
             })
@@ -704,7 +754,7 @@ impl AlbumsPage {
             ctx,
             AlbumsMessage::SlotListActivateCenter,
             if stable_viewport {
-                AlbumsMessage::SlotListSetOffset(ctx.item_index)
+                AlbumsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
             } else {
                 AlbumsMessage::SlotListClickPlay(ctx.item_index)
             },

@@ -170,12 +170,11 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ScrollbarOverlay
                 }
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
-            | Event::Touch(touch::Event::FingerLifted { .. } | touch::Event::FingerLost { .. }) => {
-                if state.is_dragging {
+            | Event::Touch(touch::Event::FingerLifted { .. } | touch::Event::FingerLost { .. })
+                if state.is_dragging => {
                     shell.publish((self.on_seek)(state.drag_fraction));
                     state.is_dragging = false;
                 }
-            }
             Event::Mouse(mouse::Event::CursorMoved { .. })
             | Event::Touch(touch::Event::FingerMoved { .. }) => {
                 if state.is_dragging

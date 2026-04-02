@@ -147,7 +147,7 @@ pub enum SettingsMessage {
     /// Navigate slot list down
     SlotListDown,
     /// Set slot list to specific offset (scrollbar seek — does NOT activate)
-    SlotListSetOffset(usize),
+    SlotListSetOffset(usize, iced::keyboard::Modifiers),
     /// Item clicked — focus + activate (like clicking then pressing Enter)
     SlotListClickItem(usize),
     /// Enter pressed on center slot — drill down, toggle edit mode, or enter sub-list
@@ -569,7 +569,7 @@ impl SettingsPage {
                 self.update_description();
                 SettingsAction::None
             }
-            SettingsMessage::SlotListSetOffset(offset) => {
+            SettingsMessage::SlotListSetOffset(offset, _) => {
                 self.editing_index = None;
                 self.toggle_cursor = None;
                 self.slot_list.set_offset(offset, total);

@@ -5,6 +5,7 @@
 
 pub mod album;
 pub mod artist;
+pub mod batch;
 pub mod collage_artwork;
 pub mod genre;
 pub mod hotkey_config;

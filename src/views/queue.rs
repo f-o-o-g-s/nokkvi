@@ -34,6 +34,7 @@ pub struct QueueViewData<'a> {
     pub window_width: f32,
     pub window_height: f32,
     pub scale_factor: f32,
+    pub modifiers: iced::keyboard::Modifiers,
     pub current_playing_song_id: Option<String>,
     pub current_playing_queue_index: Option<usize>,
     pub is_playing: bool, // True if playback is active (not stopped/paused)
@@ -69,7 +70,7 @@ pub enum QueueMessage {
     // Slot list navigation
     SlotListNavigateUp,
     SlotListNavigateDown,
-    SlotListSetOffset(usize),
+    SlotListSetOffset(usize, iced::keyboard::Modifiers),
     SlotListScrollSeek(usize),
     SlotListActivateCenter,
     SlotListClickPlay(usize), // Click non-center to play directly (skip focus)
@@ -118,14 +119,14 @@ pub enum QueueAction {
     SetRating(String, usize),            // (song_id, rating) - set absolute rating
     ToggleStar(String, bool),            // (song_id, new_starred) - toggle starred state
     MoveItem { from: usize, to: usize }, // drag-and-drop reorder (absolute item indices)
-    RemoveFromQueue(usize),              // remove song at index
-    MoveToTop(usize),                    // move song to top of queue
-    MoveToBottom(usize),                 // move song to bottom of queue
-    PlayNext(usize),                     // insert song after currently playing
+    RemoveFromQueue(Vec<usize>),         // remove songs at indices
+    MoveToTop(Vec<usize>),               // move songs to top of queue
+    MoveToBottom(Vec<usize>),            // move songs to bottom of queue
+    PlayNext(Vec<usize>),                // insert songs after currently playing
     ShowToast(String),                   // informational toast (e.g. drag disabled reason)
     SaveAsPlaylist,                      // open dialog to save queue as new playlist
     OpenBrowsingPanel,                   // toggle the library browser panel
-    AddToPlaylist(String),               // song_id - add to playlist dialog
+    AddToPlaylist(Vec<String>),          // song_ids - add to playlist dialog
     SavePlaylist,                        // save playlist edits (edit mode)
     DiscardEdits,                        // discard edits and exit edit mode
     PlaylistNameChanged(String),         // playlist name edited inline
@@ -167,8 +168,8 @@ impl QueuePage {
                 self.common.handle_navigate_down(total_items);
                 (Task::none(), QueueAction::None)
             }
-            QueueMessage::SlotListSetOffset(offset) => {
-                self.common.handle_select_offset(offset, total_items);
+            QueueMessage::SlotListSetOffset(offset, modifiers) => {
+                self.common.handle_slot_click(offset, total_items, modifiers);
                 (Task::none(), QueueAction::None)
             }
             QueueMessage::SlotListScrollSeek(offset) => {
@@ -308,24 +309,43 @@ impl QueuePage {
                     _ => (Task::none(), QueueAction::None),
                 }
             }
-            QueueMessage::ContextMenuAction(item_index, entry) => match entry {
+            QueueMessage::ContextMenuAction(clicked_idx, entry) => match entry {
                 QueueContextEntry::Play => {
-                    self.common.handle_set_offset(item_index, total_items);
-                    (Task::none(), QueueAction::PlaySong(item_index))
+                    self.common.handle_set_offset(clicked_idx, total_items);
+                    (Task::none(), QueueAction::PlaySong(clicked_idx))
                 }
-                QueueContextEntry::PlayNext => (Task::none(), QueueAction::PlayNext(item_index)),
-                QueueContextEntry::RemoveFromQueue => {
-                    (Task::none(), QueueAction::RemoveFromQueue(item_index))
-                }
-                QueueContextEntry::MoveToTop => (Task::none(), QueueAction::MoveToTop(item_index)),
-                QueueContextEntry::MoveToBottom => {
-                    (Task::none(), QueueAction::MoveToBottom(item_index))
+                QueueContextEntry::RemoveFromQueue
+                | QueueContextEntry::MoveToTop
+                | QueueContextEntry::MoveToBottom
+                | QueueContextEntry::PlayNext => {
+                    let target_indices = self.common.evaluate_context_menu(clicked_idx);
+
+                    match entry {
+                        QueueContextEntry::RemoveFromQueue => {
+                            (Task::none(), QueueAction::RemoveFromQueue(target_indices))
+                        }
+                        QueueContextEntry::MoveToTop => {
+                            (Task::none(), QueueAction::MoveToTop(target_indices))
+                        }
+                        QueueContextEntry::MoveToBottom => {
+                            (Task::none(), QueueAction::MoveToBottom(target_indices))
+                        }
+                        QueueContextEntry::PlayNext => {
+                            (Task::none(), QueueAction::PlayNext(target_indices))
+                        }
+                        _ => unreachable!(),
+                    }
                 }
                 QueueContextEntry::AddToPlaylist => {
-                    if let Some(song) = queue_songs.get(item_index) {
-                        (Task::none(), QueueAction::AddToPlaylist(song.id.clone()))
-                    } else {
+                    let target_indices = self.common.evaluate_context_menu(clicked_idx);
+                    let target_songs: Vec<String> = target_indices
+                        .iter()
+                        .filter_map(|&idx| queue_songs.get(idx).map(|s| s.id.clone()))
+                        .collect();
+                    if target_songs.is_empty() {
                         (Task::none(), QueueAction::None)
+                    } else {
+                        (Task::none(), QueueAction::AddToPlaylist(target_songs))
                     }
                 }
                 QueueContextEntry::Separator => (Task::none(), QueueAction::None),
@@ -333,9 +353,9 @@ impl QueuePage {
                 QueueContextEntry::OpenBrowsingPanel => {
                     (Task::none(), QueueAction::OpenBrowsingPanel)
                 }
-                QueueContextEntry::GetInfo => (Task::none(), QueueAction::ShowInfo(item_index)),
+                QueueContextEntry::GetInfo => (Task::none(), QueueAction::ShowInfo(clicked_idx)),
                 QueueContextEntry::ShowInFolder => {
-                    (Task::none(), QueueAction::ShowInFolder(item_index))
+                    (Task::none(), QueueAction::ShowInFolder(clicked_idx))
                 }
             },
             QueueMessage::SavePlaylist => (Task::none(), QueueAction::SavePlaylist),
@@ -643,7 +663,7 @@ impl QueuePage {
         } else {
             chrome_height_with_header()
         };
-        let config = SlotListConfig::with_dynamic_slots(data.window_height, chrome_height);
+        let config = SlotListConfig::with_dynamic_slots(data.window_height, chrome_height).with_modifiers(data.modifiers);
 
         // Capture values needed in closure
         let _scale_factor = data.scale_factor;
@@ -680,7 +700,7 @@ impl QueuePage {
             use crate::widgets::slot_list::{
                 SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column, slot_list_text,
             };
-            let style = SlotListSlotStyle::for_slot(ctx.is_center, is_current, ctx.opacity);
+            let style = SlotListSlotStyle::for_slot(ctx.is_center, is_current, ctx.is_selected, ctx.opacity);
 
             // Dynamic scaling - match albums view font sizes, apply scale_factor
             // Calculate artwork directly from row_height and apply slot scale_factor
@@ -833,7 +853,7 @@ impl QueuePage {
                 .on_press(if ctx.is_center {
                     QueueMessage::SlotListActivateCenter
                 } else if data.stable_viewport {
-                    QueueMessage::SlotListSetOffset(ctx.item_index)
+                    QueueMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
                 } else {
                     QueueMessage::SlotListClickPlay(ctx.item_index)
                 })
