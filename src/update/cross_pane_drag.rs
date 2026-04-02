@@ -29,6 +29,15 @@ impl Nokkvi {
             None => return Task::none(),
         };
 
+        // When Ctrl or Shift is held the user is multi-selecting, not starting
+        // a drag.  Bail out to avoid clearing the selection state — the button's
+        // on_press (which fires on mouse-up) will handle the click via
+        // handle_slot_click with the correct modifiers.
+        let mods = self.window.keyboard_modifiers;
+        if mods.control() || mods.shift() {
+            return Task::none();
+        }
+
         let position = self.last_cursor_position;
 
         // Check if cursor is in the browser pane (right portion of split).
