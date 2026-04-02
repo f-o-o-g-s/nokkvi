@@ -89,6 +89,18 @@ impl QueueManager {
 
         // Compute next from order array
         let next_order = match self.next_order_index() {
+            Some(0) if self.queue.shuffle => {
+                // Shuffle + repeat-playlist wrap: reshuffle so each cycle is a fresh order.
+                debug!(
+                    " [QUEUE] Shuffle+repeat: reshuffling {} songs at playlist wrap",
+                    self.queue.order.len()
+                );
+                self.shuffle_order();
+                // After reshuffle, current is at position 0; next is position 1.
+                // For single-song queues, shuffle_order is a no-op so clamp to 0.
+                let next = self.queue.current_order.map_or(0, |c| c + 1);
+                next.min(self.queue.order.len().saturating_sub(1))
+            }
             Some(idx) => idx,
             None if self.queue.shuffle && self.queue.consume && self.queue.order.len() > 1 => {
                 // Shuffle+consume: at end of shuffled order with unplayed songs remaining.
@@ -603,8 +615,59 @@ mod tests {
         qm.queue.consume = false;
         qm.queue.current_order = Some(qm.queue.order.len() - 1);
 
-        // Shuffle ON but consume OFF — should NOT reshuffle, returns None
+        // Shuffle ON, no repeat — should return None at end
         let next = qm.get_next_song();
         assert!(next.is_none());
     }
+
+    // ── Shuffle + Repeat Playlist tests ──
+
+    #[test]
+    fn next_shuffle_repeat_playlist_reshuffles_on_wrap() {
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+            make_test_song("d"),
+            make_test_song("e"),
+        ];
+        let mut qm = make_test_manager(songs, Some(0));
+        qm.queue.shuffle = true;
+        qm.set_repeat(RepeatMode::Playlist).unwrap();
+        qm.shuffle_order();
+
+        // Record the initial shuffle order
+        let initial_order = qm.queue.order.clone();
+
+        // Advance to the last song in the order
+        qm.queue.current_order = Some(qm.queue.order.len() - 1);
+        qm.queue.current_index = Some(qm.queue.order[qm.queue.order.len() - 1]);
+
+        // Next should succeed (repeat-playlist wrap) and reshuffle
+        let next = qm.get_next_song();
+        assert!(next.is_some(), "Expected Some (reshuffle wrap), got None");
+
+        // The order should have been reshuffled (with 5 songs, extremely unlikely to be identical)
+        let new_order = qm.queue.order.clone();
+        // Both orders should contain the same elements (just reordered)
+        let mut sorted_initial = initial_order.clone();
+        let mut sorted_new = new_order.clone();
+        sorted_initial.sort();
+        sorted_new.sort();
+        assert_eq!(sorted_initial, sorted_new, "Order arrays should contain the same indices");
+    }
+
+    #[test]
+    fn next_shuffle_repeat_playlist_single_song() {
+        let songs = vec![make_test_song("a")];
+        let mut qm = make_test_manager(songs, Some(0));
+        qm.queue.shuffle = true;
+        qm.set_repeat(RepeatMode::Playlist).unwrap();
+
+        // Single song + shuffle + repeat-playlist — should wrap and return the same song
+        let next = qm.get_next_song();
+        assert!(next.is_some(), "Single-song repeat-playlist should still work");
+        assert_eq!(next.unwrap().song.id, "a");
+    }
 }
+
