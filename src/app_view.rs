@@ -794,52 +794,8 @@ impl Nokkvi {
                 self.playlists_page.view(view_data).map(Message::Playlists)
             }
             View::Settings => {
-                let viz_config = self.visualizer_config.read().clone();
-                let theme_file = crate::theme_config::load_active_theme_file();
-                let active_theme_stem =
-                    nokkvi_data::services::theme_loader::read_theme_name_from_config();
-                let settings_data = views::SettingsViewData {
-                    visualizer_config: viz_config,
-                    theme_file,
-                    active_theme_stem,
-                    window_height: self.window.height,
-                    hotkey_config: self.hotkey_config.clone(),
-                    server_url: self.login_page.server_url.clone(),
-                    username: self.login_page.username.clone(),
-                    is_light_mode: crate::theme::is_light_mode(),
-                    scrobbling_enabled: self.scrobbling_enabled,
-                    scrobble_threshold: self.scrobble_threshold,
-                    start_view: self.start_view.clone(),
-                    stable_viewport: self.stable_viewport,
-                    auto_follow_playing: self.auto_follow_playing,
-                    enter_behavior: self.enter_behavior.as_label(),
-                    local_music_path: self.local_music_path.clone(),
-                    library_page_size: self.library_page_size.as_label(),
-                    rounded_mode: crate::theme::is_rounded_mode(),
-                    nav_layout: if crate::theme::is_side_nav() {
-                        "Side"
-                    } else {
-                        "Top"
-                    },
-                    nav_display_mode: crate::theme::nav_display_mode().as_label(),
-                    track_info_display: crate::theme::track_info_display().as_label(),
-                    slot_row_height: crate::theme::slot_row_height_variant().as_label(),
-                    opacity_gradient: crate::theme::is_opacity_gradient(),
-                    crossfade_enabled: self.engine.crossfade_enabled,
-                    crossfade_duration_secs: self.engine.crossfade_duration_secs,
-                    volume_normalization: self.engine.volume_normalization,
-                    normalization_level: self.engine.normalization_level.as_label(),
-                    default_playlist_name: self.default_playlist_name.clone(),
-                    quick_add_to_playlist: self.quick_add_to_playlist,
-                    horizontal_volume: crate::theme::is_horizontal_volume(),
-                    font_family: crate::theme::font_family(),
-                    strip_show_title: crate::theme::strip_show_title(),
-                    strip_show_artist: crate::theme::strip_show_artist(),
-                    strip_show_album: crate::theme::strip_show_album(),
-                    strip_show_format_info: crate::theme::strip_show_format_info(),
-                    strip_click_action: crate::theme::strip_click_action().as_label(),
-                    verbose_config: self.verbose_config,
-                };
+                let settings_data = self.build_settings_view_data();
+
                 self.settings_page
                     .view(settings_data)
                     .map(Message::Settings)

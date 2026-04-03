@@ -755,6 +755,11 @@ impl Nokkvi {
                 }
                 // Force UI refresh so all widgets pick up new colors
                 self.settings_page.config_dirty = true;
+                if self.current_view == View::Settings {
+                    let new_data = self.build_settings_view_data();
+                    self.settings_page.refresh_entries(&new_data);
+                    self.settings_page.config_dirty = false;
+                }
                 Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
             }
 
