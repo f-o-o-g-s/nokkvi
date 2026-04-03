@@ -338,13 +338,12 @@ impl LoginPage {
                     color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.8),
                     offset: iced::Vector::new(0.0, 10.0),
                     blur_radius: 30.0,
-                    ..Default::default()
                 },
                 snap: false,
             });
 
         let version = env!("CARGO_PKG_VERSION");
-        let version_text = text(format!("v{}", version)).size(12).color(theme::fg4());
+        let version_text = text(format!("v{version}")).size(12).color(theme::fg4());
 
         let layout = column![card, version_text]
             .spacing(20)

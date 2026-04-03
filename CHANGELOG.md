@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## v0.2.5 — 2026-04-03
+
+### Features
+- **Configurable Library Page Size** — added a new setting in the General tab to configure the number of items fetched per API request for library pagination, allowing you to optimize between loading frequency and memory footprint.
+- **Modernized Login View** — refreshed the login screen with a sleek, card-based layout featuring a theme-adaptive Nokkvi logo and tagline.
+
+### Fixes
+- **Queue Reshuffling on Repeat** — fixed an issue where the queue would replay the exact same shuffle sequence when wrapping around in both "Shuffle" and "Repeat Playlist" modes. It now correctly generates a new randomized sequence each time the playlist loops.
+- **Single-Item Selection State** — resolved a bug where the selection highlight was permanently cleared after using the "Center to currently playing track" (Shift+C) hotkey, ensuring consistent visual feedback for keyboard scrolling.
+- **Log Batch Resolution Errors** — the cross-pane drag handler now safely attempts to perform batch actions and cleanly logs errors instead of crashing the UI when an operation attempts to act on stale items.
 ## v0.2.4 — 2026-04-02
 
 ### Features

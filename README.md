@@ -38,13 +38,14 @@ A native Rust/Iced client for [Navidrome](https://www.navidrome.org/) music serv
 - Horizontal volume controls layout option (stacked beside player bar buttons)
 - Slot list hover overlay with press darkening and flash micro-animations
 - Toast notification system for user feedback
-- Server-side pagination for large libraries (`PagedBuffer<T>`)
+- Server-side pagination for large libraries with configurable page size (`PagedBuffer<T>`)
 - Multi-selection batch operations across library and queue views (select with Ctrl/Shift, then right-click or use hotkeys)
 - Drag-and-drop multi-selection batches from library to queue and within the queue
 - Confirmation dialogs for destructive actions
 - Queue persistence across app restarts (restores queue contents and current track)
 - Non-wrapping slot list navigation with dynamic center slot
 - Dynamic slot sizing with configurable row height (Settings → Interface)
+- Modernized card-based login screen with theme-adaptive branding
 
 ## Dependencies (Arch Linux)
 
