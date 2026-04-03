@@ -79,21 +79,18 @@ impl Default for ThemePalette {
             background: BackgroundConfig::default(),
             foreground: ForegroundConfig::default(),
             accent: AccentConfig::default(),
-            danger: SemanticColorConfig {
-                base: "#cc241d".to_string(),
-                bright: "#fb4934".to_string(),
-            },
+            danger: SemanticColorConfig::default(),
             success: SemanticColorConfig {
-                base: "#98971a".to_string(),
-                bright: "#b8bb26".to_string(),
+                base: "#26a269".to_string(),
+                bright: "#33d17a".to_string(),
             },
             warning: SemanticColorConfig {
-                base: "#d79921".to_string(),
-                bright: "#fabd2f".to_string(),
+                base: "#e5a50a".to_string(),
+                bright: "#f6d32d".to_string(),
             },
             star: SemanticColorConfig {
-                base: "#d79921".to_string(),
-                bright: "#fabd2f".to_string(),
+                base: "#e5a50a".to_string(),
+                bright: "#f6d32d".to_string(),
             },
             visualizer: VisualizerColors::default(),
         }
@@ -401,9 +398,9 @@ mod tests {
     fn test_semantic_color_default() {
         let palette = ThemePalette::default();
         assert_eq!(palette.danger.base, "#e01b24");
-        assert_eq!(palette.success.base, "#98971a");
-        assert_eq!(palette.warning.base, "#d79921");
-        assert_eq!(palette.star.base, "#d79921");
-        assert_eq!(palette.star.bright, "#fabd2f");
+        assert_eq!(palette.success.base, "#26a269");
+        assert_eq!(palette.warning.base, "#e5a50a");
+        assert_eq!(palette.star.base, "#e5a50a");
+        assert_eq!(palette.star.bright, "#f6d32d");
     }
 }

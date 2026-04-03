@@ -76,6 +76,10 @@ mod slot_list;
 mod songs;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_queue_filter;
+#[cfg(test)]
+mod tests_star_rating;
 mod text_input_dialog;
 mod toast;
 mod window;

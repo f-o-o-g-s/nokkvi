@@ -225,4 +225,68 @@ mod tests {
     fn test_empty_credential_returns_empty() {
         assert_eq!(build_cover_art_url("123", "http://srv", "", None), "");
     }
+
+    // ── Cache Key Invariants ──
+
+    #[test]
+    fn thumbnail_and_highres_share_same_id() {
+        let thumb = build_cover_art_url("al-123", "http://srv", "u=x", Some(80));
+        let hires = build_cover_art_url("al-123", "http://srv", "u=x", Some(1000));
+        // Both must reference the same artwork ID
+        assert!(thumb.contains("id=al-123"));
+        assert!(hires.contains("id=al-123"));
+        // But different sizes
+        assert!(thumb.contains("size=80"));
+        assert!(hires.contains("size=1000"));
+    }
+
+    #[test]
+    fn mf_prefix_not_double_prefixed() {
+        let url = build_cover_art_url("mf-456", "http://srv", "u=x", Some(80));
+        assert!(
+            url.contains("id=mf-456"),
+            "mf- prefix must be preserved, not double-prefixed to al-mf-456"
+        );
+        assert!(!url.contains("id=al-mf-456"));
+    }
+
+    #[test]
+    fn post_params_id_matches_get_url_id() {
+        let get_url = build_cover_art_url("al-abc", "http://srv", "u=x", Some(80));
+        let (_, post_body) =
+            build_cover_art_post_params("al-abc", "http://srv", "u=x", Some(80), None)
+                .expect("should produce params");
+        // Both must contain identical id= values
+        assert!(get_url.contains("id=al-abc"));
+        assert!(post_body.contains("id=al-abc"));
+    }
+
+    #[test]
+    fn timestamp_cache_buster_included() {
+        let url = build_cover_art_url_with_timestamp(
+            "al-123",
+            "http://srv",
+            "u=x",
+            Some(80),
+            Some("2026-01-01"),
+        );
+        assert!(
+            url.contains("_u=2026-01-01"),
+            "timestamp cache buster must be in URL"
+        );
+    }
+
+    #[test]
+    fn stream_url_empty_on_missing_inputs() {
+        assert_eq!(
+            build_stream_url("", "http://srv", "u=x"),
+            "",
+            "empty song_id"
+        );
+        assert_eq!(
+            build_stream_url("id", "http://srv", ""),
+            "",
+            "empty credential"
+        );
+    }
 }

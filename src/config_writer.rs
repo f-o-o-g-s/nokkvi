@@ -468,3 +468,227 @@ fn strip_matching_keys(doc: &mut DocumentMut, section_name: &str, defaults: &tom
         doc.remove(section_name);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::views::settings::items::SettingValue;
+
+    /// Round-trip helper: set a value via `set_dotted_value` and return the
+    /// serialized TOML string.
+    fn write_value(key: &str, value: &SettingValue, comment: Option<&str>) -> String {
+        let mut doc: DocumentMut = "".parse().unwrap();
+        set_dotted_value(&mut doc, key, value, comment).unwrap();
+        doc.to_string()
+    }
+
+    /// Write a value and re-parse the output, returning the document for typed access.
+    fn write_and_reparse(key: &str, value: &SettingValue) -> DocumentMut {
+        let toml = write_value(key, value, None);
+        toml.parse().unwrap()
+    }
+
+    /// Parse a TOML string and build the defaults table from it.
+    /// This ensures the formatting matches what `strip_matching_keys` compares.
+    fn defaults_from_toml(section: &str, toml_str: &str) -> toml_edit::Table {
+        let doc: DocumentMut = toml_str.parse().unwrap();
+        doc[section].as_table().unwrap().clone()
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    //  Value Round-Trip Tests
+    // ══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn float_roundtrip_eliminates_precision_noise() {
+        // f32→f64 conversion of 0.046 produces 0.04600000075995922
+        // The writer must round to 6 decimal places.
+        let val = SettingValue::Float {
+            val: 0.046_f32 as f64,
+            min: 0.0,
+            max: 1.0,
+            step: 0.001,
+            unit: "",
+        };
+        let doc = write_and_reparse("test.float_val", &val);
+        let written = doc["test"]["float_val"].as_float().unwrap();
+        assert!(
+            (written - 0.046).abs() < 1e-9,
+            "f32 precision noise must be eliminated, got {written}"
+        );
+    }
+
+    #[test]
+    fn int_roundtrip() {
+        let val = SettingValue::Int {
+            val: 42,
+            min: 0,
+            max: 100,
+            step: 1,
+            unit: "px",
+        };
+        let doc = write_and_reparse("test.int_val", &val);
+        assert_eq!(doc["test"]["int_val"].as_integer().unwrap(), 42);
+    }
+
+    #[test]
+    fn bool_roundtrip() {
+        let val = SettingValue::Bool(true);
+        let doc = write_and_reparse("test.enabled", &val);
+        assert_eq!(doc["test"]["enabled"].as_bool().unwrap(), true);
+    }
+
+    #[test]
+    fn enum_roundtrip() {
+        let val = SettingValue::Enum {
+            val: "horizontal".to_string(),
+            options: vec!["horizontal", "vertical"],
+        };
+        let doc = write_and_reparse("test.direction", &val);
+        assert_eq!(doc["test"]["direction"].as_str().unwrap(), "horizontal");
+    }
+
+    #[test]
+    fn hex_color_roundtrip() {
+        let val = SettingValue::HexColor("#458588".to_string());
+        let doc = write_and_reparse("palette.accent", &val);
+        assert_eq!(doc["palette"]["accent"].as_str().unwrap(), "#458588");
+    }
+
+    #[test]
+    fn color_array_roundtrip() {
+        let val = SettingValue::ColorArray(vec![
+            "#ff0000".to_string(),
+            "#00ff00".to_string(),
+            "#0000ff".to_string(),
+        ]);
+        let doc = write_and_reparse("viz.gradient", &val);
+        let arr = doc["viz"]["gradient"].as_array().unwrap();
+        assert_eq!(arr.len(), 3);
+        assert_eq!(arr.get(0).unwrap().as_str().unwrap(), "#ff0000");
+        assert_eq!(arr.get(2).unwrap().as_str().unwrap(), "#0000ff");
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    //  Dotted Key Navigation
+    // ══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn set_dotted_value_creates_intermediate_tables() {
+        let val = SettingValue::Int {
+            val: 5,
+            min: 0,
+            max: 10,
+            step: 1,
+            unit: "",
+        };
+        let doc = write_and_reparse("visualizer.bars.gap", &val);
+        assert!(doc["visualizer"].is_table());
+        assert!(doc["visualizer"]["bars"].is_table());
+        assert_eq!(doc["visualizer"]["bars"]["gap"].as_integer().unwrap(), 5);
+    }
+
+    #[test]
+    fn set_dotted_value_preserves_existing_keys() {
+        let mut doc: DocumentMut = "[test]\nexisting = true\n".parse().unwrap();
+        let val = SettingValue::Int {
+            val: 99,
+            min: 0,
+            max: 100,
+            step: 1,
+            unit: "",
+        };
+        set_dotted_value(&mut doc, "test.new_key", &val, None).unwrap();
+
+        assert_eq!(
+            doc["test"]["existing"].as_bool().unwrap(),
+            true,
+            "existing key must be preserved"
+        );
+        assert_eq!(
+            doc["test"]["new_key"].as_integer().unwrap(),
+            99,
+            "new key must be added"
+        );
+    }
+
+    #[test]
+    fn set_dotted_value_adds_comment_on_new_key() {
+        let mut doc: DocumentMut = "".parse().unwrap();
+        let val = SettingValue::Bool(true);
+        set_dotted_value(
+            &mut doc,
+            "general.verbose",
+            &val,
+            Some("Enable verbose output"),
+        )
+        .unwrap();
+
+        let output = doc.to_string();
+        assert!(
+            output.contains("# Enable verbose output"),
+            "comment must appear in output: {output}"
+        );
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    //  Strip Matching Keys (Sparse Mode)
+    // ══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn strip_matching_keys_removes_defaults() {
+        // Both doc and defaults must be parsed from TOML so formatting matches
+        let mut doc: DocumentMut = "[viz]\ngap = 5\nbars = 30\n".parse().unwrap();
+        let defaults = defaults_from_toml("viz", "[viz]\ngap = 5\nbars = 30\n");
+
+        strip_matching_keys(&mut doc, "viz", &defaults);
+        assert!(doc.get("viz").is_none(), "empty section must be removed");
+    }
+
+    #[test]
+    fn strip_matching_keys_preserves_custom_values() {
+        let mut doc: DocumentMut = "[viz]\ngap = 5\nbars = 50\n".parse().unwrap();
+        let defaults = defaults_from_toml("viz", "[viz]\ngap = 5\nbars = 30\n");
+
+        strip_matching_keys(&mut doc, "viz", &defaults);
+        // gap matches default → removed; bars differs → kept
+        assert!(doc["viz"].as_table().is_some());
+        assert!(
+            doc["viz"].get("gap").is_none(),
+            "matching key must be stripped"
+        );
+        assert_eq!(
+            doc["viz"]["bars"].as_integer().unwrap(),
+            50,
+            "non-matching key must be preserved"
+        );
+    }
+
+    #[test]
+    fn strip_matching_keys_recurses_into_subtables() {
+        // Production config uses flat `[section]\nkey = value` format from
+        // toml::to_string_pretty — not dotted headers like `[viz.sub]`.
+        // The recursive path handles this by re-serializing the sub-table.
+        let mut doc: DocumentMut = "[viz]\nval = 10\nname = \"test\"\n".parse().unwrap();
+        let defaults = defaults_from_toml("viz", "[viz]\nval = 10\nname = \"test\"\n");
+
+        strip_matching_keys(&mut doc, "viz", &defaults);
+        assert!(
+            doc.get("viz").is_none(),
+            "section with all matching keys must be removed"
+        );
+    }
+
+    #[test]
+    fn strip_removes_empty_parent_table() {
+        let toml_str = "[section]\nonly_key = 42\n";
+        let mut doc: DocumentMut = toml_str.parse().unwrap();
+        let defaults = defaults_from_toml("section", toml_str);
+
+        strip_matching_keys(&mut doc, "section", &defaults);
+        assert!(
+            doc.get("section").is_none(),
+            "section with only default keys must be removed entirely"
+        );
+    }
+}

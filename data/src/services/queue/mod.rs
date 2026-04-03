@@ -969,4 +969,150 @@ pub(crate) mod tests {
         assert!(!qm.queue.shuffle);
         assert_eq!(qm.queue.order, (0..10).collect::<Vec<_>>());
     }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Sort / Shuffle / Insert current_index Tracking
+    // ══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn sort_queue_preserves_current_song_identity() {
+        use crate::types::queue_sort_mode::QueueSortMode;
+
+        let mut songs: Vec<Song> = ["c", "a", "b"]
+            .iter()
+            .map(|t| {
+                let mut s = make_test_song(t);
+                s.title = t.to_string();
+                s
+            })
+            .collect();
+        // Give them different titles so sort actually reorders
+        songs[0].title = "Charlie".to_string();
+        songs[1].title = "Alpha".to_string();
+        songs[2].title = "Bravo".to_string();
+
+        let mut qm = make_test_manager(songs, Some(0)); // playing "c" = "Charlie"
+        qm.sort_queue(QueueSortMode::Title, true).unwrap();
+
+        // After title sort ascending: Alpha, Bravo, Charlie
+        // "c" (Charlie) should now be at index 2
+        assert_eq!(qm.queue.current_index, Some(2));
+        assert_eq!(qm.queue.song_ids[2], "c");
+    }
+
+    #[test]
+    fn sort_queue_empty_is_noop() {
+        use crate::types::queue_sort_mode::QueueSortMode;
+
+        let mut qm = make_test_manager(vec![], None);
+        qm.sort_queue(QueueSortMode::Title, true).unwrap();
+        assert!(qm.queue.song_ids.is_empty());
+        assert_eq!(qm.queue.current_index, None);
+    }
+
+    #[test]
+    fn shuffle_queue_preserves_current_song_identity() {
+        let songs: Vec<Song> = (0..20).map(|i| make_test_song(&i.to_string())).collect();
+        let mut qm = make_test_manager(songs, Some(7)); // playing "7"
+
+        qm.shuffle_queue().unwrap();
+
+        // current_index should point to "7" wherever it ended up
+        let idx = qm.queue.current_index.unwrap();
+        assert_eq!(
+            qm.queue.song_ids[idx], "7",
+            "playing song identity lost after shuffle"
+        );
+    }
+
+    #[test]
+    fn insert_after_current_does_not_shift_playing_song() {
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+        ];
+        let mut qm = make_test_manager(songs, Some(1)); // playing "b" at 1
+
+        let new_songs = vec![make_test_song("x"), make_test_song("y")];
+        qm.insert_after_current(new_songs).unwrap();
+
+        // insert_after_current inserts at pos 2 (after current=1)
+        // Since 2 > 1, current_index should NOT shift
+        assert_eq!(qm.queue.current_index, Some(1));
+        assert_eq!(qm.queue.song_ids[1], "b");
+        // New songs at 2,3
+        assert_eq!(qm.queue.song_ids[2], "x");
+        assert_eq!(qm.queue.song_ids[3], "y");
+    }
+
+    #[test]
+    fn insert_after_current_when_nothing_playing() {
+        let songs = vec![make_test_song("a"), make_test_song("b")];
+        let mut qm = make_test_manager(songs, None);
+
+        let new_songs = vec![make_test_song("x")];
+        qm.insert_after_current(new_songs).unwrap();
+
+        // With no current_index, inserts at end
+        assert_eq!(qm.queue.song_ids.len(), 3);
+        assert_eq!(qm.queue.song_ids[2], "x");
+        assert_eq!(qm.queue.current_index, None);
+    }
+
+    #[test]
+    fn insert_songs_at_before_current_shifts_index() {
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+            make_test_song("d"),
+        ];
+        let mut qm = make_test_manager(songs, Some(3)); // playing "d" at 3
+
+        let new_songs = vec![make_test_song("x"), make_test_song("y")];
+        qm.insert_songs_at(1, new_songs).unwrap();
+
+        // Inserted 2 songs at index 1 (before current=3)
+        // current_index should shift to 5
+        assert_eq!(qm.queue.current_index, Some(5));
+        assert_eq!(qm.queue.song_ids[5], "d");
+    }
+
+    #[test]
+    fn insert_songs_at_after_current_no_shift() {
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+        ];
+        let mut qm = make_test_manager(songs, Some(1)); // playing "b" at 1
+
+        let new_songs = vec![make_test_song("x")];
+        qm.insert_songs_at(3, new_songs).unwrap(); // insert after end
+
+        assert_eq!(qm.queue.current_index, Some(1)); // unchanged
+        assert_eq!(qm.queue.song_ids[1], "b");
+    }
+
+    #[test]
+    fn add_songs_does_not_affect_current_index() {
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+        ];
+        let mut qm = make_test_manager(songs, Some(2)); // playing "c" at 2
+
+        let new_songs = vec![
+            make_test_song("x"),
+            make_test_song("y"),
+            make_test_song("z"),
+        ];
+        qm.add_songs(new_songs).unwrap();
+
+        assert_eq!(qm.queue.current_index, Some(2)); // unchanged
+        assert_eq!(qm.queue.song_ids[2], "c");
+        assert_eq!(qm.queue.song_ids.len(), 6);
+    }
 }

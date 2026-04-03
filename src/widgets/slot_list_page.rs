@@ -285,4 +285,149 @@ mod tests {
         state.handle_set_offset(5, total_items);
         assert_eq!(state.slot_list.viewport_offset, 5);
     }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Multi-Selection State Machine
+    // ══════════════════════════════════════════════════════════════════════
+
+    fn no_modifiers() -> iced::keyboard::Modifiers {
+        iced::keyboard::Modifiers::empty()
+    }
+
+    fn ctrl() -> iced::keyboard::Modifiers {
+        iced::keyboard::Modifiers::CTRL
+    }
+
+    fn shift() -> iced::keyboard::Modifiers {
+        iced::keyboard::Modifiers::SHIFT
+    }
+
+    #[test]
+    fn ctrl_click_adds_to_selection() {
+        let mut state = SlotListPageState::default();
+        state.handle_slot_click(3, 10, ctrl());
+
+        assert!(state.slot_list.selected_indices.contains(&3));
+        assert_eq!(state.slot_list.anchor_index, Some(3));
+        assert_eq!(state.slot_list.selected_offset, Some(3));
+    }
+
+    #[test]
+    fn ctrl_click_toggles_off() {
+        let mut state = SlotListPageState::default();
+        state.handle_slot_click(3, 10, ctrl()); // select
+        state.handle_slot_click(3, 10, ctrl()); // deselect
+
+        assert!(state.slot_list.selected_indices.is_empty());
+        assert_eq!(state.slot_list.anchor_index, None);
+    }
+
+    #[test]
+    fn ctrl_deselect_last_clears_selected_offset() {
+        // Regression: bug ebd98d1 — selected_offset was not cleared when
+        // the last item was ctrl-deselected, leaving a stale center highlight.
+        let mut state = SlotListPageState::default();
+        state.handle_slot_click(5, 10, ctrl()); // select
+        state.handle_slot_click(5, 10, ctrl()); // deselect last
+
+        assert!(state.slot_list.selected_indices.is_empty());
+        assert_eq!(
+            state.slot_list.selected_offset, None,
+            "selected_offset must be None when selection set empties"
+        );
+    }
+
+    #[test]
+    fn ctrl_click_accumulates_non_contiguous() {
+        let mut state = SlotListPageState::default();
+        state.handle_slot_click(1, 10, ctrl());
+        state.handle_slot_click(3, 10, ctrl());
+        state.handle_slot_click(5, 10, ctrl());
+
+        assert_eq!(state.slot_list.selected_indices.len(), 3);
+        assert!(state.slot_list.selected_indices.contains(&1));
+        assert!(state.slot_list.selected_indices.contains(&3));
+        assert!(state.slot_list.selected_indices.contains(&5));
+    }
+
+    #[test]
+    fn shift_click_selects_range_from_anchor() {
+        let mut state = SlotListPageState::default();
+        // Normal click sets anchor at 2
+        state.handle_slot_click(2, 10, no_modifiers());
+        // Shift+click extends range to 5
+        state.handle_slot_click(5, 10, shift());
+
+        assert_eq!(state.slot_list.selected_indices.len(), 4);
+        for i in 2..=5 {
+            assert!(
+                state.slot_list.selected_indices.contains(&i),
+                "index {i} should be in selection"
+            );
+        }
+    }
+
+    #[test]
+    fn shift_click_without_anchor_behaves_as_normal() {
+        let mut state = SlotListPageState::default();
+        state.handle_slot_click(4, 10, shift());
+
+        assert_eq!(state.slot_list.selected_indices.len(), 1);
+        assert!(state.slot_list.selected_indices.contains(&4));
+        assert_eq!(state.slot_list.anchor_index, Some(4));
+    }
+
+    #[test]
+    fn normal_click_clears_multi_selection() {
+        let mut state = SlotListPageState::default();
+        // Build up a multi-selection
+        state.handle_slot_click(1, 10, ctrl());
+        state.handle_slot_click(3, 10, ctrl());
+        state.handle_slot_click(5, 10, ctrl());
+        assert_eq!(state.slot_list.selected_indices.len(), 3);
+
+        // Normal click should clear and select only the clicked item
+        state.handle_slot_click(2, 10, no_modifiers());
+        assert_eq!(state.slot_list.selected_indices.len(), 1);
+        assert!(state.slot_list.selected_indices.contains(&2));
+        assert_eq!(state.slot_list.anchor_index, Some(2));
+    }
+
+    #[test]
+    fn context_menu_outside_selection_resets_to_clicked() {
+        let mut state = SlotListPageState::default();
+        state.handle_slot_click(1, 10, ctrl());
+        state.handle_slot_click(3, 10, ctrl());
+        state.handle_slot_click(5, 10, ctrl());
+
+        // Right-click on 7 (not in selection) → resets to just 7
+        let targets = state.evaluate_context_menu(7);
+        assert_eq!(targets, vec![7]);
+        assert_eq!(state.slot_list.selected_indices.len(), 1);
+        assert!(state.slot_list.selected_indices.contains(&7));
+    }
+
+    #[test]
+    fn context_menu_inside_selection_returns_all() {
+        let mut state = SlotListPageState::default();
+        state.handle_slot_click(1, 10, ctrl());
+        state.handle_slot_click(3, 10, ctrl());
+        state.handle_slot_click(5, 10, ctrl());
+
+        // Right-click on 3 (in selection) → returns all selected
+        let mut targets = state.evaluate_context_menu(3);
+        targets.sort();
+        assert_eq!(targets, vec![1, 3, 5]);
+        // Selection should be unchanged
+        assert_eq!(state.slot_list.selected_indices.len(), 3);
+    }
+
+    #[test]
+    fn out_of_bounds_click_is_noop() {
+        let mut state = SlotListPageState::default();
+        state.handle_slot_click(15, 10, no_modifiers()); // >= total_items
+
+        assert!(state.slot_list.selected_indices.is_empty());
+        assert_eq!(state.slot_list.selected_offset, None);
+    }
 }

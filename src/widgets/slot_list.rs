@@ -1091,4 +1091,77 @@ mod tests {
             );
         }
     }
+
+    // ── Chrome Height Invariants ──
+
+    #[test]
+    fn slot_count_always_odd() {
+        for height in (300..=2160).step_by(50) {
+            let config = SlotListConfig::with_dynamic_slots(height as f32, 134.0);
+            assert_eq!(
+                config.slot_count % 2,
+                1,
+                "slot_count must be odd at height={height}, got {}",
+                config.slot_count
+            );
+        }
+    }
+
+    #[test]
+    fn slot_count_monotonically_increases_with_height() {
+        let mut prev_count = 0;
+        for height in (300..=2160).step_by(50) {
+            let config = SlotListConfig::with_dynamic_slots(height as f32, 134.0);
+            assert!(
+                config.slot_count >= prev_count,
+                "slot_count decreased from {prev_count} to {} at height={height}",
+                config.slot_count
+            );
+            prev_count = config.slot_count;
+        }
+    }
+
+    #[test]
+    fn center_slot_is_always_middle() {
+        for height in (300..=2160).step_by(100) {
+            let config = SlotListConfig::with_dynamic_slots(height as f32, 134.0);
+            assert_eq!(
+                config.center_slot,
+                config.slot_count / 2,
+                "center_slot must be slot_count/2 at height={height}"
+            );
+        }
+    }
+
+    #[test]
+    fn slots_never_exceed_available_space() {
+        // The core invariant: rendered slots + spacing must fit in the
+        // available area. If this fails, the last slot clips.
+        for height in (300..=2160).step_by(50) {
+            for chrome in [100.0, 134.0, 170.0, 200.0] {
+                let config = SlotListConfig::with_dynamic_slots(height as f32, chrome);
+                let row_height = config.row_height();
+                let spacing = config.slot_count.saturating_sub(1) as f32 * SLOT_SPACING;
+                let used = config.slot_count as f32 * row_height + spacing;
+                let available = (height as f32 - chrome - SLOT_LIST_CONTAINER_PADDING).max(0.0);
+                assert!(
+                    used <= available + 0.01, // f32 tolerance
+                    "clipped at height={height}, chrome={chrome}: used={used:.1} > available={available:.1}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn queue_slot_list_start_y_includes_edit_bar() {
+        // With edit_bar_height=0 and edit_bar_height=32, the difference
+        // should be exactly the edit bar.
+        let base = queue_slot_list_start_y(0.0);
+        let with_edit = queue_slot_list_start_y(EDIT_BAR_HEIGHT);
+        assert_eq!(
+            with_edit - base,
+            EDIT_BAR_HEIGHT,
+            "edit bar height must be additive"
+        );
+    }
 }

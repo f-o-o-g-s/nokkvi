@@ -43,3 +43,4 @@ pipewire = { version = "0.9.2", features = ["v0_3_77"] }
 
 [dev-dependencies]
 tempfile = "3"
+proptest = "1.11"

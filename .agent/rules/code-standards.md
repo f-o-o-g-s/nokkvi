@@ -35,7 +35,7 @@ trigger: always_on
 
 - **Hold the audio engine lock during decoder operations.** Create fresh decoders on track change.
 - **Change the root widget type between renders** (e.g., Row→Column). Destroys `text_input` focus.
-- **Install unnecessary dependencies.** Core deps: `reqwest`, `serde`, `bincode`, `redb`, `toml_edit`, `font-kit`, `lru`, `rodio`, `ringbuf`, `bytemuck`, `rustfft`, `pipewire`. Don't add alternatives.
+- **Install unnecessary production dependencies.** Core deps: `reqwest`, `serde`, `bincode`, `redb`, `toml_edit`, `font-kit`, `lru`, `rodio`, `ringbuf`, `bytemuck`, `rustfft`, `pipewire`. Don't add alternatives. Test-only `[dev-dependencies]` (e.g., `proptest`, `tempfile`) are acceptable when justified.
 - **Use debounce on search.** Fires immediately on query change.
 - **Use `lock()` in the visualizer FFT processing thread.** FFT thread uses `try_lock()`; render thread uses `lock()`.
 - **Allow play actions from the browsing panel.** Use `guard_play_action()`.

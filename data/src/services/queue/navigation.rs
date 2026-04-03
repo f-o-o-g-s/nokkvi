@@ -675,4 +675,392 @@ mod tests {
         );
         assert_eq!(next.unwrap().song.id, "a");
     }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Mode Combination Matrix (Hand-Written Exhaustive)
+    // ══════════════════════════════════════════════════════════════════════
+
+    /// Helper: configure a QueueManager with the given mode flags
+    fn with_modes(shuffle: bool, consume: bool, repeat: RepeatMode) -> QueueManager {
+        let songs: Vec<_> = (0..10).map(|i| make_test_song(&i.to_string())).collect();
+        let mut qm = make_test_manager(songs, Some(0));
+        if shuffle {
+            qm.toggle_shuffle().unwrap();
+        }
+        qm.queue.consume = consume;
+        qm.set_repeat(repeat).unwrap();
+        qm
+    }
+
+    /// Assert invariants that must hold after ANY navigation operation:
+    /// - order array indices are within bounds of song_ids
+    /// - current_order points to a valid order entry
+    /// - current_index matches order[current_order]
+    fn assert_navigation_invariants(qm: &QueueManager, label: &str) {
+        let len = qm.queue.song_ids.len();
+        // Order array entries must be in [0, len)
+        for (pos, &idx) in qm.queue.order.iter().enumerate() {
+            assert!(
+                idx < len,
+                "{label}: order[{pos}]={idx} >= song_ids.len()={len}"
+            );
+        }
+        // Order must be a permutation (no duplicates)
+        {
+            let mut sorted = qm.queue.order.clone();
+            sorted.sort();
+            sorted.dedup();
+            assert_eq!(
+                sorted.len(),
+                qm.queue.order.len(),
+                "{label}: order has duplicates"
+            );
+        }
+        // current_order must be valid
+        if let Some(co) = qm.queue.current_order {
+            assert!(
+                co < qm.queue.order.len(),
+                "{label}: current_order={co} >= order.len()={}",
+                qm.queue.order.len()
+            );
+            // current_index must match order[current_order]
+            if let Some(ci) = qm.queue.current_index {
+                assert_eq!(
+                    ci, qm.queue.order[co],
+                    "{label}: current_index {ci} != order[{co}]={}",
+                    qm.queue.order[co]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn matrix_sequential_no_consume_no_repeat() {
+        let mut qm = with_modes(false, false, RepeatMode::None);
+        // Advance through all 10 songs
+        for _ in 0..9 {
+            let next = qm.get_next_song();
+            assert!(next.is_some());
+            assert_navigation_invariants(&qm, "seq/nc/nr");
+        }
+        // 11th call should return None
+        assert!(qm.get_next_song().is_none());
+    }
+
+    #[test]
+    fn matrix_sequential_no_consume_repeat_playlist() {
+        let mut qm = with_modes(false, false, RepeatMode::Playlist);
+        // Advance 20 times — should loop twice
+        for i in 0..20 {
+            let next = qm.get_next_song();
+            assert!(next.is_some(), "expected song at step {i}");
+            assert_navigation_invariants(&qm, "seq/nc/rp");
+        }
+    }
+
+    #[test]
+    fn matrix_sequential_no_consume_repeat_track() {
+        let mut qm = with_modes(false, false, RepeatMode::Track);
+        // peek_next_song with repeat=Track always returns current
+        let peeked = qm.peek_next_song().unwrap();
+        assert_eq!(peeked.index, 0);
+        assert_eq!(peeked.reason, "repeat");
+
+        // get_next_song bypasses repeat-track and advances
+        let next = qm.get_next_song().unwrap();
+        assert_eq!(next.index, 1);
+        assert_navigation_invariants(&qm, "seq/nc/rt");
+    }
+
+    #[test]
+    fn matrix_sequential_consume_no_repeat() {
+        // Consume mode is handled externally (by the playback controller),
+        // so get_next_song doesn't itself remove songs. However, the order
+        // array must still be valid after advancing.
+        let mut qm = with_modes(false, true, RepeatMode::None);
+        for _ in 0..9 {
+            let next = qm.get_next_song();
+            assert!(next.is_some());
+            assert_navigation_invariants(&qm, "seq/c/nr");
+        }
+        assert!(qm.get_next_song().is_none());
+    }
+
+    #[test]
+    fn matrix_shuffle_no_consume_no_repeat() {
+        let mut qm = with_modes(true, false, RepeatMode::None);
+        let mut visited = std::collections::HashSet::new();
+        for _ in 0..9 {
+            let next = qm.get_next_song();
+            assert!(next.is_some());
+            visited.insert(next.unwrap().song.id.clone());
+            assert_navigation_invariants(&qm, "shuf/nc/nr");
+        }
+        // Should visit all 9 remaining songs (started at 0, advanced 9 times)
+        assert_eq!(visited.len(), 9);
+        assert!(qm.get_next_song().is_none());
+    }
+
+    #[test]
+    fn matrix_shuffle_no_consume_repeat_playlist() {
+        let mut qm = with_modes(true, false, RepeatMode::Playlist);
+        // Should loop forever — advance 25 times
+        for i in 0..25 {
+            let next = qm.get_next_song();
+            assert!(next.is_some(), "expected song at step {i}");
+            assert_navigation_invariants(&qm, "shuf/nc/rp");
+        }
+    }
+
+    #[test]
+    fn matrix_shuffle_consume_no_repeat() {
+        // Consume mode removes songs EXTERNALLY (via playback controller
+        // calling consume_current after playback starts). get_next_song
+        // itself doesn't remove songs. With shuffle+consume+no-repeat,
+        // the reshuffle fallback fires at end-of-order since songs still
+        // exist — this is correct behavior (consume removes them later).
+        //
+        // Test that the core invariants hold throughout.
+        let mut qm = with_modes(true, true, RepeatMode::None);
+        for _ in 0..15 {
+            if qm.get_next_song().is_none() {
+                break;
+            }
+            assert_navigation_invariants(&qm, "shuf/c/nr");
+        }
+    }
+
+    #[test]
+    fn matrix_shuffle_consume_repeat_playlist() {
+        let mut qm = with_modes(true, true, RepeatMode::Playlist);
+        for i in 0..20 {
+            let next = qm.get_next_song();
+            assert!(next.is_some(), "expected song at step {i}");
+            assert_navigation_invariants(&qm, "shuf/c/rp");
+        }
+    }
+
+    // ── Previous song with different modes ──
+
+    #[test]
+    fn previous_with_shuffle_uses_history() {
+        let mut qm = with_modes(true, false, RepeatMode::None);
+        // Start playing, advance a few times
+        qm.add_to_history(make_test_song("0"));
+        let next = qm.get_next_song().unwrap();
+        qm.add_to_history(next.song);
+
+        // Previous should go back to history
+        let prev = qm.get_previous_song(qm.queue.current_index);
+        match prev {
+            PreviousSongResult::InQueue(_, _) => {}
+            other => {
+                panic!("Expected InQueue, got {other:?}")
+            }
+        }
+        assert_navigation_invariants(&qm, "prev/shuf");
+    }
+
+    #[test]
+    fn previous_with_consume_returns_removed() {
+        // Simulate consume mode: playing "b", "a" was consumed (removed)
+        let songs = vec![make_test_song("b"), make_test_song("c")];
+        let mut qm = make_test_manager(songs, Some(0));
+        qm.queue.consume = true;
+
+        // Add consumed song "a" to history
+        qm.add_to_history(make_test_song("a"));
+
+        let prev = qm.get_previous_song(Some(0));
+        match prev {
+            PreviousSongResult::Removed(song) => {
+                assert_eq!(song.id, "a");
+            }
+            other => panic!("Expected Removed, got {other:?}"),
+        }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  Property-Based Tests (proptest)
+// ══════════════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod proptest_navigation {
+    use proptest::prelude::*;
+
+    use crate::{
+        services::queue::tests::{make_test_manager, make_test_song},
+        types::queue::RepeatMode,
+    };
+
+    fn repeat_mode_strategy() -> impl Strategy<Value = RepeatMode> {
+        prop_oneof![
+            Just(RepeatMode::None),
+            Just(RepeatMode::Track),
+            Just(RepeatMode::Playlist),
+        ]
+    }
+
+    /// Generate a random queue of N songs with random mode flags
+    fn queue_setup(
+        n: usize,
+        shuffle: bool,
+        consume: bool,
+        repeat: RepeatMode,
+        start_idx: usize,
+    ) -> super::QueueManager {
+        let songs: Vec<_> = (0..n).map(|i| make_test_song(&i.to_string())).collect();
+        let start = if n > 0 { start_idx % n } else { 0 };
+        let mut qm = make_test_manager(songs, if n > 0 { Some(start) } else { None });
+        if shuffle {
+            qm.toggle_shuffle().unwrap();
+        }
+        qm.queue.consume = consume;
+        qm.set_repeat(repeat).unwrap();
+        qm
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(500))]
+
+        /// Invariant: after any number of get_next_song calls, the order
+        /// array must contain valid indices into song_ids.
+        #[test]
+        fn order_array_always_valid(
+            n in 1usize..30,
+            shuffle in any::<bool>(),
+            consume in any::<bool>(),
+            repeat in repeat_mode_strategy(),
+            start in 0usize..30,
+            advances in 1usize..50,
+        ) {
+            let mut qm = queue_setup(n, shuffle, consume, repeat, start);
+            let max_advances = advances.min(100); // cap for sanity
+
+            for _ in 0..max_advances {
+                if qm.get_next_song().is_none() {
+                    break;
+                }
+                // Core invariant: order indices are in bounds
+                for (pos, &idx) in qm.queue.order.iter().enumerate() {
+                    prop_assert!(
+                        idx < qm.queue.song_ids.len(),
+                        "order[{}]={} >= len={} (n={}, shuf={}, consume={}, repeat={:?})",
+                        pos, idx, qm.queue.song_ids.len(), n, shuffle, consume, repeat
+                    );
+                }
+
+                // Order must be a permutation
+                let mut sorted = qm.queue.order.clone();
+                sorted.sort();
+                sorted.dedup();
+                prop_assert_eq!(
+                    sorted.len(),
+                    qm.queue.order.len(),
+                    "order has duplicates after advance"
+                );
+            }
+        }
+
+        /// Invariant: current_index always points to a valid song.
+        #[test]
+        fn current_index_always_valid(
+            n in 1usize..20,
+            shuffle in any::<bool>(),
+            consume in any::<bool>(),
+            repeat in repeat_mode_strategy(),
+            start in 0usize..20,
+            advances in 1usize..30,
+        ) {
+            let mut qm = queue_setup(n, shuffle, consume, repeat, start);
+
+            for _ in 0..advances {
+                if qm.get_next_song().is_none() {
+                    break;
+                }
+                if let Some(ci) = qm.queue.current_index {
+                    prop_assert!(
+                        ci < qm.queue.song_ids.len(),
+                        "current_index={} >= len={} (n={}, shuf={}, consume={}, repeat={:?})",
+                        ci, qm.queue.song_ids.len(), n, shuffle, consume, repeat
+                    );
+                }
+            }
+        }
+
+        /// Invariant: sequential (non-shuffle) traversal without repeat
+        /// always terminates after exactly n-1 advances.
+        #[test]
+        fn sequential_no_repeat_terminates(
+            n in 2usize..30,
+            start in 0usize..30,
+        ) {
+            let songs: Vec<_> = (0..n).map(|i| make_test_song(&i.to_string())).collect();
+            let s = start % n;
+            let mut qm = make_test_manager(songs, Some(s));
+            // Sequential, no consume, no repeat
+            qm.queue.consume = false;
+            qm.set_repeat(RepeatMode::None).unwrap();
+
+            let remaining = n - s - 1; // songs after start
+            let mut count = 0;
+            while qm.get_next_song().is_some() {
+                count += 1;
+                if count > n + 5 {
+                    prop_assert!(false, "did not terminate: n={}, start={}", n, s);
+                }
+            }
+            prop_assert_eq!(
+                count, remaining,
+                "expected {} advances from start={} in queue of {}", remaining, s, n
+            );
+        }
+
+        /// Invariant: peek_next_song is idempotent — calling it twice
+        /// returns the same result without side effects.
+        #[test]
+        fn peek_is_idempotent(
+            n in 1usize..20,
+            shuffle in any::<bool>(),
+            repeat in repeat_mode_strategy(),
+            start in 0usize..20,
+        ) {
+            let mut qm = queue_setup(n, shuffle, false, repeat, start);
+
+            let peek1 = qm.peek_next_song().map(|r| (r.index, r.song.id.clone()));
+            let peek2 = qm.peek_next_song().map(|r| (r.index, r.song.id.clone()));
+
+            prop_assert_eq!(
+                peek1, peek2,
+                "peek_next_song not idempotent (n={}, shuffle={}, repeat={:?})", n, shuffle, repeat
+            );
+        }
+
+        /// Invariant: shuffle traversal visits all songs exactly once
+        /// (no repeat, no consume).
+        #[test]
+        fn shuffle_visits_all_once(n in 2usize..20) {
+            let songs: Vec<_> = (0..n).map(|i| make_test_song(&i.to_string())).collect();
+            let mut qm = make_test_manager(songs, Some(0));
+            qm.toggle_shuffle().unwrap();
+            qm.queue.consume = false;
+            qm.set_repeat(RepeatMode::None).unwrap();
+
+            let mut visited = std::collections::HashSet::new();
+            visited.insert("0".to_string()); // starting song
+            let mut count = 0;
+            while let Some(next) = qm.get_next_song() {
+                visited.insert(next.song.id.clone());
+                count += 1;
+                if count > n + 5 {
+                    prop_assert!(false, "shuffle did not terminate: n={}", n);
+                }
+            }
+            prop_assert_eq!(
+                visited.len(), n,
+                "shuffle didn't visit all songs: {:?}", visited
+            );
+        }
+    }
 }
