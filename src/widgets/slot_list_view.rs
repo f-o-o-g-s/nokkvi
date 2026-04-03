@@ -164,6 +164,13 @@ impl SlotListView {
         if let Some(sel) = self.selected_offset.take() {
             self.viewport_offset = sel;
         }
+        // A single-item selection is just a click-to-focus marker, not an
+        // intentional multi-selection. Clear it so `has_multi_selection`
+        // returns to false and the center slot highlight works normally.
+        if self.selected_indices.len() == 1 {
+            self.selected_indices.clear();
+            self.anchor_index = None;
+        }
         self.viewport_offset = self.viewport_offset.saturating_sub(1);
     }
 
@@ -177,6 +184,11 @@ impl SlotListView {
         }
         if let Some(sel) = self.selected_offset.take() {
             self.viewport_offset = sel;
+        }
+        // Clear single-item focus marker (see move_up comment).
+        if self.selected_indices.len() == 1 {
+            self.selected_indices.clear();
+            self.anchor_index = None;
         }
         self.viewport_offset = (self.viewport_offset + 1).min(total_items - 1);
     }

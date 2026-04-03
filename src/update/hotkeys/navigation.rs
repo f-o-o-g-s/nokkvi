@@ -215,6 +215,13 @@ impl Nokkvi {
             // Set the offset directly, then dispatch the page's SlotListSetOffset so
             // the handler's post-update artwork loading code still runs (mini +
             // large artwork from disk cache, network fetch, pagination, etc.).
+            //
+            // Clear any active multi-selection first — CenterOnPlaying is a deliberate
+            // navigation action and stale selected_indices would keep
+            // `has_multi_selection` true, suppressing the center slot highlight.
+            if let Some(page) = self.current_view_page_mut() {
+                page.common_mut().clear_multi_selection();
+            }
             match self.current_view {
                 View::Queue => {
                     let total = self.filter_queue_songs().len();
