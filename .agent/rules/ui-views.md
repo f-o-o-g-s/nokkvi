@@ -18,6 +18,8 @@ All slot-list-based views implement `ViewPage` (in `views/mod.rs`):
 
 All views use `SlotListPageState`: search query, scroll position, focus index. Visible slots: 9→7→5→3→1 based on window height. 23-slot artwork prefetch window.
 
+**Multi-selection** (Ctrl+click / Shift+click): `selected_indices` (HashSet), `anchor_index` for range selection. `handle_slot_click()` handles modifier-aware selection. `clear_multi_selection()` resets. `evaluate_context_menu()` resolves batch targets for right-click menus.
+
 ## Navigation & Interaction
 
 - `SlotListMessage` sub-enum via `handle_slot_list_message` in `update/slot_list.rs`. Non-wrapping, dynamic center slot near edges.
@@ -36,10 +38,13 @@ Generic `ExpansionState<C>` + `SlotListEntry<P, C>`. When active, sort/search ma
 
 - Library views: `LibraryContextEntry`. Queue: `QueueContextEntry`. Strip: `StripContextEntry`.
 - Toast helpers: `toast_info()`, `toast_success()`, `toast_warn()`, `toast_error()`
+- Batch actions: context menu resolves `evaluate_context_menu()` for multi-selection, then dispatches batch operations. `clear_multi_selection()` after batch completion.
 
 ## Browsing Panel (Split-View)
 
 Toggled via Ctrl+E from Queue. `BrowsingView` enum: Songs, Albums, Artists, Genres. Reuses existing page structs. `PaneFocus` toggled via Tab. Play actions blocked via `guard_play_action()`.
+
+**Cross-pane drag** supports batch: `cross_pane_drag_selection_count` tracks whether dragging a single item or a multi-selection batch. Drag threshold 5px. Center index snapshotted at press time.
 
 ## Playlist Editing
 
@@ -49,12 +54,16 @@ Toggled via Ctrl+E from Queue. `BrowsingView` enum: Songs, Albums, Artists, Genr
 
 Physical sort via `QueueManager::sort_queue()`, persists to redb. Album column visible across all sort modes.
 
+## Queue Shuffle
+
+Shuffle on repeat-playlist wrap: re-shuffles the order array when the queue loops back to the start instead of replaying the same shuffle sequence.
+
 ## Update Handler Pattern
 
-Root dispatch in `update/mod.rs`. `ls src/update/` for handler files. Common helpers in `update/components.rs`: `shell_action_task`, `guard_play_action`, `set_item_rating_task`, etc.
+Root dispatch in `update/mod.rs`. `ls src/update/` for handler files. Common helpers in `update/components.rs`: `shell_task`, `shell_spawn`, `guard_play_action`, `set_item_rating_task`, etc.
 
 ## Modals
 
 - **Equalizer**: 10-band + presets (`widgets/eq_modal.rs`, `update/eq_modal.rs`). Selecting preset auto-enables EQ. Sliders visually reset to 0 dB when disabled.
-- **About**: metadata/diagnostics (`widgets/about_modal.rs`, `update/about_modal.rs`)
+- **About**: metadata/diagnostics, theme-adaptive logo (`widgets/about_modal.rs`, `update/about_modal.rs`)
 - Both wrapped in overlay container with `mouse_area` for correct SVG rendering.

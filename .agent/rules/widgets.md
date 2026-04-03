@@ -36,7 +36,9 @@ Custom `iced::advanced` seekable widget. `Vec<OverlaySegment>` for scrolling col
 | Info Modal | `info_modal.rs` | Two-column property table for Get Info. `InfoModalItem` enum per type. |
 | Text Input Dialog | `text_input_dialog.rs` | Modal with text input or confirmation mode. Save Queue uses `combo_box`. |
 | EQ Slider | `eq_slider.rs` | Vertical ±15 dB slider for 10-band EQ |
-| Drag Column | `drag_column.rs` | In-queue drag-and-drop reordering |
+| Drag Column | `drag_column.rs` | In-queue drag-and-drop reordering (supports multi-selection batch) |
+| Format Info | `format_info.rs` | Audio format display (codec, sample rate, bitrate) |
+| Hamburger Menu | `hamburger_menu.rs` | App menu (quit, light/dark toggle, about) |
 
 ## 3D Buttons
 
@@ -53,11 +55,11 @@ Single source of truth: `chrome_height_with_header()`, `queue_slot_list_start_y(
 
 ## Slot Rendering
 
-`SlotListRowContext` bundles per-slot args. Center slot gets `flash_at`. Clickable stars via `slot_list_star_rating()`, clickable hearts via `slot_list_favorite_icon()`. Top-packing when items < slot_count.
+`SlotListRowContext` bundles per-slot args. Center slot gets `flash_at`. Clickable stars via `slot_list_star_rating()`, clickable hearts via `slot_list_favorite_icon()`. Top-packing when items < slot_count. Multi-selection highlight: `selected_indices` set renders selected slots with center-highlight styling; suppressed during active Ctrl/Shift modifier hold.
 
 ## SVG Icons (`embedded_svg.rs`)
 
-Compile-time embedded via `include_str!`. `get_svg(path)` maps paths → content. Unknown paths fall back to play icon with `warn!` log. To add: copy SVG → `assets/icons/`, add `const` + `include_str!`, add match arm in `get_svg()`.
+**Top-level module** in `src/embedded_svg.rs` (not in `widgets/`). Compile-time embedded via `include_str!`. `get_svg(path)` maps paths → content. Unknown paths fall back to play icon with `warn!` log. `themed_logo_svg()` returns the Nokkvi logo with fills remapped to active theme colors (fg1, success, accent). To add: copy SVG → `assets/icons/`, add `const` + `include_str!`, add match arm in `get_svg()`, add to `KNOWN` list + test assertions.
 
 ## Critical Pattern
 

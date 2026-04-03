@@ -27,6 +27,11 @@ AppService (orchestrator)
 - All mutations call `clear_queued()` to invalidate buffered next song.
 - Progressive building: first 500 plays immediately, recursive `ProgressiveQueueAppendPage` chain for rest.
 - Serialization: bincode `Encode`/`Decode` (~3× faster than JSON). `load_binary_or_json()` migrates legacy.
+- **Reshuffle on repeat wrap**: when shuffle + repeat-playlist are both active, the order array is re-shuffled when the queue wraps back to start.
+
+## Batch Operations
+
+`BatchPayload` + `BatchItem` (`data/src/types/batch.rs`): multi-selection batch processing for queue add, playlist add, and context menu actions. `BatchItem` variants: `Song`, `Album`, `Artist`, `Genre`, `Playlist`. Built from `evaluate_context_menu()` resolved indices in visual top-to-bottom order.
 
 ## Persistence
 
@@ -34,7 +39,7 @@ AppService (orchestrator)
 |-------|----------|---------|
 | **redb** | `services/state_storage.rs` | Queue ordering, encrypted password |
 | **TOML config** | `services/toml_settings_io.rs` | Hot-reloadable via `toml_edit`. `verbose_config` mode writes all defaults. |
-| **Theme files** | `services/theme_loader.rs` | Named `.toml` in `~/.config/nokkvi/themes/`. 11 built-in (compiled via `include_str!`, seeded on first run). Discovery, load/save, restore-builtin. |
+| **Theme files** | `services/theme_loader.rs` | Named `.toml` in `~/.config/nokkvi/themes/`. 21 built-in (compiled via `include_str!`, seeded on first run). Discovery, load/save, restore-builtin. |
 | **Config writer** | `src/config_writer.rs` (UI crate) | Per-key TOML updates. `update_config_value()` → config.toml; `update_theme_value()` → active theme file. Atomic via temp + rename. |
 | **Credentials** | `data/src/credentials.rs` | AES-256-GCM + PBKDF2, password in redb |
 
@@ -47,10 +52,11 @@ Owns `PlayerSettings`, `TomlSettings`, `TomlViewPreferences`, `HotkeyConfig`, `S
 - `ThemeFile`: `name`, `dark: ThemePalette`, `light: ThemePalette`
 - `ThemePalette`: background (7 levels), foreground (5 + gray), accent colors, 6 named color pairs, `VisualizerColors`
 - `config.toml` stores `theme = "name"` — points to `~/.config/nokkvi/themes/{name}.toml`
+- Font is a **global setting** (`font_family` in `PlayerSettings`/`TomlSettings`), not tied to `ThemeFile`
 
 ## Domain Types
 
-Types are **iced-free**. Key types: `PagedBuffer<T>`, `HotkeyConfig` (HashMap with O(1) lookup), `PlayerSettings` (read the struct for fields), `Queue`, `QueueSortMode` (physical sort), `PlaylistEditState` (dirty detection), `SongPool`.
+Types are **iced-free**. Key types: `PagedBuffer<T>`, `HotkeyConfig` (HashMap with O(1) lookup), `PlayerSettings` (read the struct for fields — includes `font_family`, `library_page_size`), `Queue`, `QueueSortMode` (physical sort), `PlaylistEditState` (dirty detection), `SongPool`, `BatchPayload`/`BatchItem`.
 
 ## API Patterns
 

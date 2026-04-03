@@ -37,17 +37,20 @@ Follow these steps in order to add a new slot-list-based view.
 
 9. Wrap slot list in `wrap_with_scroll_indicator()` from `widgets/scroll_indicator.rs`
 
-10. Add context menu: wrap slot buttons in `context_menu()` with `LibraryContextEntry` / `QueueContextEntry` actions, add `ContextMenuAction(usize, LibraryContextEntry)` variant
+10. Add context menu: wrap slot buttons in `context_menu()` with `LibraryContextEntry` / `QueueContextEntry` actions, add `ContextMenuAction(usize, LibraryContextEntry)` variant. Batch-aware via `evaluate_context_menu()`.
 
-11. Add toast notifications for user-facing actions using `toast_*()` helpers
+11. Add multi-selection support: `handle_slot_click()` with keyboard modifiers in click handler, `clear_multi_selection()` after batch actions
 
-12. If the view should appear in the browsing panel, add a `BrowsingView` variant and lazy data load check
+12. Add toast notifications for user-facing actions using `toast_*()` helpers
 
-13. Verify:
+13. If the view should appear in the browsing panel, add a `BrowsingView` variant and lazy data load check
+
+14. Verify:
     - `cargo +nightly fmt --all -- --check`
     - `cargo clippy` clean
     - `cargo test` passing
     - Slot list navigation works (↑/↓, focus, center activation)
     - Search filtering works (/ hotkey, immediate results)
     - Context menu works (right-click, all entries functional)
+    - Multi-selection works (Ctrl+click, Shift+click range, batch actions)
     - Scroll indicator appears on long lists

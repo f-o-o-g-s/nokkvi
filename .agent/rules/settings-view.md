@@ -12,7 +12,7 @@ views/settings/
 ├── mod.rs             — State, Message, Action, update, view
 ├── entries.rs         — Entry building/filtering, cross-tab search
 ├── items.rs           — SettingValue types, SettingMeta + meta! macro
-├── items_general.rs   — Application, Mouse, Account, Cache
+├── items_general.rs   — Application (library_page_size), Mouse, Account, Cache
 ├── items_interface.rs — Layout, Metadata Strip
 ├── items_playback.rs  — Playback, Scrobbling, Playlists
 ├── items_hotkeys.rs   — Per-category hotkey entries

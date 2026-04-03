@@ -12,6 +12,14 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 - **Play button cold-start**: Uses `get_effective_center_index` (selected track), not `queue_songs.first()`.
 - **Gapless re-peek on mutation**: If a queue mutation (add/remove) calls `clear_queued()` between gapless prep and `on_track_finished`, `transition_to_queued()` would return `None` → playback stalls. The navigator now re-peeks when `queued.is_none() && !needs_load` before transitioning.
 
+## Multi-Selection & Batch
+- **Ctrl+click toggle**: Deselecting the last item must clear `selected_offset` to remove the center-highlight from the deselected slot.
+- **Shift+click range**: Clears existing selection first, then adds the range from `anchor_index` to clicked offset.
+- **Context menu batch**: `evaluate_context_menu()` checks if clicked index is in the selection; if not, resets selection to just that item.
+- **Clear after batch ops**: Always call `clear_multi_selection()` after completing batch actions (queue add, playlist add, remove) to prevent stale selections.
+- **Cross-pane drag batch**: `cross_pane_drag_selection_count` is snapshotted at press time — decoupled from subsequent selection changes.
+- **Keyboard scroll clears selection**: `handle_navigate_up/down` clears single-item selection state (`selected_offset`) to prevent stale highlights during keyboard scrolling.
+
 ## Optimistic UI & Race Conditions
 - **Tick handler race**: The 10Hz tick can overwrite optimistic state with stale backend state. Use pending flags to prevent reversion before API response.
 - **Source generation counter**: Renderer snapshots `source_generation` (AtomicU64) before releasing the engine lock; discards callback if it changed. Prevents consume+shuffle replaying the just-consumed track.
@@ -31,11 +39,12 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 - **Stale gapless prep on mode toggles**: Mode toggle handlers must call `reset_next_track()` to clear prepared decoder and disarm crossfade trigger.
 - **Pre-volume visualizer samples**: Visualizer receives raw samples before volume multiplication, scaled to S16 range. FFT input is volume-independent.
 - **Visualizer buffer lifetime**: `pending_clear` atomic handles stale audio on track change — don't add extra clearing logic.
+- **Repeat track replay**: `on_track_finished` handler natively supports repeat-track mode by seeking to start. Manual skip (next/prev) bypasses repeat-track to allow navigation.
 
 ## Config & Persistence
 - **Config writer routing**: `update_config_value()` → `config.toml`; `update_theme_value()` / `update_theme_color_array_entry()` → active theme file. Misrouting writes to the wrong file.
 - **Config reload suppression**: `suppress_config_reload()` prevents file watcher feedback loops, but GUI-initiated theme/visualizer changes need manual `ThemeConfigReloaded` trigger after write.
-- **Font propagation**: `font_family` is now a global setting, not tied to `ThemeFile`. Font changes are routed to `PlayerSettings`. EQ modal `pick_list` must explicitly receive the active app font.
+- **Font propagation**: `font_family` is a global setting in `PlayerSettings`/`TomlSettings`, not tied to `ThemeFile`. Font changes are routed to `config.toml`. EQ modal `pick_list` must explicitly receive the active app font.
 
 ## Artwork
 - **Handle::from_bytes for refresh**: `Handle::from_path` uses file path as ID → stale GPU texture on overwrite. Use `Handle::from_bytes(data)` for content-derived IDs.
