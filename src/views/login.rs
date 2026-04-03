@@ -167,17 +167,45 @@ impl LoginPage {
 impl LoginPage {
     /// Build the login view
     pub fn view(&self) -> Element<'_, LoginMessage> {
-        let title = text("Navidrome")
-            .size(60)
-            .width(Length::Fill)
+        let logo_svg = crate::embedded_svg::themed_logo_svg();
+        let logo_handle = iced::widget::svg::Handle::from_memory(logo_svg.into_bytes());
+        let logo = iced::widget::svg(logo_handle)
+            .width(Length::Fixed(80.0))
+            .height(Length::Fixed(80.0));
+
+        let title = text("Nokkvi")
+            .size(42)
             .color(theme::fg0())
+            .width(Length::Fill)
+            .align_x(Alignment::Center)
+            .font(iced::font::Font {
+                weight: iced::font::Weight::Bold,
+                ..theme::ui_font()
+            });
+
+        let subtitle = text("A sturdy hull for the endless stream.")
+            .size(14)
+            .font(iced::font::Font {
+                style: iced::font::Style::Italic,
+                ..theme::ui_font()
+            })
+            .color(theme::fg3())
+            .width(Length::Fill)
             .align_x(Alignment::Center);
 
-        let input_width = Length::Fixed(400.0);
+        let header = column![
+            container(logo).width(Length::Fill).center_x(Length::Fill),
+            title,
+            subtitle
+        ]
+        .spacing(8)
+        .align_x(Alignment::Center);
+
+        let input_width = Length::Fill;
 
         let content = column![
-            title,
-            space().height(40),
+            header,
+            space().height(24),
             column![
                 text("Server URL").size(14).color(theme::fg1()),
                 text_input("http://navidrome.local:4533", &self.server_url)
@@ -190,7 +218,7 @@ impl LoginPage {
                             _ => theme::bg3(),
                         };
                         text_input::Style {
-                            background: (theme::bg0()).into(),
+                            background: (theme::bg0_hard()).into(),
                             border: iced::Border {
                                 color: border_color,
                                 width: 1.0,
@@ -216,7 +244,7 @@ impl LoginPage {
                             _ => theme::bg3(),
                         };
                         text_input::Style {
-                            background: (theme::bg0()).into(),
+                            background: (theme::bg0_hard()).into(),
                             border: iced::Border {
                                 color: border_color,
                                 width: 1.0,
@@ -244,7 +272,7 @@ impl LoginPage {
                             _ => theme::bg3(),
                         };
                         text_input::Style {
-                            background: (theme::bg0()).into(),
+                            background: (theme::bg0_hard()).into(),
                             border: iced::Border {
                                 color: border_color,
                                 width: 1.0,
@@ -259,9 +287,13 @@ impl LoginPage {
             ]
             .spacing(5),
             if let Some(err) = &self.error_message {
-                text(err).color(theme::danger_bright()).size(14)
+                text(err)
+                    .color(theme::danger_bright())
+                    .size(14)
+                    .width(Length::Fill)
+                    .align_x(Alignment::Center)
             } else {
-                text("")
+                text(" ") // using empty text instead of nothing to preserve height, although iced handles missing fine
             },
             button(
                 text(if self.login_in_progress {
@@ -273,7 +305,7 @@ impl LoginPage {
                 .align_x(Alignment::Center)
             )
             .on_press(LoginMessage::LoginPressed)
-            .padding(12)
+            .padding(14)
             .width(input_width)
             .style(|_theme, _status| {
                 button::Style {
@@ -282,17 +314,43 @@ impl LoginPage {
                     border: iced::Border {
                         color: theme::accent_border_light(),
                         width: 1.0,
-                        radius: 4.0.into(),
+                        radius: 8.0.into(),
                     },
                     shadow: iced::Shadow::default(),
                     snap: false,
                 }
             }),
         ]
-        .spacing(20)
-        .align_x(Alignment::Center);
+        .spacing(16)
+        .width(Length::Fixed(400.0));
 
-        container(content)
+        let card = container(content)
+            .padding(40)
+            .style(|_theme| container::Style {
+                background: Some((theme::bg0()).into()),
+                text_color: Some(theme::fg0()),
+                border: iced::Border {
+                    color: theme::bg1(),
+                    width: 1.0,
+                    radius: 12.0.into(),
+                },
+                shadow: iced::Shadow {
+                    color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.8),
+                    offset: iced::Vector::new(0.0, 10.0),
+                    blur_radius: 30.0,
+                    ..Default::default()
+                },
+                snap: false,
+            });
+
+        let version = env!("CARGO_PKG_VERSION");
+        let version_text = text(format!("v{}", version)).size(12).color(theme::fg4());
+
+        let layout = column![card, version_text]
+            .spacing(20)
+            .align_x(Alignment::Center);
+
+        container(layout)
             .width(Length::Fill)
             .height(Length::Fill)
             .center_x(Length::Fill)
