@@ -10,42 +10,31 @@ A native Rust/Iced client for [Navidrome](https://www.navidrome.org/) music serv
 
 ## Features
 
-- GPU-accelerated audio visualizer (bars + lines modes, pure-Rust FFT via RustFFT with configurable opacity)
-- Native PipeWire audio engine, featuring gapless playback and dual-stream crossfade, with hardware stream volume synchronization
-- 10-band graphic equalizer with custom presets and precision DSP
-- Peak limiter and perceptual volume curve for clean, natural-sounding output
-- MPRIS D-Bus integration for media player controls
-- Scrobbling support (last.fm / ListenBrainz via Navidrome)
-- Hot-reloadable theme and visualizer configuration
-- Side or top navigation layout with text, icons, or both
-- Now-playing metadata strip (player bar or full-width top bar) with marquee scrolling and right-click context menu
-- Optional rounded corners mode for the entire UI
-- User-configurable keyboard shortcuts
-- In-app settings editor with drill-down navigation, inline search, and preset themes (all preferences hot-reloadable via `config.toml`, including a Verbose Config mode)
+### Audio
+- Native PipeWire audio engine with gapless playback and crossfade
+- Real-time hardware volume synchronization with your desktop
+- 10-band graphic equalizer with custom presets
+- GPU-accelerated visualizer (bars and line modes)
+
+### Library & Playback
+- Browse by albums, artists, songs, genres, and playlists
+- Inline expansion — drill into artists/genres to see albums and tracks without leaving the view
+- Star ratings (0–5) and favorites on everything
+- Multi-selection with Ctrl/Shift — batch add to queue, rate, favorite, etc.
+- Drag-and-drop from library to queue, and reorder within the queue
+- Queue persistence across restarts
+- Scrobbling (last.fm / ListenBrainz via Navidrome)
+- Playlist management — create, rename, delete, and split-view editing with a library browser panel
+
+### Interface
+- 21 built-in themes inspired by popular editor color schemes (Gruvbox, Catppuccin, Dracula, Nord, Tokyo Night, Kanagawa, Everforest, and more) — or create your own
+- Hot-reloadable configuration — themes, visualizer settings, and all preferences update live
+- Configurable layouts — side or top navigation, player bar or top-bar metadata strip, rounded corners mode
+- User-configurable keyboard shortcuts for every action
 - System font picker with live preview
-- File-based logging to `~/.config/nokkvi/nokkvi.log`
-- Get Info modal (Shift+I) — full metadata inspector with selectable text and copy support
-- About modal with system diagnostic information, accessible via hamburger menu
-- Show in File Manager — right-click songs to open their containing folder
-- Inline three-tier expansion (Artist → Album → Track, Genre → Album → Track)
-- Playlist management — create, rename, delete, save queue as playlist
-- Split-view playlist editing with library browser panel (includes inline comment editing)
-- Cross-pane drag-and-drop from library browser to queue with visual drop indicator
-- Right-click context menus on all views (Add to Queue, Add to Playlist, Get Info, etc.)
-- Queue drag-and-drop reordering and keyboard track reordering
-- Star ratings (0–5) on albums, artists, songs, and queue items
-- Scroll-to-adjust volume anywhere on the player bar
-- Horizontal volume controls layout option (stacked beside player bar buttons)
-- Slot list hover overlay with press darkening and flash micro-animations
-- Toast notification system for user feedback
-- Server-side pagination for large libraries with configurable page size (`PagedBuffer<T>`)
-- Multi-selection batch operations across library and queue views (select with Ctrl/Shift, then right-click or use hotkeys)
-- Drag-and-drop multi-selection batches from library to queue and within the queue
-- Confirmation dialogs for destructive actions
-- Queue persistence across app restarts (restores queue contents and current track)
-- Non-wrapping slot list navigation with dynamic center slot
-- Dynamic slot sizing with configurable row height (Settings → Interface)
-- Modernized card-based login screen with theme-adaptive branding
+- Right-click context menus everywhere, including "Show in File Manager"
+- MPRIS D-Bus integration for desktop media controls
+- In-app settings editor with drill-down navigation and inline search
 
 ## Dependencies (Arch Linux)
 
@@ -69,6 +58,16 @@ cargo build --release
 ```
 
 The binary will be at `target/release/nokkvi`.
+
+### Installation
+
+After building, install the binary, desktop entry, and icon for your user:
+
+```bash
+./install.sh
+```
+
+This copies the binary to `~/.local/bin/nokkvi` and sets up the `.desktop` file and SVG icon so your app launcher can find it.
 
 ### Formatting
 
@@ -97,19 +96,7 @@ Configuration is stored in `~/.config/nokkvi/config.toml` (hot-reloadable).
 
 ### Built-in Themes
 
-Nokkvi ships with several pre-configured built-in themes that are automatically seeded to `~/.config/nokkvi/themes/` on first launch:
-
-- **Gruvbox** (default)
-- **Gruvbox Blue**
-- **Gruvbox Red**
-- **Catppuccin** (Mocha / Latte)
-- **Cryo** (Cool icy blue palette)
-- **Dracula** (Classic dark / Alucard light)
-- **Ember** (Warm orange/red palette)
-- **Everforest** (Comfortable green/forest palette)
-- **Kanagawa** (Wave / Lotus)
-- **Nord** (Arctic, north-bluish palette)
-- **Bio Luminal Swamplab** (Custom bioluminescent theme)
+Nokkvi ships with 21 built-in themes that are automatically seeded to `~/.config/nokkvi/themes/` on first launch. These include popular editor and terminal color schemes like Gruvbox (default), Catppuccin, Dracula, Nord, Kanagawa, Everforest, Tokyo Night, Solarized, and more. Every theme includes both dark and light palettes plus visualizer colors.
 
 **To change your theme:** Simply open the in-app **Settings -> Theme** menu, and pick one from the "Select Theme" list. It will apply instantly.
 
@@ -196,8 +183,8 @@ All keyboard shortcuts are **user-configurable** via the Settings view (Hotkeys 
 | Key | Action |
 |-----|--------|
 | `Delete` | Reset focused setting to default |
-| `Shift+↑` | Toggle field up in ToggleSet (Visible Fields) |
-| `Shift+↓` | Toggle field down in ToggleSet (Visible Fields) |
+| `↑` | Toggle field up in ToggleSet (Visible Fields) |
+| `↓` | Toggle field down in ToggleSet (Visible Fields) |
 
 ### Item Actions
 

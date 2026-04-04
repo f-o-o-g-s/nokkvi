@@ -56,11 +56,7 @@ The app will show a login screen on first launch. Enter your Navidrome server UR
 
 Application logs are written to `~/.config/nokkvi/nokkvi.log`.
 
-To customize the theme, copy an example theme over your config (your credentials will be preserved on next login):
-```bash
-cp example_themes/config_catppuccin.toml ~/.config/nokkvi/config.toml
-```
-
+Built-in themes are automatically seeded to `~/.config/nokkvi/themes/` on first launch. To change themes, open **Settings → Theme** and pick from the list.
 
 ## More Information
 

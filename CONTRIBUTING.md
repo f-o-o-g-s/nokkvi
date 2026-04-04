@@ -37,7 +37,7 @@ Formatting uses **nightly rustfmt** with a custom `rustfmt.toml` (100-char lines
 - Platform support for non-Arch distros or Wayland/X11 quirks
 - Performance improvements (this is an audio app, latency matters)
 - Documentation, screenshots, user guides
-- New themes in `example_themes/`
+- New themes in `themes/`
 
 ## Things to Avoid
 
