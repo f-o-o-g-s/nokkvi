@@ -104,12 +104,12 @@ pub(crate) fn svg_widget<'a>(path: &str) -> svg::Svg<'a> {
 // Themed Logo SVG
 // ============================================================================
 
-/// The Nokkvi logo SVG template with hardcoded Gruvbox fills.
+/// The Nokkvi logo SVG template.
 ///
-/// Three distinct fill colors:
+/// Contains placeholders to map colors dynamically based on the current theme:
+/// - `{{GRADIENT_STOPS}}` — a sequence of `<stop>` tags based on the theme's
+///   visualizer bar gradient colors.
 /// - `#ebdbb2` — boat hull (maps to `fg1`)
-/// - `#689d6a` — top wave band (maps to `success`)
-/// - `#458588` — bottom wave band (maps to `accent`)
 const LOGO_SVG: &str = include_str!("../assets/nokkvi_logo.svg");
 
 /// Convert an `iced::Color` to a `#rrggbb` hex string for SVG fill replacement.
@@ -124,17 +124,14 @@ fn color_to_hex(c: Color) -> String {
 
 /// Return the Nokkvi logo SVG with fills remapped to the active theme.
 ///
-/// Performs string replacement on the compile-time SVG template, swapping
-/// the hardcoded Gruvbox hex colors for the current theme's semantic colors:
-/// - Boat hull: `fg1()` (main foreground)
-/// - Top wave:  `success()` (green semantic)
-/// - Bottom wave: `accent()` (primary accent)
+/// Performs string replacement on the compile-time SVG template:
+/// - Swaps the hardcoded `#ebdbb2` hex color for the current theme's `fg1()`.
+/// - Swaps the hardcoded `#458588` hex color for the current theme's `accent()`.
 pub(crate) fn themed_logo_svg() -> String {
     use crate::theme;
 
     LOGO_SVG
         .replace("#ebdbb2", &color_to_hex(theme::fg1()))
-        .replace("#689d6a", &color_to_hex(theme::success()))
         .replace("#458588", &color_to_hex(theme::accent()))
 }
 
