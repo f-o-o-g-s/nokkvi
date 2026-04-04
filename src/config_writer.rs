@@ -254,9 +254,13 @@ fn setting_value_to_toml(value: &SettingValue) -> Item {
     }
 }
 
+static TEMP_WRITE_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 /// Write content to a file atomically using temp file + rename.
 fn write_atomic(path: &Path, content: &str) -> Result<()> {
-    let temp_path = path.with_extension("toml.tmp");
+    let id = TEMP_WRITE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let temp_name = format!("{}.{}.tmp", path.file_name().unwrap_or_default().to_string_lossy(), id);
+    let temp_path = path.with_file_name(temp_name);
 
     std::fs::write(&temp_path, content)
         .with_context(|| format!("Failed to write temp file: {}", temp_path.display()))?;
@@ -376,7 +380,12 @@ pub(crate) fn strip_to_sparse() -> Result<()> {
     }
 
     let content = std::fs::read_to_string(&config_path).context("Failed to read config.toml")?;
+    let new_content = strip_to_sparse_content(&content)?;
 
+    write_atomic(&config_path, &new_content)
+}
+
+fn strip_to_sparse_content(content: &str) -> Result<String> {
     let mut doc: DocumentMut = content
         .parse::<DocumentMut>()
         .context("Failed to parse config.toml as TOML")?;
@@ -406,7 +415,7 @@ pub(crate) fn strip_to_sparse() -> Result<()> {
     }
 
     debug!(" [CONFIG WRITER] Stripped [visualizer] to sparse (verbose off)");
-    write_atomic(&config_path, &doc.to_string())
+    Ok(doc.to_string())
 }
 
 /// Recursively remove keys from a section in `doc` that match the `defaults` table.
@@ -690,5 +699,37 @@ mod tests {
             doc.get("section").is_none(),
             "section with only default keys must be removed entirely"
         );
+    }
+
+    #[test]
+    fn test_sparse_strip_corrupted_config() {
+        // If we feed corrupted config content directly to `strip_to_sparse_content`, it fails cleanly.
+        let result = super::strip_to_sparse_content("garbage [ \0");
+        assert!(result.is_err(), "Corrupted TOML string should return an error");
+    }
+
+    #[test]
+    fn test_atomic_write_collision() {
+        // We write atomic quickly from multiple threads to the same path
+        let temp_dir = std::env::temp_dir().join("nokkvi_test_atomic_collision");
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let path = temp_dir.join("config.toml");
+        
+        let mut handles = vec![];
+        for i in 0..20 {
+            let p = path.clone();
+            handles.push(std::thread::spawn(move || {
+                let content = format!("thread_val = {}\n", i);
+                let _ = super::write_atomic(&p, &content);
+            }));
+        }
+
+        for h in handles {
+            let _ = h.join();
+        }
+
+        let content = std::fs::read_to_string(&path).expect("Final file must exist");
+        assert!(content.contains("thread_val = "), "File must not be corrupted or deleted");
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

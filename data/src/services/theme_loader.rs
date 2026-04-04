@@ -322,9 +322,13 @@ fn try_read_theme_name() -> Result<String> {
     let content = std::fs::read_to_string(&config_path)
         .with_context(|| format!("Failed to read config.toml: {}", config_path.display()))?;
 
+    extract_theme_name_from_toml(&content)
+}
+
+fn extract_theme_name_from_toml(content: &str) -> Result<String> {
     // Quick parse: just extract the top-level `theme` key
     let doc: toml::Table =
-        toml::from_str(&content).context("Failed to parse config.toml for theme key")?;
+        toml::from_str(content).context("Failed to parse config.toml for theme key")?;
 
     match doc.get("theme").and_then(|v| v.as_str()) {
         Some(name) if !name.is_empty() => Ok(name.to_string()),
@@ -481,5 +485,32 @@ mod tests {
     #[test]
     fn test_default_theme_name() {
         assert_eq!(DEFAULT_THEME, "adwaita");
+    }
+
+    #[test]
+    fn test_read_theme_config_missing_key() {
+        // Simulate a config.toml where the theme key doesn't exist at all
+        let content = "[visualizer]\nbars = 10\n";
+        let name = extract_theme_name_from_toml(content).expect("Should parse cleanly");
+        assert_eq!(name, DEFAULT_THEME, "Missing key should fallback to default theme");
+    }
+
+    #[test]
+    fn test_read_theme_config_malformed() {
+        // Simulate a totally malformed config.toml
+        let content = "this is garbage [[[\0";
+        let result = extract_theme_name_from_toml(content);
+        assert!(result.is_err(), "Garbage should fail to parse, triggering the outer fallback");
+    }
+
+    #[test]
+    fn test_corrupted_theme_fallback() {
+        // Simulate a corrupted theme file (e.g. users editing manually and saving a syntax error)
+        let garbage = "name = \"MyTheme\"\n[dark\nbackground = { hard = \"#fff\" }";
+        let result = ThemeFile::load(garbage);
+        assert!(result.is_err(), "Corrupted theme TOML should return Err()");
+        // Verify that the fallback mechanism would trigger Adwaita (which it does in load_theme)
+        let default_theme = ThemeFile::default();
+        assert_eq!(default_theme.name, "Adwaita");
     }
 }
