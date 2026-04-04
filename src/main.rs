@@ -690,6 +690,7 @@ pub fn main() -> iced::Result {
         .title(Nokkvi::title)
         .default_font(theme::ui_font())
         .subscription(Nokkvi::subscription)
+        .antialiasing(true)
         .window(iced::window::Settings {
             platform_specific: PlatformSpecific {
                 application_id: "org.nokkvi.nokkvi".to_string(),

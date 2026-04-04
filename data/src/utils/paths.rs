@@ -2,7 +2,7 @@
 //!
 //! All data is stored under `~/.config/nokkvi/`:
 //! - `config.toml`: Server URL, username, theme & visualizer settings (user-editable)
-//! - `app.redb`: Unified persistence (encrypted password, queue state, settings, hotkeys)
+//! - `app.redb`: Unified persistence (session tokens, queue state, settings, hotkeys)
 //! - `cache/`: Artwork and other cached data
 //!   - `artwork/`: Album artwork cache
 //!   - `artist_artwork/`: Artist artwork cache

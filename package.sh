@@ -45,7 +45,7 @@ if [ -d docs ] && [ "$(ls -A docs 2>/dev/null)" ]; then
 fi
 
 # Configuration examples
-cp config.toml.example "${TEMP_DIR}/"
+
 cp -r themes "${TEMP_DIR}/"
 
 # Build/format config
