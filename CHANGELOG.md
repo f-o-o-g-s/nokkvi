@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## v0.2.6 — 2026-04-03
+
+### Fixes
+- **Theme Sync** — immediate UI synchronization when changing the active theme from settings.
+
+### Improvements
+- **Logo Aesthetics** — replaced complex SVG visualizer gradients with clean flat colors in both the application and desktop icons for a more minimalist, easily readable aesthetic.
+
+### Internal
+- **TDD Integration** — implemented comprehensive test-driven development suites covering backend state (`PagedBuffer`), data integrity, atomic configuration persistence, theme serialization, and settings invariants.
+
 ## v0.2.5 — 2026-04-03
 
 ### Features

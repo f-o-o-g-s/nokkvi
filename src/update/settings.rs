@@ -981,8 +981,20 @@ mod tests {
                 key: "visualizer.monstercat".into(),
                 label: "Monstercat".to_string(),
                 category: "Test",
-                value: SettingValue::Float { val: 1.0, min: 0.0, max: 2.0, step: 0.1, unit: "" },
-                default: SettingValue::Float { val: 1.0, min: 0.0, max: 2.0, step: 0.1, unit: "" },
+                value: SettingValue::Float {
+                    val: 1.0,
+                    min: 0.0,
+                    max: 2.0,
+                    step: 0.1,
+                    unit: "",
+                },
+                default: SettingValue::Float {
+                    val: 1.0,
+                    min: 0.0,
+                    max: 2.0,
+                    step: 0.1,
+                    unit: "",
+                },
                 label_icon: None,
                 subtitle: None,
             }),
@@ -1001,13 +1013,22 @@ mod tests {
         crate::Nokkvi::patch_cached_entry(
             &mut entries,
             "visualizer.monstercat",
-            SettingValue::Float { val: 0.0, min: 0.0, max: 10.0, step: 0.1, unit: "" },
+            SettingValue::Float {
+                val: 0.0,
+                min: 0.0,
+                max: 10.0,
+                step: 0.1,
+                unit: "",
+            },
         );
 
         if let SettingsEntry::Item(item) = &entries[0] {
             assert_eq!(item.key, "visualizer.monstercat");
             if let SettingValue::Float { val, .. } = item.value {
-                assert_eq!(val, 0.0, "Patching must successfully update the float value in place");
+                assert_eq!(
+                    val, 0.0,
+                    "Patching must successfully update the float value in place"
+                );
             } else {
                 panic!("Wrong value type after patching");
             }

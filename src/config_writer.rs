@@ -259,7 +259,11 @@ static TEMP_WRITE_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::Atomic
 /// Write content to a file atomically using temp file + rename.
 fn write_atomic(path: &Path, content: &str) -> Result<()> {
     let id = TEMP_WRITE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let temp_name = format!("{}.{}.tmp", path.file_name().unwrap_or_default().to_string_lossy(), id);
+    let temp_name = format!(
+        "{}.{}.tmp",
+        path.file_name().unwrap_or_default().to_string_lossy(),
+        id
+    );
     let temp_path = path.with_file_name(temp_name);
 
     std::fs::write(&temp_path, content)
@@ -705,7 +709,10 @@ mod tests {
     fn test_sparse_strip_corrupted_config() {
         // If we feed corrupted config content directly to `strip_to_sparse_content`, it fails cleanly.
         let result = super::strip_to_sparse_content("garbage [ \0");
-        assert!(result.is_err(), "Corrupted TOML string should return an error");
+        assert!(
+            result.is_err(),
+            "Corrupted TOML string should return an error"
+        );
     }
 
     #[test]
@@ -714,7 +721,7 @@ mod tests {
         let temp_dir = std::env::temp_dir().join("nokkvi_test_atomic_collision");
         let _ = std::fs::create_dir_all(&temp_dir);
         let path = temp_dir.join("config.toml");
-        
+
         let mut handles = vec![];
         for i in 0..20 {
             let p = path.clone();
@@ -729,7 +736,10 @@ mod tests {
         }
 
         let content = std::fs::read_to_string(&path).expect("Final file must exist");
-        assert!(content.contains("thread_val = "), "File must not be corrupted or deleted");
+        assert!(
+            content.contains("thread_val = "),
+            "File must not be corrupted or deleted"
+        );
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

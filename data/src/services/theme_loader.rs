@@ -492,7 +492,10 @@ mod tests {
         // Simulate a config.toml where the theme key doesn't exist at all
         let content = "[visualizer]\nbars = 10\n";
         let name = extract_theme_name_from_toml(content).expect("Should parse cleanly");
-        assert_eq!(name, DEFAULT_THEME, "Missing key should fallback to default theme");
+        assert_eq!(
+            name, DEFAULT_THEME,
+            "Missing key should fallback to default theme"
+        );
     }
 
     #[test]
@@ -500,7 +503,10 @@ mod tests {
         // Simulate a totally malformed config.toml
         let content = "this is garbage [[[\0";
         let result = extract_theme_name_from_toml(content);
-        assert!(result.is_err(), "Garbage should fail to parse, triggering the outer fallback");
+        assert!(
+            result.is_err(),
+            "Garbage should fail to parse, triggering the outer fallback"
+        );
     }
 
     #[test]
