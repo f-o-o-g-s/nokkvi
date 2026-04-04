@@ -89,7 +89,7 @@ impl QueueManager {
 
         // Compute next from order array
         let next_order = match self.next_order_index() {
-            Some(0) if self.queue.shuffle => {
+            Some(0) if self.queue.shuffle && !self.queue.consume => {
                 // Shuffle + repeat-playlist wrap: reshuffle so each cycle is a fresh order.
                 debug!(
                     " [QUEUE] Shuffle+repeat: reshuffling {} songs at playlist wrap",
@@ -878,6 +878,86 @@ mod tests {
             }
             other => panic!("Expected Removed, got {other:?}"),
         }
+    }
+
+    // ── Consume + Repeat-Playlist interaction tests ──
+    // Bug: crossfade + consume + repeat-queue wraps to position 0 even though
+    // consume will empty the queue, causing a ghost track to play from an empty queue.
+
+    #[test]
+    fn consume_repeat_playlist_last_song_returns_none() {
+        // The exact bug scenario: 1 song left, consume + repeat-playlist.
+        // peek_next_song must return None — there's nothing to wrap to.
+        let songs = vec![make_test_song("a")];
+        let mut qm = make_test_manager(songs, Some(0));
+        qm.queue.consume = true;
+        qm.set_repeat(RepeatMode::Playlist).unwrap();
+
+        let peeked = qm.peek_next_song();
+        assert!(
+            peeked.is_none(),
+            "consume + repeat-playlist with 1 song should NOT wrap (got {:?})",
+            peeked.map(|r| r.song.id)
+        );
+    }
+
+    #[test]
+    fn consume_repeat_playlist_sequential_no_wrap() {
+        // Sequential consume + repeat-playlist: drain all songs, should stop.
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+        ];
+        let mut qm = make_test_manager(songs, Some(0));
+        qm.queue.consume = true;
+        qm.set_repeat(RepeatMode::Playlist).unwrap();
+
+        // Advance through all songs
+        let mut count = 0;
+        while qm.get_next_song().is_some() {
+            count += 1;
+            if count > 5 {
+                panic!("consume + repeat-playlist should terminate, not loop");
+            }
+        }
+        // Should have advanced exactly 2 times (b, c) then stopped
+        assert_eq!(count, 2, "expected 2 advances (b, c) then None");
+    }
+
+    #[test]
+    fn consume_shuffle_repeat_playlist_last_song_returns_none() {
+        // Shuffle + consume + repeat-playlist with 1 song: must return None.
+        let songs = vec![make_test_song("a")];
+        let mut qm = make_test_manager(songs, Some(0));
+        qm.queue.shuffle = true;
+        qm.queue.consume = true;
+        qm.set_repeat(RepeatMode::Playlist).unwrap();
+
+        let peeked = qm.peek_next_song();
+        assert!(
+            peeked.is_none(),
+            "shuffle + consume + repeat-playlist with 1 song should NOT wrap (got {:?})",
+            peeked.map(|r| r.song.id)
+        );
+    }
+
+    #[test]
+    fn consume_repeat_playlist_with_remaining_advances() {
+        // Consume + repeat-playlist with songs remaining DOES advance.
+        // The fix must not break normal mid-queue consume behavior.
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+        ];
+        let mut qm = make_test_manager(songs, Some(0));
+        qm.queue.consume = true;
+        qm.set_repeat(RepeatMode::Playlist).unwrap();
+
+        let next = qm.peek_next_song();
+        assert!(next.is_some(), "should advance to next song mid-queue");
+        assert_eq!(next.unwrap().song.id, "b");
     }
 }
 

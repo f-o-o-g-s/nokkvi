@@ -89,7 +89,7 @@ impl QueueManager {
         let next = cur + 1;
         if next < self.queue.order.len() {
             Some(next)
-        } else if self.queue.repeat == RepeatMode::Playlist {
+        } else if self.queue.repeat == RepeatMode::Playlist && !self.queue.consume {
             Some(0)
         } else {
             None
