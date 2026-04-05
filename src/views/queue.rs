@@ -55,8 +55,6 @@ pub enum QueueContextEntry {
     PlayNext,
     Separator,
     RemoveFromQueue,
-    MoveToTop,
-    MoveToBottom,
     AddToPlaylist,
     SaveAsPlaylist,
     OpenBrowsingPanel,
@@ -123,8 +121,6 @@ pub enum QueueAction {
     MoveItem { from: usize, to: usize }, // drag-and-drop reorder (absolute item indices)
     MoveBatch { indices: Vec<usize>, target: usize }, // multi-selection drag reorder
     RemoveFromQueue(Vec<usize>), // remove songs at indices
-    MoveToTop(Vec<usize>),    // move songs to top of queue
-    MoveToBottom(Vec<usize>), // move songs to bottom of queue
     PlayNext(Vec<usize>),     // insert songs after currently playing
     ShowToast(String),        // informational toast (e.g. drag disabled reason)
     SaveAsPlaylist,           // open dialog to save queue as new playlist
@@ -338,22 +334,13 @@ impl QueuePage {
                     self.common.handle_set_offset(clicked_idx, total_items);
                     (Task::none(), QueueAction::PlaySong(clicked_idx))
                 }
-                QueueContextEntry::RemoveFromQueue
-                | QueueContextEntry::MoveToTop
-                | QueueContextEntry::MoveToBottom
-                | QueueContextEntry::PlayNext => {
+                QueueContextEntry::RemoveFromQueue | QueueContextEntry::PlayNext => {
                     let target_indices = self.common.evaluate_context_menu(clicked_idx);
                     self.common.clear_multi_selection();
 
                     match entry {
                         QueueContextEntry::RemoveFromQueue => {
                             (Task::none(), QueueAction::RemoveFromQueue(target_indices))
-                        }
-                        QueueContextEntry::MoveToTop => {
-                            (Task::none(), QueueAction::MoveToTop(target_indices))
-                        }
-                        QueueContextEntry::MoveToBottom => {
-                            (Task::none(), QueueAction::MoveToBottom(target_indices))
                         }
                         QueueContextEntry::PlayNext => {
                             (Task::none(), QueueAction::PlayNext(target_indices))
@@ -919,8 +906,6 @@ impl QueuePage {
                 QueueContextEntry::PlayNext,
                 QueueContextEntry::Separator,
                 QueueContextEntry::RemoveFromQueue,
-                QueueContextEntry::MoveToTop,
-                QueueContextEntry::MoveToBottom,
                 QueueContextEntry::Separator,
                 QueueContextEntry::AddToPlaylist,
                 QueueContextEntry::SaveAsPlaylist,
@@ -948,16 +933,6 @@ impl QueuePage {
                     Some("assets/icons/trash-2.svg"),
                     "Remove from Queue",
                     QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::RemoveFromQueue),
-                ),
-                QueueContextEntry::MoveToTop => menu_button(
-                    Some("assets/icons/arrow-up-to-line.svg"),
-                    "Move to Top",
-                    QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::MoveToTop),
-                ),
-                QueueContextEntry::MoveToBottom => menu_button(
-                    Some("assets/icons/arrow-down-to-line.svg"),
-                    "Move to Bottom",
-                    QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::MoveToBottom),
                 ),
                 QueueContextEntry::Separator => menu_separator(),
                 QueueContextEntry::AddToPlaylist => menu_button(
