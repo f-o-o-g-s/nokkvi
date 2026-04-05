@@ -300,44 +300,27 @@ impl AlbumsPage {
                     }
                 }
                 AlbumsMessage::AddCenterToQueue => {
-                    use nokkvi_data::types::batch::{BatchItem, BatchPayload};
+                    use nokkvi_data::types::batch::BatchItem;
 
                     let total = self.expansion.flattened_len(albums);
-                    let target_indices: Vec<usize> =
-                        if !self.common.slot_list.selected_indices.is_empty() {
-                            self.common
-                                .slot_list
-                                .selected_indices
-                                .iter()
-                                .copied()
-                                .collect()
-                        } else if let Some(center_idx) = self.common.get_center_item_index(total) {
-                            vec![center_idx]
-                        } else {
-                            vec![]
-                        };
+                    let target_indices = self.common.get_queue_target_indices(total);
 
                     if target_indices.is_empty() {
                         return (Task::none(), AlbumsAction::None);
                     }
 
-                    let payload = target_indices
-                        .into_iter()
-                        .filter_map(
-                            |i| match self.expansion.get_entry_at(i, albums, |a| &a.id) {
-                                Some(SlotListEntry::Parent(album)) => {
-                                    Some(BatchItem::Album(album.id.clone()))
-                                }
-                                Some(SlotListEntry::Child(song, _)) => {
-                                    let item: nokkvi_data::types::song::Song = song.clone().into();
-                                    Some(BatchItem::Song(Box::new(item)))
-                                }
-                                None => None,
-                            },
-                        )
-                        .fold(BatchPayload::new(), |p: BatchPayload, item| {
-                            p.with_item(item)
-                        });
+                    let payload = super::expansion::build_batch_payload(target_indices, |i| {
+                        match self.expansion.get_entry_at(i, albums, |a| &a.id) {
+                            Some(SlotListEntry::Parent(album)) => {
+                                Some(BatchItem::Album(album.id.clone()))
+                            }
+                            Some(SlotListEntry::Child(song, _)) => {
+                                let item: nokkvi_data::types::song::Song = song.clone().into();
+                                Some(BatchItem::Song(Box::new(item)))
+                            }
+                            None => None,
+                        }
+                    });
 
                     (Task::none(), AlbumsAction::AddBatchToQueue(payload))
                 }
@@ -353,14 +336,11 @@ impl AlbumsPage {
                 AlbumsMessage::ClickSetRating(item_index, rating) => {
                     if let Some(entry) = self.expansion.get_entry_at(item_index, albums, |a| &a.id)
                     {
+                        use nokkvi_data::utils::formatters::compute_rating_toggle;
                         match entry {
                             SlotListEntry::Child(song, _) => {
                                 let current = song.rating.unwrap_or(0) as usize;
-                                let new_rating = if rating == current {
-                                    rating.saturating_sub(1)
-                                } else {
-                                    rating
-                                };
+                                let new_rating = compute_rating_toggle(current, rating);
                                 (
                                     Task::none(),
                                     AlbumsAction::SetRating(song.id.clone(), "song", new_rating),
@@ -368,11 +348,7 @@ impl AlbumsPage {
                             }
                             SlotListEntry::Parent(album) => {
                                 let current = album.rating.unwrap_or(0) as usize;
-                                let new_rating = if rating == current {
-                                    rating.saturating_sub(1)
-                                } else {
-                                    rating
-                                };
+                                let new_rating = compute_rating_toggle(current, rating);
                                 (
                                     Task::none(),
                                     AlbumsAction::SetRating(album.id.clone(), "album", new_rating),
@@ -405,32 +381,27 @@ impl AlbumsPage {
                     }
                 }
                 AlbumsMessage::ContextMenuAction(clicked_idx, entry) => {
-                    use nokkvi_data::types::batch::{BatchItem, BatchPayload};
+                    use nokkvi_data::types::batch::BatchItem;
 
                     use crate::widgets::context_menu::LibraryContextEntry;
 
                     match entry {
                         LibraryContextEntry::AddToQueue | LibraryContextEntry::AddToPlaylist => {
-                            let target_indices = self.common.evaluate_context_menu(clicked_idx);
-                            self.common.clear_multi_selection();
-                            let payload = target_indices
-                                .into_iter()
-                                .filter_map(|i| {
-                                    match self.expansion.get_entry_at(i, albums, |a| &a.id) {
-                                        Some(SlotListEntry::Parent(album)) => {
-                                            Some(BatchItem::Album(album.id.clone()))
-                                        }
-                                        Some(SlotListEntry::Child(song, _)) => {
-                                            let item: nokkvi_data::types::song::Song =
-                                                song.clone().into();
-                                            Some(BatchItem::Song(Box::new(item)))
-                                        }
-                                        None => None,
+                            let target_indices = self.common.get_batch_target_indices(clicked_idx);
+                            let payload = super::expansion::build_batch_payload(
+                                target_indices,
+                                |i| match self.expansion.get_entry_at(i, albums, |a| &a.id) {
+                                    Some(SlotListEntry::Parent(album)) => {
+                                        Some(BatchItem::Album(album.id.clone()))
                                     }
-                                })
-                                .fold(BatchPayload::new(), |p: BatchPayload, item| {
-                                    p.with_item(item)
-                                });
+                                    Some(SlotListEntry::Child(song, _)) => {
+                                        let item: nokkvi_data::types::song::Song =
+                                            song.clone().into();
+                                        Some(BatchItem::Song(Box::new(item)))
+                                    }
+                                    None => None,
+                                },
+                            );
 
                             match entry {
                                 LibraryContextEntry::AddToQueue => {
@@ -909,7 +880,7 @@ mod tests {
         let mut page = AlbumsPage::new();
         let empty_albums: Vec<AlbumUIViewData> = vec![];
         let (_, action) = page.update(AlbumsMessage::CenterOnPlaying, 0, &empty_albums);
-        
+
         assert!(matches!(action, AlbumsAction::CenterOnPlaying));
     }
 }

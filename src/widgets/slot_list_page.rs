@@ -190,6 +190,32 @@ impl SlotListPageState {
     pub fn get_center_item_index(&self, total_items: usize) -> Option<usize> {
         self.slot_list.get_effective_center_index(total_items)
     }
+
+    /// Resolve target indices for queue/batch operations (Shift+Q, etc.).
+    ///
+    /// If multi-selection is active, returns all selected indices (sorted).
+    /// Otherwise, falls back to the effective center index.
+    /// Returns an empty vec if there are no items.
+    pub fn get_queue_target_indices(&self, total_items: usize) -> Vec<usize> {
+        if !self.slot_list.selected_indices.is_empty() {
+            self.slot_list.selected_indices.iter().copied().collect()
+        } else if let Some(center_idx) = self.get_center_item_index(total_items) {
+            vec![center_idx]
+        } else {
+            vec![]
+        }
+    }
+
+    /// Resolve target indices for context menu batch operations.
+    ///
+    /// Evaluates the context menu click (preserving selection if the clicked item
+    /// is within it, otherwise resetting to just the clicked item), then clears
+    /// multi-selection state. Returns the resolved target indices.
+    pub fn get_batch_target_indices(&mut self, clicked_idx: usize) -> Vec<usize> {
+        let indices = self.evaluate_context_menu(clicked_idx);
+        self.clear_multi_selection();
+        indices
+    }
 }
 
 #[cfg(test)]
@@ -429,5 +455,80 @@ mod tests {
 
         assert!(state.slot_list.selected_indices.is_empty());
         assert_eq!(state.slot_list.selected_offset, None);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  get_queue_target_indices
+    // ══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn queue_target_uses_selection_when_present() {
+        let mut state = SlotListPageState::default();
+        state.handle_slot_click(2, 10, ctrl());
+        state.handle_slot_click(5, 10, ctrl());
+        state.handle_slot_click(8, 10, ctrl());
+
+        let targets = state.get_queue_target_indices(10);
+        assert_eq!(targets, vec![2, 5, 8]);
+    }
+
+    #[test]
+    fn queue_target_falls_back_to_center() {
+        let mut state = SlotListPageState::default();
+        state.slot_list.set_offset(5, 20);
+
+        let targets = state.get_queue_target_indices(20);
+        assert_eq!(targets, vec![5]);
+    }
+
+    #[test]
+    fn queue_target_returns_empty_when_no_items() {
+        let state = SlotListPageState::default();
+        let targets = state.get_queue_target_indices(0);
+        assert!(targets.is_empty());
+    }
+
+    #[test]
+    fn queue_target_uses_selected_offset_when_no_multi() {
+        let mut state = SlotListPageState::default();
+        state.slot_list.set_offset(3, 20);
+        state.slot_list.set_selected(7, 20);
+
+        let targets = state.get_queue_target_indices(20);
+        // selected_offset=7 is used as effective center
+        assert_eq!(targets, vec![7]);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  get_batch_target_indices
+    // ══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn batch_target_within_selection_returns_all_and_clears() {
+        let mut state = SlotListPageState::default();
+        state.handle_slot_click(1, 10, ctrl());
+        state.handle_slot_click(3, 10, ctrl());
+        state.handle_slot_click(5, 10, ctrl());
+
+        let mut targets = state.get_batch_target_indices(3);
+        targets.sort();
+        assert_eq!(targets, vec![1, 3, 5]);
+        // Multi-selection should be cleared
+        assert!(state.slot_list.selected_indices.is_empty());
+        assert_eq!(state.slot_list.anchor_index, None);
+    }
+
+    #[test]
+    fn batch_target_outside_selection_returns_clicked_and_clears() {
+        let mut state = SlotListPageState::default();
+        state.handle_slot_click(1, 10, ctrl());
+        state.handle_slot_click(3, 10, ctrl());
+        state.handle_slot_click(5, 10, ctrl());
+
+        // Right-click on 7 (not in selection)
+        let targets = state.get_batch_target_indices(7);
+        assert_eq!(targets, vec![7]);
+        // Multi-selection should be cleared
+        assert!(state.slot_list.selected_indices.is_empty());
     }
 }

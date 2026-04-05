@@ -207,38 +207,20 @@ impl SongsPage {
                 self.update(SongsMessage::SlotListActivateCenter, songs)
             }
             SongsMessage::AddCenterToQueue => {
-                use nokkvi_data::types::batch::{BatchItem, BatchPayload};
+                use nokkvi_data::types::batch::BatchItem;
 
-                let target_indices: Vec<usize> =
-                    if !self.common.slot_list.selected_indices.is_empty() {
-                        self.common
-                            .slot_list
-                            .selected_indices
-                            .iter()
-                            .copied()
-                            .collect()
-                    } else if let Some(center_idx) = self.common.get_center_item_index(total_items)
-                    {
-                        vec![center_idx]
-                    } else {
-                        vec![]
-                    };
+                let target_indices = self.common.get_queue_target_indices(total_items);
 
                 if target_indices.is_empty() {
                     return (Task::none(), SongsAction::None);
                 }
 
-                let payload = target_indices
-                    .into_iter()
-                    .filter_map(|i| {
-                        songs.get(i).map(|s| {
-                            let item: nokkvi_data::types::song::Song = s.clone().into();
-                            BatchItem::Song(Box::new(item))
-                        })
+                let payload = super::expansion::build_batch_payload(target_indices, |i| {
+                    songs.get(i).map(|s| {
+                        let item: nokkvi_data::types::song::Song = s.clone().into();
+                        BatchItem::Song(Box::new(item))
                     })
-                    .fold(BatchPayload::new(), |p: BatchPayload, item| {
-                        p.with_item(item)
-                    });
+                });
 
                 (Task::none(), SongsAction::AddBatchToQueue(payload))
             }
@@ -255,13 +237,9 @@ impl SongsPage {
             }
             SongsMessage::ClickSetRating(item_index, rating) => {
                 if let Some(song) = songs.get(item_index) {
+                    use nokkvi_data::utils::formatters::compute_rating_toggle;
                     let current = song.rating.unwrap_or(0) as usize;
-                    // Click same star = decrease by 1 (toggle), else set to clicked value
-                    let new_rating = if rating == current {
-                        rating.saturating_sub(1)
-                    } else {
-                        rating
-                    };
+                    let new_rating = compute_rating_toggle(current, rating);
                     (
                         Task::none(),
                         SongsAction::SetRating(song.id.clone(), new_rating),
@@ -312,24 +290,18 @@ impl SongsPage {
             }
 
             SongsMessage::ContextMenuAction(clicked_idx, entry) => {
-                use nokkvi_data::types::batch::{BatchItem, BatchPayload};
+                use nokkvi_data::types::batch::BatchItem;
 
                 use crate::widgets::context_menu::LibraryContextEntry;
 
-                let target_indices = self.common.evaluate_context_menu(clicked_idx);
-                self.common.clear_multi_selection();
+                let target_indices = self.common.get_batch_target_indices(clicked_idx);
 
-                let payload = target_indices
-                    .into_iter()
-                    .filter_map(|i| {
-                        songs.get(i).map(|s| {
-                            let item: nokkvi_data::types::song::Song = s.clone().into();
-                            BatchItem::Song(Box::new(item))
-                        })
+                let payload = super::expansion::build_batch_payload(target_indices, |i| {
+                    songs.get(i).map(|s| {
+                        let item: nokkvi_data::types::song::Song = s.clone().into();
+                        BatchItem::Song(Box::new(item))
                     })
-                    .fold(BatchPayload::new(), |p: BatchPayload, item| {
-                        p.with_item(item)
-                    });
+                });
 
                 if let Some(song) = songs.get(clicked_idx) {
                     match entry {

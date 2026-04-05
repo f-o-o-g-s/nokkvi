@@ -423,7 +423,8 @@ impl QueuePage {
             QueueMessage::ToggleSortOrder,
             Some(QueueMessage::ShuffleQueue), // Shuffle button for queue
             None,                             // No refresh button for queue
-            data.current_playing_queue_index.map(|idx| QueueMessage::FocusCurrentPlaying(idx, true)),
+            data.current_playing_queue_index
+                .map(|idx| QueueMessage::FocusCurrentPlaying(idx, true)),
             QueueMessage::SearchQueryChanged,
         );
 

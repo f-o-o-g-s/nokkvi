@@ -27,8 +27,8 @@ pub(crate) fn view_header<
     search_input_id: &'static str, // Unique ID for this view's search input (must be 'static)
     on_view_selected: impl Fn(V) -> Message + 'a,
     on_sort_toggle: Message,
-    on_shuffle: Option<Message>, // Optional shuffle button
-    on_refresh: Option<Message>, // Optional refresh button
+    on_shuffle: Option<Message>,           // Optional shuffle button
+    on_refresh: Option<Message>,           // Optional refresh button
     on_center_on_playing: Option<Message>, // Optional center button
     on_search_change: impl Fn(String) -> Message + 'a,
 ) -> Element<'a, Message> {

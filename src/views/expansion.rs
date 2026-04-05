@@ -443,6 +443,27 @@ pub(crate) fn three_tier_get_entry_at<'a, P, C: Clone, G: Clone>(
     None
 }
 
+// ── Batch payload builder ───────────────────────────────────────────────────
+
+use nokkvi_data::types::batch::{BatchItem, BatchPayload};
+
+/// Build a `BatchPayload` from an iterator of indices and a mapper closure.
+///
+/// This is the universal batch fold pattern extracted from all 5 view files.
+/// Each view provides a closure that maps a flat index to an `Option<BatchItem>`
+/// (resolving through its expansion state to determine the correct item type).
+///
+/// Returns an empty payload if no indices map successfully.
+pub(crate) fn build_batch_payload(
+    indices: impl IntoIterator<Item = usize>,
+    mut mapper: impl FnMut(usize) -> Option<BatchItem>,
+) -> BatchPayload {
+    indices
+        .into_iter()
+        .filter_map(&mut mapper)
+        .fold(BatchPayload::new(), |p, item| p.with_item(item))
+}
+
 // ── Shared child row renderers ──────────────────────────────────────────────
 
 use iced::{
@@ -1035,5 +1056,44 @@ mod tests {
         // Should collapse "a" and request expansion of "c"
         assert_eq!(result, Some("c".to_string()));
         assert!(!state.is_expanded()); // old one collapsed
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  build_batch_payload
+    // ══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn build_batch_empty_indices() {
+        let payload = super::build_batch_payload(vec![], |_| None);
+        assert!(payload.items.is_empty());
+    }
+
+    #[test]
+    fn build_batch_filters_none() {
+        let payload = super::build_batch_payload(vec![0, 1, 2], |i| {
+            if i == 1 {
+                None
+            } else {
+                Some(BatchItem::Album(format!("a{i}")))
+            }
+        });
+        assert_eq!(payload.items.len(), 2);
+    }
+
+    #[test]
+    fn build_batch_preserves_order() {
+        let payload =
+            super::build_batch_payload(vec![2, 0, 1], |i| Some(BatchItem::Album(format!("a{i}"))));
+        assert_eq!(payload.items.len(), 3);
+        // Items should match input order: a2, a0, a1
+        assert!(matches!(&payload.items[0], BatchItem::Album(id) if id == "a2"));
+        assert!(matches!(&payload.items[1], BatchItem::Album(id) if id == "a0"));
+        assert!(matches!(&payload.items[2], BatchItem::Album(id) if id == "a1"));
+    }
+
+    #[test]
+    fn build_batch_all_none_returns_empty() {
+        let payload = super::build_batch_payload(vec![0, 1, 2], |_| None);
+        assert!(payload.items.is_empty());
     }
 }

@@ -316,44 +316,27 @@ impl PlaylistsPage {
                     }
                 }
                 PlaylistsMessage::AddCenterToQueue => {
-                    use nokkvi_data::types::batch::{BatchItem, BatchPayload};
+                    use nokkvi_data::types::batch::BatchItem;
                     let total = self.expansion.flattened_len(playlists);
 
-                    let target_indices: Vec<usize> =
-                        if !self.common.slot_list.selected_indices.is_empty() {
-                            self.common
-                                .slot_list
-                                .selected_indices
-                                .iter()
-                                .copied()
-                                .collect()
-                        } else if let Some(center_idx) = self.common.get_center_item_index(total) {
-                            vec![center_idx]
-                        } else {
-                            vec![]
-                        };
+                    let target_indices = self.common.get_queue_target_indices(total);
 
                     if target_indices.is_empty() {
                         return (Task::none(), PlaylistsAction::None);
                     }
 
-                    let payload = target_indices
-                        .into_iter()
-                        .filter_map(|i| {
-                            match self.expansion.get_entry_at(i, playlists, |p| &p.id) {
-                                Some(SlotListEntry::Parent(playlist)) => {
-                                    Some(BatchItem::Playlist(playlist.id.clone()))
-                                }
-                                Some(SlotListEntry::Child(song, _)) => {
-                                    let item: nokkvi_data::types::song::Song = song.clone().into();
-                                    Some(BatchItem::Song(Box::new(item)))
-                                }
-                                None => None,
+                    let payload = super::expansion::build_batch_payload(target_indices, |i| {
+                        match self.expansion.get_entry_at(i, playlists, |p| &p.id) {
+                            Some(SlotListEntry::Parent(playlist)) => {
+                                Some(BatchItem::Playlist(playlist.id.clone()))
                             }
-                        })
-                        .fold(BatchPayload::new(), |p: BatchPayload, item| {
-                            p.with_item(item)
-                        });
+                            Some(SlotListEntry::Child(song, _)) => {
+                                let item: nokkvi_data::types::song::Song = song.clone().into();
+                                Some(BatchItem::Song(Box::new(item)))
+                            }
+                            None => None,
+                        }
+                    });
 
                     (Task::none(), PlaylistsAction::AddBatchToQueue(payload))
                 }
@@ -385,10 +368,12 @@ impl PlaylistsPage {
                 PlaylistsMessage::RefreshViewData => {
                     (Task::none(), PlaylistsAction::RefreshViewData)
                 }
-                PlaylistsMessage::CenterOnPlaying => (Task::none(), PlaylistsAction::CenterOnPlaying),
+                PlaylistsMessage::CenterOnPlaying => {
+                    (Task::none(), PlaylistsAction::CenterOnPlaying)
+                }
                 PlaylistsMessage::ContextMenuAction(clicked_idx, entry) => {
                     // Context menu for child tracks (uses shared LibraryContextEntry)
-                    use nokkvi_data::types::batch::{BatchItem, BatchPayload};
+                    use nokkvi_data::types::batch::BatchItem;
 
                     use crate::widgets::context_menu::LibraryContextEntry;
 
@@ -396,26 +381,19 @@ impl PlaylistsPage {
                         entry,
                         LibraryContextEntry::AddToQueue | LibraryContextEntry::AddToPlaylist
                     ) {
-                        let target_indices = self.common.evaluate_context_menu(clicked_idx);
-                        self.common.clear_multi_selection();
-                        let payload = target_indices
-                            .into_iter()
-                            .filter_map(|i| {
-                                match self.expansion.get_entry_at(i, playlists, |p| &p.id) {
-                                    Some(SlotListEntry::Parent(playlist)) => {
-                                        Some(BatchItem::Playlist(playlist.id.clone()))
-                                    }
-                                    Some(SlotListEntry::Child(song, _)) => {
-                                        let item: nokkvi_data::types::song::Song =
-                                            song.clone().into();
-                                        Some(BatchItem::Song(Box::new(item)))
-                                    }
-                                    None => None,
+                        let target_indices = self.common.get_batch_target_indices(clicked_idx);
+                        let payload = super::expansion::build_batch_payload(target_indices, |i| {
+                            match self.expansion.get_entry_at(i, playlists, |p| &p.id) {
+                                Some(SlotListEntry::Parent(playlist)) => {
+                                    Some(BatchItem::Playlist(playlist.id.clone()))
                                 }
-                            })
-                            .fold(BatchPayload::new(), |p: BatchPayload, item| {
-                                p.with_item(item)
-                            });
+                                Some(SlotListEntry::Child(song, _)) => {
+                                    let item: nokkvi_data::types::song::Song = song.clone().into();
+                                    Some(BatchItem::Song(Box::new(item)))
+                                }
+                                None => None,
+                            }
+                        });
 
                         match entry {
                             LibraryContextEntry::AddToQueue => {
@@ -445,7 +423,7 @@ impl PlaylistsPage {
                 }
                 PlaylistsMessage::PlaylistContextAction(clicked_idx, entry) => {
                     // Context menu for parent playlists (extended entries)
-                    use nokkvi_data::types::batch::{BatchItem, BatchPayload};
+                    use nokkvi_data::types::batch::BatchItem;
 
                     use crate::widgets::context_menu::LibraryContextEntry;
 
@@ -455,26 +433,19 @@ impl PlaylistsPage {
                             LibraryContextEntry::AddToQueue | LibraryContextEntry::AddToPlaylist
                         )
                     ) {
-                        let target_indices = self.common.evaluate_context_menu(clicked_idx);
-                        self.common.clear_multi_selection();
-                        let payload = target_indices
-                            .into_iter()
-                            .filter_map(|i| {
-                                match self.expansion.get_entry_at(i, playlists, |p| &p.id) {
-                                    Some(SlotListEntry::Parent(playlist)) => {
-                                        Some(BatchItem::Playlist(playlist.id.clone()))
-                                    }
-                                    Some(SlotListEntry::Child(song, _)) => {
-                                        let item: nokkvi_data::types::song::Song =
-                                            song.clone().into();
-                                        Some(BatchItem::Song(Box::new(item)))
-                                    }
-                                    None => None,
+                        let target_indices = self.common.get_batch_target_indices(clicked_idx);
+                        let payload = super::expansion::build_batch_payload(target_indices, |i| {
+                            match self.expansion.get_entry_at(i, playlists, |p| &p.id) {
+                                Some(SlotListEntry::Parent(playlist)) => {
+                                    Some(BatchItem::Playlist(playlist.id.clone()))
                                 }
-                            })
-                            .fold(BatchPayload::new(), |p: BatchPayload, item| {
-                                p.with_item(item)
-                            });
+                                Some(SlotListEntry::Child(song, _)) => {
+                                    let item: nokkvi_data::types::song::Song = song.clone().into();
+                                    Some(BatchItem::Song(Box::new(item)))
+                                }
+                                None => None,
+                            }
+                        });
 
                         match entry {
                             PlaylistContextEntry::Library(LibraryContextEntry::AddToQueue) => {

@@ -15,7 +15,10 @@ pub const THUMBNAIL_SIZE: u32 = 80;
 /// Safely construct a consistent string cache key for a given artwork ID and size
 /// Maps the requested size to the filename string. Omitted size is 'original'.
 pub fn build_cache_key(art_id: &str, size: Option<u32>) -> String {
-    let normalized_id = if KNOWN_PREFIXES.iter().any(|prefix| art_id.starts_with(prefix)) {
+    let normalized_id = if KNOWN_PREFIXES
+        .iter()
+        .any(|prefix| art_id.starts_with(prefix))
+    {
         art_id.to_string()
     } else {
         format!("al-{art_id}")
@@ -26,7 +29,6 @@ pub fn build_cache_key(art_id: &str, size: Option<u32>) -> String {
         None => format!("{normalized_id}_original"),
     }
 }
-
 
 /// Build a Subsonic getCoverArt URL
 ///
@@ -81,9 +83,7 @@ pub fn build_cover_art_url_with_timestamp(
     };
 
     // Build size parameter string conditionally
-    let size_param = size
-        .map(|s| format!("&size={s}"))
-        .unwrap_or_default();
+    let size_param = size.map(|s| format!("&size={s}")).unwrap_or_default();
 
     if !subsonic_credential.is_empty() {
         // Include updated_at in URL for cache invalidation
@@ -236,7 +236,10 @@ mod tests {
     #[test]
     fn test_original_size() {
         let url = build_cover_art_url("123", "http://srv", "u=x", None);
-        assert!(!url.contains("size="), "Original size should omit the size parameter");
+        assert!(
+            !url.contains("size="),
+            "Original size should omit the size parameter"
+        );
     }
 
     #[test]
@@ -313,7 +316,7 @@ mod tests {
         assert_eq!(build_cache_key("al-123", Some(1000)), "al-123_1000");
         assert_eq!(build_cache_key("ar-xyz", Some(1500)), "ar-xyz_1500");
         assert_eq!(build_cache_key("mf-abc", None), "mf-abc_original");
-        
+
         // Also handle auto-prefixing if art_id misses known prefixes
         assert_eq!(build_cache_key("123", Some(80)), "al-123_80");
         assert_eq!(build_cache_key("xyz", None), "al-xyz_original");

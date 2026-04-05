@@ -353,58 +353,41 @@ impl ArtistsPage {
                     }
                 }
                 ArtistsMessage::AddCenterToQueue => {
-                    use nokkvi_data::types::batch::{BatchItem, BatchPayload};
+                    use nokkvi_data::types::batch::BatchItem;
                     let total = super::expansion::three_tier_flattened_len(
                         artists,
                         &self.expansion,
                         self.sub_expansion.children.len(),
                     );
 
-                    let target_indices: Vec<usize> =
-                        if !self.common.slot_list.selected_indices.is_empty() {
-                            self.common
-                                .slot_list
-                                .selected_indices
-                                .iter()
-                                .copied()
-                                .collect()
-                        } else if let Some(center_idx) = self.common.get_center_item_index(total) {
-                            vec![center_idx]
-                        } else {
-                            vec![]
-                        };
+                    let target_indices = self.common.get_queue_target_indices(total);
 
                     if target_indices.is_empty() {
                         return (Task::none(), ArtistsAction::None);
                     }
 
-                    let payload = target_indices
-                        .into_iter()
-                        .filter_map(|i| {
-                            match super::expansion::three_tier_get_entry_at(
-                                i,
-                                artists,
-                                &self.expansion,
-                                &self.sub_expansion,
-                                |a| &a.id,
-                                |a| &a.id,
-                            ) {
-                                Some(ThreeTierEntry::Parent(artist)) => {
-                                    Some(BatchItem::Artist(artist.id.clone()))
-                                }
-                                Some(ThreeTierEntry::Child(album, _)) => {
-                                    Some(BatchItem::Album(album.id.clone()))
-                                }
-                                Some(ThreeTierEntry::Grandchild(song, _)) => {
-                                    let item: nokkvi_data::types::song::Song = song.clone().into();
-                                    Some(BatchItem::Song(Box::new(item)))
-                                }
-                                None => None,
+                    let payload = super::expansion::build_batch_payload(target_indices, |i| {
+                        match super::expansion::three_tier_get_entry_at(
+                            i,
+                            artists,
+                            &self.expansion,
+                            &self.sub_expansion,
+                            |a| &a.id,
+                            |a| &a.id,
+                        ) {
+                            Some(ThreeTierEntry::Parent(artist)) => {
+                                Some(BatchItem::Artist(artist.id.clone()))
                             }
-                        })
-                        .fold(BatchPayload::new(), |p: BatchPayload, item| {
-                            p.with_item(item)
-                        });
+                            Some(ThreeTierEntry::Child(album, _)) => {
+                                Some(BatchItem::Album(album.id.clone()))
+                            }
+                            Some(ThreeTierEntry::Grandchild(song, _)) => {
+                                let item: nokkvi_data::types::song::Song = song.clone().into();
+                                Some(BatchItem::Song(Box::new(item)))
+                            }
+                            None => None,
+                        }
+                    });
 
                     (Task::none(), ArtistsAction::AddBatchToQueue(payload))
                 }
@@ -429,6 +412,7 @@ impl ArtistsPage {
                 ArtistsMessage::RefreshViewData => (Task::none(), ArtistsAction::RefreshViewData),
                 ArtistsMessage::CenterOnPlaying => (Task::none(), ArtistsAction::CenterOnPlaying),
                 ArtistsMessage::ClickSetRating(item_index, rating) => {
+                    use nokkvi_data::utils::formatters::compute_rating_toggle;
                     match super::expansion::three_tier_get_entry_at(
                         item_index,
                         artists,
@@ -439,11 +423,7 @@ impl ArtistsPage {
                     ) {
                         Some(ThreeTierEntry::Grandchild(song, _)) => {
                             let current = song.rating.unwrap_or(0) as usize;
-                            let new_rating = if rating == current {
-                                rating.saturating_sub(1)
-                            } else {
-                                rating
-                            };
+                            let new_rating = compute_rating_toggle(current, rating);
                             (
                                 Task::none(),
                                 ArtistsAction::SetRating(song.id.clone(), "song", new_rating),
@@ -451,11 +431,7 @@ impl ArtistsPage {
                         }
                         Some(ThreeTierEntry::Child(album, _)) => {
                             let current = album.rating.unwrap_or(0) as usize;
-                            let new_rating = if rating == current {
-                                rating.saturating_sub(1)
-                            } else {
-                                rating
-                            };
+                            let new_rating = compute_rating_toggle(current, rating);
                             (
                                 Task::none(),
                                 ArtistsAction::SetRating(album.id.clone(), "album", new_rating),
@@ -463,11 +439,7 @@ impl ArtistsPage {
                         }
                         Some(ThreeTierEntry::Parent(artist)) => {
                             let current = artist.rating.unwrap_or(0) as usize;
-                            let new_rating = if rating == current {
-                                rating.saturating_sub(1)
-                            } else {
-                                rating
-                            };
+                            let new_rating = compute_rating_toggle(current, rating);
                             (
                                 Task::none(),
                                 ArtistsAction::SetRating(artist.id.clone(), "artist", new_rating),
@@ -505,17 +477,15 @@ impl ArtistsPage {
                     }
                 }
                 ArtistsMessage::ContextMenuAction(clicked_idx, entry) => {
-                    use nokkvi_data::types::batch::{BatchItem, BatchPayload};
+                    use nokkvi_data::types::batch::BatchItem;
 
                     use crate::widgets::context_menu::LibraryContextEntry;
 
                     match entry {
                         LibraryContextEntry::AddToQueue | LibraryContextEntry::AddToPlaylist => {
-                            let target_indices = self.common.evaluate_context_menu(clicked_idx);
-                            self.common.clear_multi_selection();
-                            let payload = target_indices
-                                .into_iter()
-                                .filter_map(|i| {
+                            let target_indices = self.common.get_batch_target_indices(clicked_idx);
+                            let payload =
+                                super::expansion::build_batch_payload(target_indices, |i| {
                                     match super::expansion::three_tier_get_entry_at(
                                         i,
                                         artists,
@@ -537,9 +507,6 @@ impl ArtistsPage {
                                         }
                                         None => None,
                                     }
-                                })
-                                .fold(BatchPayload::new(), |p: BatchPayload, item| {
-                                    p.with_item(item)
                                 });
 
                             match entry {

@@ -87,7 +87,8 @@ async fn prefetch_all_artwork(
                 Some(artwork_url::THUMBNAIL_SIZE),
                 album.updated_at.as_deref(),
             )?;
-            let cache_key = artwork_url::build_cache_key(&art_id, Some(artwork_url::THUMBNAIL_SIZE));
+            let cache_key =
+                artwork_url::build_cache_key(&art_id, Some(artwork_url::THUMBNAIL_SIZE));
             Some((post_url, post_body, cache_key))
         })
         .collect();
@@ -285,7 +286,6 @@ async fn prefetch_all_artwork(
         thumbnails_cached, large_cached
     );
 }
-
 
 /// Check if cache appears incomplete (less than 80% of expected files)
 pub fn is_cache_incomplete(disk_cache: &Option<DiskCache>, expected_count: usize) -> bool {
