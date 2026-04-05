@@ -9,7 +9,18 @@ A native Rust/Iced client for [Navidrome](https://www.navidrome.org/) music serv
 >
 > This entire codebase was written by AI (primarily Claude) with my direction. I'm not a developer. I come up with the ideas, test things, and use this as my daily music player, but I don't write code myself. You'll probably find patterns in here that experienced Rust developers would do differently. If you spot something that could be better, issues and PRs are welcome.
 
-**Platform:** Linux only. Tested on Arch Linux with PipeWire v<!-- pipewire-version -->1.6.2<!-- /pipewire-version --> and Hyprland (Wayland) v<!-- hyprland-version -->0.54.3<!-- /hyprland-version --> against Navidrome v<!-- navidrome-version -->0.61.1<!-- /navidrome-version -->. No Windows or macOS support.
+**Platform:** Linux only. Tested on Arch Linux with PipeWire v<!-- pipewire-version -->1.6.2<!-- /pipewire-version --> and Hyprland v<!-- hyprland-version -->0.54.3<!-- /hyprland-version --> against Navidrome v<!-- navidrome-version -->0.61.1<!-- /navidrome-version -->. No Windows or macOS support.
+
+## Inspirations
+
+Nokkvi draws heavy inspiration from several excellent projects:
+
+- **[rmpc](https://github.com/mierak/rmpc)**: A terminal-based MPD client and previous daily driver that provided early inspiration.
+- **[Feishin](https://github.com/jeffvli/feishin)**: Referenced tremendously for their comprehensive Navidrome API implementation and enums.
+- **[mpd](https://github.com/MusicPlayerDaemon/MPD)**: Heavily influenced Nokkvi's robust queue and consume logic.
+- **[fooyin](https://github.com/fooyin/fooyin)**: Referenced for their native PipeWire implementation.
+- **[StepMania](https://github.com/stepmania/stepmania)**: Inspired the video-game-like feel and drill-down navigation of the settings menu.
+- **Vim**: Inspired the built-in color schemes and the highly keyboard-centric approach to navigation.
 
 ## Features
 
