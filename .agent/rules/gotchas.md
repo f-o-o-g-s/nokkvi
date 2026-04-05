@@ -46,6 +46,9 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 - **Config reload suppression**: `suppress_config_reload()` prevents file watcher feedback loops, but GUI-initiated theme/visualizer changes need manual `ThemeConfigReloaded` trigger after write.
 - **Font propagation**: `font_family` is a global setting in `PlayerSettings`/`TomlSettings`, not tied to `ThemeFile`. Font changes are routed to `config.toml`. EQ modal `pick_list` must explicitly receive the active app font.
 
+## Assets & Icons
+- **Silent SVG fallbacks**: All UI SVG icons must be explicitly registered via macro in `src/embedded_svg.rs` (in the const list, the match table, and the `KNOWN` test array). Because the macro has a smooth fallback to `play.svg` to prevent render-loop crashes for unregistered paths, the compiler **will not warn you** if you forget to register an icon or typo the path. You must run `cargo test --bin nokkvi -- embedded_svg` to reliably catch unbound icons.
+
 ## Artwork
 - **Handle::from_bytes for refresh**: `Handle::from_path` uses file path as ID → stale GPU texture on overwrite. Use `Handle::from_bytes(data)` for content-derived IDs.
 - **Queue song mini vs large artwork**: Queue songs must request 80px thumbnails using the `album_id` (not `cover_art` ID) to hit the prefetch cache. Large artwork fallback must construct full-size URL (`size=1000`), not reuse the 80px thumbnail URL.

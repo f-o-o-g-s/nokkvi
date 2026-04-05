@@ -62,6 +62,8 @@ pub enum AlbumsMessage {
     // Context menu
     ContextMenuAction(usize, crate::widgets::context_menu::LibraryContextEntry),
 
+    CenterOnPlaying,
+
     // Inline expansion (Shift+Enter)
     ExpandCenter,
     CollapseExpansion,
@@ -95,6 +97,7 @@ pub enum AlbumsAction {
     PlayBatch(nokkvi_data::types::batch::BatchPayload),
     AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
     LoadLargeArtwork(String), // center_idx as string
+    CenterOnPlaying,
     /// Expand album inline — root should load tracks (album_id)
     ExpandAlbum(String),
     /// Play batch starting from a specific track (album_id, track_index)
@@ -125,6 +128,7 @@ impl super::HasCommonAction for AlbumsAction {
             Self::SortModeChanged(m) => super::CommonViewAction::SortModeChanged(*m),
             Self::SortOrderChanged(a) => super::CommonViewAction::SortOrderChanged(*a),
             Self::RefreshViewData => super::CommonViewAction::RefreshViewData,
+            Self::CenterOnPlaying => super::CommonViewAction::CenterOnPlaying,
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
         }
@@ -501,6 +505,7 @@ impl AlbumsPage {
                     }
                 }
                 // Common arms already handled by macro above
+                AlbumsMessage::CenterOnPlaying => (Task::none(), AlbumsAction::CenterOnPlaying),
                 _ => (Task::none(), AlbumsAction::None),
             },
         }
@@ -525,6 +530,7 @@ impl AlbumsPage {
             AlbumsMessage::ToggleSortOrder,
             None, // No shuffle button for albums
             Some(AlbumsMessage::RefreshViewData),
+            Some(AlbumsMessage::CenterOnPlaying),
             AlbumsMessage::SearchQueryChanged,
         );
 
@@ -892,5 +898,18 @@ impl super::ViewPage for AlbumsPage {
     }
     fn reload_message(&self) -> Option<Message> {
         Some(Message::LoadAlbums)
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn center_on_playing_translates_to_action() {
+        let mut page = AlbumsPage::new();
+        let empty_albums: Vec<AlbumUIViewData> = vec![];
+        let (_, action) = page.update(AlbumsMessage::CenterOnPlaying, 0, &empty_albums);
+        
+        assert!(matches!(action, AlbumsAction::CenterOnPlaying));
     }
 }

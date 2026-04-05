@@ -80,6 +80,7 @@ pub enum GenresMessage {
     SearchQueryChanged(String),
     SearchFocused(bool),
     RefreshViewData,
+    CenterOnPlaying,
 
     // Data loading (moved from root Message enum)
     GenresLoaded(Result<Vec<GenreUIViewData>, String>, usize), // result, total_count
@@ -105,6 +106,7 @@ pub enum GenresAction {
     ToggleStar(String, &'static str, bool), // (item_id, item_type, starred)
     PlayNextBatch(nokkvi_data::types::batch::BatchPayload),
     AddBatchToPlaylist(nokkvi_data::types::batch::BatchPayload),
+    CenterOnPlaying,
     None,
 }
 
@@ -115,6 +117,7 @@ impl super::HasCommonAction for GenresAction {
             Self::SortModeChanged(m) => super::CommonViewAction::SortModeChanged(*m),
             Self::SortOrderChanged(a) => super::CommonViewAction::SortOrderChanged(*a),
             Self::RefreshViewData => super::CommonViewAction::RefreshViewData,
+            Self::CenterOnPlaying => super::CommonViewAction::CenterOnPlaying,
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
         }
@@ -451,6 +454,7 @@ impl GenresPage {
                 // Data loading messages (handled at root level, no action needed here)
                 GenresMessage::GenresLoaded(_, _) => (Task::none(), GenresAction::None),
                 GenresMessage::RefreshViewData => (Task::none(), GenresAction::RefreshViewData),
+                GenresMessage::CenterOnPlaying => (Task::none(), GenresAction::CenterOnPlaying),
                 GenresMessage::ContextMenuAction(clicked_idx, entry) => {
                     use nokkvi_data::types::batch::{BatchItem, BatchPayload};
 
@@ -556,6 +560,7 @@ impl GenresPage {
             GenresMessage::ToggleSortOrder,
             None, // No shuffle button for genres
             Some(GenresMessage::RefreshViewData),
+            Some(GenresMessage::CenterOnPlaying),
             GenresMessage::SearchQueryChanged,
         );
 

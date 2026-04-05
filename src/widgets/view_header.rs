@@ -1,7 +1,7 @@
 use iced::{
     Alignment, Element, Length,
     font::{Font, Weight},
-    widget::{container, mouse_area, pick_list, row, svg, text, text_input},
+    widget::{container, mouse_area, pick_list, row, svg, text, text_input, tooltip},
 };
 // Re-export SortMode from data crate (canonical definition)
 pub(crate) use nokkvi_data::types::sort_mode::SortMode;
@@ -29,6 +29,7 @@ pub(crate) fn view_header<
     on_sort_toggle: Message,
     on_shuffle: Option<Message>, // Optional shuffle button
     on_refresh: Option<Message>, // Optional refresh button
+    on_center_on_playing: Option<Message>, // Optional center button
     on_search_change: impl Fn(String) -> Message + 'a,
 ) -> Element<'a, Message> {
     let view_selector = container(
@@ -93,38 +94,10 @@ pub(crate) fn view_header<
     // Use mouse_area + HoverOverlay(container) — same pattern as slot list rows.
     // Native button captures ButtonPressed before HoverOverlay's passive tracker
     // can run, so the press state never gets set and the scale effect never fires.
-    let sort_button: Element<'a, Message> = mouse_area(
-        HoverOverlay::new(
-            container(sort_svg)
-                .width(Length::Fixed(40.0))
-                .height(Length::Fixed(40.0))
-                .style(|_theme| container::Style {
-                    background: Some(theme::bg0_soft().into()),
-                    border: iced::Border {
-                        radius: theme::ui_border_radius(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                })
-                .center(Length::Fixed(40.0)),
-        )
-        .border_radius(theme::ui_border_radius()),
-    )
-    .on_press(on_sort_toggle)
-    .interaction(iced::mouse::Interaction::Pointer)
-    .into();
-
-    let refresh_button = on_refresh.map(|refresh_msg| {
-        let refresh_svg = crate::embedded_svg::svg_widget("assets/icons/refresh-cw.svg")
-            .width(Length::Fixed(20.0))
-            .height(Length::Fixed(20.0))
-            .style(|_theme, _status| svg::Style {
-                color: Some(theme::fg0()),
-            });
-
-        let el: Element<'a, Message> = mouse_area(
+    let sort_button: Element<'a, Message> = tooltip(
+        mouse_area(
             HoverOverlay::new(
-                container(refresh_svg)
+                container(sort_svg)
                     .width(Length::Fixed(40.0))
                     .height(Length::Fixed(40.0))
                     .style(|_theme| container::Style {
@@ -139,8 +112,57 @@ pub(crate) fn view_header<
             )
             .border_radius(theme::ui_border_radius()),
         )
-        .on_press(refresh_msg)
-        .interaction(iced::mouse::Interaction::Pointer)
+        .on_press(on_sort_toggle)
+        .interaction(iced::mouse::Interaction::Pointer),
+        container(
+            text(if sort_ascending {
+                "Sort: Ascending"
+            } else {
+                "Sort: Descending"
+            })
+            .size(11.0)
+            .font(theme::ui_font()),
+        )
+        .padding(4),
+        tooltip::Position::Top,
+    )
+    .gap(4)
+    .style(theme::container_tooltip)
+    .into();
+
+    let refresh_button = on_refresh.map(|refresh_msg| {
+        let refresh_svg = crate::embedded_svg::svg_widget("assets/icons/refresh-cw.svg")
+            .width(Length::Fixed(20.0))
+            .height(Length::Fixed(20.0))
+            .style(|_theme, _status| svg::Style {
+                color: Some(theme::fg0()),
+            });
+
+        let el: Element<'a, Message> = tooltip(
+            mouse_area(
+                HoverOverlay::new(
+                    container(refresh_svg)
+                        .width(Length::Fixed(40.0))
+                        .height(Length::Fixed(40.0))
+                        .style(|_theme| container::Style {
+                            background: Some(theme::bg0_soft().into()),
+                            border: iced::Border {
+                                radius: theme::ui_border_radius(),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        })
+                        .center(Length::Fixed(40.0)),
+                )
+                .border_radius(theme::ui_border_radius()),
+            )
+            .on_press(refresh_msg)
+            .interaction(iced::mouse::Interaction::Pointer),
+            container(text("Refresh Data").size(11.0).font(theme::ui_font())).padding(4),
+            tooltip::Position::Top,
+        )
+        .gap(4)
+        .style(theme::container_tooltip)
         .into();
         el
     });
@@ -154,25 +176,69 @@ pub(crate) fn view_header<
                 color: Some(theme::fg0()),
             });
 
-        let el: Element<'a, Message> = mouse_area(
-            HoverOverlay::new(
-                container(shuffle_svg)
-                    .width(Length::Fixed(40.0))
-                    .height(Length::Fixed(40.0))
-                    .style(|_theme| container::Style {
-                        background: Some(theme::bg0_soft().into()),
-                        border: iced::Border {
-                            radius: theme::ui_border_radius(),
+        let el: Element<'a, Message> = tooltip(
+            mouse_area(
+                HoverOverlay::new(
+                    container(shuffle_svg)
+                        .width(Length::Fixed(40.0))
+                        .height(Length::Fixed(40.0))
+                        .style(|_theme| container::Style {
+                            background: Some(theme::bg0_soft().into()),
+                            border: iced::Border {
+                                radius: theme::ui_border_radius(),
+                                ..Default::default()
+                            },
                             ..Default::default()
-                        },
-                        ..Default::default()
-                    })
-                    .center(Length::Fixed(40.0)),
+                        })
+                        .center(Length::Fixed(40.0)),
+                )
+                .border_radius(theme::ui_border_radius()),
             )
-            .border_radius(theme::ui_border_radius()),
+            .on_press(shuffle_msg)
+            .interaction(iced::mouse::Interaction::Pointer),
+            container(text("Shuffle All").size(11.0).font(theme::ui_font())).padding(4),
+            tooltip::Position::Top,
         )
-        .on_press(shuffle_msg)
-        .interaction(iced::mouse::Interaction::Pointer)
+        .gap(4)
+        .style(theme::container_tooltip)
+        .into();
+        el
+    });
+
+    // Optional center on playing button
+    let center_button = on_center_on_playing.map(|center_msg| {
+        let center_svg = crate::embedded_svg::svg_widget("assets/icons/locate.svg")
+            .width(Length::Fixed(20.0))
+            .height(Length::Fixed(20.0))
+            .style(|_theme, _status| svg::Style {
+                color: Some(theme::fg0()),
+            });
+
+        let el: Element<'a, Message> = tooltip(
+            mouse_area(
+                HoverOverlay::new(
+                    container(center_svg)
+                        .width(Length::Fixed(40.0))
+                        .height(Length::Fixed(40.0))
+                        .style(|_theme| container::Style {
+                            background: Some(theme::bg0_soft().into()),
+                            border: iced::Border {
+                                radius: theme::ui_border_radius(),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        })
+                        .center(Length::Fixed(40.0)),
+                )
+                .border_radius(theme::ui_border_radius()),
+            )
+            .on_press(center_msg)
+            .interaction(iced::mouse::Interaction::Pointer),
+            container(text("Center on Playing").size(11.0).font(theme::ui_font())).padding(4),
+            tooltip::Position::Top,
+        )
+        .gap(4)
+        .style(theme::container_tooltip)
         .into();
         el
     });
@@ -215,6 +281,9 @@ pub(crate) fn view_header<
     }
     if let Some(shuffle_btn) = shuffle_button {
         header_row = header_row.push(shuffle_btn);
+    }
+    if let Some(center_btn) = center_button {
+        header_row = header_row.push(center_btn);
     }
     header_row = header_row.push(search_field).push(count_display);
 

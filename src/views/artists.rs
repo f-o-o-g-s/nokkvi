@@ -83,6 +83,7 @@ pub enum ArtistsMessage {
     SearchQueryChanged(String),
     SearchFocused(bool),
     RefreshViewData,
+    CenterOnPlaying,
 
     // Data loading (moved from root Message enum)
     ArtistsLoaded(Result<Vec<ArtistUIViewData>, String>, usize), // result, total_count
@@ -116,6 +117,7 @@ pub enum ArtistsAction {
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
     ShowAlbumInFolder(String), // album_id - fetch a song path and open containing folder
     ShowSongInFolder(String),  // song path - open containing folder directly
+    CenterOnPlaying,
     None,
 }
 
@@ -126,6 +128,7 @@ impl super::HasCommonAction for ArtistsAction {
             Self::SortModeChanged(m) => super::CommonViewAction::SortModeChanged(*m),
             Self::SortOrderChanged(a) => super::CommonViewAction::SortOrderChanged(*a),
             Self::RefreshViewData => super::CommonViewAction::RefreshViewData,
+            Self::CenterOnPlaying => super::CommonViewAction::CenterOnPlaying,
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
         }
@@ -424,6 +427,7 @@ impl ArtistsPage {
                 ArtistsMessage::ArtistsLoaded(_, _) => (Task::none(), ArtistsAction::None),
                 ArtistsMessage::ArtistsPageLoaded(_, _) => (Task::none(), ArtistsAction::None),
                 ArtistsMessage::RefreshViewData => (Task::none(), ArtistsAction::RefreshViewData),
+                ArtistsMessage::CenterOnPlaying => (Task::none(), ArtistsAction::CenterOnPlaying),
                 ArtistsMessage::ClickSetRating(item_index, rating) => {
                     match super::expansion::three_tier_get_entry_at(
                         item_index,
@@ -670,6 +674,7 @@ impl ArtistsPage {
             ArtistsMessage::ToggleSortOrder,
             None, // No shuffle button for artists
             Some(ArtistsMessage::RefreshViewData),
+            Some(ArtistsMessage::CenterOnPlaying),
             ArtistsMessage::SearchQueryChanged,
         );
 

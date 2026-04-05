@@ -481,6 +481,9 @@ impl Nokkvi {
                 // Return the reload message to bust the cache and refetch from source
                 Some(Task::done(reload_msg))
             }
+            views::CommonViewAction::CenterOnPlaying => {
+                Some(Task::done(Message::Hotkey(crate::app_message::HotkeyMessage::CenterOnPlaying)))
+            }
             views::CommonViewAction::None | views::CommonViewAction::ViewSpecific => None,
         }
     }

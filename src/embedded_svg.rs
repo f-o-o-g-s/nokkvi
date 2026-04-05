@@ -83,6 +83,7 @@ pub(crate) fn get_svg(path: &str) -> &'static str {
         "assets/icons/panels-top-left.svg" => PANELS_TOP_LEFT,
         "assets/icons/swatch-book.svg" => SWATCH_BOOK,
         "assets/icons/tags.svg" => TAGS,
+        "assets/icons/locate.svg" => LOCATE,
         _ => {
             warn!("  Unknown SVG path: {}", path);
             PLAY // Fallback to play icon
@@ -207,6 +208,7 @@ const FOLDER_OPEN: &str = include_str!("../assets/icons/folder-open.svg");
 const PANEL_RIGHT_OPEN: &str = include_str!("../assets/icons/panel-right-open.svg");
 const PANELS_TOP_LEFT: &str = include_str!("../assets/icons/panels-top-left.svg");
 const TAGS: &str = include_str!("../assets/icons/tags.svg");
+const LOCATE: &str = include_str!("../assets/icons/locate.svg");
 
 /// Check whether a given SVG path is registered in the embedded icon table.
 /// Returns `false` for paths that would hit the fallback arm.
@@ -286,6 +288,7 @@ fn is_registered(path: &str) -> bool {
         "assets/icons/panels-top-left.svg",
         "assets/icons/swatch-book.svg",
         "assets/icons/tags.svg",
+        "assets/icons/locate.svg",
     ];
     KNOWN.contains(&path)
 }
@@ -439,6 +442,7 @@ mod tests {
             "assets/icons/panels-top-left.svg",
             "assets/icons/swatch-book.svg",
             "assets/icons/tags.svg",
+            "assets/icons/locate.svg",
         ];
 
         for path in &known {

@@ -62,6 +62,7 @@ pub enum SongsMessage {
     SearchQueryChanged(String),
     SearchFocused(bool),
     RefreshViewData,
+    CenterOnPlaying,
 
     // Data loading (moved from root Message enum)
     SongsLoaded(Result<Vec<SongUIViewData>, String>, usize), // result, total_count
@@ -91,6 +92,7 @@ pub enum SongsAction {
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
     ShowInFolder(String),   // relative path - open containing folder
     RefreshArtwork(String), // album_id - refresh artwork from server
+    CenterOnPlaying,
     None,
 }
 
@@ -101,6 +103,7 @@ impl super::HasCommonAction for SongsAction {
             Self::SortModeChanged(m) => super::CommonViewAction::SortModeChanged(*m),
             Self::SortOrderChanged(a) => super::CommonViewAction::SortOrderChanged(*a),
             Self::RefreshViewData => super::CommonViewAction::RefreshViewData,
+            Self::CenterOnPlaying => super::CommonViewAction::CenterOnPlaying,
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
         }
@@ -362,6 +365,7 @@ impl SongsPage {
             SongsMessage::RefreshArtwork(album_id) => {
                 (Task::none(), SongsAction::RefreshArtwork(album_id))
             }
+            SongsMessage::CenterOnPlaying => (Task::none(), SongsAction::CenterOnPlaying),
         }
     }
 
@@ -405,6 +409,7 @@ impl SongsPage {
             SongsMessage::ToggleSortOrder,
             None, // No shuffle button for songs
             Some(SongsMessage::RefreshViewData),
+            Some(SongsMessage::CenterOnPlaying),
             SongsMessage::SearchQueryChanged,
         );
 
