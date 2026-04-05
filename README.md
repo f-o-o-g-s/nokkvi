@@ -209,7 +209,7 @@ While expanded, `Shift+L`, `=`/`-`, and `Shift+A` act on the child item when the
 ### Application crash on narrow window resize
 Resizing the application window horizontally to be extremely narrow will abruptly crash the application. This happens because our underlying user-interface framework (`iced`) currently struggles to safely draw images using your graphics card when they are shrunken down to less than a single pixel wide. 
 
-We attempted to write safety checks in Nokkvi to hide artwork before it gets that small, but we found that the framework attempts to calculate and draw those tiny images before our safety checks even have a chance to run. 
+During testing, we attempted to write safety checks in Nokkvi to hide artwork before it gets that small. However, we found that the framework attempts to calculate and draw those tiny images before our safety checks even have a chance to run, so we ultimately did not keep these ineffective workarounds in the codebase.
 
 We suspect this is a bug in the framework itself, and we have submitted a potential upstream fix ([PR #3292](https://github.com/iced-rs/iced/pull/3292)). Until this is reviewed and merged by the maintainers, please avoid squishing the window footprint too tightly!
 
