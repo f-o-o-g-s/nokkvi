@@ -207,7 +207,7 @@ While expanded, `Shift+L`, `=`/`-`, and `Shift+A` act on the child item when the
 ## Known Issues
 
 ### Application crash on narrow window resize
-Resizing the application window horizontally to be extremely narrow can cause a `wgpu` buffer validation crash in upstream `iced` due to sub-pixel image bounds. We are currently pinned to an older, stable commit of `iced` to prevent this crash while we wait for them to fix it. We have an open upstream PR proposing a solution, but we're honestly not certain if it's a bug on the `iced` end, or if we just have some overly-aggressive (or poorly written!) resizing logic feeding them bad size limits!
+Resizing the application window horizontally to be extremely narrow can cause a `wgpu` buffer validation crash in our upstream GUI framework `iced`. We have an open upstream PR proposing a solution, but since we aggressively shrink and hide our artwork columns, we're honestly not certain if it's purely a bug on the `iced` end, or if we just have some overly-aggressive (or poorly written!) resizing logic feeding them bad sub-pixel size limits! For now, please avoid squishing the window footprint too tightly if you enjoy an uninterrupted listening experience.
 
 ## Contributing
 
