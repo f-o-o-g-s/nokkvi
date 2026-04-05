@@ -1,16 +1,40 @@
 #!/usr/bin/env bash
-# Updates README.md with the currently tested Navidrome version before commit
+# Updates README.md with the currently tested versions before commit
+
+set -e
+
+CHANGED_README=0
+
+update_version() {
+    local tool=$1
+    local version=$2
+    local tag=$3
+    
+    if [ -n "$version" ]; then
+        CURRENT=$(grep -oP "(?<=<!-- $tag-version -->).*?(?=<!-- /$tag-version -->)" README.md || true)
+        if [ "$CURRENT" != "$version" ] && [ -n "$CURRENT" ]; then
+            echo ">> Updating $tool version in README.md ($CURRENT -> $version)"
+            sed -i "s/<!-- $tag-version -->[^<]*<!-- \/$tag-version -->/<!-- $tag-version -->$version<!-- \/$tag-version -->/g" README.md
+            CHANGED_README=1
+        fi
+    fi
+}
 
 if command -v navidrome >/dev/null 2>&1; then
     VER=$(navidrome --version 2>/dev/null | awk '{print $1}')
-    if [ -n "$VER" ]; then
-        # Check current version in README
-        CURRENT=$(grep -oP '(?<=<!-- navidrome-version -->).*?(?=<!-- /navidrome-version -->)' README.md || true)
-        
-        if [ "$CURRENT" != "$VER" ] && [ -n "$CURRENT" ]; then
-            echo ">> Updating Navidrome version in README.md ($CURRENT -> $VER)"
-            sed -i "s/<!-- navidrome-version -->[^<]*<!-- \/navidrome-version -->/<!-- navidrome-version -->$VER<!-- \/navidrome-version -->/g" README.md
-            git add README.md
-        fi
-    fi
+    update_version "Navidrome" "$VER" "navidrome"
+fi
+
+if command -v pipewire >/dev/null 2>&1; then
+    VER=$(pipewire --version 2>/dev/null | awk '/Compiled with libpipewire/ {print $4}')
+    update_version "PipeWire" "$VER" "pipewire"
+fi
+
+if command -v Hyprland >/dev/null 2>&1; then
+    VER=$(Hyprland --version 2>/dev/null | head -n 1 | awk '{print $2}')
+    update_version "Hyprland" "$VER" "hyprland"
+fi
+
+if [ $CHANGED_README -eq 1 ]; then
+    git add README.md
 fi
