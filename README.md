@@ -2,6 +2,7 @@
 
 A native Rust/Iced client for [Navidrome](https://www.navidrome.org/) music server. Named after Old Norse *nökkvi*, a small, humble boat.
 
+*Demo showcasing Nokkvi's GPU-accelerated audio visualizers and instant theme hot-reloading in action (automated via a script).*
 <img src="assets/nokkvi_demo.webp" width="100%" alt="Nokkvi theme and visualizer demo" />
 
 > **⚠️ AI-Generated Project**
