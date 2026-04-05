@@ -207,7 +207,11 @@ While expanded, `Shift+L`, `=`/`-`, and `Shift+A` act on the child item when the
 ## Known Issues
 
 ### Application crash on narrow window resize
-Resizing the application window horizontally to be extremely narrow can cause a `wgpu` buffer validation crash in our upstream GUI framework `iced`. We have an open upstream PR proposing a solution, but since we aggressively shrink and hide our artwork columns, we're honestly not certain if it's purely a bug on the `iced` end, or if we just have some overly-aggressive (or poorly written!) resizing logic feeding them bad sub-pixel size limits! For now, please avoid squishing the window footprint too tightly if you enjoy an uninterrupted listening experience.
+Resizing the application window horizontally to be extremely narrow will abruptly crash the application. This happens because our underlying user-interface framework (`iced`) currently struggles to safely draw images using your graphics card when they are shrunken down to less than a single pixel wide. 
+
+We attempted to write safety checks in Nokkvi to hide artwork before it gets that small, but we found that the framework attempts to calculate and draw those tiny images before our safety checks even have a chance to run. 
+
+We suspect this is a bug in the framework itself, and we have submitted a potential upstream fix ([PR #3292](https://github.com/iced-rs/iced/pull/3292)). Until this is reviewed and merged by the maintainers, please avoid squishing the window footprint too tightly!
 
 ## Contributing
 
