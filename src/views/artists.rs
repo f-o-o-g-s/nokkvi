@@ -82,6 +82,7 @@ pub enum ArtistsMessage {
     ToggleSortOrder,
     SearchQueryChanged(String),
     SearchFocused(bool),
+    RefreshViewData,
 
     // Data loading (moved from root Message enum)
     ArtistsLoaded(Result<Vec<ArtistUIViewData>, String>, usize), // result, total_count
@@ -109,6 +110,7 @@ pub enum ArtistsAction {
     SearchChanged(String), // trigger reload
     SortModeChanged(widgets::view_header::SortMode), // trigger reload
     SortOrderChanged(bool), // trigger reload
+    RefreshViewData,       // trigger reload
     PlayNextBatch(nokkvi_data::types::batch::BatchPayload), // artist_id or album_id - insert after currently playing
     AddBatchToPlaylist(nokkvi_data::types::batch::BatchPayload),
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
@@ -123,6 +125,7 @@ impl super::HasCommonAction for ArtistsAction {
             Self::SearchChanged(_) => super::CommonViewAction::SearchChanged,
             Self::SortModeChanged(m) => super::CommonViewAction::SortModeChanged(*m),
             Self::SortOrderChanged(a) => super::CommonViewAction::SortOrderChanged(*a),
+            Self::RefreshViewData => super::CommonViewAction::RefreshViewData,
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
         }
@@ -420,6 +423,7 @@ impl ArtistsPage {
                 // Data loading messages (handled at root level, no action needed here)
                 ArtistsMessage::ArtistsLoaded(_, _) => (Task::none(), ArtistsAction::None),
                 ArtistsMessage::ArtistsPageLoaded(_, _) => (Task::none(), ArtistsAction::None),
+                ArtistsMessage::RefreshViewData => (Task::none(), ArtistsAction::RefreshViewData),
                 ArtistsMessage::ClickSetRating(item_index, rating) => {
                     match super::expansion::three_tier_get_entry_at(
                         item_index,
@@ -665,6 +669,7 @@ impl ArtistsPage {
             ArtistsMessage::SortModeSelected,
             ArtistsMessage::ToggleSortOrder,
             None, // No shuffle button for artists
+            Some(ArtistsMessage::RefreshViewData),
             ArtistsMessage::SearchQueryChanged,
         );
 

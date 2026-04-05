@@ -946,3 +946,25 @@ fn toast_dismiss_key_removes_matching() {
     assert_eq!(state.toasts.len(), 1);
     assert_eq!(state.toasts[0].message, "Unrelated");
 }
+
+// ============================================================================
+// View Action Handlers (components.rs)
+// ============================================================================
+
+#[test]
+fn handle_common_view_action_refresh_returns_task() {
+    let app = test_app();
+
+    let persist_fn = |_s, _m, _a| async { Ok(()) };
+
+    let task = app.handle_common_view_action(
+        crate::views::CommonViewAction::RefreshViewData,
+        crate::app_message::Message::LoadAlbums,
+        "albums",
+        crate::widgets::view_header::SortMode::Name,
+        true,
+        persist_fn,
+    );
+
+    assert!(task.is_some(), "RefreshViewData should return a task");
+}

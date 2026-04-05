@@ -169,6 +169,8 @@ pub enum HotkeyMessage {
     GetInfo,
     /// Settings edit value up (enable) or down (disable)
     EditValue(bool),
+    /// Refresh data for the current active view (except Queue/Settings)
+    RefreshView,
 }
 
 /// Discriminant for genre vs playlist collage artwork pipelines

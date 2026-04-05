@@ -104,6 +104,8 @@ pub(crate) enum CommonViewAction {
     SortModeChanged(SortMode),
     /// Sort order changed — persists the new sort order and triggers a reload.
     SortOrderChanged(bool),
+    /// User manually requested a data refresh, bypassing the local cache.
+    RefreshViewData,
     /// No action — the view's update produced no effect.
     None,
     /// The action is view-specific and not handled generically.

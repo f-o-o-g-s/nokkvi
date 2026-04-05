@@ -129,6 +129,7 @@ fn action_to_message(action: HotkeyAction) -> Message {
         HotkeyAction::PrevSortMode => Message::Hotkey(HotkeyMessage::CycleSortMode(false)),
         HotkeyAction::NextSortMode => Message::Hotkey(HotkeyMessage::CycleSortMode(true)),
         HotkeyAction::ToggleSortOrder => Message::SlotList(SlotListMessage::ToggleSortOrder),
+        HotkeyAction::RefreshView => Message::Hotkey(HotkeyMessage::RefreshView),
         // Settings edit
         HotkeyAction::EditUp => Message::Hotkey(HotkeyMessage::EditValue(true)),
         HotkeyAction::EditDown => Message::Hotkey(HotkeyMessage::EditValue(false)),
@@ -157,4 +158,22 @@ pub(crate) fn handle_hotkey(
         modifiers.alt(),
     )?;
     Some(action_to_message(action))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_refresh_view_hotkey() {
+        let config = HotkeyConfig::default();
+        let action = config
+            .lookup(&KeyCode::Char('r'), false, false, false)
+            .unwrap();
+        assert_eq!(action, HotkeyAction::RefreshView);
+
+        let msg = action_to_message(action);
+        // We verify that it dispatches the correct Message variant
+        assert!(matches!(msg, Message::Hotkey(HotkeyMessage::RefreshView)));
+    }
 }

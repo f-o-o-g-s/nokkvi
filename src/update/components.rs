@@ -477,6 +477,10 @@ impl Nokkvi {
                 let pf = persist_fn;
                 Some(self.persist_view_prefs(persist_name, sort_mode, ascending, reload_msg, pf))
             }
+            views::CommonViewAction::RefreshViewData => {
+                // Return the reload message to bust the cache and refetch from source
+                Some(Task::done(reload_msg))
+            }
             views::CommonViewAction::None | views::CommonViewAction::ViewSpecific => None,
         }
     }

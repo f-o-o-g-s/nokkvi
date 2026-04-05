@@ -70,6 +70,7 @@ fn hotkey_action_to_key(action: &HotkeyAction) -> &'static str {
         HotkeyAction::PrevSortMode => "hotkey.cycle_view_left",
         HotkeyAction::NextSortMode => "hotkey.cycle_view_right",
         HotkeyAction::ToggleSortOrder => "hotkey.toggle_sort_order",
+        HotkeyAction::RefreshView => "hotkey.refresh_view",
         HotkeyAction::EditUp => "hotkey.edit_up",
         HotkeyAction::EditDown => "hotkey.edit_down",
         HotkeyAction::Escape => "hotkey.escape",

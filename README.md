@@ -79,16 +79,6 @@ cargo +nightly fmt --all            # format
 cargo +nightly fmt --all -- --check # verify without modifying
 ```
 
-### Packaging for Distribution
-
-To create a clean package for sharing with others (excludes build artifacts, reference materials, etc.):
-
-```bash
-./package.sh
-```
-
-This creates `dist/nokkvi-<version>-<commit>.zip` containing only the essential files needed to build the client, plus a `BUILD_INFO` file tracking the exact commit.
-
 
 ## Configuration
 
@@ -214,19 +204,10 @@ All keyboard shortcuts are **user-configurable** via the Settings view (Hotkeys 
 
 While expanded, `Shift+L`, `=`/`-`, and `Shift+A` act on the child item when the center slot is a child row. Press `Esc` to collapse back (collapses innermost level first).
 
-## Troubleshooting
+## Known Issues
 
-### No audio output
-
-Make sure PipeWire is running and the correct output device is selected.
-
-### fontconfig not found
-
-Install `fontconfig` for system font discovery:
-
-```bash
-pacman -S fontconfig
-```
+### Application crash on narrow window resize
+Resizing the application window horizontally to be extremely narrow can cause a `wgpu` buffer validation crash in upstream `iced` due to sub-pixel image bounds. We are currently pinned to an older, stable commit of `iced` to prevent this crash while we wait for them to fix it. We have an open upstream PR proposing a solution, but we're honestly not certain if it's a bug on the `iced` end, or if we just have some overly-aggressive (or poorly written!) resizing logic feeding them bad size limits!
 
 ## Contributing
 

@@ -28,6 +28,7 @@ pub(crate) fn view_header<
     on_view_selected: impl Fn(V) -> Message + 'a,
     on_sort_toggle: Message,
     on_shuffle: Option<Message>, // Optional shuffle button
+    on_refresh: Option<Message>, // Optional refresh button
     on_search_change: impl Fn(String) -> Message + 'a,
 ) -> Element<'a, Message> {
     let view_selector = container(
@@ -113,6 +114,37 @@ pub(crate) fn view_header<
     .interaction(iced::mouse::Interaction::Pointer)
     .into();
 
+    let refresh_button = on_refresh.map(|refresh_msg| {
+        let refresh_svg = crate::embedded_svg::svg_widget("assets/icons/refresh-cw.svg")
+            .width(Length::Fixed(20.0))
+            .height(Length::Fixed(20.0))
+            .style(|_theme, _status| svg::Style {
+                color: Some(theme::fg0()),
+            });
+
+        let el: Element<'a, Message> = mouse_area(
+            HoverOverlay::new(
+                container(refresh_svg)
+                    .width(Length::Fixed(40.0))
+                    .height(Length::Fixed(40.0))
+                    .style(|_theme| container::Style {
+                        background: Some(theme::bg0_soft().into()),
+                        border: iced::Border {
+                            radius: theme::ui_border_radius(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    })
+                    .center(Length::Fixed(40.0)),
+            )
+            .border_radius(theme::ui_border_radius()),
+        )
+        .on_press(refresh_msg)
+        .interaction(iced::mouse::Interaction::Pointer)
+        .into();
+        el
+    });
+
     // Optional shuffle button (only rendered if on_shuffle is provided)
     let shuffle_button = on_shuffle.map(|shuffle_msg| {
         let shuffle_svg = crate::embedded_svg::svg_widget("assets/icons/shuffle.svg")
@@ -176,8 +208,11 @@ pub(crate) fn view_header<
         .color(theme::fg2())
         .width(Length::Shrink); // Take only needed space, not Fill
 
-    // Build the row with conditionally included shuffle button
+    // Build the row with conditionally included buttons
     let mut header_row = row![view_selector, sort_button];
+    if let Some(refresh_btn) = refresh_button {
+        header_row = header_row.push(refresh_btn);
+    }
     if let Some(shuffle_btn) = shuffle_button {
         header_row = header_row.push(shuffle_btn);
     }

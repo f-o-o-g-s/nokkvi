@@ -141,6 +141,7 @@ pub enum PlaylistsMessage {
     ToggleSortOrder,
     SearchQueryChanged(String),
     SearchFocused(bool),
+    RefreshViewData,
 
     // Data loading (moved from root Message enum)
     PlaylistsLoaded(Result<Vec<PlaylistUIViewData>, String>, usize), // result, total_count
@@ -158,6 +159,7 @@ pub enum PlaylistsAction {
     SearchChanged(String),  // trigger reload
     SortModeChanged(widgets::view_header::SortMode), // trigger reload
     SortOrderChanged(bool), // trigger reload
+    RefreshViewData,        // trigger reload
     ToggleStar(String, &'static str, bool), // (item_id, item_type, starred)
     PlayNextBatch(nokkvi_data::types::batch::BatchPayload),
     DeletePlaylist(String),               // playlist_id
@@ -174,6 +176,7 @@ impl super::HasCommonAction for PlaylistsAction {
             Self::SearchChanged(_) => super::CommonViewAction::SearchChanged,
             Self::SortModeChanged(m) => super::CommonViewAction::SortModeChanged(*m),
             Self::SortOrderChanged(a) => super::CommonViewAction::SortOrderChanged(*a),
+            Self::RefreshViewData => super::CommonViewAction::RefreshViewData,
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
         }
@@ -376,6 +379,9 @@ impl PlaylistsPage {
                 }
                 // Data loading messages (handled at root level, no action needed here)
                 PlaylistsMessage::PlaylistsLoaded(_, _) => (Task::none(), PlaylistsAction::None),
+                PlaylistsMessage::RefreshViewData => {
+                    (Task::none(), PlaylistsAction::RefreshViewData)
+                }
                 PlaylistsMessage::ContextMenuAction(clicked_idx, entry) => {
                     // Context menu for child tracks (uses shared LibraryContextEntry)
                     use nokkvi_data::types::batch::{BatchItem, BatchPayload};
@@ -548,6 +554,7 @@ impl PlaylistsPage {
             PlaylistsMessage::SortModeSelected,
             PlaylistsMessage::ToggleSortOrder,
             None, // No shuffle button for playlists
+            Some(PlaylistsMessage::RefreshViewData),
             PlaylistsMessage::SearchQueryChanged,
         );
 

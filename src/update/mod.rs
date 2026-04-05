@@ -636,6 +636,14 @@ impl Nokkvi {
                 HotkeyMessage::MoveTrackDown => self.handle_move_track(false),
                 HotkeyMessage::GetInfo => self.handle_get_info(),
                 HotkeyMessage::EditValue(up) => self.handle_edit_value(up),
+                HotkeyMessage::RefreshView => match self.current_view {
+                    crate::View::Albums => Task::done(Message::LoadAlbums),
+                    crate::View::Artists => Task::done(Message::LoadArtists),
+                    crate::View::Songs => Task::done(Message::LoadSongs),
+                    crate::View::Genres => Task::done(Message::LoadGenres),
+                    crate::View::Playlists => Task::done(Message::LoadPlaylists),
+                    crate::View::Queue | crate::View::Settings => Task::none(),
+                },
             },
 
             // -----------------------------------------------------------------

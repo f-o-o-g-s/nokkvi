@@ -303,6 +303,7 @@ pub enum HotkeyAction {
     PrevSortMode,
     NextSortMode,
     ToggleSortOrder,
+    RefreshView,
 
     // --- Settings edit (vertical) ---
     EditUp,
@@ -357,6 +358,7 @@ impl HotkeyAction {
         HotkeyAction::PrevSortMode,
         HotkeyAction::NextSortMode,
         HotkeyAction::ToggleSortOrder,
+        HotkeyAction::RefreshView,
         // Settings edit
         HotkeyAction::EditUp,
         HotkeyAction::EditDown,
@@ -407,6 +409,7 @@ impl HotkeyAction {
             HotkeyAction::PrevSortMode => "Previous Sort Mode",
             HotkeyAction::NextSortMode => "Next Sort Mode",
             HotkeyAction::ToggleSortOrder => "Sort Asc / Desc",
+            HotkeyAction::RefreshView => "Refresh View",
             HotkeyAction::EditUp => "Edit Value Up",
             HotkeyAction::EditDown => "Edit Value Down",
             HotkeyAction::Escape => "Escape / Back",
@@ -453,6 +456,7 @@ impl HotkeyAction {
             HotkeyAction::PrevSortMode => "Cycle sort mode backward",
             HotkeyAction::NextSortMode => "Cycle sort mode forward",
             HotkeyAction::ToggleSortOrder => "Toggle ascending/descending sort",
+            HotkeyAction::RefreshView => "Reload current view data from the server",
             HotkeyAction::EditUp => "Toggle setting on · enable field",
             HotkeyAction::EditDown => "Toggle setting off · disable field",
             HotkeyAction::Escape => "Close overlay, clear search, or go back",
@@ -500,7 +504,8 @@ impl HotkeyAction {
 
             HotkeyAction::PrevSortMode
             | HotkeyAction::NextSortMode
-            | HotkeyAction::ToggleSortOrder => "Sort",
+            | HotkeyAction::ToggleSortOrder
+            | HotkeyAction::RefreshView => "Sort & View",
 
             HotkeyAction::EditUp | HotkeyAction::EditDown => "Settings Edit",
 
@@ -552,6 +557,7 @@ impl HotkeyAction {
             HotkeyAction::PrevSortMode => KeyCombo::key(KeyCode::ArrowLeft),
             HotkeyAction::NextSortMode => KeyCombo::key(KeyCode::ArrowRight),
             HotkeyAction::ToggleSortOrder => KeyCombo::key(KeyCode::PageUp),
+            HotkeyAction::RefreshView => KeyCombo::key(KeyCode::Char('r')),
             // Settings edit
             HotkeyAction::EditUp => KeyCombo::key(KeyCode::ArrowUp),
             HotkeyAction::EditDown => KeyCombo::key(KeyCode::ArrowDown),
@@ -598,6 +604,7 @@ impl HotkeyAction {
             HotkeyAction::PrevSortMode => "prev_sort_mode",
             HotkeyAction::NextSortMode => "next_sort_mode",
             HotkeyAction::ToggleSortOrder => "toggle_sort_order",
+            HotkeyAction::RefreshView => "refresh_view",
             HotkeyAction::EditUp => "edit_up",
             HotkeyAction::EditDown => "edit_down",
             HotkeyAction::Escape => "escape",
@@ -642,6 +649,7 @@ impl HotkeyAction {
             "prev_sort_mode" => HotkeyAction::PrevSortMode,
             "next_sort_mode" => HotkeyAction::NextSortMode,
             "toggle_sort_order" => HotkeyAction::ToggleSortOrder,
+            "refresh_view" => HotkeyAction::RefreshView,
             "edit_up" => HotkeyAction::EditUp,
             "edit_down" => HotkeyAction::EditDown,
             "escape" => HotkeyAction::Escape,

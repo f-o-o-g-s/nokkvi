@@ -73,6 +73,7 @@ pub enum AlbumsMessage {
     ToggleSortOrder,
     SearchQueryChanged(String),
     SearchFocused(bool),
+    RefreshViewData,
 
     // Data loading (moved from root Message enum)
     AlbumsLoaded(Result<Vec<AlbumUIViewData>, String>, usize), // result, total_count
@@ -107,6 +108,7 @@ pub enum AlbumsAction {
     SearchChanged(String), // trigger reload
     SortModeChanged(widgets::view_header::SortMode), // trigger reload
     SortOrderChanged(bool), // trigger reload
+    RefreshViewData,       // trigger reload
     PlayNext(String),      // album_id - insert after currently playing
     AddBatchToPlaylist(nokkvi_data::types::batch::BatchPayload),
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
@@ -122,6 +124,7 @@ impl super::HasCommonAction for AlbumsAction {
             Self::SearchChanged(_) => super::CommonViewAction::SearchChanged,
             Self::SortModeChanged(m) => super::CommonViewAction::SortModeChanged(*m),
             Self::SortOrderChanged(a) => super::CommonViewAction::SortOrderChanged(*a),
+            Self::RefreshViewData => super::CommonViewAction::RefreshViewData,
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
         }
@@ -339,6 +342,7 @@ impl AlbumsPage {
                 AlbumsMessage::AlbumsPageLoaded(_, _) => (Task::none(), AlbumsAction::None),
                 AlbumsMessage::ArtworkLoaded(_, _) => (Task::none(), AlbumsAction::None),
                 AlbumsMessage::LargeArtworkLoaded(_, _) => (Task::none(), AlbumsAction::None),
+                AlbumsMessage::RefreshViewData => (Task::none(), AlbumsAction::RefreshViewData),
                 AlbumsMessage::RefreshArtwork(album_id) => {
                     (Task::none(), AlbumsAction::RefreshArtwork(album_id))
                 }
@@ -520,6 +524,7 @@ impl AlbumsPage {
             AlbumsMessage::SortModeSelected,
             AlbumsMessage::ToggleSortOrder,
             None, // No shuffle button for albums
+            Some(AlbumsMessage::RefreshViewData),
             AlbumsMessage::SearchQueryChanged,
         );
 

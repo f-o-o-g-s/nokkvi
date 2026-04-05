@@ -79,6 +79,7 @@ pub enum GenresMessage {
     ToggleSortOrder,
     SearchQueryChanged(String),
     SearchFocused(bool),
+    RefreshViewData,
 
     // Data loading (moved from root Message enum)
     GenresLoaded(Result<Vec<GenreUIViewData>, String>, usize), // result, total_count
@@ -100,6 +101,7 @@ pub enum GenresAction {
     SearchChanged(String), // trigger reload
     SortModeChanged(widgets::view_header::SortMode), // trigger reload
     SortOrderChanged(bool), // trigger reload
+    RefreshViewData,     // trigger reload
     ToggleStar(String, &'static str, bool), // (item_id, item_type, starred)
     PlayNextBatch(nokkvi_data::types::batch::BatchPayload),
     AddBatchToPlaylist(nokkvi_data::types::batch::BatchPayload),
@@ -112,6 +114,7 @@ impl super::HasCommonAction for GenresAction {
             Self::SearchChanged(_) => super::CommonViewAction::SearchChanged,
             Self::SortModeChanged(m) => super::CommonViewAction::SortModeChanged(*m),
             Self::SortOrderChanged(a) => super::CommonViewAction::SortOrderChanged(*a),
+            Self::RefreshViewData => super::CommonViewAction::RefreshViewData,
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
         }
@@ -447,6 +450,7 @@ impl GenresPage {
                 }
                 // Data loading messages (handled at root level, no action needed here)
                 GenresMessage::GenresLoaded(_, _) => (Task::none(), GenresAction::None),
+                GenresMessage::RefreshViewData => (Task::none(), GenresAction::RefreshViewData),
                 GenresMessage::ContextMenuAction(clicked_idx, entry) => {
                     use nokkvi_data::types::batch::{BatchItem, BatchPayload};
 
@@ -551,6 +555,7 @@ impl GenresPage {
             GenresMessage::SortModeSelected,
             GenresMessage::ToggleSortOrder,
             None, // No shuffle button for genres
+            Some(GenresMessage::RefreshViewData),
             GenresMessage::SearchQueryChanged,
         );
 

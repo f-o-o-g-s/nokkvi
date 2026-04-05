@@ -61,6 +61,7 @@ pub enum SongsMessage {
     ToggleSortOrder,
     SearchQueryChanged(String),
     SearchFocused(bool),
+    RefreshViewData,
 
     // Data loading (moved from root Message enum)
     SongsLoaded(Result<Vec<SongUIViewData>, String>, usize), // result, total_count
@@ -83,6 +84,7 @@ pub enum SongsAction {
     SearchChanged(String),                                  // trigger reload
     SortModeChanged(widgets::view_header::SortMode),        // trigger reload
     SortOrderChanged(bool),                                 // trigger reload
+    RefreshViewData,                                        // trigger reload
     PlayNextBatch(nokkvi_data::types::batch::BatchPayload), // Batch payload
     PlayBatch(nokkvi_data::types::batch::BatchPayload),     // Play immediately
     AddToPlaylist(String),                                  // song_id - add to playlist dialog
@@ -98,6 +100,7 @@ impl super::HasCommonAction for SongsAction {
             Self::SearchChanged(_) => super::CommonViewAction::SearchChanged,
             Self::SortModeChanged(m) => super::CommonViewAction::SortModeChanged(*m),
             Self::SortOrderChanged(a) => super::CommonViewAction::SortOrderChanged(*a),
+            Self::RefreshViewData => super::CommonViewAction::RefreshViewData,
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
         }
@@ -355,6 +358,7 @@ impl SongsPage {
             SongsMessage::SongsLoaded(_, _) | SongsMessage::SongsPageLoaded(_, _) => {
                 (Task::none(), SongsAction::None)
             }
+            SongsMessage::RefreshViewData => (Task::none(), SongsAction::RefreshViewData),
             SongsMessage::RefreshArtwork(album_id) => {
                 (Task::none(), SongsAction::RefreshArtwork(album_id))
             }
@@ -400,6 +404,7 @@ impl SongsPage {
             SongsMessage::SortModeSelected,
             SongsMessage::ToggleSortOrder,
             None, // No shuffle button for songs
+            Some(SongsMessage::RefreshViewData),
             SongsMessage::SearchQueryChanged,
         );
 

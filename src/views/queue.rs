@@ -422,6 +422,7 @@ impl QueuePage {
             QueueMessage::SortModeSelected,
             QueueMessage::ToggleSortOrder,
             Some(QueueMessage::ShuffleQueue), // Shuffle button for queue
+            None,                             // No refresh button for queue
             QueueMessage::SearchQueryChanged,
         );
 
