@@ -25,6 +25,7 @@ tokio-util = "0.7"
 tracing = "0.1.44"
 url = "2.5.8"
 futures = "0.3.32"
+# Pinned for gapless playback / crossfade API requirements
 rodio = { git = "https://github.com/RustAudio/rodio.git", rev = "7e9ba6dd", default-features = false, features = ["playback", "tracing"] }
 ringbuf = "0.4"
 rustfft = "6"

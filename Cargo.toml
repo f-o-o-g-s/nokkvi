@@ -30,6 +30,7 @@ workspace = true
 nokkvi-data = { path = "data" }
 anyhow = "1.0.102"
 bytemuck = { version = "1.25", features = ["derive"] }
+# Pinned post-0.14.0: requires `Ellipsis` type support (added in PR #3254)
 iced = { git = "https://github.com/iced-rs/iced.git", rev = "12a01265", features = ["tokio", "image", "svg", "advanced", "canvas", "wgpu", "sipper"] }
 lru = "0.16"
 image = "0.25.10"

@@ -849,9 +849,7 @@ mod tests {
                 // ToggleSortOrder uses PageUp — check that PageDown isn't duplicated
                 // (it's actually the same binding in our model; if we need PageDown
                 // as a separate trigger, we'd add a ToggleSortOrderAlt action)
-                panic!(
-                    "Duplicate binding {combo:?}: both {existing:?} and {action:?}"
-                );
+                panic!("Duplicate binding {combo:?}: both {existing:?} and {action:?}");
             }
             seen.insert(combo, *action);
         }
@@ -997,10 +995,7 @@ mod tests {
     fn all_actions_have_display_name() {
         for action in HotkeyAction::ALL {
             let name = action.display_name();
-            assert!(
-                !name.is_empty(),
-                "Action {action:?} has empty display_name"
-            );
+            assert!(!name.is_empty(), "Action {action:?} has empty display_name");
         }
     }
 }
