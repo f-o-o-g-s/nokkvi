@@ -59,7 +59,7 @@ Tests live in inline `#[cfg(test)]` modules. Grep for `#[cfg(test)]` to find the
 
 | Store | What | How |
 |-------|------|-----|
-| `config.toml` | User preferences (General, Interface, Playback, Hotkeys, Views, Visualizer behavior, font_family, library_page_size) | Hot-reloadable via `SettingsManager` & `config_writer.rs`. `verbose_config` mode ensures defaults are output. |
+| `config.toml` | User preferences (General, Interface, Playback, Hotkeys, Views, Visualizer behavior, font_family, library_page_size, artwork render resolutions) | Hot-reloadable via `SettingsManager` & `config_writer.rs`. `verbose_config` mode ensures defaults are output. |
 | Theme files | Named `.toml` files in `~/.config/nokkvi/themes/` | Palette colors, visualizer colors. 21 built-in themes. `config.toml` stores `theme = "name"` key. |
 | redb | Queue, session tokens (JWT, Subsonic) | Via `state_storage.rs`, `queue/`, `credentials.rs`. Plaintext. |
 | Credentials | Server URL, username | Stored in `config.toml`. Password is NOT stored on disk. |

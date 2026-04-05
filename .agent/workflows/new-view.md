@@ -37,9 +37,9 @@ Follow these steps in order to add a new slot-list-based view.
 
 9. Wrap slot list in `wrap_with_scroll_indicator()` from `widgets/scroll_indicator.rs`
 
-10. Add context menu: wrap slot buttons in `context_menu()` with `LibraryContextEntry` / `QueueContextEntry` actions, add `ContextMenuAction(usize, LibraryContextEntry)` variant. Batch-aware via `evaluate_context_menu()`.
+10. Add context menu: wrap slot buttons in `context_menu()` with `LibraryContextEntry` / `QueueContextEntry` actions, add `ContextMenuAction(usize, LibraryContextEntry)` variant. Batch-aware via `evaluate_context_menu()` and `get_batch_target_indices()`.
 
-11. Add multi-selection support: `handle_slot_click()` with keyboard modifiers in click handler, `clear_multi_selection()` after batch actions
+11. Add multi-selection support: `handle_slot_click()` with keyboard modifiers in click handler, `clear_multi_selection()` after batch actions. Use `build_batch_payload()` and `get_queue_target_indices()` to simplify batch payload construction.
 
 12. Add toast notifications for user-facing actions using `toast_*()` helpers
 

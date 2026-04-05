@@ -60,8 +60,11 @@ Shuffle on repeat-playlist wrap: re-shuffles the order array when the queue loop
 
 ## Update Handler Pattern
 
-Root dispatch in `update/mod.rs`. `ls src/update/` for handler files. Common helpers in `update/components.rs`: `shell_task`, `shell_spawn`, `guard_play_action`, `set_item_rating_task`, etc.
+Root dispatch in `update/mod.rs`. `ls src/update/` for handler files. Common helpers in `update/components.rs`: `shell_task`, `shell_spawn`, `guard_play_action`, `set_item_rating_task`, etc. Boilerplate extraction helpers in `widgets/slot_list_page.rs` (`get_queue_target_indices`, `compute_rating_toggle`) and `views/expansion.rs` (`build_batch_payload`, `get_batch_target_indices`).
 
+## View Data Refresh
+
+View data (lists, artwork) can be explicitly refreshed via UI (header Refresh button) and hotkeys (F5 / Ctrl+R), which calls `set_needs_fetch()` on the underlying `PagedBuffer` to trigger a reload.
 ## Modals
 
 - **Equalizer**: 10-band + presets (`widgets/eq_modal.rs`, `update/eq_modal.rs`). Selecting preset auto-enables EQ. Sliders visually reset to 0 dB when disabled.

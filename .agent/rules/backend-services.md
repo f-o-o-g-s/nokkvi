@@ -15,7 +15,7 @@ AppService (orchestrator)
 │   └── reset_next_track() on mode toggles
 ├── Domain Services (Albums, Artists, Songs, Genres, Playlists, Queue, Settings, Auth)
 │   └── Lazy-initialized via `tokio::sync::OnceCell` (not Mutex<Option<T>>)
-├── ArtworkPrefetch — background artwork loading with progress tracking
+├── ArtworkPrefetch — background artwork loading with pagination, progress tracking, and dynamic cache key mappings
 └── TaskManager (centralized spawn tracking)
 ```
 
@@ -45,7 +45,7 @@ AppService (orchestrator)
 
 ## SettingsManager (`services/settings.rs`)
 
-Owns `PlayerSettings`, `TomlSettings`, `TomlViewPreferences`, `HotkeyConfig`, `StateStorage`. Loads config.toml → merges with redb → `PlayerSettings`. Per-field setters persist atomically. `reload_from_toml()` for hot-reload.
+Owns `PlayerSettings`, `TomlSettings`, `TomlViewPreferences`, `HotkeyConfig`, `StateStorage`. Loads config.toml → merges with redb → `PlayerSettings`. Per-field setters persist atomically. `reload_from_toml()` for hot-reload. Settings include artwork render resolutions, library page thresholds, and font family.
 
 ## Theme System
 

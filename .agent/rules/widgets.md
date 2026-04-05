@@ -25,7 +25,7 @@ Custom `iced::advanced` seekable widget. `Vec<OverlaySegment>` for scrolling col
 | Widget | File | Purpose |
 |--------|------|---------|
 | Volume Slider | `volume_slider.rs` | Vertical/horizontal volume, `SliderVariant` |
-| View Header | `view_header.rs` | Sort mode selector, search bar, shuffle button |
+| View Header | `view_header.rs` | Sort mode selector, search bar, shuffle button, center-on-playing button, tooltips |
 | Base Slot List | `base_slot_list_layout.rs` | Shared layout scaffolding, `base_slot_list_empty_state()` |
 | Scroll Indicator | `scroll_indicator.rs` | Transient scrollbar overlay, `wrap_with_scroll_indicator()`, drag-to-seek |
 | Hover Overlay | `hover_overlay.rs` | Per-slot hover darkening + press scale animation + external `flash_at()`. Default border radius = `ui_border_radius()` (theme-aware). |
