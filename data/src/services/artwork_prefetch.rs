@@ -29,6 +29,7 @@ pub fn start_prefetch(
     subsonic_credential: String,
     disk_cache: Arc<Option<DiskCache>>,
     progress: Option<ProgressHandle>,
+    high_res_size: Option<u32>,
 ) -> mpsc::Receiver<PrefetchProgress> {
     let (tx, rx) = mpsc::channel(100);
 
@@ -40,6 +41,7 @@ pub fn start_prefetch(
             disk_cache,
             tx,
             progress,
+            high_res_size,
         )
         .await;
     });
@@ -54,6 +56,7 @@ async fn prefetch_all_artwork(
     disk_cache: Arc<Option<DiskCache>>,
     progress_tx: mpsc::Sender<PrefetchProgress>,
     progress: Option<ProgressHandle>,
+    high_res_size: Option<u32>,
 ) {
     let total_albums = albums.len();
     let client = reqwest::Client::new();
@@ -84,11 +87,7 @@ async fn prefetch_all_artwork(
                 Some(artwork_url::THUMBNAIL_SIZE),
                 album.updated_at.as_deref(),
             )?;
-            let cache_key = format!(
-                "{}_{}",
-                normalize_art_id(&art_id),
-                artwork_url::THUMBNAIL_SIZE
-            );
+            let cache_key = artwork_url::build_cache_key(&art_id, Some(artwork_url::THUMBNAIL_SIZE));
             Some((post_url, post_body, cache_key))
         })
         .collect();
@@ -191,14 +190,10 @@ async fn prefetch_all_artwork(
                 &art_id,
                 &server_url,
                 &subsonic_credential,
-                Some(artwork_url::HIGH_RES_SIZE),
+                high_res_size,
                 album.updated_at.as_deref(),
             )?;
-            let cache_key = format!(
-                "{}_{}",
-                normalize_art_id(&art_id),
-                artwork_url::HIGH_RES_SIZE
-            );
+            let cache_key = artwork_url::build_cache_key(&art_id, high_res_size);
             Some((post_url, post_body, cache_key))
         })
         .collect();
@@ -291,19 +286,6 @@ async fn prefetch_all_artwork(
     );
 }
 
-/// Normalize art ID to match cache key format
-fn normalize_art_id(art_id: &str) -> String {
-    if art_id.starts_with("al-")
-        || art_id.starts_with("ar-")
-        || art_id.starts_with("mf-")
-        || art_id.starts_with("pl-")
-        || art_id.starts_with("sh-")
-    {
-        art_id.to_string()
-    } else {
-        format!("al-{art_id}")
-    }
-}
 
 /// Check if cache appears incomplete (less than 80% of expected files)
 pub fn is_cache_incomplete(disk_cache: &Option<DiskCache>, expected_count: usize) -> bool {

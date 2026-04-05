@@ -595,6 +595,7 @@ impl AlbumsService {
     pub async fn start_artwork_prefetch(
         &self,
         progress: Option<crate::types::progress::ProgressHandle>,
+        high_res_size: Option<u32>,
     ) {
         use std::sync::atomic::Ordering;
 
@@ -614,16 +615,31 @@ impl AlbumsService {
             return;
         }
 
-        // Get all albums for prefetching
-        let albums = if let Some(service) = self.albums_service.get() {
-            match service
-                .load_albums("name", "ASC", None, Some(0), None)
-                .await
-            {
-                Ok((albums, _)) => albums,
-                Err(e) => {
-                    debug!(" [PREFETCH] Failed to load albums: {}", e);
-                    return;
+        // Get all albums for prefetching, paginating if there are many
+        let mut albums = Vec::new();
+        if let Some(service) = self.albums_service.get() {
+            let mut offset = 0;
+            let limit = 500;
+            loop {
+                match service
+                    .load_albums("name", "ASC", None, Some(offset), Some(limit))
+                    .await
+                {
+                    Ok((mut batch, total_count)) => {
+                        let batch_len = batch.len();
+                        albums.append(&mut batch);
+                        if batch_len < limit || albums.len() >= total_count as usize {
+                            break;
+                        }
+                        offset += limit;
+                    }
+                    Err(e) => {
+                        debug!(" [PREFETCH] Failed to load albums batch: {}", e);
+                        if albums.is_empty() {
+                            return;
+                        }
+                        break; // proceed with what we have
+                    }
                 }
             }
         } else {
@@ -651,19 +667,21 @@ impl AlbumsService {
             subsonic_credential,
             self.disk_cache.clone(),
             progress,
+            high_res_size,
         );
     }
 
     /// Refresh artwork for a single album: evict from disk + memory caches, re-fetch all sizes.
     ///
     /// This allows updating one album's artwork without rebuilding the entire cache.
-    /// Re-fetches thumbnail (80px) and large (1000px) from the server.
+    /// Re-fetches thumbnail (80px) and the specified high-res size from the server.
     /// Returns the raw bytes for each size so callers can build handles directly,
     /// bypassing any cache re-read race conditions.
     pub async fn refresh_single_album_artwork(
         &self,
         album_id: &str,
-    ) -> Result<Vec<(u32, Vec<u8>)>> {
+        high_res_size: Option<u32>,
+    ) -> Result<Vec<(Option<u32>, Vec<u8>)>> {
         use crate::utils::artwork_url;
 
         let (server_url, subsonic_credential) = self.get_server_config().await;
@@ -681,12 +699,12 @@ impl AlbumsService {
             format!("al-{album_id}")
         };
 
-        let sizes: &[u32] = &[artwork_url::THUMBNAIL_SIZE, artwork_url::HIGH_RES_SIZE];
-        let mut fetched: Vec<(u32, Vec<u8>)> = Vec::new();
+        let sizes = vec![Some(artwork_url::THUMBNAIL_SIZE), high_res_size];
+        let mut fetched = Vec::new();
 
         // Evict from disk cache and re-fetch each size
-        for &size in sizes {
-            let cache_key = format!("{art_id}_{size}");
+        for size in sizes {
+            let cache_key = artwork_url::build_cache_key(&art_id, size);
 
             // Remove from disk cache
             if let Some(dc) = self.disk_cache.as_ref() {
@@ -698,12 +716,10 @@ impl AlbumsService {
             {
                 let mut mem = self.artwork_cache.lock().await;
                 // In-memory cache is keyed by full URL, but we need to evict by album_id pattern.
-                // Pop all entries matching this album_id + size.
+                // Pop all entries matching this album_id (we'll just evict all cached sizes for this ID to be safe)
                 let keys_to_remove: Vec<String> = mem
                     .iter()
-                    .filter(|(k, _)| {
-                        k.contains(&format!("id={art_id}")) && k.contains(&format!("size={size}"))
-                    })
+                    .filter(|(k, _)| k.contains(&format!("id={art_id}")))
                     .map(|(k, _)| k.clone())
                     .collect();
                 for key in keys_to_remove {
@@ -721,7 +737,7 @@ impl AlbumsService {
                 &art_id,
                 &server_url,
                 &subsonic_credential,
-                Some(size),
+                size,
             )
             .await;
 
@@ -731,7 +747,7 @@ impl AlbumsService {
                     dc.insert(&cache_key, &data);
                 }
                 debug!(
-                    " [REFRESH] Re-fetched {}px artwork for {} ({} bytes)",
+                    " [REFRESH] Re-fetched {:?}px artwork for {} ({} bytes)",
                     size,
                     album_id,
                     data.len()
@@ -739,7 +755,7 @@ impl AlbumsService {
                 fetched.push((size, data));
             } else {
                 debug!(
-                    " [REFRESH] No artwork returned for {} at {}px",
+                    " [REFRESH] No artwork returned for {} at {:?}px",
                     album_id, size
                 );
             }

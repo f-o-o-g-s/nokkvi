@@ -12,6 +12,22 @@ pub const HIGH_RES_SIZE: u32 = 1000;
 /// Default size for thumbnails
 pub const THUMBNAIL_SIZE: u32 = 80;
 
+/// Safely construct a consistent string cache key for a given artwork ID and size
+/// Maps the requested size to the filename string. Omitted size is 'original'.
+pub fn build_cache_key(art_id: &str, size: Option<u32>) -> String {
+    let normalized_id = if KNOWN_PREFIXES.iter().any(|prefix| art_id.starts_with(prefix)) {
+        art_id.to_string()
+    } else {
+        format!("al-{art_id}")
+    };
+
+    match size {
+        Some(s) => format!("{normalized_id}_{s}"),
+        None => format!("{normalized_id}_original"),
+    }
+}
+
+
 /// Build a Subsonic getCoverArt URL
 ///
 /// # Arguments
@@ -64,15 +80,17 @@ pub fn build_cover_art_url_with_timestamp(
         format!("al-{art_id}")
     };
 
-    // Build URL with size parameter
-    let actual_size = size.unwrap_or(HIGH_RES_SIZE);
+    // Build size parameter string conditionally
+    let size_param = size
+        .map(|s| format!("&size={s}"))
+        .unwrap_or_default();
 
     if !subsonic_credential.is_empty() {
         // Include updated_at in URL for cache invalidation
         // This becomes part of the URL hash, so changed artwork = new cache file
         let cache_buster = updated_at.unwrap_or("");
         format!(
-            "{server_url}/rest/getCoverArt?id={final_id}&{subsonic_credential}&size={actual_size}&square=true&f=json&v=1.8.0&c=nokkvi&_u={cache_buster}"
+            "{server_url}/rest/getCoverArt?id={final_id}&{subsonic_credential}{size_param}&square=true&f=json&v=1.8.0&c=nokkvi&_u={cache_buster}"
         )
     } else {
         String::new()
@@ -216,9 +234,9 @@ mod tests {
     }
 
     #[test]
-    fn test_default_size() {
+    fn test_original_size() {
         let url = build_cover_art_url("123", "http://srv", "u=x", None);
-        assert!(url.contains("size=1000"));
+        assert!(!url.contains("size="), "Original size should omit the size parameter");
     }
 
     #[test]
@@ -231,13 +249,13 @@ mod tests {
     #[test]
     fn thumbnail_and_highres_share_same_id() {
         let thumb = build_cover_art_url("al-123", "http://srv", "u=x", Some(80));
-        let hires = build_cover_art_url("al-123", "http://srv", "u=x", Some(1000));
+        let hires = build_cover_art_url("al-123", "http://srv", "u=x", Some(HIGH_RES_SIZE));
         // Both must reference the same artwork ID
         assert!(thumb.contains("id=al-123"));
         assert!(hires.contains("id=al-123"));
         // But different sizes
         assert!(thumb.contains("size=80"));
-        assert!(hires.contains("size=1000"));
+        assert!(hires.contains(&format!("size={}", HIGH_RES_SIZE)));
     }
 
     #[test]
@@ -288,5 +306,16 @@ mod tests {
             "",
             "empty credential"
         );
+    }
+
+    #[test]
+    fn test_build_cache_key() {
+        assert_eq!(build_cache_key("al-123", Some(1000)), "al-123_1000");
+        assert_eq!(build_cache_key("ar-xyz", Some(1500)), "ar-xyz_1500");
+        assert_eq!(build_cache_key("mf-abc", None), "mf-abc_original");
+        
+        // Also handle auto-prefixing if art_id misses known prefixes
+        assert_eq!(build_cache_key("123", Some(80)), "al-123_80");
+        assert_eq!(build_cache_key("xyz", None), "al-xyz_original");
     }
 }

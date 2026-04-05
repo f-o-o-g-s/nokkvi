@@ -240,6 +240,7 @@ impl Nokkvi {
             // First try to find in albums list
             if let Some(album) = self.library.albums.iter().find(|a| a.id == album_id) {
                 let art_id = album.id.clone();
+                let artwork_size = self.artwork_resolution.to_size();
                 return Task::perform(
                     async move {
                         let (url, cred) = albums_vm.get_server_config().await;
@@ -247,10 +248,10 @@ impl Nokkvi {
                             &art_id,
                             &url,
                             &cred,
-                            Some(1000),
+                            artwork_size,
                         );
                         let path = albums_vm
-                            .get_artwork_cache_path(&artwork_url, Some(1000))
+                            .get_artwork_cache_path(&artwork_url, artwork_size)
                             .await;
                         let handle = path.map(image::Handle::from_path);
                         (art_id, handle)
@@ -269,6 +270,7 @@ impl Nokkvi {
                 .any(|s| s.album_id == album_id)
             {
                 let art_id = album_id.clone();
+                let artwork_size = self.artwork_resolution.to_size();
                 return Task::perform(
                     async move {
                         let (url, cred) = albums_vm.get_server_config().await;
@@ -276,10 +278,10 @@ impl Nokkvi {
                             &art_id,
                             &url,
                             &cred,
-                            Some(1000),
+                            artwork_size,
                         );
                         let path = albums_vm
-                            .get_artwork_cache_path(&artwork_url, Some(1000))
+                            .get_artwork_cache_path(&artwork_url, artwork_size)
                             .await;
                         let handle = path.map(image::Handle::from_path);
                         (art_id, handle)
@@ -291,6 +293,7 @@ impl Nokkvi {
             // Final fallback: construct artwork URL directly from album_id
             // This handles songs whose albums aren't in the paginated buffer
             let art_id = album_id.clone();
+            let artwork_size = self.artwork_resolution.to_size();
             return Task::perform(
                 async move {
                     let (url, cred) = albums_vm.get_server_config().await;
@@ -298,10 +301,10 @@ impl Nokkvi {
                         &art_id,
                         &url,
                         &cred,
-                        Some(1000),
+                        artwork_size,
                     );
                     let path = albums_vm
-                        .get_artwork_cache_path(&artwork_url, Some(1000))
+                        .get_artwork_cache_path(&artwork_url, artwork_size)
                         .await;
                     let handle = path.map(image::Handle::from_path);
                     (art_id, handle)
@@ -329,11 +332,14 @@ impl Nokkvi {
         if let Some(shell) = &self.app_service {
             let albums_vm = shell.albums().clone();
             let id = album_id.clone();
+            let artwork_size = self.artwork_resolution.to_size();
 
             let refresh_task = Task::perform(
                 async move {
                     // Backend: evict caches + re-fetch, returns raw bytes per size
-                    let fetched = albums_vm.refresh_single_album_artwork(&id).await?;
+                    let fetched = albums_vm
+                        .refresh_single_album_artwork(&id, artwork_size)
+                        .await?;
 
                     // Build handles from fresh bytes (not disk paths)
                     let mut thumb_handle: Option<image::Handle> = None;
@@ -347,9 +353,9 @@ impl Nokkvi {
                         // identical ID and Iced serves the stale texture. from_bytes
                         // derives the ID from content, busting the stale cache entry.
                         let handle = image::Handle::from_bytes(data);
-                        if size == nokkvi_data::utils::artwork_url::THUMBNAIL_SIZE {
+                        if size == Some(nokkvi_data::utils::artwork_url::THUMBNAIL_SIZE) {
                             thumb_handle = Some(handle);
-                        } else if size == nokkvi_data::utils::artwork_url::HIGH_RES_SIZE {
+                        } else if size == artwork_size {
                             large_handle = Some(handle);
                         }
                     }
@@ -429,9 +435,12 @@ impl Nokkvi {
         progress: Option<nokkvi_data::types::progress::ProgressHandle>,
     ) -> Task<Message> {
         // Start background prefetch of all album artwork
+        let artwork_size = self.artwork_resolution.to_size();
         self.shell_spawn("album_artwork_prefetch", move |shell| async move {
             let albums_vm = shell.albums().clone();
-            albums_vm.start_artwork_prefetch(progress).await;
+            albums_vm
+                .start_artwork_prefetch(progress, artwork_size)
+                .await;
             Ok(())
         });
         Task::none()
