@@ -161,6 +161,7 @@ All keyboard shortcuts are **user-configurable** via the Settings view (Hotkeys 
 | `Shift+Enter` | Expand center item inline (drill into children) |
 | `Ctrl+E` | Toggle library browser panel beside queue |
 | `/` | Focus search input |
+| `r` | Refresh current view data from the server |
 | `Esc` | Collapse inline expansion; if none, clear search; if in Settings, exit |
 
 ### Sort Controls
