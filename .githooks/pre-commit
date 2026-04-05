@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Updates README.md with the currently tested Navidrome version before commit
+
+if command -v navidrome >/dev/null 2>&1; then
+    VER=$(navidrome --version 2>/dev/null | awk '{print $1}')
+    if [ -n "$VER" ]; then
+        # Check current version in README
+        CURRENT=$(grep -oP '(?<=<!-- navidrome-version -->).*?(?=<!-- /navidrome-version -->)' README.md || true)
+        
+        if [ "$CURRENT" != "$VER" ] && [ -n "$CURRENT" ]; then
+            echo ">> Updating Navidrome version in README.md ($CURRENT -> $VER)"
+            sed -i "s/<!-- navidrome-version -->[^<]*<!-- \/navidrome-version -->/<!-- navidrome-version -->$VER<!-- \/navidrome-version -->/g" README.md
+            git add README.md
+        fi
+    fi
+fi
