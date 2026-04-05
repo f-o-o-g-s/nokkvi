@@ -2,6 +2,8 @@
 
 A native Rust/Iced client for [Navidrome](https://www.navidrome.org/) music server. Named after Old Norse *nökkvi*, a small, humble boat.
 
+https://github.com/f-o-o-g-s/nokkvi/raw/main/assets/nokkvi_demo.mp4
+
 > **⚠️ AI-Generated Project**
 >
 > This entire codebase was written by AI (primarily Claude) with my direction. I'm not a developer. I come up with the ideas, test things, and use this as my daily music player, but I don't write code myself. You'll probably find patterns in here that experienced Rust developers would do differently. If you spot something that could be better, issues and PRs are welcome.
