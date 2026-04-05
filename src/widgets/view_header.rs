@@ -33,50 +33,82 @@ pub(crate) fn view_header<
     show_search: bool,
     on_search_change: impl Fn(String) -> Message + 'a,
 ) -> Element<'a, Message> {
-    let view_selector = container(
-        pick_list(Some(current_view), view_options, |v: &V| v.to_string())
-            .on_select(on_view_selected)
-            .width(Length::Fixed(200.0))
-            .text_size(12.0) // Match QML font size
-            .font(Font {
-                weight: Weight::Medium,
-                ..theme::ui_font()
-            })
-            .padding([10, 8]) // Increased vertical padding to fill 40px height
-            .style(move |_theme, status| pick_list::Style {
-                text_color: theme::fg0(),
-                placeholder_color: theme::fg4(),
-                handle_color: theme::fg4(),
-                background: (theme::bg0_soft()).into(),
+    let view_selector = if view_options.is_empty() {
+        // Render a static pill matching the pick_list styling
+        Some(
+            container(
+                text(current_view.to_string())
+                    .size(12.0)
+                    .font(Font {
+                        weight: Weight::Medium,
+                        ..theme::ui_font()
+                    })
+                    .wrapping(iced::widget::text::Wrapping::None)
+                    .ellipsis(iced::widget::text::Ellipsis::End),
+            )
+            .padding([0, 12]) // Horizontal padding
+            .max_width(300.0)
+            .align_y(Alignment::Center)
+            .style(move |_theme| container::Style {
+                text_color: Some(theme::fg0()),
+                background: Some(theme::bg0_soft().into()),
                 border: iced::Border {
-                    color: match status {
-                        pick_list::Status::Active | pick_list::Status::Disabled => {
-                            iced::Color::TRANSPARENT
-                        }
-                        pick_list::Status::Hovered => theme::accent_bright(),
-                        pick_list::Status::Opened { .. } => theme::accent_bright(),
-                    },
+                    color: iced::Color::TRANSPARENT,
                     width: 2.0,
                     radius: theme::ui_border_radius(),
                 },
+                ..Default::default()
             })
-            .menu_style(move |_theme| {
-                // Style for the dropdown menu overlay
-                iced::widget::overlay::menu::Style {
-                    text_color: theme::fg0(),
-                    background: (theme::bg1()).into(),
-                    border: iced::Border {
-                        color: theme::accent_bright(),
-                        width: 2.0,
-                        radius: theme::ui_border_radius(),
-                    },
-                    selected_text_color: theme::bg0_hard(),
-                    selected_background: (theme::accent_bright()).into(),
-                    shadow: iced::Shadow::default(),
-                }
-            }),
-    )
-    .height(Length::Fixed(40.0)); // Match button and search field height
+            .height(Length::Fixed(40.0)),
+        )
+    } else {
+        Some(
+            container(
+                pick_list(Some(current_view), view_options, |v: &V| v.to_string())
+                    .on_select(on_view_selected)
+                    .width(Length::Fixed(200.0))
+                    .text_size(12.0) // Match QML font size
+                    .font(Font {
+                        weight: Weight::Medium,
+                        ..theme::ui_font()
+                    })
+                    .padding([10, 8]) // Increased vertical padding to fill 40px height
+                    .style(move |_theme, status| pick_list::Style {
+                        text_color: theme::fg0(),
+                        placeholder_color: theme::fg4(),
+                        handle_color: theme::fg4(),
+                        background: (theme::bg0_soft()).into(),
+                        border: iced::Border {
+                            color: match status {
+                                pick_list::Status::Active | pick_list::Status::Disabled => {
+                                    iced::Color::TRANSPARENT
+                                }
+                                pick_list::Status::Hovered => theme::accent_bright(),
+                                pick_list::Status::Opened { .. } => theme::accent_bright(),
+                            },
+                            width: 2.0,
+                            radius: theme::ui_border_radius(),
+                        },
+                    })
+                    .menu_style(move |_theme| {
+                        // Style for the dropdown menu overlay
+                        iced::widget::overlay::menu::Style {
+                            text_color: theme::fg0(),
+                            background: (theme::bg1()).into(),
+                            border: iced::Border {
+                                color: theme::accent_bright(),
+                                width: 2.0,
+                                radius: theme::ui_border_radius(),
+                            },
+                            selected_text_color: theme::bg0_hard(),
+                            selected_background: (theme::accent_bright()).into(),
+                            shadow: iced::Shadow::default(),
+                        }
+                    }),
+            )
+            .height(Length::Fixed(40.0)),
+        ) // Match button and search field height
+    };
 
     let sort_button = on_sort_toggle.map(|sort_msg| {
         // Use Lucide SVG icons matching QML/Slint implementation
@@ -283,7 +315,10 @@ pub(crate) fn view_header<
         .width(Length::Shrink); // Take only needed space, not Fill
 
     // Build the row with conditionally included buttons
-    let mut header_row = row![view_selector];
+    let mut header_row = row![];
+    if let Some(selector) = view_selector {
+        header_row = header_row.push(selector);
+    }
     if let Some(sort_btn) = sort_button {
         header_row = header_row.push(sort_btn);
     }
@@ -298,6 +333,9 @@ pub(crate) fn view_header<
     }
     if let Some(search_element) = search_field {
         header_row = header_row.push(search_element);
+    } else {
+        // Push empty space to force the count display to the right edge
+        header_row = header_row.push(iced::widget::Space::new().width(Length::Fill));
     }
     header_row = header_row.push(count_display);
 

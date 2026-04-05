@@ -233,18 +233,18 @@ impl SimilarPage {
             data.label.to_lowercase()
         };
 
-        // We don't have sort mode options for Similar, we can pass a dummy enum or just use Song options
-        // since we are hiding the sort button anyway.
-        use crate::widgets::view_header::SortMode;
+        // We don't have sort mode options for Similar, we can pass an empty slice
+        // to hide the sort dropdown entirely, and pass the header_prefix as the view title.
+        let empty_options: &[String] = &[];
 
         let header = widgets::view_header::view_header(
-            SortMode::Name,
-            SortMode::SONG_OPTIONS, // dummy
-            true,                   // ascending dummy
-            "",                     // no search query
+            header_prefix,
+            empty_options,
+            true, // ascending dummy
+            "",   // no search query
             data.songs.len(),
             data.songs.len(),
-            &header_prefix,
+            "songs",
             crate::views::SIMILAR_SEARCH_ID,
             |_| SimilarMessage::NoOp,
             None,  // Hide sort button
