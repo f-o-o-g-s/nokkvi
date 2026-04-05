@@ -82,4 +82,10 @@ impl AuthGateway {
         let auth_service = self.auth_service.lock().await;
         auth_service.get_client().cloned()
     }
+
+    /// Fetches the server version dynamically using the Subsonic /rest/ping endpoint
+    pub async fn fetch_server_version(&self) -> Result<String> {
+        let auth_service = self.auth_service.lock().await;
+        auth_service.fetch_server_version().await
+    }
 }

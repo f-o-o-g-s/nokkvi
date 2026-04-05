@@ -635,8 +635,7 @@ mod tests {
             .iter()
             .enumerate()
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
-            .map(|(idx, _)| idx)
-            .unwrap_or(0);
+            .map_or(0, |(idx, _)| idx);
 
         // 440Hz with 50-10000Hz range across 32 bars should be in the lower bars
         // (logarithmic distribution means most bars are in upper frequencies)

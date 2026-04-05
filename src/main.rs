@@ -212,6 +212,8 @@ pub struct Nokkvi {
     pub verbose_config: bool,
     /// Artwork resolution for the large artwork panel (configurable in Settings)
     pub artwork_resolution: nokkvi_data::types::player_settings::ArtworkResolution,
+    /// Extracted backend server version (e.g. from Navidrome)
+    pub server_version: Option<String>,
 
     // -------------------------------------------------------------------------
     // Progress Tracking (polled from Tick for live toast updates)
@@ -278,6 +280,7 @@ impl Default for Nokkvi {
             quick_add_to_playlist: false,
             verbose_config: false,
             artwork_resolution: nokkvi_data::types::player_settings::ArtworkResolution::Default,
+            server_version: None,
             // Consolidated state structs with defaults
             playback: crate::state::PlaybackState::default(),
             scrobble: crate::state::ScrobbleState::default(),

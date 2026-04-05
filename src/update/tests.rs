@@ -968,3 +968,19 @@ fn handle_common_view_action_refresh_returns_task() {
 
     assert!(task.is_some(), "RefreshViewData should return a task");
 }
+
+// ============================================================================
+// Server Version (mod.rs)
+// ============================================================================
+
+#[test]
+fn server_version_fetched_updates_state() {
+    let mut app = test_app();
+    assert_eq!(app.server_version, None);
+
+    let _ = app.update(crate::app_message::Message::ServerVersionFetched(Some(
+        "0.61.1".to_string(),
+    )));
+
+    assert_eq!(app.server_version.as_deref(), Some("0.61.1"));
+}

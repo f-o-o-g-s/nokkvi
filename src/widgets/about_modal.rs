@@ -59,6 +59,8 @@ pub(crate) struct AboutViewData<'a> {
     pub server_url: &'a str,
     /// Connected username (empty if not connected)
     pub username: &'a str,
+    /// Connected Navidrome server version (None if not fetched or failed)
+    pub server_version: Option<&'a str>,
 }
 
 // =============================================================================
@@ -207,6 +209,11 @@ pub(crate) fn about_modal_overlay<'a>(
         rows.push(row_separator());
     }
 
+    if let Some(sv) = data.server_version {
+        rows.push(info_row("Navidrome", sv));
+        rows.push(row_separator());
+    }
+
     // GPU backend info (via iced's renderer)
     rows.push(info_row("Toolkit", "Iced (wgpu)"));
 
@@ -287,7 +294,9 @@ fn info_row<'a>(label: &'a str, value: &'a str) -> Element<'a, AboutModalMessage
         text(value)
             .size(VALUE_SIZE)
             .font(theme::ui_font())
-            .color(theme::fg1()),
+            .color(theme::fg1())
+            .wrapping(iced::widget::text::Wrapping::None)
+            .ellipsis(iced::widget::text::Ellipsis::End),
     ]
     .align_y(Alignment::Center)
     .width(Length::Fill)

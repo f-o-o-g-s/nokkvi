@@ -268,6 +268,8 @@ pub enum Message {
     LoginResult(Result<AppService, String>),
     /// Resume session from stored JWT (no password needed)
     ResumeSession,
+    /// Response from pinging the server to fetch its native application version
+    ServerVersionFetched(Option<String>),
 
     // --- Data Loading ---
     LoadAlbums,

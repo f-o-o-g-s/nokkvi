@@ -190,6 +190,12 @@ impl Nokkvi {
             Message::Login(msg) => self.handle_login(msg),
             Message::LoginResult(result) => self.handle_login_result(result),
             Message::ResumeSession => self.handle_resume_session(),
+            Message::ServerVersionFetched(version) => {
+                if version.is_some() {
+                    self.server_version = version;
+                }
+                Task::none()
+            }
 
             // -----------------------------------------------------------------
             // Data Loading: Albums

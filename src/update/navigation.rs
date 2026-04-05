@@ -279,6 +279,13 @@ impl Nokkvi {
                         Message::HotkeyConfigUpdated,
                     ),
                     init_scrobble_task,
+                    Task::perform(
+                        {
+                            let shell_for_version = shell.clone();
+                            async move { shell_for_version.auth().fetch_server_version().await.ok() }
+                        },
+                        Message::ServerVersionFetched,
+                    ),
                 ]);
             }
             Err(e) => {

@@ -342,8 +342,8 @@ impl VisualizerColors {
 // Semantic color defaults (used by ThemePalette::default)
 // ============================================================================
 
-/// The `Default` impl on `ThemePalette` uses Gruvbox dark values
-/// for all semantic colors.
+// The `Default` impl on `ThemePalette` uses Adwaita dark values
+// for all semantic colors.
 
 // ============================================================================
 // Tests

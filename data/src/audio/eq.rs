@@ -295,9 +295,7 @@ mod tests {
             let out = eq.process_sample(val);
             assert!(
                 (out - val).abs() < 0.01,
-                "Expected roughly {} got {}",
-                val,
-                out
+                "Expected roughly {val} got {out}"
             );
         }
     }

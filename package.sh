@@ -16,6 +16,9 @@ OUTPUT_DIR="dist"
 TEMP_DIR="${OUTPUT_DIR}/${PACKAGE_NAME}-${VERSION}"
 ZIP_FILE="${OUTPUT_DIR}/${PACKAGE_NAME}-${VERSION}-${COMMIT_SHORT}.zip"
 
+# Try to capture the local test server version (Navidrome) running on localhost
+TEST_SERVER_VERSION=$(curl -sS "http://localhost:4533/rest/ping?u=nobody&p=nopass&v=1.16.1&c=nokkvi&f=json" 2>/dev/null | grep -oP '"serverVersion":"\K[^"]+' || echo "unknown")
+
 echo "📦 Packaging ${PACKAGE_NAME} v${VERSION} (${COMMIT_SHORT}, ${DIRTY})"
 
 # Clean up old builds
@@ -76,6 +79,7 @@ branch:  ${BRANCH}
 date:    ${COMMIT_DATE}
 status:  ${DIRTY}
 built:   $(date -Iseconds)
+test_server: ${TEST_SERVER_VERSION}
 EOF
 
 echo "🗜️  Creating zip archive..."

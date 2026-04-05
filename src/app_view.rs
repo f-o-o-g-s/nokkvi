@@ -271,6 +271,7 @@ impl Nokkvi {
             crate::widgets::about_modal::AboutViewData {
                 server_url: &self.login_page.server_url,
                 username: &self.login_page.username,
+                server_version: self.server_version.as_deref(),
             },
         ) {
             stack = stack.push(about_overlay.map(Message::AboutModal));

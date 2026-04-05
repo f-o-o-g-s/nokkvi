@@ -823,15 +823,13 @@ mod tests {
         for action in HotkeyAction::ALL {
             assert!(
                 config.bindings.contains_key(action),
-                "Missing default binding for {:?}",
-                action
+                "Missing default binding for {action:?}"
             );
         }
         for action in HotkeyAction::RESERVED {
             assert!(
                 config.bindings.contains_key(action),
-                "Missing default binding for reserved action {:?}",
-                action
+                "Missing default binding for reserved action {action:?}"
             );
         }
         let expected = HotkeyAction::ALL.len() + HotkeyAction::RESERVED.len();
@@ -852,8 +850,7 @@ mod tests {
                 // (it's actually the same binding in our model; if we need PageDown
                 // as a separate trigger, we'd add a ToggleSortOrderAlt action)
                 panic!(
-                    "Duplicate binding {:?}: both {:?} and {:?}",
-                    combo, existing, action
+                    "Duplicate binding {combo:?}: both {existing:?} and {action:?}"
                 );
             }
             seen.insert(combo, *action);
@@ -895,8 +892,7 @@ mod tests {
             assert_eq!(
                 config.get_binding(action),
                 deserialized.get_binding(action),
-                "Mismatch after roundtrip for {:?}",
-                action
+                "Mismatch after roundtrip for {action:?}"
             );
         }
     }
@@ -984,8 +980,7 @@ mod tests {
             assert_eq!(
                 config.get_binding(action),
                 default.get_binding(action),
-                "Reset failed for {:?}",
-                action
+                "Reset failed for {action:?}"
             );
         }
     }
@@ -994,7 +989,7 @@ mod tests {
     fn all_actions_have_category() {
         for action in HotkeyAction::ALL {
             let cat = action.category();
-            assert!(!cat.is_empty(), "Action {:?} has empty category", action);
+            assert!(!cat.is_empty(), "Action {action:?} has empty category");
         }
     }
 
@@ -1004,8 +999,7 @@ mod tests {
             let name = action.display_name();
             assert!(
                 !name.is_empty(),
-                "Action {:?} has empty display_name",
-                action
+                "Action {action:?} has empty display_name"
             );
         }
     }

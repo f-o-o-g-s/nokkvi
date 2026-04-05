@@ -148,8 +148,6 @@ impl AuthService {
         &self.token
     }
 
-    /// Set the token refresh callback on the ApiClient.
-    /// Called after login/resume to wire up persistence (e.g., save to redb).
     pub fn set_token_refresh_callback(
         &mut self,
         callback: crate::services::api::client::TokenRefreshCallback,
@@ -157,5 +155,58 @@ impl AuthService {
         if let Some(client) = &mut self.client {
             client.set_on_token_refresh(callback);
         }
+    }
+
+    /// Fetches the server version dynamically using the Subsonic /rest/ping endpoint.
+    pub async fn fetch_server_version(&self) -> Result<String> {
+        let ping_url = format!(
+            "{}/rest/ping?{}&f=json&c=nokkvi",
+            self.server_url, self.subsonic_credential
+        );
+        let client = reqwest::Client::new();
+        let response = client
+            .get(&ping_url)
+            .timeout(std::time::Duration::from_secs(5))
+            .send()
+            .await
+            .context("Failed to connect to server for ping")?;
+
+        let body = response.text().await.unwrap_or_default();
+        extract_server_version(&body)
+            .context("Could not extract Navidrome server version from API response")
+    }
+}
+
+pub(crate) fn extract_server_version(json: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(json)
+        .ok()
+        .and_then(|parsed| parsed.get("subsonic-response").cloned())
+        .and_then(|sub| sub.get("serverVersion").cloned())
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_server_version_success() {
+        let json = r#"{"subsonic-response":{"status":"ok","version":"1.16.1","type":"navidrome","serverVersion":"0.61.1 (e7c7cba87374ebe1bace57271bc5e8cf731b7a6e)","openSubsonic":true}}"#;
+        assert_eq!(
+            extract_server_version(json).unwrap(),
+            "0.61.1 (e7c7cba87374ebe1bace57271bc5e8cf731b7a6e)"
+        );
+    }
+
+    #[test]
+    fn test_extract_server_version_auth_failure() {
+        let json = r#"{"subsonic-response":{"status":"failed","version":"1.16.1","type":"navidrome","serverVersion":"0.61.0","openSubsonic":true,"error":{"code":40,"message":"Wrong username or password"}}}"#;
+        assert_eq!(extract_server_version(json).unwrap(), "0.61.0");
+    }
+
+    #[test]
+    fn test_extract_server_version_missing() {
+        let json = r#"{"subsonic-response":{"status":"ok"}}"#;
+        assert_eq!(extract_server_version(json), None);
     }
 }

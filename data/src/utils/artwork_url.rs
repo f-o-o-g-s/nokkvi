@@ -258,7 +258,7 @@ mod tests {
         assert!(hires.contains("id=al-123"));
         // But different sizes
         assert!(thumb.contains("size=80"));
-        assert!(hires.contains(&format!("size={}", HIGH_RES_SIZE)));
+        assert!(hires.contains(&format!("size={HIGH_RES_SIZE}")));
     }
 
     #[test]

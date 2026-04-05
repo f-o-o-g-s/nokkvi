@@ -19,6 +19,7 @@ impl Nokkvi {
                 let git_hash = env!("GIT_HASH");
                 let server_url = &self.login_page.server_url;
                 let username = &self.login_page.username;
+                let server_version = self.server_version.as_deref();
 
                 let mut lines = vec![format!("Nokkvi v{version}")];
                 if !git_hash.is_empty() {
@@ -26,6 +27,9 @@ impl Nokkvi {
                 }
                 if !server_url.is_empty() {
                     lines.push(format!("Server: {server_url}"));
+                }
+                if let Some(sv) = server_version {
+                    lines.push(format!("Navidrome: {sv}"));
                 }
                 if !username.is_empty() {
                     lines.push(format!("User: {username}"));

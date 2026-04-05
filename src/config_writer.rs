@@ -548,7 +548,7 @@ mod tests {
     fn bool_roundtrip() {
         let val = SettingValue::Bool(true);
         let doc = write_and_reparse("test.enabled", &val);
-        assert_eq!(doc["test"]["enabled"].as_bool().unwrap(), true);
+        assert!(doc["test"]["enabled"].as_bool().unwrap());
     }
 
     #[test]
@@ -613,9 +613,8 @@ mod tests {
         };
         set_dotted_value(&mut doc, "test.new_key", &val, None).unwrap();
 
-        assert_eq!(
+        assert!(
             doc["test"]["existing"].as_bool().unwrap(),
-            true,
             "existing key must be preserved"
         );
         assert_eq!(
@@ -726,7 +725,7 @@ mod tests {
         for i in 0..20 {
             let p = path.clone();
             handles.push(std::thread::spawn(move || {
-                let content = format!("thread_val = {}\n", i);
+                let content = format!("thread_val = {i}\n");
                 let _ = super::write_atomic(&p, &content);
             }));
         }
