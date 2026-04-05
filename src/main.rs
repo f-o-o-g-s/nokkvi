@@ -210,6 +210,8 @@ pub struct Nokkvi {
     pub quick_add_to_playlist: bool,
     /// Whether all settings (including defaults) are written to config.toml
     pub verbose_config: bool,
+    /// Artwork resolution for the large artwork panel (configurable in Settings)
+    pub artwork_resolution: nokkvi_data::types::player_settings::ArtworkResolution,
 
     // -------------------------------------------------------------------------
     // Progress Tracking (polled from Tick for live toast updates)
@@ -275,6 +277,7 @@ impl Default for Nokkvi {
             default_playlist_name: String::new(),
             quick_add_to_playlist: false,
             verbose_config: false,
+            artwork_resolution: nokkvi_data::types::player_settings::ArtworkResolution::Default,
             // Consolidated state structs with defaults
             playback: crate::state::PlaybackState::default(),
             scrobble: crate::state::ScrobbleState::default(),

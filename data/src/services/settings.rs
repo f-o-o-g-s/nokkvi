@@ -11,8 +11,8 @@ use crate::{
     types::{
         hotkey_config::{HotkeyAction, HotkeyConfig, KeyCombo},
         player_settings::{
-            EnterBehavior, NavDisplayMode, NavLayout, NormalizationLevel, SlotRowHeight,
-            StripClickAction, TrackInfoDisplay,
+            ArtworkResolution, EnterBehavior, NavDisplayMode, NavLayout, NormalizationLevel,
+            SlotRowHeight, StripClickAction, TrackInfoDisplay,
         },
         queue::{QueueSortPreferences, SortPreferences},
         queue_sort_mode::QueueSortMode,
@@ -387,6 +387,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_artwork_resolution(&mut self, resolution: ArtworkResolution) -> Result<()> {
+        self.settings.player.artwork_resolution = resolution;
+        self.save()
+    }
+
     pub fn is_verbose_config(&self) -> bool {
         self.settings.player.verbose_config
     }
@@ -522,6 +527,7 @@ impl SettingsManager {
             eq_gains: p.eq_gains,
             custom_eq_presets: p.custom_eq_presets.clone(),
             verbose_config: p.verbose_config,
+            artwork_resolution: p.artwork_resolution,
         }
     }
 
@@ -585,6 +591,7 @@ fn apply_toml_settings_to_internal(
     p.custom_eq_presets = ts.custom_eq_presets.clone();
     p.verbose_config = ts.verbose_config;
     p.library_page_size = ts.library_page_size;
+    p.artwork_resolution = ts.artwork_resolution;
 }
 
 /// Convert `AllViewPreferences` into the internal `ViewPreferences` for redb storage.

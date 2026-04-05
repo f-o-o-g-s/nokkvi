@@ -294,6 +294,7 @@ pub(crate) struct SettingsViewData {
     pub strip_show_format_info: bool,
     pub strip_click_action: &'static str,
     pub verbose_config: bool,
+    pub artwork_resolution: &'static str,
 }
 
 // ============================================================================

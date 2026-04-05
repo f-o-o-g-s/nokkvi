@@ -13,6 +13,7 @@ pub(crate) struct GeneralSettingsData<'a> {
     pub local_music_path: &'a str,
     pub verbose_config: bool,
     pub library_page_size: &'a str,
+    pub artwork_resolution: &'a str,
 }
 
 /// Build settings entries for the General tab
@@ -68,6 +69,21 @@ pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEnt
                 "Default (500)",
                 "Large (1,000)",
                 "Massive (5,000)",
+            ],
+        ),
+        SettingItem::enum_val(
+            meta!(
+                "general.artwork_resolution",
+                "Artwork Resolution",
+                "Panel image quality · higher = sharper on HiDPI, larger cache"
+            ),
+            data.artwork_resolution,
+            "Default (1000px)",
+            vec![
+                "Default (1000px)",
+                "High (1500px)",
+                "Ultra (2000px)",
+                "Original (Full Size)",
             ],
         ),
         SettingItem::bool_val(

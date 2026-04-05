@@ -59,6 +59,7 @@ impl Nokkvi {
     {
         let entity_id_clone = entity_id.clone();
         let disk_cache = self.collage_disk_cache(target);
+        let artwork_size = self.artwork_resolution.to_size();
 
         self.shell_task(
             move |shell| async move {
@@ -134,14 +135,14 @@ impl Nokkvi {
                         &album_ids[0],
                         &server_url,
                         &subsonic_credential,
-                        Some(nokkvi_data::utils::artwork_url::HIGH_RES_SIZE),
+                        artwork_size.or(Some(nokkvi_data::utils::artwork_url::HIGH_RES_SIZE)),
                     );
 
                     let (mini_handle, full_res_bytes) = futures::join!(
                         mini_handle_fut,
                         albums_vm.load_album_artwork_buffer(
                             &full_res_url,
-                            Some(nokkvi_data::utils::artwork_url::HIGH_RES_SIZE)
+                            artwork_size.or(Some(nokkvi_data::utils::artwork_url::HIGH_RES_SIZE))
                         )
                     );
 

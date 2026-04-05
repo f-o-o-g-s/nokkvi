@@ -58,6 +58,7 @@ impl Nokkvi {
             strip_show_format_info: crate::theme::strip_show_format_info(),
             strip_click_action: crate::theme::strip_click_action().as_label(),
             verbose_config: self.verbose_config,
+            artwork_resolution: self.artwork_resolution.as_label(),
         }
     }
 
@@ -638,6 +639,21 @@ impl Nokkvi {
                 }
                 Task::none()
             }
+            "general.artwork_resolution" => {
+                if let crate::views::settings::items::SettingValue::Enum { ref val, .. } = value {
+                    let res =
+                        nokkvi_data::types::player_settings::ArtworkResolution::from_label(val);
+                    self.artwork_resolution = res;
+                    self.shell_spawn("persist_artwork_resolution", move |shell| async move {
+                        shell.settings().set_artwork_resolution(res).await?;
+                        Ok(())
+                    });
+                    self.toast_info(
+                        "Artwork resolution changed — rebuild artwork cache to apply",
+                    );
+                }
+                Task::none()
+            }
             "general.track_info_display" => {
                 if let crate::views::settings::items::SettingValue::Enum {
                     val: ref label, ..
@@ -900,12 +916,15 @@ impl Nokkvi {
             nokkvi_data::types::toast::ToastLevel::Info,
         ));
         // Clear album disk cache + in-memory LRU via AlbumsService
+        let artwork_size = self.artwork_resolution.to_size();
         let album_task = self.shell_task(
             move |shell| async move {
                 let albums_vm = shell.albums().clone();
                 let removed = albums_vm.clear_and_reset_cache().await;
                 tracing::info!(" [SETTINGS] Cleared {removed} files from album artwork cache");
-                albums_vm.start_artwork_prefetch(Some(album_progress)).await;
+                albums_vm
+                    .start_artwork_prefetch(Some(album_progress), artwork_size)
+                    .await;
                 Ok::<(), anyhow::Error>(())
             },
             |_result| Message::NoOp,

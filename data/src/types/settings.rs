@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use crate::types::{
     hotkey_config::HotkeyConfig,
     player_settings::{
-        EnterBehavior, LibraryPageSize, NavDisplayMode, NavLayout, NormalizationLevel,
-        SlotRowHeight, StripClickAction, TrackInfoDisplay, VisualizationMode,
+        ArtworkResolution, EnterBehavior, LibraryPageSize, NavDisplayMode, NavLayout,
+        NormalizationLevel, SlotRowHeight, StripClickAction, TrackInfoDisplay, VisualizationMode,
     },
     queue::{QueueSortPreferences, SortPreferences},
     queue_sort_mode::QueueSortMode,
@@ -135,6 +135,9 @@ pub struct PlayerSettings {
     /// Library page size controls how many items are fetched at once.
     #[serde(default)]
     pub library_page_size: LibraryPageSize,
+    /// Artwork resolution for the large panel (Default / High / Ultra / Original)
+    #[serde(default)]
+    pub artwork_resolution: ArtworkResolution,
 }
 
 fn default_eq_gains() -> [f32; 10] {
@@ -218,6 +221,7 @@ impl Default for PlayerSettings {
             custom_eq_presets: Vec::new(),
             verbose_config: false,
             library_page_size: LibraryPageSize::default(),
+            artwork_resolution: ArtworkResolution::default(),
         }
     }
 }

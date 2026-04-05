@@ -230,6 +230,15 @@ impl SettingsService {
         sm.set_library_page_size(size)
     }
 
+    /// Set artwork resolution for the large artwork panel and persist
+    pub async fn set_artwork_resolution(
+        &self,
+        resolution: crate::types::player_settings::ArtworkResolution,
+    ) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_artwork_resolution(resolution)
+    }
+
     pub async fn set_eq_enabled(&self, enabled: bool) -> anyhow::Result<()> {
         let mut sm = self.settings_manager.lock().await;
         sm.set_eq_enabled(enabled)

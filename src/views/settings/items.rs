@@ -746,6 +746,7 @@ mod tests {
             local_music_path: "",
             verbose_config: false,
             library_page_size: "Default (500)",
+            artwork_resolution: "Default (1000px)",
         };
         let entries = build_general_items(&data);
 
@@ -754,7 +755,7 @@ mod tests {
             4,
             "Expected 4 sections: Application, Mouse Behavior, Account, Cache"
         );
-        assert_eq!(count_items(&entries), 12, "Expected 12 items");
+        assert_eq!(count_items(&entries), 13, "Expected 13 items");
     }
 
     #[test]

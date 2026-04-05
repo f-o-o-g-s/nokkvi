@@ -445,6 +445,73 @@ impl std::fmt::Display for NormalizationLevel {
     }
 }
 
+/// Artwork resolution for the large artwork panel.
+///
+/// Controls what size image is requested from Navidrome for the artwork panel.
+/// Higher resolutions look sharper on HiDPI/4K displays but consume more disk
+/// cache space. Navidrome performs high-quality Lanczos resampling server-side.
+///
+/// Serializes to lowercase strings for redb storage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ArtworkResolution {
+    /// Standard quality (1000px) — matches 1080p/1440p panels
+    #[default]
+    Default,
+    /// High quality for HiDPI displays (1500px)
+    High,
+    /// Ultra quality for 4K displays (2000px)
+    Ultra,
+    /// Server original — no resize, max fidelity, large cache
+    Original,
+}
+
+impl ArtworkResolution {
+    /// Convert to the pixel size to request from the server.
+    ///
+    /// Returns `None` for `Original` — meaning "don't pass a size parameter"
+    /// so Navidrome sends the unresized source image.
+    pub fn to_size(self) -> Option<u32> {
+        match self {
+            Self::Default => Some(1000),
+            Self::High => Some(1500),
+            Self::Ultra => Some(2000),
+            Self::Original => None,
+        }
+    }
+
+    /// Convert from settings GUI label to enum variant.
+    pub fn from_label(label: &str) -> Self {
+        match label {
+            "High (1500px)" => Self::High,
+            "Ultra (2000px)" => Self::Ultra,
+            "Original (Full Size)" => Self::Original,
+            _ => Self::Default,
+        }
+    }
+
+    /// Convert to settings GUI label.
+    pub fn as_label(self) -> &'static str {
+        match self {
+            Self::Default => "Default (1000px)",
+            Self::High => "High (1500px)",
+            Self::Ultra => "Ultra (2000px)",
+            Self::Original => "Original (Full Size)",
+        }
+    }
+}
+
+impl std::fmt::Display for ArtworkResolution {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Default => write!(f, "default"),
+            Self::High => write!(f, "high"),
+            Self::Ultra => write!(f, "ultra"),
+            Self::Original => write!(f, "original"),
+        }
+    }
+}
+
 /// Player settings loaded from persistence (redb).
 ///
 /// Note: `light_mode` is stored in config.toml, not redb.
@@ -525,6 +592,8 @@ pub struct PlayerSettings {
     pub verbose_config: bool,
     /// Library page size controls how many items are fetched at once.
     pub library_page_size: LibraryPageSize,
+    /// Artwork resolution for the large artwork panel.
+    pub artwork_resolution: ArtworkResolution,
 }
 
 #[cfg(test)]

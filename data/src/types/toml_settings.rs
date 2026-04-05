@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize, Serializer};
 use crate::{
     audio::eq::CustomEqPreset,
     types::player_settings::{
-        EnterBehavior, LibraryPageSize, NavDisplayMode, NavLayout, NormalizationLevel,
-        SlotRowHeight, StripClickAction, TrackInfoDisplay, VisualizationMode,
+        ArtworkResolution, EnterBehavior, LibraryPageSize, NavDisplayMode, NavLayout,
+        NormalizationLevel, SlotRowHeight, StripClickAction, TrackInfoDisplay, VisualizationMode,
     },
 };
 
@@ -28,6 +28,7 @@ pub struct TomlSettings {
     /// When true, all settings (including defaults) are written to config.toml
     pub verbose_config: bool,
     pub library_page_size: LibraryPageSize,
+    pub artwork_resolution: ArtworkResolution,
 
     // -- Behavior --
     pub stable_viewport: bool,
@@ -104,6 +105,7 @@ impl Default for TomlSettings {
             local_music_path: String::new(),
             verbose_config: false,
             library_page_size: LibraryPageSize::default(),
+            artwork_resolution: ArtworkResolution::default(),
             stable_viewport: true,
             auto_follow_playing: true,
             light_mode: false,
@@ -146,6 +148,7 @@ impl TomlSettings {
             local_music_path: ps.local_music_path.clone(),
             verbose_config: ps.verbose_config,
             library_page_size: ps.library_page_size,
+            artwork_resolution: ps.artwork_resolution,
             stable_viewport: ps.stable_viewport,
             auto_follow_playing: ps.auto_follow_playing,
             light_mode: false, // Will be read from theme.light_mode or fresh default
