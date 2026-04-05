@@ -783,6 +783,9 @@ impl Nokkvi {
                     album_id,
                 )));
             }
+            AlbumsAction::FindSimilar(id, label) => {
+                return Task::done(Message::FindSimilar { id, label });
+            }
             _ => {} // None + already-handled common actions
         }
 

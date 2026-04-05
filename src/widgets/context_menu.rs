@@ -39,6 +39,10 @@ pub enum LibraryContextEntry {
     Separator,
     GetInfo,
     ShowInFolder,
+    /// Open Find Similar panel for this song/album/artist
+    FindSimilar,
+    /// Open Top Songs panel for this artist
+    TopSongs,
 }
 
 /// Standard library context menu entries list.
@@ -59,6 +63,32 @@ pub(crate) fn library_entries_with_folder() -> Vec<LibraryContextEntry> {
         LibraryContextEntry::Separator,
         LibraryContextEntry::GetInfo,
         LibraryContextEntry::ShowInFolder,
+    ]
+}
+
+/// Library context menu entries for Songs view (includes FindSimilar/TopSongs).
+pub(crate) fn song_entries_with_folder() -> Vec<LibraryContextEntry> {
+    vec![
+        LibraryContextEntry::AddToQueue,
+        LibraryContextEntry::AddToPlaylist,
+        LibraryContextEntry::Separator,
+        LibraryContextEntry::GetInfo,
+        LibraryContextEntry::ShowInFolder,
+        LibraryContextEntry::FindSimilar,
+        LibraryContextEntry::TopSongs,
+    ]
+}
+
+/// Library context menu entries for Artists view (includes TopSongs + FindSimilar).
+pub(crate) fn artist_entries_with_folder() -> Vec<LibraryContextEntry> {
+    vec![
+        LibraryContextEntry::AddToQueue,
+        LibraryContextEntry::AddToPlaylist,
+        LibraryContextEntry::Separator,
+        LibraryContextEntry::GetInfo,
+        LibraryContextEntry::ShowInFolder,
+        LibraryContextEntry::FindSimilar,
+        LibraryContextEntry::TopSongs,
     ]
 }
 
@@ -90,6 +120,16 @@ pub(crate) fn library_entry_view<'a, Message: Clone + 'a>(
             "Show in File Manager",
             on_action(LibraryContextEntry::ShowInFolder),
         ),
+        LibraryContextEntry::FindSimilar => menu_button(
+            Some("assets/icons/radar.svg"),
+            "Find Similar",
+            on_action(LibraryContextEntry::FindSimilar),
+        ),
+        LibraryContextEntry::TopSongs => menu_button(
+            Some("assets/icons/sparkles.svg"),
+            "Top Songs",
+            on_action(LibraryContextEntry::TopSongs),
+        ),
     }
 }
 
@@ -107,6 +147,8 @@ pub enum StripContextEntry {
     CopyTrackInfo,
     ToggleStar,
     ShowInFolder,
+    FindSimilar,
+    TopSongs,
 }
 
 /// Build strip context menu entries.
@@ -120,6 +162,8 @@ pub(crate) fn strip_entries(has_local_path: bool) -> Vec<StripContextEntry> {
         StripContextEntry::CopyTrackInfo,
         StripContextEntry::ToggleStar,
     ];
+    entries.push(StripContextEntry::FindSimilar);
+    entries.push(StripContextEntry::TopSongs);
     if has_local_path {
         entries.push(StripContextEntry::ShowInFolder);
     }
@@ -168,6 +212,16 @@ pub(crate) fn strip_entry_view<'a, Message: Clone + 'a>(
             Some("assets/icons/folder-open.svg"),
             "Show in File Manager",
             on_action(StripContextEntry::ShowInFolder),
+        ),
+        StripContextEntry::FindSimilar => menu_button(
+            Some("assets/icons/radar.svg"),
+            "Find Similar",
+            on_action(StripContextEntry::FindSimilar),
+        ),
+        StripContextEntry::TopSongs => menu_button(
+            Some("assets/icons/star.svg"),
+            "Top Songs",
+            on_action(StripContextEntry::TopSongs),
         ),
     }
 }

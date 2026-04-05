@@ -9,6 +9,7 @@ pub mod client;
 pub mod genres;
 pub mod playlists;
 pub mod rating;
+pub mod similar;
 pub mod songs;
 pub mod star;
 pub mod subsonic;

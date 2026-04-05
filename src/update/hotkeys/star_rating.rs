@@ -320,6 +320,14 @@ impl Nokkvi {
             new_starred_status,
             "queue",
         );
+        if let Some(similar) = &mut self.similar_songs {
+            nokkvi_data::backend::update_starred_in_list(
+                &mut similar.songs,
+                &song_id,
+                new_starred_status,
+                "similar",
+            );
+        }
         // Update expanded children in any view that shows tracks
         if let Some(track) = self
             .albums_page
@@ -594,6 +602,14 @@ impl Nokkvi {
             rating_opt,
             "song",
         );
+        if let Some(similar) = &mut self.similar_songs {
+            nokkvi_data::backend::update_rating_in_list(
+                &mut similar.songs,
+                &song_id,
+                rating_opt,
+                "similar",
+            );
+        }
         // Also update expanded tracks in all views that show songs
         if let Some(track) = self
             .albums_page

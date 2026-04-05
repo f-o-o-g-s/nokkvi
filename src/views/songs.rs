@@ -90,8 +90,10 @@ pub enum SongsAction {
     PlayBatch(nokkvi_data::types::batch::BatchPayload),     // Play immediately
     AddToPlaylist(String),                                  // song_id - add to playlist dialog
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
-    ShowInFolder(String),   // relative path - open containing folder
-    RefreshArtwork(String), // album_id - refresh artwork from server
+    ShowInFolder(String),        // relative path - open containing folder
+    RefreshArtwork(String),      // album_id - refresh artwork from server
+    FindSimilar(String, String), // (id, label) - Find similar to this song
+    TopSongs(String, String),    // (artist, label) - Find top songs by artist
     CenterOnPlaying,
     None,
 }
@@ -322,6 +324,24 @@ impl SongsPage {
                         LibraryContextEntry::ShowInFolder => {
                             (Task::none(), SongsAction::ShowInFolder(song.path.clone()))
                         }
+                        LibraryContextEntry::FindSimilar => (
+                            Task::none(),
+                            SongsAction::FindSimilar(song.id.clone(), song.title.clone()),
+                        ),
+                        LibraryContextEntry::TopSongs => {
+                            let artist = &song.artist;
+                            if !artist.is_empty() {
+                                (
+                                    Task::none(),
+                                    SongsAction::TopSongs(
+                                        artist.clone(),
+                                        format!("Top Songs: {}", artist),
+                                    ),
+                                )
+                            } else {
+                                (Task::none(), SongsAction::None)
+                            }
+                        }
                         LibraryContextEntry::Separator => (Task::none(), SongsAction::None),
                     }
                 } else {
@@ -378,10 +398,11 @@ impl SongsPage {
             "songs",
             crate::views::SONGS_SEARCH_ID,
             SongsMessage::SortModeSelected,
-            SongsMessage::ToggleSortOrder,
+            Some(SongsMessage::ToggleSortOrder),
             None, // No shuffle button for songs
             Some(SongsMessage::RefreshViewData),
             Some(SongsMessage::CenterOnPlaying),
+            true, // show_search
             SongsMessage::SearchQueryChanged,
         );
 
@@ -611,12 +632,12 @@ impl SongsPage {
                     .width(Length::Fill);
 
                 use crate::widgets::context_menu::{
-                    context_menu, library_entries_with_folder, library_entry_view,
+                    context_menu, library_entry_view, song_entries_with_folder,
                 };
                 let item_idx = ctx.item_index;
                 context_menu(
                     slot_button,
-                    library_entries_with_folder(),
+                    song_entries_with_folder(),
                     move |entry, length| {
                         library_entry_view(entry, length, |e| {
                             SongsMessage::ContextMenuAction(item_idx, e)

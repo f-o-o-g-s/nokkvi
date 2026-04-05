@@ -527,6 +527,12 @@ impl Nokkvi {
                     album_id,
                 )));
             }
+            SongsAction::FindSimilar(song_id, label) => {
+                return self.handle_find_similar(song_id, label);
+            }
+            SongsAction::TopSongs(artist_name, label) => {
+                return self.handle_find_top_songs(artist_name, label);
+            }
             _ => {} // None + already-handled common actions
         }
 

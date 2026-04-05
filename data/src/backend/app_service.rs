@@ -640,6 +640,27 @@ impl AppService {
         )
     }
 
+    /// Construct an authenticated `SimilarApiService`.
+    ///
+    /// Callers inside `shell_task` closures can use `shell.similar_api().await?`
+    /// to fetch similar songs or top songs.
+    pub async fn similar_api(&self) -> Result<crate::services::api::similar::SimilarApiService> {
+        let client = self
+            .auth_gateway
+            .get_client()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Not authenticated"))?;
+        let server_url = self.auth_gateway.get_server_url().await;
+        let subsonic_credential = self.auth_gateway.get_subsonic_credential().await;
+        Ok(
+            crate::services::api::similar::SimilarApiService::new_with_client(
+                client,
+                server_url,
+                subsonic_credential,
+            ),
+        )
+    }
+
     /// Load all songs for a genre via the Genres API.
     async fn load_genre_songs(&self, genre_name: &str) -> Result<Vec<crate::types::song::Song>> {
         let songs_service = self.songs_api().await?;

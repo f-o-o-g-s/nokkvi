@@ -118,6 +118,7 @@ pub enum AlbumsAction {
     ShowInFolder(String), // album_id - fetch a song path and open containing folder
     ShowSongInFolder(String), // song path - open containing folder directly (expansion child)
     RefreshArtwork(String), // album_id - refresh artwork from server
+    FindSimilar(String, String), // (entity_id, label) - open similar tab
     None,
 }
 
@@ -451,6 +452,13 @@ impl AlbumsPage {
                                 LibraryContextEntry::ShowInFolder => {
                                     (Task::none(), AlbumsAction::ShowInFolder(album.id.clone()))
                                 }
+                                LibraryContextEntry::FindSimilar => (
+                                    Task::none(),
+                                    AlbumsAction::FindSimilar(
+                                        album.artist.clone(),
+                                        format!("Similar to: {}", album.name),
+                                    ),
+                                ),
                                 LibraryContextEntry::Separator => {
                                     (Task::none(), AlbumsAction::None)
                                 }
@@ -465,6 +473,13 @@ impl AlbumsPage {
                                 LibraryContextEntry::ShowInFolder => (
                                     Task::none(),
                                     AlbumsAction::ShowSongInFolder(song.path.clone()),
+                                ),
+                                LibraryContextEntry::FindSimilar => (
+                                    Task::none(),
+                                    AlbumsAction::FindSimilar(
+                                        song.id.clone(),
+                                        format!("Similar to: {}", song.title),
+                                    ),
                                 ),
                                 LibraryContextEntry::Separator => {
                                     (Task::none(), AlbumsAction::None)
@@ -498,10 +513,11 @@ impl AlbumsPage {
             "albums",
             crate::views::ALBUMS_SEARCH_ID,
             AlbumsMessage::SortModeSelected,
-            AlbumsMessage::ToggleSortOrder,
+            Some(AlbumsMessage::ToggleSortOrder),
             None, // No shuffle button for albums
             Some(AlbumsMessage::RefreshViewData),
             Some(AlbumsMessage::CenterOnPlaying),
+            true, // show_search
             AlbumsMessage::SearchQueryChanged,
         );
 

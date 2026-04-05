@@ -79,6 +79,7 @@ pub struct Nokkvi {
     pub queue_page: views::QueuePage,
     pub songs_page: views::SongsPage,
     pub settings_page: views::SettingsPage,
+    pub similar_page: views::SimilarPage,
 
     // -------------------------------------------------------------------------
     // Core Services
@@ -107,6 +108,11 @@ pub struct Nokkvi {
     // Library Data (consolidated data vectors + counts)
     // -------------------------------------------------------------------------
     pub library: crate::state::LibraryData,
+
+    /// Similar songs state — populated by getSimilarSongs2 / getTopSongs API calls
+    pub similar_songs: Option<crate::state::SimilarSongsState>,
+    /// Generation counter for stale response rejection
+    pub similar_songs_generation: u64,
 
     // -------------------------------------------------------------------------
     // Consolidated State Structs
@@ -254,6 +260,7 @@ impl Default for Nokkvi {
             queue_page: views::QueuePage::new(),
             songs_page: views::SongsPage::new(),
             settings_page: views::SettingsPage::new(),
+            similar_page: views::SimilarPage::new(),
             app_service: None,
             cached_storage: None,
             sfx_engine: nokkvi_data::audio::SfxEngine::default(),
@@ -263,6 +270,8 @@ impl Default for Nokkvi {
             should_auto_login,
             stored_session,
             library: crate::state::LibraryData::default(),
+            similar_songs: None,
+            similar_songs_generation: 0,
             // General settings defaults (overridden by PlayerSettingsLoaded)
             scrobbling_enabled: true,
             scrobble_threshold: 0.50,

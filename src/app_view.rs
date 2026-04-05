@@ -602,7 +602,8 @@ impl Nokkvi {
 
             let browser_content: Element<'_, Message> = if let Some(ref panel) = self.browsing_panel
             {
-                let tab_bar = panel.tab_bar().map(Message::BrowsingPanel);
+                let similar_label = self.similar_songs.as_ref().map(|s| s.label.as_str());
+                let tab_bar = panel.tab_bar(similar_label).map(Message::BrowsingPanel);
 
                 // The tab bar eats into available height — subtract it so the
                 // slot list slot calculation doesn't overflow the last slot.
@@ -670,6 +671,24 @@ impl Nokkvi {
                             stable_viewport: true, // Browser pane: click to highlight, not play
                         };
                         self.genres_page.view(view_data).map(Message::Genres)
+                    }
+                    views::BrowsingView::Similar => {
+                        let (songs, label, loading) = match self.similar_songs.as_ref() {
+                            Some(s) => (s.songs.as_slice(), s.label.as_str(), s.loading),
+                            None => (&[][..], "", false),
+                        };
+                        let view_data = views::SimilarViewData {
+                            songs,
+                            album_art: &self.artwork.album_art,
+                            large_artwork,
+                            window_width: self.window.width * 0.45,
+                            window_height: browser_height,
+                            scale_factor: self.window.scale_factor,
+                            modifiers: self.window.keyboard_modifiers,
+                            label,
+                            loading,
+                        };
+                        self.similar_page.view(view_data).map(Message::Similar)
                     }
                 };
 

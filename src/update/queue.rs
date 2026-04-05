@@ -620,6 +620,27 @@ impl Nokkvi {
                     return self.show_song_in_folder_task(song_id);
                 }
             }
+            QueueAction::FindSimilar(index) => {
+                if let Some(song) = filtered_queue.get(index) {
+                    let id = song.id.clone();
+                    let title = song.title.clone();
+                    return Task::done(Message::FindSimilar {
+                        id,
+                        label: format!("Similar to: {title}"),
+                    });
+                }
+            }
+            QueueAction::TopSongs(index) => {
+                if let Some(song) = filtered_queue.get(index) {
+                    let artist = song.artist.clone();
+                    if !artist.is_empty() {
+                        return Task::done(Message::FindTopSongs {
+                            artist_name: artist.clone(),
+                            label: format!("Top Songs: {artist}"),
+                        });
+                    }
+                }
+            }
             QueueAction::RefreshArtwork(album_id) => {
                 return self.update(Message::Artwork(ArtworkMessage::RefreshAlbumArtwork(
                     album_id,

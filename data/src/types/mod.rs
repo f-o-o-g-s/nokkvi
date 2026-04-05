@@ -27,3 +27,41 @@ pub mod toast;
 pub mod toml_settings;
 pub mod toml_views;
 pub mod view_preferences;
+
+pub fn deserialize_starred<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StarredValue {
+        Bool(bool),
+        String(String),
+    }
+
+    match Option::<StarredValue>::deserialize(deserializer)? {
+        Some(StarredValue::Bool(b)) => Ok(b),
+        Some(StarredValue::String(s)) => Ok(!s.is_empty()),
+        None => Ok(false),
+    }
+}
+
+pub fn deserialize_starred_opt<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StarredValue {
+        Bool(bool),
+        String(String),
+    }
+
+    match Option::<StarredValue>::deserialize(deserializer)? {
+        Some(StarredValue::Bool(b)) => Ok(Some(b)),
+        Some(StarredValue::String(s)) => Ok(Some(!s.is_empty())),
+        None => Ok(None),
+    }
+}

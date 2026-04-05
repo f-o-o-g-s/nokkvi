@@ -527,10 +527,11 @@ impl PlaylistsPage {
             "playlists",
             crate::views::PLAYLISTS_SEARCH_ID,
             PlaylistsMessage::SortModeSelected,
-            PlaylistsMessage::ToggleSortOrder,
+            Some(PlaylistsMessage::ToggleSortOrder),
             None, // No shuffle button for playlists
             Some(PlaylistsMessage::RefreshViewData),
             None, // Playlists view doesn't need center on playing button
+            true, // show_search
             PlaylistsMessage::SearchQueryChanged,
         );
 

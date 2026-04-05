@@ -36,6 +36,20 @@ fn star_propagates_to_songs_list() {
 }
 
 #[test]
+fn star_propagates_to_similar_songs() {
+    let mut app = test_app();
+    let song = make_song("s1", "Song A", "Artist").into();
+    app.similar_songs = Some(crate::state::SimilarSongsState {
+        songs: vec![song],
+        label: "Similar".to_string(),
+        loading: false,
+    });
+
+    let _ = app.handle_song_starred_status_updated("s1".to_string(), true);
+    assert!(app.similar_songs.unwrap().songs[0].starred);
+}
+
+#[test]
 fn star_propagates_to_album_expansion_children() {
     let mut app = test_app();
     // Simulate expanded album with track children
@@ -153,6 +167,21 @@ fn rating_propagates_to_all_song_views() {
         Some(4),
         "genre sub-expansion"
     );
+}
+
+#[test]
+fn rating_propagates_to_similar_songs() {
+    let mut app = test_app();
+    let song = make_song("s1", "Song A", "Artist").into();
+    app.similar_songs = Some(crate::state::SimilarSongsState {
+        songs: vec![song],
+        label: "Similar".to_string(),
+        loading: false,
+    });
+
+    let _ = app.handle_song_rating_updated("s1".to_string(), 4);
+
+    assert_eq!(app.similar_songs.unwrap().songs[0].rating, Some(4));
 }
 
 #[test]

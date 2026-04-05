@@ -106,6 +106,7 @@ pub enum GenresAction {
     ToggleStar(String, &'static str, bool), // (item_id, item_type, starred)
     PlayNextBatch(nokkvi_data::types::batch::BatchPayload),
     AddBatchToPlaylist(nokkvi_data::types::batch::BatchPayload),
+    FindSimilar(String, String), // (entity_id, label) - open similar tab
     CenterOnPlaying,
     None,
 }
@@ -500,6 +501,16 @@ impl GenresPage {
                                     | LibraryContextEntry::ShowInFolder => {
                                         (Task::none(), GenresAction::None)
                                     }
+                                    LibraryContextEntry::FindSimilar => {
+                                        let aid = _album.artist.clone();
+                                        (
+                                            Task::none(),
+                                            GenresAction::FindSimilar(
+                                                aid,
+                                                format!("Similar to: {}", _album.name),
+                                            ),
+                                        )
+                                    }
                                     _ => (Task::none(), GenresAction::None),
                                 },
                                 Some(ThreeTierEntry::Grandchild(_song, _)) => match entry {
@@ -508,6 +519,13 @@ impl GenresPage {
                                     | LibraryContextEntry::ShowInFolder => {
                                         (Task::none(), GenresAction::None)
                                     }
+                                    LibraryContextEntry::FindSimilar => (
+                                        Task::none(),
+                                        GenresAction::FindSimilar(
+                                            _song.id.clone(),
+                                            format!("Similar to: {}", _song.title),
+                                        ),
+                                    ),
                                     _ => (Task::none(), GenresAction::None),
                                 },
                                 None => (Task::none(), GenresAction::None),
@@ -535,10 +553,11 @@ impl GenresPage {
             "genres",
             crate::views::GENRES_SEARCH_ID,
             GenresMessage::SortModeSelected,
-            GenresMessage::ToggleSortOrder,
+            Some(GenresMessage::ToggleSortOrder),
             None, // No shuffle button for genres
             Some(GenresMessage::RefreshViewData),
             Some(GenresMessage::CenterOnPlaying),
+            true, // show_search
             GenresMessage::SearchQueryChanged,
         );
 

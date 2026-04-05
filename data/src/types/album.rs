@@ -67,7 +67,8 @@ pub struct Album {
     pub compilation: Option<bool>,
     #[serde(rename = "comment")]
     pub comment: Option<String>,
-    #[serde(rename = "starred")]
+    #[serde(rename = "starred", default)]
+    #[serde(deserialize_with = "crate::types::deserialize_starred_opt")]
     pub starred: Option<bool>,
     #[serde(rename = "starredAt")]
     pub starred_at: Option<String>,

@@ -28,7 +28,7 @@ impl Nokkvi {
     /// active view page so all existing hotkey handlers work on the browser pane.
     pub(crate) fn current_view_page(&self) -> Option<&dyn views::ViewPage> {
         // Pane-aware routing: when editing with browser focus, delegate to the active tab
-        if self.playlist_edit.is_some()
+        if self.browsing_panel.is_some()
             && self.pane_focus == crate::state::PaneFocus::Browser
             && let Some(panel) = &self.browsing_panel
         {
@@ -37,6 +37,7 @@ impl Nokkvi {
                 views::BrowsingView::Songs => Some(&self.songs_page),
                 views::BrowsingView::Artists => Some(&self.artists_page),
                 views::BrowsingView::Genres => Some(&self.genres_page),
+                views::BrowsingView::Similar => Some(&self.similar_page),
             };
         }
 
@@ -50,7 +51,7 @@ impl Nokkvi {
     /// active view page so all existing hotkey handlers work on the browser pane.
     pub(crate) fn current_view_page_mut(&mut self) -> Option<&mut dyn views::ViewPage> {
         // Pane-aware routing: when editing with browser focus, delegate to the active tab
-        if self.playlist_edit.is_some()
+        if self.browsing_panel.is_some()
             && self.pane_focus == crate::state::PaneFocus::Browser
             && let Some(panel) = &self.browsing_panel
         {
@@ -59,6 +60,7 @@ impl Nokkvi {
                 views::BrowsingView::Songs => Some(&mut self.songs_page),
                 views::BrowsingView::Artists => Some(&mut self.artists_page),
                 views::BrowsingView::Genres => Some(&mut self.genres_page),
+                views::BrowsingView::Similar => Some(&mut self.similar_page),
             };
         }
 
@@ -104,6 +106,25 @@ impl Nokkvi {
             ));
         }
 
+        if self.browsing_panel.is_some()
+            && self.pane_focus == crate::state::PaneFocus::Browser
+            && self.browsing_panel.as_ref().unwrap().active_view
+                == crate::views::BrowsingView::Similar
+        {
+            if let Some(similar) = &self.similar_songs {
+                let center_idx = self
+                    .similar_page
+                    .common
+                    .slot_list
+                    .get_center_item_index(similar.songs.len());
+                if let Some(song) = center_idx.and_then(|idx| similar.songs.get(idx)) {
+                    let item = InfoModalItem::from_song(song);
+                    return self.update(Message::InfoModal(
+                        crate::widgets::info_modal::InfoModalMessage::Open(Box::new(item)),
+                    ));
+                }
+            }
+        }
         match self.current_view {
             View::Songs => {
                 let center_idx = self

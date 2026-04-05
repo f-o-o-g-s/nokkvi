@@ -107,6 +107,10 @@ impl Nokkvi {
                 &mut self.genres_page.common.slot_list,
                 self.library.genres.len(),
             ),
+            views::BrowsingView::Similar => (
+                &mut self.similar_page.common.slot_list,
+                self.similar_songs.as_ref().map_or(0, |s| s.songs.len()),
+            ),
         };
         slot_list.slot_count = config.slot_count;
         let viewport_offset = slot_list.viewport_offset;
@@ -128,6 +132,7 @@ impl Nokkvi {
             views::BrowsingView::Songs => &mut self.songs_page.common,
             views::BrowsingView::Artists => &mut self.artists_page.common,
             views::BrowsingView::Genres => &mut self.genres_page.common,
+            views::BrowsingView::Similar => &mut self.similar_page.common,
         };
         let count = if selection_count
             .slot_list
@@ -276,6 +281,13 @@ impl Nokkvi {
                         .slot_list
                         .set_selected(center_idx, total);
                 }
+                views::BrowsingView::Similar => {
+                    let total = self.similar_songs.as_ref().map_or(0, |s| s.songs.len());
+                    self.similar_page
+                        .common
+                        .slot_list
+                        .set_selected(center_idx, total);
+                }
             }
         }
 
@@ -313,6 +325,9 @@ impl Nokkvi {
                 Message::Artists(views::ArtistsMessage::AddCenterToQueue)
             }
             views::BrowsingView::Genres => Message::Genres(views::GenresMessage::AddCenterToQueue),
+            views::BrowsingView::Similar => {
+                Message::Similar(views::SimilarMessage::AddCenterToQueue)
+            }
         };
 
         Task::done(msg)
@@ -381,6 +396,18 @@ impl Nokkvi {
                         format!("{} albums", g.album_count),
                         format!("{} songs", g.song_count),
                     )
+                }),
+                views::BrowsingView::Similar => self.similar_songs.as_ref().and_then(|state| {
+                    state.songs.get(center_idx).map(|s| {
+                        (
+                            s.album_id
+                                .as_ref()
+                                .and_then(|aid| self.artwork.album_art.get(aid)),
+                            s.title.clone(),
+                            s.artist.clone(),
+                            s.album.clone(),
+                        )
+                    })
                 }),
             };
 

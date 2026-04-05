@@ -11,7 +11,8 @@ pub struct Artist {
     pub album_count: Option<u32>,
     #[serde(rename = "songCount")]
     pub song_count: Option<u32>,
-    #[serde(rename = "starred")]
+    #[serde(rename = "starred", default)]
+    #[serde(deserialize_with = "crate::types::deserialize_starred_opt")]
     pub starred: Option<bool>,
     #[serde(rename = "starredAt")]
     pub starred_at: Option<String>,

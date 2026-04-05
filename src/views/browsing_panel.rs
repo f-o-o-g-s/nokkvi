@@ -19,6 +19,7 @@ pub enum BrowsingView {
     Songs,
     Artists,
     Genres,
+    Similar,
 }
 
 impl BrowsingView {
@@ -28,6 +29,7 @@ impl BrowsingView {
         BrowsingView::Albums,
         BrowsingView::Artists,
         BrowsingView::Genres,
+        BrowsingView::Similar,
     ];
 
     /// Display label for the tab bar.
@@ -37,6 +39,7 @@ impl BrowsingView {
             BrowsingView::Songs => "Songs",
             BrowsingView::Artists => "Artists",
             BrowsingView::Genres => "Genres",
+            BrowsingView::Similar => "Similar",
         }
     }
 }
@@ -62,9 +65,18 @@ impl BrowsingPanel {
     /// Uses mouse_area + HoverOverlay(container) so HoverOverlay sees mouse
     /// events directly — native button captures ButtonPressed which prevents
     /// HoverOverlay's passive press tracker from firing (no scale effect).
-    pub fn tab_bar(&self) -> Element<'_, BrowsingPanelMessage> {
+    pub fn tab_bar(&self, similar_label: Option<&str>) -> Element<'_, BrowsingPanelMessage> {
         let tabs = BrowsingView::ALL.iter().map(|&view| {
-            let label = text(view.label())
+            let mut label_str = view.label();
+            if view == BrowsingView::Similar {
+                if let Some(lbl) = similar_label {
+                    if lbl.starts_with("Top Songs") {
+                        label_str = "Top Songs";
+                    }
+                }
+            }
+
+            let label = text(label_str)
                 .font(iced::font::Font {
                     weight: iced::font::Weight::Medium,
                     ..theme::ui_font()

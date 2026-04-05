@@ -26,10 +26,11 @@ pub(crate) fn view_header<
     item_type: &str,
     search_input_id: &'static str, // Unique ID for this view's search input (must be 'static)
     on_view_selected: impl Fn(V) -> Message + 'a,
-    on_sort_toggle: Message,
+    on_sort_toggle: Option<Message>,
     on_shuffle: Option<Message>,           // Optional shuffle button
     on_refresh: Option<Message>,           // Optional refresh button
     on_center_on_playing: Option<Message>, // Optional center button
+    show_search: bool,
     on_search_change: impl Fn(String) -> Message + 'a,
 ) -> Element<'a, Message> {
     let view_selector = container(
@@ -77,58 +78,59 @@ pub(crate) fn view_header<
     )
     .height(Length::Fixed(40.0)); // Match button and search field height
 
-    // Use Lucide SVG icons matching QML/Slint implementation
-    let sort_icon_path = if sort_ascending {
-        "assets/icons/arrow-up.svg"
-    } else {
-        "assets/icons/arrow-down.svg"
-    };
+    let sort_button = on_sort_toggle.map(|sort_msg| {
+        // Use Lucide SVG icons matching QML/Slint implementation
+        let sort_icon_path = if sort_ascending {
+            "assets/icons/arrow-up.svg"
+        } else {
+            "assets/icons/arrow-down.svg"
+        };
 
-    let sort_svg = crate::embedded_svg::svg_widget(sort_icon_path)
-        .width(Length::Fixed(20.0))
-        .height(Length::Fixed(20.0))
-        .style(|_theme, _status| svg::Style {
-            color: Some(theme::fg0()),
-        });
+        let sort_svg = crate::embedded_svg::svg_widget(sort_icon_path)
+            .width(Length::Fixed(20.0))
+            .height(Length::Fixed(20.0))
+            .style(|_theme, _status| svg::Style {
+                color: Some(theme::fg0()),
+            });
 
-    // Use mouse_area + HoverOverlay(container) — same pattern as slot list rows.
-    // Native button captures ButtonPressed before HoverOverlay's passive tracker
-    // can run, so the press state never gets set and the scale effect never fires.
-    let sort_button: Element<'a, Message> = tooltip(
-        mouse_area(
-            HoverOverlay::new(
-                container(sort_svg)
-                    .width(Length::Fixed(40.0))
-                    .height(Length::Fixed(40.0))
-                    .style(|_theme| container::Style {
-                        background: Some(theme::bg0_soft().into()),
-                        border: iced::Border {
-                            radius: theme::ui_border_radius(),
+        // Use mouse_area + HoverOverlay(container) — same pattern as slot list rows.
+        let el: Element<'a, Message> = tooltip(
+            mouse_area(
+                HoverOverlay::new(
+                    container(sort_svg)
+                        .width(Length::Fixed(40.0))
+                        .height(Length::Fixed(40.0))
+                        .style(|_theme| container::Style {
+                            background: Some(theme::bg0_soft().into()),
+                            border: iced::Border {
+                                radius: theme::ui_border_radius(),
+                                ..Default::default()
+                            },
                             ..Default::default()
-                        },
-                        ..Default::default()
-                    })
-                    .center(Length::Fixed(40.0)),
+                        })
+                        .center(Length::Fixed(40.0)),
+                )
+                .border_radius(theme::ui_border_radius()),
             )
-            .border_radius(theme::ui_border_radius()),
+            .on_press(sort_msg)
+            .interaction(iced::mouse::Interaction::Pointer),
+            container(
+                text(if sort_ascending {
+                    "Sort: Ascending"
+                } else {
+                    "Sort: Descending"
+                })
+                .size(11.0)
+                .font(theme::ui_font()),
+            )
+            .padding(4),
+            tooltip::Position::Top,
         )
-        .on_press(on_sort_toggle)
-        .interaction(iced::mouse::Interaction::Pointer),
-        container(
-            text(if sort_ascending {
-                "Sort: Ascending"
-            } else {
-                "Sort: Descending"
-            })
-            .size(11.0)
-            .font(theme::ui_font()),
-        )
-        .padding(4),
-        tooltip::Position::Top,
-    )
-    .gap(4)
-    .style(theme::container_tooltip)
-    .into();
+        .gap(4)
+        .style(theme::container_tooltip)
+        .into();
+        el
+    });
 
     let refresh_button = on_refresh.map(|refresh_msg| {
         let refresh_svg = crate::embedded_svg::svg_widget("assets/icons/refresh-cw.svg")
@@ -243,21 +245,27 @@ pub(crate) fn view_header<
         el
     });
 
-    let search_field = container(
-        text_input("Search...", search_query)
-            .id(search_input_id) // Use unique ID per view to prevent focus transfer
-            .on_input(on_search_change)
-            .width(Length::Fill)
-            .padding(8)
-            .size(12.0) // Match QML font size
-            .font(Font {
-                weight: Weight::Medium,
-                ..theme::ui_font()
-            })
-            .style(theme::search_input_style),
-    )
-    .height(Length::Fixed(40.0)) // Match button and pick_list height
-    .width(Length::Fill);
+    let search_field = if show_search {
+        Some(
+            container(
+                text_input("Search...", search_query)
+                    .id(search_input_id) // Use unique ID per view to prevent focus transfer
+                    .on_input(on_search_change)
+                    .width(Length::Fill)
+                    .padding(8)
+                    .size(12.0) // Match QML font size
+                    .font(Font {
+                        weight: Weight::Medium,
+                        ..theme::ui_font()
+                    })
+                    .style(theme::search_input_style),
+            )
+            .height(Length::Fixed(40.0)) // Match button and pick_list height
+            .width(Length::Fill),
+        )
+    } else {
+        None
+    };
 
     let count_text = if filtered_count > 0 && filtered_count < total_count {
         format!("{filtered_count} of {total_count} {item_type}")
@@ -275,7 +283,10 @@ pub(crate) fn view_header<
         .width(Length::Shrink); // Take only needed space, not Fill
 
     // Build the row with conditionally included buttons
-    let mut header_row = row![view_selector, sort_button];
+    let mut header_row = row![view_selector];
+    if let Some(sort_btn) = sort_button {
+        header_row = header_row.push(sort_btn);
+    }
     if let Some(refresh_btn) = refresh_button {
         header_row = header_row.push(refresh_btn);
     }
@@ -285,7 +296,10 @@ pub(crate) fn view_header<
     if let Some(center_btn) = center_button {
         header_row = header_row.push(center_btn);
     }
-    header_row = header_row.push(search_field).push(count_display);
+    if let Some(search_element) = search_field {
+        header_row = header_row.push(search_element);
+    }
+    header_row = header_row.push(count_display);
 
     container(
         header_row

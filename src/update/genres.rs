@@ -428,6 +428,9 @@ impl Nokkvi {
                     "play next batch",
                 );
             }
+            GenresAction::FindSimilar(id, label) => {
+                return Task::done(Message::FindSimilar { id, label });
+            }
             _ => {} // None + already-handled common actions
         }
 

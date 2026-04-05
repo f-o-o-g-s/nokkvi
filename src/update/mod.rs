@@ -72,6 +72,7 @@ mod progressive_queue;
 mod queue;
 mod scrobbling;
 mod settings;
+mod similar;
 mod slot_list;
 mod songs;
 #[cfg(test)]
@@ -177,6 +178,8 @@ impl Nokkvi {
                     StripContextEntry::ShowInFolder => {
                         self.handle_show_in_folder_for_playing_track()
                     }
+                    StripContextEntry::FindSimilar => self.handle_find_similar_for_playing_track(),
+                    StripContextEntry::TopSongs => self.handle_find_top_songs_for_playing_track(),
                     StripContextEntry::Separator => Task::none(),
                 }
             }
@@ -897,6 +900,18 @@ impl Nokkvi {
             // Show in File Manager
             // -----------------------------------------------------------------
             Message::ShowInFolder(path) => self.handle_show_in_folder(path),
+
+            // -----------------------------------------------------------------
+            // Similar Songs
+            // -----------------------------------------------------------------
+            Message::Similar(msg) => self.handle_similar_message(msg),
+            Message::FindSimilar { id, label } => self.handle_find_similar(id, label),
+            Message::FindTopSongs { artist_name, label } => {
+                self.handle_find_top_songs(artist_name, label)
+            }
+            Message::SimilarSongsLoaded(generation, result, label) => {
+                self.handle_similar_songs_loaded(generation, result, label)
+            }
         }
     }
 }

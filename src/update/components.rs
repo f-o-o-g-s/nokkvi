@@ -137,6 +137,59 @@ pub(super) fn prefetch_song_artwork_tasks(
         .collect()
 }
 
+/// Generate song artwork prefetch tasks for a slot list viewport using raw Song types.
+/// Used by Similar page which circumvents SongUIViewData wrapping.
+pub(crate) fn prefetch_raw_song_artwork_tasks(
+    slot_list: &SlotListView,
+    songs: &[nokkvi_data::types::song::Song],
+    cached_ids: &HashSet<&String>,
+    albums_vm: AlbumsService,
+) -> Vec<Task<Message>> {
+    let total = songs.len();
+    if total == 0 {
+        return Vec::new();
+    }
+
+    let mut already_queued = HashSet::new();
+
+    slot_list
+        .prefetch_indices(total)
+        .filter_map(|idx| songs.get(idx))
+        .filter_map(|song| {
+            song.album_id.as_ref().and_then(|id| {
+                if cached_ids.contains(id) || already_queued.contains(id) {
+                    None
+                } else {
+                    already_queued.insert(id.clone());
+                    Some(id.clone())
+                }
+            })
+        })
+        .map(|album_id| {
+            let vm = albums_vm.clone();
+            let id = album_id;
+            Task::perform(
+                async move {
+                    let (url, cred) = vm.get_server_config().await;
+                    let artwork_url = nokkvi_data::utils::artwork_url::build_cover_art_url(
+                        &id,
+                        &url,
+                        &cred,
+                        Some(80),
+                    );
+                    let path = vm.get_artwork_cache_path(&artwork_url, Some(80)).await;
+                    (id, path.map(image::Handle::from_path))
+                },
+                |(id, handle)| {
+                    Message::Artwork(crate::app_message::ArtworkMessage::SongMiniLoaded(
+                        id, handle,
+                    ))
+                },
+            )
+        })
+        .collect()
+}
+
 impl Nokkvi {
     // ── Helper methods for deduplicating component handler patterns ──
 
@@ -829,6 +882,32 @@ impl Nokkvi {
                 }
             },
         )
+    }
+
+    /// Open Find Similar tab for the currently playing track.
+    pub(crate) fn handle_find_similar_for_playing_track(&mut self) -> Task<Message> {
+        let Some(song_id) = self.scrobble.current_song_id.clone() else {
+            self.toast_warn("No track is currently playing");
+            return Task::none();
+        };
+        let title = self.playback.title.clone();
+        Task::done(Message::FindSimilar {
+            id: song_id,
+            label: format!("Similar to: {title}"),
+        })
+    }
+
+    /// Open Top Songs tab for the currently playing track's artist.
+    pub(crate) fn handle_find_top_songs_for_playing_track(&mut self) -> Task<Message> {
+        let artist = self.playback.artist.clone();
+        if artist.is_empty() {
+            self.toast_warn("No artist metadata for currently playing track");
+            return Task::none();
+        }
+        Task::done(Message::FindTopSongs {
+            artist_name: artist.clone(),
+            label: format!("Top Songs: {artist}"),
+        })
     }
 
     /// Open the currently playing track's folder in the file manager.

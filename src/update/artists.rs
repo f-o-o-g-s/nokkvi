@@ -644,6 +644,12 @@ impl Nokkvi {
             ArtistsAction::ShowSongInFolder(path) => {
                 return self.handle_show_in_folder(path);
             }
+            ArtistsAction::FindSimilar(id, label) => {
+                return Task::done(Message::FindSimilar { id, label });
+            }
+            ArtistsAction::TopSongs(artist_name, label) => {
+                return Task::done(Message::FindTopSongs { artist_name, label });
+            }
             _ => {} // None + already-handled common actions
         }
 

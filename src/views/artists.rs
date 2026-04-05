@@ -117,6 +117,8 @@ pub enum ArtistsAction {
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
     ShowAlbumInFolder(String), // album_id - fetch a song path and open containing folder
     ShowSongInFolder(String),  // song path - open containing folder directly
+    FindSimilar(String, String), // (entity_id, label) - open similar tab
+    TopSongs(String, String),    // (artist_name, label) - open similar tab for top songs
     CenterOnPlaying,
     None,
 }
@@ -552,6 +554,20 @@ impl ArtistsPage {
                                     | LibraryContextEntry::Separator => {
                                         (Task::none(), ArtistsAction::None)
                                     }
+                                    LibraryContextEntry::FindSimilar => (
+                                        Task::none(),
+                                        ArtistsAction::FindSimilar(
+                                            artist.id.clone(),
+                                            format!("Similar to: {}", artist.name),
+                                        ),
+                                    ),
+                                    LibraryContextEntry::TopSongs => (
+                                        Task::none(),
+                                        ArtistsAction::TopSongs(
+                                            artist.name.clone(),
+                                            format!("Top Songs: {}", artist.name),
+                                        ),
+                                    ),
                                     _ => (Task::none(), ArtistsAction::None),
                                 },
                                 Some(ThreeTierEntry::Child(album, _)) => match entry {
@@ -594,6 +610,16 @@ impl ArtistsPage {
                                     LibraryContextEntry::Separator => {
                                         (Task::none(), ArtistsAction::None)
                                     }
+                                    LibraryContextEntry::FindSimilar => {
+                                        let aid = album.artist.clone();
+                                        (
+                                            Task::none(),
+                                            ArtistsAction::FindSimilar(
+                                                aid,
+                                                format!("Similar to: {}", album.name),
+                                            ),
+                                        )
+                                    }
                                     _ => (Task::none(), ArtistsAction::None),
                                 },
                                 Some(ThreeTierEntry::Grandchild(song, _)) => match entry {
@@ -609,6 +635,13 @@ impl ArtistsPage {
                                     LibraryContextEntry::Separator => {
                                         (Task::none(), ArtistsAction::None)
                                     }
+                                    LibraryContextEntry::FindSimilar => (
+                                        Task::none(),
+                                        ArtistsAction::FindSimilar(
+                                            song.id.clone(),
+                                            format!("Similar to: {}", song.title),
+                                        ),
+                                    ),
                                     _ => (Task::none(), ArtistsAction::None),
                                 },
                                 None => (Task::none(), ArtistsAction::None),
@@ -638,10 +671,11 @@ impl ArtistsPage {
             "artists",
             crate::views::ARTISTS_SEARCH_ID,
             ArtistsMessage::SortModeSelected,
-            ArtistsMessage::ToggleSortOrder,
+            Some(ArtistsMessage::ToggleSortOrder),
             None, // No shuffle button for artists
             Some(ArtistsMessage::RefreshViewData),
             Some(ArtistsMessage::CenterOnPlaying),
+            true, // show_search
             ArtistsMessage::SearchQueryChanged,
         );
 
@@ -917,12 +951,12 @@ impl ArtistsPage {
             .width(Length::Fill);
 
         use crate::widgets::context_menu::{
-            context_menu, library_entries_with_folder, library_entry_view,
+            artist_entries_with_folder, context_menu, library_entry_view,
         };
         let item_idx = ctx.item_index;
         context_menu(
             slot_button,
-            library_entries_with_folder(),
+            artist_entries_with_folder(),
             move |entry, length| {
                 library_entry_view(entry, length, |e| {
                     ArtistsMessage::ContextMenuAction(item_idx, e)

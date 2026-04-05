@@ -62,6 +62,8 @@ pub enum QueueContextEntry {
     OpenBrowsingPanel,
     GetInfo,
     ShowInFolder,
+    FindSimilar,
+    TopSongs,
 }
 
 /// Messages for local queue page interactions
@@ -136,6 +138,8 @@ pub enum QueueAction {
     ShowInfo(usize),          // Open info modal (queue index for full Song lookup)
     ShowInFolder(usize),      // Open containing folder (queue index, path fetched via API)
     RefreshArtwork(String),   // album_id - refresh artwork from server
+    FindSimilar(usize),       // Open Find Similar panel for queue index
+    TopSongs(usize),          // Open Top Songs panel for queue index
     None,
 }
 
@@ -379,6 +383,12 @@ impl QueuePage {
                 QueueContextEntry::ShowInFolder => {
                     (Task::none(), QueueAction::ShowInFolder(clicked_idx))
                 }
+                QueueContextEntry::FindSimilar => {
+                    (Task::none(), QueueAction::FindSimilar(clicked_idx))
+                }
+                QueueContextEntry::TopSongs => {
+                    (Task::none(), QueueAction::TopSongs(clicked_idx))
+                }
             },
             QueueMessage::SavePlaylist => (Task::none(), QueueAction::SavePlaylist),
             QueueMessage::DiscardEdits => (Task::none(), QueueAction::DiscardEdits),
@@ -420,11 +430,12 @@ impl QueuePage {
             "songs",
             crate::views::QUEUE_SEARCH_ID,
             QueueMessage::SortModeSelected,
-            QueueMessage::ToggleSortOrder,
+            Some(QueueMessage::ToggleSortOrder),
             Some(QueueMessage::ShuffleQueue), // Shuffle button for queue
             None,                             // No refresh button for queue
             data.current_playing_queue_index
                 .map(|idx| QueueMessage::FocusCurrentPlaying(idx, true)),
+            true, // show_search
             QueueMessage::SearchQueryChanged,
         );
 
@@ -920,6 +931,8 @@ impl QueuePage {
                 QueueContextEntry::Separator,
                 QueueContextEntry::GetInfo,
                 QueueContextEntry::ShowInFolder,
+                QueueContextEntry::FindSimilar,
+                QueueContextEntry::TopSongs,
             ];
 
             context_menu(slot_button, entries, move |entry, _length| match entry {
@@ -973,6 +986,16 @@ impl QueuePage {
                     Some("assets/icons/folder-open.svg"),
                     "Show in File Manager",
                     QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::ShowInFolder),
+                ),
+                QueueContextEntry::FindSimilar => menu_button(
+                    Some("assets/icons/radar.svg"),
+                    "Find Similar",
+                    QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::FindSimilar),
+                ),
+                QueueContextEntry::TopSongs => menu_button(
+                    Some("assets/icons/star.svg"),
+                    "Top Songs",
+                    QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::TopSongs),
                 ),
             })
             .into()

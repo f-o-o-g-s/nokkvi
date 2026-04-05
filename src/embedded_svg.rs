@@ -81,7 +81,9 @@ pub(crate) fn get_svg(path: &str) -> &'static str {
         "assets/icons/folder-open.svg" => FOLDER_OPEN,
         "assets/icons/panel-right-open.svg" => PANEL_RIGHT_OPEN,
         "assets/icons/panels-top-left.svg" => PANELS_TOP_LEFT,
+        "assets/icons/radar.svg" => RADAR,
         "assets/icons/swatch-book.svg" => SWATCH_BOOK,
+        "assets/icons/sparkles.svg" => SPARKLES,
         "assets/icons/tags.svg" => TAGS,
         "assets/icons/locate.svg" => LOCATE,
         _ => {
@@ -207,6 +209,8 @@ const COPY: &str = include_str!("../assets/icons/copy.svg");
 const FOLDER_OPEN: &str = include_str!("../assets/icons/folder-open.svg");
 const PANEL_RIGHT_OPEN: &str = include_str!("../assets/icons/panel-right-open.svg");
 const PANELS_TOP_LEFT: &str = include_str!("../assets/icons/panels-top-left.svg");
+const RADAR: &str = include_str!("../assets/icons/radar.svg");
+const SPARKLES: &str = include_str!("../assets/icons/sparkles.svg");
 const TAGS: &str = include_str!("../assets/icons/tags.svg");
 const LOCATE: &str = include_str!("../assets/icons/locate.svg");
 
@@ -286,6 +290,8 @@ fn is_registered(path: &str) -> bool {
         "assets/icons/folder-open.svg",
         "assets/icons/panel-right-open.svg",
         "assets/icons/panels-top-left.svg",
+        "assets/icons/radar.svg",
+        "assets/icons/sparkles.svg",
         "assets/icons/swatch-book.svg",
         "assets/icons/tags.svg",
         "assets/icons/locate.svg",
@@ -440,6 +446,8 @@ mod tests {
             "assets/icons/folder-open.svg",
             "assets/icons/panel-right-open.svg",
             "assets/icons/panels-top-left.svg",
+            "assets/icons/radar.svg",
+            "assets/icons/sparkles.svg",
             "assets/icons/swatch-book.svg",
             "assets/icons/tags.svg",
             "assets/icons/locate.svg",

@@ -13,6 +13,7 @@ pub(crate) mod login;
 pub(crate) mod playlists;
 pub(crate) mod queue;
 pub(crate) mod settings;
+pub(crate) mod similar;
 pub(crate) mod songs;
 
 // Re-export commonly used items
@@ -24,6 +25,7 @@ pub(crate) use login::{LoginAction, LoginMessage, LoginPage};
 pub(crate) use playlists::{PlaylistsAction, PlaylistsMessage, PlaylistsPage, PlaylistsViewData};
 pub(crate) use queue::{QueueAction, QueueMessage, QueuePage, QueueSortMode, QueueViewData};
 pub(crate) use settings::{SettingsAction, SettingsMessage, SettingsPage, SettingsViewData};
+pub(crate) use similar::{SimilarAction, SimilarMessage, SimilarPage, SimilarViewData};
 pub(crate) use songs::{SongsAction, SongsMessage, SongsPage, SongsViewData};
 
 use crate::{
@@ -248,3 +250,6 @@ pub(crate) const GENRES_SEARCH_ID: &str = "genres_search_input";
 
 /// Search input ID for Playlists view
 pub(crate) const PLAYLISTS_SEARCH_ID: &str = "playlists_search_input";
+
+/// Search input ID for Similar view
+pub(crate) const SIMILAR_SEARCH_ID: &str = "similar_search_input";

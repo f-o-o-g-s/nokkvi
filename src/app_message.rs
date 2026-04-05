@@ -338,6 +338,8 @@ pub enum Message {
     Genres(views::GenresMessage),
     Playlists(views::PlaylistsMessage),
     Settings(views::SettingsMessage),
+    /// Similar Songs page messages
+    Similar(views::SimilarMessage),
 
     // --- MPRIS D-Bus Integration ---
     Mpris(services::mpris::MprisEvent),
@@ -409,4 +411,22 @@ pub enum Message {
 
     /// Open a song's containing folder in the file manager (relative path from Navidrome)
     ShowInFolder(String),
+
+    // --- Similar Songs ---
+    /// Trigger "Find Similar" from any view — opens browsing panel, fires getSimilarSongs2
+    FindSimilar {
+        id: String,
+        label: String,
+    },
+    /// Trigger "Top Songs" from artists view — opens browsing panel, fires getTopSongs
+    FindTopSongs {
+        artist_name: String,
+        label: String,
+    },
+    /// API response for similar/top songs (generation counter, result)
+    SimilarSongsLoaded(
+        u64,
+        Result<Vec<nokkvi_data::types::song::Song>, String>,
+        String,
+    ),
 }

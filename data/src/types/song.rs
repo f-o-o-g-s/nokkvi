@@ -21,20 +21,20 @@ pub struct ReplayGain {
 pub struct Song {
     #[serde(rename = "id")]
     pub id: String,
-    #[serde(rename = "title")]
+    #[serde(rename = "title", default)]
     pub title: String,
-    #[serde(rename = "artist")]
+    #[serde(rename = "artist", default)]
     pub artist: String,
     #[serde(rename = "artistId")]
     pub artist_id: Option<String>,
-    #[serde(rename = "album")]
+    #[serde(rename = "album", default)]
     pub album: String,
     #[serde(rename = "albumId")]
     pub album_id: Option<String>,
     #[serde(rename = "coverArt")]
     pub cover_art: Option<String>,
     // Duration can be a float in API, convert to u32 (seconds)
-    #[serde(rename = "duration")]
+    #[serde(rename = "duration", default)]
     #[serde(deserialize_with = "deserialize_duration")]
     pub duration: u32, // seconds
     #[serde(rename = "trackNumber")]
@@ -45,13 +45,14 @@ pub struct Song {
     pub year: Option<u32>,
     #[serde(rename = "genre")]
     pub genre: Option<String>,
-    #[serde(rename = "path")]
+    #[serde(rename = "path", default)]
     pub path: String,
-    #[serde(rename = "size")]
+    #[serde(rename = "size", default)]
     pub size: u64,
     #[serde(rename = "bitRate")]
     pub bitrate: Option<u32>,
     #[serde(rename = "starred", default)]
+    #[serde(deserialize_with = "crate::types::deserialize_starred")]
     pub starred: bool,
     #[serde(rename = "playCount")]
     pub play_count: Option<u32>,
@@ -165,5 +166,74 @@ impl Song {
 impl std::fmt::Display for Song {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} - {}", self.artist, self.title)
+    }
+}
+
+impl crate::backend::Starable for Song {
+    fn entity_id(&self) -> &str {
+        &self.id
+    }
+    fn set_starred(&mut self, starred: bool) {
+        self.starred = starred;
+    }
+    fn display_label(&self) -> String {
+        format!("{} - {}", self.title, self.artist)
+    }
+}
+
+impl crate::backend::Ratable for Song {
+    fn entity_id(&self) -> &str {
+        &self.id
+    }
+    fn set_rating(&mut self, rating: Option<u32>) {
+        self.rating = rating;
+    }
+    fn display_label(&self) -> String {
+        format!("{} - {}", self.title, self.artist)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Subsonic endpoints like `getSimilarSongs2` may omit `path` and `size`
+    /// (Go's `omitempty` drops zero-value fields). Verify deserialization
+    /// succeeds with defaults when these fields are absent.
+    #[test]
+    fn test_deserialize_song_missing_path_and_size() {
+        let json = r#"{
+            "id": "s1",
+            "title": "Creep",
+            "artist": "Radiohead",
+            "album": "Pablo Honey",
+            "duration": 239,
+            "starred": false
+        }"#;
+
+        let song: Song = serde_json::from_str(json).expect("should deserialize without path/size");
+        assert_eq!(song.id, "s1");
+        assert_eq!(song.path, ""); // default empty string
+        assert_eq!(song.size, 0); // default zero
+    }
+
+    /// Normal deserialization with all fields present should still work.
+    #[test]
+    fn test_deserialize_song_with_all_fields() {
+        let json = r#"{
+            "id": "s2",
+            "title": "Paranoid Android",
+            "artist": "Radiohead",
+            "album": "OK Computer",
+            "duration": 384,
+            "path": "/music/radiohead/paranoid.flac",
+            "size": 42000000,
+            "starred": true
+        }"#;
+
+        let song: Song = serde_json::from_str(json).expect("should deserialize with all fields");
+        assert_eq!(song.path, "/music/radiohead/paranoid.flac");
+        assert_eq!(song.size, 42000000);
+        assert!(song.starred);
     }
 }
