@@ -50,6 +50,17 @@ Nokkvi draws heavy inspiration from several excellent projects:
 - MPRIS D-Bus integration for desktop media controls
 - In-app settings editor with drill-down navigation and inline search
 
+### Non-Goals
+Nokkvi is designed to be a fast, highly-themed, keyboard-driven music player—not a full administrative dashboard or a 1:1 replica of the Navidrome web UI. The following Navidrome features are intentionally **not** implemented at this time (though some may be considered for future releases):
+- Server administration (triggering library scans, user management)
+- Internet Radio and Podcasts
+- Jukebox mode (server-side playback control)
+- Smart playlist generation (filtering rules configuration)
+- Bookmarks (audiobook/podcast resume positions)
+- Public sharing links
+- Media downloading for offline usage
+- Lyrics integration
+
 ## Dependencies (Arch Linux)
 
 ```bash
