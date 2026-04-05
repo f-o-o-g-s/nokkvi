@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## v0.2.7 — 2026-04-05
+
+### Features
+- **Algorithmic Radio Tabs** — added a "Similar" tab to the library browser that explicitly fetches "Similar Songs" and "Top Songs" via algorithmic backend queries (Navidrome/ListenBrainz). Right-clicking on any artist or song (in the library, queue, or now-playing strip) allows you to endlessly explore mathematically related discographies with full cross-pane drag-and-drop routing support.
+- **Header Tooltips & Navigation** — added tooltips to UI headers and implemented a global "Center on Playing" shortcut for precise library navigation.
+- **Server Version Awareness** — the About modal now reliably fetches and displays the actual Navidrome backend server version.
+
+### Improvements
+- **DRY Refactoring** — aggressively re-architected view layer boilerplate into domain specific helper macros, streamlining UI maintenance across all primary lists.
+
+### CI & Internal
+- **Dynamic CI Automation** — implemented robust GitHub Actions workflows and local pre-commit hooks to automatically test PRs, validate builds, and sync Navidrome backend version tracking natively into the README.
+- **Node Environment** — sanitized CI logic and patched Node 20 deprecation warnings.
+- **Readme Modernization** — upgraded the readme to support active feature showcases using high-resolution animated WebP images natively embedding real-time application renders.
+
 ## v0.2.6 — 2026-04-03
 
 ### Fixes

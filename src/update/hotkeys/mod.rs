@@ -106,6 +106,7 @@ impl Nokkvi {
             ));
         }
 
+        #[allow(clippy::collapsible_if)]
         if self.browsing_panel.is_some()
             && self.pane_focus == crate::state::PaneFocus::Browser
             && self.browsing_panel.as_ref().unwrap().active_view

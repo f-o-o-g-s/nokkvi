@@ -335,7 +335,7 @@ impl SongsPage {
                                     Task::none(),
                                     SongsAction::TopSongs(
                                         artist.clone(),
-                                        format!("Top Songs: {}", artist),
+                                        format!("Top Songs: {artist}"),
                                     ),
                                 )
                             } else {

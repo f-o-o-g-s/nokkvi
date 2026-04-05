@@ -31,7 +31,8 @@ Nokkvi draws heavy inspiration from several excellent projects:
 - GPU-accelerated visualizer (bars and line modes)
 
 ### Library & Playback
-- Browse by albums, artists, songs, genres, and playlists
+- Browse by albums, artists, songs, genres, playlists, and algorithmic similarities
+- Algorithmic exploration — endlessly dive into mathematically related discographies via context menu "Find Similar" and "Top Songs" actions
 - Inline expansion — drill into artists/genres to see albums and tracks without leaving the view
 - Star ratings (0–5) and favorites on everything
 - Multi-selection with Ctrl/Shift — batch add to queue, rate, favorite, etc.

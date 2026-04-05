@@ -216,6 +216,7 @@ impl Nokkvi {
 
                 // Select the first item (center) to seed the large artwork panel immediately
                 if let Some(state) = &self.similar_songs {
+                    #[allow(clippy::collapsible_if)]
                     if let Some(first_song) = state.songs.first() {
                         if let Some(album_id) = &first_song.album_id {
                             tasks.push(Task::done(Message::Artwork(

@@ -68,12 +68,10 @@ impl BrowsingPanel {
     pub fn tab_bar(&self, similar_label: Option<&str>) -> Element<'_, BrowsingPanelMessage> {
         let tabs = BrowsingView::ALL.iter().map(|&view| {
             let mut label_str = view.label();
-            if view == BrowsingView::Similar {
-                if let Some(lbl) = similar_label {
-                    if lbl.starts_with("Top Songs") {
-                        label_str = "Top Songs";
-                    }
-                }
+            if view == BrowsingView::Similar
+                && similar_label.is_some_and(|lbl| lbl.starts_with("Top Songs"))
+            {
+                label_str = "Top Songs";
             }
 
             let label = text(label_str)

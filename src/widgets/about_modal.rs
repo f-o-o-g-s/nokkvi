@@ -83,7 +83,7 @@ pub(crate) fn about_modal_overlay<'a>(
     }
 
     let version = env!("CARGO_PKG_VERSION");
-    let git_hash = env!("GIT_HASH");
+    let git_hash = option_env!("GIT_HASH").unwrap_or("unknown");
 
     // ── Header: [Nokkvi  ·····  📋  X] ──────────────────────────
     let title_text = text("Nokkvi")

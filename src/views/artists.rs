@@ -118,7 +118,7 @@ pub enum ArtistsAction {
     ShowAlbumInFolder(String), // album_id - fetch a song path and open containing folder
     ShowSongInFolder(String),  // song path - open containing folder directly
     FindSimilar(String, String), // (entity_id, label) - open similar tab
-    TopSongs(String, String),    // (artist_name, label) - open similar tab for top songs
+    TopSongs(String, String),  // (artist_name, label) - open similar tab for top songs
     CenterOnPlaying,
     None,
 }

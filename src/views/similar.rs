@@ -271,11 +271,7 @@ impl SimilarPage {
                 "Loading similar songs…"
             };
 
-            return widgets::base_slot_list_empty_state(
-                header,
-                loading_text,
-                &layout_config,
-            );
+            return widgets::base_slot_list_empty_state(header, loading_text, &layout_config);
         }
 
         // Empty state (no results loaded yet)

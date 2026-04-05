@@ -16,7 +16,7 @@ impl Nokkvi {
             }
             AboutModalMessage::CopyAll => {
                 let version = env!("CARGO_PKG_VERSION");
-                let git_hash = env!("GIT_HASH");
+                let git_hash = option_env!("GIT_HASH").unwrap_or("unknown");
                 let server_url = &self.login_page.server_url;
                 let username = &self.login_page.username;
                 let server_version = self.server_version.as_deref();
