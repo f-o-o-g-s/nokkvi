@@ -542,8 +542,7 @@ mod tests {
         let (_, action) = page.update(SimilarMessage::ClickToggleStar(0), &songs);
         assert!(
             matches!(action, SimilarAction::ToggleStar(ref id, true) if id == "s1"),
-            "expected ToggleStar(s1, true), got {:?}",
-            action
+            "expected ToggleStar(s1, true), got {action:?}",
         );
     }
 
@@ -556,8 +555,7 @@ mod tests {
         let (_, action) = page.update(SimilarMessage::ClickToggleStar(0), &songs);
         assert!(
             matches!(action, SimilarAction::ToggleStar(ref id, false) if id == "s1"),
-            "expected ToggleStar(s1, false), got {:?}",
-            action
+            "expected ToggleStar(s1, false), got {action:?}",
         );
     }
 
@@ -573,8 +571,7 @@ mod tests {
         );
         assert!(
             matches!(action, SimilarAction::AddBatchToQueue(ref p) if !p.items.is_empty()),
-            "expected non-empty batch, got {:?}",
-            action
+            "expected non-empty batch, got {action:?}",
         );
     }
 
@@ -593,7 +590,7 @@ mod tests {
                 assert_eq!(id, "s1");
                 assert_eq!(title, "Test Song");
             }
-            other => panic!("expected FindSimilar, got {:?}", other),
+            other => panic!("expected FindSimilar, got {other:?}"),
         }
     }
 
@@ -612,7 +609,7 @@ mod tests {
                 assert_eq!(artist, "Radiohead");
                 assert!(label.contains("Radiohead"));
             }
-            other => panic!("expected FindTopSongs, got {:?}", other),
+            other => panic!("expected FindTopSongs, got {other:?}"),
         }
     }
 
@@ -623,8 +620,7 @@ mod tests {
         let (_, action) = page.update(SimilarMessage::ClickToggleStar(99), &songs);
         assert!(
             matches!(action, SimilarAction::None),
-            "expected None for out-of-bounds, got {:?}",
-            action
+            "expected None for out-of-bounds, got {action:?}",
         );
     }
 }
