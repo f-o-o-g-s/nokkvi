@@ -1,7 +1,7 @@
 use iced::{
     Alignment, Element, Length,
     font::{Font, Weight},
-    widget::{container, mouse_area, pick_list, row, svg, text, text_input, tooltip},
+    widget::{container, mouse_area, pick_list, row, text, text_input},
 };
 // Re-export SortMode from data crate (canonical definition)
 pub(crate) use nokkvi_data::types::sort_mode::SortMode;
@@ -111,170 +111,31 @@ pub(crate) fn view_header<
     };
 
     let sort_button = on_sort_toggle.map(|sort_msg| {
-        // Use Lucide SVG icons matching QML/Slint implementation
         let sort_icon_path = if sort_ascending {
             "assets/icons/arrow-up.svg"
         } else {
             "assets/icons/arrow-down.svg"
         };
-
-        let sort_svg = crate::embedded_svg::svg_widget(sort_icon_path)
-            .width(Length::Fixed(20.0))
-            .height(Length::Fixed(20.0))
-            .style(|_theme, _status| svg::Style {
-                color: Some(theme::fg0()),
-            });
-
-        // Use mouse_area + HoverOverlay(container) — same pattern as slot list rows.
-        let el: Element<'a, Message> = tooltip(
-            mouse_area(
-                HoverOverlay::new(
-                    container(sort_svg)
-                        .width(Length::Fixed(40.0))
-                        .height(Length::Fixed(40.0))
-                        .style(|_theme| container::Style {
-                            background: Some(theme::bg0_soft().into()),
-                            border: iced::Border {
-                                radius: theme::ui_border_radius(),
-                                ..Default::default()
-                            },
-                            ..Default::default()
-                        })
-                        .center(Length::Fixed(40.0)),
-                )
-                .border_radius(theme::ui_border_radius()),
-            )
-            .on_press(sort_msg)
-            .interaction(iced::mouse::Interaction::Pointer),
-            container(
-                text(if sort_ascending {
-                    "Sort: Ascending"
-                } else {
-                    "Sort: Descending"
-                })
-                .size(11.0)
-                .font(theme::ui_font()),
-            )
-            .padding(4),
-            tooltip::Position::Top,
-        )
-        .gap(4)
-        .style(theme::container_tooltip)
-        .into();
-        el
+        let tooltip_text = if sort_ascending {
+            "Sort: Ascending"
+        } else {
+            "Sort: Descending"
+        };
+        header_icon_button(sort_icon_path, tooltip_text, sort_msg)
     });
 
     let refresh_button = on_refresh.map(|refresh_msg| {
-        let refresh_svg = crate::embedded_svg::svg_widget("assets/icons/refresh-cw.svg")
-            .width(Length::Fixed(20.0))
-            .height(Length::Fixed(20.0))
-            .style(|_theme, _status| svg::Style {
-                color: Some(theme::fg0()),
-            });
-
-        let el: Element<'a, Message> = tooltip(
-            mouse_area(
-                HoverOverlay::new(
-                    container(refresh_svg)
-                        .width(Length::Fixed(40.0))
-                        .height(Length::Fixed(40.0))
-                        .style(|_theme| container::Style {
-                            background: Some(theme::bg0_soft().into()),
-                            border: iced::Border {
-                                radius: theme::ui_border_radius(),
-                                ..Default::default()
-                            },
-                            ..Default::default()
-                        })
-                        .center(Length::Fixed(40.0)),
-                )
-                .border_radius(theme::ui_border_radius()),
-            )
-            .on_press(refresh_msg)
-            .interaction(iced::mouse::Interaction::Pointer),
-            container(text("Refresh Data").size(11.0).font(theme::ui_font())).padding(4),
-            tooltip::Position::Top,
-        )
-        .gap(4)
-        .style(theme::container_tooltip)
-        .into();
-        el
+        header_icon_button("assets/icons/refresh-cw.svg", "Refresh Data", refresh_msg)
     });
 
     // Optional shuffle button (only rendered if on_shuffle is provided)
     let shuffle_button = on_shuffle.map(|shuffle_msg| {
-        let shuffle_svg = crate::embedded_svg::svg_widget("assets/icons/shuffle.svg")
-            .width(Length::Fixed(20.0))
-            .height(Length::Fixed(20.0))
-            .style(|_theme, _status| svg::Style {
-                color: Some(theme::fg0()),
-            });
-
-        let el: Element<'a, Message> = tooltip(
-            mouse_area(
-                HoverOverlay::new(
-                    container(shuffle_svg)
-                        .width(Length::Fixed(40.0))
-                        .height(Length::Fixed(40.0))
-                        .style(|_theme| container::Style {
-                            background: Some(theme::bg0_soft().into()),
-                            border: iced::Border {
-                                radius: theme::ui_border_radius(),
-                                ..Default::default()
-                            },
-                            ..Default::default()
-                        })
-                        .center(Length::Fixed(40.0)),
-                )
-                .border_radius(theme::ui_border_radius()),
-            )
-            .on_press(shuffle_msg)
-            .interaction(iced::mouse::Interaction::Pointer),
-            container(text("Shuffle All").size(11.0).font(theme::ui_font())).padding(4),
-            tooltip::Position::Top,
-        )
-        .gap(4)
-        .style(theme::container_tooltip)
-        .into();
-        el
+        header_icon_button("assets/icons/shuffle.svg", "Shuffle All", shuffle_msg)
     });
 
     // Optional center on playing button
     let center_button = on_center_on_playing.map(|center_msg| {
-        let center_svg = crate::embedded_svg::svg_widget("assets/icons/locate.svg")
-            .width(Length::Fixed(20.0))
-            .height(Length::Fixed(20.0))
-            .style(|_theme, _status| svg::Style {
-                color: Some(theme::fg0()),
-            });
-
-        let el: Element<'a, Message> = tooltip(
-            mouse_area(
-                HoverOverlay::new(
-                    container(center_svg)
-                        .width(Length::Fixed(40.0))
-                        .height(Length::Fixed(40.0))
-                        .style(|_theme| container::Style {
-                            background: Some(theme::bg0_soft().into()),
-                            border: iced::Border {
-                                radius: theme::ui_border_radius(),
-                                ..Default::default()
-                            },
-                            ..Default::default()
-                        })
-                        .center(Length::Fixed(40.0)),
-                )
-                .border_radius(theme::ui_border_radius()),
-            )
-            .on_press(center_msg)
-            .interaction(iced::mouse::Interaction::Pointer),
-            container(text("Center on Playing").size(11.0).font(theme::ui_font())).padding(4),
-            tooltip::Position::Top,
-        )
-        .gap(4)
-        .style(theme::container_tooltip)
-        .into();
-        el
+        header_icon_button("assets/icons/locate.svg", "Center on Playing", center_msg)
     });
 
     let search_field = if show_search {
@@ -349,4 +210,70 @@ pub(crate) fn view_header<
     .height(Length::Fixed(48.0))
     .style(theme::container_bg0_hard)
     .into()
+}
+
+/// Reusable header icon button with tooltip, hover overlay, and consistent styling.
+///
+/// Wraps an SVG icon in a 40×40 container with bg0_soft background, adds hover
+/// overlay for interactive feedback, and positions a tooltip above the button.
+fn header_icon_button<'a, Message: Clone + 'a>(
+    icon_path: &str,
+    tooltip_text: &str,
+    on_press: Message,
+) -> Element<'a, Message> {
+    use iced::widget::{svg, tooltip};
+
+    let icon_svg = crate::embedded_svg::svg_widget(icon_path)
+        .width(Length::Fixed(20.0))
+        .height(Length::Fixed(20.0))
+        .style(|_theme, _status| svg::Style {
+            color: Some(theme::fg0()),
+        });
+
+    tooltip(
+        mouse_area(
+            HoverOverlay::new(
+                container(icon_svg)
+                    .width(Length::Fixed(40.0))
+                    .height(Length::Fixed(40.0))
+                    .style(|_theme| container::Style {
+                        background: Some(theme::bg0_soft().into()),
+                        border: iced::Border {
+                            radius: theme::ui_border_radius(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    })
+                    .center(Length::Fixed(40.0)),
+            )
+            .border_radius(theme::ui_border_radius()),
+        )
+        .on_press(on_press)
+        .interaction(iced::mouse::Interaction::Pointer),
+        container(
+            text(tooltip_text.to_string())
+                .size(11.0)
+                .font(theme::ui_font()),
+        )
+        .padding(4),
+        tooltip::Position::Top,
+    )
+    .gap(4)
+    .style(theme::container_tooltip)
+    .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn header_icon_button_produces_element() {
+        // Characterization test: the extracted helper compiles and produces a valid Element.
+        let _el: Element<'_, String> = header_icon_button(
+            "assets/icons/shuffle.svg",
+            "Shuffle All",
+            "test_press".to_string(),
+        );
+    }
 }

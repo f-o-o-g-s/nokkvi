@@ -163,7 +163,11 @@ impl AuthService {
             "{}/rest/ping?{}&f=json&c=nokkvi",
             self.server_url, self.subsonic_credential
         );
-        let client = reqwest::Client::new();
+        let client = self
+            .client
+            .as_ref()
+            .context("Not authenticated")?
+            .http_client();
         let response = client
             .get(&ping_url)
             .timeout(std::time::Duration::from_secs(5))

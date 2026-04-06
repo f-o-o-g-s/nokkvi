@@ -70,6 +70,8 @@ pub enum SimilarAction {
     ShowInFolder(String),
     /// Recursive discovery: FindSimilar from within the similar results
     FindSimilar(String, String),
+    /// Top Songs for an artist, triggered from within similar results
+    FindTopSongs(String, String),
     None,
 }
 
@@ -212,9 +214,14 @@ impl SimilarPage {
                             Task::none(),
                             SimilarAction::FindSimilar(song.id.clone(), song.title.clone()),
                         ),
-                        LibraryContextEntry::TopSongs | LibraryContextEntry::Separator => {
-                            (Task::none(), SimilarAction::None)
-                        }
+                        LibraryContextEntry::TopSongs => (
+                            Task::none(),
+                            SimilarAction::FindTopSongs(
+                                song.artist.clone(),
+                                format!("Top Songs: {}", song.artist),
+                            ),
+                        ),
+                        LibraryContextEntry::Separator => (Task::none(), SimilarAction::None),
                     }
                 } else {
                     (Task::none(), SimilarAction::None)
@@ -314,7 +321,6 @@ impl SimilarPage {
                 let album_id = song.album_id.clone();
                 let duration = song.duration;
                 let is_starred = song.starred;
-                let _rating = song.rating.unwrap_or(0).min(5) as usize;
 
                 use crate::widgets::slot_list::{
                     SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column,
@@ -431,12 +437,12 @@ impl SimilarPage {
                     .width(Length::Fill);
 
                 use crate::widgets::context_menu::{
-                    context_menu, library_entries_with_folder, library_entry_view,
+                    context_menu, library_entry_view, song_entries_with_folder,
                 };
                 let item_idx = ctx.item_index;
                 context_menu(
                     slot_button,
-                    library_entries_with_folder(),
+                    song_entries_with_folder(),
                     move |entry, length| {
                         library_entry_view(entry, length, |e| {
                             SimilarMessage::ContextMenuAction(item_idx, e)
@@ -495,5 +501,144 @@ impl super::ViewPage for SimilarPage {
 
     fn add_to_queue_message(&self) -> Option<Message> {
         Some(Message::Similar(SimilarMessage::AddCenterToQueue))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nokkvi_data::types::song::Song;
+
+    use super::*;
+    use crate::widgets::context_menu::LibraryContextEntry;
+
+    fn test_song(id: &str, title: &str, artist: &str) -> Song {
+        Song {
+            id: id.to_string(),
+            title: title.to_string(),
+            artist: artist.to_string(),
+            artist_id: None,
+            album: "Album".to_string(),
+            album_id: None,
+            cover_art: None,
+            duration: 180,
+            track: None,
+            disc: None,
+            year: None,
+            genre: None,
+            path: String::new(),
+            size: 0,
+            bitrate: None,
+            starred: false,
+            play_count: None,
+            bpm: None,
+            channels: None,
+            comment: None,
+            rating: None,
+            album_artist: None,
+            suffix: None,
+            sample_rate: None,
+            created_at: None,
+            play_date: None,
+            compilation: None,
+            bit_depth: None,
+            updated_at: None,
+            replay_gain: None,
+            tags: None,
+            participants: None,
+            original_position: None,
+        }
+    }
+
+    #[test]
+    fn star_toggle_emits_action() {
+        let mut page = SimilarPage::new();
+        let songs = vec![test_song("s1", "Song", "Artist")];
+        let (_, action) = page.update(SimilarMessage::ClickToggleStar(0), &songs);
+        assert!(
+            matches!(action, SimilarAction::ToggleStar(ref id, true) if id == "s1"),
+            "expected ToggleStar(s1, true), got {:?}",
+            action
+        );
+    }
+
+    #[test]
+    fn star_toggle_unstar_when_starred() {
+        let mut page = SimilarPage::new();
+        let mut song = test_song("s1", "Song", "Artist");
+        song.starred = true;
+        let songs = vec![song];
+        let (_, action) = page.update(SimilarMessage::ClickToggleStar(0), &songs);
+        assert!(
+            matches!(action, SimilarAction::ToggleStar(ref id, false) if id == "s1"),
+            "expected ToggleStar(s1, false), got {:?}",
+            action
+        );
+    }
+
+    #[test]
+    fn context_add_to_queue_emits_batch() {
+        let mut page = SimilarPage::new();
+        let songs = vec![test_song("s1", "Song", "Artist")];
+        page.common
+            .handle_slot_click(0, songs.len(), Default::default());
+        let (_, action) = page.update(
+            SimilarMessage::ContextMenuAction(0, LibraryContextEntry::AddToQueue),
+            &songs,
+        );
+        assert!(
+            matches!(action, SimilarAction::AddBatchToQueue(ref p) if !p.items.is_empty()),
+            "expected non-empty batch, got {:?}",
+            action
+        );
+    }
+
+    #[test]
+    fn context_find_similar_emits_recursive_action() {
+        let mut page = SimilarPage::new();
+        let songs = vec![test_song("s1", "Test Song", "Test Artist")];
+        page.common
+            .handle_slot_click(0, songs.len(), Default::default());
+        let (_, action) = page.update(
+            SimilarMessage::ContextMenuAction(0, LibraryContextEntry::FindSimilar),
+            &songs,
+        );
+        match action {
+            SimilarAction::FindSimilar(id, title) => {
+                assert_eq!(id, "s1");
+                assert_eq!(title, "Test Song");
+            }
+            other => panic!("expected FindSimilar, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn context_top_songs_emits_find_top_songs_action() {
+        let mut page = SimilarPage::new();
+        let songs = vec![test_song("s1", "Test Song", "Radiohead")];
+        page.common
+            .handle_slot_click(0, songs.len(), Default::default());
+        let (_, action) = page.update(
+            SimilarMessage::ContextMenuAction(0, LibraryContextEntry::TopSongs),
+            &songs,
+        );
+        match action {
+            SimilarAction::FindTopSongs(artist, label) => {
+                assert_eq!(artist, "Radiohead");
+                assert!(label.contains("Radiohead"));
+            }
+            other => panic!("expected FindTopSongs, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn out_of_bounds_star_toggle_is_noop() {
+        let mut page = SimilarPage::new();
+        let songs = vec![test_song("s1", "Song", "Artist")];
+        let (_, action) = page.update(SimilarMessage::ClickToggleStar(99), &songs);
+        assert!(
+            matches!(action, SimilarAction::None),
+            "expected None for out-of-bounds, got {:?}",
+            action
+        );
     }
 }

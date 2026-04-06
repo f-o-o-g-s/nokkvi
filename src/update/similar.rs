@@ -98,6 +98,10 @@ impl Nokkvi {
                     label: format!("Similar to: {title}"),
                 })
             }
+            SimilarAction::FindTopSongs(artist_name, label) => {
+                // Top songs for artist — from within similar results
+                Task::done(Message::FindTopSongs { artist_name, label })
+            }
             SimilarAction::None => Task::none(),
         };
 
