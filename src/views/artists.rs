@@ -56,7 +56,6 @@ pub enum ArtistsMessage {
     SlotListActivateCenter,
     SlotListClickPlay(usize), // Click non-center to play directly (skip focus)
     AddCenterToQueue,         // Add all songs from centered artist to queue (Shift+Q)
-    ToggleCenterStar,         // Toggle star on centered artist (L key)
 
     // Mouse click on star/heart (item_index, value)
     ClickSetRating(usize, usize), // (item_index, rating 1-5)
@@ -393,21 +392,7 @@ impl ArtistsPage {
 
                     (Task::none(), ArtistsAction::AddBatchToQueue(payload))
                 }
-                ArtistsMessage::ToggleCenterStar => {
-                    if let Some(center_idx) = self.common.get_center_item_index(total_items) {
-                        if let Some(artist) = artists.get(center_idx) {
-                            if artist.is_starred {
-                                (Task::none(), ArtistsAction::UnstarArtist(artist.id.clone()))
-                            } else {
-                                (Task::none(), ArtistsAction::StarArtist(artist.id.clone()))
-                            }
-                        } else {
-                            (Task::none(), ArtistsAction::None)
-                        }
-                    } else {
-                        (Task::none(), ArtistsAction::None)
-                    }
-                }
+
                 // Data loading messages (handled at root level, no action needed here)
                 ArtistsMessage::ArtistsLoaded(_, _) => (Task::none(), ArtistsAction::None),
                 ArtistsMessage::ArtistsPageLoaded(_, _) => (Task::none(), ArtistsAction::None),

@@ -47,7 +47,6 @@ pub enum SongsMessage {
     SlotListActivateCenter,
     SlotListClickPlay(usize), // Click non-center to play directly (skip focus)
     AddCenterToQueue,         // Add centered song to queue (Shift+Q)
-    ToggleCenterStar,         // Toggle star on centered song (L key)
 
     // Mouse click on star/heart (item_index, value)
     ClickSetRating(usize, usize), // (item_index, rating 1-5)
@@ -60,7 +59,7 @@ pub enum SongsMessage {
     SortModeSelected(widgets::view_header::SortMode),
     ToggleSortOrder,
     SearchQueryChanged(String),
-    SearchFocused(bool),
+
     RefreshViewData,
     CenterOnPlaying,
 
@@ -226,17 +225,7 @@ impl SongsPage {
 
                 (Task::none(), SongsAction::AddBatchToQueue(payload))
             }
-            SongsMessage::ToggleCenterStar => {
-                if let Some(center_idx) = self.common.get_center_item_index(total_items)
-                    && let Some(song) = songs.get(center_idx)
-                {
-                    return (
-                        Task::none(),
-                        SongsAction::ToggleStar(song.id.clone(), !song.is_starred),
-                    );
-                }
-                (Task::none(), SongsAction::None)
-            }
+
             SongsMessage::ClickSetRating(item_index, rating) => {
                 if let Some(song) = songs.get(item_index) {
                     use nokkvi_data::utils::formatters::compute_rating_toggle;
@@ -285,10 +274,6 @@ impl SongsPage {
                     }
                     _ => (Task::none(), SongsAction::None),
                 }
-            }
-            SongsMessage::SearchFocused(focused) => {
-                self.common.handle_search_focused(focused);
-                (Task::none(), SongsAction::None)
             }
 
             SongsMessage::ContextMenuAction(clicked_idx, entry) => {

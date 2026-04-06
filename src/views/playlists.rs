@@ -142,7 +142,6 @@ pub enum PlaylistsMessage {
     SearchQueryChanged(String),
     SearchFocused(bool),
     RefreshViewData,
-    CenterOnPlaying,
 
     // Data loading (moved from root Message enum)
     PlaylistsLoaded(Result<Vec<PlaylistUIViewData>, String>, usize), // result, total_count
@@ -168,7 +167,7 @@ pub enum PlaylistsAction {
     EditPlaylist(String, String, String), // (playlist_id, playlist_name, comment) — enter split-view edit mode
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
     SetAsDefaultPlaylist(String, String), // (playlist_id, playlist_name) — set as quick-add default
-    CenterOnPlaying,
+
     None,
 }
 
@@ -179,7 +178,7 @@ impl super::HasCommonAction for PlaylistsAction {
             Self::SortModeChanged(m) => super::CommonViewAction::SortModeChanged(*m),
             Self::SortOrderChanged(a) => super::CommonViewAction::SortOrderChanged(*a),
             Self::RefreshViewData => super::CommonViewAction::RefreshViewData,
-            Self::CenterOnPlaying => super::CommonViewAction::CenterOnPlaying,
+
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
         }
@@ -368,9 +367,7 @@ impl PlaylistsPage {
                 PlaylistsMessage::RefreshViewData => {
                     (Task::none(), PlaylistsAction::RefreshViewData)
                 }
-                PlaylistsMessage::CenterOnPlaying => {
-                    (Task::none(), PlaylistsAction::CenterOnPlaying)
-                }
+
                 PlaylistsMessage::ContextMenuAction(clicked_idx, entry) => {
                     // Context menu for child tracks (uses shared LibraryContextEntry)
                     use nokkvi_data::types::batch::BatchItem;

@@ -54,16 +54,7 @@ impl Nokkvi {
                     self.star_item_task(song_id, "song", starred),
                 ])
             }
-            SimilarAction::SetRating(song_id, new_rating) => {
-                // Look up the current rating from similar songs state
-                let current = self
-                    .similar_songs
-                    .as_ref()
-                    .and_then(|s| s.songs.iter().find(|s| s.id == song_id))
-                    .and_then(|s| s.rating)
-                    .unwrap_or(0);
-                self.set_item_rating_task(song_id, "song", new_rating, current)
-            }
+
             SimilarAction::LoadLargeArtwork(album_id) => {
                 let mut tasks = vec![Task::done(Message::Artwork(
                     crate::app_message::ArtworkMessage::LoadLarge(album_id),

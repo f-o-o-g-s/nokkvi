@@ -51,7 +51,6 @@ pub enum SimilarMessage {
     AddCenterToQueue,
 
     // Mouse click on star/heart (item_index, value)
-    ClickSetRating(usize, usize),
     ClickToggleStar(usize),
 
     // Context menu
@@ -64,7 +63,6 @@ pub enum SimilarAction {
     AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
     AddBatchToPlaylist(nokkvi_data::types::batch::BatchPayload),
     ToggleStar(String, bool),
-    SetRating(String, usize),
     LoadLargeArtwork(String),
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>),
     ShowInFolder(String),
@@ -160,19 +158,7 @@ impl SimilarPage {
 
                 (Task::none(), SimilarAction::AddBatchToQueue(payload))
             }
-            SimilarMessage::ClickSetRating(item_index, rating) => {
-                if let Some(song) = songs.get(item_index) {
-                    use nokkvi_data::utils::formatters::compute_rating_toggle;
-                    let current = song.rating.unwrap_or(0) as usize;
-                    let new_rating = compute_rating_toggle(current, rating);
-                    (
-                        Task::none(),
-                        SimilarAction::SetRating(song.id.clone(), new_rating),
-                    )
-                } else {
-                    (Task::none(), SimilarAction::None)
-                }
-            }
+
             SimilarMessage::ClickToggleStar(item_index) => {
                 if let Some(song) = songs.get(item_index) {
                     (

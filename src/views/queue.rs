@@ -91,7 +91,6 @@ pub enum QueueMessage {
     ToggleSortOrder,
     ShuffleQueue,
     SearchQueryChanged(String),
-    SearchFocused(bool),
 
     // Playlist edit mode
     SavePlaylist,
@@ -219,10 +218,6 @@ impl QueuePage {
                 self.common.search_query = query.clone();
                 self.common.slot_list.set_offset(0, total_items); // Reset to top on search
                 (Task::none(), QueueAction::SearchChanged(query))
-            }
-            QueueMessage::SearchFocused(focused) => {
-                self.common.search_input_focused = focused;
-                (Task::none(), QueueAction::None)
             }
 
             // Data loading messages (handled at root level, no action needed here)
