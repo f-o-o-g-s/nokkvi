@@ -44,6 +44,15 @@ impl Nokkvi {
                     )
                 }
             }
+            SimilarAction::PlayBatch(payload) => {
+                let len = payload.items.len();
+                debug!(" Playing batch of {} similar items", len);
+                self.shell_fire_and_forget_task(
+                    move |shell| async move { shell.play_batch(payload).await },
+                    format!("Playing batch of {len} items"),
+                    "play similar batch",
+                )
+            }
             SimilarAction::AddBatchToPlaylist(payload) => {
                 self.handle_add_batch_to_playlist(payload)
             }

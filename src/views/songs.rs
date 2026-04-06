@@ -327,7 +327,12 @@ impl SongsPage {
                                 (Task::none(), SongsAction::None)
                             }
                         }
-                        LibraryContextEntry::Separator => (Task::none(), SongsAction::None),
+                        LibraryContextEntry::Separator
+                        | LibraryContextEntry::ReplaceQueueWithAllFound
+                        | LibraryContextEntry::AddAllFoundToQueue
+                        | LibraryContextEntry::AddAllFoundToPlaylist => {
+                            (Task::none(), SongsAction::None)
+                        }
                     }
                 } else {
                     (Task::none(), SongsAction::None)

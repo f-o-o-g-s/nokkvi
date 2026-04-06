@@ -60,6 +60,7 @@ pub enum SimilarMessage {
 /// Actions that bubble up to root for global state mutation
 #[derive(Debug, Clone)]
 pub enum SimilarAction {
+    PlayBatch(nokkvi_data::types::batch::BatchPayload),
     AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
     AddBatchToPlaylist(nokkvi_data::types::batch::BatchPayload),
     ToggleStar(String, bool),
@@ -174,18 +175,39 @@ impl SimilarPage {
 
                 use crate::widgets::context_menu::LibraryContextEntry;
 
-                let target_indices = self.common.get_batch_target_indices(clicked_idx);
-
-                let payload = super::expansion::build_batch_payload(target_indices, |i| {
-                    songs.get(i).map(|s| BatchItem::Song(Box::new(s.clone())))
-                });
+                let build_all_payload = || {
+                    super::expansion::build_batch_payload(0..songs.len(), |i| {
+                        songs.get(i).map(|s| BatchItem::Song(Box::new(s.clone())))
+                    })
+                };
 
                 if let Some(song) = songs.get(clicked_idx) {
                     match entry {
+                        LibraryContextEntry::ReplaceQueueWithAllFound => {
+                            (Task::none(), SimilarAction::PlayBatch(build_all_payload()))
+                        }
+                        LibraryContextEntry::AddAllFoundToQueue => (
+                            Task::none(),
+                            SimilarAction::AddBatchToQueue(build_all_payload()),
+                        ),
+                        LibraryContextEntry::AddAllFoundToPlaylist => (
+                            Task::none(),
+                            SimilarAction::AddBatchToPlaylist(build_all_payload()),
+                        ),
                         LibraryContextEntry::AddToQueue => {
+                            let target_indices = self.common.get_batch_target_indices(clicked_idx);
+                            let payload =
+                                super::expansion::build_batch_payload(target_indices, |i| {
+                                    songs.get(i).map(|s| BatchItem::Song(Box::new(s.clone())))
+                                });
                             (Task::none(), SimilarAction::AddBatchToQueue(payload))
                         }
                         LibraryContextEntry::AddToPlaylist => {
+                            let target_indices = self.common.get_batch_target_indices(clicked_idx);
+                            let payload =
+                                super::expansion::build_batch_payload(target_indices, |i| {
+                                    songs.get(i).map(|s| BatchItem::Song(Box::new(s.clone())))
+                                });
                             (Task::none(), SimilarAction::AddBatchToPlaylist(payload))
                         }
                         LibraryContextEntry::GetInfo => {
@@ -423,18 +445,14 @@ impl SimilarPage {
                     .width(Length::Fill);
 
                 use crate::widgets::context_menu::{
-                    context_menu, library_entry_view, song_entries_with_folder,
+                    context_menu, library_entry_view, similar_entries,
                 };
                 let item_idx = ctx.item_index;
-                context_menu(
-                    slot_button,
-                    song_entries_with_folder(),
-                    move |entry, length| {
-                        library_entry_view(entry, length, |e| {
-                            SimilarMessage::ContextMenuAction(item_idx, e)
-                        })
-                    },
-                )
+                context_menu(slot_button, similar_entries(), move |entry, length| {
+                    library_entry_view(entry, length, |e| {
+                        SimilarMessage::ContextMenuAction(item_idx, e)
+                    })
+                })
                 .into()
             },
         );
@@ -610,6 +628,63 @@ mod tests {
                 assert!(label.contains("Radiohead"));
             }
             other => panic!("expected FindTopSongs, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn context_replace_queue_with_all_emits_full_batch() {
+        let mut page = SimilarPage::new();
+        let songs = vec![
+            test_song("s1", "Song 1", "Artist"),
+            test_song("s2", "Song 2", "Artist"),
+        ];
+        let (_, action) = page.update(
+            SimilarMessage::ContextMenuAction(0, LibraryContextEntry::ReplaceQueueWithAllFound),
+            &songs,
+        );
+        match action {
+            SimilarAction::PlayBatch(batch) => {
+                assert_eq!(batch.items.len(), 2, "Batch should contain all found songs");
+            }
+            other => panic!("expected PlayBatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn context_add_all_to_playlist_emits_full_batch() {
+        let mut page = SimilarPage::new();
+        let songs = vec![
+            test_song("s1", "Song 1", "Artist"),
+            test_song("s2", "Song 2", "Artist"),
+        ];
+        let (_, action) = page.update(
+            SimilarMessage::ContextMenuAction(0, LibraryContextEntry::AddAllFoundToPlaylist),
+            &songs,
+        );
+        match action {
+            SimilarAction::AddBatchToPlaylist(batch) => {
+                assert_eq!(batch.items.len(), 2, "Batch should contain all found songs");
+            }
+            other => panic!("expected AddBatchToPlaylist, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn context_add_all_to_queue_emits_full_batch() {
+        let mut page = SimilarPage::new();
+        let songs = vec![
+            test_song("s1", "Song 1", "Artist"),
+            test_song("s2", "Song 2", "Artist"),
+        ];
+        let (_, action) = page.update(
+            SimilarMessage::ContextMenuAction(0, LibraryContextEntry::AddAllFoundToQueue),
+            &songs,
+        );
+        match action {
+            SimilarAction::AddBatchToQueue(batch) => {
+                assert_eq!(batch.items.len(), 2, "Batch should contain all found songs");
+            }
+            other => panic!("expected AddBatchToQueue, got {other:?}"),
         }
     }
 

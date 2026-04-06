@@ -43,6 +43,9 @@ pub enum LibraryContextEntry {
     FindSimilar,
     /// Open Top Songs panel for this artist
     TopSongs,
+    ReplaceQueueWithAllFound,
+    AddAllFoundToQueue,
+    AddAllFoundToPlaylist,
 }
 
 /// Standard library context menu entries list.
@@ -92,6 +95,23 @@ pub(crate) fn artist_entries_with_folder() -> Vec<LibraryContextEntry> {
     ]
 }
 
+/// Library context menu entries for Similar/Top Songs view (includes batch actions).
+pub(crate) fn similar_entries() -> Vec<LibraryContextEntry> {
+    vec![
+        LibraryContextEntry::ReplaceQueueWithAllFound,
+        LibraryContextEntry::AddAllFoundToQueue,
+        LibraryContextEntry::AddAllFoundToPlaylist,
+        LibraryContextEntry::Separator,
+        LibraryContextEntry::AddToQueue,
+        LibraryContextEntry::AddToPlaylist,
+        LibraryContextEntry::Separator,
+        LibraryContextEntry::GetInfo,
+        LibraryContextEntry::ShowInFolder,
+        LibraryContextEntry::FindSimilar,
+        LibraryContextEntry::TopSongs,
+    ]
+}
+
 /// Render a standard library context menu entry.
 pub(crate) fn library_entry_view<'a, Message: Clone + 'a>(
     entry: LibraryContextEntry,
@@ -129,6 +149,21 @@ pub(crate) fn library_entry_view<'a, Message: Clone + 'a>(
             Some("assets/icons/sparkles.svg"),
             "Top Songs",
             on_action(LibraryContextEntry::TopSongs),
+        ),
+        LibraryContextEntry::ReplaceQueueWithAllFound => menu_button(
+            Some("assets/icons/circle-play.svg"),
+            "Replace Queue with All Found",
+            on_action(LibraryContextEntry::ReplaceQueueWithAllFound),
+        ),
+        LibraryContextEntry::AddAllFoundToQueue => menu_button(
+            Some("assets/icons/list-tree.svg"),
+            "Add All Found to Queue",
+            on_action(LibraryContextEntry::AddAllFoundToQueue),
+        ),
+        LibraryContextEntry::AddAllFoundToPlaylist => menu_button(
+            Some("assets/icons/library.svg"),
+            "Create Playlist from All Found",
+            on_action(LibraryContextEntry::AddAllFoundToPlaylist),
         ),
     }
 }
