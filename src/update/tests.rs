@@ -984,3 +984,162 @@ fn server_version_fetched_updates_state() {
 
     assert_eq!(app.server_version.as_deref(), Some("0.61.1"));
 }
+
+// ============================================================================
+// Settings Escape Priority Chain (views/settings/mod.rs)
+// ============================================================================
+
+/// Build a minimal SettingsViewData for testing.
+/// Only the structure matters — values are defaults/dummies.
+fn make_settings_view_data() -> crate::views::SettingsViewData {
+    crate::views::SettingsViewData {
+        visualizer_config: crate::visualizer_config::VisualizerConfig::default(),
+        theme_file: nokkvi_data::types::theme_file::ThemeFile::default(),
+        active_theme_stem: String::new(),
+        window_height: 800.0,
+        hotkey_config: nokkvi_data::types::hotkey_config::HotkeyConfig::default(),
+        server_url: String::new(),
+        username: String::new(),
+        is_light_mode: false,
+        scrobbling_enabled: true,
+        scrobble_threshold: 0.50,
+        start_view: "Queue".to_string(),
+        stable_viewport: true,
+        auto_follow_playing: true,
+        enter_behavior: "PlayAll",
+        local_music_path: String::new(),
+        library_page_size: "Default",
+        rounded_mode: false,
+        nav_layout: "Top",
+        nav_display_mode: "IconsAndLabels",
+        track_info_display: "Full",
+        slot_row_height: "Default",
+        opacity_gradient: true,
+        crossfade_enabled: false,
+        crossfade_duration_secs: 5,
+        volume_normalization: false,
+        normalization_level: "Standard",
+        default_playlist_name: String::new(),
+        quick_add_to_playlist: false,
+        horizontal_volume: false,
+        font_family: String::new(),
+        strip_show_title: true,
+        strip_show_artist: true,
+        strip_show_album: true,
+        strip_show_format_info: true,
+        strip_click_action: "CenterOnPlaying",
+        verbose_config: false,
+        artwork_resolution: "Default",
+    }
+}
+
+#[test]
+fn settings_escape_at_root_exits() {
+    use crate::views::settings::{NavLevel, SettingsAction, SettingsMessage};
+    let mut page = crate::views::SettingsPage::new();
+    // Default state: nav_stack = [CategoryPicker], no search, no editing
+    assert_eq!(page.nav_stack.len(), 1);
+    assert_eq!(*page.current_level(), NavLevel::CategoryPicker);
+
+    let data = make_settings_view_data();
+    let action = page.update(SettingsMessage::Escape, &data);
+    assert!(
+        matches!(action, SettingsAction::ExitSettings),
+        "Escape at root should exit settings, got: {action:?}"
+    );
+}
+
+#[test]
+fn settings_escape_with_stale_search_exits() {
+    use crate::views::settings::{SettingsAction, SettingsMessage};
+    let mut page = crate::views::SettingsPage::new();
+    // Simulate: user searched, then SlotListDown cleared search_active but kept query
+    page.search_query = "scrobbl".to_string();
+    page.search_active = false; // search bar is hidden — query is stale/invisible
+
+    let data = make_settings_view_data();
+    let action = page.update(SettingsMessage::Escape, &data);
+    assert!(
+        matches!(action, SettingsAction::ExitSettings),
+        "Escape with stale (inactive) search should exit settings, got: {action:?}"
+    );
+    // Query should also be cleaned up
+    assert!(
+        page.search_query.is_empty(),
+        "Stale search query should be cleared on exit"
+    );
+}
+
+#[test]
+fn settings_escape_with_active_search_clears_search() {
+    use crate::views::settings::{SettingsAction, SettingsMessage};
+    let mut page = crate::views::SettingsPage::new();
+    page.search_query = "scrobbl".to_string();
+    page.search_active = true; // search bar is visible
+
+    let data = make_settings_view_data();
+    let action = page.update(SettingsMessage::Escape, &data);
+    assert!(
+        matches!(action, SettingsAction::None),
+        "Escape with active search should clear search (not exit), got: {action:?}"
+    );
+    assert!(!page.search_active, "search_active should be cleared");
+    assert!(page.search_query.is_empty(), "search query should be empty");
+}
+
+#[test]
+fn settings_escape_pops_nav_stack() {
+    use crate::views::settings::{NavLevel, SettingsAction, SettingsMessage, SettingsTab};
+    let mut page = crate::views::SettingsPage::new();
+    // Drill into General category
+    page.push_level(NavLevel::Category(SettingsTab::General));
+    assert_eq!(page.nav_stack.len(), 2);
+
+    let data = make_settings_view_data();
+    let action = page.update(SettingsMessage::Escape, &data);
+    assert!(
+        matches!(action, SettingsAction::None),
+        "Escape at depth 2 should pop nav stack, got: {action:?}"
+    );
+    assert_eq!(
+        page.nav_stack.len(),
+        1,
+        "Nav stack should be popped to root"
+    );
+}
+
+#[test]
+fn settings_escape_cancels_hotkey_capture() {
+    use crate::views::settings::{SettingsAction, SettingsMessage};
+    let mut page = crate::views::SettingsPage::new();
+    page.capturing_hotkey = Some(nokkvi_data::types::hotkey_config::HotkeyAction::TogglePlay);
+
+    let data = make_settings_view_data();
+    let action = page.update(SettingsMessage::Escape, &data);
+    assert!(
+        matches!(action, SettingsAction::None),
+        "Escape during hotkey capture should cancel capture, got: {action:?}"
+    );
+    assert!(
+        page.capturing_hotkey.is_none(),
+        "capturing_hotkey should be cleared"
+    );
+}
+
+#[test]
+fn settings_escape_exits_edit_mode() {
+    use crate::views::settings::{SettingsAction, SettingsMessage};
+    let mut page = crate::views::SettingsPage::new();
+    page.editing_index = Some(0);
+
+    let data = make_settings_view_data();
+    let action = page.update(SettingsMessage::Escape, &data);
+    assert!(
+        matches!(action, SettingsAction::None),
+        "Escape during edit mode should exit edit, got: {action:?}"
+    );
+    assert!(
+        page.editing_index.is_none(),
+        "editing_index should be cleared"
+    );
+}

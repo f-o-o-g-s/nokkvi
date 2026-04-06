@@ -364,11 +364,16 @@ impl Nokkvi {
         // Audio rendering no longer driven by iced subscription.
         // It runs on a dedicated std::thread with a 5ms timer (see engine.rs).
 
-        let keyboard = keyboard::listen().filter_map(|event| match event {
-            keyboard::Event::KeyPressed { key, modifiers, .. } => {
+        // Keyboard events: use event::listen_with (not keyboard::listen) to
+        // receive ALL key events regardless of widget capture status.
+        // keyboard::listen() filters for Status::Ignored, which means focused
+        // text_input widgets silently swallow Escape/Enter before our hotkey
+        // system ever sees them.
+        let keyboard = event::listen_with(|event, _status, _window| match event {
+            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
                 Some(Message::RawKeyEvent(key, modifiers))
             }
-            keyboard::Event::ModifiersChanged(modifiers) => {
+            Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
                 Some(Message::ModifiersChanged(modifiers))
             }
             _ => None,

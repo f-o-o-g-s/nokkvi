@@ -823,8 +823,8 @@ impl SettingsPage {
                     self.editing_index = None;
                     self.hex_input.clear();
                     SettingsAction::None
-                } else if !self.search_query.is_empty() {
-                    // Clear search filter and restore entries for current nav level
+                } else if self.search_active && !self.search_query.is_empty() {
+                    // Clear visible search filter and restore entries for current nav level
                     self.search_active = false;
                     self.search_query.clear();
                     self.slot_list = SlotListView::new();
@@ -832,10 +832,14 @@ impl SettingsPage {
                     SettingsAction::None
                 } else if self.nav_stack.len() > 1 {
                     // Pop navigation stack — go back one level
+                    // Clear any stale search query from a dismissed search bar
+                    self.search_query.clear();
                     self.pop_level();
                     self.refresh_entries(data);
                     SettingsAction::None
                 } else {
+                    // Clear any stale search query so re-opening shows full list
+                    self.search_query.clear();
                     tracing::debug!(" [SETTINGS] ExitSettings triggered!");
                     SettingsAction::ExitSettings
                 }
