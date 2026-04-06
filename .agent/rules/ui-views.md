@@ -38,11 +38,11 @@ Generic `ExpansionState<C>` + `SlotListEntry<P, C>`. When active, sort/search ma
 
 - Library views: `LibraryContextEntry`. Queue: `QueueContextEntry`. Strip: `StripContextEntry`.
 - Toast helpers: `toast_info()`, `toast_success()`, `toast_warn()`, `toast_error()`
-- Batch actions: context menu resolves `evaluate_context_menu()` for multi-selection, then dispatches batch operations. `clear_multi_selection()` after batch completion.
+- Batch actions: context menu resolves `evaluate_context_menu()` for multi-selection (or generates full-batch payloads for algorithmic views like Similar Songs), then dispatches batch operations. `clear_multi_selection()` after batch completion.
 
 ## Browsing Panel (Split-View)
 
-Toggled via Ctrl+E from Queue. `BrowsingView` enum: Songs, Albums, Artists, Genres. Reuses existing page structs. `PaneFocus` toggled via Tab. Play actions blocked via `guard_play_action()`.
+Toggled via Ctrl+E from Queue. `BrowsingView` enum: Albums, Songs, Artists, Genres, Similar. Reuses existing page structs. `PaneFocus` toggled via Tab. Play actions blocked via `guard_play_action()`.
 
 **Cross-pane drag** supports batch: `cross_pane_drag_selection_count` tracks whether dragging a single item or a multi-selection batch. Drag threshold 5px. Center index snapshotted at press time.
 

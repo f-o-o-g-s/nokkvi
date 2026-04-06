@@ -17,7 +17,7 @@ A Rust/Iced desktop client for [Navidrome](https://www.navidrome.org/) music ser
 
 **Key data structure:** `PagedBuffer<T>` (`data/src/types/paged_buffer.rs`) — replaces `Vec<T>` for all library data. `Deref<Target = [T]>` makes it a drop-in replacement. Load state tracked via `set_loading()` / `needs_fetch()`.
 
-**Consolidated state:** `src/state.rs` groups app state into domain structs (`PlaybackState`, `ScrobbleState`, `LibraryData`, `WindowState`, `ToastState`, etc.).
+**Consolidated state:** `src/state.rs` groups app state into domain structs (`PlaybackState`, `ScrobbleState`, `LibraryData`, `WindowState`, `ToastState`, `SimilarSongsState`, etc.).
 
 ## Core Pattern: TEA (The Elm Architecture)
 
