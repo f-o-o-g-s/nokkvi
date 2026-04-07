@@ -46,14 +46,26 @@ trigger: always_on
 
 ## Testing & Verification
 
+### Red-Green TDD Protocol
+
+**Bug fixes** and **new feature handlers** must follow red-green TDD:
+
+1. **Red**: Write tests asserting the desired behavior. Tests must use **observable state mutations** (e.g., `modes.random`, `modes.consume`, `search_query`) — avoid testing side effects that require `app_service` or return opaque `Task` values. Run tests, confirm they **fail**.
+2. **Green**: Implement the minimal fix/feature to make the tests pass.
+3. **Verify**: `cargo test`, `cargo clippy`, `cargo +nightly fmt --all`.
+
+**Structural plumbing** (adding fields, wiring message variants) may be done before writing tests if the tests cannot compile without it — but no behavior changes until tests are red.
+
+**Test placement**: `update/tests.rs` for update handler tests, inline `#[cfg(test)]` modules for self-contained logic (data types, widgets, pure functions).
+
+### CI Commands
+
 ```bash
 cargo +nightly fmt --all      # Format (nightly required)
 cargo clippy                  # Lint — fix all warnings
 cargo test                    # Unit tests
 cargo build --release         # Release build verification
 ```
-
-Tests live in inline `#[cfg(test)]` modules. Grep for `#[cfg(test)]` to find them.
 
 ## Config & Persistence
 

@@ -33,5 +33,6 @@ description: End-to-end checklist when building new features. Covers cross-view 
 - [ ] **Icons**: Lucide SVGs from `reference-lucide/icons/` → register in `src/embedded_svg.rs` (add const, match arm, KNOWN list entry)
 
 ## Verification
+- [ ] **TDD**: Write tests for observable state mutations **before** implementing handlers (see code-standards.md Red-Green protocol)
 - [ ] `cargo +nightly fmt --all`, `cargo clippy`, `cargo test` clean
 - [ ] Manual test: happy path + edge cases + stable widget tree
