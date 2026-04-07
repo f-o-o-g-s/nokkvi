@@ -106,9 +106,21 @@ cargo +nightly fmt --all -- --check # verify without modifying
 ```
 
 
-## Configuration
+## Data & Configuration
 
-Configuration is stored in `~/.config/nokkvi/config.toml` (hot-reloadable).
+All application data and configuration is localized to `~/.config/nokkvi/`:
+
+- `config.toml`: User preferences, theme selection, and visualizer settings (hot-reloadable).
+- `app.redb`: Unified database file storing your session tokens, saved queue state, and application settings.
+- `cache/`: Persistent disk cache for album and artist artwork.
+- `themes/`: Directory containing all built-in and user-created `.toml` theme files.
+- `sfx/`: Directory containing all UI sound effects (you can drop in custom `.wav` files to override the defaults).
+
+### Artwork Prefetching & Cache
+
+To guarantee instantaneous load times and a fluid, 60fps scrolling experience, Nokkvi doesn't fetch album art on-the-fly like a web browser. Instead, a background service automatically downloads and caches your *entire* library's album and artist artwork (both thumbnail and high-resolution sizes) to `~/.config/nokkvi/cache/` after you log in. 
+
+Depending on your library size, this means Nokkvi will consume local disk space to store these images (often a few hundred megabytes for larger libraries). This aggressive caching strategy is what allows the native application interface to remain perfectly responsive during rapid navigation without being bottlenecked by network latency.
 
 ### Built-in Themes
 

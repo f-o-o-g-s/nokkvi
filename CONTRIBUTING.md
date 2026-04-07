@@ -27,14 +27,13 @@ cargo clippy                  # Lint (fix all warnings)
 cargo +nightly fmt --all      # Format (nightly required)
 ```
 
-All four need to pass before submitting a PR.
+All of these checks need to pass before submitting a PR.
 
 Formatting uses **nightly rustfmt** with a custom `rustfmt.toml` (100-char lines, crate-level import merging). Install nightly with `rustup toolchain install nightly` if you don't have it.
 
 ## Good Contributions
 
 - Bug fixes, especially edge cases, panics, or rendering issues
-- Platform support for non-Arch distros or Wayland/X11 quirks
 - Performance improvements (this is an audio app, latency matters)
 - Documentation, screenshots, user guides
 - New themes in `themes/`
