@@ -492,19 +492,45 @@ pub(crate) fn player_bar<'a>(
         ));
     }
 
-    // EQ button
+    // EQ button (text label instead of icon)
     if show_consume {
-        let eq_label = if eq_enabled {
+        let eq_tooltip = if eq_enabled {
             "Equalizer: Active"
         } else {
             "Equalizer: Disabled"
         };
-        mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
-            "assets/icons/sliders-horizontal.svg",
-            PlayerBarMessage::ToggleEq,
-            eq_enabled,
-            eq_label,
-        ));
+        mode_toggles_row = mode_toggles_row.push(Element::from(HoverOverlay::new(
+            tooltip(
+                three_d_button(
+                    container(text("EQ").size(10.0).font(Font {
+                        weight: Weight::Bold,
+                        ..theme::ui_font()
+                    }))
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .center_x(Length::Fill)
+                    .center_y(Length::Fill),
+                )
+                .on_press(PlayerBarMessage::ToggleEq)
+                .width(Length::Fixed(BUTTON_SIZE))
+                .height(BUTTON_SIZE)
+                .background(if eq_enabled {
+                    theme::accent_bright()
+                } else {
+                    theme::bg1()
+                })
+                .active(eq_enabled),
+                container(
+                    text(eq_tooltip)
+                        .size(11.0)
+                        .font(theme::ui_font()),
+                )
+                .padding(4),
+                tooltip::Position::Top,
+            )
+            .gap(4)
+            .style(theme::container_tooltip),
+        )));
     }
 
     // SFX toggle button
