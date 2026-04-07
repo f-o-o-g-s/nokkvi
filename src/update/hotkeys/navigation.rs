@@ -17,6 +17,14 @@ impl Nokkvi {
             return self.handle_cross_pane_drag_cancel();
         }
 
+        // Settings has its own Escape handling — must be checked before the
+        // browsing panel block, because current_view_page() returns None for
+        // Settings, making all is_none_or() guards pass true and silently
+        // closing the browsing panel instead of exiting settings.
+        if self.current_view == View::Settings {
+            return Task::done(Message::Settings(views::SettingsMessage::Escape));
+        }
+
         // In playlist edit mode: Escape exits edit mode when search is empty
         // and no expansion is active (i.e. there's nothing else to dismiss).
         // In standalone browsing panel: Escape closes the panel.
@@ -38,11 +46,6 @@ impl Nokkvi {
             return Task::done(Message::TextInputDialog(
                 crate::widgets::text_input_dialog::TextInputDialogMessage::Cancel,
             ));
-        }
-
-        // Settings has its own Escape handling
-        if self.current_view == View::Settings {
-            return Task::done(Message::Settings(views::SettingsMessage::Escape));
         }
 
         if let Some(page) = self.current_view_page_mut() {
