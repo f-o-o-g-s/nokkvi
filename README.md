@@ -220,6 +220,8 @@ All keyboard shortcuts are **user-configurable** via the Settings view (Hotkeys 
 | Key | Action | Views |
 |-----|--------|-------|
 | `Shift+I` | Open Get Info modal for selected item | All library views + Queue |
+| `Shift+S` | Find similar songs for the currently playing track | All |
+| `Shift+T` | Show top songs for the currently playing track's artist | All |
 | `Shift+C` | Center on currently playing | All (view-aware: finds album, artist, song, or genre) |
 | `Shift+L` | Toggle star/favorite on selected item | Queue, Albums, Artists, Songs, Genres, Playlists (expansion-aware) |
 | `Shift+A` | Add centered item to queue | Albums, Artists, Songs, Genres, Playlists |

@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+## v0.2.8 — 2026-04-06
+
+### Features
+- **Similar Songs Enhancements** — finalized similar songs integration, including refined UI headers and batch operations in the context menu.
+- **Find Similar/Top Songs Hotkeys** — added global configurable hotkey bindings (default `Shift+S` and `Shift+T`) to quickly find similar or top songs for the currently playing track's artist.
+
+### Fixes
+- **Settings Input Escaping** — prevented the escape key from being swallowed by focused text inputs, ensuring it consistently closes settings or modals.
+- **Hotkey Suppressions** — safely suppressed global hotkey dispatch when text inputs have captured the key event, avoiding accidental actions while typing.
+
+### Improvements
+- **UI Refinements** — replaced the equalizer icon with a clean text label and removed deprecated queue movement and action variants.
+- **Scalability** — performed an audit remediation for the UI and API client to improve overall application performance.
+
+### Docs & Internal
+- **Documentation Updates** — updated the readme with cache storage information, clarified contributing guidelines, and refreshed third-party licenses.
+- **Rule Synchronization** — synced agent rules, incorporated red-green TDD protocols, and fixed clippy warnings.
+
 ## v0.2.7 — 2026-04-05
 
 ### Features
