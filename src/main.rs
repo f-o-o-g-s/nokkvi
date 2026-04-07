@@ -369,9 +369,9 @@ impl Nokkvi {
         // keyboard::listen() filters for Status::Ignored, which means focused
         // text_input widgets silently swallow Escape/Enter before our hotkey
         // system ever sees them.
-        let keyboard = event::listen_with(|event, _status, _window| match event {
+        let keyboard = event::listen_with(|event, status, _window| match event {
             Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
-                Some(Message::RawKeyEvent(key, modifiers))
+                Some(Message::RawKeyEvent(key, modifiers, status))
             }
             Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
                 Some(Message::ModifiersChanged(modifiers))

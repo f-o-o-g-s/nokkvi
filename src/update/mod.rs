@@ -829,7 +829,7 @@ impl Nokkvi {
             // -----------------------------------------------------------------
             // Raw Keyboard Events → HotkeyConfig dispatch
             // -----------------------------------------------------------------
-            Message::RawKeyEvent(key, modifiers) => {
+            Message::RawKeyEvent(key, modifiers, status) => {
                 // If settings is in hotkey capture mode, forward the raw event there
                 // instead of dispatching it as a normal hotkey action
                 if self.settings_page.capturing_hotkey.is_some() {
@@ -837,6 +837,22 @@ impl Nokkvi {
                         key, modifiers,
                     ));
                 }
+
+                // When a widget (e.g. text_input search bar) has captured the
+                // key event, suppress hotkey dispatch to avoid triggering actions
+                // while the user is typing. Exceptions:
+                //   - Escape: always allowed (close overlays, clear search)
+                //   - Ctrl+key: always allowed (intentional shortcuts like Ctrl+S)
+                if status == iced::event::Status::Captured {
+                    let is_escape = matches!(
+                        key,
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape)
+                    );
+                    if !is_escape && !modifiers.control() {
+                        return Task::none();
+                    }
+                }
+
                 // Look up the key event against the user's hotkey config
                 match crate::hotkeys::handle_hotkey(key, modifiers, &self.hotkey_config) {
                     Some(msg) => self.update(msg),

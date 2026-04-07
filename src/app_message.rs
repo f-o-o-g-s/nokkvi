@@ -363,7 +363,13 @@ pub enum Message {
     // --- Raw Keyboard Event ---
     // --- Raw Keyboard Event ---
     /// Raw key press forwarded from subscription; dispatched via HotkeyConfig in update()
-    RawKeyEvent(iced::keyboard::Key, iced::keyboard::Modifiers),
+    /// The `Status` field indicates whether a widget (e.g. text_input) has already
+    /// captured this event. Used to suppress hotkeys while typing in search fields.
+    RawKeyEvent(
+        iced::keyboard::Key,
+        iced::keyboard::Modifiers,
+        iced::event::Status,
+    ),
     /// Tracks global keyboard modifiers (shift/ctrl/alt/logo) for mouse interaction (e.g. shift+click)
     ModifiersChanged(iced::keyboard::Modifiers),
 

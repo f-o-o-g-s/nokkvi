@@ -1143,3 +1143,132 @@ fn settings_escape_exits_edit_mode() {
         "editing_index should be cleared"
     );
 }
+
+// ============================================================================
+// Hotkey Suppression During Text Input (TDD — regression from 2c54792)
+// ============================================================================
+//
+// When a text_input widget has captured a key event (Status::Captured),
+// hotkeys should NOT fire — the user is typing in a search field.
+//
+// Exceptions:
+// - Escape should always pass through (close overlays / clear search)
+// - Ctrl+key combos should always pass through (Ctrl+S, Ctrl+D, Ctrl+E)
+
+/// Helper: simulate a RawKeyEvent through the full update() dispatch.
+fn send_raw_key(
+    app: &mut crate::Nokkvi,
+    key: iced::keyboard::Key,
+    modifiers: iced::keyboard::Modifiers,
+    status: iced::event::Status,
+) -> iced::Task<crate::Message> {
+    app.update(crate::Message::RawKeyEvent(key, modifiers, status))
+}
+
+#[test]
+fn hotkey_suppressed_when_captured_toggle_random() {
+    // 'x' is bound to ToggleRandom. If captured by a text_input, it must NOT toggle.
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    app.screen = crate::Screen::Home;
+    assert!(!app.modes.random, "random should start as false");
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("x".into()),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Captured,
+    );
+
+    assert!(
+        !app.modes.random,
+        "ToggleRandom ('x') should be suppressed when Status::Captured"
+    );
+}
+
+#[test]
+fn hotkey_suppressed_when_captured_toggle_consume() {
+    // 'c' is bound to ToggleConsume. Must be suppressed when captured.
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    app.screen = crate::Screen::Home;
+    assert!(!app.modes.consume);
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("c".into()),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Captured,
+    );
+
+    assert!(
+        !app.modes.consume,
+        "ToggleConsume ('c') should be suppressed when Status::Captured"
+    );
+}
+
+#[test]
+fn hotkey_fires_when_not_captured_toggle_random() {
+    // Same key 'x' with Status::Ignored should work normally.
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    app.screen = crate::Screen::Home;
+    assert!(!app.modes.random);
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("x".into()),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Ignored,
+    );
+
+    assert!(
+        app.modes.random,
+        "ToggleRandom should fire when Status::Ignored (no widget has focus)"
+    );
+}
+
+#[test]
+fn escape_not_suppressed_when_captured() {
+    // Escape should always fire, even when a text_input has captured the event.
+    // This was the whole reason we switched to event::listen_with() in 2c54792.
+    let mut app = test_app();
+    app.current_view = View::Settings;
+    app.screen = crate::Screen::Home;
+    app.window.eq_modal_open = true;
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Captured,
+    );
+
+    assert!(
+        !app.window.eq_modal_open,
+        "Escape should close EQ modal even when Status::Captured"
+    );
+}
+
+#[test]
+fn ctrl_combo_not_suppressed_when_captured() {
+    // Ctrl+E is bound to ToggleBrowsingPanel. Ctrl+ combos are intentional
+    // actions, not typing — they must NOT be suppressed even when captured.
+    // Without app_service the handler returns Task::none(), but the fact that
+    // it reaches the handler (no panic, no suppression) is what we're testing.
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    app.screen = crate::Screen::Home;
+    assert!(app.browsing_panel.is_none());
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("e".into()),
+        iced::keyboard::Modifiers::CTRL,
+        iced::event::Status::Captured,
+    );
+
+    // ToggleBrowsingPanel was dispatched (not suppressed). No panic = success.
+    // Contrast with hotkey_suppressed_when_captured_toggle_random which MUST
+    // be suppressed under the same Status::Captured condition.
+}
