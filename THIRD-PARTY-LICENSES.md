@@ -34,7 +34,7 @@ PERFORMANCE OF THIS SOFTWARE.
 
 ## Rust Dependencies
 
-All Rust crate dependencies are listed in `Cargo.toml` and `data/Cargo.toml`. Every transitive dependency uses a permissive open source license (MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, CC0-1.0, BSL-1.0, or Zlib). There are no copyleft-only dependencies.
+All Rust crate dependencies are listed in `Cargo.toml` and `data/Cargo.toml`. Every transitive dependency uses a permissive or file-based weak copyleft open source license (including MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, CC0-1.0, BSL-1.0, Zlib, MPL-2.0, Unicode-3.0, CDLA-Permissive-2.0, and The Unlicense). There are no strong copyleft-only (e.g., GPL-only) dependencies.
 
 You can audit dependency licenses yourself with:
 
