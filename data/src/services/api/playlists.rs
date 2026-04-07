@@ -360,28 +360,29 @@ impl PlaylistsApiService {
     /// Create a new playlist with the given name and optional songs.
     ///
     /// Uses Navidrome native API: POST /api/playlist + POST /api/playlist/:id/tracks
-    pub async fn create_playlist(&self, name: &str, song_ids: &[String]) -> Result<()> {
+    pub async fn create_playlist(&self, name: &str, song_ids: &[String]) -> Result<String> {
         // Step 1: Create the playlist
         let body = serde_json::json!({ "name": name });
         let response = self.client.post_json("api/playlist", &body).await?;
 
+        // Parse the playlist ID from response
+        let response_json: serde_json::Value =
+            serde_json::from_str(&response).context("Failed to parse create playlist response")?;
+        let playlist_id = response_json
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("No playlist ID in create response"))?
+            .to_string();
+
         // Step 2: If we have songs, add them to the newly created playlist
         if !song_ids.is_empty() {
-            // Parse the playlist ID from response
-            let response_json: serde_json::Value = serde_json::from_str(&response)
-                .context("Failed to parse create playlist response")?;
-            let playlist_id = response_json
-                .get("id")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("No playlist ID in create response"))?;
-
             let tracks_body = serde_json::json!({ "ids": song_ids });
             self.client
                 .post_json(&format!("api/playlist/{playlist_id}/tracks"), &tracks_body)
                 .await?;
         }
 
-        Ok(())
+        Ok(playlist_id)
     }
 
     /// Update a playlist's name and/or comment.

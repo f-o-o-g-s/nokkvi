@@ -20,8 +20,10 @@ use crate::{View, services, views, widgets};
 pub enum PlaylistMutation {
     Deleted(String),
     Renamed(String),
-    Created(String),
-    Overwritten(String),
+    /// (name, playlist_id) — playlist_id used to set queue header when created from queue
+    Created(String, Option<String>),
+    /// (name, playlist_id) — playlist_id used to set queue header when overwritten from queue
+    Overwritten(String, Option<String>),
     Appended(String),
 }
 
@@ -30,8 +32,8 @@ impl std::fmt::Display for PlaylistMutation {
         match self {
             Self::Deleted(name) => write!(f, "Deleted '{name}'"),
             Self::Renamed(name) => write!(f, "Renamed to '{name}'"),
-            Self::Created(name) => write!(f, "Created playlist '{name}'"),
-            Self::Overwritten(name) => write!(f, "Overwritten playlist '{name}'"),
+            Self::Created(name, _) => write!(f, "Created playlist '{name}'"),
+            Self::Overwritten(name, _) => write!(f, "Overwritten playlist '{name}'"),
             Self::Appended(name) => write!(f, "Added songs to '{name}'"),
         }
     }

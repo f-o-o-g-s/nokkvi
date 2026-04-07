@@ -1321,3 +1321,79 @@ fn focus_search_on_settings_without_panel_works() {
     assert!(!app.albums_page.common.search_input_focused);
     assert!(!app.queue_page.common.search_input_focused);
 }
+
+// ============================================================================
+// Playlist Mutation → Queue Header (update/mod.rs)
+// ============================================================================
+
+#[test]
+fn playlist_created_from_queue_sets_active_playlist_info() {
+    let mut app = test_app();
+    assert!(app.active_playlist_info.is_none());
+
+    let _ = app.update(crate::app_message::Message::PlaylistMutated(
+        crate::app_message::PlaylistMutation::Created(
+            "My Queue Playlist".to_string(),
+            Some("pl-123".to_string()),
+        ),
+    ));
+
+    let info = app
+        .active_playlist_info
+        .as_ref()
+        .expect("active_playlist_info should be set after Created with ID");
+    assert_eq!(info.0, "pl-123", "playlist ID should match");
+    assert_eq!(info.1, "My Queue Playlist", "playlist name should match");
+    assert_eq!(info.2, "", "comment should be empty for new playlists");
+}
+
+#[test]
+fn playlist_overwritten_from_queue_sets_active_playlist_info() {
+    let mut app = test_app();
+    assert!(app.active_playlist_info.is_none());
+
+    let _ = app.update(crate::app_message::Message::PlaylistMutated(
+        crate::app_message::PlaylistMutation::Overwritten(
+            "Overwritten Playlist".to_string(),
+            Some("pl-456".to_string()),
+        ),
+    ));
+
+    let info = app
+        .active_playlist_info
+        .as_ref()
+        .expect("active_playlist_info should be set after Overwritten with ID");
+    assert_eq!(info.0, "pl-456");
+    assert_eq!(info.1, "Overwritten Playlist");
+}
+
+#[test]
+fn playlist_created_without_id_does_not_set_active_playlist_info() {
+    let mut app = test_app();
+    assert!(app.active_playlist_info.is_none());
+
+    // Created from a non-queue context (e.g. "Add to Playlist" dialog) — no ID
+    let _ = app.update(crate::app_message::Message::PlaylistMutated(
+        crate::app_message::PlaylistMutation::Created("From Songs View".to_string(), None),
+    ));
+
+    assert!(
+        app.active_playlist_info.is_none(),
+        "active_playlist_info should NOT be set when Created has no playlist ID"
+    );
+}
+
+#[test]
+fn playlist_deleted_does_not_set_active_playlist_info() {
+    let mut app = test_app();
+    assert!(app.active_playlist_info.is_none());
+
+    let _ = app.update(crate::app_message::Message::PlaylistMutated(
+        crate::app_message::PlaylistMutation::Deleted("Deleted Playlist".to_string()),
+    ));
+
+    assert!(
+        app.active_playlist_info.is_none(),
+        "active_playlist_info should NOT be set for Delete mutations"
+    );
+}

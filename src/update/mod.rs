@@ -273,6 +273,17 @@ impl Nokkvi {
             // -----------------------------------------------------------------
             Message::LoadPlaylists => self.handle_load_playlists(),
             Message::PlaylistMutated(mutation) => {
+                // When creating/overwriting a playlist from the queue, set the
+                // playlist context header so the queue shows the same header bar
+                // as when playing an existing playlist.
+                match &mutation {
+                    crate::app_message::PlaylistMutation::Created(name, Some(id))
+                    | crate::app_message::PlaylistMutation::Overwritten(name, Some(id)) => {
+                        self.active_playlist_info = Some((id.clone(), name.clone(), String::new()));
+                        self.persist_active_playlist_info();
+                    }
+                    _ => {}
+                }
                 self.toast_success(mutation.to_string());
                 self.handle_load_playlists()
             }

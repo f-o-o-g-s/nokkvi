@@ -92,13 +92,27 @@ impl Nokkvi {
                 self.text_input_dialog.close();
                 let song_ids = self.queue_song_ids();
                 let name = value.clone();
-                self.shell_action_task(
+                self.shell_task(
                     move |shell| async move {
                         let service = shell.playlists_api().await?;
-                        service.create_playlist(&name, &song_ids).await
+                        let playlist_id = service.create_playlist(&name, &song_ids).await?;
+                        Ok(playlist_id)
                     },
-                    Message::PlaylistMutated(PlaylistMutation::Created(value)),
-                    "create playlist from queue",
+                    move |result: Result<String, anyhow::Error>| match result {
+                        Ok(playlist_id) => Message::PlaylistMutated(PlaylistMutation::Created(
+                            value,
+                            Some(playlist_id),
+                        )),
+                        Err(e) => {
+                            tracing::error!(" Failed to create playlist from queue: {e}");
+                            Message::Toast(crate::app_message::ToastMessage::Push(
+                                nokkvi_data::types::toast::Toast::new(
+                                    format!("Failed to create playlist: {e}"),
+                                    nokkvi_data::types::toast::ToastLevel::Error,
+                                ),
+                            ))
+                        }
+                    },
                 )
             }
             Some(TextInputDialogAction::OverwritePlaylistFromQueue(playlist_id)) => {
@@ -114,6 +128,7 @@ impl Nokkvi {
                     .unwrap_or_default();
                 self.text_input_dialog.close();
                 let song_ids = self.queue_song_ids();
+                let id_for_msg = playlist_id.clone();
                 self.shell_action_task(
                     move |shell| async move {
                         let service = shell.playlists_api().await?;
@@ -121,7 +136,10 @@ impl Nokkvi {
                             .replace_playlist_tracks(&playlist_id, &song_ids)
                             .await
                     },
-                    Message::PlaylistMutated(PlaylistMutation::Overwritten(playlist_name)),
+                    Message::PlaylistMutated(PlaylistMutation::Overwritten(
+                        playlist_name,
+                        Some(id_for_msg),
+                    )),
                     "overwrite playlist from queue",
                 )
             }
@@ -144,13 +162,25 @@ impl Nokkvi {
                 }
                 self.text_input_dialog.close();
                 let name = value.clone();
-                self.shell_action_task(
+                self.shell_task(
                     move |shell| async move {
                         let service = shell.playlists_api().await?;
                         service.create_playlist(&name, &song_ids).await
                     },
-                    Message::PlaylistMutated(PlaylistMutation::Created(value)),
-                    "create playlist with songs",
+                    move |result: Result<String, anyhow::Error>| match result {
+                        Ok(_playlist_id) => {
+                            Message::PlaylistMutated(PlaylistMutation::Created(value, None))
+                        }
+                        Err(e) => {
+                            tracing::error!(" Failed to create playlist with songs: {e}");
+                            Message::Toast(crate::app_message::ToastMessage::Push(
+                                nokkvi_data::types::toast::Toast::new(
+                                    format!("Failed to create playlist: {e}"),
+                                    nokkvi_data::types::toast::ToastLevel::Error,
+                                ),
+                            ))
+                        }
+                    },
                 )
             }
             Some(TextInputDialogAction::AppendToPlaylist(playlist_id, song_ids)) => {
