@@ -7,7 +7,7 @@
 
 use iced::{
     Element, Length,
-    widget::{container, mouse_area, row, text},
+    widget::{container, mouse_area, row, space, svg, text},
 };
 
 use crate::{theme, widgets::hover_overlay::HoverOverlay};
@@ -65,7 +65,15 @@ impl BrowsingPanel {
     /// Uses mouse_area + HoverOverlay(container) so HoverOverlay sees mouse
     /// events directly — native button captures ButtonPressed which prevents
     /// HoverOverlay's passive press tracker from firing (no scale effect).
-    pub fn tab_bar(&self, similar_label: Option<&str>) -> Element<'_, BrowsingPanelMessage> {
+    ///
+    /// When `is_editing` is false, a close button (×) appears at the right
+    /// edge to dismiss the panel. Hidden during playlist edit mode since
+    /// the panel is closed via the Discard/Save flow instead.
+    pub fn tab_bar(
+        &self,
+        similar_label: Option<&str>,
+        is_editing: bool,
+    ) -> Element<'_, BrowsingPanelMessage> {
         let tabs = BrowsingView::ALL.iter().map(|&view| {
             let mut label_str = view.label();
             if view == BrowsingView::Similar
@@ -116,13 +124,55 @@ impl BrowsingPanel {
             tab
         });
 
-        container(row(tabs).spacing(4).padding([6, 8]).width(Length::Fill))
-            .style(|_theme| container::Style {
-                background: Some(theme::bg0_hard().into()),
-                ..Default::default()
-            })
-            .width(Length::Fill)
-            .into()
+        // Close button — hidden in playlist edit mode
+        let close_button: Option<Element<'_, BrowsingPanelMessage>> = if is_editing {
+            None
+        } else {
+            Some(
+                mouse_area(
+                    HoverOverlay::new(
+                        container(
+                            crate::embedded_svg::svg_widget("assets/icons/x.svg")
+                                .width(Length::Fixed(14.0))
+                                .height(Length::Fixed(14.0))
+                                .style(|_theme, _status| svg::Style {
+                                    color: Some(theme::fg3()),
+                                }),
+                        )
+                        .width(Length::Fixed(24.0))
+                        .height(Length::Fixed(24.0))
+                        .style(|_theme| container::Style {
+                            background: None,
+                            border: iced::Border::default(),
+                            ..Default::default()
+                        })
+                        .center(Length::Fixed(24.0)),
+                    )
+                    .border_radius(theme::ui_border_radius()),
+                )
+                .on_press(BrowsingPanelMessage::Close)
+                .interaction(iced::mouse::Interaction::Pointer)
+                .into(),
+            )
+        };
+
+        let mut tab_row = row(tabs).spacing(4).width(Length::Fill);
+        if let Some(btn) = close_button {
+            tab_row = tab_row.push(space::horizontal()).push(btn);
+        }
+
+        container(tab_row.padding(iced::Padding {
+            top: 6.0,
+            right: 8.0,
+            bottom: 2.0,
+            left: 8.0,
+        }))
+        .style(|_theme| container::Style {
+            background: Some(theme::bg0_hard().into()),
+            ..Default::default()
+        })
+        .width(Length::Fill)
+        .into()
     }
 }
 
@@ -131,4 +181,6 @@ impl BrowsingPanel {
 pub enum BrowsingPanelMessage {
     /// Switch the active tab in the browsing panel.
     SwitchView(BrowsingView),
+    /// Close the browsing panel (× button in tab bar).
+    Close,
 }

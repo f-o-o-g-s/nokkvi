@@ -164,7 +164,7 @@ pub(crate) const VIEW_HEADER_HEIGHT: f32 = 48.0;
 pub(crate) const EDIT_BAR_HEIGHT: f32 = 32.0;
 
 /// Height of the browsing panel tab bar.
-pub(crate) const TAB_BAR_HEIGHT: f32 = 36.0;
+pub(crate) const TAB_BAR_HEIGHT: f32 = 32.0;
 
 /// Bottom padding for slot_list_background_container — also subtracted in row_height()
 /// to keep slot heights in sync with actual available space. Single source of truth.

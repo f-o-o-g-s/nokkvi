@@ -43,6 +43,7 @@ impl Nokkvi {
                     _ => Task::none(),
                 }
             }
+            BrowsingPanelMessage::Close => self.handle_toggle_browsing_panel(),
         }
     }
 

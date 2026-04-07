@@ -1272,3 +1272,52 @@ fn ctrl_combo_not_suppressed_when_captured() {
     // Contrast with hotkey_suppressed_when_captured_toggle_random which MUST
     // be suppressed under the same Status::Captured condition.
 }
+
+// ============================================================================
+// FocusSearch routing with browsing panel open (navigation.rs)
+// ============================================================================
+//
+// When current_view == Settings and the browsing panel is open with browser
+// focus, FocusSearch (/) must route to the Settings search handler — NOT to
+// the browsing panel's active page.
+
+#[test]
+fn focus_search_on_settings_ignores_browsing_panel() {
+    // Setup: Settings view, browsing panel open with browser focus on Songs tab
+    let mut app = test_app();
+    app.current_view = View::Settings;
+    app.screen = crate::Screen::Home;
+    app.browsing_panel = Some(crate::views::BrowsingPanel::new()); // default: Songs tab
+    app.pane_focus = crate::state::PaneFocus::Browser;
+
+    // Pre-condition: songs page search is not focused
+    assert!(
+        !app.songs_page.common.search_input_focused,
+        "songs_page search should start unfocused"
+    );
+
+    // Act: trigger FocusSearch hotkey
+    let _ = app.handle_focus_search();
+
+    // Assert: songs_page must NOT have been touched — we're on Settings
+    assert!(
+        !app.songs_page.common.search_input_focused,
+        "FocusSearch on Settings should NOT focus the browsing panel's search field"
+    );
+}
+
+#[test]
+fn focus_search_on_settings_without_panel_works() {
+    // Baseline: Settings view, no browsing panel — should not panic or
+    // accidentally set any page's search_input_focused.
+    let mut app = test_app();
+    app.current_view = View::Settings;
+    app.screen = crate::Screen::Home;
+
+    let _ = app.handle_focus_search();
+
+    // No ViewPage search should be focused
+    assert!(!app.songs_page.common.search_input_focused);
+    assert!(!app.albums_page.common.search_input_focused);
+    assert!(!app.queue_page.common.search_input_focused);
+}

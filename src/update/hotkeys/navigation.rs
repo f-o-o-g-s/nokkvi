@@ -315,20 +315,25 @@ impl Nokkvi {
 
     pub(crate) fn handle_focus_search(&mut self) -> Task<Message> {
         trace!(" FocusSearch (/) hotkey pressed - focusing search field");
-        if let Some(page) = self.current_view_page_mut() {
-            let search_id = page.search_input_id();
-            page.common_mut().search_input_focused = true;
-            iced::widget::operation::focus(search_id)
-        } else if self.current_view == View::Settings && self.settings_page.font_sub_list.is_some()
-        {
+
+        // Settings has its own search — must be checked before current_view_page_mut()
+        // which would incorrectly route to the browsing panel's page when it's open
+        // with browser focus (same priority pattern as handle_clear_search).
+        if self.current_view == View::Settings && self.settings_page.font_sub_list.is_some() {
             // Font picker is open — focus its search field
-            iced::widget::operation::focus(crate::views::settings::FONT_SEARCH_INPUT_ID)
+            return iced::widget::operation::focus(crate::views::settings::FONT_SEARCH_INPUT_ID);
         } else if self.current_view == View::Settings {
             // Toggle search overlay and focus the input
             let toggle = Task::done(Message::Settings(views::SettingsMessage::ToggleSearch));
             let focus =
                 iced::widget::operation::focus(crate::views::settings::SETTINGS_SEARCH_INPUT_ID);
-            Task::batch([toggle, focus])
+            return Task::batch([toggle, focus]);
+        }
+
+        if let Some(page) = self.current_view_page_mut() {
+            let search_id = page.search_input_id();
+            page.common_mut().search_input_focused = true;
+            iced::widget::operation::focus(search_id)
         } else {
             Task::none()
         }

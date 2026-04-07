@@ -603,7 +603,10 @@ impl Nokkvi {
             let browser_content: Element<'_, Message> = if let Some(ref panel) = self.browsing_panel
             {
                 let similar_label = self.similar_songs.as_ref().map(|s| s.label.as_str());
-                let tab_bar = panel.tab_bar(similar_label).map(Message::BrowsingPanel);
+                let is_editing = self.playlist_edit.is_some();
+                let tab_bar = panel
+                    .tab_bar(similar_label, is_editing)
+                    .map(Message::BrowsingPanel);
 
                 // The tab bar eats into available height — subtract it so the
                 // slot list slot calculation doesn't overflow the last slot.
