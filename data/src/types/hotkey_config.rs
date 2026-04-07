@@ -291,6 +291,8 @@ pub enum HotkeyAction {
     IncreaseRating,
     DecreaseRating,
     GetInfo,
+    FindSimilar,
+    FindTopSongs,
 
     // --- Queue reorder ---
     MoveTrackUp,
@@ -349,6 +351,8 @@ impl HotkeyAction {
         HotkeyAction::IncreaseRating,
         HotkeyAction::DecreaseRating,
         HotkeyAction::GetInfo,
+        HotkeyAction::FindSimilar,
+        HotkeyAction::FindTopSongs,
         // Queue reorder
         HotkeyAction::MoveTrackUp,
         HotkeyAction::MoveTrackDown,
@@ -403,6 +407,8 @@ impl HotkeyAction {
             HotkeyAction::IncreaseRating => "Increase Rating",
             HotkeyAction::DecreaseRating => "Decrease Rating",
             HotkeyAction::GetInfo => "Get Info",
+            HotkeyAction::FindSimilar => "Find Similar",
+            HotkeyAction::FindTopSongs => "Top Songs",
             HotkeyAction::MoveTrackUp => "Move Track Up",
             HotkeyAction::MoveTrackDown => "Move Track Down",
             HotkeyAction::SaveQueueAsPlaylist => "Save Queue as Playlist",
@@ -450,6 +456,8 @@ impl HotkeyAction {
             HotkeyAction::IncreaseRating => "Increase rating by one star",
             HotkeyAction::DecreaseRating => "Decrease rating by one star",
             HotkeyAction::GetInfo => "Show info for the focused item",
+            HotkeyAction::FindSimilar => "Find similar songs for the playing track",
+            HotkeyAction::FindTopSongs => "Show top songs for the playing track's artist",
             HotkeyAction::MoveTrackUp => "Move centered track up in queue",
             HotkeyAction::MoveTrackDown => "Move centered track down in queue",
             HotkeyAction::SaveQueueAsPlaylist => "Open save-as-playlist dialog for the queue",
@@ -495,6 +503,8 @@ impl HotkeyAction {
             | HotkeyAction::IncreaseRating
             | HotkeyAction::DecreaseRating
             | HotkeyAction::GetInfo
+            | HotkeyAction::FindSimilar
+            | HotkeyAction::FindTopSongs
             | HotkeyAction::AddToQueue
             | HotkeyAction::RemoveFromQueue
             | HotkeyAction::ClearQueue
@@ -548,6 +558,8 @@ impl HotkeyAction {
             HotkeyAction::IncreaseRating => KeyCombo::key(KeyCode::Char('=')),
             HotkeyAction::DecreaseRating => KeyCombo::key(KeyCode::Char('-')),
             HotkeyAction::GetInfo => KeyCombo::shift(KeyCode::Char('i')),
+            HotkeyAction::FindSimilar => KeyCombo::shift(KeyCode::Char('s')),
+            HotkeyAction::FindTopSongs => KeyCombo::shift(KeyCode::Char('t')),
             // Queue reorder
             HotkeyAction::MoveTrackUp => KeyCombo::shift(KeyCode::ArrowUp),
             HotkeyAction::MoveTrackDown => KeyCombo::shift(KeyCode::ArrowDown),
@@ -598,6 +610,8 @@ impl HotkeyAction {
             HotkeyAction::IncreaseRating => "increase_rating",
             HotkeyAction::DecreaseRating => "decrease_rating",
             HotkeyAction::GetInfo => "get_info",
+            HotkeyAction::FindSimilar => "find_similar",
+            HotkeyAction::FindTopSongs => "find_top_songs",
             HotkeyAction::MoveTrackUp => "move_track_up",
             HotkeyAction::MoveTrackDown => "move_track_down",
             HotkeyAction::SaveQueueAsPlaylist => "save_queue_as_playlist",
@@ -643,6 +657,8 @@ impl HotkeyAction {
             "increase_rating" => HotkeyAction::IncreaseRating,
             "decrease_rating" => HotkeyAction::DecreaseRating,
             "get_info" => HotkeyAction::GetInfo,
+            "find_similar" => HotkeyAction::FindSimilar,
+            "find_top_songs" => HotkeyAction::FindTopSongs,
             "move_track_up" => HotkeyAction::MoveTrackUp,
             "move_track_down" => HotkeyAction::MoveTrackDown,
             "save_queue_as_playlist" => HotkeyAction::SaveQueueAsPlaylist,

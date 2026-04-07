@@ -644,6 +644,8 @@ impl Nokkvi {
                 HotkeyMessage::MoveTrackUp => self.handle_move_track(true),
                 HotkeyMessage::MoveTrackDown => self.handle_move_track(false),
                 HotkeyMessage::GetInfo => self.handle_get_info(),
+                HotkeyMessage::FindSimilar => self.handle_find_similar_for_playing_track(),
+                HotkeyMessage::FindTopSongs => self.handle_find_top_songs_for_playing_track(),
                 HotkeyMessage::EditValue(up) => self.handle_edit_value(up),
                 HotkeyMessage::RefreshView => match self.current_view {
                     crate::View::Albums => Task::done(Message::LoadAlbums),

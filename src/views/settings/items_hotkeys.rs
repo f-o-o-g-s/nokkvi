@@ -64,6 +64,8 @@ fn hotkey_action_to_key(action: &HotkeyAction) -> &'static str {
         HotkeyAction::IncreaseRating => "hotkey.increase_rating",
         HotkeyAction::DecreaseRating => "hotkey.decrease_rating",
         HotkeyAction::GetInfo => "hotkey.get_info",
+        HotkeyAction::FindSimilar => "hotkey.find_similar",
+        HotkeyAction::FindTopSongs => "hotkey.find_top_songs",
         HotkeyAction::MoveTrackUp => "hotkey.move_track_up",
         HotkeyAction::MoveTrackDown => "hotkey.move_track_down",
         HotkeyAction::SaveQueueAsPlaylist => "hotkey.save_queue_as_playlist",

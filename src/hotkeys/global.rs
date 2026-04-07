@@ -120,6 +120,8 @@ fn action_to_message(action: HotkeyAction) -> Message {
         HotkeyAction::IncreaseRating => Message::Hotkey(HotkeyMessage::IncreaseRating),
         HotkeyAction::DecreaseRating => Message::Hotkey(HotkeyMessage::DecreaseRating),
         HotkeyAction::GetInfo => Message::Hotkey(HotkeyMessage::GetInfo),
+        HotkeyAction::FindSimilar => Message::Hotkey(HotkeyMessage::FindSimilar),
+        HotkeyAction::FindTopSongs => Message::Hotkey(HotkeyMessage::FindTopSongs),
         // Queue reorder
         HotkeyAction::MoveTrackUp => Message::Hotkey(HotkeyMessage::MoveTrackUp),
         HotkeyAction::MoveTrackDown => Message::Hotkey(HotkeyMessage::MoveTrackDown),

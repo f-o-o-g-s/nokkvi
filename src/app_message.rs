@@ -167,6 +167,10 @@ pub enum HotkeyMessage {
     MoveTrackDown,
     /// Open Get Info modal for centered item (Shift+I)
     GetInfo,
+    /// Find Similar songs for the currently playing track (Shift+S)
+    FindSimilar,
+    /// Show Top Songs for the currently playing track's artist (Shift+T)
+    FindTopSongs,
     /// Settings edit value up (enable) or down (disable)
     EditValue(bool),
     /// Refresh data for the current active view (except Queue/Settings)
