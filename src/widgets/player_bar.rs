@@ -520,12 +520,7 @@ pub(crate) fn player_bar<'a>(
                     theme::bg1()
                 })
                 .active(eq_enabled),
-                container(
-                    text(eq_tooltip)
-                        .size(11.0)
-                        .font(theme::ui_font()),
-                )
-                .padding(4),
+                container(text(eq_tooltip).size(11.0).font(theme::ui_font())).padding(4),
                 tooltip::Position::Top,
             )
             .gap(4)
