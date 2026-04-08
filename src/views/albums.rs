@@ -270,10 +270,7 @@ impl AlbumsPage {
                             self.expansion
                                 .handle_expand_center(albums, |a| &a.id, &mut self.common)
                         {
-                            (
-                                Task::none(),
-                                AlbumsAction::ExpandAlbum(parent_id),
-                            )
+                            (Task::none(), AlbumsAction::ExpandAlbum(parent_id))
                         } else {
                             (
                                 Task::none(),

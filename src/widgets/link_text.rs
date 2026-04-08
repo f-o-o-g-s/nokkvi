@@ -16,14 +16,12 @@ use iced::{
     widget::text::Wrapping,
 };
 
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 struct State {
     constrained:
         iced::advanced::text::paragraph::Plain<<iced::Renderer as TextRenderer>::Paragraph>,
     is_hovered: bool,
 }
-
 
 pub struct LinkText<M> {
     content: String,
@@ -139,10 +137,11 @@ impl<M: Clone + 'static> Widget<M, Theme, iced::Renderer> for LinkText<M> {
 
         if let Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) = event
             && is_over
-                && let Some(msg) = &self.on_press {
-                    shell.publish(msg.clone());
-                    shell.capture_event(); // Capture to prevent row selection!
-                }
+            && let Some(msg) = &self.on_press
+        {
+            shell.publish(msg.clone());
+            shell.capture_event(); // Capture to prevent row selection!
+        }
     }
 
     fn mouse_interaction(

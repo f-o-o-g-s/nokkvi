@@ -67,6 +67,10 @@ impl<C: Clone> ExpansionState<C> {
     ) {
         self.expanded_id = Some(parent_id);
         self.children = children;
+        // Clear stale click-to-focus selection state so that
+        // `has_multi_selection` returns to false and the center-slot
+        // fallback highlight works correctly for expanded child rows.
+        common.clear_multi_selection();
         // Recalculate slot list with new flattened count
         let flattened_len = self.flattened_len(parents);
         common.slot_list.set_offset(
@@ -1095,5 +1099,50 @@ mod tests {
     fn build_batch_all_none_returns_empty() {
         let payload = super::build_batch_payload(vec![0, 1, 2], |_| None);
         assert!(payload.items.is_empty());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Expansion clears stale selection state (FocusAndExpand highlight bug)
+    // ══════════════════════════════════════════════════════════════════════
+
+    /// Regression: when clicking "N songs" link on a non-selected album,
+    /// `FocusAndExpand` sets `selected_indices = {clicked_index}` before
+    /// expansion. When `set_children` later clears `selected_offset` but
+    /// leaves `selected_indices` intact, `has_multi_selection = true` for
+    /// all slots, which prevents the center-slot fallback highlight from
+    /// activating on child tracks. The track at the viewport center slot
+    /// loses its highlight background.
+    ///
+    /// Fix: `set_children` must clear `selected_indices` and `anchor_index`.
+    #[test]
+    fn set_children_clears_stale_selection_indices() {
+        let mut state: ExpansionState<TestChild> = ExpansionState::default();
+        let p = parents();
+        let mut common = SlotListPageState::default();
+
+        // Simulate FocusAndExpand: user clicked album at index 0 to expand it.
+        // handle_slot_click sets selected_offset + selected_indices + anchor_index.
+        common.handle_slot_click(0, p.len(), iced::keyboard::Modifiers::empty());
+        assert_eq!(common.slot_list.selected_offset, Some(0));
+        assert!(common.slot_list.selected_indices.contains(&0));
+        assert_eq!(common.slot_list.anchor_index, Some(0));
+
+        // TracksLoaded → set_children clears selected_offset via set_offset,
+        // but must ALSO clear selected_indices/anchor_index to prevent
+        // has_multi_selection from being true (which disables center highlight).
+        state.set_children("a".into(), children(), &p, &mut common);
+
+        assert!(
+            common.slot_list.selected_indices.is_empty(),
+            "set_children must clear selected_indices so has_multi_selection is false"
+        );
+        assert_eq!(
+            common.slot_list.anchor_index, None,
+            "set_children must clear anchor_index"
+        );
+        assert_eq!(
+            common.slot_list.selected_offset, None,
+            "set_children must clear selected_offset (via set_offset)"
+        );
     }
 }
