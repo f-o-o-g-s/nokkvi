@@ -29,7 +29,7 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 ## Widget Tree & Focus
 - **Widget tree stability**: Changing root widget type (Row→Column) destroys `text_input` focus. Use `base_slot_list_empty_state` for consistent structure.
 - **Search input ID collisions**: Each view needs a unique search input ID constant.
-- **HoverOverlay must wrap a Container, not a Button**: Native `button` captures `ButtonPressed` before HoverOverlay's press tracker runs. Pattern: `mouse_area(HoverOverlay::new(container(content)...)).on_press(msg)`.
+- **HoverOverlay Wraps Containers**: WHEN using HoverOverlay, ALWAYS wrap a `Container` instead of a native `Button`, since native buttons capture `ButtonPressed` early. Pattern: `mouse_area(HoverOverlay::new(container(content)...)).on_press(msg)`.
 - **Length::Fill stripe in unconstrained Row**: `container(Space).height(Fill)` in a row without explicit height expands to fill all column space. Set `height(Shrink)` on the wrapper row.
 
 ## Audio Engine
@@ -38,7 +38,7 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 - **Crossfade duration clamping**: `arm_crossfade()` clamps to `min(xfade, shorter_track / 2)` and skips for songs < 10s.
 - **Stale gapless prep on mode toggles**: Mode toggle handlers must call `reset_next_track()` to clear prepared decoder and disarm crossfade trigger.
 - **Pre-volume visualizer samples**: Visualizer receives raw samples before volume multiplication, scaled to S16 range. FFT input is volume-independent.
-- **Visualizer buffer lifetime**: `pending_clear` atomic handles stale audio on track change — don't add extra clearing logic.
+- **Visualizer buffer lifetime**: WHEN handling audio track changes, ALWAYS rely exclusively on the `pending_clear` atomic to manage stale audio, rather than adding custom clearing logic.
 - **Repeat track replay**: `on_track_finished` handler natively supports repeat-track mode by seeking to start. Manual skip (next/prev) bypasses repeat-track to allow navigation.
 
 ## Config & Persistence
@@ -51,10 +51,10 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 
 ## Artwork
 - **Handle::from_bytes for refresh**: `Handle::from_path` uses file path as ID → stale GPU texture on overwrite. Use `Handle::from_bytes(data)` for content-derived IDs.
-- **Queue song mini vs large artwork**: Queue songs must request 80px thumbnails using the `album_id` (not `cover_art` ID) to hit the prefetch cache. Large artwork fallback must construct full-size URL (`size=1000`), not reuse the 80px thumbnail URL.
+- **Queue song mini vs large artwork**: Queue songs must request 80px thumbnails using the `album_id` to hit the prefetch cache. Large artwork fallback MUST ALWAYS construct the full-size URL (`size=1000`) rather than reusing the 80px thumbnail URL.
 
 ## Misc
-- **CenterOnPlaying (Shift+C)**: Must directly call `handle_set_offset()`, not dispatch `SlotListMessage::SetOffset` (which routes through click-to-highlight path).
+- **CenterOnPlaying (Shift+C)**: WHEN handling CenterOnPlaying, ALWAYS directly call `handle_set_offset()` rather than dispatching `SlotListMessage::SetOffset` (which routes through click-to-highlight path).
 - **Expansion sort state**: When expansion is active, sort/search may target the expansion. Check `expansion.is_expanded()`.
 - **Playlist edit guard**: Use `guard_play_action()` at the top of every play handler.
 - **Chrome height**: Must account for all visible header bars. Update constants in `widgets/slot_list.rs` when chrome changes.

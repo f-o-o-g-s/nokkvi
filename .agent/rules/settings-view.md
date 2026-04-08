@@ -45,7 +45,7 @@ views/settings/
 
 ## Key Patterns
 
-- **Config write routing**: Application/Playback/Interface settings → `WriteGeneralSetting` action → `config.toml`. Theme settings → `update_theme_value()` → active theme file. Don't misroute.
+- **Config write routing**: Application/Playback/Interface settings → `WriteGeneralSetting` action → `config.toml`. Theme settings → `update_theme_value()` → active theme file. ALWAYS route settings correctly to avoid overwriting files.
 - **`verbose_config` toggle**: combined persist + TOML write in single async task to avoid races.
 - **Strip visibility toggles**: affect both metadata strip AND progress track overlay. `ToggleSetToggle` flips cached entry + emits `WriteGeneralSetting`.
 - **Font picker**: modal overlay sub-slot-list (not drill-down). System fonts via `font-kit`, `LazyLock`-cached.

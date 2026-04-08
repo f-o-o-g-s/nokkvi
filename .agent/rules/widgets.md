@@ -7,10 +7,10 @@ globs: src/widgets/**
 
 ## Global Atomics (in `src/theme.rs`)
 
-- `ROUNDED_MODE` (AtomicBool): `is_rounded_mode()` / `set_rounded_mode()`. `ui_border_radius()` → 6.0 or 0.0. **Don't hardcode border radii.**
+- `ROUNDED_MODE` (AtomicBool): `is_rounded_mode()` / `set_rounded_mode()`. `ui_border_radius()` → 6.0 or 0.0. **ALWAYS use `ui_border_radius()` instead of hardcoded border radii.**
 - `opacity_gradient` (AtomicBool): non-center slot opacity fade. Settings → Theme → Appearance.
 - `slot_row_height` (AtomicU8): `SlotRowHeight` enum (Compact 50px, Default 70px, Comfortable 90px, Spacious 110px). Settings → Interface → Layout.
-- **Transparent-border clipping**: Iced clips background to border radius even when border is transparent/0px. Don't set border radius on flush-to-edge bars.
+- **Transparent-border clipping**: Iced clips background to border radius even when border is transparent/0px. ALWAYS leave border radius unset on flush-to-edge bars.
 
 ## Player Bar (`player_bar.rs`)
 
@@ -63,4 +63,4 @@ Single source of truth: `chrome_height_with_header()`, `queue_slot_list_start_y(
 
 ## Critical Pattern
 
-**HoverOverlay wraps containers, not buttons.** `mouse_area(HoverOverlay::new(container(...)))` — never `HoverOverlay::new(button(...).on_press())`. See gotchas.
+**HoverOverlay Wraps Containers.** WHEN using HoverOverlay, ALWAYS wrap a container (`mouse_area(HoverOverlay::new(container(...)))`) rather than building over a native button. See gotchas.

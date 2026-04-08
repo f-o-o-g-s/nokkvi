@@ -26,7 +26,7 @@ description: End-to-end checklist when building new features. Covers cross-view 
 - [ ] **Hotkeys**: `HotkeyAction` variant if needed
 - [ ] **MPRIS**: update `services/mpris.rs` if playback-related
 - [ ] **Scrobbling**: check `update/scrobbling.rs` if track-lifecycle related
-- [ ] **Sort/Search**: `SortMode` variants + persistence. Search is immediate (no debounce).
+- [ ] **Sort/Search**: `SortMode` variants + persistence. Search is ALWAYS immediate.
 - [ ] **Settings**: add items in `views/settings/items_*.rs`. Use `SettingMeta` with `subtitle`.
 - [ ] **Playlist edit guard**: `guard_play_action()` on play actions
 - [ ] **HasCommonAction**: implement if view has SearchChanged/SortModeChanged/SortOrderChanged

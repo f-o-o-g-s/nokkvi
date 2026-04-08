@@ -27,7 +27,7 @@ One native PipeWire stream via a shared `rodio::Mixer`:
 
 ## Critical Rules
 
-- **Never hold the engine lock during decoder operations** — create fresh decoders on track change
+- **Decoder Operations**: WHEN handling track changes, ALWAYS create fresh decoders and release the engine lock beforehand.
 - **`source_generation` (AtomicU64)**: engine increments on `set_source()`; renderer snapshots and discards stale callbacks
 - **Mode toggle reset**: `reset_next_track()` clears prepared decoder + disarms crossfade on shuffle/repeat/consume toggle
 - Decoupled render thread: 20ms intervals (50Hz), handles crossfade tick + completion detection
@@ -37,7 +37,7 @@ One native PipeWire stream via a shared `rodio::Mixer`:
 Dual-path: PipeWire native (preferred) or software fallback.
 
 - **PipeWire-native** (`pw_volume_active = true`): software at 1.0, SfxEngine sends cubic volume (`v³`) to PipeWire via IPC
-- **Software fallback**: exponential amplitude curve, per-sample exponential smoothing (~5ms) to avoid crackle
+- **Software fallback**: exponential amplitude curve, per-sample exponential smoothing (~5ms) for anti-aliasing.
 - Crossfade: equal-power cos²/sin² curves. When `pw_volume_active`, fade uses only the coefficient; PipeWire applies user volume on top.
 
 ## Equalizer
