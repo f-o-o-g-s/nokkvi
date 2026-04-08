@@ -273,54 +273,16 @@ impl SettingsPage {
             }
         }
 
-        // Always-visible inline search with search icon prefix
+        // Always-visible inline search
         content = content.push(Space::new().width(Length::Fixed(16.0)));
-        let search_query = self.search_query.clone();
-        let search_icon_size = label_size * 0.9;
-        let search_icon = embedded_svg::svg_widget("assets/icons/search.svg")
-            .width(Length::Fixed(search_icon_size))
-            .height(Length::Fixed(search_icon_size))
-            .style(move |_theme, _status| svg::Style {
-                color: Some(dim_color),
-            });
-        let search_input = iced::widget::text_input("Search settings…", &search_query)
-            .id(SETTINGS_SEARCH_INPUT_ID)
-            .on_input(SettingsMessage::SearchChanged)
-            .size(12.0)
-            .width(Length::Fill)
-            .padding([4, 8])
-            .font(Font {
-                weight: Weight::Medium,
-                ..font
-            })
-            .style(
-                |_theme: &iced::Theme, status: iced::widget::text_input::Status| {
-                    iced::widget::text_input::Style {
-                        background: theme::bg0_hard().into(),
-                        border: iced::Border {
-                            color: if matches!(
-                                status,
-                                iced::widget::text_input::Status::Focused { .. }
-                            ) {
-                                theme::accent_bright()
-                            } else {
-                                theme::bg2()
-                            },
-                            width: 1.0,
-                            radius: theme::ui_border_radius(),
-                        },
-                        icon: theme::fg4(),
-                        placeholder: theme::fg4(),
-                        value: theme::fg0(),
-                        selection: theme::selection_color(),
-                    }
-                },
-            );
-        let search_row = row![search_icon, search_input]
-            .spacing(6)
-            .align_y(Alignment::Center)
-            .width(Length::Fill);
-        content = content.push(search_row);
+        let search_bar = crate::widgets::search_bar::search_bar(
+            &self.search_query,
+            "Search settings…",
+            SETTINGS_SEARCH_INPUT_ID,
+            SettingsMessage::SearchChanged,
+            Some(crate::theme::settings_search_input_style),
+        );
+        content = content.push(search_bar);
 
         content = content.push(Space::new().width(Length::Fixed(12.0)));
 
@@ -535,17 +497,13 @@ impl SettingsPage {
 
         // ── Search bar ──
         let search_bar = {
-            let input = iced::widget::text_input("Type to filter fonts...", &search_query)
-                .id(FONT_SEARCH_INPUT_ID)
-                .on_input(SettingsMessage::FontSearchChanged)
-                .size(12.0)
-                .width(Length::Fill)
-                .padding(8)
-                .font(Font {
-                    weight: Weight::Medium,
-                    ..theme::ui_font()
-                })
-                .style(theme::search_input_style);
+            let input = crate::widgets::search_bar::search_bar(
+                &search_query,
+                "Type to filter fonts...",
+                FONT_SEARCH_INPUT_ID,
+                SettingsMessage::FontSearchChanged,
+                Some(crate::theme::settings_search_input_style),
+            );
             container(input)
                 .width(Length::Fill)
                 .height(Length::Fixed(FONT_SEARCH_BAR_HEIGHT))

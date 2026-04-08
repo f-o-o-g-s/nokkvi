@@ -1,7 +1,7 @@
 use iced::{
     Alignment, Element, Length,
     font::{Font, Weight},
-    widget::{container, mouse_area, pick_list, row, text, text_input},
+    widget::{container, mouse_area, pick_list, row, text},
 };
 // Re-export SortMode from data crate (canonical definition)
 pub(crate) use nokkvi_data::types::sort_mode::SortMode;
@@ -139,23 +139,13 @@ pub(crate) fn view_header<
     });
 
     let search_field = if show_search {
-        Some(
-            container(
-                text_input("Search...", search_query)
-                    .id(search_input_id) // Use unique ID per view to prevent focus transfer
-                    .on_input(on_search_change)
-                    .width(Length::Fill)
-                    .padding(8)
-                    .size(12.0) // Match QML font size
-                    .font(Font {
-                        weight: Weight::Medium,
-                        ..theme::ui_font()
-                    })
-                    .style(theme::search_input_style),
-            )
-            .height(Length::Fixed(40.0)) // Match button and pick_list height
-            .width(Length::Fill),
-        )
+        Some(crate::widgets::search_bar::search_bar(
+            search_query,
+            "Search...",
+            search_input_id,
+            on_search_change,
+            None,
+        ))
     } else {
         None
     };

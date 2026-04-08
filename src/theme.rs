@@ -832,6 +832,29 @@ pub(crate) fn search_input_style(_theme: &Theme, status: text_input::Status) -> 
     }
 }
 
+/// Specialized search style for settings panels so it doesn't blend into bg0_soft.
+pub(crate) fn settings_search_input_style(
+    _theme: &Theme,
+    status: text_input::Status,
+) -> text_input::Style {
+    text_input::Style {
+        background: (bg0_hard()).into(),
+        border: iced::Border {
+            color: if matches!(status, text_input::Status::Focused { .. }) {
+                accent_bright()
+            } else {
+                bg2()
+            },
+            width: 1.0,
+            radius: ui_border_radius(),
+        },
+        icon: fg4(),
+        placeholder: fg4(),
+        value: fg0(),
+        selection: selection_color(),
+    }
+}
+
 // ============================================================================
 // Iced Theme Integration
 // ============================================================================
