@@ -6,22 +6,22 @@ trigger: always_on
 
 ## Design Philosophy
 
-- **Always prefer the most robust, DRY, and scalable solution.** No quick fixes, no half-measures.
+- **Always prefer the most robust, DRY, and scalable solution.** ALWAYS implement comprehensive fixes designed for the long term.
 - **Reuse existing patterns.** Check the codebase before building something new.
 - **Handle edge cases proactively.** Address race conditions, error states, and boundary cases during initial implementation.
 
 ## Rust Conventions
 
-- **No `.unwrap()` in production code.** Use `?`, `.unwrap_or_default()`, or explicit error handling.
-- **No `clone()` without justification.** Prefer references or `Cow<>`.
-- **Structured logging** via `tracing`: `error!` (failures), `warn!` (recoverable), `info!` (milestones), `debug!` (flow control), `trace!` (per-frame, per-packet, startup enumeration).
-- **Use `Arc` + atomics** for cross-thread shared state, never raw `Mutex` around simple values.
+- **WHEN handling errors in production code, ALWAYS** use `?`, `.unwrap_or_default()`, or explicit match statements.
+- **WHEN passing values, ALWAYS** prefer references or `Cow<>` over explicit `.clone()`.
+- **WHEN logging, ALWAYS** use structured logging via `tracing`: `error!` (failures), `warn!` (recoverable), `info!` (milestones), `debug!` (flow control), `trace!` (per-frame, per-packet, startup enumeration).
+- **WHEN sharing simple state across threads, ALWAYS** use `Arc` + atomics instead of `Mutex` wrappers.
 
 ## Error Handling
 
 - Backend services return `Result<T, E>` — propagate with `?`.
 - UI handlers use `shell_task` / `shell_spawn` helpers.
-- Log errors at the boundary where they're handled, not where they're propagated.
+- **WHEN handling errors, ALWAYS** log them at the boundary where they are ultimately handled, rather than at the propagation layers.
 - **Toast on user-facing errors**: `toast_error()` / `toast_warn()`. Use `toast_success()` / `toast_info()` for confirmations.
 
 ## File Organization
@@ -31,14 +31,14 @@ trigger: always_on
 - Handler files in `update/` correspond 1:1 to views, plus specialized handlers for cross-cutting concerns. `ls src/update/` to see them.
 - Shared helpers live in `update/components.rs`.
 
-## Anti-Patterns — Do NOT
+## Core Requirements (WHEN / ALWAYS)
 
-- **Hold the audio engine lock during decoder operations.** Create fresh decoders on track change.
-- **Change the root widget type between renders** (e.g., Row→Column). Destroys `text_input` focus.
-- **Install unnecessary production dependencies.** Core deps: `reqwest`, `serde`, `bincode`, `redb`, `toml_edit`, `font-kit`, `lru`, `rodio`, `ringbuf`, `bytemuck`, `rustfft`, `pipewire`. Don't add alternatives. Test-only `[dev-dependencies]` (e.g., `proptest`, `tempfile`) are acceptable when justified.
-- **Use debounce on search.** Fires immediately on query change.
-- **Use `lock()` in the visualizer FFT processing thread.** FFT thread uses `try_lock()`; render thread uses `lock()`.
-- **Allow play actions from the browsing panel.** Use `guard_play_action()`.
+- **WHEN handling an audio track change, ALWAYS** create fresh decoders before locking. Release the audio engine lock during decoder operations.
+- **WHEN defining a view's render output, ALWAYS** maintain a consistent root widget type (e.g., keep it a `Column` or `Row`) across renders to ensure `text_input` focus is preserved.
+- **WHEN considering dependencies, ALWAYS** rely exclusively on the core deps: `reqwest`, `serde`, `bincode`, `redb`, `toml_edit`, `font-kit`, `lru`, `rodio`, `ringbuf`, `bytemuck`, `rustfft`, `pipewire`. You may use test-only `[dev-dependencies]` (e.g., `proptest`, `tempfile`).
+- **WHEN implementing search behavior, ALWAYS** fire queries immediately on text change rather than debouncing.
+- **WHEN working with the visualizer FFT thread, ALWAYS** use `try_lock()`. Only the main render thread may use `lock()`.
+- **WHEN handling play actions in update routines, ALWAYS** protect against split-view conflicts by calling `guard_play_action()` at the top of the handler.
 
 ## Formatting
 
@@ -48,13 +48,13 @@ trigger: always_on
 
 ### Red-Green TDD Protocol
 
-**Bug fixes** and **new feature handlers** must follow red-green TDD:
+**WHEN implementing bug fixes or new feature handlers, ALWAYS follow red-green TDD:**
 
-1. **Red**: Write tests asserting the desired behavior. Tests must use **observable state mutations** (e.g., `modes.random`, `modes.consume`, `search_query`) — avoid testing side effects that require `app_service` or return opaque `Task` values. Run tests, confirm they **fail**.
-2. **Green**: Implement the minimal fix/feature to make the tests pass.
-3. **Verify**: `cargo test`, `cargo clippy`, `cargo +nightly fmt --all`.
+1. **Red**: First, write tests in `src/update/tests.rs` (using the `test_app()` helper) asserting the desired behavior. Tests must use **observable state mutations** (e.g., `modes.random`, `modes.consume`, `search_query`) and ALWAYS target pure state rather than side effects requiring `app_service`. Run tests, confirm they **fail**.
+2. **Green**: Second, implement the minimal fix/feature to make the tests pass.
+3. **Verify**: Run `cargo test`, `cargo clippy`, `cargo +nightly fmt --all`.
 
-**Structural plumbing** (adding fields, wiring message variants) may be done before writing tests if the tests cannot compile without it — but no behavior changes until tests are red.
+**WHEN structural plumbing is required** (adding fields, wiring message variants), ALWAYS complete the plumbing first so the tests can compile, but implement no behavioral changes until the tests are red.
 
 **Test placement**: `update/tests.rs` for update handler tests, inline `#[cfg(test)]` modules for self-contained logic (data types, widgets, pure functions).
 

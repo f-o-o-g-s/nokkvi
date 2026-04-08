@@ -6,8 +6,8 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 # Common Gotchas
 
 ## Queue & Indices
-- **Filtered indices**: When search is active, slot list indices are relative to the **filtered** queue. Always map through `filtered_songs` for queue operations.
-- **Queue peek/transition pattern**: All track transitions must use `peek_next_song()` → `transition_to_queued()`. Never set `current_index` directly for transitions. Use `set_current_index()` only for non-transition updates (play-from-here).
+- **Filtered indices**: WHEN search is active, ALWAYS map through `filtered_songs` for queue operations, as slot list indices are relative to the filtered queue.
+- **Queue peek/transition pattern**: WHEN handling track transitions, ALWAYS use `peek_next_song()` → `transition_to_queued()`. Use `set_current_index()` ONLY for non-transition updates (like play-from-here).
 - **Progressive queue generation**: `ProgressiveQueueAppendPage` chains must check `progressive_queue_generation` before appending — stale chains silently stop.
 - **Play button cold-start**: Uses `get_effective_center_index` (selected track), not `queue_songs.first()`.
 - **Gapless re-peek on mutation**: If a queue mutation (add/remove) calls `clear_queued()` between gapless prep and `on_track_finished`, `transition_to_queued()` would return `None` → playback stalls. The navigator now re-peeks when `queued.is_none() && !needs_load` before transitioning.
@@ -33,7 +33,7 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 - **Length::Fill stripe in unconstrained Row**: `container(Space).height(Fill)` in a row without explicit height expands to fill all column space. Set `height(Shrink)` on the wrapper row.
 
 ## Audio Engine
-- **Never hold engine lock during decoder operations.** Create fresh decoders on track change.
+- **Decoder operations**: WHEN handling track changes, ALWAYS create fresh decoders and release the audio engine lock beforehand.
 - **Crossfade trigger must be synchronous**: `render_tick`'s crossfade trigger must set `crossfade_active = true` synchronously before signaling the engine async. Otherwise EOF fires first → hard-cut.
 - **Crossfade duration clamping**: `arm_crossfade()` clamps to `min(xfade, shorter_track / 2)` and skips for songs < 10s.
 - **Stale gapless prep on mode toggles**: Mode toggle handlers must call `reset_next_track()` to clear prepared decoder and disarm crossfade trigger.
