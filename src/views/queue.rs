@@ -732,6 +732,7 @@ impl QueuePage {
                 ctx.is_selected,
                 ctx.has_multi_selection,
                 ctx.opacity,
+                0,
             );
 
             // Dynamic scaling - match albums view font sizes, apply scale_factor

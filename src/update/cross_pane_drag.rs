@@ -422,7 +422,7 @@ impl Nokkvi {
 
         // Wrap in center-slot styled container
         use crate::widgets::slot_list::SlotListSlotStyle;
-        let style = SlotListSlotStyle::for_slot(true, false, false, false, 1.0);
+        let style = SlotListSlotStyle::for_slot(true, false, false, false, 1.0, 0);
 
         // For multi-selection drags, overlay a count badge
         if selection_count > 1 {
@@ -493,7 +493,7 @@ impl Nokkvi {
             slot_list_text_column,
         };
 
-        let style = SlotListSlotStyle::for_slot(true, false, false, false, 1.0);
+        let style = SlotListSlotStyle::for_slot(true, false, false, false, 1.0, 0);
         let row_height = 64.0_f32;
         let artwork_size = (row_height - 16.0).max(32.0);
         let title_size = calculate_font_size(16.0, row_height, 1.0);

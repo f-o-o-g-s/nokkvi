@@ -1023,7 +1023,7 @@ pub(crate) fn render_color_slot<'a>(
     hex_input: &str,
 ) -> Element<'a, SettingsMessage> {
     let style =
-        slot_list::SlotListSlotStyle::for_slot(ctx.is_center, false, false, false, ctx.opacity);
+        slot_list::SlotListSlotStyle::for_slot(ctx.is_center, false, false, false, ctx.opacity, 0);
     let label_size =
         nokkvi_data::utils::scale::calculate_font_size(14.0, ctx.row_height, ctx.scale_factor)
             * ctx.scale_factor;
@@ -1168,7 +1168,7 @@ pub(crate) fn render_font_slot<'a>(
     font_name: &str,
 ) -> Element<'a, SettingsMessage> {
     let style =
-        slot_list::SlotListSlotStyle::for_slot(ctx.is_center, false, false, false, ctx.opacity);
+        slot_list::SlotListSlotStyle::for_slot(ctx.is_center, false, false, false, ctx.opacity, 0);
     let label_size =
         nokkvi_data::utils::scale::calculate_font_size(14.0, ctx.row_height, ctx.scale_factor)
             * ctx.scale_factor;

@@ -481,6 +481,7 @@ impl SongsPage {
                     ctx.is_selected,
                     ctx.has_multi_selection,
                     ctx.opacity,
+                    0,
                 );
 
                 // Dynamic scaling based on row height AND scale factor

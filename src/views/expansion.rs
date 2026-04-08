@@ -522,14 +522,17 @@ pub(crate) fn render_child_track_row<'a, M: Clone + 'a>(
     center_msg: M,
     offset_msg: M,
     on_star_click: Option<M>,
+    depth: u8,
 ) -> Element<'a, M> {
-    // Center slot gets bright center style; non-center children get highlighted (blue) group look
+    // Center slot gets bright center style; non-center children get highlighted group look
+    // with depth-based darkening for visual hierarchy
     let style = SlotListSlotStyle::for_slot(
         ctx.is_center,
         !ctx.is_center,
         ctx.is_selected,
         ctx.has_multi_selection,
         ctx.opacity,
+        depth,
     );
 
     let title_size = calculate_font_size(14.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
@@ -539,8 +542,14 @@ pub(crate) fn render_child_track_row<'a, M: Clone + 'a>(
     let track_num = song.track.map_or("-".to_string(), |t| t.to_string());
     let duration_str = formatters::format_time(song.duration);
 
+    let indent_width = if depth > 0 {
+        30.0 * depth as f32
+    } else {
+        50.0
+    };
+
     let content = row![
-        container(text("")).width(Length::Fixed(50.0)),
+        container(text("")).width(Length::Fixed(indent_width)),
         container(slot_list_text(track_num, meta_size, style.subtext_color))
             .width(Length::Fixed(30.0))
             .height(Length::Fill)
@@ -602,6 +611,7 @@ pub(crate) fn render_child_track_row<'a, M: Clone + 'a>(
 ///
 /// When `show_artist` is true (Genres view), includes an artist column.
 /// Layout: `[indent] [album name] [artist?] [year 12%] [songs 15%] [duration 12%] [star 5%]`
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
     album: &nokkvi_data::backend::albums::AlbumUIViewData,
     ctx: &SlotListRowContext,
@@ -610,6 +620,7 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
     show_artist: bool,
     on_star_click: Option<M>,
     on_song_count_click: Option<M>,
+    depth: u8,
 ) -> Element<'a, M> {
     let style = SlotListSlotStyle::for_slot(
         ctx.is_center,
@@ -617,6 +628,7 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
         ctx.is_selected,
         ctx.has_multi_selection,
         ctx.opacity,
+        depth,
     );
 
     let title_size = calculate_font_size(14.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
@@ -632,8 +644,14 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
     // Adjust album name width when artist column is shown
     let name_portion = if show_artist { 30 } else { 50 };
 
+    let indent_width = if depth > 0 {
+        30.0 * depth as f32
+    } else {
+        50.0
+    };
+
     let mut content = row![
-        container(text("")).width(Length::Fixed(50.0)),
+        container(text("")).width(Length::Fixed(indent_width)),
         container(slot_list_text(
             album.name.clone(),
             title_size,

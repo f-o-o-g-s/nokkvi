@@ -802,6 +802,7 @@ impl AlbumsPage {
             ctx.is_selected,
             ctx.has_multi_selection,
             ctx.opacity,
+            0,
         );
 
         let base_artwork_size = (ctx.row_height - 16.0).max(32.0);
@@ -979,6 +980,7 @@ impl AlbumsPage {
                 AlbumsMessage::SlotListClickPlay(ctx.item_index)
             },
             Some(AlbumsMessage::ClickToggleStar(ctx.item_index)),
+            1, // depth 1: child tracks under album
         );
 
         use crate::widgets::context_menu::{

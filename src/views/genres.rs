@@ -720,6 +720,7 @@ impl GenresPage {
                             GenresMessage::SlotListClickPlay(ctx.item_index)
                         },
                         Some(GenresMessage::ClickToggleStar(ctx.item_index)),
+                        2, // depth 2: grandchild tracks (genre → album → track)
                     );
                     use crate::widgets::context_menu::{
                         context_menu, library_entry_view, song_entries_with_folder,
@@ -802,6 +803,7 @@ impl GenresPage {
             ctx.is_selected,
             ctx.has_multi_selection,
             ctx.opacity,
+            0,
         );
 
         let base_artwork_size = (ctx.row_height - 16.0).max(32.0);
@@ -923,6 +925,7 @@ impl GenresPage {
             true, // show artist since genre groups albums from different artists
             Some(GenresMessage::ClickToggleStar(ctx.item_index)),
             Some(GenresMessage::FocusAndExpandAlbum(ctx.item_index)),
+            1, // depth 1: child albums under genre
         );
 
         use crate::widgets::context_menu::{

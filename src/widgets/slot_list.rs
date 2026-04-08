@@ -45,17 +45,26 @@ pub(crate) struct SlotListSlotStyle {
 
 impl SlotListSlotStyle {
     /// Get slot styling based on state
+    ///
+    /// `depth` controls hierarchy-based background darkening for expanded slots:
+    /// 0 = parent/root (no darkening), 1 = child, 2 = grandchild.
     pub(crate) fn for_slot(
         is_center: bool,
         is_highlighted: bool,
         is_selected: bool,
         has_multi_selection: bool,
         opacity: f32,
+        depth: u8,
     ) -> Self {
         if is_highlighted {
             // Currently playing/selected state (e.g., current song in queue)
+            let bg = if depth > 0 {
+                theme::darken(theme::now_playing_color(), depth as f32 * 0.15)
+            } else {
+                theme::now_playing_color()
+            };
             Self {
-                bg_color: theme::now_playing_color(),
+                bg_color: bg,
                 border_color: theme::accent_bright(),
                 border_width: 2.0,
                 border_radius: slot_list_border_radius(),
@@ -996,7 +1005,7 @@ pub(crate) fn slot_list_favorite_icon<'a, Message: Clone + 'a>(
 fn empty_slot<'a, Message: 'a>(opacity: f32) -> Element<'a, Message> {
     use iced::Alignment;
 
-    let style = SlotListSlotStyle::for_slot(false, false, false, false, opacity);
+    let style = SlotListSlotStyle::for_slot(false, false, false, false, opacity, 0);
 
     container(
         iced::widget::text("· · ·")
@@ -1209,15 +1218,15 @@ mod tests {
     #[test]
     fn hover_text_color_adjusts_for_background_contrast() {
         // Normal slot (dark bg) -> hover is bright accent
-        let style = SlotListSlotStyle::for_slot(false, false, false, false, 1.0);
+        let style = SlotListSlotStyle::for_slot(false, false, false, false, 1.0, 0);
         assert_eq!(style.hover_text_color, crate::theme::accent_bright());
 
         // Highlighted slot (light playing bg) -> hover is dark text (e.g. bg0_hard)
-        let hl_style = SlotListSlotStyle::for_slot(false, true, false, false, 1.0);
+        let hl_style = SlotListSlotStyle::for_slot(false, true, false, false, 1.0, 0);
         assert_eq!(hl_style.hover_text_color, crate::theme::bg0_hard());
 
         // Selected slot (light selected bg) -> hover is dark text
-        let sel_style = SlotListSlotStyle::for_slot(false, false, true, false, 1.0);
+        let sel_style = SlotListSlotStyle::for_slot(false, false, true, false, 1.0, 0);
         assert_eq!(sel_style.hover_text_color, crate::theme::bg0_hard());
     }
 }

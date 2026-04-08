@@ -654,6 +654,7 @@ impl PlaylistsPage {
             ctx.is_selected,
             ctx.has_multi_selection,
             ctx.opacity,
+            0,
         );
 
         let base_artwork_size = (ctx.row_height - 16.0).max(32.0);
@@ -822,6 +823,7 @@ impl PlaylistsPage {
                 PlaylistsMessage::SlotListClickPlay(ctx.item_index)
             },
             Some(PlaylistsMessage::ClickToggleStar(ctx.item_index)),
+            1, // depth 1: child tracks under playlist
         )
     }
 }

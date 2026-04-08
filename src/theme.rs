@@ -705,7 +705,7 @@ fn lighten(color: Color, amount: f32) -> Color {
 
 /// Darken a color by blending it toward black  
 #[inline]
-fn darken(color: Color, amount: f32) -> Color {
+pub(crate) fn darken(color: Color, amount: f32) -> Color {
     blend_toward(color, Color::BLACK, amount)
 }
 

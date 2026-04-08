@@ -340,6 +340,7 @@ impl SimilarPage {
                     ctx.is_selected,
                     ctx.has_multi_selection,
                     ctx.opacity,
+                    0,
                 );
 
                 let base_artwork_size = (ctx.row_height - 16.0).max(32.0);
