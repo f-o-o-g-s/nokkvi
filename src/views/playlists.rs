@@ -745,7 +745,7 @@ impl PlaylistsPage {
                     playlist.name.clone(),
                     Some(PlaylistsMessage::FocusAndExpand(ctx.item_index)),
                     subtitle,
-                    None,
+                    Some(PlaylistsMessage::FocusAndExpand(ctx.item_index)),
                     title_size,
                     metadata_size,
                     style,
