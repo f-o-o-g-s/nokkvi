@@ -691,7 +691,10 @@ impl AlbumsPage {
                         ..theme::ui_font()
                     })
                     .color(primary_color),
-                text(album.artist.clone()).size(16).color(primary_color),
+                text(album.artist.clone())
+                    .size(16)
+                    .color(primary_color)
+                    .font(theme::ui_font()),
             ]
             .spacing(4)
             .align_x(iced::Alignment::Center);
@@ -715,7 +718,12 @@ impl AlbumsPage {
                 {
                     full_date = format!("{full_date} • {yr}");
                 }
-                col = col.push(text(full_date).size(14).color(primary_color));
+                col = col.push(
+                    text(full_date)
+                        .size(14)
+                        .color(primary_color)
+                        .font(theme::ui_font()),
+                );
             }
 
             // Duration
@@ -729,12 +737,22 @@ impl AlbumsPage {
                 tracks_str.push_str(" • ");
                 tracks_str.push_str(&dur_str);
             }
-            col = col.push(text(tracks_str).size(14).color(primary_color));
+            col = col.push(
+                text(tracks_str)
+                    .size(14)
+                    .color(primary_color)
+                    .font(theme::ui_font()),
+            );
 
             // Genres
             if let Some(genres) = &album.genres {
                 let genres_display = genres.replace(" • ", ", ");
-                col = col.push(text(genres_display).size(14).color(primary_color));
+                col = col.push(
+                    text(genres_display)
+                        .size(14)
+                        .color(primary_color)
+                        .font(theme::ui_font()),
+                );
             }
 
             let pill_bg = if is_dark_backdrop {
