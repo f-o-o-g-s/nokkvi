@@ -709,19 +709,22 @@ impl AlbumsPage {
 
             let pill = container(col)
                 .padding(32)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
                 .style(move |_theme| container::Style {
                     background: Some(iced::Background::Color(pill_bg)),
                     border: iced::Border {
-                        radius: 16.0.into(),
+                        // Keep a slight rounded border if the container doesn't fill completely,
+                        // otherwise it naturally squares off if pushed to the edges.
+                        radius: 0.0.into(),
                         ..Default::default()
                     },
                     ..Default::default()
                 });
 
-            container(pill)
-                .center_x(Length::Fill)
-                .center_y(Length::Fill)
-                .into()
+            pill.into()
         });
 
         let artwork_content = Some(single_artwork_panel_with_overlay(
