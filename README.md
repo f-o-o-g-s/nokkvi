@@ -124,7 +124,7 @@ Depending on your library size, this means Nokkvi will consume local disk space 
 
 ### Built-in Themes
 
-Nokkvi ships with 21 built-in themes that are automatically seeded to `~/.config/nokkvi/themes/` on first launch. These include popular editor and terminal color schemes like Gruvbox (default), Catppuccin, Dracula, Nord, Kanagawa, Everforest, Tokyo Night, Solarized, and more. Every theme includes both dark and light palettes plus visualizer colors.
+Nokkvi ships with 21 built-in themes that are automatically seeded to `~/.config/nokkvi/themes/` on first launch. These include popular editor and terminal color schemes like Adwaita (default), Gruvbox, Catppuccin, Dracula, Nord, Kanagawa, Everforest, Tokyo Night, Solarized, and more. Every theme includes both dark and light palettes plus visualizer colors.
 
 **To change your theme:** Simply open the in-app **Settings -> Theme** menu, and pick one from the "Select Theme" list. It will apply instantly.
 

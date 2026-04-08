@@ -229,7 +229,7 @@ pub fn discover_themes() -> Result<Vec<ThemeInfo>> {
 
 /// Load a theme by stem name from `~/.config/nokkvi/themes/{name}.toml`.
 ///
-/// Falls back to the Gruvbox default if the file is missing or corrupt.
+/// Falls back to the Adwaita default if the file is missing or corrupt.
 pub fn load_theme(name: &str) -> ThemeFile {
     match try_load_theme(name) {
         Ok(theme) => theme,
@@ -237,7 +237,7 @@ pub fn load_theme(name: &str) -> ThemeFile {
             warn!(
                 theme = name,
                 error = %e,
-                "Failed to load theme, falling back to Gruvbox default"
+                "Failed to load theme, falling back to Adwaita default"
             );
             ThemeFile::default()
         }
