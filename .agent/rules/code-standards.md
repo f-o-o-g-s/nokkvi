@@ -52,7 +52,7 @@ trigger: always_on
 
 1. **Red**: First, write tests in `src/update/tests.rs` (using the `test_app()` helper) asserting the desired behavior. Tests must use **observable state mutations** (e.g., `modes.random`, `modes.consume`, `search_query`) and ALWAYS target pure state rather than side effects requiring `app_service`. Run tests, confirm they **fail**.
 2. **Green**: Second, implement the minimal fix/feature to make the tests pass.
-3. **Verify**: Run `cargo test`, `cargo clippy`, `cargo +nightly fmt --all`.
+3. **Verify**: Run `cargo test`, `cargo clippy -- -D warnings`, `cargo +nightly fmt --all`.
 
 **WHEN structural plumbing is required** (adding fields, wiring message variants), ALWAYS complete the plumbing first so the tests can compile, but implement no behavioral changes until the tests are red.
 
@@ -62,7 +62,7 @@ trigger: always_on
 
 ```bash
 cargo +nightly fmt --all      # Format (nightly required)
-cargo clippy                  # Lint — fix all warnings
+cargo clippy -- -D warnings   # Lint — enforce zero warnings for CI parity
 cargo test                    # Unit tests
 cargo build --release         # Release build verification
 ```

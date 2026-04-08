@@ -11,9 +11,9 @@ description: Build, test, and lint the project
 cargo +nightly fmt --all -- --check
 ```
 
-2. Run clippy for lint checks:
+2. Run clippy to enforce zero warnings (matches CI strictness):
 ```bash
-cargo clippy
+cargo clippy -- -D warnings
 ```
 
 3. Run the test suite:
