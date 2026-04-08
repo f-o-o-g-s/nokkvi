@@ -141,6 +141,9 @@ impl super::HasCommonAction for AlbumsAction {
             Self::SortOrderChanged(a) => super::CommonViewAction::SortOrderChanged(*a),
             Self::RefreshViewData => super::CommonViewAction::RefreshViewData,
             Self::CenterOnPlaying => super::CommonViewAction::CenterOnPlaying,
+            Self::NavigateAndSearch(v, q) => {
+                super::CommonViewAction::NavigateAndSearch(*v, q.clone())
+            }
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
         }

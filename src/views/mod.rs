@@ -110,6 +110,9 @@ pub(crate) enum CommonViewAction {
     CenterOnPlaying,
     /// User manually requested a data refresh, bypassing the local cache.
     RefreshViewData,
+    /// Navigate to a different view and set its search query.
+    /// Used by inline link clicks (e.g. artist name → Artists view).
+    NavigateAndSearch(crate::View, String),
     /// No action — the view's update produced no effect.
     None,
     /// The action is view-specific and not handled generically.

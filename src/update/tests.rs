@@ -969,6 +969,26 @@ fn handle_common_view_action_refresh_returns_task() {
     assert!(task.is_some(), "RefreshViewData should return a task");
 }
 
+#[test]
+fn handle_common_view_action_navigate_and_search_returns_task() {
+    let app = test_app();
+    let persist_fn = |_s, _m, _a| async { Ok(()) };
+
+    let task = app.handle_common_view_action(
+        crate::views::CommonViewAction::NavigateAndSearch(View::Artists, "Beatles".to_string()),
+        crate::app_message::Message::LoadAlbums,
+        "albums",
+        crate::widgets::view_header::SortMode::Name,
+        true,
+        persist_fn,
+    );
+
+    assert!(
+        task.is_some(),
+        "NavigateAndSearch should be handled by common action handler"
+    );
+}
+
 // ============================================================================
 // Server Version (mod.rs)
 // ============================================================================
@@ -1467,16 +1487,16 @@ fn dominant_color_caching_returns_instantly() {
 // ============================================================================
 
 #[test]
-fn handle_navigate_and_search_updates_view_and_query() {
+fn handle_navigate_and_search_updates_view_and_defocuses() {
     let mut app = test_app();
     app.current_view = View::Queue; // Start at Queue
-    app.artists_page.common.search_query = "old_search".to_string();
+    app.artists_page.common.search_input_focused = true;
 
     let _ = app.handle_navigate_and_search(View::Artists, "The Beatles".to_string());
 
     assert_eq!(app.current_view, View::Artists);
-    assert_eq!(app.artists_page.common.search_query, "The Beatles");
-    assert_eq!(app.artists_page.common.slot_list.viewport_offset, 0);
+    // search_input_focused is cleared synchronously; the actual query is set
+    // asynchronously by the batched SearchQueryChanged task.
     assert!(!app.artists_page.common.search_input_focused);
 }
 
@@ -1484,12 +1504,11 @@ fn handle_navigate_and_search_updates_view_and_query() {
 fn handle_navigate_and_search_updates_queue_properly() {
     let mut app = test_app();
     app.current_view = View::Songs; // Start at Songs
-    app.queue_page.common.search_query = "old_search".to_string();
+    app.queue_page.common.search_input_focused = true;
 
     let _ = app.handle_navigate_and_search(View::Queue, "Master".to_string());
 
     assert_eq!(app.current_view, View::Queue);
-    assert_eq!(app.queue_page.common.search_query, "Master");
     assert!(!app.queue_page.common.search_input_focused);
 }
 

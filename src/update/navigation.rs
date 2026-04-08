@@ -304,11 +304,10 @@ impl Nokkvi {
     ) -> Task<Message> {
         let switch_task = self.handle_switch_view(view);
 
-        // Turn off search input focus if possible, and reset the slot list offset
+        // Defocus the search input so cursor doesn't blink in the target view.
+        // The query and offset are handled by the SearchQueryChanged dispatch below.
         if let Some(page) = self.current_view_page_mut() {
-            page.common_mut().search_query = query.clone();
             page.common_mut().search_input_focused = false;
-            page.common_mut().slot_list.set_offset(0, 0);
         }
 
         // Dispatch the view-specific SearchQueryChanged message so the target view
