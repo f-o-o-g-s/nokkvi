@@ -107,10 +107,9 @@ impl Nokkvi {
         }
 
         #[allow(clippy::collapsible_if)]
-        if self.browsing_panel.is_some()
-            && self.pane_focus == crate::state::PaneFocus::Browser
-            && self.browsing_panel.as_ref().unwrap().active_view
-                == crate::views::BrowsingView::Similar
+        if self.pane_focus == crate::state::PaneFocus::Browser
+            && let Some(panel) = self.browsing_panel.as_ref()
+            && panel.active_view == crate::views::BrowsingView::Similar
         {
             if let Some(similar) = &self.similar_songs {
                 let center_idx = self

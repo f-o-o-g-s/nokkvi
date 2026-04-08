@@ -348,7 +348,11 @@ impl Nokkvi {
             }
         };
 
-        let drag = self.cross_pane_drag.as_ref().unwrap();
+        let Some(drag) = self.cross_pane_drag.as_ref() else {
+            return iced::widget::text("Drag to queue")
+                .color(crate::theme::fg0())
+                .into();
+        };
         let selection_count = drag.selection_count;
 
         let center_idx = match drag.center_index {

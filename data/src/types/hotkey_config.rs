@@ -102,7 +102,7 @@ impl KeyCode {
         let s = s.trim();
         // Single ASCII character → Char variant (lowercase)
         if s.chars().count() == 1 && s.is_ascii() {
-            let c = s.chars().next().unwrap();
+            let c = s.chars().next().unwrap_or('?');
             return Ok(KeyCode::Char(c.to_lowercase().next().unwrap_or(c)));
         }
         // Named keys (case-insensitive)

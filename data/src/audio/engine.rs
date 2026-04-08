@@ -603,45 +603,49 @@ impl CustomAudioEngine {
 
                                 if formats_match {
                                     // Take the next decoder and swap it into the primary slot
-                                    let next_dec = next_dec_guard.take().unwrap();
-                                    let next_duration = next_dec.duration();
-                                    let next_source_url = next_source_shared.lock().await.clone();
+                                    if let Some(next_dec) = next_dec_guard.take() {
+                                        let next_duration = next_dec.duration();
+                                        let next_source_url =
+                                            next_source_shared.lock().await.clone();
 
-                                    // Swap into primary decoder
-                                    *decoder.lock().await = next_dec;
-                                    *next_track_prepared.lock().await = false;
+                                        // Swap into primary decoder
+                                        *decoder.lock().await = next_dec;
+                                        *next_track_prepared.lock().await = false;
 
-                                    // Increment source generation for stale callback detection
-                                    source_generation.fetch_add(1, Ordering::Release);
+                                        // Increment source generation for stale callback detection
+                                        source_generation.fetch_add(1, Ordering::Release);
 
-                                    // Reset renderer position for the new track
-                                    {
-                                        let mut r = renderer.lock();
-                                        r.reset_position();
-                                        r.reset_finished_called();
+                                        // Reset renderer position for the new track
+                                        {
+                                            let mut r = renderer.lock();
+                                            r.reset_position();
+                                            r.reset_finished_called();
+                                        }
+
+                                        // Store transition info for the engine to pick up
+                                        {
+                                            let mut info = gapless_info.lock().await;
+                                            *info = Some(GaplessTransitionInfo {
+                                                source: next_source_url,
+                                                duration: next_duration,
+                                                format: next_fmt,
+                                            });
+                                        }
+
+                                        // Fire completion callback so the UI updates
+                                        // (queue advances, track info refreshes)
+                                        if let Some(ref cb) = completion_callback {
+                                            cb(false);
+                                        }
+
+                                        tracing::info!(
+                                            "🎵 [DECODE LOOP] Gapless transition — continuing decode loop"
+                                        );
+                                        backpressure_active = false;
+                                        true
+                                    } else {
+                                        false
                                     }
-
-                                    // Store transition info for the engine to pick up
-                                    {
-                                        let mut info = gapless_info.lock().await;
-                                        *info = Some(GaplessTransitionInfo {
-                                            source: next_source_url,
-                                            duration: next_duration,
-                                            format: next_fmt,
-                                        });
-                                    }
-
-                                    // Fire completion callback so the UI updates
-                                    // (queue advances, track info refreshes)
-                                    if let Some(ref cb) = completion_callback {
-                                        cb(false);
-                                    }
-
-                                    tracing::info!(
-                                        "🎵 [DECODE LOOP] Gapless transition — continuing decode loop"
-                                    );
-                                    backpressure_active = false;
-                                    true
                                 } else {
                                     tracing::debug!(
                                         "🔄 [DECODE LOOP] Format mismatch for gapless: {:?} → {:?}",
