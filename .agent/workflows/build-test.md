@@ -13,7 +13,7 @@ cargo +nightly fmt --all -- --check
 
 2. Run clippy to enforce zero warnings (matches CI strictness):
 ```bash
-cargo clippy -- -D warnings
+cargo clippy --all-targets -- -D warnings
 ```
 
 3. Run the test suite:
