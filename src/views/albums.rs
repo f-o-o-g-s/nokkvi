@@ -68,6 +68,7 @@ pub enum AlbumsMessage {
 
     // Inline expansion (Shift+Enter)
     ExpandCenter,
+    FocusAndExpand(usize), // Clicked 'X songs' — focus that row and expand it
     CollapseExpansion,
     /// Tracks loaded for expanded album (album_id, tracks)
     TracksLoaded(String, Vec<SongUIViewData>),
@@ -93,6 +94,9 @@ pub enum AlbumsMessage {
 
     /// Dominant color calculated asynchronously
     DominantColorCalculated(String, iced::Color),
+
+    /// Navigate to a view and set its search query
+    NavigateAndSearch(crate::View, String),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -125,6 +129,7 @@ pub enum AlbumsAction {
     RefreshArtwork(String), // album_id - refresh artwork from server
     FindSimilar(String, String), // (entity_id, label) - open similar tab
     SaveDominantColor(String, iced::Color),
+    NavigateAndSearch(crate::View, String), // Navigate to target view and search
     None,
 }
 
@@ -249,6 +254,34 @@ impl AlbumsPage {
                             )
                         }
                         None => (Task::none(), AlbumsAction::None),
+                    }
+                }
+                AlbumsMessage::FocusAndExpand(offset) => {
+                    let center = self.expansion.handle_select_offset(
+                        offset,
+                        Default::default(),
+                        albums,
+                        &mut self.common,
+                    );
+                    if let Some(idx) = center {
+                        self.dominant_color = None;
+                        // Now expand it
+                        if let Some(parent_id) =
+                            self.expansion
+                                .handle_expand_center(albums, |a| &a.id, &mut self.common)
+                        {
+                            (
+                                Task::none(),
+                                AlbumsAction::ExpandAlbum(parent_id),
+                            )
+                        } else {
+                            (
+                                Task::none(),
+                                AlbumsAction::LoadLargeArtwork(idx.to_string()),
+                            )
+                        }
+                    } else {
+                        (Task::none(), AlbumsAction::None)
                     }
                 }
                 AlbumsMessage::SlotListScrollSeek(offset) => {
@@ -512,6 +545,9 @@ impl AlbumsPage {
                 }
                 // Common arms already handled by macro above
                 AlbumsMessage::CenterOnPlaying => (Task::none(), AlbumsAction::CenterOnPlaying),
+                AlbumsMessage::NavigateAndSearch(view, query) => {
+                    (Task::none(), AlbumsAction::NavigateAndSearch(view, query))
+                }
                 _ => (Task::none(), AlbumsAction::None),
             },
         }
@@ -747,7 +783,7 @@ impl AlbumsPage {
         stable_viewport: bool,
     ) -> Element<'a, AlbumsMessage> {
         use crate::widgets::slot_list::{
-            SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column, slot_list_text,
+            SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column,
         };
 
         let album_id = album.id.clone();
@@ -794,9 +830,15 @@ impl AlbumsPage {
             },
             {
                 use crate::widgets::slot_list::slot_list_text_column;
+                let artist_click = Some(AlbumsMessage::NavigateAndSearch(
+                    crate::View::Artists,
+                    album_artist.clone(),
+                ));
                 slot_list_text_column(
                     album_name,
+                    None,
                     album_artist,
+                    artist_click,
                     title_size,
                     subtitle_size,
                     style,
@@ -805,8 +847,15 @@ impl AlbumsPage {
                 )
             },
             {
+                let idx = ctx.item_index;
                 use crate::widgets::slot_list::slot_list_metadata_column;
-                slot_list_metadata_column(format!("{song_count} songs"), song_count_size, style, 22)
+                slot_list_metadata_column(
+                    format!("{song_count} songs"),
+                    Some(AlbumsMessage::FocusAndExpand(idx)),
+                    song_count_size,
+                    style,
+                    22,
+                )
             },
             {
                 if current_sort_mode == SortMode::Rating {
@@ -824,17 +873,22 @@ impl AlbumsPage {
                         Some(move |star: usize| AlbumsMessage::ClickSetRating(idx, star)),
                     )
                 } else if !extra_value.is_empty() {
-                    container(slot_list_text(
+                    let mut click_msg = None;
+                    if current_sort_mode == SortMode::Genre {
+                        click_msg = Some(AlbumsMessage::NavigateAndSearch(
+                            crate::View::Genres,
+                            extra_value.clone(),
+                        ));
+                    }
+                    use crate::widgets::slot_list::slot_list_metadata_column;
+                    slot_list_metadata_column(
                         extra_value,
+                        click_msg,
                         calculate_font_size(14.0, ctx.row_height, ctx.scale_factor)
                             * ctx.scale_factor,
-                        style.subtext_color,
-                    ))
-                    .width(Length::FillPortion(21))
-                    .height(Length::Fill)
-                    .clip(true)
-                    .align_y(Alignment::Center)
-                    .into()
+                        style,
+                        21,
+                    )
                 } else {
                     container(text("")).width(Length::FillPortion(21)).into()
                 }

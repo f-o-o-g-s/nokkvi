@@ -377,6 +377,7 @@ fn render_item_slot<'a>(
         border_color: Color::TRANSPARENT,
         border_width: 0.0,
         border_radius: 0.0.into(),
+        hover_text_color: crate::theme::accent_bright(),
     };
 
     // ── Special layout for preset, restore, and action items ──────────

@@ -263,6 +263,8 @@ pub enum ToastMessage {
 pub enum Message {
     // --- Navigation ---
     SwitchView(View),
+    /// Navigate to a view and populate its search query
+    NavigateAndSearch(View, String),
     /// Track info strip was clicked — dispatch depends on strip_click_action setting
     StripClicked,
     /// Track info strip right-click context menu action

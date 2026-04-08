@@ -11,6 +11,7 @@ pub(crate) mod eq_slider;
 pub(crate) mod format_info;
 pub(crate) mod hover_indicator;
 pub(crate) mod hover_overlay;
+pub(crate) mod link_text;
 pub(crate) mod marquee_text;
 pub(crate) mod nav_bar;
 pub(crate) mod player_bar;

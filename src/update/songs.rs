@@ -533,6 +533,9 @@ impl Nokkvi {
             SongsAction::TopSongs(artist_name, label) => {
                 return self.handle_find_top_songs(artist_name, label);
             }
+            SongsAction::NavigateAndSearch(view, query) => {
+                return Task::done(Message::NavigateAndSearch(view, query));
+            }
             _ => {} // None + already-handled common actions
         }
 

@@ -842,6 +842,9 @@ impl Nokkvi {
                 self.artwork.album_dominant_colors.put(id, color);
                 return Task::none();
             }
+            AlbumsAction::NavigateAndSearch(view, query) => {
+                return Task::done(Message::NavigateAndSearch(view, query));
+            }
             _ => {} // None + already-handled common actions
         }
 

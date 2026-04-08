@@ -1461,3 +1461,83 @@ fn dominant_color_caching_returns_instantly() {
         "Dominant color should be seamlessly restored from the cache effect"
     );
 }
+
+// ============================================================================
+// Navigate and Search Handlers
+// ============================================================================
+
+#[test]
+fn handle_navigate_and_search_updates_view_and_query() {
+    let mut app = test_app();
+    app.current_view = View::Queue; // Start at Queue
+    app.artists_page.common.search_query = "old_search".to_string();
+
+    let _ = app.handle_navigate_and_search(View::Artists, "The Beatles".to_string());
+
+    assert_eq!(app.current_view, View::Artists);
+    assert_eq!(app.artists_page.common.search_query, "The Beatles");
+    assert_eq!(app.artists_page.common.slot_list.viewport_offset, 0);
+    assert!(!app.artists_page.common.search_input_focused);
+}
+
+#[test]
+fn handle_navigate_and_search_updates_queue_properly() {
+    let mut app = test_app();
+    app.current_view = View::Songs; // Start at Songs
+    app.queue_page.common.search_query = "old_search".to_string();
+
+    let _ = app.handle_navigate_and_search(View::Queue, "Master".to_string());
+
+    assert_eq!(app.current_view, View::Queue);
+    assert_eq!(app.queue_page.common.search_query, "Master");
+    assert!(!app.queue_page.common.search_input_focused);
+}
+
+#[test]
+fn queue_page_navigate_and_search_returns_action() {
+    let mut app = test_app();
+    let (_, action) = app.queue_page.update(
+        crate::views::QueueMessage::NavigateAndSearch(View::Albums, "Daft Punk".to_string()),
+        &[],
+    );
+    match action {
+        crate::views::QueueAction::NavigateAndSearch(v, q) => {
+            assert_eq!(v, View::Albums);
+            assert_eq!(q, "Daft Punk");
+        }
+        _ => panic!("Expected NavigateAndSearch action"),
+    }
+}
+
+#[test]
+fn songs_page_navigate_and_search_returns_action() {
+    let mut app = test_app();
+    let (_, action) = app.songs_page.update(
+        crate::views::SongsMessage::NavigateAndSearch(View::Artists, "Pink".to_string()),
+        &[],
+    );
+    match action {
+        crate::views::SongsAction::NavigateAndSearch(v, q) => {
+            assert_eq!(v, View::Artists);
+            assert_eq!(q, "Pink");
+        }
+        _ => panic!("Expected NavigateAndSearch action"),
+    }
+}
+
+#[test]
+fn albums_page_navigate_and_search_returns_action() {
+    let mut app = test_app();
+    let (_, action) = app.albums_page.update(
+        crate::views::AlbumsMessage::NavigateAndSearch(View::Songs, "Get Lucky".to_string()),
+        0,
+        &[],
+    );
+    match action {
+        crate::views::AlbumsAction::NavigateAndSearch(v, q) => {
+            assert_eq!(v, View::Songs);
+            assert_eq!(q, "Get Lucky");
+        }
+        _ => panic!("Expected NavigateAndSearch action"),
+    }
+}

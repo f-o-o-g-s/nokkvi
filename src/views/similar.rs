@@ -372,7 +372,9 @@ impl SimilarPage {
                         use crate::widgets::slot_list::slot_list_text_column;
                         slot_list_text_column(
                             song_title,
+                            None,
                             song_artist,
+                            None,
                             title_size,
                             subtitle_size,
                             style,
@@ -382,7 +384,7 @@ impl SimilarPage {
                     },
                     {
                         use crate::widgets::slot_list::slot_list_metadata_column;
-                        slot_list_metadata_column(song_album, metadata_size, style, 30)
+                        slot_list_metadata_column(song_album, None, metadata_size, style, 30)
                     },
                     {
                         let duration_str = formatters::format_time(duration);

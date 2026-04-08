@@ -745,12 +745,13 @@ impl GenresPage {
                 } else {
                     format!("{} albums", genre.album_count)
                 };
-                slot_list_metadata_column(album_text, metadata_size, style, 20)
+                slot_list_metadata_column(album_text, None, metadata_size, style, 20)
             },
             {
                 use crate::widgets::slot_list::slot_list_metadata_column;
                 slot_list_metadata_column(
                     format!("{} songs", genre.song_count),
+                    None,
                     metadata_size,
                     style,
                     20,

@@ -38,9 +38,8 @@ fn linearize(c: u8) -> f64 {
 }
 
 pub fn is_dark_color(r: u8, g: u8, b: u8) -> bool {
-    let luminance =
-        0.2126 * linearize(r) + 0.7152 * linearize(g) + 0.0722 * linearize(b);
-    
+    let luminance = 0.2126 * linearize(r) + 0.7152 * linearize(g) + 0.0722 * linearize(b);
+
     // W3C suggests swapping to dark text if background luminance > 0.179
     luminance <= 0.179
 }
@@ -55,7 +54,7 @@ mod tests {
         assert!(is_dark_color(50, 20, 30)); // Deep maroon is dark
         assert!(!is_dark_color(255, 255, 255)); // White is not dark
         assert!(!is_dark_color(200, 200, 200)); // Light grey is not dark
-        
+
         // Bright orange-red (like the Nina Kraviz album) is NOT dark
         assert!(!is_dark_color(240, 80, 40));
     }

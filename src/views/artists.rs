@@ -873,12 +873,18 @@ impl ArtistsPage {
                 } else {
                     format!("{album_count} albums")
                 };
-                slot_list_metadata_column(album_text, metadata_size, style, 22)
+                slot_list_metadata_column(album_text, None, metadata_size, style, 22)
             },
             // 4. Song Count (21%)
             {
                 use crate::widgets::slot_list::slot_list_metadata_column;
-                slot_list_metadata_column(format!("{song_count} songs"), metadata_size, style, 21)
+                slot_list_metadata_column(
+                    format!("{song_count} songs"),
+                    None,
+                    metadata_size,
+                    style,
+                    21,
+                )
             },
             // 5. Star/Heart Icon (5%)
             container({

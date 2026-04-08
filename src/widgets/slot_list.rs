@@ -40,6 +40,7 @@ pub(crate) struct SlotListSlotStyle {
     pub border_radius: iced::border::Radius,
     pub text_color: Color,
     pub subtext_color: Color,
+    pub hover_text_color: Color,
 }
 
 impl SlotListSlotStyle {
@@ -60,6 +61,7 @@ impl SlotListSlotStyle {
                 border_radius: slot_list_border_radius(),
                 text_color: theme::bg0_hard(),
                 subtext_color: theme::bg0_hard(),
+                hover_text_color: theme::bg0_hard(),
             }
         } else if is_selected || (is_center && !has_multi_selection) {
             // Selected item, or center slot when there is NO explicit multi-selection.
@@ -74,6 +76,7 @@ impl SlotListSlotStyle {
                 border_radius: slot_list_border_radius(),
                 text_color: theme::bg0_hard(),
                 subtext_color: theme::bg0_hard(),
+                hover_text_color: theme::bg0_hard(),
             }
         // Removed redundant else if is_center branch as it matches the default fallback exactly
         } else {
@@ -97,6 +100,7 @@ impl SlotListSlotStyle {
                     a: opacity,
                     ..theme::fg4()
                 },
+                hover_text_color: theme::accent_bright(),
             }
         }
     }
@@ -701,9 +705,12 @@ pub(crate) fn slot_list_artwork_column<'a, Message: 'a>(
 /// * `style` - Slot styling to determine text colors
 /// * `is_bold` - Whether to bold the title
 /// * `portion` - FillPortion width allocation
-pub(crate) fn slot_list_text_column<'a, Message: 'a>(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn slot_list_text_column<'a, Message: Clone + 'a + 'static>(
     title: String,
+    title_on_press: Option<Message>,
     subtitle: String,
+    subtitle_on_press: Option<Message>,
     title_size: f32,
     subtitle_size: f32,
     style: SlotListSlotStyle,
@@ -724,16 +731,37 @@ pub(crate) fn slot_list_text_column<'a, Message: 'a>(
         theme::ui_font()
     };
 
-    let title_widget = iced::widget::text(title)
-        .size(title_size)
-        .color(style.text_color)
-        .font(title_font)
-        .wrapping(Wrapping::None)
-        .ellipsis(Ellipsis::End);
+    let title_widget: Element<'a, Message> = if let Some(msg) = title_on_press {
+        crate::widgets::link_text::LinkText::new(title)
+            .size(title_size)
+            .color(style.text_color)
+            .hover_color(style.hover_text_color)
+            .font(title_font)
+            .on_press(Some(msg))
+            .into()
+    } else {
+        iced::widget::text(title)
+            .size(title_size)
+            .color(style.text_color)
+            .font(title_font)
+            .wrapping(Wrapping::None)
+            .ellipsis(Ellipsis::End)
+            .into()
+    };
 
-    let subtitle_widget = slot_list_text(subtitle, subtitle_size, style.subtext_color);
+    let subtitle_widget: Element<'a, Message> = if let Some(msg) = subtitle_on_press {
+        crate::widgets::link_text::LinkText::new(subtitle)
+            .size(subtitle_size)
+            .color(style.subtext_color)
+            .hover_color(style.hover_text_color)
+            .font(theme::ui_font())
+            .on_press(Some(msg))
+            .into()
+    } else {
+        slot_list_text(subtitle, subtitle_size, style.subtext_color).into()
+    };
 
-    container(column![title_widget, subtitle_widget,].spacing(SLOT_LIST_COL_SPACING))
+    container(column![title_widget, subtitle_widget].spacing(SLOT_LIST_COL_SPACING))
         .width(Length::FillPortion(portion))
         .height(Length::Fill)
         .clip(true)
@@ -748,15 +776,28 @@ pub(crate) fn slot_list_text_column<'a, Message: 'a>(
 /// * `font_size` - Font size for the text
 /// * `style` - Slot styling to determine text color
 /// * `portion` - FillPortion width allocation
-pub(crate) fn slot_list_metadata_column<'a, Message: 'a>(
+pub(crate) fn slot_list_metadata_column<'a, Message: Clone + 'a + 'static>(
     content: String,
+    on_press: Option<Message>,
     font_size: f32,
     style: SlotListSlotStyle,
     portion: u16,
 ) -> Element<'a, Message> {
     use iced::Alignment;
 
-    container(slot_list_text(content, font_size, style.subtext_color))
+    let text_widget: Element<'a, Message> = if let Some(msg) = on_press {
+        crate::widgets::link_text::LinkText::new(content)
+            .size(font_size)
+            .color(style.subtext_color)
+            .hover_color(style.hover_text_color)
+            .font(theme::ui_font())
+            .on_press(Some(msg))
+            .into()
+    } else {
+        slot_list_text(content, font_size, style.subtext_color).into()
+    };
+
+    container(text_widget)
         .width(Length::FillPortion(portion))
         .height(Length::Fill)
         .clip(true)
@@ -1163,5 +1204,20 @@ mod tests {
             EDIT_BAR_HEIGHT,
             "edit bar height must be additive"
         );
+    }
+
+    #[test]
+    fn hover_text_color_adjusts_for_background_contrast() {
+        // Normal slot (dark bg) -> hover is bright accent
+        let style = SlotListSlotStyle::for_slot(false, false, false, false, 1.0);
+        assert_eq!(style.hover_text_color, crate::theme::accent_bright());
+
+        // Highlighted slot (light playing bg) -> hover is dark text (e.g. bg0_hard)
+        let hl_style = SlotListSlotStyle::for_slot(false, true, false, false, 1.0);
+        assert_eq!(hl_style.hover_text_color, crate::theme::bg0_hard());
+
+        // Selected slot (light selected bg) -> hover is dark text
+        let sel_style = SlotListSlotStyle::for_slot(false, false, true, false, 1.0);
+        assert_eq!(sel_style.hover_text_color, crate::theme::bg0_hard());
     }
 }

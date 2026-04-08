@@ -561,6 +561,9 @@ impl Nokkvi {
                     album_id,
                 )));
             }
+            QueueAction::NavigateAndSearch(view, query) => {
+                return Task::done(Message::NavigateAndSearch(view, query));
+            }
             QueueAction::None => {}
         }
 

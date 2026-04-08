@@ -104,6 +104,8 @@ pub enum QueueMessage {
     QueueLoaded(Result<Vec<QueueSongUIViewData>, String>), // queue_songs
     /// Refresh artwork for a specific album (album_id)
     RefreshArtwork(String),
+    /// Navigate to a view and set its search query
+    NavigateAndSearch(crate::View, String),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -135,6 +137,7 @@ pub enum QueueAction {
     RefreshArtwork(String),   // album_id - refresh artwork from server
     FindSimilar(usize),       // Open Find Similar panel for queue index
     TopSongs(usize),          // Open Top Songs panel for queue index
+    NavigateAndSearch(crate::View, String), // Navigate to target view and search
     None,
 }
 
@@ -198,6 +201,9 @@ impl QueuePage {
                     queue_index, self.common.slot_list.viewport_offset
                 );
                 (Task::none(), QueueAction::FocusOnSong(queue_index, flash))
+            }
+            QueueMessage::NavigateAndSearch(view, query) => {
+                (Task::none(), QueueAction::NavigateAndSearch(view, query))
             }
             QueueMessage::SortModeSelected(sort_mode) => {
                 self.queue_sort_mode = sort_mode;
@@ -766,7 +772,12 @@ impl QueuePage {
                     use crate::widgets::slot_list::slot_list_text_column;
                     slot_list_text_column(
                         title,
-                        artist,
+                        None,
+                        artist.clone(),
+                        Some(QueueMessage::NavigateAndSearch(
+                            crate::View::Artists,
+                            artist,
+                        )),
                         title_size,
                         subtitle_size,
                         style,
@@ -782,26 +793,41 @@ impl QueuePage {
             if show_album_column {
                 content_row = content_row.push(
                     container({
+                        let click_album =
+                            QueueMessage::NavigateAndSearch(crate::View::Albums, album.clone());
+                        let album_widget: Element<'_, QueueMessage> =
+                            crate::widgets::link_text::LinkText::new(album)
+                                .size(subtitle_size)
+                                .color(style.subtext_color)
+                                .hover_color(style.hover_text_color)
+                                .font(crate::theme::ui_font())
+                                .on_press(Some(click_album))
+                                .into();
+
                         let content: Element<'_, QueueMessage> = if current_sort_mode
                             == QueueSortMode::Genre
                         {
-                            column![
-                                slot_list_text(album.clone(), subtitle_size, style.subtext_color),
-                                slot_list_text(
-                                    if genre.is_empty() {
-                                        "Unknown".to_string()
-                                    } else {
-                                        genre
-                                    },
-                                    calculate_font_size(10.0, ctx.row_height, ctx.scale_factor)
-                                        * ctx.scale_factor,
-                                    style.subtext_color
-                                ),
-                            ]
-                            .spacing(2.0)
-                            .into()
+                            let click_genre =
+                                QueueMessage::NavigateAndSearch(crate::View::Genres, genre.clone());
+                            let genre_font_size =
+                                calculate_font_size(10.0, ctx.row_height, ctx.scale_factor)
+                                    * ctx.scale_factor;
+                            let genre_widget: Element<'_, QueueMessage> =
+                                crate::widgets::link_text::LinkText::new(if genre.is_empty() {
+                                    "Unknown".to_string()
+                                } else {
+                                    genre
+                                })
+                                .size(genre_font_size)
+                                .color(style.subtext_color)
+                                .hover_color(style.hover_text_color)
+                                .font(crate::theme::ui_font())
+                                .on_press(Some(click_genre))
+                                .into();
+
+                            column![album_widget, genre_widget].spacing(2.0).into()
                         } else {
-                            slot_list_text(album, subtitle_size, style.subtext_color).into()
+                            album_widget
                         };
                         content
                     })

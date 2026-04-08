@@ -717,7 +717,9 @@ impl PlaylistsPage {
                 use crate::widgets::slot_list::slot_list_text_column;
                 slot_list_text_column(
                     playlist.name.clone(),
+                    None,
                     subtitle,
+                    None,
                     title_size,
                     metadata_size,
                     style,
@@ -730,6 +732,7 @@ impl PlaylistsPage {
         if show_song_count_col {
             columns.push(slot_list_metadata_column(
                 count_text.clone(),
+                None,
                 metadata_size,
                 style,
                 20,
@@ -738,6 +741,7 @@ impl PlaylistsPage {
         if show_duration_col {
             columns.push(slot_list_metadata_column(
                 duration_str.clone(),
+                None,
                 metadata_size,
                 style,
                 20,
@@ -747,6 +751,7 @@ impl PlaylistsPage {
             let date_str = format_date_concise(&playlist.updated_at);
             columns.push(slot_list_metadata_column(
                 date_str,
+                None,
                 metadata_size,
                 style,
                 20,

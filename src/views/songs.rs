@@ -68,6 +68,8 @@ pub enum SongsMessage {
     SongsPageLoaded(Result<Vec<SongUIViewData>, String>, usize), // result, total_count (subsequent page)
     /// Refresh artwork for a specific album (album_id)
     RefreshArtwork(String),
+    /// Navigate to a view and set its search query
+    NavigateAndSearch(crate::View, String),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -94,6 +96,7 @@ pub enum SongsAction {
     FindSimilar(String, String), // (id, label) - Find similar to this song
     TopSongs(String, String),    // (artist, label) - Find top songs by artist
     CenterOnPlaying,
+    NavigateAndSearch(crate::View, String), // Navigate to target view and search
     None,
 }
 
@@ -348,6 +351,9 @@ impl SongsPage {
                 (Task::none(), SongsAction::RefreshArtwork(album_id))
             }
             SongsMessage::CenterOnPlaying => (Task::none(), SongsAction::CenterOnPlaying),
+            SongsMessage::NavigateAndSearch(view, query) => {
+                (Task::none(), SongsAction::NavigateAndSearch(view, query))
+            }
         }
     }
 
@@ -506,9 +512,15 @@ impl SongsPage {
                     // 2. Title + Artist (40%)
                     {
                         use crate::widgets::slot_list::slot_list_text_column;
+                        let artist_click = Some(SongsMessage::NavigateAndSearch(
+                            crate::View::Artists,
+                            song_artist.clone(),
+                        ));
                         slot_list_text_column(
                             song_title,
+                            None,
                             song_artist,
+                            artist_click,
                             title_size,
                             subtitle_size,
                             style,
@@ -519,7 +531,11 @@ impl SongsPage {
                     // 3. Album (25%)
                     {
                         use crate::widgets::slot_list::slot_list_metadata_column;
-                        slot_list_metadata_column(song_album, metadata_size, style, 25)
+                        let album_click = Some(SongsMessage::NavigateAndSearch(
+                            crate::View::Albums,
+                            song_album.clone(),
+                        ));
+                        slot_list_metadata_column(song_album, album_click, metadata_size, style, 25)
                     },
                     // 4. Extra Column (18%) - Dynamic based on current sort mode
                     {
@@ -538,17 +554,22 @@ impl SongsPage {
                                 Some(move |star: usize| SongsMessage::ClickSetRating(idx, star)),
                             )
                         } else if !extra_value.is_empty() {
-                            container(slot_list_text(
+                            let mut click_msg = None;
+                            if current_sort_mode == SortMode::Genre {
+                                click_msg = Some(SongsMessage::NavigateAndSearch(
+                                    crate::View::Genres,
+                                    extra_value.clone(),
+                                ));
+                            }
+                            use crate::widgets::slot_list::slot_list_metadata_column;
+                            slot_list_metadata_column(
                                 extra_value,
+                                click_msg,
                                 calculate_font_size(14.0, ctx.row_height, ctx.scale_factor)
                                     * ctx.scale_factor,
-                                style.subtext_color,
-                            ))
-                            .width(Length::FillPortion(18))
-                            .height(Length::Fill)
-                            .clip(true)
-                            .align_y(Alignment::Center)
-                            .into()
+                                style,
+                                18,
+                            )
                         } else {
                             container(text("")).width(Length::FillPortion(18)).into()
                         }

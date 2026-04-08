@@ -294,4 +294,47 @@ impl Nokkvi {
         }
         Task::none()
     }
+
+    /// Handles clicking an inline link (like Artist or Album) from a slot text column.
+    /// Uses TDD Red step: returns Task::none() for now so tests fail.
+    pub(crate) fn handle_navigate_and_search(
+        &mut self,
+        view: crate::View,
+        query: String,
+    ) -> Task<Message> {
+        let switch_task = self.handle_switch_view(view);
+
+        // Turn off search input focus if possible, and reset the slot list offset
+        if let Some(page) = self.current_view_page_mut() {
+            page.common_mut().search_query = query.clone();
+            page.common_mut().search_input_focused = false;
+            page.common_mut().slot_list.set_offset(0, 0);
+        }
+
+        // Dispatch the view-specific SearchQueryChanged message so the target view
+        // re-filters, caches artwork, and updates its query properly.
+        let search_task = match view {
+            View::Queue => Task::done(Message::Queue(views::QueueMessage::SearchQueryChanged(
+                query,
+            ))),
+            View::Albums => Task::done(Message::Albums(views::AlbumsMessage::SearchQueryChanged(
+                query,
+            ))),
+            View::Artists => Task::done(Message::Artists(
+                views::ArtistsMessage::SearchQueryChanged(query),
+            )),
+            View::Songs => Task::done(Message::Songs(views::SongsMessage::SearchQueryChanged(
+                query,
+            ))),
+            View::Genres => Task::done(Message::Genres(views::GenresMessage::SearchQueryChanged(
+                query,
+            ))),
+            View::Playlists => Task::done(Message::Playlists(
+                views::PlaylistsMessage::SearchQueryChanged(query),
+            )),
+            View::Settings => Task::none(),
+        };
+
+        Task::batch([switch_task, search_task])
+    }
 }

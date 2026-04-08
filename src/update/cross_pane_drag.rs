@@ -502,8 +502,18 @@ impl Nokkvi {
 
         row![
             slot_list_artwork_column(artwork, artwork_size, true, false, 1.0),
-            slot_list_text_column(title, subtitle, title_size, subtitle_size, style, true, 50),
-            slot_list_metadata_column(meta, meta_size, style, 22),
+            slot_list_text_column(
+                title,
+                None,
+                subtitle,
+                None,
+                title_size,
+                subtitle_size,
+                style,
+                true,
+                50
+            ),
+            slot_list_metadata_column(meta, None, meta_size, style, 22),
         ]
         .spacing(6.0)
         .padding(iced::Padding {
