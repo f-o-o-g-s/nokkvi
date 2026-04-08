@@ -806,7 +806,7 @@ impl GenresPage {
         stable_viewport: bool,
     ) -> Element<'a, GenresMessage> {
         use crate::widgets::slot_list::{
-            SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column,
+            SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column, slot_list_text,
         };
 
         let is_expanded = self.expansion.is_expanded_parent(&genre.id);
@@ -841,22 +841,11 @@ impl GenresPage {
                     ctx.opacity,
                 )
             },
-            container({
-                let click_title = Some(GenresMessage::ContextMenuAction(
-                    ctx.item_index,
-                    crate::widgets::context_menu::LibraryContextEntry::GetInfo,
-                ));
-                let link_color = if ctx.is_center {
-                    style.text_color
-                } else {
-                    crate::theme::accent_bright()
-                };
-                crate::widgets::link_text::LinkText::new(genre.name.clone())
-                    .size(title_size)
-                    .color(style.text_color)
-                    .hover_color(link_color)
-                    .on_press(click_title)
-            })
+            container(slot_list_text(
+                genre.name.clone(),
+                title_size,
+                style.text_color,
+            ))
             .width(Length::FillPortion(45))
             .height(Length::Fill)
             .clip(true)
