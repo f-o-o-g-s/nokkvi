@@ -43,6 +43,12 @@ pub struct AlbumUIViewData {
     pub comment: Option<String>,
     pub tags: Vec<(String, String)>,
     pub participants: Vec<(String, String)>,
+    /// Raw release date string from Navidrome (ISO 8601, e.g. "2023-11-05")
+    pub release_date: Option<String>,
+    /// Raw original date string (e.g. "1973-03-24" for a remaster's original release)
+    pub original_date: Option<String>,
+    /// Original release year (Feishin uses max_original_year)
+    pub original_year: Option<u32>,
 }
 
 impl AlbumUIViewData {
@@ -92,6 +98,9 @@ impl AlbumUIViewData {
             comment: album.comment.clone(),
             tags,
             participants,
+            release_date: album.release_date.clone(),
+            original_date: album.original_date.clone(),
+            original_year: album.max_original_year,
         }
     }
 

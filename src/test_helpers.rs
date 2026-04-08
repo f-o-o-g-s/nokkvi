@@ -127,6 +127,9 @@ pub(crate) fn make_album(id: &str, name: &str, artist: &str) -> AlbumUIViewData 
         comment: None,
         tags: Vec::new(),
         participants: Vec::new(),
+        release_date: None,
+        original_date: None,
+        original_year: None,
     }
 }
 

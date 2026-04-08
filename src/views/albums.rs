@@ -27,6 +27,8 @@ pub struct AlbumsPage {
     pub common: SlotListPageState,
     /// Inline expansion state (album → tracks)
     pub expansion: ExpansionState<SongUIViewData>,
+    /// Dominant color extracted from the currently centered large artwork
+    pub dominant_color: Option<iced::Color>,
 }
 
 /// View data passed from root (read-only, borrows from app state to avoid allocations)
@@ -88,6 +90,9 @@ pub enum AlbumsMessage {
     LargeArtworkLoaded(String, Option<image::Handle>),
     /// Refresh artwork for a specific album (album_id)
     RefreshArtwork(String),
+
+    /// Dominant color calculated asynchronously
+    DominantColorCalculated(String, iced::Color),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -119,6 +124,7 @@ pub enum AlbumsAction {
     ShowSongInFolder(String), // song path - open containing folder directly (expansion child)
     RefreshArtwork(String), // album_id - refresh artwork from server
     FindSimilar(String, String), // (entity_id, label) - open similar tab
+    SaveDominantColor(String, iced::Color),
     None,
 }
 
@@ -144,6 +150,7 @@ impl Default for AlbumsPage {
                 false, // sort_ascending
             ),
             expansion: ExpansionState::default(),
+            dominant_color: None,
         }
     }
 }
@@ -201,10 +208,13 @@ impl AlbumsPage {
                 AlbumsMessage::SlotListNavigateUp => {
                     let center = self.expansion.handle_navigate_up(albums, &mut self.common);
                     match center {
-                        Some(idx) => (
-                            Task::none(),
-                            AlbumsAction::LoadLargeArtwork(idx.to_string()),
-                        ),
+                        Some(idx) => {
+                            self.dominant_color = None;
+                            (
+                                Task::none(),
+                                AlbumsAction::LoadLargeArtwork(idx.to_string()),
+                            )
+                        }
                         None => (Task::none(), AlbumsAction::None),
                     }
                 }
@@ -213,10 +223,13 @@ impl AlbumsPage {
                         .expansion
                         .handle_navigate_down(albums, &mut self.common);
                     match center {
-                        Some(idx) => (
-                            Task::none(),
-                            AlbumsAction::LoadLargeArtwork(idx.to_string()),
-                        ),
+                        Some(idx) => {
+                            self.dominant_color = None;
+                            (
+                                Task::none(),
+                                AlbumsAction::LoadLargeArtwork(idx.to_string()),
+                            )
+                        }
                         None => (Task::none(), AlbumsAction::None),
                     }
                 }
@@ -228,10 +241,13 @@ impl AlbumsPage {
                         &mut self.common,
                     );
                     match center {
-                        Some(idx) => (
-                            Task::none(),
-                            AlbumsAction::LoadLargeArtwork(idx.to_string()),
-                        ),
+                        Some(idx) => {
+                            self.dominant_color = None;
+                            (
+                                Task::none(),
+                                AlbumsAction::LoadLargeArtwork(idx.to_string()),
+                            )
+                        }
                         None => (Task::none(), AlbumsAction::None),
                     }
                 }
@@ -239,6 +255,10 @@ impl AlbumsPage {
                     self.expansion
                         .handle_set_offset(offset, albums, &mut self.common);
                     (Task::none(), AlbumsAction::None)
+                }
+                AlbumsMessage::DominantColorCalculated(id, color) => {
+                    self.dominant_color = Some(color);
+                    (Task::none(), AlbumsAction::SaveDominantColor(id, color))
                 }
                 AlbumsMessage::SlotListClickPlay(offset) => {
                     // Set offset then activate (play without focusing)
@@ -594,7 +614,7 @@ impl AlbumsPage {
 
         // Use base slot list layout with artwork column
         use crate::widgets::base_slot_list_layout::{
-            base_slot_list_layout, single_artwork_panel_with_menu,
+            base_slot_list_layout, single_artwork_panel_with_overlay,
         };
 
         // Build artwork column component — show parent album art even when on a child track
@@ -603,11 +623,113 @@ impl AlbumsPage {
             Some(SlotListEntry::Child(_, parent_id)) => albums.iter().find(|a| &a.id == parent_id),
             None => None,
         });
+
         let artwork_handle = centered_album.and_then(|album| data.large_artwork.get(&album.id));
         let on_refresh =
             centered_album.map(|album| AlbumsMessage::RefreshArtwork(album.id.clone()));
 
-        let artwork_content = Some(single_artwork_panel_with_menu(artwork_handle, on_refresh));
+        let is_dark_backdrop = if let Some(color) = self.dominant_color {
+            let [r, g, b, _] = color.into_rgba8();
+            nokkvi_data::utils::dominant_color::is_dark_color(r, g, b)
+        } else {
+            true // bg0_hard is dark
+        };
+
+        let primary_color = if is_dark_backdrop {
+            crate::theme::fg0()
+        } else {
+            crate::theme::bg0_hard()
+        };
+
+        // Overlay building
+        let overlay_content = centered_album.map(|album| {
+            use iced::widget::{column, container, text};
+
+            use crate::theme;
+
+            let mut col = column![
+                text(album.name.clone())
+                    .size(24)
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Bold,
+                        ..theme::ui_font()
+                    })
+                    .color(primary_color),
+                text(album.artist.clone()).size(16).color(primary_color),
+            ]
+            .spacing(4)
+            .align_x(iced::Alignment::Center);
+
+            // Date Resolution (Feishin logic cascade)
+            // originalDate -> releaseDate -> year
+            let date_text = if let Some(orig_date) = &album.original_date {
+                nokkvi_data::utils::formatters::format_release_date(orig_date)
+            } else if let Some(rel_date) = &album.release_date {
+                nokkvi_data::utils::formatters::format_release_date(rel_date)
+            } else if let Some(year) = album.original_year.or(album.year) {
+                year.to_string()
+            } else {
+                String::new()
+            };
+
+            if !date_text.is_empty() {
+                let mut full_date = date_text;
+                if let (Some(orig_yr), Some(yr)) = (album.original_year, album.year)
+                    && orig_yr != yr
+                {
+                    full_date = format!("{full_date} • {yr}");
+                }
+                col = col.push(text(full_date).size(14).color(primary_color));
+            }
+
+            // Duration
+            let dur_str = if let Some(secs) = album.duration {
+                nokkvi_data::utils::formatters::format_duration_short(secs)
+            } else {
+                String::new()
+            };
+            let mut tracks_str = format!("{} tracks", album.song_count);
+            if !dur_str.is_empty() {
+                tracks_str.push_str(" • ");
+                tracks_str.push_str(&dur_str);
+            }
+            col = col.push(text(tracks_str).size(14).color(primary_color));
+
+            // Genres
+            if let Some(genres) = &album.genres {
+                let genres_display = genres.replace(" • ", ", ");
+                col = col.push(text(genres_display).size(14).color(primary_color));
+            }
+
+            let pill_bg = if is_dark_backdrop {
+                iced::Color::from_rgba(0.0, 0.0, 0.0, 0.75) // Much darker pill
+            } else {
+                iced::Color::from_rgba(1.0, 1.0, 1.0, 0.75) // Much lighter pill
+            };
+
+            let pill = container(col)
+                .padding(32)
+                .style(move |_theme| container::Style {
+                    background: Some(iced::Background::Color(pill_bg)),
+                    border: iced::Border {
+                        radius: 16.0.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                });
+
+            container(pill)
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .into()
+        });
+
+        let artwork_content = Some(single_artwork_panel_with_overlay(
+            artwork_handle,
+            overlay_content,
+            self.dominant_color,
+            on_refresh,
+        ));
 
         base_slot_list_layout(&layout_config, header, slot_list_content, artwork_content)
     }

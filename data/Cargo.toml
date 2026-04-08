@@ -10,6 +10,7 @@ workspace = true
 anyhow = "1.0.102"
 bytemuck = { version = "1.25", features = ["derive"] }
 chrono = "0.4.44"
+color-thief = "0.2.2"
 directories = "6.0.0"
 image = "0.25.10"
 md5 = "0.8.0"

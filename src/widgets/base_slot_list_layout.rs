@@ -175,6 +175,54 @@ pub(crate) fn single_artwork_panel_with_menu<'a, Message: Clone + 'a>(
     }
 }
 
+/// Create a single-image artwork panel with a centered text overlay and dominant color backdrop.
+pub(crate) fn single_artwork_panel_with_overlay<'a, Message: Clone + 'a>(
+    artwork_handle: Option<&'a iced::widget::image::Handle>,
+    overlay_content: Option<Element<'a, Message>>,
+    dominant_color: Option<iced::Color>,
+    on_refresh: Option<Message>,
+) -> Element<'a, Message> {
+    let base_panel = single_artwork_panel(artwork_handle);
+
+    let panel = if let Some(content) = overlay_content {
+        use iced::widget::{container, stack};
+
+        // Determine background color. Use dominant color if available, defaulting to deep black.
+        // We set alpha to 0.7 to ensure legibility while letting artwork bleed through.
+        let mut bg_color = dominant_color.unwrap_or(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.7));
+        bg_color.a = 0.7;
+
+        let overlay = container(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .style(move |_theme| container::Style {
+                background: Some(iced::Background::Color(bg_color)),
+                ..Default::default()
+            });
+
+        stack![base_panel, overlay].into()
+    } else {
+        base_panel
+    };
+
+    if let Some(refresh_msg) = on_refresh {
+        use crate::widgets::context_menu::{context_menu, menu_button};
+
+        context_menu(panel, vec![()], move |_entry, _length| {
+            menu_button(
+                Some("assets/icons/refresh-cw.svg"),
+                "Refresh Artwork",
+                refresh_msg.clone(),
+            )
+        })
+        .into()
+    } else {
+        panel
+    }
+}
+
 /// Create a 3×3 collage artwork panel (used by genres, playlists)
 ///
 /// Shows a grid of album covers when `collage_handles` has 2+ entries.

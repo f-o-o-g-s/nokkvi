@@ -227,9 +227,18 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_load_large_artwork(&mut self, album_id: String) -> Task<Message> {
-        // Skip if already cached - makes back-navigation instant
+        // Skip fetching if already cached - makes back-navigation instant
         if self.artwork.large_artwork.peek(&album_id).is_some() {
-            return Task::none();
+            if let Some(&color) = self.artwork.album_dominant_colors.peek(&album_id) {
+                return Task::done(Message::Albums(AlbumsMessage::DominantColorCalculated(
+                    album_id, color,
+                )));
+            } else {
+                let handle = self.artwork.large_artwork.peek(&album_id).cloned();
+                return Task::done(Message::Artwork(ArtworkMessage::LargeLoaded(
+                    album_id, handle,
+                )));
+            }
         }
 
         self.artwork.loading_large_artwork = Some(album_id.clone());
@@ -417,17 +426,60 @@ impl Nokkvi {
         id: String,
         handle: Option<image::Handle>,
     ) -> Task<Message> {
+        let mut fetch_color_task = Task::none();
+
         // Always cache artwork that arrives (even if user navigated away)
         // This fixes the bug where rapid navigation discarded completed loads
         if let Some(h) = handle {
             self.artwork.large_artwork.put(id.clone(), h);
             self.artwork.refresh_large_artwork_snapshot();
+
+            if let Some(shell) = &self.app_service {
+                let albums_vm = shell.albums().clone();
+                let art_id = id.clone();
+                let artwork_size = self.artwork_resolution.to_size();
+
+                fetch_color_task = Task::perform(
+                    async move {
+                        let (url, cred) = albums_vm.get_server_config().await;
+                        let artwork_url = nokkvi_data::utils::artwork_url::build_cover_art_url(
+                            &art_id,
+                            &url,
+                            &cred,
+                            artwork_size,
+                        );
+                        let path = albums_vm
+                            .get_artwork_cache_path(&artwork_url, artwork_size)
+                            .await;
+                        if let Some(p) = path
+                            && let Ok(bytes) = tokio::fs::read(p).await
+                        {
+                            let dominant = tokio::task::spawn_blocking(move || {
+                                nokkvi_data::utils::dominant_color::extract_dominant_color(&bytes)
+                            })
+                            .await
+                            .unwrap_or(None);
+
+                            return dominant
+                                .map(|(r, g, b)| (art_id, iced::Color::from_rgb8(r, g, b)));
+                        }
+                        None
+                    },
+                    |result| {
+                        if let Some((id, c)) = result {
+                            Message::Albums(AlbumsMessage::DominantColorCalculated(id, c))
+                        } else {
+                            Message::NoOp
+                        }
+                    },
+                );
+            }
         }
         // Clear loading_large_artwork if this was the most recent request
         if self.artwork.loading_large_artwork.as_ref() == Some(&id) {
             self.artwork.loading_large_artwork = None;
         }
-        Task::none()
+        fetch_color_task
     }
 
     pub(crate) fn handle_start_artwork_prefetch(
@@ -785,6 +837,10 @@ impl Nokkvi {
             }
             AlbumsAction::FindSimilar(id, label) => {
                 return Task::done(Message::FindSimilar { id, label });
+            }
+            AlbumsAction::SaveDominantColor(id, color) => {
+                self.artwork.album_dominant_colors.put(id, color);
+                return Task::none();
             }
             _ => {} // None + already-handled common actions
         }

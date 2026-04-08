@@ -6,6 +6,57 @@ pub fn format_duration(seconds: u32) -> String {
     format!("{minutes}:{secs:02}")
 }
 
+/// Format seconds into a short human-readable string using the two most significant units.
+///
+/// Ported from Feishin's `formatDurationStringShort`.
+///
+/// # Examples
+/// - `45.0` → `"45s"`
+/// - `2576.0` → `"42m 56s"`
+/// - `4320.0` → `"1h 12m"`
+/// - `104400.0` → `"1d 5h"`
+pub fn format_duration_short(seconds: f64) -> String {
+    let total_secs = seconds as u64;
+
+    let days = total_secs / 86400;
+    let hours = (total_secs % 86400) / 3600;
+    let minutes = (total_secs % 3600) / 60;
+    let secs = total_secs % 60;
+
+    if days > 0 {
+        format!("{days}d {hours}h")
+    } else if hours > 0 {
+        format!("{hours}h {minutes}m")
+    } else if minutes > 0 {
+        format!("{minutes}m {secs}s")
+    } else {
+        format!("{secs}s")
+    }
+}
+
+/// Format an ISO 8601 date string into a human-readable absolute date.
+///
+/// Output format: `"Mar 24, 1973"` (abbreviated month, day without leading zero, 4-digit year).
+///
+/// Handles both date-only (`"1973-03-24"`) and full timestamp (`"1973-03-24T00:00:00Z"`) inputs.
+/// Returns the raw string unchanged if parsing fails, or empty string for empty input.
+pub fn format_release_date(date_str: &str) -> String {
+    if date_str.is_empty() {
+        return String::new();
+    }
+
+    use chrono::NaiveDate;
+
+    // Try date-only first (YYYY-MM-DD)
+    let date_portion = date_str.split('T').next().unwrap_or(date_str);
+    if let Ok(date) = NaiveDate::parse_from_str(date_portion, "%Y-%m-%d") {
+        return date.format("%b %-d, %Y").to_string();
+    }
+
+    // Fallback: return raw string
+    date_str.to_string()
+}
+
 pub fn format_time(seconds: u32) -> String {
     format_duration(seconds)
 }
@@ -82,5 +133,76 @@ mod tests {
     #[test]
     fn toggle_five_same_goes_to_four() {
         assert_eq!(compute_rating_toggle(5, 5), 4);
+    }
+
+    // =========================================================================
+    // format_duration_short — Red-Green TDD
+    // =========================================================================
+
+    #[test]
+    fn duration_short_seconds_only() {
+        assert_eq!(format_duration_short(45.0), "45s");
+    }
+
+    #[test]
+    fn duration_short_minutes_and_seconds() {
+        assert_eq!(format_duration_short(2576.0), "42m 56s");
+    }
+
+    #[test]
+    fn duration_short_exact_minutes() {
+        assert_eq!(format_duration_short(120.0), "2m 0s");
+    }
+
+    #[test]
+    fn duration_short_hours_and_minutes() {
+        assert_eq!(format_duration_short(4320.0), "1h 12m");
+    }
+
+    #[test]
+    fn duration_short_days_and_hours() {
+        assert_eq!(format_duration_short(104400.0), "1d 5h");
+    }
+
+    #[test]
+    fn duration_short_zero() {
+        assert_eq!(format_duration_short(0.0), "0s");
+    }
+
+    #[test]
+    fn duration_short_fractional_seconds() {
+        // Fractional seconds should be truncated
+        assert_eq!(format_duration_short(65.7), "1m 5s");
+    }
+
+    // =========================================================================
+    // format_release_date — Red-Green TDD
+    // =========================================================================
+
+    #[test]
+    fn release_date_full_iso() {
+        assert_eq!(format_release_date("1973-03-24"), "Mar 24, 1973");
+    }
+
+    #[test]
+    fn release_date_another_date() {
+        assert_eq!(format_release_date("2023-11-05"), "Nov 5, 2023");
+    }
+
+    #[test]
+    fn release_date_iso_with_time() {
+        // Navidrome sometimes sends full timestamps
+        assert_eq!(format_release_date("1973-03-24T00:00:00Z"), "Mar 24, 1973");
+    }
+
+    #[test]
+    fn release_date_invalid_returns_raw() {
+        // Graceful fallback for unparseable strings
+        assert_eq!(format_release_date("unknown"), "unknown");
+    }
+
+    #[test]
+    fn release_date_empty() {
+        assert_eq!(format_release_date(""), "");
     }
 }
