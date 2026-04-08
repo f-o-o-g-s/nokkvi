@@ -478,7 +478,7 @@ use nokkvi_data::utils::{formatters, scale::calculate_font_size};
 
 use crate::widgets::slot_list::{
     SLOT_LIST_SLOT_PADDING, SlotListRowContext, SlotListSlotStyle, slot_list_favorite_icon,
-    slot_list_text,
+    slot_list_metadata_column, slot_list_text,
 };
 
 /// Wrap child row content in a clickable styled container + button.
@@ -602,13 +602,14 @@ pub(crate) fn render_child_track_row<'a, M: Clone + 'a>(
 ///
 /// When `show_artist` is true (Genres view), includes an artist column.
 /// Layout: `[indent] [album name] [artist?] [year 12%] [songs 15%] [duration 12%] [star 5%]`
-pub(crate) fn render_child_album_row<'a, M: Clone + 'a>(
+pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
     album: &nokkvi_data::backend::albums::AlbumUIViewData,
     ctx: &SlotListRowContext,
     center_msg: M,
     offset_msg: M,
     show_artist: bool,
     on_star_click: Option<M>,
+    on_song_count_click: Option<M>,
 ) -> Element<'a, M> {
     let style = SlotListSlotStyle::for_slot(
         ctx.is_center,
@@ -665,12 +666,13 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a>(
                 .height(Length::Fill)
                 .align_y(Alignment::Center),
         )
-        .push(
-            container(slot_list_text(songs_str, meta_size, style.subtext_color))
-                .width(Length::FillPortion(15))
-                .height(Length::Fill)
-                .align_y(Alignment::Center),
-        )
+        .push(slot_list_metadata_column(
+            songs_str,
+            on_song_count_click,
+            meta_size,
+            style,
+            15,
+        ))
         .push(
             container(slot_list_text(duration_str, meta_size, style.subtext_color))
                 .width(Length::FillPortion(12))

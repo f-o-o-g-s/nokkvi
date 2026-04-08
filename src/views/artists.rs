@@ -66,12 +66,14 @@ pub enum ArtistsMessage {
 
     // Inline expansion — first level (Shift+Enter on artist)
     ExpandCenter,
+    FocusAndExpand(usize), // Clicked 'X albums' — focus that row and expand it
     CollapseExpansion,
     /// Albums loaded for expanded artist (artist_id, albums)
     AlbumsLoaded(String, Vec<AlbumUIViewData>),
 
     // Inline expansion — second level (Shift+Enter on child album)
     ExpandAlbum,
+    FocusAndExpandAlbum(usize), // Clicked 'X songs' on child album — focus and expand tracks
     CollapseAlbumExpansion,
     /// Tracks loaded for expanded album (album_id, songs)
     TracksLoaded(String, Vec<nokkvi_data::backend::songs::SongUIViewData>),
@@ -202,6 +204,25 @@ impl ArtistsPage {
                 (task, action)
             }
             Err(msg) => match msg {
+                ArtistsMessage::FocusAndExpand(offset) => {
+                    let len = super::expansion::three_tier_flattened_len(
+                        artists,
+                        &self.expansion,
+                        self.sub_expansion.children.len(),
+                    );
+                    self.common
+                        .handle_slot_click(offset, len, Default::default());
+                    // Now expand the centered artist
+                    if let Some(parent_id) =
+                        self.expansion
+                            .handle_expand_center(artists, |a| &a.id, &mut self.common)
+                    {
+                        self.sub_expansion.clear();
+                        (Task::none(), ArtistsAction::ExpandArtist(parent_id))
+                    } else {
+                        (Task::none(), ArtistsAction::None)
+                    }
+                }
                 // CollapseExpansion handled by macro — clear sub_expansion too
                 ArtistsMessage::CollapseAlbumExpansion => {
                     // Restore position to where user was when album was expanded
@@ -211,6 +232,18 @@ impl ArtistsPage {
                         super::expansion::three_tier_flattened_len(artists, &self.expansion, 0);
                     self.common.handle_set_offset(saved, total);
                     (Task::none(), ArtistsAction::None)
+                }
+                ArtistsMessage::FocusAndExpandAlbum(offset) => {
+                    // Clicked 'X songs' link on a child album — focus that row, then expand
+                    let len = super::expansion::three_tier_flattened_len(
+                        artists,
+                        &self.expansion,
+                        self.sub_expansion.children.len(),
+                    );
+                    self.common
+                        .handle_slot_click(offset, len, Default::default());
+                    // Delegate to the existing ExpandAlbum logic
+                    self.update(ArtistsMessage::ExpandAlbum, total_items, artists)
                 }
                 ArtistsMessage::ExpandAlbum => {
                     // Shift+Enter on a child album row — expand its tracks
@@ -873,7 +906,14 @@ impl ArtistsPage {
                 } else {
                     format!("{album_count} albums")
                 };
-                slot_list_metadata_column(album_text, None, metadata_size, style, 22)
+                let idx = ctx.item_index;
+                slot_list_metadata_column(
+                    album_text,
+                    Some(ArtistsMessage::FocusAndExpand(idx)),
+                    metadata_size,
+                    style,
+                    22,
+                )
             },
             // 4. Song Count (21%)
             {
@@ -975,6 +1015,7 @@ impl ArtistsPage {
             },
             false, // artist is already the parent row
             Some(ArtistsMessage::ClickToggleStar(ctx.item_index)),
+            Some(ArtistsMessage::FocusAndExpandAlbum(ctx.item_index)),
         )
     }
 }

@@ -64,12 +64,14 @@ pub enum GenresMessage {
 
     // Inline expansion — first level (Shift+Enter on genre)
     ExpandCenter,
+    FocusAndExpand(usize), // Clicked 'X albums' — focus that row and expand it
     CollapseExpansion,
     /// Albums loaded for expanded genre (genre_id, albums)
     AlbumsLoaded(String, Vec<AlbumUIViewData>),
 
     // Inline expansion — second level (Shift+Enter on child album)
     ExpandAlbum,
+    FocusAndExpandAlbum(usize), // Clicked 'X songs' on child album — focus and expand tracks
     CollapseAlbumExpansion,
     /// Tracks loaded for expanded album (album_id, songs)
     TracksLoaded(String, Vec<nokkvi_data::backend::songs::SongUIViewData>),
@@ -225,6 +227,33 @@ impl GenresPage {
                 (task, action)
             }
             Err(msg) => match msg {
+                GenresMessage::FocusAndExpand(offset) => {
+                    let len = super::expansion::three_tier_flattened_len(
+                        genres,
+                        &self.expansion,
+                        self.sub_expansion.children.len(),
+                    );
+                    self.common
+                        .handle_slot_click(offset, len, Default::default());
+                    // Now expand the centered genre
+                    if let Some(parent_id) =
+                        self.expansion
+                            .handle_expand_center(genres, |g| &g.id, &mut self.common)
+                    {
+                        self.sub_expansion.clear();
+                        let genre_name = genres
+                            .iter()
+                            .find(|g| g.id == parent_id)
+                            .map(|g| g.name.clone())
+                            .unwrap_or_default();
+                        (
+                            Task::none(),
+                            GenresAction::ExpandGenre(genre_name, parent_id),
+                        )
+                    } else {
+                        (Task::none(), GenresAction::None)
+                    }
+                }
                 GenresMessage::CollapseAlbumExpansion => {
                     let saved = self.sub_expansion.parent_offset;
                     self.sub_expansion.clear();
@@ -232,6 +261,16 @@ impl GenresPage {
                         super::expansion::three_tier_flattened_len(genres, &self.expansion, 0);
                     self.common.handle_set_offset(saved, total);
                     (Task::none(), GenresAction::None)
+                }
+                GenresMessage::FocusAndExpandAlbum(offset) => {
+                    let len = super::expansion::three_tier_flattened_len(
+                        genres,
+                        &self.expansion,
+                        self.sub_expansion.children.len(),
+                    );
+                    self.common
+                        .handle_slot_click(offset, len, Default::default());
+                    self.update(GenresMessage::ExpandAlbum, total_items, genres)
                 }
                 GenresMessage::ExpandAlbum => {
                     let total = super::expansion::three_tier_flattened_len(
@@ -745,7 +784,14 @@ impl GenresPage {
                 } else {
                     format!("{} albums", genre.album_count)
                 };
-                slot_list_metadata_column(album_text, None, metadata_size, style, 20)
+                let idx = ctx.item_index;
+                slot_list_metadata_column(
+                    album_text,
+                    Some(GenresMessage::FocusAndExpand(idx)),
+                    metadata_size,
+                    style,
+                    20,
+                )
             },
             {
                 use crate::widgets::slot_list::slot_list_metadata_column;
@@ -818,6 +864,7 @@ impl GenresPage {
             },
             true, // show artist since genre groups albums from different artists
             Some(GenresMessage::ClickToggleStar(ctx.item_index)),
+            Some(GenresMessage::FocusAndExpandAlbum(ctx.item_index)),
         )
     }
 }
