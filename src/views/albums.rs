@@ -672,9 +672,9 @@ impl AlbumsPage {
         };
 
         let primary_color = if is_dark_backdrop {
-            crate::theme::fg0()
+            iced::Color::WHITE
         } else {
-            crate::theme::bg0_hard()
+            iced::Color::BLACK
         };
 
         // Overlay building
