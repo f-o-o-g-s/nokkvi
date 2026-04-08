@@ -721,7 +721,12 @@ impl Nokkvi {
             AlbumsAction::ExpandAlbum(album_id) => {
                 // Load tracks for the album and send them back to the view
                 let id = album_id.clone();
-                return self.shell_task(
+
+                // CRITICAL FIX: Ensure large artwork is fetched when expanding an album via mouse click.
+                // Standard navigation triggers this automatically, but FocusAndExpand skips standard focus.
+                let artwork_task = self.handle_load_large_artwork(id.clone());
+
+                let tracks_task = self.shell_task(
                     move |shell| async move {
                         let albums_vm = shell.albums().clone();
                         albums_vm.load_album_songs(&id).await
@@ -738,6 +743,8 @@ impl Nokkvi {
                         }
                     },
                 );
+
+                return Task::batch([artwork_task, tracks_task]);
             }
             AlbumsAction::PlayAlbumFromTrack(album_id, track_idx) => {
                 if let Some(task) = self.guard_play_action() {

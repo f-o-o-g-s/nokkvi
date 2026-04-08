@@ -1690,3 +1690,36 @@ fn genres_context_menu_show_in_folder_on_grandchild_song() {
         other => panic!("Expected ShowSongInFolder action, got {:?}", other),
     }
 }
+
+// ============================================================================
+// Focus and Expand Artwork Fetching Bug (albums.rs / etc)
+// ============================================================================
+
+#[test]
+fn album_focus_and_expand_triggers_large_artwork_load() {
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    app.library
+        .albums
+        .set_from_vec(vec![make_album("a1", "Album", "Artist")]);
+    app.albums_page.dominant_color = Some(iced::Color::BLACK);
+
+    // Act: Focus and expand the first item
+    let _ = app.handle_albums(crate::views::AlbumsMessage::FocusAndExpand(0));
+
+    // Assert: The dominant color must be cleared to prevent stale flashes
+    assert_eq!(
+        app.albums_page.dominant_color, None,
+        "dominant color should be cleared after focus"
+    );
+
+    // Assert: It should schedule loading the large artwork so the background updates
+    assert_eq!(
+        app.artwork.loading_large_artwork.as_deref(),
+        Some("a1"),
+        "LoadLargeArtwork should be dispatched so the new dominant color can be fetched"
+    );
+}
+
+// Only AlbumsPage uses the dominant_color overlay logic which requires LoadLargeArtwork
+// to be triggered when expanding via click.

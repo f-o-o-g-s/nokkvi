@@ -188,9 +188,13 @@ pub(crate) fn single_artwork_panel_with_overlay<'a, Message: Clone + 'a>(
         use iced::widget::{container, stack};
 
         // Determine background color. Use dominant color if available, defaulting to deep black.
-        // We set alpha to 0.7 to ensure legibility while letting artwork bleed through.
-        let mut bg_color = dominant_color.unwrap_or(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.7));
-        bg_color.a = 0.7;
+        // Mute the colors and darken them so the artwork doesn't get washed out into a pastel haze.
+        // By pulling RGB towards black, the overlay becomes a dark tint rather than a bright wash.
+        let mut bg_color = dominant_color.unwrap_or(iced::Color::from_rgba(0.05, 0.05, 0.05, 0.55));
+        bg_color.r *= 0.3;
+        bg_color.g *= 0.3;
+        bg_color.b *= 0.3;
+        bg_color.a = 0.55; // Lower alpha so artwork pops more
 
         let overlay = container(content)
             .width(Length::Fill)
