@@ -980,7 +980,10 @@ impl AlbumsPage {
                 AlbumsMessage::SlotListClickPlay(ctx.item_index)
             },
             Some(AlbumsMessage::ClickToggleStar(ctx.item_index)),
-            Some(AlbumsMessage::NavigateAndSearch(crate::View::Artists, song.artist.clone())),
+            Some(AlbumsMessage::NavigateAndSearch(
+                crate::View::Artists,
+                song.artist.clone(),
+            )),
             1, // depth 1: child tracks under album
         );
 

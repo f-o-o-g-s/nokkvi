@@ -824,7 +824,7 @@ impl PlaylistsPage {
             },
             Some(PlaylistsMessage::ClickToggleStar(ctx.item_index)),
             None, // on_artist_click not implemented for playlists
-            1, // depth 1: child tracks under playlist
+            1,    // depth 1: child tracks under playlist
         )
     }
 }

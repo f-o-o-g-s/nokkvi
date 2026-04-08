@@ -729,7 +729,10 @@ impl GenresPage {
                             GenresMessage::SlotListClickPlay(ctx.item_index)
                         },
                         Some(GenresMessage::ClickToggleStar(ctx.item_index)),
-                        Some(GenresMessage::NavigateAndSearch(crate::View::Artists, song.artist.clone())),
+                        Some(GenresMessage::NavigateAndSearch(
+                            crate::View::Artists,
+                            song.artist.clone(),
+                        )),
                         2, // depth 2: grandchild tracks (genre → album → track)
                     );
                     use crate::widgets::context_menu::{
@@ -935,8 +938,14 @@ impl GenresPage {
             true, // show artist since genre groups albums from different artists
             Some(GenresMessage::ClickToggleStar(ctx.item_index)),
             Some(GenresMessage::FocusAndExpandAlbum(ctx.item_index)),
-            Some(GenresMessage::NavigateAndSearch(crate::View::Albums, album.name.clone())),
-            Some(GenresMessage::NavigateAndSearch(crate::View::Artists, album.artist.clone())),
+            Some(GenresMessage::NavigateAndSearch(
+                crate::View::Albums,
+                album.name.clone(),
+            )),
+            Some(GenresMessage::NavigateAndSearch(
+                crate::View::Artists,
+                album.artist.clone(),
+            )),
             1, // depth 1: child albums under genre
         );
 

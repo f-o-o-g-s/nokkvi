@@ -785,7 +785,7 @@ impl ArtistsPage {
                         },
                         Some(ArtistsMessage::ClickToggleStar(ctx.item_index)),
                         None, // click artist - artist is already the parent anyway, so maybe None? Or wait, can click it to search artist in artists view? No, we are already in artists view.
-                        2, // depth 2: grandchild tracks (artist → album → track)
+                        2,    // depth 2: grandchild tracks (artist → album → track)
                     );
                     use crate::widgets::context_menu::{
                         context_menu, library_entry_view, song_entries_with_folder,
@@ -1042,9 +1042,12 @@ impl ArtistsPage {
             false, // artist is already the parent row
             Some(ArtistsMessage::ClickToggleStar(ctx.item_index)),
             Some(ArtistsMessage::FocusAndExpandAlbum(ctx.item_index)),
-            Some(ArtistsMessage::NavigateAndSearch(crate::View::Albums, album.name.clone())),
+            Some(ArtistsMessage::NavigateAndSearch(
+                crate::View::Albums,
+                album.name.clone(),
+            )),
             None, // artist click - artist is already the parent
-            1, // depth 1: child albums under artist
+            1,    // depth 1: child albums under artist
         );
 
         use crate::widgets::context_menu::{

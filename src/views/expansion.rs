@@ -543,11 +543,7 @@ pub(crate) fn render_child_track_row<'a, M: Clone + 'a + 'static>(
     let track_num = song.track.map_or("-".to_string(), |t| t.to_string());
     let duration_str = formatters::format_time(song.duration);
 
-    let indent_width = if depth > 0 {
-        30.0 * depth as f32
-    } else {
-        50.0
-    };
+    let indent_width = if depth > 0 { 30.0 * depth as f32 } else { 50.0 };
 
     let content = row![
         container(text("")).width(Length::Fixed(indent_width)),
@@ -555,19 +551,17 @@ pub(crate) fn render_child_track_row<'a, M: Clone + 'a + 'static>(
             .width(Length::Fixed(30.0))
             .height(Length::Fill)
             .align_y(Alignment::Center),
-        container(
-            crate::widgets::slot_list::slot_list_text_column(
-                song.title.clone(),
-                None, // track title doesn't navigate
-                song.artist.clone(),
-                on_artist_click,
-                title_size,
-                meta_size,
-                style,
-                true,
-                80, // combined width 60+20
-            ),
-        )
+        container(crate::widgets::slot_list::slot_list_text_column(
+            song.title.clone(),
+            None, // track title doesn't navigate
+            song.artist.clone(),
+            on_artist_click,
+            title_size,
+            meta_size,
+            style,
+            true,
+            80, // combined width 60+20
+        ),)
         .width(Length::FillPortion(80))
         .height(Length::Fill)
         .clip(true)
@@ -646,28 +640,28 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
     // Adjust album name width when artist column is shown
     let name_portion = if show_artist { 30 } else { 50 };
 
-    let indent_width = if depth > 0 {
-        30.0 * depth as f32
-    } else {
-        50.0
-    };
+    let indent_width = if depth > 0 { 30.0 * depth as f32 } else { 50.0 };
 
     let content = row![
         container(text("")).width(Length::Fixed(indent_width)),
-        container(
-            crate::widgets::slot_list::slot_list_text_column(
-                album.name.clone(),
-                on_album_click.clone(),
-                if show_artist { album.artist.clone() } else { String::new() },
-                if show_artist { on_artist_click } else { None },
-                title_size,
-                meta_size,
-                style,
-                true,
-                name_portion + if show_artist { 20 } else { 0 },
-            ),
-        )
-        .width(Length::FillPortion(name_portion + if show_artist { 20 } else { 0 }))
+        container(crate::widgets::slot_list::slot_list_text_column(
+            album.name.clone(),
+            on_album_click.clone(),
+            if show_artist {
+                album.artist.clone()
+            } else {
+                String::new()
+            },
+            if show_artist { on_artist_click } else { None },
+            title_size,
+            meta_size,
+            style,
+            true,
+            name_portion + if show_artist { 20 } else { 0 },
+        ),)
+        .width(Length::FillPortion(
+            name_portion + if show_artist { 20 } else { 0 }
+        ))
         .height(Length::Fill)
         .clip(true)
         .align_y(Alignment::Center),
