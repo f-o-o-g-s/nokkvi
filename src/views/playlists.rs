@@ -132,8 +132,9 @@ pub enum PlaylistsMessage {
     PlaylistContextAction(usize, PlaylistContextEntry),
 
     // Expansion
-    ExpandCenter,      // Toggle expand/collapse on centered playlist (Shift+Enter)
-    CollapseExpansion, // Collapse current expansion (Escape when expanded)
+    ExpandCenter,          // Toggle expand/collapse on centered playlist (Shift+Enter)
+    FocusAndExpand(usize), // Clicked 'X songs' or playlist name — focus that row and expand it
+    CollapseExpansion,     // Collapse current expansion (Escape when expanded)
     TracksLoaded(String, Vec<SongUIViewData>), // playlist_id, tracks
 
     // View header
@@ -145,6 +146,8 @@ pub enum PlaylistsMessage {
 
     // Data loading (moved from root Message enum)
     PlaylistsLoaded(Result<Vec<PlaylistUIViewData>, String>, usize), // result, total_count
+
+    NavigateAndSearch(crate::View, String), // Navigate to target view and search
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -167,6 +170,7 @@ pub enum PlaylistsAction {
     EditPlaylist(String, String, String), // (playlist_id, playlist_name, comment) — enter split-view edit mode
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
     SetAsDefaultPlaylist(String, String), // (playlist_id, playlist_name) — set as quick-add default
+    NavigateAndSearch(crate::View, String), // Navigate to target view and search
 
     None,
 }
@@ -178,6 +182,9 @@ impl super::HasCommonAction for PlaylistsAction {
             Self::SortModeChanged(m) => super::CommonViewAction::SortModeChanged(*m),
             Self::SortOrderChanged(a) => super::CommonViewAction::SortOrderChanged(*a),
             Self::RefreshViewData => super::CommonViewAction::RefreshViewData,
+            Self::NavigateAndSearch(v, q) => {
+                super::CommonViewAction::NavigateAndSearch(*v, q.clone())
+            }
 
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
@@ -266,6 +273,20 @@ impl PlaylistsPage {
                         Some(idx) => (Task::none(), PlaylistsAction::LoadArtwork(idx.to_string())),
                         None => (Task::none(), PlaylistsAction::None),
                     }
+                }
+                PlaylistsMessage::FocusAndExpand(idx) => {
+                    self.common.slot_list.selected_indices.clear();
+                    let (t1, _) = self.update(
+                        PlaylistsMessage::SlotListSetOffset(
+                            idx,
+                            iced::keyboard::Modifiers::default(),
+                        ),
+                        total_items,
+                        playlists,
+                    );
+                    let (t2, action) =
+                        self.update(PlaylistsMessage::ExpandCenter, total_items, playlists);
+                    (Task::batch(vec![t1, t2]), action)
                 }
                 PlaylistsMessage::SlotListScrollSeek(offset) => {
                     self.expansion
@@ -367,6 +388,10 @@ impl PlaylistsPage {
                 PlaylistsMessage::RefreshViewData => {
                     (Task::none(), PlaylistsAction::RefreshViewData)
                 }
+                PlaylistsMessage::NavigateAndSearch(view, query) => (
+                    Task::none(),
+                    PlaylistsAction::NavigateAndSearch(view, query),
+                ),
 
                 PlaylistsMessage::ContextMenuAction(clicked_idx, entry) => {
                     // Context menu for child tracks (uses shared LibraryContextEntry)
@@ -718,7 +743,7 @@ impl PlaylistsPage {
                 use crate::widgets::slot_list::slot_list_text_column;
                 slot_list_text_column(
                     playlist.name.clone(),
-                    None,
+                    Some(PlaylistsMessage::FocusAndExpand(ctx.item_index)),
                     subtitle,
                     None,
                     title_size,
@@ -733,7 +758,7 @@ impl PlaylistsPage {
         if show_song_count_col {
             columns.push(slot_list_metadata_column(
                 count_text.clone(),
-                None,
+                Some(PlaylistsMessage::FocusAndExpand(ctx.item_index)),
                 metadata_size,
                 style,
                 20,
@@ -823,8 +848,11 @@ impl PlaylistsPage {
                 PlaylistsMessage::SlotListClickPlay(ctx.item_index)
             },
             Some(PlaylistsMessage::ClickToggleStar(ctx.item_index)),
-            None, // on_artist_click not implemented for playlists
-            1,    // depth 1: child tracks under playlist
+            Some(PlaylistsMessage::NavigateAndSearch(
+                crate::View::Artists,
+                song.artist.clone(),
+            )),
+            1, // depth 1: child tracks under playlist
         )
     }
 }
