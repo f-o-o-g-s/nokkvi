@@ -516,12 +516,13 @@ fn child_clickable_button<'a, M: Clone + 'a>(
 /// Render a child **track** row (used by Albums → Tracks and Playlists → Tracks).
 ///
 /// Layout: `[indent] [track#] [title 60%] [artist 20%] [duration 12%] [star 5%]`
-pub(crate) fn render_child_track_row<'a, M: Clone + 'a>(
+pub(crate) fn render_child_track_row<'a, M: Clone + 'a + 'static>(
     song: &nokkvi_data::backend::songs::SongUIViewData,
     ctx: &SlotListRowContext,
     center_msg: M,
     offset_msg: M,
     on_star_click: Option<M>,
+    on_artist_click: Option<M>,
     depth: u8,
 ) -> Element<'a, M> {
     // Center slot gets bright center style; non-center children get highlighted group look
@@ -554,21 +555,20 @@ pub(crate) fn render_child_track_row<'a, M: Clone + 'a>(
             .width(Length::Fixed(30.0))
             .height(Length::Fill)
             .align_y(Alignment::Center),
-        container(slot_list_text(
-            song.title.clone(),
-            title_size,
-            style.text_color
-        ))
-        .width(Length::FillPortion(60))
-        .height(Length::Fill)
-        .clip(true)
-        .align_y(Alignment::Center),
-        container(slot_list_text(
-            song.artist.clone(),
-            meta_size,
-            style.subtext_color
-        ))
-        .width(Length::FillPortion(20))
+        container(
+            crate::widgets::slot_list::slot_list_text_column(
+                song.title.clone(),
+                None, // track title doesn't navigate
+                song.artist.clone(),
+                on_artist_click,
+                title_size,
+                meta_size,
+                style,
+                true,
+                80, // combined width 60+20
+            ),
+        )
+        .width(Length::FillPortion(80))
         .height(Length::Fill)
         .clip(true)
         .align_y(Alignment::Center),
@@ -620,6 +620,8 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
     show_artist: bool,
     on_star_click: Option<M>,
     on_song_count_click: Option<M>,
+    on_album_click: Option<M>,
+    on_artist_click: Option<M>,
     depth: u8,
 ) -> Element<'a, M> {
     let style = SlotListSlotStyle::for_slot(
@@ -650,32 +652,26 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
         50.0
     };
 
-    let mut content = row![
+    let content = row![
         container(text("")).width(Length::Fixed(indent_width)),
-        container(slot_list_text(
-            album.name.clone(),
-            title_size,
-            style.text_color
-        ))
-        .width(Length::FillPortion(name_portion))
+        container(
+            crate::widgets::slot_list::slot_list_text_column(
+                album.name.clone(),
+                on_album_click.clone(),
+                if show_artist { album.artist.clone() } else { String::new() },
+                if show_artist { on_artist_click } else { None },
+                title_size,
+                meta_size,
+                style,
+                true,
+                name_portion + if show_artist { 20 } else { 0 },
+            ),
+        )
+        .width(Length::FillPortion(name_portion + if show_artist { 20 } else { 0 }))
         .height(Length::Fill)
         .clip(true)
         .align_y(Alignment::Center),
     ];
-
-    if show_artist {
-        content = content.push(
-            container(slot_list_text(
-                album.artist.clone(),
-                meta_size,
-                style.subtext_color,
-            ))
-            .width(Length::FillPortion(20))
-            .height(Length::Fill)
-            .clip(true)
-            .align_y(Alignment::Center),
-        );
-    }
 
     let content = content
         .push(

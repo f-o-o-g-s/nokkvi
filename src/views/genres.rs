@@ -86,6 +86,8 @@ pub enum GenresMessage {
 
     // Data loading (moved from root Message enum)
     GenresLoaded(Result<Vec<GenreUIViewData>, String>, usize), // result, total_count
+
+    NavigateAndSearch(crate::View, String), // Navigate to target view and search
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -113,6 +115,7 @@ pub enum GenresAction {
     ShowAlbumInFolder(String),   // album_id - fetch a song path and open containing folder
     ShowSongInFolder(String),    // song path - open containing folder directly
     CenterOnPlaying,
+    NavigateAndSearch(crate::View, String),
     None,
 }
 
@@ -124,6 +127,9 @@ impl super::HasCommonAction for GenresAction {
             Self::SortOrderChanged(a) => super::CommonViewAction::SortOrderChanged(*a),
             Self::RefreshViewData => super::CommonViewAction::RefreshViewData,
             Self::CenterOnPlaying => super::CommonViewAction::CenterOnPlaying,
+            Self::NavigateAndSearch(v, q) => {
+                super::CommonViewAction::NavigateAndSearch(*v, q.clone())
+            }
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
         }
@@ -481,6 +487,9 @@ impl GenresPage {
                 GenresMessage::GenresLoaded(_, _) => (Task::none(), GenresAction::None),
                 GenresMessage::RefreshViewData => (Task::none(), GenresAction::RefreshViewData),
                 GenresMessage::CenterOnPlaying => (Task::none(), GenresAction::CenterOnPlaying),
+                GenresMessage::NavigateAndSearch(view, query) => {
+                    (Task::none(), GenresAction::NavigateAndSearch(view, query))
+                }
                 GenresMessage::ContextMenuAction(clicked_idx, entry) => {
                     use nokkvi_data::types::batch::BatchItem;
 
@@ -720,6 +729,7 @@ impl GenresPage {
                             GenresMessage::SlotListClickPlay(ctx.item_index)
                         },
                         Some(GenresMessage::ClickToggleStar(ctx.item_index)),
+                        Some(GenresMessage::NavigateAndSearch(crate::View::Artists, song.artist.clone())),
                         2, // depth 2: grandchild tracks (genre → album → track)
                     );
                     use crate::widgets::context_menu::{
@@ -925,6 +935,8 @@ impl GenresPage {
             true, // show artist since genre groups albums from different artists
             Some(GenresMessage::ClickToggleStar(ctx.item_index)),
             Some(GenresMessage::FocusAndExpandAlbum(ctx.item_index)),
+            Some(GenresMessage::NavigateAndSearch(crate::View::Albums, album.name.clone())),
+            Some(GenresMessage::NavigateAndSearch(crate::View::Artists, album.artist.clone())),
             1, // depth 1: child albums under genre
         );
 

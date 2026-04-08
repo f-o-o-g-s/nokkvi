@@ -89,6 +89,8 @@ pub enum ArtistsMessage {
     // Data loading (moved from root Message enum)
     ArtistsLoaded(Result<Vec<ArtistUIViewData>, String>, usize), // result, total_count
     ArtistsPageLoaded(Result<Vec<ArtistUIViewData>, String>, usize), // result, total_count (subsequent page)
+
+    NavigateAndSearch(crate::View, String), // Navigate to target view and search
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -121,6 +123,7 @@ pub enum ArtistsAction {
     FindSimilar(String, String), // (entity_id, label) - open similar tab
     TopSongs(String, String),  // (artist_name, label) - open similar tab for top songs
     CenterOnPlaying,
+    NavigateAndSearch(crate::View, String),
     None,
 }
 
@@ -132,6 +135,9 @@ impl super::HasCommonAction for ArtistsAction {
             Self::SortOrderChanged(a) => super::CommonViewAction::SortOrderChanged(*a),
             Self::RefreshViewData => super::CommonViewAction::RefreshViewData,
             Self::CenterOnPlaying => super::CommonViewAction::CenterOnPlaying,
+            Self::NavigateAndSearch(v, q) => {
+                super::CommonViewAction::NavigateAndSearch(*v, q.clone())
+            }
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
         }
@@ -431,6 +437,9 @@ impl ArtistsPage {
                 ArtistsMessage::ArtistsPageLoaded(_, _) => (Task::none(), ArtistsAction::None),
                 ArtistsMessage::RefreshViewData => (Task::none(), ArtistsAction::RefreshViewData),
                 ArtistsMessage::CenterOnPlaying => (Task::none(), ArtistsAction::CenterOnPlaying),
+                ArtistsMessage::NavigateAndSearch(view, query) => {
+                    (Task::none(), ArtistsAction::NavigateAndSearch(view, query))
+                }
                 ArtistsMessage::ClickSetRating(item_index, rating) => {
                     use nokkvi_data::utils::formatters::compute_rating_toggle;
                     match super::expansion::three_tier_get_entry_at(
@@ -775,6 +784,7 @@ impl ArtistsPage {
                             ArtistsMessage::SlotListClickPlay(ctx.item_index)
                         },
                         Some(ArtistsMessage::ClickToggleStar(ctx.item_index)),
+                        None, // click artist - artist is already the parent anyway, so maybe None? Or wait, can click it to search artist in artists view? No, we are already in artists view.
                         2, // depth 2: grandchild tracks (artist → album → track)
                     );
                     use crate::widgets::context_menu::{
@@ -1032,6 +1042,8 @@ impl ArtistsPage {
             false, // artist is already the parent row
             Some(ArtistsMessage::ClickToggleStar(ctx.item_index)),
             Some(ArtistsMessage::FocusAndExpandAlbum(ctx.item_index)),
+            Some(ArtistsMessage::NavigateAndSearch(crate::View::Albums, album.name.clone())),
+            None, // artist click - artist is already the parent
             1, // depth 1: child albums under artist
         );
 
