@@ -233,12 +233,11 @@ impl Nokkvi {
                 return Task::done(Message::Albums(AlbumsMessage::DominantColorCalculated(
                     album_id, color,
                 )));
-            } else {
-                let handle = self.artwork.large_artwork.peek(&album_id).cloned();
-                return Task::done(Message::Artwork(ArtworkMessage::LargeLoaded(
-                    album_id, handle,
-                )));
             }
+            let handle = self.artwork.large_artwork.peek(&album_id).cloned();
+            return Task::done(Message::Artwork(ArtworkMessage::LargeLoaded(
+                album_id, handle,
+            )));
         }
 
         self.artwork.loading_large_artwork = Some(album_id.clone());
