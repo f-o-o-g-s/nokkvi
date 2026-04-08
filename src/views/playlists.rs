@@ -740,10 +740,16 @@ impl PlaylistsPage {
                 ctx.opacity,
             ),
             {
+                let click_title = Some(PlaylistsMessage::PlaylistContextAction(
+                    ctx.item_index,
+                    PlaylistContextEntry::Library(
+                        crate::widgets::context_menu::LibraryContextEntry::GetInfo,
+                    ),
+                ));
                 use crate::widgets::slot_list::slot_list_text_column;
                 slot_list_text_column(
                     playlist.name.clone(),
-                    Some(PlaylistsMessage::FocusAndExpand(ctx.item_index)),
+                    click_title,
                     subtitle,
                     Some(PlaylistsMessage::FocusAndExpand(ctx.item_index)),
                     title_size,

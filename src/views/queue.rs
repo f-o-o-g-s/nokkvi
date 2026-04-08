@@ -771,9 +771,13 @@ impl QueuePage {
                 // 2. Title + Artist (always simple text column)
                 {
                     use crate::widgets::slot_list::slot_list_text_column;
+                    let title_click = Some(QueueMessage::ContextMenuAction(
+                        ctx.item_index,
+                        QueueContextEntry::GetInfo,
+                    ));
                     slot_list_text_column(
                         title,
-                        None,
+                        title_click,
                         artist.clone(),
                         Some(QueueMessage::NavigateAndSearch(
                             crate::View::Artists,

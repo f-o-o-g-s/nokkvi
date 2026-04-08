@@ -835,9 +835,13 @@ impl AlbumsPage {
                     crate::View::Artists,
                     album_artist.clone(),
                 ));
+                let title_click = Some(AlbumsMessage::ContextMenuAction(
+                    ctx.item_index,
+                    crate::widgets::context_menu::LibraryContextEntry::GetInfo,
+                ));
                 slot_list_text_column(
                     album_name,
-                    None,
+                    title_click,
                     album_artist,
                     artist_click,
                     title_size,

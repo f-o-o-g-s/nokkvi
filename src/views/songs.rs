@@ -520,9 +520,13 @@ impl SongsPage {
                             crate::View::Artists,
                             song_artist.clone(),
                         ));
+                        let title_click = Some(SongsMessage::ContextMenuAction(
+                            ctx.item_index,
+                            crate::widgets::context_menu::LibraryContextEntry::GetInfo,
+                        ));
                         slot_list_text_column(
                             song_title,
-                            None,
+                            title_click,
                             song_artist,
                             artist_click,
                             title_size,

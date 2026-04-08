@@ -845,7 +845,7 @@ impl ArtistsPage {
         stable_viewport: bool,
     ) -> Element<'a, ArtistsMessage> {
         use crate::widgets::slot_list::{
-            SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column, slot_list_text,
+            SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column,
         };
 
         let artist_id = artist.id.clone();
@@ -902,8 +902,22 @@ impl ArtistsPage {
                                 * ctx.scale_factor;
                         let idx = ctx.item_index;
 
+                        let title_click = Some(ArtistsMessage::ContextMenuAction(
+                            ctx.item_index,
+                            crate::widgets::context_menu::LibraryContextEntry::GetInfo,
+                        ));
+                        let link_color = if ctx.is_center {
+                            style.text_color
+                        } else {
+                            crate::theme::accent_bright()
+                        };
+
                         column![
-                            slot_list_text(artist_name, title_size, style.text_color),
+                            crate::widgets::link_text::LinkText::new(artist_name)
+                                .size(title_size)
+                                .color(style.text_color)
+                                .hover_color(link_color)
+                                .on_press(title_click),
                             slot_list_star_rating(
                                 rating,
                                 star_icon_size,
@@ -916,7 +930,21 @@ impl ArtistsPage {
                         .spacing(2.0)
                         .into()
                     } else {
-                        slot_list_text(artist_name, title_size, style.text_color).into()
+                        let title_click = Some(ArtistsMessage::ContextMenuAction(
+                            ctx.item_index,
+                            crate::widgets::context_menu::LibraryContextEntry::GetInfo,
+                        ));
+                        let link_color = if ctx.is_center {
+                            style.text_color
+                        } else {
+                            crate::theme::accent_bright()
+                        };
+                        crate::widgets::link_text::LinkText::new(artist_name)
+                            .size(title_size)
+                            .color(style.text_color)
+                            .hover_color(link_color)
+                            .on_press(title_click)
+                            .into()
                     };
                 container(content)
                     .width(Length::FillPortion(50))
