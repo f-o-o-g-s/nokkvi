@@ -153,6 +153,18 @@ pub(crate) fn make_artist(id: &str, name: &str) -> ArtistUIViewData {
     }
 }
 
+/// Create a `GenreUIViewData` with the given fields, defaulting the rest.
+pub(crate) fn make_genre(id: &str, name: &str) -> nokkvi_data::backend::genres::GenreUIViewData {
+    nokkvi_data::backend::genres::GenreUIViewData {
+        id: id.to_string(),
+        name: name.to_string(),
+        album_count: 3,
+        song_count: 30,
+        artwork_url: None,
+        artwork_album_ids: Vec::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1560,3 +1560,133 @@ fn albums_page_navigate_and_search_returns_action() {
         _ => panic!("Expected NavigateAndSearch action"),
     }
 }
+
+// ============================================================================
+// Genres Context Menu — Child/Grandchild GetInfo + ShowInFolder
+// ============================================================================
+
+#[test]
+fn genres_context_menu_get_info_on_child_album() {
+    let mut app = test_app();
+    let genres = vec![make_genre("g1", "Rock")];
+    app.library.genres.set_from_vec(genres.clone());
+
+    // Expand genre so child album is at index 1
+    let album = make_album("a1", "Album 1", "Artist A");
+    app.genres_page.expansion.expanded_id = Some("g1".to_string());
+    app.genres_page.expansion.parent_offset = 0;
+    app.genres_page.expansion.children = vec![album];
+
+    let (_, action) = app.genres_page.update(
+        crate::views::GenresMessage::ContextMenuAction(
+            1, // child album index
+            crate::widgets::context_menu::LibraryContextEntry::GetInfo,
+        ),
+        genres.len(),
+        &genres,
+    );
+    match action {
+        crate::views::GenresAction::ShowInfo(item) => match *item {
+            nokkvi_data::types::info_modal::InfoModalItem::Album { ref name, .. } => {
+                assert_eq!(name, "Album 1");
+            }
+            _ => panic!("Expected InfoModalItem::Album"),
+        },
+        other => panic!("Expected ShowInfo action, got {:?}", other),
+    }
+}
+
+#[test]
+fn genres_context_menu_show_in_folder_on_child_album() {
+    let mut app = test_app();
+    let genres = vec![make_genre("g1", "Rock")];
+    app.library.genres.set_from_vec(genres.clone());
+
+    let album = make_album("a1", "Album 1", "Artist A");
+    app.genres_page.expansion.expanded_id = Some("g1".to_string());
+    app.genres_page.expansion.parent_offset = 0;
+    app.genres_page.expansion.children = vec![album];
+
+    let (_, action) = app.genres_page.update(
+        crate::views::GenresMessage::ContextMenuAction(
+            1, // child album index
+            crate::widgets::context_menu::LibraryContextEntry::ShowInFolder,
+        ),
+        genres.len(),
+        &genres,
+    );
+    match action {
+        crate::views::GenresAction::ShowAlbumInFolder(album_id) => {
+            assert_eq!(album_id, "a1");
+        }
+        other => panic!("Expected ShowAlbumInFolder action, got {:?}", other),
+    }
+}
+
+#[test]
+fn genres_context_menu_get_info_on_grandchild_song() {
+    let mut app = test_app();
+    let genres = vec![make_genre("g1", "Rock")];
+    app.library.genres.set_from_vec(genres.clone());
+
+    // Expand genre + sub-expand album so grandchild song is at index 2
+    let album = make_album("a1", "Album 1", "Artist A");
+    app.genres_page.expansion.expanded_id = Some("g1".to_string());
+    app.genres_page.expansion.parent_offset = 0;
+    app.genres_page.expansion.children = vec![album];
+
+    let song = make_song("s1", "Song One", "Artist A");
+    app.genres_page.sub_expansion.expanded_id = Some("a1".to_string());
+    app.genres_page.sub_expansion.parent_offset = 1;
+    app.genres_page.sub_expansion.children = vec![song];
+
+    let (_, action) = app.genres_page.update(
+        crate::views::GenresMessage::ContextMenuAction(
+            2, // grandchild song index
+            crate::widgets::context_menu::LibraryContextEntry::GetInfo,
+        ),
+        genres.len(),
+        &genres,
+    );
+    match action {
+        crate::views::GenresAction::ShowInfo(item) => match *item {
+            nokkvi_data::types::info_modal::InfoModalItem::Song { ref title, .. } => {
+                assert_eq!(title, "Song One");
+            }
+            _ => panic!("Expected InfoModalItem::Song"),
+        },
+        other => panic!("Expected ShowInfo action, got {:?}", other),
+    }
+}
+
+#[test]
+fn genres_context_menu_show_in_folder_on_grandchild_song() {
+    let mut app = test_app();
+    let genres = vec![make_genre("g1", "Rock")];
+    app.library.genres.set_from_vec(genres.clone());
+
+    let album = make_album("a1", "Album 1", "Artist A");
+    app.genres_page.expansion.expanded_id = Some("g1".to_string());
+    app.genres_page.expansion.parent_offset = 0;
+    app.genres_page.expansion.children = vec![album];
+
+    let song = make_song("s1", "Song One", "Artist A");
+    app.genres_page.sub_expansion.expanded_id = Some("a1".to_string());
+    app.genres_page.sub_expansion.parent_offset = 1;
+    app.genres_page.sub_expansion.children = vec![song];
+
+    let (_, action) = app.genres_page.update(
+        crate::views::GenresMessage::ContextMenuAction(
+            2, // grandchild song index
+            crate::widgets::context_menu::LibraryContextEntry::ShowInFolder,
+        ),
+        genres.len(),
+        &genres,
+    );
+    match action {
+        crate::views::GenresAction::ShowSongInFolder(path) => {
+            assert_eq!(path, "/music/s1.flac");
+        }
+        other => panic!("Expected ShowSongInFolder action, got {:?}", other),
+    }
+}

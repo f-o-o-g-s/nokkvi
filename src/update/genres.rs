@@ -431,6 +431,17 @@ impl Nokkvi {
             GenresAction::FindSimilar(id, label) => {
                 return Task::done(Message::FindSimilar { id, label });
             }
+            GenresAction::ShowInfo(item) => {
+                return self.update(Message::InfoModal(
+                    crate::widgets::info_modal::InfoModalMessage::Open(item),
+                ));
+            }
+            GenresAction::ShowAlbumInFolder(album_id) => {
+                return self.show_album_in_folder_task(album_id);
+            }
+            GenresAction::ShowSongInFolder(path) => {
+                return self.handle_show_in_folder(path);
+            }
             _ => {} // None + already-handled common actions
         }
 

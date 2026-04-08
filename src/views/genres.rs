@@ -109,6 +109,9 @@ pub enum GenresAction {
     PlayNextBatch(nokkvi_data::types::batch::BatchPayload),
     AddBatchToPlaylist(nokkvi_data::types::batch::BatchPayload),
     FindSimilar(String, String), // (entity_id, label) - open similar tab
+    ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
+    ShowAlbumInFolder(String),   // album_id - fetch a song path and open containing folder
+    ShowSongInFolder(String),    // song path - open containing folder directly
     CenterOnPlaying,
     None,
 }
@@ -534,35 +537,76 @@ impl GenresPage {
                                 Some(ThreeTierEntry::Parent(_genre)) => {
                                     (Task::none(), GenresAction::None)
                                 }
-                                Some(ThreeTierEntry::Child(_album, _)) => match entry {
-                                    LibraryContextEntry::Separator
-                                    | LibraryContextEntry::GetInfo
-                                    | LibraryContextEntry::ShowInFolder => {
+                                Some(ThreeTierEntry::Child(album, _)) => match entry {
+                                    LibraryContextEntry::GetInfo => {
+                                        use nokkvi_data::types::info_modal::InfoModalItem;
+                                        let item = InfoModalItem::Album {
+                                            name: album.name.clone(),
+                                            album_artist: Some(album.artist.clone()),
+                                            release_type: album.release_type.clone(),
+                                            genre: album.genre.clone(),
+                                            genres: album.genres.clone(),
+                                            duration: album.duration,
+                                            year: album.year,
+                                            song_count: Some(album.song_count),
+                                            compilation: album.compilation,
+                                            size: album.size,
+                                            is_starred: album.is_starred,
+                                            rating: album.rating,
+                                            play_count: album.play_count,
+                                            play_date: album.play_date.clone(),
+                                            updated_at: album.updated_at.clone(),
+                                            created_at: album.created_at.clone(),
+                                            mbz_album_id: album.mbz_album_id.clone(),
+                                            comment: album.comment.clone(),
+                                            id: album.id.clone(),
+                                            tags: album.tags.clone(),
+                                            participants: album.participants.clone(),
+                                            representative_path: self
+                                                .sub_expansion
+                                                .children
+                                                .first()
+                                                .map(|s| s.path.clone()),
+                                        };
+                                        (Task::none(), GenresAction::ShowInfo(Box::new(item)))
+                                    }
+                                    LibraryContextEntry::ShowInFolder => (
+                                        Task::none(),
+                                        GenresAction::ShowAlbumInFolder(album.id.clone()),
+                                    ),
+                                    LibraryContextEntry::Separator => {
                                         (Task::none(), GenresAction::None)
                                     }
                                     LibraryContextEntry::FindSimilar => {
-                                        let aid = _album.artist.clone();
+                                        let aid = album.artist.clone();
                                         (
                                             Task::none(),
                                             GenresAction::FindSimilar(
                                                 aid,
-                                                format!("Similar to: {}", _album.name),
+                                                format!("Similar to: {}", album.name),
                                             ),
                                         )
                                     }
                                     _ => (Task::none(), GenresAction::None),
                                 },
-                                Some(ThreeTierEntry::Grandchild(_song, _)) => match entry {
-                                    LibraryContextEntry::Separator
-                                    | LibraryContextEntry::GetInfo
-                                    | LibraryContextEntry::ShowInFolder => {
+                                Some(ThreeTierEntry::Grandchild(song, _)) => match entry {
+                                    LibraryContextEntry::GetInfo => {
+                                        use nokkvi_data::types::info_modal::InfoModalItem;
+                                        let item = InfoModalItem::from_song_view_data(song);
+                                        (Task::none(), GenresAction::ShowInfo(Box::new(item)))
+                                    }
+                                    LibraryContextEntry::ShowInFolder => (
+                                        Task::none(),
+                                        GenresAction::ShowSongInFolder(song.path.clone()),
+                                    ),
+                                    LibraryContextEntry::Separator => {
                                         (Task::none(), GenresAction::None)
                                     }
                                     LibraryContextEntry::FindSimilar => (
                                         Task::none(),
                                         GenresAction::FindSimilar(
-                                            _song.id.clone(),
-                                            format!("Similar to: {}", _song.title),
+                                            song.id.clone(),
+                                            format!("Similar to: {}", song.title),
                                         ),
                                     ),
                                     _ => (Task::none(), GenresAction::None),
@@ -666,7 +710,7 @@ impl GenresPage {
                     self.render_album_row(album, &ctx, data.stable_viewport)
                 }
                 ThreeTierEntry::Grandchild(song, _album_id) => {
-                    super::expansion::render_child_track_row(
+                    let track_el = super::expansion::render_child_track_row(
                         song,
                         &ctx,
                         GenresMessage::SlotListActivateCenter,
@@ -676,7 +720,21 @@ impl GenresPage {
                             GenresMessage::SlotListClickPlay(ctx.item_index)
                         },
                         Some(GenresMessage::ClickToggleStar(ctx.item_index)),
+                    );
+                    use crate::widgets::context_menu::{
+                        context_menu, library_entry_view, song_entries_with_folder,
+                    };
+                    let item_idx = ctx.item_index;
+                    context_menu(
+                        track_el,
+                        song_entries_with_folder(),
+                        move |entry, length| {
+                            library_entry_view(entry, length, |e| {
+                                GenresMessage::ContextMenuAction(item_idx, e)
+                            })
+                        },
                     )
+                    .into()
                 }
             },
         );
@@ -853,7 +911,7 @@ impl GenresPage {
         ctx: &crate::widgets::slot_list::SlotListRowContext,
         stable_viewport: bool,
     ) -> Element<'a, GenresMessage> {
-        super::expansion::render_child_album_row(
+        let album_el = super::expansion::render_child_album_row(
             album,
             ctx,
             GenresMessage::SlotListActivateCenter,
@@ -865,7 +923,22 @@ impl GenresPage {
             true, // show artist since genre groups albums from different artists
             Some(GenresMessage::ClickToggleStar(ctx.item_index)),
             Some(GenresMessage::FocusAndExpandAlbum(ctx.item_index)),
+        );
+
+        use crate::widgets::context_menu::{
+            context_menu, library_entries_with_folder, library_entry_view,
+        };
+        let item_idx = ctx.item_index;
+        context_menu(
+            album_el,
+            library_entries_with_folder(),
+            move |entry, length| {
+                library_entry_view(entry, length, |e| {
+                    GenresMessage::ContextMenuAction(item_idx, e)
+                })
+            },
         )
+        .into()
     }
 }
 

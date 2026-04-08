@@ -765,7 +765,7 @@ impl ArtistsPage {
                     self.render_album_child_row(album, &ctx, data.stable_viewport)
                 }
                 ThreeTierEntry::Grandchild(song, _album_id) => {
-                    super::expansion::render_child_track_row(
+                    let track_el = super::expansion::render_child_track_row(
                         song,
                         &ctx,
                         ArtistsMessage::SlotListActivateCenter,
@@ -775,7 +775,21 @@ impl ArtistsPage {
                             ArtistsMessage::SlotListClickPlay(ctx.item_index)
                         },
                         Some(ArtistsMessage::ClickToggleStar(ctx.item_index)),
+                    );
+                    use crate::widgets::context_menu::{
+                        context_menu, library_entry_view, song_entries_with_folder,
+                    };
+                    let item_idx = ctx.item_index;
+                    context_menu(
+                        track_el,
+                        song_entries_with_folder(),
+                        move |entry, length| {
+                            library_entry_view(entry, length, |e| {
+                                ArtistsMessage::ContextMenuAction(item_idx, e)
+                            })
+                        },
                     )
+                    .into()
                 }
             },
         );
@@ -1004,7 +1018,7 @@ impl ArtistsPage {
         ctx: &crate::widgets::slot_list::SlotListRowContext,
         stable_viewport: bool,
     ) -> Element<'a, ArtistsMessage> {
-        super::expansion::render_child_album_row(
+        let album_el = super::expansion::render_child_album_row(
             album,
             ctx,
             ArtistsMessage::SlotListActivateCenter,
@@ -1016,7 +1030,22 @@ impl ArtistsPage {
             false, // artist is already the parent row
             Some(ArtistsMessage::ClickToggleStar(ctx.item_index)),
             Some(ArtistsMessage::FocusAndExpandAlbum(ctx.item_index)),
+        );
+
+        use crate::widgets::context_menu::{
+            context_menu, library_entries_with_folder, library_entry_view,
+        };
+        let item_idx = ctx.item_index;
+        context_menu(
+            album_el,
+            library_entries_with_folder(),
+            move |entry, length| {
+                library_entry_view(entry, length, |e| {
+                    ArtistsMessage::ContextMenuAction(item_idx, e)
+                })
+            },
         )
+        .into()
     }
 }
 
