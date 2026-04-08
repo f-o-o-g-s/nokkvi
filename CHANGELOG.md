@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+## v0.2.9 — 2026-04-08
+
+### Features
+- **Clickable Library Data** — made primary row titles (album, artist, song, genre) and inline counts clickable across all library views for navigation and expansion.
+- **Album Overlay** — added a full-bleed album metadata overlay on large artwork with dynamic contrast detection.
+- **Context Menus in Expansions** — added full context menu support to expanded child and grandchild slots across library views.
+- **Unified Search** — added integrated clear button.
+- **UI Shading** — added depth-based shading and indentation to slot list expansion.
+
+### Fixes
+- **Artwork Workflows** — fixed missing load actions upon expansion.
+- **Hotkeys & Navigation** — prioritized settings escape over browsing panel dismissal and properly cleared stale selections on expansion to fix child highlighting.
+
+### Improvements
+- **Code Refactoring** — parameterized navigate and search functionality via shared common view actions to reduce boilerplate.
+
+### Docs & Internal
+- **Rule Strictness** — enforced strict clippy checks for CI parity and eradicated remaining architectural negative triggers.
+- **Theme Document** — corrected default theme documentation to Adwaita.
 ## v0.2.8 — 2026-04-06
 
 ### Features

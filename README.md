@@ -10,6 +10,7 @@ A native Rust/Iced client for [Navidrome](https://www.navidrome.org/) music serv
 > This entire codebase was written by AI (primarily Claude) with my direction. I'm not a developer. I come up with the ideas, test things, and use this as my daily music player, but I don't write code myself. You'll probably find patterns in here that experienced Rust developers would do differently. If you spot something that could be better, issues and PRs are welcome.
 
 **Platform:** Linux only. Tested on Arch Linux with PipeWire v<!-- pipewire-version -->1.6.2<!-- /pipewire-version --> and Hyprland v<!-- hyprland-version -->0.54.3<!-- /hyprland-version --> against Navidrome v<!-- navidrome-version -->0.61.1<!-- /navidrome-version -->. No Windows or macOS support.
+**Network:** Designed and tested primarily as a local network client (LAN). Performance and reliability over WAN/remote internet connections are unknown.
 
 ## Inspirations
 
@@ -45,7 +46,7 @@ Nokkvi draws heavy inspiration from several excellent projects:
 - 21 built-in themes inspired by popular editor color schemes (Gruvbox, Catppuccin, Dracula, Nord, Tokyo Night, Kanagawa, Everforest, and more) — or create your own
 - Hot-reloadable configuration — themes, visualizer settings, and all preferences update live
 - Configurable layouts — side or top navigation, player bar or top-bar metadata strip, rounded corners mode
-- User-configurable keyboard shortcuts for every action
+- User-configurable keyboard shortcuts for most actions
 - System font picker with live preview
 - Right-click context menus everywhere, including "Show in File Manager"
 - MPRIS D-Bus integration for desktop media controls

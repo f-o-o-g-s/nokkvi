@@ -1592,7 +1592,7 @@ fn genres_context_menu_get_info_on_child_album() {
             }
             _ => panic!("Expected InfoModalItem::Album"),
         },
-        other => panic!("Expected ShowInfo action, got {:?}", other),
+        other => panic!("Expected ShowInfo action, got {other:?}"),
     }
 }
 
@@ -1619,7 +1619,7 @@ fn genres_context_menu_show_in_folder_on_child_album() {
         crate::views::GenresAction::ShowAlbumInFolder(album_id) => {
             assert_eq!(album_id, "a1");
         }
-        other => panic!("Expected ShowAlbumInFolder action, got {:?}", other),
+        other => panic!("Expected ShowAlbumInFolder action, got {other:?}"),
     }
 }
 
@@ -1655,7 +1655,7 @@ fn genres_context_menu_get_info_on_grandchild_song() {
             }
             _ => panic!("Expected InfoModalItem::Song"),
         },
-        other => panic!("Expected ShowInfo action, got {:?}", other),
+        other => panic!("Expected ShowInfo action, got {other:?}"),
     }
 }
 
@@ -1687,7 +1687,7 @@ fn genres_context_menu_show_in_folder_on_grandchild_song() {
         crate::views::GenresAction::ShowSongInFolder(path) => {
             assert_eq!(path, "/music/s1.flac");
         }
-        other => panic!("Expected ShowSongInFolder action, got {:?}", other),
+        other => panic!("Expected ShowSongInFolder action, got {other:?}"),
     }
 }
 
