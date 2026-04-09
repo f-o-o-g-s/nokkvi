@@ -838,8 +838,16 @@ impl SettingsPage {
                     self.refresh_entries(data);
                     SettingsAction::None
                 } else {
-                    // Clear any stale search query so re-opening shows full list
+                    // Reset all transient state for clean re-open.
+                    // This handles the zombie scenario where Tab sets
+                    // search_active=false while search_query remains populated,
+                    // causing Escape to skip the search-clearing branch.
                     self.search_query.clear();
+                    self.search_active = false;
+                    self.cached_entries.clear();
+                    self.description_text.clear();
+                    self.slot_list = SlotListView::new();
+                    self.nav_stack.truncate(1); // Reset to CategoryPicker
                     tracing::debug!(" [SETTINGS] ExitSettings triggered!");
                     SettingsAction::ExitSettings
                 }
@@ -1134,8 +1142,14 @@ impl SettingsPage {
             .map(|entry| match entry {
                 SettingsEntry::Item(item) => item.subtitle.unwrap_or(item.category).to_string(),
                 SettingsEntry::Header { label, .. } => {
-                    // At Level 1, look up the tab's description for a meaningful footer
-                    if matches!(self.current_level(), NavLevel::CategoryPicker) {
+                    // At Level 1 (without active search), look up the tab's
+                    // description for a meaningful footer. During search, headers
+                    // are section separators from within tabs and may collide with
+                    // tab names (e.g. Visualizer's "General" section vs the General
+                    // tab) — show the raw label instead.
+                    if matches!(self.current_level(), NavLevel::CategoryPicker)
+                        && self.search_query.is_empty()
+                    {
                         SettingsTab::ALL
                             .iter()
                             .find(|t| t.label() == *label)

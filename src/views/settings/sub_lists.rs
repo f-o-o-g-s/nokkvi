@@ -174,6 +174,7 @@ impl SettingsPage {
                     let parent_offset = sub.parent_offset;
                     self.sub_list = None;
                     self.restore_parent_offset(parent_offset);
+                    self.update_description();
                     SettingsAction::None
                 }
             }
@@ -238,6 +239,7 @@ impl SettingsPage {
                 let parent_offset = fsw.parent_offset;
                 self.font_sub_list = None;
                 self.restore_parent_offset(parent_offset);
+                self.update_description();
                 SettingsAction::None
             }
             // Not applicable in font sub-list:
