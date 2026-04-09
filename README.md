@@ -261,4 +261,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions, guidelines, and t
 
 ## License
 
-[MIT](LICENSE). See [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md) for third-party attribution.
+[GNU General Public License v3.0](LICENSE). See [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md) for third-party attribution.
