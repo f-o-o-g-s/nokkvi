@@ -250,8 +250,9 @@ pub(crate) struct VisualizerState {
     // === Separate (different access patterns) ===
     /// Sample buffer for FFT processing (audio callback writes, tick reads)
     sample_buffer: Arc<Mutex<Vec<f64>>>,
-    /// Spectrum engine (needs exclusive access, reinitializes on resize)
-    engine: Arc<Mutex<SpectrumEngine>>,
+    /// Spectrum engine (needs exclusive access, reinitializes on resize).
+    /// `None` when initialization failed — tick() produces flat bars.
+    engine: Arc<Mutex<Option<SpectrumEngine>>>,
     /// Sample rate for sync calculations (rarely changes)
     sample_rate: Arc<Mutex<u32>>,
 
@@ -301,9 +302,12 @@ impl VisualizerState {
         let fft_limit = max_bars_for_sample_rate(44100);
         let fft_count = bar_count.min(fft_limit);
 
-        // Create spectrum engine (default 44.1kHz, will reinit when audio starts)
-        let engine = build_spectrum_engine(fft_count, 44100, &config)
-            .expect("Failed to initialize spectrum engine at startup");
+        // Create spectrum engine (default 44.1kHz, will reinit when audio starts).
+        // If this fails (e.g. resource exhaustion), the visualizer shows flat bars.
+        let engine = build_spectrum_engine(fft_count, 44100, &config);
+        if engine.is_none() {
+            tracing::error!("Failed to initialize spectrum engine — visualizer disabled");
+        }
 
         // Create background thread control
         let fft_thread_running = Arc::new(AtomicBool::new(true));
@@ -377,10 +381,12 @@ impl VisualizerState {
                 }
 
                 debug!("📊 [FFT THREAD] Stopped after {} frames", frame_count);
-            })
-            .expect("Failed to spawn FFT thread");
+            });
 
-        *self.fft_thread_handle.lock() = Some(handle);
+        match handle {
+            Ok(h) => *self.fft_thread_handle.lock() = Some(h),
+            Err(e) => tracing::error!("Failed to spawn FFT thread — visualizer disabled: {e}"),
+        }
     }
 
     /// Get audio callback for connecting to audio engine.
@@ -468,6 +474,9 @@ impl VisualizerState {
         let Some(mut engine_guard) = self.engine.try_lock() else {
             return false; // Engine lock contended, skip this tick
         };
+        let Some(ref mut engine) = *engine_guard else {
+            return false; // Engine not initialized (init failed), skip
+        };
         let Some(mut buffer) = self.sample_buffer.try_lock() else {
             return false; // Sample buffer lock contended, skip this tick
         };
@@ -495,7 +504,7 @@ impl VisualizerState {
 
             // Execute spectrum engine FFT at the FFT-limited bar count
             let mut fft_output = vec![0.0; fft_bar_count];
-            engine_guard.execute(&process_samples, &mut fft_output);
+            engine.execute(&process_samples, &mut fft_output);
 
             {
                 // Read config values for hot-reload support
@@ -785,7 +794,7 @@ impl VisualizerState {
         let fft_count = self.fft_bar_count();
 
         if let Some(new_engine) = build_spectrum_engine(fft_count, sample_rate, &self.config) {
-            *self.engine.lock() = new_engine;
+            *self.engine.lock() = Some(new_engine);
         } else {
             tracing::warn!(
                 " [VIZ] Failed to reinit spectrum engine for sample rate change, keeping existing instance"
@@ -917,7 +926,7 @@ impl VisualizerState {
         let fft_count = visual_count.min(fft_limit);
 
         if let Some(new_engine) = build_spectrum_engine(fft_count, sample_rate, &self.config) {
-            *self.engine.lock() = new_engine;
+            *self.engine.lock() = Some(new_engine);
         } else {
             tracing::warn!(
                 " [VIZ] Failed to reinit spectrum engine for resize, keeping existing instance"

@@ -137,8 +137,9 @@ impl RodioOutput {
         let rb = HeapRb::<f32>::new(RING_BUFFER_CAPACITY);
         let (producer, consumer) = rb.split();
 
-        let channels_nz = NonZero::new(channels).unwrap_or(NonZero::new(2).unwrap());
-        let sample_rate_nz = NonZero::new(sample_rate).unwrap_or(NonZero::new(44100).unwrap());
+        let channels_nz = NonZero::new(channels).unwrap_or(NonZero::new(2).expect("2 is nonzero"));
+        let sample_rate_nz =
+            NonZero::new(sample_rate).unwrap_or(NonZero::new(44100).expect("44100 is nonzero"));
 
         // Create the streaming source with initial volume
         let (source, handle) = StreamingSource::new(
