@@ -370,9 +370,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
         let accent = crate::theme::accent_bright();
         // Handle uses raised accent 3D effect
         let (accent_top_left, accent_bottom_right) = crate::theme::border_3d_accent_raised();
-        // Grip uses raised accent effect (same as handle)
         let (grip_top_left, grip_bottom_right) = crate::theme::border_3d_accent_raised();
-        let grip_mid = crate::theme::accent();
 
         let radius = crate::theme::ui_border_radius();
         let is_rounded = crate::theme::is_rounded_mode();
@@ -662,82 +660,48 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
                     grip_top_left,
                 );
             } else {
-                // Non-rounded mode: 3D raised rectangle grip
-                let grip_padding = 8.0;
-                let grip_width = handle_width - grip_padding * 2.0;
-                let grip_height = 8.0;
-                let grip_x = handle_x + grip_padding;
-                let grip_y = bounds.y + (bounds.height - grip_height) / 2.0;
+                // Non-rounded mode: Knurled vertical ridges
+                let num_ridges = 5;
+                let ridge_spacing = 3.0; // 2px ridge + 1px gap
+                let total_grip_width = (num_ridges as f32) * ridge_spacing - 1.0;
+                let start_x = handle_x + (handle_width - total_grip_width) / 2.0;
 
-                // Grip center fill
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds: Rectangle {
-                            x: grip_x + 1.0,
-                            y: grip_y + 1.0,
-                            width: grip_width - 2.0,
-                            height: grip_height - 2.0,
-                        },
-                        ..Default::default()
-                    },
-                    grip_mid,
-                );
+                // Make the ridges taller than the old single groove
+                let grip_padding_y = 6.0;
+                let grip_height = bounds.height - grip_padding_y * 2.0;
+                let grip_y = bounds.y + grip_padding_y;
 
-                // Grip top border (light - raised effect)
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds: Rectangle {
-                            x: grip_x,
-                            y: grip_y,
-                            width: grip_width,
-                            height: 1.0,
-                        },
-                        ..Default::default()
-                    },
-                    grip_top_left,
-                );
+                for i in 0..num_ridges {
+                    let ridge_x = start_x + (i as f32) * ridge_spacing;
 
-                // Grip left border (light - raised effect)
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds: Rectangle {
-                            x: grip_x,
-                            y: grip_y,
-                            width: 1.0,
-                            height: grip_height,
+                    // Ridge left edge (light - raised effect)
+                    renderer.fill_quad(
+                        renderer::Quad {
+                            bounds: Rectangle {
+                                x: ridge_x,
+                                y: grip_y,
+                                width: 1.0,
+                                height: grip_height,
+                            },
+                            ..Default::default()
                         },
-                        ..Default::default()
-                    },
-                    grip_top_left,
-                );
+                        grip_top_left,
+                    );
 
-                // Grip bottom border (dark - raised effect)
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds: Rectangle {
-                            x: grip_x,
-                            y: grip_y + grip_height - 1.0,
-                            width: grip_width,
-                            height: 1.0,
+                    // Ridge right edge (dark - raised effect)
+                    renderer.fill_quad(
+                        renderer::Quad {
+                            bounds: Rectangle {
+                                x: ridge_x + 1.0,
+                                y: grip_y,
+                                width: 1.0,
+                                height: grip_height,
+                            },
+                            ..Default::default()
                         },
-                        ..Default::default()
-                    },
-                    grip_bottom_right,
-                );
-
-                // Grip right border (dark - raised effect)
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds: Rectangle {
-                            x: grip_x + grip_width - 1.0,
-                            y: grip_y,
-                            width: 1.0,
-                            height: grip_height,
-                        },
-                        ..Default::default()
-                    },
-                    grip_bottom_right,
-                );
+                        grip_bottom_right,
+                    );
+                }
             }
         }); // end handle layer
 
