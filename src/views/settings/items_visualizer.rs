@@ -339,7 +339,7 @@ pub(crate) fn build_visualizer_items(
             "visualizer.bars.gradient_mode",
             "Gradient Mode",
             "Bars",
-            "How bar colors shift with amplitude\nstatic: height-based gradient (bottom to top)\nwave: gradient stretching (taller bars show more bottom colors)\nshimmer: bars cycle through all gradient colors as flat per-bar colors\nenergy: gradient shifts based on overall loudness\nalternate: bars alternate between first two gradient colors"
+            "static: height-based gradient (bottom to top)\nwave: gradient stretching (taller bars show more bottom colors)\nshimmer: bars cycle through all gradient colors as flat per-bar colors\nenergy: gradient shifts based on overall loudness\nalternate: bars alternate between first two gradient colors"
         ),
         &config.bars.gradient_mode,
         &d.bars.gradient_mode,
