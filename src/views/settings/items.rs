@@ -954,12 +954,25 @@ mod tests {
         let visualizer = crate::visualizer_config::VisualizerConfig::default();
 
         let mut all_entries = Vec::new();
-        all_entries.extend(crate::views::settings::items_general::build_general_items(&general));
-        all_entries.extend(crate::views::settings::items_interface::build_interface_items(&interface));
+        all_entries.extend(crate::views::settings::items_general::build_general_items(
+            &general,
+        ));
+        all_entries
+            .extend(crate::views::settings::items_interface::build_interface_items(&interface));
         all_entries.extend(crate::views::settings::items_playback::build_playback_items(&playback));
-        all_entries.extend(crate::views::settings::items_hotkeys::build_hotkeys_items(&hotkeys));
-        all_entries.extend(crate::views::settings::items_theme::build_theme_items(&theme, "adwaita", false, true, false));
-        all_entries.extend(crate::views::settings::items_visualizer::build_visualizer_items(&visualizer, &theme, "adwaita"));
+        all_entries.extend(crate::views::settings::items_hotkeys::build_hotkeys_items(
+            &hotkeys,
+        ));
+        all_entries.extend(crate::views::settings::items_theme::build_theme_items(
+            &theme, "adwaita", false, true, false,
+        ));
+        all_entries.extend(
+            crate::views::settings::items_visualizer::build_visualizer_items(
+                &visualizer,
+                &theme,
+                "adwaita",
+            ),
+        );
 
         for entry in all_entries {
             if let SettingsEntry::Item(item) = entry
@@ -969,7 +982,9 @@ mod tests {
                 assert!(
                     newlines <= 4,
                     "Description for '{}' has {} newlines, which exceeds the max of 4. This will overflow the footer.\nDescription:\n{}",
-                    item.label, newlines, subtitle
+                    item.label,
+                    newlines,
+                    subtitle
                 );
             }
         }

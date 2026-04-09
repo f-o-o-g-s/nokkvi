@@ -2022,7 +2022,10 @@ fn settings_escape_active_search_updates_description() {
     // 2. Escape clears active search
     let _ = page.update(SettingsMessage::Escape, &data);
     assert!(!page.search_active, "search should be deactivated");
-    assert!(page.search_query.is_empty(), "search query should be cleared");
+    assert!(
+        page.search_query.is_empty(),
+        "search query should be cleared"
+    );
 
     // 3. Description must be refreshed, not stale
     assert_ne!(
@@ -2039,20 +2042,20 @@ fn settings_search_then_sub_list_then_escape_updates_description() {
     let data = make_settings_view_data();
 
     // 1. At CategoryPicker, search for "gradient" to find color arrays
-    let _ = page.update(SettingsMessage::SearchChanged("gradient".to_string()), &data);
+    let _ = page.update(
+        SettingsMessage::SearchChanged("gradient".to_string()),
+        &data,
+    );
     assert!(
         !page.cached_entries.is_empty(),
         "'gradient' should match entries"
     );
 
     // 2. Find a ColorArray entry in the search results
-    let color_idx = page
-        .cached_entries
-        .iter()
-        .position(|e| {
-            matches!(e, crate::views::settings::items::SettingsEntry::Item(item)
+    let color_idx = page.cached_entries.iter().position(|e| {
+        matches!(e, crate::views::settings::items::SettingsEntry::Item(item)
                 if matches!(item.value, crate::views::settings::items::SettingValue::ColorArray(_)))
-        });
+    });
 
     if let Some(idx) = color_idx {
         // Navigate to it
@@ -2229,8 +2232,7 @@ fn settings_stale_description_after_tab_deactivated_search_then_exit() {
     //
     // The description should NOT be the stale zombie search result text.
     // It should be a valid Level 1 tab description or empty.
-    let level1_descriptions: Vec<&str> =
-        SettingsTab::ALL.iter().map(|t| t.description()).collect();
+    let level1_descriptions: Vec<&str> = SettingsTab::ALL.iter().map(|t| t.description()).collect();
 
     let is_valid = app.settings_page.description_text.is_empty()
         || level1_descriptions.contains(&app.settings_page.description_text.as_str());
