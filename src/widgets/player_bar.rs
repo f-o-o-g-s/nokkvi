@@ -69,6 +69,7 @@ pub(crate) struct PlayerBarViewData {
     pub eq_enabled: bool,
     pub sound_effects_enabled: bool,
     pub sfx_volume: f32, // 0.0-1.0 for sound effects volume
+    pub crossfade_enabled: bool,
     pub visualization_mode: nokkvi_data::types::player_settings::VisualizationMode,
     pub window_width: f32,
     pub is_light_mode: bool,
@@ -98,6 +99,7 @@ pub enum PlayerBarMessage {
     ToggleSoundEffects,
     SfxVolumeChanged(f32),
     CycleVisualization,
+    ToggleCrossfade,
     ScrollVolume(f32),
     OpenSettings,
     ToggleLightMode,
@@ -558,6 +560,16 @@ pub(crate) fn player_bar<'a>(
             .gap(4)
             .style(theme::container_tooltip),
         )));
+    }
+
+    // Crossfade toggle button (show-when-enabled, like SFX)
+    if data.crossfade_enabled {
+        mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
+            "assets/icons/blend.svg",
+            PlayerBarMessage::ToggleCrossfade,
+            true,
+            "Crossfade: Active",
+        ));
     }
 
     // Visualizer button

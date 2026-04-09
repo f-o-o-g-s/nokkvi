@@ -100,6 +100,7 @@ pub enum PlaybackMessage {
     ToggleSoundEffects,
     SfxVolumeChanged(f32),
     CycleVisualization,
+    ToggleCrossfade,
     Seek(f32),
     VolumeChanged(f32),
     /// Timer-triggered message with ID to hide volume %

@@ -1723,3 +1723,40 @@ fn album_focus_and_expand_triggers_large_artwork_load() {
 
 // Only AlbumsPage uses the dominant_color overlay logic which requires LoadLargeArtwork
 // to be triggered when expanding via click.
+
+// ============================================================================
+// Crossfade Toggle (playback.rs)
+// ============================================================================
+
+#[test]
+fn crossfade_toggle_flips_state() {
+    let mut app = test_app();
+    assert!(
+        !app.engine.crossfade_enabled,
+        "crossfade should default to false"
+    );
+
+    let _ = app.handle_toggle_crossfade();
+    assert!(
+        app.engine.crossfade_enabled,
+        "first toggle should enable crossfade"
+    );
+
+    let _ = app.handle_toggle_crossfade();
+    assert!(
+        !app.engine.crossfade_enabled,
+        "second toggle should disable crossfade"
+    );
+}
+
+#[test]
+fn crossfade_toggle_from_enabled() {
+    let mut app = test_app();
+    app.engine.crossfade_enabled = true;
+
+    let _ = app.handle_toggle_crossfade();
+    assert!(
+        !app.engine.crossfade_enabled,
+        "toggle from enabled should disable"
+    );
+}

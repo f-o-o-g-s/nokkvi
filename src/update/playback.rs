@@ -740,6 +740,21 @@ impl Nokkvi {
         Task::none()
     }
 
+    pub(crate) fn handle_toggle_crossfade(&mut self) -> Task<Message> {
+        self.engine.crossfade_enabled = !self.engine.crossfade_enabled;
+
+        // Persist to storage and sync to audio engine
+        let enabled = self.engine.crossfade_enabled;
+        self.shell_spawn("persist_crossfade_toggle", move |shell| async move {
+            shell.settings().set_crossfade_enabled(enabled).await?;
+            let engine_arc = shell.audio_engine();
+            let mut engine = engine_arc.lock().await;
+            engine.set_crossfade_enabled(enabled);
+            Ok(())
+        });
+        Task::none()
+    }
+
     pub(crate) fn handle_seek(&mut self, val: f32) -> Task<Message> {
         // Slider sends position in seconds, shell.seek expects seconds
         let pos_secs = f64::from(val);

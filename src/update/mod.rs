@@ -550,6 +550,7 @@ impl Nokkvi {
                         self.handle_hide_sfx_volume_percentage(id)
                     }
                     PlaybackMessage::CycleVisualization => self.handle_cycle_visualization(),
+                    PlaybackMessage::ToggleCrossfade => self.handle_toggle_crossfade(),
                     PlaybackMessage::Seek(val) => self.handle_seek(val),
                     PlaybackMessage::VolumeChanged(val) => self.handle_volume_changed(val),
                     PlaybackMessage::HideVolumePercentage(id) => {

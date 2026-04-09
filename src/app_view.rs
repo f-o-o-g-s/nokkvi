@@ -85,6 +85,7 @@ impl Nokkvi {
             sound_effects_enabled: self.sfx.enabled,
             sfx_volume: self.sfx.volume,
             show_sfx_volume_percentage: self.sfx.show_percentage,
+            crossfade_enabled: self.engine.crossfade_enabled,
             visualization_mode: self.engine.visualization_mode,
             window_width: self.window.width,
             is_light_mode: crate::theme::is_light_mode(),

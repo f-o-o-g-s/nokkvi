@@ -18,6 +18,7 @@ pub(crate) fn get_svg(path: &str) -> &'static str {
         "assets/icons/arrow-up-to-line.svg" => ARROW_UP_TO_LINE,
         "assets/icons/audio-lines.svg" => AUDIO_LINES,
         "assets/icons/audio-waveform.svg" => AUDIO_WAVEFORM,
+        "assets/icons/blend.svg" => BLEND,
         "assets/icons/chevron-down.svg" => CHEVRON_DOWN,
         "assets/icons/chevron-up.svg" => CHEVRON_UP,
         "assets/icons/check.svg" => CHECK,
@@ -147,6 +148,7 @@ const ARROW_UP: &str = include_str!("../assets/icons/arrow-up.svg");
 const ARROW_UP_TO_LINE: &str = include_str!("../assets/icons/arrow-up-to-line.svg");
 const AUDIO_LINES: &str = include_str!("../assets/icons/audio-lines.svg");
 const AUDIO_WAVEFORM: &str = include_str!("../assets/icons/audio-waveform.svg");
+const BLEND: &str = include_str!("../assets/icons/blend.svg");
 const CHEVRON_DOWN: &str = include_str!("../assets/icons/chevron-down.svg");
 const CHEVRON_UP: &str = include_str!("../assets/icons/chevron-up.svg");
 const CHECK: &str = include_str!("../assets/icons/check.svg");
@@ -231,6 +233,7 @@ fn is_registered(path: &str) -> bool {
         "assets/icons/arrow-up-to-line.svg",
         "assets/icons/audio-lines.svg",
         "assets/icons/audio-waveform.svg",
+        "assets/icons/blend.svg",
         "assets/icons/chevron-down.svg",
         "assets/icons/chevron-up.svg",
         "assets/icons/check.svg",
@@ -389,6 +392,7 @@ mod tests {
             "assets/icons/arrow-up-to-line.svg",
             "assets/icons/audio-lines.svg",
             "assets/icons/audio-waveform.svg",
+            "assets/icons/blend.svg",
             "assets/icons/chevron-down.svg",
             "assets/icons/chevron-up.svg",
             "assets/icons/check.svg",

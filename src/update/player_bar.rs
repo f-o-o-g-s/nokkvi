@@ -47,6 +47,9 @@ impl Nokkvi {
             PlayerBarMessage::CycleVisualization => {
                 Task::done(Message::Playback(PlaybackMessage::CycleVisualization))
             }
+            PlayerBarMessage::ToggleCrossfade => {
+                Task::done(Message::Playback(PlaybackMessage::ToggleCrossfade))
+            }
             PlayerBarMessage::ScrollVolume(delta) => {
                 let new_vol = (self.playback.volume + delta).clamp(0.0, 1.0);
                 let pct = (new_vol * 100.0) as u32;
