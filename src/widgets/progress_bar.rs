@@ -637,28 +637,38 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
 
             // Grip groove (centered in handle)
             if is_rounded {
-                // Rounded mode: mini version of the handle shape (rounded rect with border)
-                let grip_width = 16.0;
-                let grip_height = 6.0;
-                let grip_x = handle_x + (handle_width - grip_width) / 2.0;
-                let grip_y = bounds.y + (bounds.height - grip_height) / 2.0;
+                // Rounded mode: Knurled vertical pill ridges
+                let num_ridges = 4;
+                let ridge_width = 2.0;
+                let ridge_spacing = 4.0; // 2px ridge + 2px gap
+                let total_grip_width = (num_ridges as f32) * ridge_spacing - 2.0;
+                let start_x = handle_x + (handle_width - total_grip_width) / 2.0;
 
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds: Rectangle {
-                            x: grip_x,
-                            y: grip_y,
-                            width: grip_width,
-                            height: grip_height,
-                        },
-                        border: iced::Border {
-                            radius,
+                // Taller pill ridges
+                let grip_padding_y = 6.0;
+                let grip_height = bounds.height - grip_padding_y * 2.0;
+                let grip_y = bounds.y + grip_padding_y;
+
+                for i in 0..num_ridges {
+                    let ridge_x = start_x + (i as f32) * ridge_spacing;
+
+                    renderer.fill_quad(
+                        renderer::Quad {
+                            bounds: Rectangle {
+                                x: ridge_x,
+                                y: grip_y,
+                                width: ridge_width,
+                                height: grip_height,
+                            },
+                            border: iced::Border {
+                                radius,
+                                ..Default::default()
+                            },
                             ..Default::default()
                         },
-                        ..Default::default()
-                    },
-                    grip_top_left,
-                );
+                        grip_top_left,
+                    );
+                }
             } else {
                 // Non-rounded mode: Knurled vertical ridges
                 let num_ridges = 5;
