@@ -911,4 +911,67 @@ mod tests {
         assert!(colors.increment().is_none());
         assert!(!colors.is_editable());
     }
+
+    #[test]
+    fn settings_descriptions_fit_in_footer() {
+        let general = crate::views::settings::items_general::GeneralSettingsData {
+            server_url: "http://localhost:4533",
+            username: "admin",
+            start_view: "Queue",
+            stable_viewport: true,
+            auto_follow_playing: true,
+            enter_behavior: "Play All",
+            local_music_path: "",
+            verbose_config: false,
+            library_page_size: "Default (500)",
+            artwork_resolution: "Default (1000px)",
+        };
+        let interface = crate::views::settings::items_interface::InterfaceSettingsData {
+            nav_layout: "Top",
+            nav_display_mode: "Text Only",
+            track_info_display: "Off",
+            slot_row_height: "Default",
+            horizontal_volume: false,
+            font_family: "",
+            strip_show_title: true,
+            strip_show_artist: true,
+            strip_show_album: true,
+            strip_show_format_info: true,
+            strip_click_action: "Go to Queue",
+        };
+        let playback = crate::views::settings::items_playback::PlaybackSettingsData {
+            crossfade_enabled: false,
+            crossfade_duration_secs: 5,
+            volume_normalization: false,
+            normalization_level: "Normal",
+            scrobbling_enabled: true,
+            scrobble_threshold: 0.50,
+            quick_add_to_playlist: false,
+            default_playlist_name: "",
+        };
+        let hotkeys = nokkvi_data::types::hotkey_config::HotkeyConfig::default();
+        let theme = nokkvi_data::types::theme_file::ThemeFile::default();
+        let visualizer = crate::visualizer_config::VisualizerConfig::default();
+
+        let mut all_entries = Vec::new();
+        all_entries.extend(crate::views::settings::items_general::build_general_items(&general));
+        all_entries.extend(crate::views::settings::items_interface::build_interface_items(&interface));
+        all_entries.extend(crate::views::settings::items_playback::build_playback_items(&playback));
+        all_entries.extend(crate::views::settings::items_hotkeys::build_hotkeys_items(&hotkeys));
+        all_entries.extend(crate::views::settings::items_theme::build_theme_items(&theme, "adwaita", false, true, false));
+        all_entries.extend(crate::views::settings::items_visualizer::build_visualizer_items(&visualizer, &theme, "adwaita"));
+
+        for entry in all_entries {
+            if let SettingsEntry::Item(item) = entry
+                && let Some(subtitle) = item.subtitle
+            {
+                let newlines = subtitle.chars().filter(|c| *c == '\n').count();
+                assert!(
+                    newlines <= 4,
+                    "Description for '{}' has {} newlines, which exceeds the max of 4. This will overflow the footer.\nDescription:\n{}",
+                    item.label, newlines, subtitle
+                );
+            }
+        }
+    }
 }
