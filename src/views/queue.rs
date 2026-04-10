@@ -8,8 +8,8 @@ use iced::{
     widget::{button, column, container, mouse_area, row},
 };
 // Re-export QueueSortMode from data crate (canonical definition)
+use nokkvi_data::backend::queue::QueueSongUIViewData;
 pub(crate) use nokkvi_data::types::queue_sort_mode::QueueSortMode;
-use nokkvi_data::{backend::queue::QueueSongUIViewData, utils::scale::calculate_font_size};
 use tracing::{debug, trace};
 
 use crate::{
@@ -735,19 +735,13 @@ impl QueuePage {
                 0,
             );
 
-            // Dynamic scaling - match albums view font sizes, apply scale_factor
-            // Calculate artwork directly from row_height and apply slot scale_factor
-            let base_artwork_size = (ctx.row_height - 16.0).max(32.0);
-            let artwork_size = base_artwork_size * ctx.scale_factor;
-            let title_size =
-                calculate_font_size(16.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
-            let subtitle_size =
-                calculate_font_size(13.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
-            let index_size =
-                calculate_font_size(12.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
-            let duration_size =
-                calculate_font_size(12.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
-            let icon_size = (ctx.row_height * 0.3 * ctx.scale_factor).clamp(16.0, 24.0); // Match albums star_size
+            let m = ctx.metrics;
+            let artwork_size = m.artwork_size;
+            let title_size = m.title_size_lg;
+            let subtitle_size = m.subtitle_size;
+            let index_size = m.metadata_size;
+            let duration_size = m.metadata_size;
+            let icon_size = m.star_size;
 
             // Dynamic column proportions: title gets more space when album/rating columns are hidden
             let show_rating_column = current_sort_mode == QueueSortMode::Rating;
@@ -814,9 +808,11 @@ impl QueuePage {
                         {
                             let click_genre =
                                 QueueMessage::NavigateAndSearch(crate::View::Genres, genre.clone());
-                            let genre_font_size =
-                                calculate_font_size(10.0, ctx.row_height, ctx.scale_factor)
-                                    * ctx.scale_factor;
+                            let genre_font_size = nokkvi_data::utils::scale::calculate_font_size(
+                                10.0,
+                                ctx.row_height,
+                                ctx.scale_factor,
+                            ) * ctx.scale_factor;
                             let genre_widget: Element<'_, QueueMessage> =
                                 crate::widgets::link_text::LinkText::new(if genre.is_empty() {
                                     "Unknown".to_string()
@@ -845,8 +841,7 @@ impl QueuePage {
 
             // 4. Rating column — only shown for Rating sort mode (dedicated column, not inline with title)
             if show_rating_column {
-                let star_icon_size =
-                    calculate_font_size(14.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
+                let star_icon_size = m.title_size;
                 let idx = ctx.item_index;
                 use crate::widgets::slot_list::slot_list_star_rating;
                 content_row = content_row.push(slot_list_star_rating(

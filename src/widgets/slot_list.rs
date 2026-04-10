@@ -12,6 +12,45 @@ use iced::{
 
 use crate::{theme, widgets::SlotListView};
 
+/// Pre-computed font and sizing metrics for slot list rows.
+///
+/// Calculated once per slot list render pass and passed via `SlotListRowContext`.
+/// Views reference these fields instead of re-deriving them from `row_height`
+/// and `scale_factor` in every `render_*_row` function.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SlotListRowMetrics {
+    /// Artwork thumbnail size (scaled): `(row_height - 16.0).max(32.0) * scale_factor`
+    pub artwork_size: f32,
+    /// Large title — base 16.0 (songs, albums, queue, similar)
+    pub title_size_lg: f32,
+    /// Standard title — base 14.0 (artists, playlists, genres, expansion)
+    pub title_size: f32,
+    /// Subtitle text — base 13.0
+    pub subtitle_size: f32,
+    /// Metadata / index text — base 12.0
+    pub metadata_size: f32,
+    /// Star/heart icon size for parent rows: `clamp(16.0, 24.0)`
+    pub star_size: f32,
+    /// Star/heart icon size for expansion child rows: `clamp(14.0, 20.0)`
+    pub star_size_child: f32,
+}
+
+impl SlotListRowMetrics {
+    /// Compute all metrics from layout parameters.
+    fn from_row(row_height: f32, scale_factor: f32) -> Self {
+        use nokkvi_data::utils::scale::calculate_font_size;
+        Self {
+            artwork_size: (row_height - 16.0).max(32.0) * scale_factor,
+            title_size_lg: calculate_font_size(16.0, row_height, scale_factor) * scale_factor,
+            title_size: calculate_font_size(14.0, row_height, scale_factor) * scale_factor,
+            subtitle_size: calculate_font_size(13.0, row_height, scale_factor) * scale_factor,
+            metadata_size: calculate_font_size(12.0, row_height, scale_factor) * scale_factor,
+            star_size: (row_height * 0.3 * scale_factor).clamp(16.0, 24.0),
+            star_size_child: (row_height * 0.3 * scale_factor).clamp(14.0, 20.0),
+        }
+    }
+}
+
 /// Per-slot rendering context passed to render closures.
 ///
 /// Bundles all the common parameters that every slot list row renderer needs,
@@ -29,6 +68,8 @@ pub(crate) struct SlotListRowContext {
     pub row_height: f32,
     /// Global keyboard modifiers
     pub modifiers: iced::keyboard::Modifiers,
+    /// Pre-computed font and sizing metrics
+    pub metrics: SlotListRowMetrics,
 }
 
 /// Styling for slot list slots (backgrounds, borders, text colors)
@@ -473,6 +514,8 @@ fn build_slot_list_slots<'a, T, Message: 'a>(
         config.center_slot.min(sl.viewport_offset).max(end_push)
     };
 
+    let metrics = SlotListRowMetrics::from_row(row_height, 1.0);
+
     let mut slots = Vec::with_capacity(config.slot_count);
     for slot_index in 0..config.slot_count {
         let opacity = if crate::theme::is_opacity_gradient() {
@@ -522,6 +565,7 @@ fn build_slot_list_slots<'a, T, Message: 'a>(
                     row_height,
                     scale_factor,
                     modifiers: config.modifiers,
+                    metrics,
                 };
                 render_item(item, ctx)
             } else if config.cull_empty {

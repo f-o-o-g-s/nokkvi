@@ -474,7 +474,7 @@ use iced::{
     Alignment, Element, Length,
     widget::{button, container, row, text},
 };
-use nokkvi_data::utils::{formatters, scale::calculate_font_size};
+use nokkvi_data::utils::formatters;
 
 use crate::widgets::slot_list::{
     SLOT_LIST_SLOT_PADDING, SlotListRowContext, SlotListSlotStyle, slot_list_favorite_icon,
@@ -536,9 +536,9 @@ pub(crate) fn render_child_track_row<'a, M: Clone + 'a + 'static>(
         depth,
     );
 
-    let title_size = calculate_font_size(14.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
-    let meta_size = calculate_font_size(12.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
-    let star_size = (ctx.row_height * 0.3 * ctx.scale_factor).clamp(14.0, 20.0);
+    let title_size = ctx.metrics.title_size;
+    let meta_size = ctx.metrics.metadata_size;
+    let star_size = ctx.metrics.star_size_child;
 
     let track_num = song.track.map_or("-".to_string(), |t| t.to_string());
     let duration_str = formatters::format_time(song.duration);
@@ -627,9 +627,9 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
         depth,
     );
 
-    let title_size = calculate_font_size(14.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
-    let meta_size = calculate_font_size(12.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
-    let star_size = (ctx.row_height * 0.3 * ctx.scale_factor).clamp(14.0, 20.0);
+    let title_size = ctx.metrics.title_size;
+    let meta_size = ctx.metrics.metadata_size;
+    let star_size = ctx.metrics.star_size_child;
 
     let year_str = album.year.map_or("-".to_string(), |y| y.to_string());
     let songs_str = format!("{} songs", album.song_count);

@@ -11,7 +11,7 @@ use iced::{
 };
 use nokkvi_data::{
     backend::{playlists::PlaylistUIViewData, songs::SongUIViewData},
-    utils::{formatters::format_date_concise, scale::calculate_font_size},
+    utils::formatters::format_date_concise,
 };
 
 use super::expansion::{ExpansionState, SlotListEntry};
@@ -751,14 +751,11 @@ impl PlaylistsPage {
             0,
         );
 
-        let base_artwork_size = (ctx.row_height - 16.0).max(32.0);
-        let artwork_size = base_artwork_size * ctx.scale_factor;
-        let title_size =
-            calculate_font_size(14.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
-        let metadata_size =
-            calculate_font_size(12.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
-        let index_size =
-            calculate_font_size(12.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
+        let m = ctx.metrics;
+        let artwork_size = m.artwork_size;
+        let title_size = m.title_size;
+        let metadata_size = m.metadata_size;
+        let index_size = m.metadata_size;
 
         // Format duration
         let duration_mins = (playlist.duration / 60.0) as u32;

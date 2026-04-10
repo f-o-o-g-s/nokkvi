@@ -10,10 +10,7 @@ use iced::{
     Alignment, Element, Length, Task,
     widget::{button, container, image, row},
 };
-use nokkvi_data::{
-    types::song::Song,
-    utils::{formatters, scale::calculate_font_size},
-};
+use nokkvi_data::{types::song::Song, utils::formatters};
 
 use crate::widgets::{self, SlotListPageState, view_header::SortMode};
 
@@ -343,17 +340,13 @@ impl SimilarPage {
                     0,
                 );
 
-                let base_artwork_size = (ctx.row_height - 16.0).max(32.0);
-                let artwork_size = base_artwork_size * ctx.scale_factor;
-                let title_size =
-                    calculate_font_size(16.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
-                let subtitle_size =
-                    calculate_font_size(13.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
-                let metadata_size =
-                    calculate_font_size(12.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
-                let star_size = (ctx.row_height * 0.3 * ctx.scale_factor).clamp(16.0, 24.0);
-                let index_size =
-                    calculate_font_size(12.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
+                let m = ctx.metrics;
+                let artwork_size = m.artwork_size;
+                let title_size = m.title_size_lg;
+                let subtitle_size = m.subtitle_size;
+                let metadata_size = m.metadata_size;
+                let star_size = m.star_size;
+                let index_size = m.metadata_size;
 
                 // Layout: [Index] [Art] [Title/Artist (45%)] [Album (30%)] [Duration (15%)] [Star (5%)]
                 let content = row![

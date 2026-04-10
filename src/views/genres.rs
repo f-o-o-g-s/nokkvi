@@ -9,10 +9,7 @@ use iced::{
     Alignment, Element, Length, Task,
     widget::{button, container, image, row},
 };
-use nokkvi_data::{
-    backend::{albums::AlbumUIViewData, genres::GenreUIViewData},
-    utils::scale::calculate_font_size,
-};
+use nokkvi_data::backend::{albums::AlbumUIViewData, genres::GenreUIViewData};
 
 use super::expansion::{ExpansionState, ThreeTierEntry};
 use crate::{
@@ -819,14 +816,11 @@ impl GenresPage {
             0,
         );
 
-        let base_artwork_size = (ctx.row_height - 16.0).max(32.0);
-        let artwork_size = base_artwork_size * ctx.scale_factor;
-        let title_size =
-            calculate_font_size(14.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
-        let metadata_size =
-            calculate_font_size(12.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
-        let index_size =
-            calculate_font_size(12.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
+        let m = ctx.metrics;
+        let artwork_size = m.artwork_size;
+        let title_size = m.title_size;
+        let metadata_size = m.metadata_size;
+        let index_size = m.metadata_size;
 
         // Layout: [Index (5%)] [Artwork] [Genre Name (45%)] [Album Count (20%)] [Song Count (20%)]
         let content = row![

@@ -12,7 +12,7 @@ use iced::{
 };
 use nokkvi_data::{
     backend::{albums::AlbumUIViewData, songs::SongUIViewData},
-    utils::{formatters, scale::calculate_font_size},
+    utils::formatters,
 };
 
 use super::expansion::{ExpansionState, SlotListEntry};
@@ -771,17 +771,13 @@ impl AlbumsPage {
             0,
         );
 
-        let base_artwork_size = (ctx.row_height - 16.0).max(32.0);
-        let artwork_size = base_artwork_size * ctx.scale_factor;
-        let title_size =
-            calculate_font_size(16.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
-        let subtitle_size =
-            calculate_font_size(13.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
-        let song_count_size =
-            calculate_font_size(12.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
-        let star_size = (ctx.row_height * 0.3 * ctx.scale_factor).clamp(16.0, 24.0);
-        let index_size =
-            calculate_font_size(12.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
+        let m = ctx.metrics;
+        let artwork_size = m.artwork_size;
+        let title_size = m.title_size_lg;
+        let subtitle_size = m.subtitle_size;
+        let song_count_size = m.metadata_size;
+        let star_size = m.star_size;
+        let index_size = m.metadata_size;
 
         let content = row![
             slot_list_index_column(ctx.item_index, index_size, style, ctx.opacity),
@@ -830,9 +826,7 @@ impl AlbumsPage {
             },
             {
                 if current_sort_mode == SortMode::Rating {
-                    let star_icon_size =
-                        calculate_font_size(14.0, ctx.row_height, ctx.scale_factor)
-                            * ctx.scale_factor;
+                    let star_icon_size = m.title_size;
                     let idx = ctx.item_index;
                     use crate::widgets::slot_list::slot_list_star_rating;
                     slot_list_star_rating(
@@ -852,14 +846,7 @@ impl AlbumsPage {
                         ));
                     }
                     use crate::widgets::slot_list::slot_list_metadata_column;
-                    slot_list_metadata_column(
-                        extra_value,
-                        click_msg,
-                        calculate_font_size(14.0, ctx.row_height, ctx.scale_factor)
-                            * ctx.scale_factor,
-                        style,
-                        21,
-                    )
+                    slot_list_metadata_column(extra_value, click_msg, m.title_size, style, 21)
                 } else {
                     container(text("")).width(Length::FillPortion(21)).into()
                 }

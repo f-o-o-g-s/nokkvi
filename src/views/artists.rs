@@ -10,10 +10,7 @@ use iced::{
     Alignment, Element, Length, Task,
     widget::{button, container, image, row},
 };
-use nokkvi_data::{
-    backend::{albums::AlbumUIViewData, artists::ArtistUIViewData},
-    utils::scale::calculate_font_size,
-};
+use nokkvi_data::backend::{albums::AlbumUIViewData, artists::ArtistUIViewData};
 
 use super::expansion::{ExpansionState, ThreeTierEntry};
 use crate::{
@@ -992,15 +989,12 @@ impl ArtistsPage {
             0,
         );
 
-        let base_artwork_size = (ctx.row_height - 16.0).max(32.0);
-        let artwork_size = base_artwork_size * ctx.scale_factor;
-        let title_size =
-            calculate_font_size(14.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
-        let metadata_size =
-            calculate_font_size(12.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
-        let star_size = (ctx.row_height * 0.3 * ctx.scale_factor).clamp(16.0, 24.0);
-        let index_size =
-            calculate_font_size(12.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
+        let m = ctx.metrics;
+        let artwork_size = m.artwork_size;
+        let title_size = m.title_size;
+        let metadata_size = m.metadata_size;
+        let star_size = m.star_size;
+        let index_size = m.metadata_size;
 
         // Layout: [Index] [Art] [Artist Name (50%)] [Album Count (22%)] [Song Count (21%)] [Star (5%)]
         let content = row![
@@ -1023,9 +1017,7 @@ impl ArtistsPage {
                 let content: Element<'_, ArtistsMessage> =
                     if current_sort_mode == crate::widgets::view_header::SortMode::Rating {
                         use crate::widgets::slot_list::slot_list_star_rating;
-                        let star_icon_size =
-                            calculate_font_size(12.0, ctx.row_height, ctx.scale_factor)
-                                * ctx.scale_factor;
+                        let star_icon_size = m.metadata_size;
                         let idx = ctx.item_index;
 
                         let title_click = Some(ArtistsMessage::ContextMenuAction(

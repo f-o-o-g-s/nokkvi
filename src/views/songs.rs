@@ -9,10 +9,7 @@ use iced::{
     Alignment, Element, Length, Task,
     widget::{button, container, image, row, text},
 };
-use nokkvi_data::{
-    backend::songs::SongUIViewData,
-    utils::{formatters, scale::calculate_font_size},
-};
+use nokkvi_data::{backend::songs::SongUIViewData, utils::formatters};
 
 use crate::widgets::{self, SlotListPageState, view_header::SortMode};
 
@@ -485,18 +482,13 @@ impl SongsPage {
                     0,
                 );
 
-                // Dynamic scaling based on row height AND scale factor
-                let base_artwork_size = (ctx.row_height - 16.0).max(32.0);
-                let artwork_size = base_artwork_size * ctx.scale_factor;
-                let title_size =
-                    calculate_font_size(16.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
-                let subtitle_size =
-                    calculate_font_size(13.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
-                let metadata_size =
-                    calculate_font_size(12.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
-                let star_size = (ctx.row_height * 0.3 * ctx.scale_factor).clamp(16.0, 24.0);
-                let index_size =
-                    calculate_font_size(12.0, ctx.row_height, ctx.scale_factor) * ctx.scale_factor;
+                let m = ctx.metrics;
+                let artwork_size = m.artwork_size;
+                let title_size = m.title_size_lg;
+                let subtitle_size = m.subtitle_size;
+                let metadata_size = m.metadata_size;
+                let star_size = m.star_size;
+                let index_size = m.metadata_size;
 
                 // Layout: [Index] [Art] [Title/Artist (40%)] [Album (25%)] [Extra (18%)] [Duration (10%)] [Star (5%)]
                 let content = row![
@@ -550,9 +542,7 @@ impl SongsPage {
                     {
                         if current_sort_mode == SortMode::Rating {
                             use crate::widgets::slot_list::slot_list_star_rating;
-                            let star_icon_size =
-                                calculate_font_size(14.0, ctx.row_height, ctx.scale_factor)
-                                    * ctx.scale_factor;
+                            let star_icon_size = m.title_size;
                             let idx = ctx.item_index;
                             slot_list_star_rating(
                                 rating,
@@ -574,8 +564,7 @@ impl SongsPage {
                             slot_list_metadata_column(
                                 extra_value,
                                 click_msg,
-                                calculate_font_size(14.0, ctx.row_height, ctx.scale_factor)
-                                    * ctx.scale_factor,
+                                m.title_size,
                                 style,
                                 18,
                             )
