@@ -812,13 +812,19 @@ impl SongsPage {
             if let Some(suffix) = &song.suffix {
                 tech_specs.push(suffix.to_uppercase());
             }
-            if let Some(depth) = song.bit_depth {
+            if let Some(depth) = song.bit_depth
+                && depth > 0
+            {
                 tech_specs.push(format!("{depth}-bit"));
             }
-            if let Some(rate) = song.sample_rate {
+            if let Some(rate) = song.sample_rate
+                && rate > 0
+            {
                 tech_specs.push(format!("{} kHz", rate as f32 / 1000.0));
             }
-            if let Some(bitrate) = song.bitrate {
+            if let Some(bitrate) = song.bitrate
+                && bitrate > 0
+            {
                 tech_specs.push(format!("{bitrate} kbps"));
             }
             if let Some(bpm) = song.bpm {
