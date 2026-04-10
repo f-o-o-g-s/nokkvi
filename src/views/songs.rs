@@ -690,8 +690,9 @@ impl SongsPage {
             .map(SongsMessage::RefreshArtwork);
 
         let pill_content = centered_song.map(|song| {
-            use crate::theme;
             use iced::widget::{column, text};
+
+            use crate::theme;
 
             let mut col = column![
                 text(song.title.clone())

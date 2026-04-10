@@ -642,8 +642,9 @@ impl PlaylistsPage {
         let album_count = centered_playlist.map_or(0, |p| p.artwork_album_ids.len());
 
         let pill_content = centered_playlist.map(|playlist| {
-            use crate::theme;
             use iced::widget::{column, text};
+
+            use crate::theme;
 
             let mut col = column![
                 text(playlist.name.clone())

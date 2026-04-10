@@ -649,8 +649,9 @@ impl AlbumsPage {
 
         // Overlay building
         let overlay_content = centered_album.map(|album| {
-            use crate::theme;
             use iced::widget::{column, text};
+
+            use crate::theme;
 
             let mut col = column![
                 text(album.name.clone())

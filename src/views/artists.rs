@@ -840,8 +840,9 @@ impl ArtistsPage {
             centered_artist.and_then(|artist| data.dominant_colors.get(&artist.id).copied());
 
         let pill_content = centered_artist.map(|artist| {
-            use crate::theme;
             use iced::widget::{button, column, text};
+
+            use crate::theme;
 
             let mut col = column![
                 text(artist.name.clone())
