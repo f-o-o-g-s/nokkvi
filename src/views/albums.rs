@@ -699,13 +699,11 @@ impl AlbumsPage {
             if let Some(secs) = album.duration {
                 info_stats.push(nokkvi_data::utils::formatters::format_duration_short(secs));
             }
-            if !info_stats.is_empty() {
-                col = col.push(
-                    text(info_stats.join(" • "))
-                        .size(14)
-                        .color(theme::fg2())
-                        .font(theme::ui_font()),
-                );
+
+            use crate::widgets::metadata_pill::{auth_status_row, dot_row, play_stats_row};
+
+            if let Some(row) = dot_row::<AlbumsMessage>(info_stats, 14.0, theme::fg2()) {
+                col = col.push(row);
             }
 
             // Genre row
@@ -718,79 +716,13 @@ impl AlbumsPage {
                 );
             }
 
-            let mut stat_items = Vec::new();
-            if let Some(plays) = album.play_count {
-                stat_items.push(format!("{plays} plays"));
-            }
-            if let Some(date) = &album.play_date {
-                let ymd = date.split('T').next().unwrap_or(date);
-                stat_items.push(format!("Last played: {ymd}"));
-            }
-            if !stat_items.is_empty() {
-                col = col.push(
-                    text(stat_items.join(" • "))
-                        .size(13)
-                        .color(theme::fg2())
-                        .font(theme::ui_font()),
-                );
-            }
-
-            let mut auth_row_items: Vec<iced::Element<'_, AlbumsMessage>> = Vec::new();
-            if album.is_starred {
-                let heart = crate::embedded_svg::svg_widget("assets/icons/heart-filled.svg")
-                    .width(13)
-                    .height(13)
-                    .style(|_, _| iced::widget::svg::Style {
-                        color: Some(theme::danger_bright()),
-                    });
-                auth_row_items.push(
-                    iced::widget::row![
-                        text("Favorited ")
-                            .size(13)
-                            .color(theme::fg2())
-                            .font(theme::ui_font()),
-                        heart
-                    ]
-                    .align_y(iced::Alignment::Center)
-                    .into(),
-                );
-            }
-
-            if let Some(rating) = album.rating
-                && rating > 0
+            if let Some(row) =
+                play_stats_row::<AlbumsMessage>(album.play_count, album.play_date.as_deref())
             {
-                let mut stars_row = iced::widget::row![
-                    text("Rated ")
-                        .size(13)
-                        .color(theme::fg2())
-                        .font(theme::ui_font())
-                ]
-                .spacing(2)
-                .align_y(iced::Alignment::Center);
-
-                for _ in 0..rating {
-                    stars_row = stars_row.push(
-                        crate::embedded_svg::svg_widget("assets/icons/star-filled.svg")
-                            .width(13)
-                            .height(13)
-                            .style(|_, _| iced::widget::svg::Style {
-                                color: Some(theme::star_bright()),
-                            }),
-                    );
-                }
-                auth_row_items.push(stars_row.into());
+                col = col.push(row);
             }
 
-            if !auth_row_items.is_empty() {
-                let mut row = iced::widget::row![]
-                    .spacing(12)
-                    .align_y(iced::Alignment::Center);
-                for (i, item) in auth_row_items.into_iter().enumerate() {
-                    if i > 0 {
-                        row = row.push(text("•").size(13).color(theme::fg3()));
-                    }
-                    row = row.push(item);
-                }
+            if let Some(row) = auth_status_row::<AlbumsMessage>(album.is_starred, album.rating) {
                 col = col.push(row);
             }
 

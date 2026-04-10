@@ -687,12 +687,10 @@ impl PlaylistsPage {
                 .unwrap_or(&playlist.updated_at);
             stats.push(format!("Updated: {ymd}"));
 
-            col = col.push(
-                text(stats.join(" • "))
-                    .size(13)
-                    .color(theme::fg3())
-                    .font(theme::ui_font()),
-            );
+            use crate::widgets::metadata_pill::dot_row;
+            if let Some(row) = dot_row::<PlaylistsMessage>(stats, 13.0, theme::fg3()) {
+                col = col.push(row);
+            }
 
             col.into()
         });

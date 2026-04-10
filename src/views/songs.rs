@@ -710,6 +710,10 @@ impl SongsPage {
             .spacing(4)
             .align_x(iced::Alignment::Center);
 
+            use crate::widgets::metadata_pill::{
+                auth_status_row, dot_row, play_stats_row, tech_specs_row,
+            };
+
             // Row 1: Track • Year • Genre
             let mut info_stats = Vec::new();
             if let Some(track) = song.track {
@@ -721,124 +725,31 @@ impl SongsPage {
             if let Some(genre) = &song.genre {
                 info_stats.push(genre.clone());
             }
-            if !info_stats.is_empty() {
-                col = col.push(
-                    text(info_stats.join(" • "))
-                        .size(13)
-                        .color(theme::fg2())
-                        .font(theme::ui_font()),
-                );
-            }
-
-            // Row 2: Plays • Last
-            let mut stat_items = Vec::new();
-            if let Some(plays) = song.play_count {
-                stat_items.push(format!("{plays} plays"));
-            }
-            if let Some(date) = &song.play_date {
-                let ymd = date.split('T').next().unwrap_or(date);
-                stat_items.push(format!("Last played: {ymd}"));
-            }
-            if !stat_items.is_empty() {
-                col = col.push(
-                    text(stat_items.join(" • "))
-                        .size(13)
-                        .color(theme::fg2())
-                        .font(theme::ui_font()),
-                );
-            }
-
-            // Row 3: Loved / Rating
-            let mut auth_row_items: Vec<iced::Element<'_, SongsMessage>> = Vec::new();
-            if song.is_starred {
-                let heart = crate::embedded_svg::svg_widget("assets/icons/heart-filled.svg")
-                    .width(13)
-                    .height(13)
-                    .style(|_, _| iced::widget::svg::Style {
-                        color: Some(theme::danger_bright()),
-                    });
-                auth_row_items.push(
-                    iced::widget::row![
-                        text("Favorited ")
-                            .size(13)
-                            .color(theme::fg2())
-                            .font(theme::ui_font()),
-                        heart
-                    ]
-                    .align_y(iced::Alignment::Center)
-                    .into(),
-                );
-            }
-
-            if let Some(rating) = song.rating
-                && rating > 0
-            {
-                let mut stars_row = iced::widget::row![
-                    text("Rated ")
-                        .size(13)
-                        .color(theme::fg2())
-                        .font(theme::ui_font())
-                ]
-                .spacing(2)
-                .align_y(iced::Alignment::Center);
-
-                for _ in 0..rating {
-                    stars_row = stars_row.push(
-                        crate::embedded_svg::svg_widget("assets/icons/star-filled.svg")
-                            .width(13)
-                            .height(13)
-                            .style(|_, _| iced::widget::svg::Style {
-                                color: Some(theme::star_bright()),
-                            }),
-                    );
-                }
-                auth_row_items.push(stars_row.into());
-            }
-
-            if !auth_row_items.is_empty() {
-                let mut row = iced::widget::row![]
-                    .spacing(12)
-                    .align_y(iced::Alignment::Center);
-                for (i, item) in auth_row_items.into_iter().enumerate() {
-                    if i > 0 {
-                        row = row.push(text("•").size(13).color(theme::fg3()));
-                    }
-                    row = row.push(item);
-                }
+            if let Some(row) = dot_row::<SongsMessage>(info_stats, 13.0, theme::fg2()) {
                 col = col.push(row);
             }
 
-            // Row 2: Tech Specs (FLAC • 16-bit • 44.1kHz • 900 kbps • 120 BPM)
-            let mut tech_specs = Vec::new();
-            if let Some(suffix) = &song.suffix {
-                tech_specs.push(suffix.to_uppercase());
-            }
-            if let Some(depth) = song.bit_depth
-                && depth > 0
+            // Row 2: Plays • Last played
+            if let Some(row) =
+                play_stats_row::<SongsMessage>(song.play_count, song.play_date.as_deref())
             {
-                tech_specs.push(format!("{depth}-bit"));
-            }
-            if let Some(rate) = song.sample_rate
-                && rate > 0
-            {
-                tech_specs.push(format!("{} kHz", rate as f32 / 1000.0));
-            }
-            if let Some(bitrate) = song.bitrate
-                && bitrate > 0
-            {
-                tech_specs.push(format!("{bitrate} kbps"));
-            }
-            if let Some(bpm) = song.bpm {
-                tech_specs.push(format!("{bpm} BPM"));
+                col = col.push(row);
             }
 
-            if !tech_specs.is_empty() {
-                col = col.push(
-                    text(tech_specs.join(" • "))
-                        .size(12)
-                        .color(theme::fg3())
-                        .font(theme::ui_font()),
-                );
+            // Row 3: Favorited / Rating
+            if let Some(row) = auth_status_row::<SongsMessage>(song.is_starred, song.rating) {
+                col = col.push(row);
+            }
+
+            // Row 4: Tech specs
+            if let Some(row) = tech_specs_row::<SongsMessage>(
+                song.suffix.as_deref(),
+                song.bit_depth,
+                song.sample_rate,
+                song.bitrate,
+                song.bpm,
+            ) {
+                col = col.push(row);
             }
 
             col.into()

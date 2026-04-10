@@ -13,6 +13,7 @@ pub(crate) mod hover_indicator;
 pub(crate) mod hover_overlay;
 pub(crate) mod link_text;
 pub(crate) mod marquee_text;
+pub(crate) mod metadata_pill;
 pub(crate) mod nav_bar;
 pub(crate) mod player_bar;
 pub(crate) mod scroll_indicator;
