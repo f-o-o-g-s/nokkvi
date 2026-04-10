@@ -521,7 +521,7 @@ impl Nokkvi {
                 let new_state = matches!(value, crate::views::settings::items::SettingValue::Enum { ref val, .. } if val == "Light");
                 crate::theme::set_light_mode(new_state);
                 if let Err(e) = crate::config_writer::update_config_value(
-                    "theme.light_mode",
+                    "settings.light_mode",
                     &crate::views::settings::items::SettingValue::Bool(new_state),
                     None,
                 ) {

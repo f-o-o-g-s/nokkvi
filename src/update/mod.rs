@@ -704,7 +704,7 @@ impl Nokkvi {
                 // Persist to config.toml — the config file watcher will pick this up
                 // and ThemeConfigReloaded will read the correct value
                 if let Err(e) = crate::config_writer::update_config_value(
-                    "theme.light_mode",
+                    "settings.light_mode",
                     &crate::views::settings::items::SettingValue::Bool(new_state),
                     None,
                 ) {

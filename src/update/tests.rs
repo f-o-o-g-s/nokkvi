@@ -2207,3 +2207,43 @@ fn settings_stale_description_after_tab_deactivated_search_then_exit() {
         app.settings_page.description_text,
     );
 }
+
+// ============================================================================
+// Light Mode Persistence (mod.rs)
+// ============================================================================
+
+#[test]
+fn toggle_light_mode_persists_to_settings_key() {
+    // Set a mock HOME dir to isolate config file I/O
+    let temp = tempfile::tempdir().unwrap();
+    unsafe {
+        std::env::set_var("HOME", temp.path());
+        std::env::set_var("XDG_CONFIG_HOME", temp.path().join(".config"));
+    }
+
+    // Initialize test app and ensure light mode is in a known state
+    let mut app = test_app();
+    crate::theme::set_light_mode(false);
+
+    // Trigger the toggle handler
+    let _ = app.update(crate::app_message::Message::ToggleLightMode);
+
+    // Validate the config file was created and contains the correct key
+    let actual_config_path = nokkvi_data::utils::paths::get_config_path().unwrap();
+    let content = std::fs::read_to_string(&actual_config_path).unwrap_or_default();
+
+    let doc = content
+        .parse::<toml_edit::DocumentMut>()
+        .expect("valid TOML");
+
+    // The key MUST be written to [settings] light_mode
+    assert!(
+        doc.get("settings").is_some(),
+        "[settings] table missing from config.toml. Current content:\n{content}"
+    );
+    assert!(
+        doc["settings"].get("light_mode").is_some(),
+        "light_mode missing from [settings]. Current content:\n{content}"
+    );
+    assert!(doc["settings"]["light_mode"].as_bool().unwrap());
+}
