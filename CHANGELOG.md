@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## v0.2.11 — 2026-04-09
+
+### Fixes
+- **Settings State** — persisted theme mode to correct config table so the application no longer reverts to dark mode on restart.
+
 ## v0.2.10 — 2026-04-09
 
 ### Features
