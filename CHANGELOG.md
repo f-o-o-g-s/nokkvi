@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+## v0.2.10 — 2026-04-09
+
+### Features
+- **Artwork Metadata Overlays** — unified and standardized artwork metadata overlays across the UI.
+- **Crossfade Indicator** — added crossfade toggle indicator to player bar.
+
+### Fixes
+- **Format Technical Specs** — hid zero values for format technical specifications.
+- **Settings State** — cleared stale footer description across exit/re-open cycles.
+- **Artwork Text Contrast** — used absolute contrast colors for artwork overlay text.
+- **Audio Engine Stability** — replaced production `unwrap()` calls with safe fallbacks.
+
+### Improvements
+- **UI Progress Bar Handle** — designed knurled pill ridges for rounded progress bar handle.
+- **Project License** — updated project license to GPLv3.
+
+### Docs & Internal
+- Enforced max description length to prevent footer overflow and removed preamble from gradient mode descriptions to fit in footer.
+- Add `--all-targets` to clippy commands for CI parity.
+- Applied nightly rustfmt import guidelines, including new settings tests.
+
 ## v0.2.9 — 2026-04-08
 
 ### Features
