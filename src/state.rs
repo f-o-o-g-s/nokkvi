@@ -235,6 +235,8 @@ pub struct ArtworkState {
     pub large_artwork_snapshot: HashMap<String, image::Handle>,
     /// Cache for album dominant colors (extracted from large artwork bytes)
     pub album_dominant_colors: LruCache<String, iced::Color>,
+    /// Read-only snapshot of dominant colors for view()
+    pub album_dominant_colors_snapshot: HashMap<String, iced::Color>,
     /// Genre artwork cache
     pub genre: CollageArtworkCache,
     /// Playlist artwork cache
@@ -263,6 +265,15 @@ impl ArtworkState {
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
     }
+
+    /// Refresh the read-only snapshot of dominant colors from the LRU cache.
+    pub fn refresh_dominant_colors_snapshot(&mut self) {
+        self.album_dominant_colors_snapshot = self
+            .album_dominant_colors
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
+    }
 }
 
 impl Default for ArtworkState {
@@ -276,6 +287,7 @@ impl Default for ArtworkState {
             album_dominant_colors: LruCache::new(
                 NonZeroUsize::new(LARGE_ARTWORK_CACHE_CAPACITY).expect("capacity must be > 0"),
             ),
+            album_dominant_colors_snapshot: HashMap::new(),
             genre: CollageArtworkCache::default(),
             playlist: CollageArtworkCache::default(),
             loading_large_artwork: None,
@@ -295,6 +307,10 @@ impl std::fmt::Debug for ArtworkState {
             .field("large_artwork", &self.large_artwork.len())
             .field("large_artwork_snapshot", &self.large_artwork_snapshot.len())
             .field("album_dominant_colors", &self.album_dominant_colors.len())
+            .field(
+                "album_dominant_colors_snapshot",
+                &self.album_dominant_colors_snapshot.len(),
+            )
             .field("genre", &self.genre)
             .field("playlist", &self.playlist)
             .field("loading_large_artwork", &self.loading_large_artwork)

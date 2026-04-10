@@ -230,7 +230,7 @@ impl Nokkvi {
         // Skip fetching if already cached - makes back-navigation instant
         if self.artwork.large_artwork.peek(&album_id).is_some() {
             if let Some(&color) = self.artwork.album_dominant_colors.peek(&album_id) {
-                return Task::done(Message::Albums(AlbumsMessage::DominantColorCalculated(
+                return Task::done(Message::Artwork(ArtworkMessage::DominantColorCalculated(
                     album_id, color,
                 )));
             }
@@ -466,7 +466,7 @@ impl Nokkvi {
                     },
                     |result| {
                         if let Some((id, c)) = result {
-                            Message::Albums(AlbumsMessage::DominantColorCalculated(id, c))
+                            Message::Artwork(ArtworkMessage::DominantColorCalculated(id, c))
                         } else {
                             Message::NoOp
                         }
@@ -843,10 +843,6 @@ impl Nokkvi {
             }
             AlbumsAction::FindSimilar(id, label) => {
                 return Task::done(Message::FindSimilar { id, label });
-            }
-            AlbumsAction::SaveDominantColor(id, color) => {
-                self.artwork.album_dominant_colors.put(id, color);
-                return Task::none();
             }
             _ => {} // None + already-handled common actions
         }

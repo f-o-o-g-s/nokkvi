@@ -27,6 +27,7 @@ pub struct SongsViewData<'a> {
     pub songs: &'a [SongUIViewData],
     pub album_art: &'a HashMap<String, image::Handle>, // album_id -> artwork
     pub large_artwork: &'a HashMap<String, image::Handle>,
+    pub dominant_colors: &'a HashMap<String, iced::Color>,
     pub window_width: f32,
     pub window_height: f32,
     pub scale_factor: f32,
@@ -672,7 +673,7 @@ impl SongsPage {
         let slot_list_content = slot_list_background_container(slot_list_content);
 
         use crate::widgets::base_slot_list_layout::{
-            base_slot_list_layout, single_artwork_panel_with_menu,
+            base_slot_list_layout, single_artwork_panel_with_pill,
         };
 
         // Build artwork column component - use album artwork of centered song
@@ -680,11 +681,168 @@ impl SongsPage {
         let artwork_handle = centered_song
             .and_then(|song| song.album_id.as_ref())
             .and_then(|album_id| data.large_artwork.get(album_id));
+        let active_dominant_color = centered_song
+            .and_then(|song| song.album_id.as_ref())
+            .and_then(|album_id| data.dominant_colors.get(album_id).copied());
+
         let on_refresh = centered_song
             .and_then(|song| song.album_id.clone())
             .map(SongsMessage::RefreshArtwork);
 
-        let artwork_content = Some(single_artwork_panel_with_menu(artwork_handle, on_refresh));
+        let pill_content = centered_song.map(|song| {
+            use crate::theme;
+            use iced::widget::{column, text};
+
+            let mut col = column![
+                text(song.title.clone())
+                    .size(20)
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Bold,
+                        ..theme::ui_font()
+                    })
+                    .color(theme::fg0()),
+                text(song.artist.clone())
+                    .size(16)
+                    .color(theme::fg1())
+                    .font(theme::ui_font()),
+            ]
+            .spacing(4)
+            .align_x(iced::Alignment::Center);
+
+            // Row 1: Track • Year • Genre
+            let mut info_stats = Vec::new();
+            if let Some(track) = song.track {
+                info_stats.push(format!("Track {track}"));
+            }
+            if let Some(year) = song.year {
+                info_stats.push(year.to_string());
+            }
+            if let Some(genre) = &song.genre {
+                info_stats.push(genre.clone());
+            }
+            if !info_stats.is_empty() {
+                col = col.push(
+                    text(info_stats.join(" • "))
+                        .size(13)
+                        .color(theme::fg2())
+                        .font(theme::ui_font()),
+                );
+            }
+
+            // Row 2: Plays • Last
+            let mut stat_items = Vec::new();
+            if let Some(plays) = song.play_count {
+                stat_items.push(format!("{plays} plays"));
+            }
+            if let Some(date) = &song.play_date {
+                let ymd = date.split('T').next().unwrap_or(date);
+                stat_items.push(format!("Last played: {ymd}"));
+            }
+            if !stat_items.is_empty() {
+                col = col.push(
+                    text(stat_items.join(" • "))
+                        .size(13)
+                        .color(theme::fg2())
+                        .font(theme::ui_font()),
+                );
+            }
+
+            // Row 3: Loved / Rating
+            let mut auth_row_items: Vec<iced::Element<'_, SongsMessage>> = Vec::new();
+            if song.is_starred {
+                let heart = crate::embedded_svg::svg_widget("assets/icons/heart-filled.svg")
+                    .width(13)
+                    .height(13)
+                    .style(|_, _| iced::widget::svg::Style {
+                        color: Some(theme::danger_bright()),
+                    });
+                auth_row_items.push(
+                    iced::widget::row![
+                        text("Favorited ")
+                            .size(13)
+                            .color(theme::fg2())
+                            .font(theme::ui_font()),
+                        heart
+                    ]
+                    .align_y(iced::Alignment::Center)
+                    .into(),
+                );
+            }
+
+            if let Some(rating) = song.rating
+                && rating > 0
+            {
+                let mut stars_row = iced::widget::row![
+                    text("Rated ")
+                        .size(13)
+                        .color(theme::fg2())
+                        .font(theme::ui_font())
+                ]
+                .spacing(2)
+                .align_y(iced::Alignment::Center);
+
+                for _ in 0..rating {
+                    stars_row = stars_row.push(
+                        crate::embedded_svg::svg_widget("assets/icons/star-filled.svg")
+                            .width(13)
+                            .height(13)
+                            .style(|_, _| iced::widget::svg::Style {
+                                color: Some(theme::star_bright()),
+                            }),
+                    );
+                }
+                auth_row_items.push(stars_row.into());
+            }
+
+            if !auth_row_items.is_empty() {
+                let mut row = iced::widget::row![]
+                    .spacing(12)
+                    .align_y(iced::Alignment::Center);
+                for (i, item) in auth_row_items.into_iter().enumerate() {
+                    if i > 0 {
+                        row = row.push(text("•").size(13).color(theme::fg3()));
+                    }
+                    row = row.push(item);
+                }
+                col = col.push(row);
+            }
+
+            // Row 2: Tech Specs (FLAC • 16-bit • 44.1kHz • 900 kbps • 120 BPM)
+            let mut tech_specs = Vec::new();
+            if let Some(suffix) = &song.suffix {
+                tech_specs.push(suffix.to_uppercase());
+            }
+            if let Some(depth) = song.bit_depth {
+                tech_specs.push(format!("{depth}-bit"));
+            }
+            if let Some(rate) = song.sample_rate {
+                tech_specs.push(format!("{} kHz", rate as f32 / 1000.0));
+            }
+            if let Some(bitrate) = song.bitrate {
+                tech_specs.push(format!("{bitrate} kbps"));
+            }
+            if let Some(bpm) = song.bpm {
+                tech_specs.push(format!("{bpm} BPM"));
+            }
+
+            if !tech_specs.is_empty() {
+                col = col.push(
+                    text(tech_specs.join(" • "))
+                        .size(12)
+                        .color(theme::fg3())
+                        .font(theme::ui_font()),
+                );
+            }
+
+            col.into()
+        });
+
+        let artwork_content = Some(single_artwork_panel_with_pill(
+            artwork_handle,
+            pill_content,
+            active_dominant_color,
+            on_refresh,
+        ));
 
         base_slot_list_layout(&layout_config, header, slot_list_content, artwork_content)
     }

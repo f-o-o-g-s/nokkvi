@@ -623,9 +623,7 @@ impl PlaylistsPage {
         use crate::widgets::slot_list::slot_list_background_container;
         let slot_list_content = slot_list_background_container(slot_list_content);
 
-        use crate::widgets::base_slot_list_layout::{
-            base_slot_list_layout, collage_artwork_panel, single_artwork_panel,
-        };
+        use crate::widgets::base_slot_list_layout::base_slot_list_layout;
 
         // Build artwork column — show parent playlist art even when on a child track
         let centered_playlist = center_index.and_then(|idx| match flattened.get(idx) {
@@ -643,18 +641,90 @@ impl PlaylistsPage {
         // Show single full-res when 0-1 albums, collage when 2+ albums
         let album_count = centered_playlist.map_or(0, |p| p.artwork_album_ids.len());
 
+        let pill_content = centered_playlist.map(|playlist| {
+            use crate::theme;
+            use iced::widget::{column, text};
+
+            let mut col = column![
+                text(playlist.name.clone())
+                    .size(24)
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Bold,
+                        ..theme::ui_font()
+                    })
+                    .color(theme::fg0()),
+            ]
+            .spacing(4)
+            .align_x(iced::Alignment::Center);
+
+            if !playlist.comment.is_empty() {
+                let comment = &playlist.comment;
+                let preview: String = comment.chars().take(100).collect();
+                let preview = if comment.chars().count() > 100 {
+                    format!("{}...", preview.trim_end())
+                } else {
+                    preview
+                };
+                col = col.push(
+                    text(preview)
+                        .size(14)
+                        .color(theme::fg2())
+                        .font(theme::ui_font())
+                        .center(),
+                );
+            }
+
+            let duration_min = playlist.duration / 60.0;
+            let mut stats = vec![
+                format!("{} songs", playlist.song_count),
+                format!("{} mins", duration_min.round()),
+            ];
+            let ymd = playlist
+                .updated_at
+                .split('T')
+                .next()
+                .unwrap_or(&playlist.updated_at);
+            stats.push(format!("Updated: {ymd}"));
+
+            col = col.push(
+                text(stats.join(" • "))
+                    .size(13)
+                    .color(theme::fg3())
+                    .font(theme::ui_font()),
+            );
+
+            col.into()
+        });
+
+        use crate::widgets::base_slot_list_layout::{
+            collage_artwork_panel_with_pill, single_artwork_panel_with_pill,
+        };
+
         let artwork_content = if album_count <= 1 {
             // Show single artwork full-size (use collage[0] if available, else mini)
             let handle = collage_handles
                 .and_then(|v| v.first())
                 .or_else(|| playlist_artwork.get(&playlist_id));
-            Some(single_artwork_panel::<PlaylistsMessage>(handle))
+            Some(single_artwork_panel_with_pill::<PlaylistsMessage>(
+                handle,
+                pill_content,
+                None, // Use standard dark backdrop
+                None,
+            ))
         } else if let Some(handles) = collage_handles.filter(|v| !v.is_empty()) {
             // Render 3x3 collage grid (2+ albums)
-            Some(collage_artwork_panel::<PlaylistsMessage>(handles))
+            Some(collage_artwork_panel_with_pill::<PlaylistsMessage>(
+                handles,
+                pill_content,
+            ))
         } else {
             // album_count > 1 but collage NOT loaded yet - show placeholder
-            Some(single_artwork_panel::<PlaylistsMessage>(None))
+            Some(single_artwork_panel_with_pill::<PlaylistsMessage>(
+                None,
+                pill_content,
+                None,
+                None,
+            ))
         };
 
         base_slot_list_layout(&layout_config, header, slot_list_content, artwork_content)

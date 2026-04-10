@@ -27,8 +27,6 @@ pub struct AlbumsPage {
     pub common: SlotListPageState,
     /// Inline expansion state (album → tracks)
     pub expansion: ExpansionState<SongUIViewData>,
-    /// Dominant color extracted from the currently centered large artwork
-    pub dominant_color: Option<iced::Color>,
 }
 
 /// View data passed from root (read-only, borrows from app state to avoid allocations)
@@ -36,6 +34,7 @@ pub struct AlbumsViewData<'a> {
     pub albums: &'a [AlbumUIViewData],
     pub album_art: &'a HashMap<String, image::Handle>,
     pub large_artwork: &'a HashMap<String, image::Handle>,
+    pub dominant_colors: &'a HashMap<String, iced::Color>,
     pub window_width: f32,
     pub window_height: f32,
     pub scale_factor: f32,
@@ -92,9 +91,6 @@ pub enum AlbumsMessage {
     /// Refresh artwork for a specific album (album_id)
     RefreshArtwork(String),
 
-    /// Dominant color calculated asynchronously
-    DominantColorCalculated(String, iced::Color),
-
     /// Navigate to a view and set its search query
     NavigateAndSearch(crate::View, String),
 }
@@ -128,7 +124,6 @@ pub enum AlbumsAction {
     ShowSongInFolder(String), // song path - open containing folder directly (expansion child)
     RefreshArtwork(String), // album_id - refresh artwork from server
     FindSimilar(String, String), // (entity_id, label) - open similar tab
-    SaveDominantColor(String, iced::Color),
     NavigateAndSearch(crate::View, String), // Navigate to target view and search
     None,
 }
@@ -158,7 +153,6 @@ impl Default for AlbumsPage {
                 false, // sort_ascending
             ),
             expansion: ExpansionState::default(),
-            dominant_color: None,
         }
     }
 }
@@ -216,13 +210,10 @@ impl AlbumsPage {
                 AlbumsMessage::SlotListNavigateUp => {
                     let center = self.expansion.handle_navigate_up(albums, &mut self.common);
                     match center {
-                        Some(idx) => {
-                            self.dominant_color = None;
-                            (
-                                Task::none(),
-                                AlbumsAction::LoadLargeArtwork(idx.to_string()),
-                            )
-                        }
+                        Some(idx) => (
+                            Task::none(),
+                            AlbumsAction::LoadLargeArtwork(idx.to_string()),
+                        ),
                         None => (Task::none(), AlbumsAction::None),
                     }
                 }
@@ -231,13 +222,10 @@ impl AlbumsPage {
                         .expansion
                         .handle_navigate_down(albums, &mut self.common);
                     match center {
-                        Some(idx) => {
-                            self.dominant_color = None;
-                            (
-                                Task::none(),
-                                AlbumsAction::LoadLargeArtwork(idx.to_string()),
-                            )
-                        }
+                        Some(idx) => (
+                            Task::none(),
+                            AlbumsAction::LoadLargeArtwork(idx.to_string()),
+                        ),
                         None => (Task::none(), AlbumsAction::None),
                     }
                 }
@@ -249,13 +237,10 @@ impl AlbumsPage {
                         &mut self.common,
                     );
                     match center {
-                        Some(idx) => {
-                            self.dominant_color = None;
-                            (
-                                Task::none(),
-                                AlbumsAction::LoadLargeArtwork(idx.to_string()),
-                            )
-                        }
+                        Some(idx) => (
+                            Task::none(),
+                            AlbumsAction::LoadLargeArtwork(idx.to_string()),
+                        ),
                         None => (Task::none(), AlbumsAction::None),
                     }
                 }
@@ -267,7 +252,6 @@ impl AlbumsPage {
                         &mut self.common,
                     );
                     if let Some(idx) = center {
-                        self.dominant_color = None;
                         // Now expand it
                         if let Some(parent_id) =
                             self.expansion
@@ -288,10 +272,6 @@ impl AlbumsPage {
                     self.expansion
                         .handle_set_offset(offset, albums, &mut self.common);
                     (Task::none(), AlbumsAction::None)
-                }
-                AlbumsMessage::DominantColorCalculated(id, color) => {
-                    self.dominant_color = Some(color);
-                    (Task::none(), AlbumsAction::SaveDominantColor(id, color))
                 }
                 AlbumsMessage::SlotListClickPlay(offset) => {
                     // Set offset then activate (play without focusing)
@@ -650,7 +630,7 @@ impl AlbumsPage {
 
         // Use base slot list layout with artwork column
         use crate::widgets::base_slot_list_layout::{
-            base_slot_list_layout, single_artwork_panel_with_overlay,
+            base_slot_list_layout, single_artwork_panel_with_pill,
         };
 
         // Build artwork column component — show parent album art even when on a child track
@@ -661,27 +641,16 @@ impl AlbumsPage {
         });
 
         let artwork_handle = centered_album.and_then(|album| data.large_artwork.get(&album.id));
+        let active_dominant_color =
+            centered_album.and_then(|album| data.dominant_colors.get(&album.id).copied());
+
         let on_refresh =
             centered_album.map(|album| AlbumsMessage::RefreshArtwork(album.id.clone()));
 
-        let is_dark_backdrop = if let Some(color) = self.dominant_color {
-            let [r, g, b, _] = color.into_rgba8();
-            nokkvi_data::utils::dominant_color::is_dark_color(r, g, b)
-        } else {
-            true // bg0_hard is dark
-        };
-
-        let primary_color = if is_dark_backdrop {
-            iced::Color::WHITE
-        } else {
-            iced::Color::BLACK
-        };
-
         // Overlay building
         let overlay_content = centered_album.map(|album| {
-            use iced::widget::{column, container, text};
-
             use crate::theme;
+            use iced::widget::{column, text};
 
             let mut col = column![
                 text(album.name.clone())
@@ -690,17 +659,16 @@ impl AlbumsPage {
                         weight: iced::font::Weight::Bold,
                         ..theme::ui_font()
                     })
-                    .color(primary_color),
+                    .color(theme::fg0()),
                 text(album.artist.clone())
                     .size(16)
-                    .color(primary_color)
+                    .color(theme::fg1())
                     .font(theme::ui_font()),
             ]
             .spacing(4)
             .align_x(iced::Alignment::Center);
 
             // Date Resolution (Feishin logic cascade)
-            // originalDate -> releaseDate -> year
             let date_text = if let Some(orig_date) = &album.original_date {
                 nokkvi_data::utils::formatters::format_release_date(orig_date)
             } else if let Some(rel_date) = &album.release_date {
@@ -711,80 +679,127 @@ impl AlbumsPage {
                 String::new()
             };
 
+            let mut info_stats = Vec::new();
             if !date_text.is_empty() {
                 let mut full_date = date_text;
                 if let (Some(orig_yr), Some(yr)) = (album.original_year, album.year)
                     && orig_yr != yr
                 {
-                    full_date = format!("{full_date} • {yr}");
+                    full_date = format!("{full_date} ({yr})");
                 }
+                info_stats.push(full_date);
+            }
+
+            let count = album.song_count;
+            if count > 0 {
+                info_stats.push(format!("{count} tracks"));
+            }
+
+            if let Some(secs) = album.duration {
+                info_stats.push(nokkvi_data::utils::formatters::format_duration_short(secs));
+            }
+            if !info_stats.is_empty() {
                 col = col.push(
-                    text(full_date)
+                    text(info_stats.join(" • "))
                         .size(14)
-                        .color(primary_color)
+                        .color(theme::fg2())
                         .font(theme::ui_font()),
                 );
             }
 
-            // Duration
-            let dur_str = if let Some(secs) = album.duration {
-                nokkvi_data::utils::formatters::format_duration_short(secs)
-            } else {
-                String::new()
-            };
-            let mut tracks_str = format!("{} tracks", album.song_count);
-            if !dur_str.is_empty() {
-                tracks_str.push_str(" • ");
-                tracks_str.push_str(&dur_str);
-            }
-            col = col.push(
-                text(tracks_str)
-                    .size(14)
-                    .color(primary_color)
-                    .font(theme::ui_font()),
-            );
-
-            // Genres
-            if let Some(genres) = &album.genres {
-                let genres_display = genres.replace(" • ", ", ");
+            // Genre row
+            if let Some(genres_display) = &album.genres {
                 col = col.push(
-                    text(genres_display)
-                        .size(14)
-                        .color(primary_color)
+                    text(genres_display.clone())
+                        .size(13)
+                        .color(theme::fg3())
                         .font(theme::ui_font()),
                 );
             }
 
-            let pill_bg = if is_dark_backdrop {
-                iced::Color::from_rgba(0.0, 0.0, 0.0, 0.75) // Much darker pill
-            } else {
-                iced::Color::from_rgba(1.0, 1.0, 1.0, 0.75) // Much lighter pill
-            };
+            let mut stat_items = Vec::new();
+            if let Some(plays) = album.play_count {
+                stat_items.push(format!("{plays} plays"));
+            }
+            if let Some(date) = &album.play_date {
+                let ymd = date.split('T').next().unwrap_or(date);
+                stat_items.push(format!("Last played: {ymd}"));
+            }
+            if !stat_items.is_empty() {
+                col = col.push(
+                    text(stat_items.join(" • "))
+                        .size(13)
+                        .color(theme::fg2())
+                        .font(theme::ui_font()),
+                );
+            }
 
-            let pill = container(col)
-                .padding(32)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .center_x(Length::Fill)
-                .center_y(Length::Fill)
-                .style(move |_theme| container::Style {
-                    background: Some(iced::Background::Color(pill_bg)),
-                    border: iced::Border {
-                        // Keep a slight rounded border if the container doesn't fill completely,
-                        // otherwise it naturally squares off if pushed to the edges.
-                        radius: 0.0.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                });
+            let mut auth_row_items: Vec<iced::Element<'_, AlbumsMessage>> = Vec::new();
+            if album.is_starred {
+                let heart = crate::embedded_svg::svg_widget("assets/icons/heart-filled.svg")
+                    .width(13)
+                    .height(13)
+                    .style(|_, _| iced::widget::svg::Style {
+                        color: Some(theme::danger_bright()),
+                    });
+                auth_row_items.push(
+                    iced::widget::row![
+                        text("Favorited ")
+                            .size(13)
+                            .color(theme::fg2())
+                            .font(theme::ui_font()),
+                        heart
+                    ]
+                    .align_y(iced::Alignment::Center)
+                    .into(),
+                );
+            }
 
-            pill.into()
+            if let Some(rating) = album.rating
+                && rating > 0
+            {
+                let mut stars_row = iced::widget::row![
+                    text("Rated ")
+                        .size(13)
+                        .color(theme::fg2())
+                        .font(theme::ui_font())
+                ]
+                .spacing(2)
+                .align_y(iced::Alignment::Center);
+
+                for _ in 0..rating {
+                    stars_row = stars_row.push(
+                        crate::embedded_svg::svg_widget("assets/icons/star-filled.svg")
+                            .width(13)
+                            .height(13)
+                            .style(|_, _| iced::widget::svg::Style {
+                                color: Some(theme::star_bright()),
+                            }),
+                    );
+                }
+                auth_row_items.push(stars_row.into());
+            }
+
+            if !auth_row_items.is_empty() {
+                let mut row = iced::widget::row![]
+                    .spacing(12)
+                    .align_y(iced::Alignment::Center);
+                for (i, item) in auth_row_items.into_iter().enumerate() {
+                    if i > 0 {
+                        row = row.push(text("•").size(13).color(theme::fg3()));
+                    }
+                    row = row.push(item);
+                }
+                col = col.push(row);
+            }
+
+            col.into()
         });
 
-        let artwork_content = Some(single_artwork_panel_with_overlay(
+        let artwork_content = Some(single_artwork_panel_with_pill(
             artwork_handle,
             overlay_content,
-            self.dominant_color,
+            active_dominant_color,
             on_refresh,
         ));
 

@@ -335,6 +335,23 @@ impl Nokkvi {
                     ArtworkMessage::LargeLoaded(id, handle) => {
                         self.handle_large_artwork_loaded(id, handle)
                     }
+                    ArtworkMessage::LargeArtistLoaded(id, handle, color) => {
+                        if let Some(h) = handle {
+                            self.artwork.large_artwork.put(id.clone(), h);
+                            self.artwork.refresh_large_artwork_snapshot();
+                        }
+                        if let Some(c) = color {
+                            self.artwork.album_dominant_colors.put(id, c);
+                            self.artwork.refresh_dominant_colors_snapshot();
+                        }
+                        self.artwork.loading_large_artwork = None;
+                        Task::none()
+                    }
+                    ArtworkMessage::DominantColorCalculated(id, color) => {
+                        self.artwork.album_dominant_colors.put(id, color);
+                        self.artwork.refresh_dominant_colors_snapshot();
+                        Task::none()
+                    }
                     ArtworkMessage::StartPrefetch => self.handle_start_artwork_prefetch(None),
                     ArtworkMessage::StartArtistPrefetch => self.handle_start_artist_prefetch(None),
                     ArtworkMessage::RefreshAlbumArtwork(album_id) => {

@@ -36,6 +36,7 @@ pub struct ArtistsViewData<'a> {
     pub artists: &'a [ArtistUIViewData],
     pub artist_art: &'a HashMap<String, image::Handle>,
     pub large_artwork: &'a HashMap<String, image::Handle>,
+    pub dominant_colors: &'a HashMap<String, iced::Color>,
     pub window_width: f32,
     pub window_height: f32,
     pub scale_factor: f32,
@@ -91,6 +92,9 @@ pub enum ArtistsMessage {
     ArtistsPageLoaded(Result<Vec<ArtistUIViewData>, String>, usize), // result, total_count (subsequent page)
 
     NavigateAndSearch(crate::View, String), // Navigate to target view and search
+
+    // Open external URL
+    OpenExternalUrl(String),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -809,7 +813,9 @@ impl ArtistsPage {
         use crate::widgets::slot_list::slot_list_background_container;
         let slot_list_content = slot_list_background_container(slot_list_content);
 
-        use crate::widgets::base_slot_list_layout::{base_slot_list_layout, single_artwork_panel};
+        use crate::widgets::base_slot_list_layout::{
+            base_slot_list_layout, single_artwork_panel_with_pill,
+        };
 
         // Build artwork column — show parent artist art even when on a child or grandchild
         let centered_artist = center_index.and_then(|idx| match flattened.get(idx) {
@@ -828,9 +834,187 @@ impl ArtistsPage {
             }
             None => None,
         });
-        let artwork_handle = centered_artist.and_then(|artist| data.large_artwork.get(&artist.id));
 
-        let artwork_content = Some(single_artwork_panel::<ArtistsMessage>(artwork_handle));
+        let artwork_handle = centered_artist.and_then(|artist| data.large_artwork.get(&artist.id));
+        let active_dominant_color =
+            centered_artist.and_then(|artist| data.dominant_colors.get(&artist.id).copied());
+
+        let pill_content = centered_artist.map(|artist| {
+            use crate::theme;
+            use iced::widget::{button, column, text};
+
+            let mut col = column![
+                text(artist.name.clone())
+                    .size(24)
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Bold,
+                        ..theme::ui_font()
+                    })
+                    .color(theme::fg0()),
+            ]
+            .spacing(4)
+            .align_x(iced::Alignment::Center);
+
+            let mut lib_stats = vec![
+                format!("{} albums", artist.album_count),
+                format!("{} songs", artist.song_count),
+            ];
+            if let Some(plays) = artist.play_count {
+                lib_stats.push(format!("{plays} plays"));
+            }
+
+            col = col.push(
+                text(lib_stats.join(" • "))
+                    .size(14)
+                    .color(theme::fg2())
+                    .font(theme::ui_font())
+                    .center(),
+            );
+
+            let mut stat_items = Vec::new();
+            if let Some(date) = &artist.play_date {
+                let ymd = date.split('T').next().unwrap_or(date);
+                stat_items.push(format!("Last played: {ymd}"));
+            }
+            if !stat_items.is_empty() {
+                col = col.push(
+                    text(stat_items.join(" • "))
+                        .size(13)
+                        .color(theme::fg2())
+                        .font(theme::ui_font())
+                        .center(),
+                );
+            }
+
+            let mut auth_row_items: Vec<iced::Element<'_, ArtistsMessage>> = Vec::new();
+            if artist.is_starred {
+                let heart = crate::embedded_svg::svg_widget("assets/icons/heart-filled.svg")
+                    .width(13)
+                    .height(13)
+                    .style(|_, _| iced::widget::svg::Style {
+                        color: Some(theme::danger_bright()),
+                    });
+                auth_row_items.push(
+                    iced::widget::row![
+                        text("Favorited ")
+                            .size(13)
+                            .color(theme::fg2())
+                            .font(theme::ui_font()),
+                        heart
+                    ]
+                    .align_y(iced::Alignment::Center)
+                    .into(),
+                );
+            }
+
+            if let Some(rating) = artist.rating
+                && rating > 0
+            {
+                let mut stars_row = iced::widget::row![
+                    text("Rated ")
+                        .size(13)
+                        .color(theme::fg2())
+                        .font(theme::ui_font())
+                ]
+                .spacing(2)
+                .align_y(iced::Alignment::Center);
+
+                for _ in 0..rating {
+                    stars_row = stars_row.push(
+                        crate::embedded_svg::svg_widget("assets/icons/star-filled.svg")
+                            .width(13)
+                            .height(13)
+                            .style(|_, _| iced::widget::svg::Style {
+                                color: Some(theme::star_bright()),
+                            }),
+                    );
+                }
+                auth_row_items.push(stars_row.into());
+            }
+
+            if !auth_row_items.is_empty() {
+                let mut row = iced::widget::row![]
+                    .spacing(12)
+                    .align_y(iced::Alignment::Center);
+                for (i, item) in auth_row_items.into_iter().enumerate() {
+                    if i > 0 {
+                        row = row.push(text("•").size(13).color(theme::fg3()));
+                    }
+                    row = row.push(item);
+                }
+                col = col.push(row);
+            }
+
+            if let Some(bio) = &artist.biography
+                && !bio.is_empty()
+            {
+                let bio_preview: String = bio.chars().take(350).collect();
+                let bio_preview = if bio.chars().count() > 350 {
+                    format!("{}...", bio_preview.trim_end())
+                } else {
+                    bio_preview
+                };
+
+                let mut bio_col = column![
+                    text(bio_preview)
+                        .size(13)
+                        .color(theme::fg1())
+                        .font(theme::ui_font())
+                        .center()
+                ]
+                .spacing(4)
+                .align_x(iced::Alignment::Center);
+
+                if let Some(url) = &artist.external_url {
+                    let read_more_btn = button(
+                        text("Read more on Last.fm")
+                            .size(11)
+                            .color(theme::accent_bright())
+                            .font(iced::Font {
+                                weight: iced::font::Weight::Bold,
+                                ..theme::ui_font()
+                            }),
+                    )
+                    .on_press(ArtistsMessage::OpenExternalUrl(url.clone()))
+                    .padding(iced::Padding {
+                        top: 2.0,
+                        bottom: 2.0,
+                        left: 6.0,
+                        right: 6.0,
+                    })
+                    .style(|_theme, status| {
+                        let opacity = match status {
+                            iced::widget::button::Status::Hovered
+                            | iced::widget::button::Status::Pressed => 0.75,
+                            _ => 1.0,
+                        };
+                        let mut color = theme::accent_bright();
+                        color.a = opacity;
+                        iced::widget::button::Style {
+                            background: None,
+                            border: iced::Border {
+                                width: 0.0,
+                                ..Default::default()
+                            },
+                            text_color: color,
+                            ..Default::default()
+                        }
+                    });
+                    bio_col = bio_col.push(read_more_btn);
+                }
+
+                col = col.push(bio_col);
+            }
+
+            col.into()
+        });
+
+        let artwork_content = Some(single_artwork_panel_with_pill(
+            artwork_handle,
+            pill_content,
+            active_dominant_color,
+            None,
+        ));
 
         base_slot_list_layout(&layout_config, header, slot_list_content, artwork_content)
     }

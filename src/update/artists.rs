@@ -265,58 +265,93 @@ impl Nokkvi {
                             let cache_ref = self.artwork.artist_disk_cache.as_ref();
                             if let Some(cache) = cache_ref {
                                 if cache.contains(&cache_key) {
+                                    let path = cache.get_path(&cache_key);
                                     self.artwork.large_artwork.put(
                                         artist.id.clone(),
-                                        image::Handle::from_path(cache.get_path(&cache_key)),
+                                        image::Handle::from_path(path.clone()),
                                     );
                                     self.artwork.refresh_large_artwork_snapshot();
+
+                                    // Extract dominant color from disk cache since we bypassed network
+                                    let id = artist.id.clone();
+                                    tasks.push(Task::perform(
+                                        async move {
+                                            if let Ok(bytes) = tokio::fs::read(path).await {
+                                                let dominant = tokio::task::spawn_blocking(move || {
+                                                    nokkvi_data::utils::dominant_color::extract_dominant_color(&bytes)
+                                                })
+                                                .await
+                                                .unwrap_or(None);
+
+                                                return dominant.map(|(r, g, b)| (id.clone(), iced::Color::from_rgb8(r, g, b)));
+                                            }
+                                            None
+                                        },
+                                        |result| {
+                                            if let Some((id, c)) = result {
+                                                Message::Artwork(ArtworkMessage::DominantColorCalculated(id, c))
+                                            } else {
+                                                Message::NoOp
+                                            }
+                                        }
+                                    ));
+
                                     // Skip network fetch since loaded from cache
                                 } else {
                                     // Not in cache, fetch from network
                                     let id = artist.id.clone();
-                                    let name = artist.name.clone();
                                     let external_url = artist.image_url.clone();
                                     let vm = albums_vm.clone();
                                     let disk_cache = self.artwork.artist_disk_cache.clone();
                                     tasks.push(Task::perform(
-                                                async move {
-                                                    let (url, cred) = vm.get_server_config().await;
-                                                    let client = reqwest::Client::new();
-                                                    // Use external image if available (GET), otherwise getCoverArt (POST)
-                                                    let art_id = external_url.unwrap_or_else(|| format!("ar-{id}"));
-                                                    match nokkvi_data::utils::artwork_url::fetch_cover_art(
-                                                        &client, &art_id, &url, &cred, Some(500),
-                                                    ).await {
-                                                        Some(bytes) => {
-                                                            let bytes_vec = bytes.clone();
-                                                            if bytes_vec.len() > 100 {
-                                                                // Save to disk cache
-                                                                let cache_key = format!("ar-{id}_500");
-                                                                if let Some(c) = disk_cache.as_ref() {
-                                                                    let _ = c.insert(&cache_key, &bytes_vec);
-                                                                    debug!("🖼️ Loaded large artwork ({} bytes) for artist '{}'", bytes_vec.len(), name);
-                                                                    return (
-                                                                        id,
-                                                                        Some(image::Handle::from_path(
-                                                                            c.get_path(&cache_key),
-                                                                        )),
-                                                                    );
-                                                                }
-                                                                // No disk cache — fall back to from_bytes
-                                                                return (
-                                                                    id,
-                                                                    Some(image::Handle::from_bytes(bytes_vec)),
-                                                                );
-                                                            }
-                                                            (id, None)
+                                        async move {
+                                            let (url, cred) = vm.get_server_config().await;
+                                            let client = reqwest::Client::new();
+                                            let art_id = external_url.unwrap_or_else(|| format!("ar-{id}"));
+                                            match nokkvi_data::utils::artwork_url::fetch_cover_art(
+                                                &client, &art_id, &url, &cred, Some(500),
+                                            ).await {
+                                                Some(bytes) => {
+                                                    let bytes_vec = bytes.clone();
+                                                    if bytes_vec.len() > 100 {
+                                                        // Extract dominant color inline since this skips the normal pipeline
+                                                        let dominant_color = tokio::task::spawn_blocking({
+                                                            let bytes_clone = bytes_vec.clone();
+                                                            move || nokkvi_data::utils::dominant_color::extract_dominant_color(&bytes_clone)
+                                                        }).await.unwrap_or(None);
+
+                                                        let cache_key = format!("ar-{id}_500");
+                                                        if let Some(c) = disk_cache.as_ref() {
+                                                            let _ = c.insert(&cache_key, &bytes_vec);
+                                                            return (
+                                                                id,
+                                                                Some(image::Handle::from_path(c.get_path(&cache_key))),
+                                                                dominant_color,
+                                                            );
                                                         }
-                                                        None => (id, None),
+                                                        return (
+                                                            id,
+                                                            Some(image::Handle::from_bytes(bytes_vec)),
+                                                            dominant_color,
+                                                        );
                                                     }
-                                                },
-                                                |(id, handle)| {
-                                                    Message::Artwork(ArtworkMessage::LargeLoaded(id, handle))
-                                                },
-                                            ));
+                                                    (id, None, None)
+                                                }
+                                                None => (id, None, None),
+                                            }
+                                        },
+                                        |(id, handle, color)| {
+                                            if handle.is_none() && color.is_none() {
+                                                Message::NoOp
+                                            } else {
+                                                Message::Artwork(ArtworkMessage::LargeArtistLoaded(
+                                                    id,
+                                                    handle,
+                                                    color.map(|(r,g,b)| iced::Color::from_rgb8(r, g, b))
+                                                ))
+                                            }
+                                        },
+                                    ));
                                 }
                             }
                         }
@@ -353,6 +388,12 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_artists(&mut self, msg: views::ArtistsMessage) -> Task<Message> {
+        if let ArtistsMessage::OpenExternalUrl(url) = msg {
+            if let Err(e) = std::process::Command::new("xdg-open").arg(&url).spawn() {
+                tracing::warn!("Failed to open URL '{}': {}", url, e);
+            }
+            return Task::none();
+        }
         self.play_view_sfx(
             matches!(
                 msg,
@@ -671,11 +712,37 @@ impl Nokkvi {
                 && cache.contains(&format!("ar-{}_500", artist.id))
             {
                 let cache_key = format!("ar-{}_500", artist.id);
-                self.artwork.large_artwork.put(
-                    artist.id.clone(),
-                    image::Handle::from_path(cache.get_path(&cache_key)),
-                );
+                let path = cache.get_path(&cache_key);
+                self.artwork
+                    .large_artwork
+                    .put(artist.id.clone(), image::Handle::from_path(path.clone()));
                 self.artwork.refresh_large_artwork_snapshot();
+
+                // Extract dominant color from disk cache on slot list change
+                let id = artist.id.clone();
+                let fetch_color_task = Task::perform(
+                    async move {
+                        if let Ok(bytes) = tokio::fs::read(path).await {
+                            let dominant = tokio::task::spawn_blocking(move || {
+                                nokkvi_data::utils::dominant_color::extract_dominant_color(&bytes)
+                            })
+                            .await
+                            .unwrap_or(None);
+
+                            return dominant
+                                .map(|(r, g, b)| (id.clone(), iced::Color::from_rgb8(r, g, b)));
+                        }
+                        None
+                    },
+                    |result| {
+                        if let Some((id, c)) = result {
+                            Message::Artwork(ArtworkMessage::DominantColorCalculated(id, c))
+                        } else {
+                            Message::NoOp
+                        }
+                    },
+                );
+                return Task::batch(vec![cmd.map(Message::Artists), fetch_color_task]);
             }
         }
 
