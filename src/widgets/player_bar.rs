@@ -562,13 +562,18 @@ pub(crate) fn player_bar<'a>(
         )));
     }
 
-    // Crossfade toggle button (show-when-enabled, like SFX)
-    if data.crossfade_enabled {
+    // Crossfade toggle button
+    if show_consume {
+        let crossfade_label = if data.crossfade_enabled {
+            "Crossfade: Active"
+        } else {
+            "Crossfade: Off"
+        };
         mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
             "assets/icons/blend.svg",
             PlayerBarMessage::ToggleCrossfade,
-            true,
-            "Crossfade: Active",
+            data.crossfade_enabled,
+            crossfade_label,
         ));
     }
 
