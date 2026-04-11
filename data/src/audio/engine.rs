@@ -159,7 +159,7 @@ pub struct CustomAudioEngine {
     next_source_shared: Arc<tokio::sync::Mutex<String>>,
 
     /// Raw ICY-metadata parsed by IcyMetadataReader
-    live_icy_metadata: Arc<tokio::sync::Mutex<Option<String>>>,
+    live_icy_metadata: Arc<std::sync::RwLock<Option<String>>>,
 
     /// Extracted stream codec based on Symphonia probing (e.g. mp3, aac)
     live_codec_name: Arc<std::sync::RwLock<Option<String>>>,
@@ -167,7 +167,7 @@ pub struct CustomAudioEngine {
 
 impl CustomAudioEngine {
     pub fn new() -> Self {
-        let live_icy_metadata = Arc::new(tokio::sync::Mutex::new(None));
+        let live_icy_metadata = Arc::new(std::sync::RwLock::new(None));
         Self {
             source: String::new(),
             playing: false,
@@ -232,7 +232,7 @@ impl CustomAudioEngine {
         self.live_bitrate.store(0, Ordering::Relaxed);
         self.live_sample_rate.store(0, Ordering::Relaxed);
         self.decoder_eof.store(false, Ordering::Release);
-        if let Ok(mut guard) = self.live_icy_metadata.try_lock() {
+        if let Ok(mut guard) = self.live_icy_metadata.try_write() {
             *guard = None;
         }
         if let Ok(mut guard) = self.live_codec_name.write() {
@@ -255,7 +255,7 @@ impl CustomAudioEngine {
     /// Get current parsed ICY-metadata from the stream buffer
     pub fn live_icy_metadata(&self) -> Option<String> {
         self.live_icy_metadata
-            .try_lock()
+            .read()
             .ok()
             .and_then(|guard| guard.clone())
     }
@@ -490,6 +490,7 @@ impl CustomAudioEngine {
         let gapless_info = self.gapless_transition_info.clone();
         let source_generation = self.source_generation.clone();
         let next_source_shared = self.next_source_shared.clone();
+        let reconnect_url = self.source.clone();
 
         // Clear EOF flag — this decoder is starting fresh
         self.decoder_eof.store(false, Ordering::Release);
@@ -509,7 +510,7 @@ impl CustomAudioEngine {
             let mut radio_music_jitter_filled = false;
             let mut last_heartbeat = std::time::Instant::now();
 
-            loop {
+            'decode_loop: loop {
                 loop_count += 1;
 
                 // Heartbeat every 10 seconds to confirm loop is still running
@@ -691,11 +692,61 @@ impl CustomAudioEngine {
                     // =========================================================
                     if is_infinite {
                         tracing::warn!(
-                            "📻 [DECODE LOOP] Radio stream ended (connection dropped or server closed)"
+                            "📻 [DECODE LOOP] Radio stream dropped, attempting reconnect..."
                         );
+                        // CRITICAL: Drop decoder_guard BEFORE sleeping!
+                        // Holding this lock during the backoff would deadlock the UI tick
+                        // (which reads position/duration via decoder.lock()).
                         drop(decoder_guard);
-                        decoder_eof.store(true, Ordering::Release);
-                        break;
+
+                        let mut retry_count = 0u32;
+                        const MAX_RETRIES: u32 = 5;
+
+                        loop {
+                            // Abort reconnect if source changed (user skipped/stopped)
+                            if decode_gen.load(Ordering::Acquire) != my_gen {
+                                tracing::debug!("📻 [RECONNECT] Aborted — generation superseded");
+                                break;
+                            }
+                            retry_count += 1;
+                            if retry_count > MAX_RETRIES {
+                                tracing::warn!(
+                                    "📻 [RECONNECT] Failed after {} attempts, giving up",
+                                    MAX_RETRIES
+                                );
+                                decoder_eof.store(true, Ordering::Release);
+                                break;
+                            }
+                            let backoff =
+                                std::time::Duration::from_secs(1u64 << retry_count.min(4));
+                            tracing::info!(
+                                "📻 [RECONNECT] Attempt {}/{} in {:?}",
+                                retry_count,
+                                MAX_RETRIES,
+                                backoff
+                            );
+                            tokio::time::sleep(backoff).await;
+
+                            // Re-acquire decoder lock for re-init
+                            let mut dec = decoder.lock().await;
+                            match dec.init(&reconnect_url).await {
+                                Ok(()) => {
+                                    tracing::info!("📻 [RECONNECT] Success!");
+                                    // Reset stream-type check so jitter buffer and
+                                    // backpressure caching are re-evaluated
+                                    stream_type_checked = false;
+                                    radio_music_jitter_filled = false;
+                                    drop(dec);
+                                    continue 'decode_loop;
+                                }
+                                Err(e) => {
+                                    tracing::warn!("📻 [RECONNECT] Failed: {}", e);
+                                    drop(dec);
+                                    // Continue retry loop
+                                }
+                            }
+                        }
+                        break; // Exit decode loop (either exhausted or generation superseded)
                     }
 
                     // =========================================================

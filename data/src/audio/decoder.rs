@@ -14,6 +14,16 @@ use tracing::{debug, error, trace, warn};
 use super::range_http_reader::RangeHttpReader;
 use crate::audio::{AudioBuffer, AudioFormat, SampleFormat};
 
+const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+/// Detect if an HTTP response originates from an Icecast/SHOUTcast radio server.
+fn is_radio_response(headers: &reqwest::header::HeaderMap) -> bool {
+    headers.keys().any(|k| k.as_str().starts_with("icy-"))
+        || headers
+            .get("server")
+            .is_some_and(|v| v.to_str().unwrap_or("").to_lowercase().contains("icecast"))
+}
+
 /// A background-threaded network buffer that eagerly consumes an unbounded/infinite HTTP stream
 /// to decouple TCP receive windows from the CPAL playback rate, eliminating stuttering drops.
 struct AsyncNetworkBuffer {
@@ -51,7 +61,7 @@ impl AsyncNetworkBuffer {
                     }
                 }
             })
-            .unwrap();
+            .expect("failed to spawn nokkvi-network-fetch thread");
         Self {
             receiver: std::sync::Mutex::new(rx),
             buffer: Vec::new(),
@@ -62,7 +72,12 @@ impl AsyncNetworkBuffer {
 impl std::io::Read for AsyncNetworkBuffer {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         if self.buffer.is_empty() {
-            if let Ok(new_buf) = self.receiver.lock().unwrap().recv() {
+            if let Ok(new_buf) = self
+                .receiver
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .recv()
+            {
                 self.buffer = new_buf;
             } else {
                 return Ok(0);
@@ -95,15 +110,9 @@ impl<R: std::io::Read> std::io::Read for IcyStreamReader<R> {
                 let mut meta_buf = vec![0u8; meta_len];
                 self.inner.read_exact(&mut meta_buf)?;
 
-                if let Ok(meta_str) = String::from_utf8(meta_buf) {
-                    let trim = meta_str.trim_end_matches('\0');
-                    // Parse StreamTitle='Artist - Title';
-                    if let Some(start) = trim.find("StreamTitle='") {
-                        let substr = &trim[start + 13..];
-                        if let Some(end) = substr.find("';") {
-                            (self.callback)(substr[..end].to_string());
-                        }
-                    }
+                let meta_str = String::from_utf8_lossy(&meta_buf);
+                if let Some(title) = parse_icy_stream_title(&meta_str) {
+                    (self.callback)(title);
                 }
             }
             self.bytes_until_meta = self.metaint;
@@ -114,6 +123,21 @@ impl<R: std::io::Read> std::io::Read for IcyStreamReader<R> {
         self.bytes_until_meta -= n;
         Ok(n)
     }
+}
+
+/// Extract the StreamTitle value from a raw ICY metadata string.
+fn parse_icy_stream_title(raw: &str) -> Option<String> {
+    let trim = raw.trim_end_matches('\0');
+    if let Some(start) = trim.find("StreamTitle='") {
+        let substr = &trim[start + 13..];
+        if let Some(end) = substr.find("';") {
+            let title = &substr[..end];
+            if !title.is_empty() {
+                return Some(title.to_string());
+            }
+        }
+    }
+    None
 }
 
 /// Audio decoder using symphonia
@@ -136,13 +160,13 @@ pub struct AudioDecoder {
     /// consume-mode queue mutation.
     infinite_stream: bool,
     /// Arc passed in by the AudioEngine, populated by `IcyMetadataReader` if this stream supports ICY.
-    live_icy_metadata: std::sync::Arc<tokio::sync::Mutex<Option<String>>>,
+    live_icy_metadata: std::sync::Arc<std::sync::RwLock<Option<String>>>,
     /// The short-name of the actual hardware codec (e.g., "mp3", "aac", "vorbis").
     live_codec: Option<String>,
 }
 
 impl AudioDecoder {
-    pub fn new(live_icy_metadata: std::sync::Arc<tokio::sync::Mutex<Option<String>>>) -> Self {
+    pub fn new(live_icy_metadata: std::sync::Arc<std::sync::RwLock<Option<String>>>) -> Self {
         Self {
             format_reader: None,
             decoder: None,
@@ -202,7 +226,7 @@ impl AudioDecoder {
 
             let client = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
-                .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                .user_agent(USER_AGENT)
                 .build()
                 .context("Failed to create HTTP client")?;
 
@@ -212,10 +236,7 @@ impl AudioDecoder {
             let mut content_length = match client.head(&self.url).send().await {
                 Ok(head_response) if head_response.status().is_success() => {
                     let headers = head_response.headers();
-                    is_radio = headers.keys().any(|k| k.as_str().starts_with("icy-"))
-                        || headers.get("server").is_some_and(|v| {
-                            v.to_str().unwrap_or("").to_lowercase().contains("icecast")
-                        });
+                    is_radio = is_radio_response(headers);
 
                     if is_radio {
                         trace!(" [DECODER] ICEcast / Radio stream detected from HEAD headers.");
@@ -239,10 +260,7 @@ impl AudioDecoder {
                 {
                     Ok(range_response) => {
                         let headers = range_response.headers();
-                        is_radio = headers.keys().any(|k| k.as_str().starts_with("icy-"))
-                            || headers.get("server").is_some_and(|v| {
-                                v.to_str().unwrap_or("").to_lowercase().contains("icecast")
-                            });
+                        is_radio = is_radio_response(headers);
 
                         if is_radio {
                             trace!(
@@ -288,10 +306,7 @@ impl AudioDecoder {
                 match client.get(&self.url).send().await {
                     Ok(response) if response.status().is_success() => {
                         let headers = response.headers();
-                        is_radio = headers.keys().any(|k| k.as_str().starts_with("icy-"))
-                            || headers.get("server").is_some_and(|v| {
-                                v.to_str().unwrap_or("").to_lowercase().contains("icecast")
-                            });
+                        is_radio = is_radio_response(headers);
 
                         if is_radio {
                             trace!(" [DECODER] ICEcast / Radio stream detected from GET headers.");
@@ -335,7 +350,7 @@ impl AudioDecoder {
                 let (response, content_type) = tokio::task::block_in_place(|| {
                     let client = reqwest::blocking::Client::builder()
                         .timeout(std::time::Duration::from_secs(30))
-                        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                        .user_agent(USER_AGENT)
                         .build()
                         .context("Failed to create blocking HTTP client")?;
                     let resp = client
@@ -387,10 +402,10 @@ impl AudioDecoder {
                         bytes_until_meta: interval_usize,
                         callback: Box::new(move |title| {
                             trace!(" [DECODER] ICY Callback fired! Result: {:?}", title);
-                            if let Ok(mut guard) = atomic_meta.try_lock() {
+                            if let Ok(mut guard) = atomic_meta.try_write() {
                                 *guard = Some(title);
                             } else {
-                                warn!(" [DECODER] ICY Failed to acquire try_lock!");
+                                warn!(" [DECODER] ICY Failed to acquire try_write!");
                             }
                         }),
                     };
@@ -673,7 +688,9 @@ impl AudioDecoder {
                                             sample_rate,
                                             channels as u32,
                                         );
-                                        if let Some(desc) = symphonia::default::get_codecs().get_codec(track.codec_params.codec) {
+                                        if let Some(desc) = symphonia::default::get_codecs()
+                                            .get_codec(track.codec_params.codec)
+                                        {
                                             self.live_codec = Some(desc.short_name.to_string());
                                         }
                                         // Retry reading the packet with the new decoder
@@ -977,7 +994,7 @@ impl AudioDecoder {
 
 impl Default for AudioDecoder {
     fn default() -> Self {
-        Self::new(std::sync::Arc::new(tokio::sync::Mutex::new(None)))
+        Self::new(std::sync::Arc::new(std::sync::RwLock::new(None)))
     }
 }
 
@@ -1144,18 +1161,88 @@ mod tests {
     }
 
     // =========================================================================
+    // parse_icy_stream_title
+    // =========================================================================
+
+    #[test]
+    fn icy_title_normal() {
+        assert_eq!(
+            parse_icy_stream_title("StreamTitle='Artist - Title';"),
+            Some("Artist - Title".to_string())
+        );
+    }
+
+    #[test]
+    fn icy_title_empty_is_none() {
+        assert_eq!(parse_icy_stream_title("StreamTitle='';"), None);
+    }
+
+    #[test]
+    fn icy_title_missing_key() {
+        assert_eq!(
+            parse_icy_stream_title("StreamUrl='http://example.com';"),
+            None
+        );
+    }
+
+    #[test]
+    fn icy_title_null_padded() {
+        assert_eq!(
+            parse_icy_stream_title("StreamTitle='Test';\0\0\0\0"),
+            Some("Test".to_string())
+        );
+    }
+
+    #[test]
+    fn icy_title_no_semicolon_terminator() {
+        // Malformed: missing '; terminator — should return None
+        assert_eq!(parse_icy_stream_title("StreamTitle='Unterminated"), None);
+    }
+
+    // =========================================================================
+    // is_radio_response
+    // =========================================================================
+
+    #[test]
+    fn radio_response_icy_headers() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("icy-name", "SomaFM".parse().unwrap());
+        assert!(is_radio_response(&headers));
+    }
+
+    #[test]
+    fn radio_response_icecast_server() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("server", "Icecast 2.4.4".parse().unwrap());
+        assert!(is_radio_response(&headers));
+    }
+
+    #[test]
+    fn radio_response_no_markers() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("content-type", "audio/mpeg".parse().unwrap());
+        assert!(!is_radio_response(&headers));
+    }
+
+    #[test]
+    fn radio_response_empty_headers() {
+        let headers = reqwest::header::HeaderMap::new();
+        assert!(!is_radio_response(&headers));
+    }
+
+    // =========================================================================
     // Decoder state defaults
     // =========================================================================
 
     #[test]
     fn decoder_defaults_not_infinite() {
-        let decoder = AudioDecoder::new(std::sync::Arc::new(tokio::sync::Mutex::new(None)));
+        let decoder = AudioDecoder::new(std::sync::Arc::new(std::sync::RwLock::new(None)));
         assert!(!decoder.is_infinite_stream());
     }
 
     #[test]
     fn duration_defaults_to_zero() {
-        let decoder = AudioDecoder::new(std::sync::Arc::new(tokio::sync::Mutex::new(None)));
+        let decoder = AudioDecoder::new(std::sync::Arc::new(std::sync::RwLock::new(None)));
         assert_eq!(decoder.duration(), 0);
     }
 }
