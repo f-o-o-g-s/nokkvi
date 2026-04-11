@@ -72,15 +72,31 @@ impl AsyncNetworkBuffer {
 impl std::io::Read for AsyncNetworkBuffer {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         if self.buffer.is_empty() {
-            if let Ok(new_buf) = self
+            // Use recv_timeout instead of blocking recv() so the decode loop can
+            // check its generation counter periodically and exit cleanly on shutdown.
+            // Without this, radio streams block here until TCP data arrives (up to 30s).
+            match self
                 .receiver
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .recv()
+                .recv_timeout(std::time::Duration::from_millis(500))
             {
-                self.buffer = new_buf;
-            } else {
-                return Ok(0);
+                Ok(new_buf) => self.buffer = new_buf,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    // No data yet — return TimedOut so the decode loop can check
+                    // its generation counter and exit cleanly during shutdown.
+                    // IMPORTANT: Do NOT use Interrupted here! std::io::Read::read_exact()
+                    // silently retries on Interrupted, which traps IcyStreamReader's
+                    // metadata reads (read_exact calls) in an infinite loop.
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "network buffer timeout",
+                    ));
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    // Network thread exited (EOF or error)
+                    return Ok(0);
+                }
             }
         }
         let take = std::cmp::min(buf.len(), self.buffer.len());
@@ -713,6 +729,15 @@ impl AudioDecoder {
                     break;
                 }
                 Err(SymphoniaError::IoError(ref io_err)) => {
+                    // recv_timeout in AsyncNetworkBuffer returns TimedOut when no
+                    // data arrives within 500ms. Break out of read_buffer() so the
+                    // decode loop in engine.rs can check its generation counter and
+                    // exit cleanly during shutdown. Using `continue` here would stay
+                    // trapped inside read_buffer's packet loop indefinitely.
+                    if io_err.kind() == std::io::ErrorKind::TimedOut {
+                        break;
+                    }
+
                     consecutive_io_errors += 1;
 
                     // Check if this looks like a real EOF from Symphonia

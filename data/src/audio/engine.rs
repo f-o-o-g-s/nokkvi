@@ -1880,3 +1880,20 @@ impl Default for CustomAudioEngine {
         Self::new()
     }
 }
+
+impl Drop for CustomAudioEngine {
+    fn drop(&mut self) {
+        // Kill the decode loop immediately (lock-free atomic check).
+        self.decode_generation.fetch_add(1, Ordering::Release);
+
+        // Stop the render thread — sets render_running=false and joins the OS thread.
+        // Without this, the render thread keeps feeding buffered audio to CPAL/PipeWire
+        // for several seconds after the window closes.
+        self.stop_render_thread();
+
+        // Stop the audio renderer — sets `stopped=true` on the StreamingSourceHandle,
+        // causing the CPAL callback to immediately emit silence instead of draining
+        // the ring buffer.
+        self.renderer.lock().stop();
+    }
+}
