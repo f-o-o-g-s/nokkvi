@@ -148,6 +148,11 @@ impl Nokkvi {
 
         match action {
             QueueAction::PlaySong(index) => {
+                // Guard: block during playlist edit mode + transition radio → queue
+                if let Some(task) = self.guard_play_action() {
+                    return task;
+                }
+
                 // Look up from FILTERED list since the slot list index is relative to filtered results
                 if let Some(song) = filtered_queue.get(index) {
                     debug!(

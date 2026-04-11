@@ -496,15 +496,22 @@ impl Nokkvi {
         let discontinuity = delta_us.abs() > 2_000_000 || delta_us < -100_000;
         self.last_mpris_position_us = position_us;
 
+        // For radio streams, override title/artist with ICY metadata so MPRIS
+        // consumers see the actual artist/track instead of the station name.
+        // self.playback.title/artist are set to station name / empty by handle_tick;
+        // the richer ICY data lives in RadioPlaybackState.
+        let (mpris_title, mpris_artist) =
+            if let crate::state::ActivePlayback::Radio(ref state) = self.active_playback {
+                let title = state.icy_title.as_deref().unwrap_or(&self.playback.title);
+                let artist = state.icy_artist.as_deref().unwrap_or(&self.playback.artist);
+                (title, artist)
+            } else {
+                (self.playback.title.as_str(), self.playback.artist.as_str())
+            };
+
         // Push state via channel (synchronous, non-blocking)
         conn.set_playback_status(status);
-        conn.set_metadata(
-            &self.playback.title,
-            &self.playback.artist,
-            u.album,
-            duration_us,
-            u.art_url,
-        );
+        conn.set_metadata(mpris_title, mpris_artist, u.album, duration_us, u.art_url);
         conn.set_position(position_us);
         conn.set_loop_status(loop_status);
         conn.set_shuffle(u.random);
