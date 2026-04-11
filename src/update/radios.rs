@@ -94,6 +94,19 @@ impl Nokkvi {
                 self.text_input_dialog.open_delete_radio_confirmation(id, name);
                 return Task::none();
             }
+            RadiosAction::EditRadioStation(station) => {
+                self.text_input_dialog.open_two_fields(
+                    "Edit Radio Station",
+                    station.name,
+                    "Station Name...",
+                    station.stream_url,
+                    "Stream URL...",
+                    crate::widgets::text_input_dialog::TextInputDialogAction::EditRadioStation(
+                        station.id,
+                    ),
+                );
+                return Task::none();
+            }
             RadiosAction::PlayRadioStation(station) => {
                 // Wait! This is the core logic.
                 // We transition ActivePlayback into RadioPlaybackState.

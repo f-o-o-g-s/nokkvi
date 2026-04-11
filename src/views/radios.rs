@@ -61,6 +61,7 @@ pub enum RadiosMessage {
     RadioStationsLoaded(Result<Vec<RadioStation>, String>),
     
     // Context Menu Actions
+    EditStationDialog(RadioStation),
     DeleteStationConfirmation(String, String),
     CopyStreamUrl(String),
 
@@ -74,6 +75,7 @@ pub enum RadiosAction {
     /// User activated a radio station — root should transition to radio playback
     PlayRadioStation(RadioStation),
     AddRadioStation,
+    EditRadioStation(RadioStation),
     DeleteStation(String, String),
     SearchChanged(String),
     SortModeChanged(SortMode),
@@ -197,6 +199,9 @@ impl RadiosPage {
 
             RadiosMessage::AddRadioStation => (Task::none(), RadiosAction::AddRadioStation),
 
+            RadiosMessage::EditStationDialog(station) => {
+                (Task::none(), RadiosAction::EditRadioStation(station))
+            }
             RadiosMessage::DeleteStationConfirmation(id, name) => {
                 (Task::none(), RadiosAction::DeleteStation(id, name))
             }
@@ -347,21 +352,20 @@ impl RadiosPage {
                     slot_button,
                     crate::widgets::context_menu::radio_entries(),
                     {
-                        let id = station.id.clone();
-                        let name = station.name.clone();
-                        let stream_url = station.stream_url.clone();
+                        let station_cloned = station.clone();
                         move |entry, length| {
-                            let id = id.clone();
-                            let name = name.clone();
-                            let stream_url = stream_url.clone();
-                            crate::widgets::context_menu::radio_entry_view(entry, length, move |e| match e {
-                                crate::widgets::context_menu::RadioContextEntry::Delete => {
-                                    RadiosMessage::DeleteStationConfirmation(id.clone(), name.clone())
-                                }
-                                crate::widgets::context_menu::RadioContextEntry::CopyStreamUrl => {
-                                    RadiosMessage::CopyStreamUrl(stream_url.clone())
-                                }
-                            })
+                             let s = station_cloned.clone();
+                             crate::widgets::context_menu::radio_entry_view(entry, length, move |a| match a {
+                                 crate::widgets::context_menu::RadioContextEntry::Edit => {
+                                     RadiosMessage::EditStationDialog(s.clone())
+                                 }
+                                 crate::widgets::context_menu::RadioContextEntry::CopyStreamUrl => {
+                                     RadiosMessage::CopyStreamUrl(s.stream_url.clone())
+                                 }
+                                 crate::widgets::context_menu::RadioContextEntry::Delete => {
+                                     RadiosMessage::DeleteStationConfirmation(s.id.clone(), s.name.clone())
+                                 }
+                             })
                         }
                     },
                 )

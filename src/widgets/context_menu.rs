@@ -268,12 +268,14 @@ pub(crate) fn strip_entry_view<'a, Message: Clone + 'a>(
 /// Context menu entries for internet radio stations.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum RadioContextEntry {
+    Edit,
     Delete,
     CopyStreamUrl,
 }
 
 pub(crate) fn radio_entries() -> Vec<RadioContextEntry> {
     vec![
+        RadioContextEntry::Edit,
         RadioContextEntry::CopyStreamUrl,
         RadioContextEntry::Delete,
     ]
@@ -285,6 +287,11 @@ pub(crate) fn radio_entry_view<'a, Message: Clone + 'a>(
     on_action: impl Fn(RadioContextEntry) -> Message,
 ) -> Element<'a, Message> {
     match entry {
+        RadioContextEntry::Edit => menu_button(
+            Some("assets/icons/pencil.svg"),
+            "Edit Station",
+            on_action(RadioContextEntry::Edit),
+        ),
         RadioContextEntry::CopyStreamUrl => menu_button(
             Some("assets/icons/copy.svg"),
             "Copy Stream URL",

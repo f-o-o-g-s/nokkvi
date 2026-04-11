@@ -139,6 +139,30 @@ impl RadiosApiService {
         )
         .await
     }
+
+    /// Update an internet radio station
+    pub async fn update_radio_station(
+        &self,
+        id: &str,
+        name: &str,
+        stream_url: &str,
+        homepage_url: Option<&str>,
+    ) -> Result<()> {
+        let mut params = vec![("id", id), ("name", name), ("streamUrl", stream_url)];
+        if let Some(url) = homepage_url {
+            params.push(("homepageUrl", url));
+        }
+
+        crate::services::api::subsonic::subsonic_post_ok(
+            &self.client.http_client(),
+            &self.server_url,
+            "updateInternetRadioStation",
+            &self.subsonic_credential,
+            &params,
+            "Failed to update internet radio station",
+        )
+        .await
+    }
 }
 
 impl Clone for RadiosApiService {

@@ -38,6 +38,8 @@ pub enum TextInputDialogAction {
     CreateRadioStation,
     /// Delete an internet radio station (holds station id, station name)
     DeleteRadioStation(String, String),
+    /// Edit an internet radio station (holds station id)
+    EditRadioStation(String),
 }
 
 /// An option in the playlist selection combo_box.
