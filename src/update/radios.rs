@@ -117,6 +117,7 @@ impl Nokkvi {
                         station: station.clone(),
                         icy_artist: None,
                         icy_title: None,
+                        icy_url: None,
                     });
 
                 let stream_url = station.stream_url.clone();

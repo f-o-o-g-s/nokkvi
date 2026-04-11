@@ -27,6 +27,11 @@ struct MprisUpdate<'a> {
 impl Nokkvi {
     pub(crate) fn handle_tick(&mut self) -> Task<Message> {
         let radio_station = self.active_playback.radio_station().cloned();
+        let icy_url = if let crate::state::ActivePlayback::Radio(ref state) = self.active_playback {
+            state.icy_url.clone()
+        } else {
+            None
+        };
 
         self.shell_task(
             move |shell| async move {
@@ -109,6 +114,8 @@ impl Nokkvi {
                         None, // Use default high-res size
                     );
                     if url.is_empty() { None } else { Some(url) }
+                } else if radio_station.is_some() {
+                    icy_url
                 } else {
                     None
                 };
@@ -187,9 +194,27 @@ impl Nokkvi {
         if let Some(icy_meta) = live_icy_metadata
             && self.active_playback.is_radio()
         {
+            let mut extracted_title = String::new();
+            let mut extracted_url = None;
+
+            // Parse StreamTitle and StreamUrl from the raw ICY payload.
+            // Example format: "StreamTitle='Artist - Song';StreamUrl='https://...';"
+            for part in icy_meta.split("';") {
+                let part = part.trim_end_matches('\0');
+                if let Some(idx) = part.find("='") {
+                    let key = &part[..idx];
+                    let val = &part[idx + 2..];
+                    if key == "StreamTitle" && !val.is_empty() {
+                        extracted_title = val.to_string();
+                    } else if key == "StreamUrl" && !val.is_empty() {
+                        extracted_url = Some(val.to_string());
+                    }
+                }
+            }
+
             // Split icy meta "Artist - Title" format. Not all stations follow this exactly,
             // but it's the standard convention used by majority of SHOUTcast/Icecast stations.
-            let mut parts = icy_meta.splitn(2, " - ");
+            let mut parts = extracted_title.splitn(2, " - ");
             let (artist, title) = if let (Some(artist), Some(title)) = (parts.next(), parts.next())
             {
                 // It had a dash, treat as Artist - Title
@@ -199,12 +224,12 @@ impl Nokkvi {
                 )
             } else {
                 // No dash found, fallback: put everything in title
-                (None, Some(icy_meta.trim().to_string()))
+                (None, Some(extracted_title.trim().to_string()))
             };
 
             // Dispatch the metadata update directly
             // (Using handle_radio_metadata_update directly since we are already in the update fn)
-            let _ = self.handle_radio_metadata_update(artist, title);
+            let _ = self.handle_radio_metadata_update(artist, title, extracted_url);
         }
 
         // Update playback and mode fields
@@ -1174,10 +1199,12 @@ impl Nokkvi {
         &mut self,
         icy_artist: Option<String>,
         icy_title: Option<String>,
+        icy_url: Option<String>,
     ) -> Task<Message> {
         if let crate::state::ActivePlayback::Radio(state) = &mut self.active_playback {
             state.icy_artist = icy_artist;
             state.icy_title = icy_title;
+            state.icy_url = icy_url;
         }
         Task::none()
     }

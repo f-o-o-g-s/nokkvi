@@ -119,8 +119,9 @@ impl<R: std::io::Read> std::io::Read for IcyStreamReader<R> {
                 self.inner.read_exact(&mut meta_buf)?;
 
                 let meta_str = String::from_utf8_lossy(&meta_buf);
-                if let Some(title) = parse_icy_stream_title(&meta_str) {
-                    (self.callback)(title);
+                let trim = meta_str.trim_end_matches('\0');
+                if !trim.is_empty() {
+                    (self.callback)(trim.to_string());
                 }
             }
             self.bytes_until_meta = self.metaint;
@@ -131,21 +132,6 @@ impl<R: std::io::Read> std::io::Read for IcyStreamReader<R> {
         self.bytes_until_meta -= n;
         Ok(n)
     }
-}
-
-/// Extract the StreamTitle value from a raw ICY metadata string.
-fn parse_icy_stream_title(raw: &str) -> Option<String> {
-    let trim = raw.trim_end_matches('\0');
-    if let Some(start) = trim.find("StreamTitle='") {
-        let substr = &trim[start + 13..];
-        if let Some(end) = substr.find("';") {
-            let title = &substr[..end];
-            if !title.is_empty() {
-                return Some(title.to_string());
-            }
-        }
-    }
-    None
 }
 
 /// Audio decoder using symphonia
@@ -1177,44 +1163,6 @@ mod tests {
         );
     }
 
-    // =========================================================================
-    // parse_icy_stream_title
-    // =========================================================================
-
-    #[test]
-    fn icy_title_normal() {
-        assert_eq!(
-            parse_icy_stream_title("StreamTitle='Artist - Title';"),
-            Some("Artist - Title".to_string())
-        );
-    }
-
-    #[test]
-    fn icy_title_empty_is_none() {
-        assert_eq!(parse_icy_stream_title("StreamTitle='';"), None);
-    }
-
-    #[test]
-    fn icy_title_missing_key() {
-        assert_eq!(
-            parse_icy_stream_title("StreamUrl='http://example.com';"),
-            None
-        );
-    }
-
-    #[test]
-    fn icy_title_null_padded() {
-        assert_eq!(
-            parse_icy_stream_title("StreamTitle='Test';\0\0\0\0"),
-            Some("Test".to_string())
-        );
-    }
-
-    #[test]
-    fn icy_title_no_semicolon_terminator() {
-        // Malformed: missing '; terminator — should return None
-        assert_eq!(parse_icy_stream_title("StreamTitle='Unterminated"), None);
-    }
 
     // =========================================================================
     // is_radio_response

@@ -2267,12 +2267,14 @@ fn test_handle_radio_metadata_update() {
         station,
         icy_artist: None,
         icy_title: None,
+        icy_url: None,
     });
 
     // Update metadata
     let _ = app.handle_radio_metadata_update(
         Some("Test Artist".to_string()),
         Some("Test Song".to_string()),
+        None,
     );
 
     // Verify state mutation

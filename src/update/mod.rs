@@ -585,7 +585,7 @@ impl Nokkvi {
                         self.handle_initialize_scrobble_state(song_id)
                     }
                     PlaybackMessage::RadioMetadataUpdate(artist, title) => {
-                        self.handle_radio_metadata_update(artist, title)
+                        self.handle_radio_metadata_update(artist, title, None)
                     }
                 }
             }

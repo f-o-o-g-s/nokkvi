@@ -75,6 +75,7 @@ pub struct RadioPlaybackState {
     pub station: nokkvi_data::types::radio_station::RadioStation,
     pub icy_artist: Option<String>,
     pub icy_title: Option<String>,
+    pub icy_url: Option<String>,
 }
 
 impl ActivePlayback {
