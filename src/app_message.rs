@@ -77,6 +77,8 @@ pub struct PlaybackStateUpdate {
     pub sample_rate: u32,
     /// Bitrate in kbps (e.g., 320 for MP3, 1411 for CD-quality FLAC)
     pub bitrate: u32,
+    /// Live ICY-metadata parsed by IcyMetadataReader
+    pub live_icy_metadata: Option<String>,
 }
 
 /// Playback-related messages, namespaced under `Message::Playback(..)`
@@ -113,6 +115,8 @@ pub enum PlaybackMessage {
     PlayerSettingsLoaded(Box<PlayerSettings>),
     /// Initialize scrobble state with current song ID from persisted queue
     InitializeScrobbleState(Option<String>),
+    /// Live ICY-metadata parsed from internet radio stream (Artist, Title)
+    RadioMetadataUpdate(Option<String>, Option<String>),
 }
 
 /// Scrobbling-related messages, namespaced under `Message::Scrobble(..)`
@@ -288,6 +292,8 @@ pub enum Message {
     LoadArtists,
     LoadGenres,
     LoadPlaylists,
+    /// Load internet radio stations from Subsonic API
+    LoadRadioStations,
     /// Playlist was mutated (created/deleted/renamed/overwritten/appended) — toast and reload
     PlaylistMutated(PlaylistMutation),
     /// Playlists fetched on-demand for Save Queue as Playlist dialog
@@ -351,6 +357,8 @@ pub enum Message {
     Settings(views::SettingsMessage),
     /// Similar Songs page messages
     Similar(views::SimilarMessage),
+    /// Internet Radio page messages
+    Radios(views::RadiosMessage),
 
     // --- MPRIS D-Bus Integration ---
     Mpris(services::mpris::MprisEvent),

@@ -26,8 +26,10 @@ struct MprisUpdate<'a> {
 
 impl Nokkvi {
     pub(crate) fn handle_tick(&mut self) -> Task<Message> {
+        let radio_station = self.active_playback.radio_station().cloned();
+
         self.shell_task(
-            |shell| async move {
+            move |shell| async move {
                 let engine_arc = shell.audio_engine();
                 let engine = engine_arc.lock().await;
                 let pos = engine.position();
@@ -37,6 +39,7 @@ impl Nokkvi {
                 let sample_rate = engine.sample_rate();
                 // Live compressed bitrate from decoder (0 if not yet decoding)
                 let engine_live_bitrate = engine.live_bitrate();
+                let engine_live_icy_metadata = engine.live_icy_metadata();
                 drop(engine);
 
                 let qm_arc = shell.queue().queue_manager();
@@ -67,6 +70,17 @@ impl Nokkvi {
                             Some(s.id.clone()),
                             suffix,
                             br,
+                        )
+                    } else if let Some(station) = &radio_station {
+                        (
+                            station.name.clone(),
+                            String::new(), // Artist handles name sometimes? No, artist is empty
+                            String::new(),
+                            None,
+                            None,
+                            Some(station.id.clone()),
+                            "radio".to_string(), // Will be updated in Phase 5 to use engine format
+                            engine_live_bitrate,
                         )
                     } else {
                         (
@@ -129,6 +143,7 @@ impl Nokkvi {
                     format_suffix,
                     sample_rate,
                     bitrate,
+                    live_icy_metadata: engine_live_icy_metadata,
                 }
             },
             |update| Message::Playback(PlaybackMessage::PlaybackStateUpdated(Box::new(update))),
@@ -158,6 +173,7 @@ impl Nokkvi {
             format_suffix,
             sample_rate,
             bitrate,
+            live_icy_metadata,
         } = update;
 
         // Detect transition from playing to stopped (not paused)
@@ -165,6 +181,30 @@ impl Nokkvi {
         let was_playing = self.playback.playing && !self.playback.paused;
         let is_stopped = !playing && !paused;
         let playback_stopped = was_playing && is_stopped;
+
+        // Process radio metadata updates
+        if let Some(icy_meta) = live_icy_metadata
+            && self.active_playback.is_radio()
+        {
+            // Split icy meta "Artist - Title" format. Not all stations follow this exactly,
+            // but it's the standard convention used by majority of SHOUTcast/Icecast stations.
+            let mut parts = icy_meta.splitn(2, " - ");
+            let (artist, title) =
+                if let (Some(artist), Some(title)) = (parts.next(), parts.next()) {
+                    // It had a dash, treat as Artist - Title
+                    (
+                        Some(artist.trim().to_string()),
+                        Some(title.trim().to_string()),
+                    )
+                } else {
+                    // No dash found, fallback: put everything in title
+                    (None, Some(icy_meta.trim().to_string()))
+                };
+
+            // Dispatch the metadata update directly
+            // (Using handle_radio_metadata_update directly since we are already in the update fn)
+            let _ = self.handle_radio_metadata_update(artist, title);
+        }
 
         // Update playback and mode fields
         self.playback.position = pos;
@@ -192,8 +232,11 @@ impl Nokkvi {
         // Scrobble: song change detection + previous-song submission
         let song_changed = self.scrobble.current_song_id != song_id;
 
+        // PipeWire stream description update
         let pw_title = if is_stopped || self.playback.title.is_empty() {
             "Nokkvi".to_string()
+        } else if self.playback.artist.is_empty() {
+            format!("Nokkvi ({})", self.playback.title)
         } else {
             format!(
                 "Nokkvi ({} - {})",
@@ -216,30 +259,32 @@ impl Nokkvi {
             self.sfx_engine.set_output_title(pw_title);
         }
 
-        if song_changed {
-            // Reset gapless flag BEFORE scrobble updates current_song_id.
-            // Must happen here because consume mode can cause the queue index
-            // to round-trip (0→1→0), making the index-based reset in
-            // handle_queue_focus_change miss the song transition.
-            self.engine.gapless_preparing = false;
-            self.handle_scrobble_on_song_change(&song_id, pos, &mut tasks);
-        }
-
-        // Scrobble: track listening time (anti-seek-fraud)
-        self.track_listening_time(playing, paused, &song_id, pos, dur, &mut tasks);
-
-        // Queue focus tracking + gapless preparation
-        self.handle_queue_focus_change(current_index, &mut tasks);
-        if playing && !paused && dur > 0 {
-            let threshold = (f64::from(dur) * 0.8) as u32;
-            if pos >= threshold {
-                tasks.push(Task::done(Message::Playback(
-                    PlaybackMessage::PrepareNextForGapless,
-                )));
+        if self.active_playback.is_queue() {
+            if song_changed {
+                // Reset gapless flag BEFORE scrobble updates current_song_id.
+                // Must happen here because consume mode can cause the queue index
+                // to round-trip (0→1→0), making the index-based reset in
+                // handle_queue_focus_change miss the song transition.
+                self.engine.gapless_preparing = false;
+                self.handle_scrobble_on_song_change(&song_id, pos, &mut tasks);
             }
-            // NOTE: crossfade triggering has moved to the renderer
-            // (render_buffers queue-size check). The tick handler only
-            // handles gapless preparation now.
+
+            // Scrobble: track listening time (anti-seek-fraud)
+            self.track_listening_time(playing, paused, &song_id, pos, dur, &mut tasks);
+
+            // Queue focus tracking + gapless preparation
+            self.handle_queue_focus_change(current_index, &mut tasks);
+            if playing && !paused && dur > 0 {
+                let threshold = (f64::from(dur) * 0.8) as u32;
+                if pos >= threshold {
+                    tasks.push(Task::done(Message::Playback(
+                        PlaybackMessage::PrepareNextForGapless,
+                    )));
+                }
+                // NOTE: crossfade triggering has moved to the renderer
+                // (render_buffers queue-size check). The tick handler only
+                // handles gapless preparation now.
+            }
         }
 
         // MPRIS: push state to D-Bus
@@ -576,6 +621,9 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_next_track(&mut self) -> Task<Message> {
+        if self.active_playback.is_radio() {
+            return Task::none();
+        }
         // NOTE: We intentionally do NOT reset the visualizer here.
         // The auto-sensitivity naturally adapts between tracks. Resetting it
         // causes a 2-4 second delay while it recalibrates to the new track's volume.
@@ -605,6 +653,9 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_prev_track(&mut self) -> Task<Message> {
+        if self.active_playback.is_radio() {
+            return Task::none();
+        }
         // NOTE: We intentionally do NOT reset the visualizer here.
         // The auto-sensitivity naturally adapts between tracks. Resetting it
         // causes a 2-4 second delay while it recalibrates to the new track's volume.
@@ -756,6 +807,9 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_seek(&mut self, val: f32) -> Task<Message> {
+        if self.active_playback.is_radio() {
+            return Task::none();
+        }
         // Slider sends position in seconds, shell.seek expects seconds
         let pos_secs = f64::from(val);
         self.shell_task(
@@ -1106,5 +1160,17 @@ impl Nokkvi {
             },
             f,
         )
+    }
+
+    pub(crate) fn handle_radio_metadata_update(
+        &mut self,
+        icy_artist: Option<String>,
+        icy_title: Option<String>,
+    ) -> Task<Message> {
+        if let crate::state::ActivePlayback::Radio(state) = &mut self.active_playback {
+            state.icy_artist = icy_artist;
+            state.icy_title = icy_title;
+        }
+        Task::none()
     }
 }

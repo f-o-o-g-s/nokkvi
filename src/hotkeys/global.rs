@@ -95,6 +95,7 @@ fn action_to_message(action: HotkeyAction) -> Message {
         HotkeyAction::SwitchToSongs => Message::SwitchView(View::Songs),
         HotkeyAction::SwitchToGenres => Message::SwitchView(View::Genres),
         HotkeyAction::SwitchToPlaylists => Message::SwitchView(View::Playlists),
+        HotkeyAction::SwitchToRadios => Message::SwitchView(View::Radios),
         HotkeyAction::SwitchToSettings => Message::ToggleSettings,
         // Playback
         HotkeyAction::TogglePlay => Message::Playback(PlaybackMessage::TogglePlay),

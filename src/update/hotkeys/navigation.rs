@@ -199,6 +199,16 @@ impl Nokkvi {
                     .iter()
                     .position(|g| g.name.eq_ignore_ascii_case(&qs.genre))
             }),
+            View::Radios => {
+                if let crate::state::ActivePlayback::Radio(radio_state) = &self.active_playback {
+                    self.library
+                        .radio_stations
+                        .iter()
+                        .position(|r| r.id == radio_state.station.id)
+                } else {
+                    None
+                }
+            }
             View::Playlists | View::Settings => {
                 // No meaningful match for playlists or settings
                 trace!(" CenterOnPlaying: No-op for {:?} view", self.current_view);
@@ -271,6 +281,14 @@ impl Nokkvi {
                         &mut self.genres_page.common,
                     );
                     Task::done(Message::Genres(views::GenresMessage::SlotListSetOffset(
+                        i,
+                        iced::keyboard::Modifiers::default(),
+                    )))
+                }
+                View::Radios => {
+                    let total = self.library.radio_stations.len();
+                    self.radios_page.common.handle_set_offset(i, total);
+                    Task::done(Message::Radios(views::RadiosMessage::SlotListSetOffset(
                         i,
                         iced::keyboard::Modifiers::default(),
                     )))

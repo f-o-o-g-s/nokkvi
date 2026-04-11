@@ -14,6 +14,108 @@ use tracing::{debug, error, trace, warn};
 use super::range_http_reader::RangeHttpReader;
 use crate::audio::{AudioBuffer, AudioFormat, SampleFormat};
 
+/// A background-threaded network buffer that eagerly consumes an unbounded/infinite HTTP stream
+/// to decouple TCP receive windows from the CPAL playback rate, eliminating stuttering drops.
+struct AsyncNetworkBuffer {
+    receiver: std::sync::Mutex<std::sync::mpsc::Receiver<Vec<u8>>>,
+    buffer: Vec<u8>,
+}
+
+impl AsyncNetworkBuffer {
+    pub fn new(mut read: Box<dyn std::io::Read + Send + 'static>) -> Self {
+        let (tx, rx) = std::sync::mpsc::sync_channel(2048); // 32MB max buffer (10 minutes 256kbps)
+        std::thread::Builder::new()
+            .name("nokkvi-network-fetch".into())
+            .spawn(move || {
+                let mut accum = Vec::with_capacity(16384);
+                let mut buf = vec![0u8; 16384];
+                loop {
+                    match read.read(&mut buf) {
+                        Ok(0) => {
+                            if !accum.is_empty() {
+                                let _ = tx.send(accum);
+                            }
+                            break;
+                        }
+                        Ok(n) => {
+                            accum.extend_from_slice(&buf[..n]);
+                            if accum.len() >= 16384 {
+                                let push_buf =
+                                    std::mem::replace(&mut accum, Vec::with_capacity(16384));
+                                if tx.send(push_buf).is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+            })
+            .unwrap();
+        Self {
+            receiver: std::sync::Mutex::new(rx),
+            buffer: Vec::new(),
+        }
+    }
+}
+
+impl std::io::Read for AsyncNetworkBuffer {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.buffer.is_empty() {
+            if let Ok(new_buf) = self.receiver.lock().unwrap().recv() {
+                self.buffer = new_buf;
+            } else {
+                return Ok(0);
+            }
+        }
+        let take = std::cmp::min(buf.len(), self.buffer.len());
+        buf[..take].copy_from_slice(&self.buffer[..take]);
+        self.buffer.drain(..take);
+        Ok(take)
+    }
+}
+
+/// Reader that demuxes ICY metadata from an Icecast stream.
+struct IcyStreamReader<R: std::io::Read> {
+    inner: R,
+    metaint: usize,
+    bytes_until_meta: usize,
+    callback: Box<dyn Fn(String) + Send + Sync>,
+}
+
+impl<R: std::io::Read> std::io::Read for IcyStreamReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.bytes_until_meta == 0 {
+            // Time to read metadata
+            let mut len_byte = [0u8; 1];
+            self.inner.read_exact(&mut len_byte)?;
+            let meta_len = len_byte[0] as usize * 16;
+
+            if meta_len > 0 {
+                let mut meta_buf = vec![0u8; meta_len];
+                self.inner.read_exact(&mut meta_buf)?;
+
+                if let Ok(meta_str) = String::from_utf8(meta_buf) {
+                    let trim = meta_str.trim_end_matches('\0');
+                    // Parse StreamTitle='Artist - Title';
+                    if let Some(start) = trim.find("StreamTitle='") {
+                        let substr = &trim[start + 13..];
+                        if let Some(end) = substr.find("';") {
+                            (self.callback)(substr[..end].to_string());
+                        }
+                    }
+                }
+            }
+            self.bytes_until_meta = self.metaint;
+        }
+
+        let max_read = std::cmp::min(buf.len(), self.bytes_until_meta);
+        let n = self.inner.read(&mut buf[..max_read])?;
+        self.bytes_until_meta -= n;
+        Ok(n)
+    }
+}
+
 /// Audio decoder using symphonia
 pub struct AudioDecoder {
     format_reader: Option<Box<dyn FormatReader>>,
@@ -29,10 +131,16 @@ pub struct AudioDecoder {
     /// EMA-smoothed compressed bitrate in kbps, computed per-packet from
     /// Symphonia's `Packet.data.len()` and `Packet.dur`.
     smoothed_bitrate_kbps: f64,
+    /// True when stream has no Content-Length (internet radio / infinite stream).
+    /// Engine uses this to skip gapless preparation, crossfade arming, and
+    /// consume-mode queue mutation.
+    infinite_stream: bool,
+    /// Arc passed in by the AudioEngine, populated by `IcyMetadataReader` if this stream supports ICY.
+    live_icy_metadata: std::sync::Arc<tokio::sync::Mutex<Option<String>>>,
 }
 
 impl AudioDecoder {
-    pub fn new() -> Self {
+    pub fn new(live_icy_metadata: std::sync::Arc<tokio::sync::Mutex<Option<String>>>) -> Self {
         Self {
             format_reader: None,
             decoder: None,
@@ -44,6 +152,8 @@ impl AudioDecoder {
             eof: false,
             frame_buffer: Vec::new(),
             smoothed_bitrate_kbps: 0.0,
+            infinite_stream: false,
+            live_icy_metadata,
         }
     }
 
@@ -89,20 +199,34 @@ impl AudioDecoder {
 
             let client = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
+                .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                 .build()
                 .context("Failed to create HTTP client")?;
+
+            let mut is_radio = false;
 
             // Try HEAD request first
             let mut content_length = match client.head(&self.url).send().await {
                 Ok(head_response) if head_response.status().is_success() => {
-                    head_response.content_length().filter(|&len| len > 0)
+                    let headers = head_response.headers();
+                    is_radio = headers.keys().any(|k| k.as_str().starts_with("icy-"))
+                        || headers.get("server").is_some_and(|v| {
+                            v.to_str().unwrap_or("").to_lowercase().contains("icecast")
+                        });
+
+                    if is_radio {
+                        trace!(" [DECODER] ICEcast / Radio stream detected from HEAD headers.");
+                        None
+                    } else {
+                        head_response.content_length().filter(|&len| len > 0)
+                    }
                 }
                 _ => None,
             };
 
             // If HEAD didn't give us content-length, try a Range request with bytes=0-0
             // to get the Content-Range header which tells us total size
-            if content_length.is_none() {
+            if content_length.is_none() && !is_radio {
                 trace!(" [DECODER] HEAD didn't return Content-Length, trying Range probe...");
                 match client
                     .get(&self.url)
@@ -111,31 +235,42 @@ impl AudioDecoder {
                     .await
                 {
                     Ok(range_response) => {
-                        // Check Content-Range header: "bytes 0-0/TOTAL_SIZE"
-                        if let Some(content_range) = range_response.headers().get("content-range")
-                            && let Ok(range_str) = content_range.to_str()
-                        {
-                            // Parse "bytes 0-0/12345678"
-                            if let Some(total) = range_str.split('/').next_back()
-                                && let Ok(len) = total.parse::<u64>()
+                        let headers = range_response.headers();
+                        is_radio = headers.keys().any(|k| k.as_str().starts_with("icy-"))
+                            || headers.get("server").is_some_and(|v| {
+                                v.to_str().unwrap_or("").to_lowercase().contains("icecast")
+                            });
+
+                        if is_radio {
+                            trace!(
+                                " [DECODER] ICEcast / Radio stream detected from Range headers."
+                            );
+                        } else {
+                            // Check Content-Range header: "bytes 0-0/TOTAL_SIZE"
+                            if let Some(content_range) =
+                                range_response.headers().get("content-range")
+                                && let Ok(range_str) = content_range.to_str()
                             {
-                                content_length = Some(len);
-                                debug!(
-                                    " [DECODER] Got Content-Length from Range response: {} bytes",
+                                // Parse "bytes 0-0/12345678"
+                                if let Some(total) = range_str.split('/').next_back()
+                                    && let Ok(len) = total.parse::<u64>()
+                                {
+                                    content_length = Some(len);
+                                    debug!(
+                                        " [DECODER] Got Content-Length from Range response: {} bytes",
+                                        len
+                                    );
+                                }
+                            }
+                            // Fallback: try Content-Length from this response
+                            if content_length.is_none()
+                                && let Some(len) = range_response.content_length()
+                            {
+                                trace!(
+                                    " [DECODER] Range response Content-Length: {} (not useful)",
                                     len
                                 );
                             }
-                        }
-                        // Fallback: try Content-Length from this response
-                        if content_length.is_none()
-                            && let Some(len) = range_response.content_length()
-                        {
-                            // For bytes=0-0 request, actual content is 1 byte, but we need full size
-                            // This won't work, but try anyway
-                            trace!(
-                                " [DECODER] Range response Content-Length: {} (not useful)",
-                                len
-                            );
                         }
                     }
                     Err(e) => {
@@ -145,40 +280,125 @@ impl AudioDecoder {
             }
 
             // If we still don't have content-length, try a regular GET and read content-length header
-            if content_length.is_none() {
+            if content_length.is_none() && !is_radio {
                 trace!(" [DECODER] Trying regular GET to detect Content-Length...");
                 match client.get(&self.url).send().await {
                     Ok(response) if response.status().is_success() => {
-                        content_length = response.content_length().filter(|&len| len > 0);
-                        if let Some(len) = content_length {
-                            trace!(" [DECODER] Got Content-Length from GET: {} bytes", len);
+                        let headers = response.headers();
+                        is_radio = headers.keys().any(|k| k.as_str().starts_with("icy-"))
+                            || headers.get("server").is_some_and(|v| {
+                                v.to_str().unwrap_or("").to_lowercase().contains("icecast")
+                            });
+
+                        if is_radio {
+                            trace!(" [DECODER] ICEcast / Radio stream detected from GET headers.");
+                        } else {
+                            content_length = response.content_length().filter(|&len| len > 0);
+                            if let Some(len) = content_length {
+                                trace!(" [DECODER] Got Content-Length from GET: {} bytes", len);
+                            }
+                            // Note: we're throwing away this response, which is wasteful
+                            // but it's a fallback path
                         }
-                        // Note: we're throwing away this response, which is wasteful
-                        // but it's a fallback path
                     }
                     _ => {}
                 }
             }
 
-            let content_length =
-                content_length.context("Could not determine Content-Length for HTTP stream")?;
-            trace!(
-                " [DECODER] Final Content-Length: {} bytes (took {:?})",
-                content_length,
-                init_start.elapsed()
-            );
+            // We've completed our detection for Content-Length
+            let mut detected_format = self.extract_format_hint(&self.url);
 
-            // Extract format hint from URL
-            let detected_format = self.extract_format_hint(&self.url);
-            if let Some(ref format) = detected_format {
-                trace!(" [DECODER] Detected format from URL: {}", format);
-            }
+            let mss = if let Some(len) = content_length {
+                trace!(
+                    " [DECODER] Final Content-Length: {} bytes (took {:?})",
+                    len,
+                    init_start.elapsed()
+                );
 
-            // Create Range-based reader - fetches only needed bytes on demand
-            let reader = RangeHttpReader::new(self.url.clone(), content_length);
+                if let Some(ref format) = detected_format {
+                    trace!(" [DECODER] Detected format from URL: {}", format);
+                }
 
-            let media_source: Box<dyn MediaSource> = Box::new(reader);
-            let mss = MediaSourceStream::new(media_source, Default::default());
+                // Create Range-based reader - fetches only needed bytes on demand
+                let reader = RangeHttpReader::new(self.url.clone(), len);
+
+                let media_source: Box<dyn MediaSource> = Box::new(reader);
+                MediaSourceStream::new(media_source, Default::default())
+            } else {
+                trace!(" [DECODER] No Content-Length found, treating as infinite stream.");
+                self.infinite_stream = true;
+
+                let url_copy = self.url.clone();
+                let (response, content_type) = tokio::task::block_in_place(|| {
+                    let client = reqwest::blocking::Client::builder()
+                        .timeout(std::time::Duration::from_secs(30))
+                        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                        .build()
+                        .context("Failed to create blocking HTTP client")?;
+                    let resp = client
+                        .get(url_copy)
+                        .header("Icy-MetaData", "1")
+                        .send()
+                        .context("Failed to open infinite stream connection")?;
+                    let ct = resp
+                        .headers()
+                        .get("content-type")
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.to_string());
+                    Ok::<(reqwest::blocking::Response, Option<String>), anyhow::Error>((resp, ct))
+                })?;
+
+                if let Some(ct) = content_type.as_ref()
+                    && let Some(format_from_ct) = format_hint_from_content_type(ct)
+                {
+                    detected_format = Some(format_from_ct);
+                }
+
+                if detected_format.is_none() {
+                    detected_format = format_hint_from_radio_url(&self.url);
+                }
+
+                if let Some(ref format) = detected_format {
+                    trace!(" [DECODER] Detected format for infinite stream: {}", format);
+                }
+
+                // Check for ICY metadata
+                use icy_metadata::IcyHeaders;
+                let icy_headers = IcyHeaders::parse_from_headers(response.headers());
+                let interval = icy_headers.metadata_interval();
+
+                // Buffer the response using a dedicated OS thread to prevent OS-level TCP starvation
+                let buffered_response = AsyncNetworkBuffer::new(Box::new(response));
+
+                let media_source: Box<dyn MediaSource> = if let Some(interval) = interval {
+                    let interval_usize = interval.get();
+                    trace!(
+                        " [DECODER] ICY Metadata detected! Interval: {}",
+                        interval_usize
+                    );
+                    let atomic_meta = self.live_icy_metadata.clone();
+
+                    let icy_reader = IcyStreamReader {
+                        inner: buffered_response,
+                        metaint: interval_usize,
+                        bytes_until_meta: interval_usize,
+                        callback: Box::new(move |title| {
+                            trace!(" [DECODER] ICY Callback fired! Result: {:?}", title);
+                            if let Ok(mut guard) = atomic_meta.try_lock() {
+                                *guard = Some(title);
+                            } else {
+                                warn!(" [DECODER] ICY Failed to acquire try_lock!");
+                            }
+                        }),
+                    };
+                    Box::new(symphonia::core::io::ReadOnlySource::new(icy_reader))
+                } else {
+                    trace!(" [DECODER] No ICY Interval detected in headers!");
+                    Box::new(symphonia::core::io::ReadOnlySource::new(buffered_response))
+                };
+
+                MediaSourceStream::new(media_source, Default::default())
+            };
 
             (mss, detected_format)
         } else {
@@ -208,24 +428,23 @@ impl AudioDecoder {
 
         let probe_start = std::time::Instant::now();
         trace!(" [DECODER] Starting format probe...");
-        let probed = match symphonia::default::get_probe().format(
-            &hint,
-            mss,
-            &format_opts,
-            &metadata_opts,
-        ) {
-            Ok(p) => {
-                trace!(
-                    " [DECODER] Format probe successful (took {:?})",
-                    probe_start.elapsed()
-                );
-                p
+        // CRITICAL: Format probing reads from the MediaSource stream, which does blocking I/O.
+        // Must wrap in block_in_place to avoid freezing the Tokio executor.
+        let probed = tokio::task::block_in_place(|| {
+            match symphonia::default::get_probe().format(&hint, mss, &format_opts, &metadata_opts) {
+                Ok(p) => {
+                    trace!(
+                        " [DECODER] Format probe successful (took {:?})",
+                        probe_start.elapsed()
+                    );
+                    Ok(p)
+                }
+                Err(e) => {
+                    error!(" [DECODER] Format probe FAILED: {:?}", e);
+                    Err(anyhow::Error::new(e).context("Failed to probe media format"))
+                }
             }
-            Err(e) => {
-                error!(" [DECODER] Format probe FAILED: {:?}", e);
-                return Err(e).context("Failed to probe media format");
-            }
-        };
+        })?;
 
         let format_reader = probed.format;
 
@@ -388,8 +607,78 @@ impl AudioDecoder {
                     p
                 }
                 Err(SymphoniaError::ResetRequired) => {
-                    // Track list changed - not handled for now
-                    warn!(" [DECODER] ResetRequired error - treating as EOF");
+                    // Track list changed (e.g., OGG ICECast metadata changed)
+                    warn!(" [DECODER] ResetRequired error - Stream format changed, reprobing...");
+                    if let Some(reader) = self.format_reader.take() {
+                        let mss = reader.into_inner();
+                        let probe = symphonia::default::get_probe();
+
+                        let mut hint = symphonia::core::probe::Hint::new();
+                        // Assume OGG for internet radio if it's infinite, as that's the main codec that chains
+                        if self.infinite_stream
+                            || self.url.to_lowercase().contains("ogg")
+                            || self.url.to_lowercase().contains("vorbis")
+                        {
+                            hint.with_extension("ogg");
+                        } else if let Some(ext) = self.url.split('.').next_back()
+                            && ext.len() <= 4
+                        {
+                            hint.with_extension(ext);
+                        }
+
+                        match probe.format(
+                            &hint,
+                            mss,
+                            &symphonia::core::formats::FormatOptions {
+                                enable_gapless: false,
+                                ..Default::default()
+                            },
+                            &symphonia::core::meta::MetadataOptions::default(),
+                        ) {
+                            Ok(probed) => {
+                                self.format_reader = Some(probed.format);
+                                if let Some(track) =
+                                    self.format_reader.as_ref().unwrap().default_track()
+                                {
+                                    self.track_id = Some(track.id);
+                                    let decoder = symphonia::default::get_codecs().make(
+                                        &track.codec_params,
+                                        &symphonia::core::codecs::DecoderOptions::default(),
+                                    );
+                                    if let Ok(dec) = decoder {
+                                        self.decoder = Some(dec);
+                                        // Update format in case it changed
+                                        let channels = track
+                                            .codec_params
+                                            .channels
+                                            .unwrap_or(
+                                                symphonia::core::audio::Channels::FRONT_LEFT
+                                                    | symphonia::core::audio::Channels::FRONT_RIGHT,
+                                            )
+                                            .count();
+                                        let sample_rate =
+                                            track.codec_params.sample_rate.unwrap_or(44100);
+                                        self.format = AudioFormat::new(
+                                            SampleFormat::F32,
+                                            sample_rate,
+                                            channels as u32,
+                                        );
+                                        // Retry reading the packet with the new decoder
+                                        continue;
+                                    }
+                                    error!(" [DECODER] Failed to make decoder after reprobing");
+                                } else {
+                                    error!(" [DECODER] No default track found after reprobing");
+                                }
+                            }
+                            Err(e) => {
+                                error!(
+                                    " [DECODER] Failed to reprobe format after ResetRequired: {}",
+                                    e
+                                );
+                            }
+                        }
+                    }
                     self.eof = true;
                     break;
                 }
@@ -510,11 +799,39 @@ impl AudioDecoder {
                         " [DECODER] I/O error during packet decode (skipping): {:?}",
                         e
                     );
+
+                    // Zero-fill to maintain time sync and prevent buffer starvation
+                    if packet.dur > 0 {
+                        let channels = self.format.channel_count() as usize;
+                        let silence_bytes = (packet.dur as usize) * channels * 2; // 2 bytes for i16
+                        let needed = bytes.saturating_sub(output_data.len());
+                        let to_take = needed.min(silence_bytes);
+
+                        output_data.extend(std::iter::repeat_n(0, to_take));
+                        if silence_bytes > to_take {
+                            self.frame_buffer
+                                .extend(std::iter::repeat_n(0, silence_bytes - to_take));
+                        }
+                    }
                     continue;
                 }
                 Err(SymphoniaError::DecodeError(ref e)) => {
                     // Log and skip packet on decode error
                     warn!(" [DECODER] Decode error (skipping): {:?}", e);
+
+                    // Zero-fill to maintain time sync and prevent buffer starvation
+                    if packet.dur > 0 {
+                        let channels = self.format.channel_count() as usize;
+                        let silence_bytes = (packet.dur as usize) * channels * 2; // 2 bytes for i16
+                        let needed = bytes.saturating_sub(output_data.len());
+                        let to_take = needed.min(silence_bytes);
+
+                        output_data.extend(std::iter::repeat_n(0, to_take));
+                        if silence_bytes > to_take {
+                            self.frame_buffer
+                                .extend(std::iter::repeat_n(0, silence_bytes - to_take));
+                        }
+                    }
                     continue;
                 }
                 Err(_) => {
@@ -623,6 +940,12 @@ impl AudioDecoder {
         self.eof
     }
 
+    /// True when stream has no Content-Length (internet radio).
+    /// Engine queries this to skip gapless, crossfade, and consume-mode logic.
+    pub fn is_infinite_stream(&self) -> bool {
+        self.infinite_stream
+    }
+
     /// Get the EMA-smoothed live compressed bitrate in kbps.
     /// Returns 0 if no packets have been decoded yet.
     pub fn live_bitrate(&self) -> u32 {
@@ -637,6 +960,185 @@ impl AudioDecoder {
 
 impl Default for AudioDecoder {
     fn default() -> Self {
-        Self::new()
+        Self::new(std::sync::Arc::new(tokio::sync::Mutex::new(None)))
+    }
+}
+
+// =============================================================================
+// Radio stream helpers (Phase 3)
+// =============================================================================
+
+/// Extract a Symphonia-compatible format hint from an HTTP Content-Type header.
+///
+/// Radio streams typically advertise their codec via Content-Type:
+/// `audio/mpeg` → mp3, `audio/ogg` → ogg, `audio/aac` → aac, etc.
+///
+/// Returns `None` for non-audio or unrecognized MIME types.
+pub(crate) fn format_hint_from_content_type(content_type: &str) -> Option<String> {
+    // Strip parameters (e.g., "audio/mpeg; charset=utf-8" → "audio/mpeg")
+    let mime = content_type.split(';').next()?.trim();
+
+    match mime {
+        "audio/mpeg" | "audio/mp3" => Some("mp3".to_string()),
+        "audio/ogg" | "application/ogg" => Some("ogg".to_string()),
+        "audio/aac" | "audio/aacp" => Some("aac".to_string()),
+        "audio/flac" => Some("flac".to_string()),
+        "audio/wav" | "audio/x-wav" => Some("wav".to_string()),
+        "audio/opus" => Some("opus".to_string()),
+        _ => None,
+    }
+}
+
+/// Extract a format hint from a radio stream URL.
+///
+/// Handles two common radio URL patterns:
+/// 1. Standard extensions: `https://example.com/stream.ogg` → "ogg"
+/// 2. Suffix-style (Icecast): `https://ice1.somafm.com/groovesalad-128-mp3` → "mp3"
+///
+/// Falls back to `None` if no format can be determined.
+pub(crate) fn format_hint_from_radio_url(url: &str) -> Option<String> {
+    // First try the existing URL-based extraction (handles .ext patterns)
+    // Parse URL path, stripping query params
+    let path = if let Ok(parsed) = url::Url::parse(url) {
+        parsed.path().to_string()
+    } else {
+        url.to_string()
+    };
+
+    // Check for standard file extension
+    if let Some(ext) = path.rsplit('.').next()
+        && ext.len() <= 5
+        && ext.chars().all(|c| c.is_alphanumeric())
+    {
+        return Some(ext.to_lowercase());
+    }
+
+    // Icecast/Shoutcast suffix pattern: URL ends with "-mp3", "-ogg", "-aac"
+    let last_segment = path.rsplit('/').next()?;
+    for suffix in &["mp3", "ogg", "aac", "flac", "opus"] {
+        if last_segment.ends_with(&format!("-{suffix}"))
+            || last_segment.ends_with(&format!("_{suffix}"))
+        {
+            return Some((*suffix).to_string());
+        }
+    }
+
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // format_hint_from_content_type
+    // =========================================================================
+
+    #[test]
+    fn content_type_audio_mpeg() {
+        assert_eq!(
+            format_hint_from_content_type("audio/mpeg"),
+            Some("mp3".to_string())
+        );
+    }
+
+    #[test]
+    fn content_type_audio_ogg() {
+        assert_eq!(
+            format_hint_from_content_type("audio/ogg"),
+            Some("ogg".to_string())
+        );
+    }
+
+    #[test]
+    fn content_type_audio_aac() {
+        assert_eq!(
+            format_hint_from_content_type("audio/aac"),
+            Some("aac".to_string())
+        );
+    }
+
+    #[test]
+    fn content_type_with_params() {
+        // Content-Type can have parameters after semicolon
+        assert_eq!(
+            format_hint_from_content_type("audio/mpeg; charset=utf-8"),
+            Some("mp3".to_string())
+        );
+    }
+
+    #[test]
+    fn content_type_unknown() {
+        assert_eq!(format_hint_from_content_type("text/html"), None);
+    }
+
+    #[test]
+    fn content_type_application_ogg() {
+        assert_eq!(
+            format_hint_from_content_type("application/ogg"),
+            Some("ogg".to_string())
+        );
+    }
+
+    // =========================================================================
+    // format_hint_from_radio_url
+    // =========================================================================
+
+    #[test]
+    fn radio_url_standard_extension() {
+        assert_eq!(
+            format_hint_from_radio_url("https://example.com/stream.ogg"),
+            Some("ogg".to_string())
+        );
+    }
+
+    #[test]
+    fn radio_url_icecast_suffix_mp3() {
+        // SomaFM, DI.FM, and many Icecast stations use this pattern
+        assert_eq!(
+            format_hint_from_radio_url("https://ice1.somafm.com/groovesalad-128-mp3"),
+            Some("mp3".to_string())
+        );
+    }
+
+    #[test]
+    fn radio_url_icecast_suffix_ogg() {
+        assert_eq!(
+            format_hint_from_radio_url("https://ice1.somafm.com/groovesalad-128-ogg"),
+            Some("ogg".to_string())
+        );
+    }
+
+    #[test]
+    fn radio_url_no_hint() {
+        assert_eq!(
+            format_hint_from_radio_url("https://example.com/stream"),
+            None
+        );
+    }
+
+    #[test]
+    fn radio_url_with_query_params() {
+        // Extension should be extracted from path, not query
+        assert_eq!(
+            format_hint_from_radio_url("https://example.com/stream.mp3?key=value"),
+            Some("mp3".to_string())
+        );
+    }
+
+    // =========================================================================
+    // Decoder state defaults
+    // =========================================================================
+
+    #[test]
+    fn decoder_defaults_not_infinite() {
+        let decoder = AudioDecoder::new(std::sync::Arc::new(tokio::sync::Mutex::new(None)));
+        assert!(!decoder.is_infinite_stream());
+    }
+
+    #[test]
+    fn duration_defaults_to_zero() {
+        let decoder = AudioDecoder::new(std::sync::Arc::new(tokio::sync::Mutex::new(None)));
+        assert_eq!(decoder.duration(), 0);
     }
 }

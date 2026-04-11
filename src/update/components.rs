@@ -218,6 +218,14 @@ impl Nokkvi {
             self.toast_warn("Cannot play — would replace the playlist being edited");
             return Some(Task::none());
         }
+        // NOTE from Claude: The plan says "Stop radio if active — transition back
+        // to queue mode". The play action that follows will stop the engine anyway.
+        // Blocking here with a toast prevents the user from ever resuming queue
+        // playback while a radio stream is active — which defeats the purpose.
+        if self.active_playback.is_radio() {
+            self.active_playback = crate::state::ActivePlayback::Queue;
+            // Engine stop is handled by the play action that follows
+        }
         // Cancel any in-progress progressive queue loading target so the header
         // doesn't show a stale "X of Y" count from a superseded play action.
         self.library.queue_loading_target = None;

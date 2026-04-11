@@ -550,7 +550,7 @@ impl PlaybackController {
             .spawn_result("gapless_prep", move || async move {
                 // Create and initialize decoder OUTSIDE the engine lock
                 // This is the slow part - downloads ~20MB of audio
-                let mut decoder = crate::audio::AudioDecoder::new();
+                let mut decoder = crate::audio::AudioDecoder::default();
                 decoder.init(&url_for_task).await?;
 
                 // BRIEF lock to store the already-downloaded decoder

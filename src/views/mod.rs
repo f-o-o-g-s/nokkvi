@@ -12,6 +12,7 @@ pub(crate) mod genres;
 pub(crate) mod login;
 pub(crate) mod playlists;
 pub(crate) mod queue;
+pub(crate) mod radios;
 pub(crate) mod settings;
 pub(crate) mod similar;
 pub(crate) mod songs;
@@ -24,6 +25,7 @@ pub(crate) use genres::{GenresAction, GenresMessage, GenresPage, GenresViewData}
 pub(crate) use login::{LoginAction, LoginMessage, LoginPage};
 pub(crate) use playlists::{PlaylistsAction, PlaylistsMessage, PlaylistsPage, PlaylistsViewData};
 pub(crate) use queue::{QueueAction, QueueMessage, QueuePage, QueueSortMode, QueueViewData};
+pub(crate) use radios::{RadiosAction, RadiosMessage, RadiosPage, RadiosViewData};
 pub(crate) use settings::{SettingsAction, SettingsMessage, SettingsPage, SettingsViewData};
 pub(crate) use similar::{SimilarAction, SimilarMessage, SimilarPage, SimilarViewData};
 pub(crate) use songs::{SongsAction, SongsMessage, SongsPage, SongsViewData};
@@ -256,3 +258,6 @@ pub(crate) const PLAYLISTS_SEARCH_ID: &str = "playlists_search_input";
 
 /// Search input ID for Similar view
 pub(crate) const SIMILAR_SEARCH_ID: &str = "similar_search_input";
+
+/// Search input ID for Radios view
+pub(crate) const RADIOS_SEARCH_ID: &str = "radios_search_input";

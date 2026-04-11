@@ -640,6 +640,30 @@ impl AppService {
         )
     }
 
+    /// Construct an authenticated `RadiosApiService`.
+    ///
+    /// Callers inside `shell_task` closures can use `shell.radios_api().await?`
+    /// to fetch internet radio stations from the Subsonic API.
+    ///
+    /// NOTE from Claude: Built ahead of Gemini's Phase 4 work. This follows
+    /// the exact same auth+construct pattern as genres_api/playlists_api.
+    pub async fn radios_api(&self) -> Result<crate::services::api::radios::RadiosApiService> {
+        let client = self
+            .auth_gateway
+            .get_client()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("Not authenticated"))?;
+        let server_url = self.auth_gateway.get_server_url().await;
+        let subsonic_credential = self.auth_gateway.get_subsonic_credential().await;
+        Ok(
+            crate::services::api::radios::RadiosApiService::new_with_client(
+                client,
+                server_url,
+                subsonic_credential,
+            ),
+        )
+    }
+
     /// Construct an authenticated `SimilarApiService`.
     ///
     /// Callers inside `shell_task` closures can use `shell.similar_api().await?`
@@ -666,6 +690,14 @@ impl AppService {
         let songs_service = self.songs_api().await?;
         let (songs, _) = songs_service.load_songs_by_genre(genre_name).await?;
         Ok(songs)
+    }
+
+    /// Load all internet radio stations via the Radios API.
+    pub async fn load_radio_stations(
+        &self,
+    ) -> Result<Vec<crate::types::radio_station::RadioStation>> {
+        let radios_service = self.radios_api().await?;
+        radios_service.load_radio_stations().await
     }
 
     /// Load all songs for a playlist via the Playlists API.

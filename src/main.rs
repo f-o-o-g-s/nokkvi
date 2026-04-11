@@ -56,6 +56,7 @@ pub enum View {
     Artists,
     Genres,
     Playlists,
+    Radios,
     Settings,
 }
 
@@ -78,6 +79,7 @@ pub struct Nokkvi {
     pub playlists_page: views::PlaylistsPage,
     pub queue_page: views::QueuePage,
     pub songs_page: views::SongsPage,
+    pub radios_page: views::RadiosPage,
     pub settings_page: views::SettingsPage,
     pub similar_page: views::SimilarPage,
 
@@ -117,6 +119,7 @@ pub struct Nokkvi {
     // -------------------------------------------------------------------------
     // Consolidated State Structs
     // -------------------------------------------------------------------------
+    pub active_playback: crate::state::ActivePlayback,
     pub playback: crate::state::PlaybackState,
     pub scrobble: crate::state::ScrobbleState,
     pub modes: crate::state::PlaybackModes,
@@ -259,6 +262,7 @@ impl Default for Nokkvi {
             playlists_page: views::PlaylistsPage::new(),
             queue_page: views::QueuePage::new(),
             songs_page: views::SongsPage::new(),
+            radios_page: views::RadiosPage::new(),
             settings_page: views::SettingsPage::new(),
             similar_page: views::SimilarPage::new(),
             app_service: None,
@@ -291,6 +295,7 @@ impl Default for Nokkvi {
             artwork_resolution: nokkvi_data::types::player_settings::ArtworkResolution::Default,
             server_version: None,
             // Consolidated state structs with defaults
+            active_playback: crate::state::ActivePlayback::default(),
             playback: crate::state::PlaybackState::default(),
             scrobble: crate::state::ScrobbleState::default(),
             modes: crate::state::PlaybackModes::default(),
@@ -336,16 +341,31 @@ impl Default for Nokkvi {
 impl Nokkvi {
     /// Window title — dynamic based on playback state
     pub fn title(&self) -> String {
-        if self.playback.has_track() {
+        if self.active_playback.is_radio() {
             let status = if self.playback.playing {
                 ""
             } else {
                 " (Paused)"
             };
-            format!(
-                "{} - {}{} \u{2014} Nokkvi",
-                self.playback.artist, self.playback.title, status
-            )
+            if let Some(station) = self.active_playback.radio_station() {
+                format!("{}{} \u{2014} Nokkvi", station.name, status)
+            } else {
+                format!("{}{} \u{2014} Nokkvi", self.playback.title, status)
+            }
+        } else if self.playback.has_track() {
+            let status = if self.playback.playing {
+                ""
+            } else {
+                " (Paused)"
+            };
+            if self.playback.artist.is_empty() {
+                format!("{}{} \u{2014} Nokkvi", self.playback.title, status)
+            } else {
+                format!(
+                    "{} - {}{} \u{2014} Nokkvi",
+                    self.playback.artist, self.playback.title, status
+                )
+            }
         } else {
             "Nokkvi".to_string()
         }
@@ -544,6 +564,17 @@ impl Nokkvi {
         )
     }
 
+    /// Filter radio stations based on search query (client-side).
+    /// Returns `Cow::Borrowed` when no search is active (zero-cost).
+    pub fn filter_radio_stations(
+        &self,
+    ) -> std::borrow::Cow<'_, [nokkvi_data::types::radio_station::RadioStation]> {
+        nokkvi_data::utils::search::filter_items(
+            &self.library.radio_stations,
+            &self.radios_page.common.search_query,
+        )
+    }
+
     /// Collect song IDs from the current queue (for dirty detection, save, etc.)
     pub fn queue_song_ids(&self) -> Vec<String> {
         self.library
@@ -591,6 +622,25 @@ impl Nokkvi {
             .set_offset(0, self.library.queue_songs.len());
     }
 
+    /// Sort radio stations based on current sort order (client-side)
+    pub fn sort_radio_stations(&mut self) {
+        let ascending = self.radios_page.common.sort_ascending;
+
+        debug!(
+            " Sorting radios by Name ({})",
+            if ascending { "ASC" } else { "DESC" }
+        );
+
+        self.library.radio_stations.sort_by(|a, b| {
+            let cmp = a.name.to_lowercase().cmp(&b.name.to_lowercase());
+            if ascending { cmp } else { cmp.reverse() }
+        });
+
+        self.radios_page
+            .common
+            .handle_set_offset(0, self.library.radio_stations.len());
+    }
+
     // =========================================================================
     // SECTION: Toast Convenience Methods
     // =========================================================================
@@ -625,6 +675,14 @@ impl Nokkvi {
             msg,
             nokkvi_data::types::toast::ToastLevel::Error,
         ));
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn should_scrobble_current_track(&self) -> bool {
+        self.active_playback.is_queue()
+            && self
+                .scrobble
+                .should_scrobble(self.playback.duration, self.scrobble_threshold)
     }
 }
 

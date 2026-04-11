@@ -8,6 +8,7 @@ pub mod artists;
 pub mod client;
 pub mod genres;
 pub mod playlists;
+pub mod radios;
 pub mod rating;
 pub mod similar;
 pub mod songs;

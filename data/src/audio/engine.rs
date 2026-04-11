@@ -156,10 +156,14 @@ pub struct CustomAudioEngine {
     gapless_transition_info: Arc<tokio::sync::Mutex<Option<GaplessTransitionInfo>>>,
     /// Next track source URL — shared with the decode loop for gapless transitions.
     next_source_shared: Arc<tokio::sync::Mutex<String>>,
+
+    /// Raw ICY-metadata parsed by IcyMetadataReader
+    live_icy_metadata: Arc<tokio::sync::Mutex<Option<String>>>,
 }
 
 impl CustomAudioEngine {
     pub fn new() -> Self {
+        let live_icy_metadata = Arc::new(tokio::sync::Mutex::new(None));
         Self {
             source: String::new(),
             playing: false,
@@ -167,7 +171,9 @@ impl CustomAudioEngine {
             position: 0,
             duration: 0,
             volume: 1.0,
-            decoder: Arc::new(tokio::sync::Mutex::new(AudioDecoder::new())),
+            decoder: Arc::new(tokio::sync::Mutex::new(AudioDecoder::new(
+                live_icy_metadata.clone(),
+            ))),
             next_decoder: Arc::new(tokio::sync::Mutex::new(None)),
             current_format: AudioFormat::invalid(),
             next_format: AudioFormat::invalid(),
@@ -192,6 +198,7 @@ impl CustomAudioEngine {
             crossfade_incoming_source: String::new(),
             gapless_transition_info: Arc::new(tokio::sync::Mutex::new(None)),
             next_source_shared: Arc::new(tokio::sync::Mutex::new(String::new())),
+            live_icy_metadata,
         }
     }
 
@@ -213,18 +220,21 @@ impl CustomAudioEngine {
             self.stop().await;
         }
 
-        // CRITICAL FIX: Create a FRESH decoder instead of reusing the old one.
-        // The old decoding loop may still be holding a lock on the old decoder
-        // (blocked in read_buffer doing network I/O). By creating a new decoder,
-        // we avoid the lock contention entirely. The old loop will exit when it
-        // sees a generation mismatch, and the old decoder will be dropped.
-        trace!(" AudioEngine: creating fresh decoder for new source");
-        self.decoder = Arc::new(tokio::sync::Mutex::new(AudioDecoder::new()));
-
-        // Reset live bitrate, sample rate, and decoder EOF for new track
+        // CRITICAL FIX: Reset fields *BEFORE* creating AudioDecoder.
+        // During `AudioDecoder::new`, Symphonia's probe reads the first chunk of the stream synchronously.
+        // If this stream contains ICY metadata, the callback fires during `new()` and populates `live_icy_metadata`.
+        // If we reset this to `None` after `new()`, we will permanently discard the first stream title!
         self.live_bitrate.store(0, Ordering::Relaxed);
         self.live_sample_rate.store(0, Ordering::Relaxed);
         self.decoder_eof.store(false, Ordering::Release);
+        if let Ok(mut guard) = self.live_icy_metadata.try_lock() {
+            *guard = None;
+        }
+
+        trace!(" AudioEngine: creating fresh decoder for new source");
+        self.decoder = Arc::new(tokio::sync::Mutex::new(AudioDecoder::new(
+            self.live_icy_metadata.clone(),
+        )));
 
         self.duration = 0;
         self.position = 0;
@@ -232,6 +242,14 @@ impl CustomAudioEngine {
         self.source = source;
         self.source_generation.fetch_add(1, Ordering::Release);
         trace!(" AudioEngine: source set successfully");
+    }
+
+    /// Get current parsed ICY-metadata from the stream buffer
+    pub fn live_icy_metadata(&self) -> Option<String> {
+        self.live_icy_metadata
+            .try_lock()
+            .ok()
+            .and_then(|guard| guard.clone())
     }
 
     /// Get playing state
@@ -465,15 +483,12 @@ impl CustomAudioEngine {
 
         // Spawn decoding task
         tokio::spawn(async move {
-            let mut loop_count: u64 = 0;
-            let mut last_heartbeat = std::time::Instant::now();
-
-            // Backpressure: dual-watermark strategy
-            // HIGH_WATERMARK: Stop fetching when buffer is "full enough"
-            // LOW_WATERMARK: Resume fetching when buffer drops below this threshold
-            // When crossfade is enabled, scale watermarks so the buffer holds
-            // enough audio for the full crossfade fade-out.
+            let mut loop_count = 0;
             let mut backpressure_active = false;
+            let mut stream_type_checked = false;
+            let mut stream_is_infinite_cached = false;
+            let mut radio_music_jitter_filled = false;
+            let mut last_heartbeat = std::time::Instant::now();
 
             loop {
                 loop_count += 1;
@@ -512,7 +527,12 @@ impl CustomAudioEngine {
                 let cf_ms = crossfade_duration_shared.load(Ordering::Relaxed);
                 let (high_watermark, low_watermark) = compute_watermarks(cf_ms);
 
-                if buffer_count >= high_watermark {
+                // CRITICAL FIX: NEVER apply backpressure to Infinite Streams (Internet Radio)!
+                // Radio streams send data precisely at 1x speed. If we apply backpressure by sleeping
+                // the decode async thread, we completely neglect the raw TCP socket! When it wakes up,
+                // the TCP Zero Window will cause Icecast dropping and 1-2 second connection delays.
+                // We MUST let Symphonia read the Icecast stream continuously to maintain network stability!
+                if buffer_count >= high_watermark && !stream_is_infinite_cached {
                     if !backpressure_active {
                         tracing::trace!(
                             "⏸️ [DECODE LOOP] Backpressure ON: buffer count {} >= {} (high watermark, cf={}ms)",
@@ -571,8 +591,14 @@ impl CustomAudioEngine {
                     live_bitrate.store(current_bitrate, Ordering::Relaxed);
                 }
 
-                // Check EOF before dropping decoder lock
+                // Check stream type once and cache it so we can safely disable backpressure.
+                if !stream_type_checked {
+                    stream_is_infinite_cached = decoder_guard.is_infinite_stream();
+                    stream_type_checked = true;
+                }
+
                 let is_eof = decoder_guard.is_eof();
+                let is_infinite = stream_is_infinite_cached;
 
                 if buffer.is_valid() && buffer.byte_count() > 0 {
                     // Release decoder lock before acquiring renderer lock
@@ -580,10 +606,79 @@ impl CustomAudioEngine {
 
                     // Convert S16 bytes to f32 and write to ring buffer
                     let samples = s16_bytes_to_f32(buffer.data());
-                    let mut renderer_guard = renderer.lock();
-                    renderer_guard.write_samples(&samples);
-                    drop(renderer_guard);
+
+                    let mut samples_to_write = samples.as_slice();
+                    while !samples_to_write.is_empty() {
+                        if decode_gen.load(Ordering::Acquire) != my_gen {
+                            break;
+                        }
+
+                        let written = {
+                            let mut renderer_guard = renderer.lock();
+                            renderer_guard.write_samples(samples_to_write)
+                        };
+
+                        if written < samples_to_write.len() {
+                            samples_to_write = &samples_to_write[written..];
+                            tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
+                        } else {
+                            break;
+                        }
+                    }
+
+                    // Radio jitter buffer: initial prebuffer only, then never pause.
+                    // SomaFM sends at exactly 1.0× realtime, so the buffer level
+                    // will hover near the consumption rate. Pausing playback to
+                    // re-buffer causes audible gaps — instead, let transient
+                    // underruns produce natural silence via try_pop().unwrap_or(0.0).
+                    if is_infinite && !radio_music_jitter_filled {
+                        let buffered_samples = renderer.lock().buffer_count();
+                        if buffered_samples < 441_000 {
+                            // Enforce pause continuously until full. This prevents front-end
+                            // UI events (like `engine.play()`) from unpausing prematurely.
+                            renderer.lock().pause();
+                        } else {
+                            tracing::info!(
+                                "📻 [DECODE LOOP] Pre-buffered 5+ seconds of radio, starting playback."
+                            );
+                            radio_music_jitter_filled = true;
+                            renderer.lock().start();
+                        }
+                    }
+
+                    if last_heartbeat.elapsed().as_secs() >= 5 {
+                        let guard = renderer.lock();
+                        let buffered = guard.buffer_count();
+                        let (ur_count, ur_peak, ur_total) = guard.underrun_stats();
+                        drop(guard);
+                        let sec_rem = buffered as f32 / 88_200.0;
+                        let peak_ms = ur_peak as f32 / 88.2;
+                        tracing::info!(
+                            "🔌 [STREAM HEALTH] Buffer: {} ({:.1}s) | Underruns: {} (peak {:.0}ms) | Silence: {} | HW: {} LW: {}",
+                            buffered,
+                            sec_rem,
+                            ur_count,
+                            peak_ms,
+                            ur_total,
+                            high_watermark,
+                            low_watermark,
+                        );
+                        last_heartbeat = std::time::Instant::now();
+                    }
                 } else if is_eof {
+                    // =========================================================
+                    // RADIO STREAM EOF: connection dropped or server closed.
+                    // Skip gapless transition — radio has no "next track".
+                    // =========================================================
+                    if is_infinite {
+                        tracing::warn!(
+                            "📻 [DECODE LOOP] Radio stream ended (connection dropped or server closed)"
+                        );
+                        drop(decoder_guard);
+                        decoder_eof.store(true, Ordering::Release);
+                        break;
+                    }
+
                     // =========================================================
                     // GAPLESS TRANSITION: try to swap the next decoder inline
                     // =========================================================
@@ -928,7 +1023,7 @@ impl CustomAudioEngine {
         }
 
         // Create and initialize next decoder
-        let mut next_decoder = AudioDecoder::new();
+        let mut next_decoder = AudioDecoder::new(self.live_icy_metadata.clone());
         if next_decoder.init(url).await.is_ok() {
             let incoming_duration = next_decoder.duration();
             self.next_format = next_decoder.format().clone();

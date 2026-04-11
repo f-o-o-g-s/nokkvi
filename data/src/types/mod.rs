@@ -17,6 +17,7 @@ pub mod playlist_edit;
 pub mod progress;
 pub mod queue;
 pub mod queue_sort_mode;
+pub mod radio_station;
 pub mod reactive;
 pub mod settings;
 pub mod song;

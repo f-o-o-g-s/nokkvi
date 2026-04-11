@@ -27,6 +27,10 @@ pub(crate) struct TrackInfoStripData<'a> {
     pub format_suffix: &'a str,
     pub sample_rate: u32,
     pub bitrate: u32,
+    pub radio_name: Option<&'a str>,
+    pub radio_url: Option<&'a str>,
+    pub icy_artist: Option<&'a str>,
+    pub icy_title: Option<&'a str>,
 }
 
 /// Labeled metadata field: dimmed label + scrolling marquee value.
@@ -155,6 +159,63 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
 
     // Trailing separator
     if has_prev_field {
+        center_row = center_row.push(info_sep());
+    }
+
+    if let Some(radio_name) = data.radio_name {
+        // OVERRIDE: If radio mode is active, display radio station info
+        center_row = iced::widget::Row::new()
+            .spacing(6)
+            .align_y(Alignment::Center);
+        center_row = center_row.push(info_sep());
+
+        let icon_widget = crate::embedded_svg::svg_widget("assets/icons/radio-tower.svg")
+            .width(Length::Fixed(12.0))
+            .height(Length::Fixed(12.0))
+            .style(|_theme, _status| iced::widget::svg::Style {
+                color: Some(theme::fg4()),
+            });
+
+        center_row = center_row.push(icon_widget);
+
+        center_row = center_row.push(
+            text(radio_name.to_string())
+                .size(11.0)
+                .font(Font {
+                    weight: Weight::Bold,
+                    ..theme::ui_font()
+                })
+                .color(theme::now_playing_color()),
+        );
+
+        let icy_title = data.icy_title.unwrap_or("");
+        let icy_artist = data.icy_artist.unwrap_or("");
+
+        if !icy_title.is_empty() {
+            center_row = center_row.push(info_sep());
+            center_row = center_row.push(info_field(
+                "playing:",
+                icy_title.to_string(),
+                theme::accent_bright(),
+            ));
+        }
+
+        if !icy_artist.is_empty() {
+            center_row = center_row.push(info_sep());
+            center_row = center_row.push(info_field(
+                "artist:",
+                icy_artist.to_string(),
+                theme::selected_color(),
+            ));
+        }
+
+        if icy_title.is_empty()
+            && icy_artist.is_empty()
+            && let Some(url) = data.radio_url
+        {
+            center_row = center_row.push(info_sep());
+            center_row = center_row.push(info_field("url:", url.to_string(), theme::fg2()));
+        }
         center_row = center_row.push(info_sep());
     }
 

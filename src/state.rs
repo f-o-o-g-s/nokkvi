@@ -60,6 +60,57 @@ pub struct CrossPaneDragState {
 // Playback State
 // ============================================================================
 
+/// What is currently driving audio output.
+/// `Queue` = normal library playback. `Radio` = direct internet radio stream.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ActivePlayback {
+    #[default]
+    Queue,
+    Radio(RadioPlaybackState),
+}
+
+/// Transient state for an active radio stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RadioPlaybackState {
+    pub station: nokkvi_data::types::radio_station::RadioStation,
+    pub icy_artist: Option<String>,
+    pub icy_title: Option<String>,
+}
+
+impl ActivePlayback {
+    pub fn is_radio(&self) -> bool {
+        matches!(self, Self::Radio(_))
+    }
+
+    pub fn is_queue(&self) -> bool {
+        matches!(self, Self::Queue)
+    }
+
+    pub fn radio_station(&self) -> Option<&nokkvi_data::types::radio_station::RadioStation> {
+        match self {
+            Self::Radio(state) => Some(&state.station),
+            _ => None,
+        }
+    }
+
+    /// Extract standard metadata for the Top Nav bar, overriding with
+    /// radio metadata if a radio stream is active.
+    pub fn nav_metadata(&self, fallback: &PlaybackState) -> (String, String, String) {
+        match self {
+            Self::Radio(state) => (
+                state.station.name.clone(),
+                "Radio".to_string(),
+                state.station.stream_url.clone(),
+            ),
+            Self::Queue => (
+                fallback.title.clone(),
+                fallback.artist.clone(),
+                fallback.album.clone(),
+            ),
+        }
+    }
+}
+
 /// Playback-related state for the player bar
 #[derive(Debug, Clone)]
 pub struct PlaybackState {
@@ -389,6 +440,7 @@ pub struct LibraryData {
         nokkvi_data::backend::playlists::PlaylistUIViewData,
     >,
     pub queue_songs: Vec<nokkvi_data::backend::queue::QueueSongUIViewData>,
+    pub radio_stations: Vec<nokkvi_data::types::radio_station::RadioStation>,
     /// Target count during progressive queue loading (e.g., 12036 while loading).
     /// When `Some`, the queue header shows "X of Y songs" as pages are appended.
     pub queue_loading_target: Option<usize>,

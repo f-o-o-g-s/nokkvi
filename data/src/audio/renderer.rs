@@ -330,9 +330,6 @@ impl AudioRenderer {
 
     /// Pause playback.
     pub fn pause(&mut self) {
-        if !self.playing {
-            return;
-        }
         self.paused = true;
         // Pause the streaming source — it will emit silence and stop
         // counting samples, so position freezes correctly.
@@ -452,6 +449,14 @@ impl AudioRenderer {
         self.primary_stream.as_ref().map_or(0, |s| {
             crate::audio::rodio_output::RING_BUFFER_CAPACITY.saturating_sub(s.available_space())
         })
+    }
+
+    /// Get underrun diagnostics from the primary stream.
+    /// Returns `(count, peak_samples, total_silence)`.
+    pub fn underrun_stats(&self) -> (u64, u64, u64) {
+        self.primary_stream
+            .as_ref()
+            .map_or((0, 0, 0), |s| s.handle.underrun_stats())
     }
 
     /// Set visualizer callback. Works even if the output doesn't exist yet

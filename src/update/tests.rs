@@ -228,6 +228,7 @@ fn make_playback_update() -> PlaybackStateUpdate {
         format_suffix: "flac".to_string(),
         sample_rate: 44100,
         bitrate: 1411,
+        live_icy_metadata: None,
     }
 }
 
@@ -2246,4 +2247,39 @@ fn toggle_light_mode_persists_to_settings_key() {
         "light_mode missing from [settings]. Current content:\n{content}"
     );
     assert!(doc["settings"]["light_mode"].as_bool().unwrap());
+}
+
+#[test]
+fn test_handle_radio_metadata_update() {
+    let mut app = test_app();
+
+    // Ensure we start with Queue playback
+    assert!(app.active_playback.is_queue());
+
+    // Switch to Radio playback
+    let station = nokkvi_data::types::radio_station::RadioStation {
+        id: "radio_1".into(),
+        name: "Test Radio".into(),
+        stream_url: "http://test".into(),
+        home_page_url: None,
+    };
+    app.active_playback = crate::state::ActivePlayback::Radio(crate::state::RadioPlaybackState {
+        station,
+        icy_artist: None,
+        icy_title: None,
+    });
+
+    // Update metadata
+    let _ = app.handle_radio_metadata_update(
+        Some("Test Artist".to_string()),
+        Some("Test Song".to_string()),
+    );
+
+    // Verify state mutation
+    if let crate::state::ActivePlayback::Radio(state) = &app.active_playback {
+        assert_eq!(state.icy_artist.as_deref(), Some("Test Artist"));
+        assert_eq!(state.icy_title.as_deref(), Some("Test Song"));
+    } else {
+        panic!("Should still be in Radio playback state");
+    }
 }

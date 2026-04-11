@@ -80,6 +80,7 @@ pub struct ProgressBar<'a, Message> {
     on_seek: Box<dyn Fn(f32) -> Message + 'a>,
     width: Length,
     height: f32,
+    hide_handle: bool,
     overlay_segments: Vec<OverlaySegment>,
 }
 
@@ -95,6 +96,7 @@ impl<'a, Message> ProgressBar<'a, Message> {
             on_seek: Box::new(on_seek),
             width: Length::Fill,
             height: 24.0,
+            hide_handle: false,
             overlay_segments: Vec::new(),
         }
     }
@@ -102,6 +104,11 @@ impl<'a, Message> ProgressBar<'a, Message> {
     #[allow(clippy::wrong_self_convention)] // Builder pattern setter, not an accessor
     pub fn is_playing(mut self, is_playing: bool) -> Self {
         self.is_playing = is_playing;
+        self
+    }
+
+    pub fn hide_handle(mut self, hide: bool) -> Self {
+        self.hide_handle = hide;
         self
     }
 
@@ -248,6 +255,11 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
         // If playing, request continuous redraws for smooth interpolation
         if self.is_playing && !state.is_dragging {
             shell.request_redraw();
+        }
+
+        // If handle is hidden, disable mouse interaction
+        if self.hide_handle {
+            return;
         }
 
         match event {
@@ -514,206 +526,209 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
                 render_segments(renderer, text_x - offset + cycle_px);
             }
         }
-        // Handle + grip in a separate layer so it renders ON TOP of overlay text.
-        // (Iced's wgpu renderer renders quads before text within the same layer,
-        //  so a new layer is needed to ensure the handle appears above the text.)
-        //
-        // Expand the clip rect downward so the handle's drop shadow
-        // (offset 2.5 + blur 3.0 = 5.5px below bounds) is not clipped.
-        let shadow_overflow = 6.0; // ceil(2.5 + 3.0)
-        let handle_clip = Rectangle {
-            x: bounds.x,
-            y: bounds.y,
-            width: bounds.width,
-            height: bounds.height + shadow_overflow,
-        };
-        renderer.with_layer(handle_clip, |renderer| {
-            // Handle background + borders
-            let handle_bounds = Rectangle {
-                x: handle_x,
+
+        if !self.hide_handle {
+            // Handle + grip in a separate layer so it renders ON TOP of overlay text.
+            // (Iced's wgpu renderer renders quads before text within the same layer,
+            //  so a new layer is needed to ensure the handle appears above the text.)
+            //
+            // Expand the clip rect downward so the handle's drop shadow
+            // (offset 2.5 + blur 3.0 = 5.5px below bounds) is not clipped.
+            let shadow_overflow = 6.0; // ceil(2.5 + 3.0)
+            let handle_clip = Rectangle {
+                x: bounds.x,
                 y: bounds.y,
-                width: handle_width,
-                height: bounds.height,
+                width: bounds.width,
+                height: bounds.height + shadow_overflow,
             };
-            let shadow_color = Color::from_rgba(0.0, 0.0, 0.0, 0.7);
+            renderer.with_layer(handle_clip, |renderer| {
+                // Handle background + borders
+                let handle_bounds = Rectangle {
+                    x: handle_x,
+                    y: bounds.y,
+                    width: handle_width,
+                    height: bounds.height,
+                };
+                let shadow_color = Color::from_rgba(0.0, 0.0, 0.0, 0.7);
 
-            if is_rounded {
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds: handle_bounds,
-                        border: iced::Border {
-                            color: accent_top_left,
-                            width: border_width,
-                            radius,
+                if is_rounded {
+                    renderer.fill_quad(
+                        renderer::Quad {
+                            bounds: handle_bounds,
+                            border: iced::Border {
+                                color: accent_top_left,
+                                width: border_width,
+                                radius,
+                            },
+                            shadow: Shadow {
+                                color: shadow_color,
+                                offset: Vector::new(0.0, 2.5),
+                                blur_radius: 3.0,
+                            },
+                            ..Default::default()
                         },
-                        shadow: Shadow {
-                            color: shadow_color,
-                            offset: Vector::new(0.0, 2.5),
-                            blur_radius: 3.0,
-                        },
-                        ..Default::default()
-                    },
-                    accent,
-                );
-            } else {
-                // Handle background with integrated shadow
-                // IMPORTANT: Shadow must be on a quad with a real fill color, not TRANSPARENT.
-                // Iced's WGSL shader blends shadow with quad_color, and using TRANSPARENT
-                // causes edge artifacts (white pixels) in light mode.
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds: Rectangle {
-                            x: handle_x + border_width,
-                            y: bounds.y + border_width,
-                            width: handle_width - border_width * 2.0,
-                            height: bounds.height - border_width * 2.0,
-                        },
-                        shadow: Shadow {
-                            color: shadow_color,
-                            offset: Vector::new(0.0, 2.5),
-                            blur_radius: 3.0,
-                        },
-                        ..Default::default()
-                    },
-                    accent,
-                );
-
-                // Handle top border (dark - 3D raised effect)
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds: Rectangle {
-                            x: handle_x,
-                            y: bounds.y,
-                            width: handle_width,
-                            height: border_width,
-                        },
-                        ..Default::default()
-                    },
-                    accent_top_left,
-                );
-
-                // Handle left border (dark - 3D raised effect)
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds: Rectangle {
-                            x: handle_x,
-                            y: bounds.y,
-                            width: border_width,
-                            height: bounds.height,
-                        },
-                        ..Default::default()
-                    },
-                    accent_top_left,
-                );
-
-                // Handle bottom border - use base accent (not lightened) to avoid white line
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds: Rectangle {
-                            x: handle_x,
-                            y: bounds.y + bounds.height - border_width,
-                            width: handle_width,
-                            height: border_width,
-                        },
-                        ..Default::default()
-                    },
-                    accent,
-                );
-
-                // Handle right border (shadow - 3D raised effect)
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds: Rectangle {
-                            x: handle_x + handle_width - border_width,
-                            y: bounds.y,
-                            width: border_width,
-                            height: bounds.height,
-                        },
-                        ..Default::default()
-                    },
-                    accent_bottom_right,
-                );
-            }
-
-            // Grip groove (centered in handle)
-            if is_rounded {
-                // Rounded mode: Knurled vertical pill ridges
-                let num_ridges = 4;
-                let ridge_width = 2.0;
-                let ridge_spacing = 4.0; // 2px ridge + 2px gap
-                let total_grip_width = (num_ridges as f32) * ridge_spacing - 2.0;
-                let start_x = handle_x + (handle_width - total_grip_width) / 2.0;
-
-                // Taller pill ridges
-                let grip_padding_y = 6.0;
-                let grip_height = bounds.height - grip_padding_y * 2.0;
-                let grip_y = bounds.y + grip_padding_y;
-
-                for i in 0..num_ridges {
-                    let ridge_x = start_x + (i as f32) * ridge_spacing;
-
+                        accent,
+                    );
+                } else {
+                    // Handle background with integrated shadow
+                    // IMPORTANT: Shadow must be on a quad with a real fill color, not TRANSPARENT.
+                    // Iced's WGSL shader blends shadow with quad_color, and using TRANSPARENT
+                    // causes edge artifacts (white pixels) in light mode.
                     renderer.fill_quad(
                         renderer::Quad {
                             bounds: Rectangle {
-                                x: ridge_x,
-                                y: grip_y,
-                                width: ridge_width,
-                                height: grip_height,
+                                x: handle_x + border_width,
+                                y: bounds.y + border_width,
+                                width: handle_width - border_width * 2.0,
+                                height: bounds.height - border_width * 2.0,
                             },
-                            border: iced::Border {
-                                radius,
+                            shadow: Shadow {
+                                color: shadow_color,
+                                offset: Vector::new(0.0, 2.5),
+                                blur_radius: 3.0,
+                            },
+                            ..Default::default()
+                        },
+                        accent,
+                    );
+
+                    // Handle top border (dark - 3D raised effect)
+                    renderer.fill_quad(
+                        renderer::Quad {
+                            bounds: Rectangle {
+                                x: handle_x,
+                                y: bounds.y,
+                                width: handle_width,
+                                height: border_width,
+                            },
+                            ..Default::default()
+                        },
+                        accent_top_left,
+                    );
+
+                    // Handle left border (dark - 3D raised effect)
+                    renderer.fill_quad(
+                        renderer::Quad {
+                            bounds: Rectangle {
+                                x: handle_x,
+                                y: bounds.y,
+                                width: border_width,
+                                height: bounds.height,
+                            },
+                            ..Default::default()
+                        },
+                        accent_top_left,
+                    );
+
+                    // Handle bottom border - use base accent (not lightened) to avoid white line
+                    renderer.fill_quad(
+                        renderer::Quad {
+                            bounds: Rectangle {
+                                x: handle_x,
+                                y: bounds.y + bounds.height - border_width,
+                                width: handle_width,
+                                height: border_width,
+                            },
+                            ..Default::default()
+                        },
+                        accent,
+                    );
+
+                    // Handle right border (shadow - 3D raised effect)
+                    renderer.fill_quad(
+                        renderer::Quad {
+                            bounds: Rectangle {
+                                x: handle_x + handle_width - border_width,
+                                y: bounds.y,
+                                width: border_width,
+                                height: bounds.height,
+                            },
+                            ..Default::default()
+                        },
+                        accent_bottom_right,
+                    );
+                }
+
+                // Grip groove (centered in handle)
+                if is_rounded {
+                    // Rounded mode: Knurled vertical pill ridges
+                    let num_ridges = 4;
+                    let ridge_width = 2.0;
+                    let ridge_spacing = 4.0; // 2px ridge + 2px gap
+                    let total_grip_width = (num_ridges as f32) * ridge_spacing - 2.0;
+                    let start_x = handle_x + (handle_width - total_grip_width) / 2.0;
+
+                    // Taller pill ridges
+                    let grip_padding_y = 6.0;
+                    let grip_height = bounds.height - grip_padding_y * 2.0;
+                    let grip_y = bounds.y + grip_padding_y;
+
+                    for i in 0..num_ridges {
+                        let ridge_x = start_x + (i as f32) * ridge_spacing;
+
+                        renderer.fill_quad(
+                            renderer::Quad {
+                                bounds: Rectangle {
+                                    x: ridge_x,
+                                    y: grip_y,
+                                    width: ridge_width,
+                                    height: grip_height,
+                                },
+                                border: iced::Border {
+                                    radius,
+                                    ..Default::default()
+                                },
                                 ..Default::default()
                             },
-                            ..Default::default()
-                        },
-                        grip_top_left,
-                    );
-                }
-            } else {
-                // Non-rounded mode: Knurled vertical ridges
-                let num_ridges = 5;
-                let ridge_spacing = 3.0; // 2px ridge + 1px gap
-                let total_grip_width = (num_ridges as f32) * ridge_spacing - 1.0;
-                let start_x = handle_x + (handle_width - total_grip_width) / 2.0;
+                            grip_top_left,
+                        );
+                    }
+                } else {
+                    // Non-rounded mode: Knurled vertical ridges
+                    let num_ridges = 5;
+                    let ridge_spacing = 3.0; // 2px ridge + 1px gap
+                    let total_grip_width = (num_ridges as f32) * ridge_spacing - 1.0;
+                    let start_x = handle_x + (handle_width - total_grip_width) / 2.0;
 
-                // Make the ridges taller than the old single groove
-                let grip_padding_y = 6.0;
-                let grip_height = bounds.height - grip_padding_y * 2.0;
-                let grip_y = bounds.y + grip_padding_y;
+                    // Make the ridges taller than the old single groove
+                    let grip_padding_y = 6.0;
+                    let grip_height = bounds.height - grip_padding_y * 2.0;
+                    let grip_y = bounds.y + grip_padding_y;
 
-                for i in 0..num_ridges {
-                    let ridge_x = start_x + (i as f32) * ridge_spacing;
+                    for i in 0..num_ridges {
+                        let ridge_x = start_x + (i as f32) * ridge_spacing;
 
-                    // Ridge left edge (light - raised effect)
-                    renderer.fill_quad(
-                        renderer::Quad {
-                            bounds: Rectangle {
-                                x: ridge_x,
-                                y: grip_y,
-                                width: 1.0,
-                                height: grip_height,
+                        // Ridge left edge (light - raised effect)
+                        renderer.fill_quad(
+                            renderer::Quad {
+                                bounds: Rectangle {
+                                    x: ridge_x,
+                                    y: grip_y,
+                                    width: 1.0,
+                                    height: grip_height,
+                                },
+                                ..Default::default()
                             },
-                            ..Default::default()
-                        },
-                        grip_top_left,
-                    );
+                            grip_top_left,
+                        );
 
-                    // Ridge right edge (dark - raised effect)
-                    renderer.fill_quad(
-                        renderer::Quad {
-                            bounds: Rectangle {
-                                x: ridge_x + 1.0,
-                                y: grip_y,
-                                width: 1.0,
-                                height: grip_height,
+                        // Ridge right edge (dark - raised effect)
+                        renderer.fill_quad(
+                            renderer::Quad {
+                                bounds: Rectangle {
+                                    x: ridge_x + 1.0,
+                                    y: grip_y,
+                                    width: 1.0,
+                                    height: grip_height,
+                                },
+                                ..Default::default()
                             },
-                            ..Default::default()
-                        },
-                        grip_bottom_right,
-                    );
+                            grip_bottom_right,
+                        );
+                    }
                 }
-            }
-        }); // end handle layer
+            }); // end handle layer
+        }
 
         // Tooltip is now drawn via overlay() for proper z-ordering
     }
@@ -726,6 +741,10 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
         _viewport: &Rectangle,
         _renderer: &iced::Renderer,
     ) -> mouse::Interaction {
+        if self.hide_handle {
+            return mouse::Interaction::default();
+        }
+
         let state = tree.state.downcast_ref::<State>();
 
         if state.is_dragging {

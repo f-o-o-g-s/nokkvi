@@ -35,6 +35,9 @@ impl Nokkvi {
             View::Playlists if self.library.playlists.is_empty() => {
                 Task::done(Message::LoadPlaylists)
             }
+            View::Radios if self.library.radio_stations.is_empty() => {
+                Task::done(Message::LoadRadioStations)
+            }
             View::Queue => Task::done(Message::LoadQueue), // Always reload queue to reflect changes
             View::Settings => Task::none(),                // Settings don't need data loading
             // Data already loaded — re-prefetch artwork for the current slot_count
@@ -331,6 +334,9 @@ impl Nokkvi {
             View::Playlists => Task::done(Message::Playlists(
                 views::PlaylistsMessage::SearchQueryChanged(query),
             )),
+            View::Radios => Task::done(Message::Radios(views::RadiosMessage::SearchQueryChanged(
+                query,
+            ))),
             View::Settings => Task::none(),
         };
 

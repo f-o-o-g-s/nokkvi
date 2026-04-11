@@ -70,6 +70,7 @@ mod player_bar;
 mod playlists;
 mod progressive_queue;
 mod queue;
+mod radios;
 mod scrobbling;
 mod settings;
 mod similar;
@@ -273,6 +274,7 @@ impl Nokkvi {
             // Data Loading: Playlists
             // -----------------------------------------------------------------
             Message::LoadPlaylists => self.handle_load_playlists(),
+            Message::LoadRadioStations => self.handle_load_radio_stations(),
             Message::PlaylistMutated(mutation) => {
                 // When creating/overwriting a playlist from the queue, set the
                 // playlist context header so the queue shows the same header bar
@@ -582,6 +584,9 @@ impl Nokkvi {
                     PlaybackMessage::InitializeScrobbleState(song_id) => {
                         self.handle_initialize_scrobble_state(song_id)
                     }
+                    PlaybackMessage::RadioMetadataUpdate(artist, title) => {
+                        self.handle_radio_metadata_update(artist, title)
+                    }
                 }
             }
             Message::ViewPreferencesLoaded(prefs) => self.handle_view_preferences_loaded(prefs),
@@ -683,6 +688,7 @@ impl Nokkvi {
                     crate::View::Songs => Task::done(Message::LoadSongs),
                     crate::View::Genres => Task::done(Message::LoadGenres),
                     crate::View::Playlists => Task::done(Message::LoadPlaylists),
+                    crate::View::Radios => Task::done(Message::LoadRadioStations),
                     crate::View::Queue | crate::View::Settings => Task::none(),
                 },
             },
@@ -757,6 +763,15 @@ impl Nokkvi {
                     handle_playlists,
                     crate::views::PlaylistsMessage::SlotListScrollSeek(_),
                     View::Playlists
+                )
+            }
+            Message::Radios(msg) => {
+                dispatch_view_with_seek!(
+                    self,
+                    msg,
+                    handle_radios,
+                    crate::views::RadiosMessage::SlotListScrollSeek(_),
+                    View::Radios
                 )
             }
             Message::Settings(msg) => self.handle_settings(msg),

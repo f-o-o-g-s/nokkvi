@@ -77,6 +77,7 @@ impl Nokkvi {
             View::Genres => Some(&self.genres_page),
             View::Playlists => Some(&self.playlists_page),
             View::Queue => Some(&self.queue_page),
+            View::Radios => Some(&self.radios_page),
             View::Settings => None,
         }
     }
@@ -90,6 +91,7 @@ impl Nokkvi {
             View::Genres => Some(&mut self.genres_page),
             View::Playlists => Some(&mut self.playlists_page),
             View::Queue => Some(&mut self.queue_page),
+            View::Radios => Some(&mut self.radios_page),
             View::Settings => None,
         }
     }

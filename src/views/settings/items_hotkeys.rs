@@ -43,6 +43,7 @@ fn hotkey_action_to_key(action: &HotkeyAction) -> &'static str {
         HotkeyAction::SwitchToSongs => "hotkey.switch_to_songs",
         HotkeyAction::SwitchToGenres => "hotkey.switch_to_genres",
         HotkeyAction::SwitchToPlaylists => "hotkey.switch_to_playlists",
+        HotkeyAction::SwitchToRadios => "hotkey.switch_to_radios",
         HotkeyAction::SwitchToSettings => "hotkey.switch_to_settings",
         HotkeyAction::TogglePlay => "hotkey.toggle_play",
         HotkeyAction::ToggleRandom => "hotkey.toggle_random",

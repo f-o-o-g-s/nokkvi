@@ -132,6 +132,13 @@ impl Nokkvi {
                     iced::keyboard::Modifiers::default(),
                 ))
             }
+            View::Radios => {
+                let offset = self.radios_page.common.slot_list.viewport_offset;
+                self.handle_radios(views::RadiosMessage::SlotListSetOffset(
+                    offset,
+                    iced::keyboard::Modifiers::default(),
+                ))
+            }
             View::Settings => Task::none(),
         }
     }
@@ -154,6 +161,7 @@ impl Nokkvi {
             View::Playlists => Task::done(Message::Playlists(
                 views::PlaylistsMessage::SlotListNavigateUp,
             )),
+            View::Radios => Task::done(Message::Radios(views::RadiosMessage::SlotListNavigateUp)),
             View::Settings => Task::done(Message::Settings(views::SettingsMessage::SlotListUp)),
         }
     }
@@ -198,6 +206,7 @@ impl Nokkvi {
             View::Playlists => Task::done(Message::Playlists(
                 views::PlaylistsMessage::SlotListNavigateDown,
             )),
+            View::Radios => Task::done(Message::Radios(views::RadiosMessage::SlotListNavigateDown)),
             View::Settings => Task::done(Message::Settings(views::SettingsMessage::SlotListDown)),
         };
         Task::batch([unfocus_task, nav_task])
@@ -233,6 +242,10 @@ impl Nokkvi {
                     iced::keyboard::Modifiers::default(),
                 ),
             )),
+            View::Radios => Task::done(Message::Radios(views::RadiosMessage::SlotListSetOffset(
+                offset,
+                iced::keyboard::Modifiers::default(),
+            ))),
             View::Settings => Task::done(Message::Settings(
                 views::SettingsMessage::SlotListSetOffset(
                     offset,
@@ -261,6 +274,9 @@ impl Nokkvi {
             )),
             View::Playlists => Task::done(Message::Playlists(
                 views::PlaylistsMessage::SlotListActivateCenter,
+            )),
+            View::Radios => Task::done(Message::Radios(
+                views::RadiosMessage::SlotListActivateCenter,
             )),
             View::Settings => Task::done(Message::Settings(views::SettingsMessage::EditActivate)),
         }

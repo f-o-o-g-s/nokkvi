@@ -35,6 +35,7 @@ pub enum NavView {
     Songs,
     Genres,
     Playlists,
+    Radios,
 }
 
 /// Pure view data passed from root for nav bar rendering
@@ -64,6 +65,10 @@ pub(crate) struct NavBarViewData {
     pub local_music_path: String,
     /// Whether the currently playing track is starred
     pub is_current_starred: bool,
+    pub radio_name: Option<String>,
+    pub radio_url: Option<String>,
+    pub icy_artist: Option<String>,
+    pub icy_title: Option<String>,
 }
 
 /// Messages emitted by nav bar interactions
@@ -95,6 +100,7 @@ pub(crate) const NAV_TABS: &[(&str, &str, NavView)] = &[
     ("Songs", "assets/icons/music.svg", NavView::Songs),
     ("Genres", "assets/icons/tags.svg", NavView::Genres),
     ("Playlists", "assets/icons/list.svg", NavView::Playlists),
+    ("Radio", "assets/icons/radio-tower.svg", NavView::Radios),
 ];
 
 /// Flat-mode tab button style (filled accent background when active, bg0_hard idle).
@@ -394,46 +400,100 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // Layout: │ title: xxx │ artist: xxx │ album: xxx │ [fill] │ FLAC 44.1kHz · 1411kbps │
     let is_playing = data.is_playing;
 
-    let center_section: Element<'static, NavBarMessage> =
-        if !show_title && !show_artist && !show_album {
-            // All metadata hidden (narrow window OR all user toggles off)
-            Space::new().width(Length::Fill).into()
-        } else if !is_playing {
-            // Stopped state - no track loaded
-            container(
-                text("No track loaded")
-                    .size(12.0)
+    let center_section: Element<'static, NavBarMessage> = if !show_title
+        && !show_artist
+        && !show_album
+    {
+        // All metadata hidden (narrow window OR all user toggles off)
+        Space::new().width(Length::Fill).into()
+    } else if !is_playing {
+        // Stopped state - no track loaded
+        container(
+            text("No track loaded")
+                .size(12.0)
+                .font(Font {
+                    weight: Weight::Semibold,
+                    ..theme::ui_font()
+                })
+                .color(theme::fg4())
+                .wrapping(Wrapping::None),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .into()
+    } else {
+        // Playing or paused - build nav-bar-specific track info
+        let title = data.track_title.clone();
+        let artist = data.track_artist.clone();
+        let album = data.track_album.clone();
+
+        let info_sep = info_separator;
+
+        let mut info_row = iced::widget::Row::new()
+            .spacing(6)
+            .align_y(Alignment::Center)
+            .height(Length::Fill);
+
+        // Fill spacer → center the metadata fields
+        info_row = info_row.push(Space::new().width(Length::Fill));
+
+        // Progressive metadata: each field independently toggleable
+        let mut has_prev_field = false;
+
+        if let Some(radio_name) = &data.radio_name {
+            info_row = info_row.push(info_sep());
+
+            let icon_widget = crate::embedded_svg::svg_widget("assets/icons/radio-tower.svg")
+                .width(Length::Fixed(12.0))
+                .height(Length::Fixed(12.0))
+                .style(|_theme, _status| iced::widget::svg::Style {
+                    color: Some(theme::fg4()),
+                });
+
+            info_row = info_row.push(icon_widget);
+
+            info_row = info_row.push(
+                text(radio_name.clone())
+                    .size(11.0)
                     .font(Font {
-                        weight: Weight::Semibold,
+                        weight: Weight::Bold,
                         ..theme::ui_font()
                     })
-                    .color(theme::fg4())
-                    .wrapping(Wrapping::None),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
-            .into()
+                    .color(theme::now_playing_color()),
+            );
+
+            let icy_title = data.icy_title.as_deref().unwrap_or("");
+            let icy_artist = data.icy_artist.as_deref().unwrap_or("");
+
+            if !icy_title.is_empty() {
+                info_row = info_row.push(info_sep());
+                info_row = info_row.push(info_field(
+                    "title:",
+                    icy_title.to_string(),
+                    theme::accent_bright(),
+                ));
+            }
+
+            if !icy_artist.is_empty() {
+                info_row = info_row.push(info_sep());
+                info_row = info_row.push(info_field(
+                    "artist:",
+                    icy_artist.to_string(),
+                    theme::selected_color(),
+                ));
+            }
+
+            if icy_title.is_empty()
+                && icy_artist.is_empty()
+                && let Some(url) = &data.radio_url
+            {
+                info_row = info_row.push(info_sep());
+                info_row = info_row.push(info_field("url:", url.clone(), theme::fg2()));
+            }
+            info_row = info_row.push(info_sep());
         } else {
-            // Playing or paused - build nav-bar-specific track info
-            let title = data.track_title.clone();
-            let artist = data.track_artist.clone();
-            let album = data.track_album.clone();
-
-            let info_sep = info_separator;
-
-            let mut info_row = iced::widget::Row::new()
-                .spacing(6)
-                .align_y(Alignment::Center)
-                .height(Length::Fill);
-
-            // Fill spacer → center the metadata fields
-            info_row = info_row.push(Space::new().width(Length::Fill));
-
-            // Progressive metadata: each field independently toggleable
-            let mut has_prev_field = false;
-
             if show_title {
                 info_row = info_row.push(info_sep());
                 info_row = info_row.push(info_field("title:", title, theme::now_playing_color()));
@@ -455,19 +515,23 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             if has_prev_field {
                 info_row = info_row.push(info_sep());
             }
+        }
 
-            // Fill spacer → push format info away
-            info_row = info_row.push(Space::new().width(Length::Fill));
+        // Fill spacer → push format info away
+        info_row = info_row.push(Space::new().width(Length::Fill));
 
-            // Wrap in mouse_area so clicking metadata navigates to queue
-            let clickable = mouse_area(info_row).on_press(NavBarMessage::StripClicked);
+        let clickable = container(mouse_area(info_row).on_press(NavBarMessage::StripClicked))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_y(Length::Fill);
+
+        let wrapped: Element<'static, NavBarMessage> = if data.radio_name.is_some() {
+            clickable.into()
+        } else {
             let has_local_path = !data.local_music_path.is_empty();
             let is_starred = data.is_current_starred;
-            let wrapped = super::context_menu::context_menu(
-                container(clickable)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .center_y(Length::Fill),
+            super::context_menu::context_menu(
+                clickable,
                 super::context_menu::strip_entries(has_local_path),
                 move |entry, length| {
                     super::context_menu::strip_entry_view(
@@ -477,9 +541,11 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                         NavBarMessage::StripContextAction,
                     )
                 },
-            );
-            wrapped.into()
+            )
+            .into()
         };
+        wrapped
+    };
 
     // -------------------------------------------------------------------------
     // Format Info (independent of metadata — stays visible at narrow widths)

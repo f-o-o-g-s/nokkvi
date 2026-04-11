@@ -53,6 +53,12 @@ pub struct StreamHandle {
     pub(super) stopped: Arc<AtomicBool>,
     /// When true, emit silence without consuming from ring buffer.
     pub(super) paused: Arc<AtomicBool>,
+    /// Total number of underrun events (consecutive silence episodes > 882 samples = 10ms).
+    pub(super) underrun_count: Arc<AtomicU64>,
+    /// Peak consecutive silence samples seen in the worst underrun.
+    pub(super) peak_underrun_samples: Arc<AtomicU64>,
+    /// Total silence samples emitted due to empty ring buffer.
+    pub(super) total_silence_samples: Arc<AtomicU64>,
 }
 
 impl StreamHandle {
@@ -89,6 +95,15 @@ impl StreamHandle {
     /// Reset the samples-consumed counter (e.g., after seek or new track).
     pub fn reset_position(&self) {
         self.samples_consumed.store(0, Ordering::Relaxed);
+    }
+
+    /// Get underrun diagnostics: (count, peak_samples, total_silence).
+    pub fn underrun_stats(&self) -> (u64, u64, u64) {
+        (
+            self.underrun_count.load(Ordering::Relaxed),
+            self.peak_underrun_samples.load(Ordering::Relaxed),
+            self.total_silence_samples.load(Ordering::Relaxed),
+        )
     }
 
     /// Pause the stream — emits silence, position freezes.
@@ -138,6 +153,8 @@ pub struct StreamingSource {
     smoothing_coeff: f32,
     /// Per-stream EQ filter bank. None if EQ is not configured.
     eq: Option<super::eq::EqProcessor>,
+    /// Consecutive silence samples emitted (ring buffer empty). Used for underrun tracking.
+    consecutive_silence: u64,
 }
 
 impl StreamingSource {
@@ -161,6 +178,9 @@ impl StreamingSource {
             samples_consumed: Arc::new(AtomicU64::new(0)),
             stopped: Arc::new(AtomicBool::new(false)),
             paused: Arc::new(AtomicBool::new(false)),
+            underrun_count: Arc::new(AtomicU64::new(0)),
+            peak_underrun_samples: Arc::new(AtomicU64::new(0)),
+            total_silence_samples: Arc::new(AtomicU64::new(0)),
         };
 
         // ~5ms time constant for volume smoothing (avoids crossfade crackle).
@@ -186,6 +206,7 @@ impl StreamingSource {
             smoothed_volume: volume,
             smoothing_coeff,
             eq,
+            consecutive_silence: 0,
         };
 
         (source, handle)
@@ -220,8 +241,11 @@ impl Iterator for StreamingSource {
             return Some(0.0);
         }
 
-        // Pull one sample from the ring buffer (silence if empty — decoder may still be producing)
-        let mut sample = self.consumer.try_pop().unwrap_or(0.0);
+        // Pull one sample from the ring buffer.
+        // If empty, emit silence but do NOT count it — prevents position drift
+        // during transient underruns (especially radio streams at 1.0× rate).
+        let raw = self.consumer.try_pop();
+        let mut sample = raw.unwrap_or(0.0);
 
         if let Some(ref mut eq) = self.eq
             && eq.is_enabled()
@@ -236,11 +260,29 @@ impl Iterator for StreamingSource {
         self.smoothed_volume += self.smoothing_coeff * (target - self.smoothed_volume);
         let output = sample * self.smoothed_volume;
 
-        // Count consumed samples
-        self.handle.samples_consumed.fetch_add(1, Ordering::Relaxed);
+        // Track underruns — count consecutive silence episodes for diagnostics
+        if raw.is_some() {
+            self.handle.samples_consumed.fetch_add(1, Ordering::Relaxed);
+            // End of underrun — record if it was significant (>882 samples ≈ 10ms at 44.1kHz stereo)
+            if self.consecutive_silence > 882 {
+                self.handle.underrun_count.fetch_add(1, Ordering::Relaxed);
+                let prev_peak = self.handle.peak_underrun_samples.load(Ordering::Relaxed);
+                if self.consecutive_silence > prev_peak {
+                    self.handle
+                        .peak_underrun_samples
+                        .store(self.consecutive_silence, Ordering::Relaxed);
+                }
+            }
+            self.consecutive_silence = 0;
+        } else {
+            self.consecutive_silence += 1;
+            self.handle
+                .total_silence_samples
+                .fetch_add(1, Ordering::Relaxed);
+        }
 
-        // Feed visualizer (check shared slot — callback may arrive after stream creation)
-        {
+        // Feed visualizer only with real samples (not silence fill)
+        if raw.is_some() {
             let guard = self.visualizer.read();
             if guard.is_some() {
                 // Feed the pre-volume sample scaled to S16 range for the visualizer FFT.

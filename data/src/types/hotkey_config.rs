@@ -263,6 +263,7 @@ pub enum HotkeyAction {
     SwitchToSongs,
     SwitchToGenres,
     SwitchToPlaylists,
+    SwitchToRadios,
     SwitchToSettings,
 
     // --- Playback ---
@@ -326,6 +327,7 @@ impl HotkeyAction {
         HotkeyAction::SwitchToSongs,
         HotkeyAction::SwitchToGenres,
         HotkeyAction::SwitchToPlaylists,
+        HotkeyAction::SwitchToRadios,
         HotkeyAction::SwitchToSettings,
         // Playback
         HotkeyAction::TogglePlay,
@@ -385,6 +387,7 @@ impl HotkeyAction {
             HotkeyAction::SwitchToSongs => "Songs",
             HotkeyAction::SwitchToGenres => "Genres",
             HotkeyAction::SwitchToPlaylists => "Playlists",
+            HotkeyAction::SwitchToRadios => "Radios",
             HotkeyAction::SwitchToSettings => "Settings",
             HotkeyAction::TogglePlay => "Play / Pause",
             HotkeyAction::ToggleRandom => "Toggle Random",
@@ -432,6 +435,7 @@ impl HotkeyAction {
             HotkeyAction::SwitchToSongs => "Switch to the songs view",
             HotkeyAction::SwitchToGenres => "Switch to the genres view",
             HotkeyAction::SwitchToPlaylists => "Switch to the playlists view",
+            HotkeyAction::SwitchToRadios => "Switch to the internet radios view",
             HotkeyAction::SwitchToSettings => "Open the settings panel",
             HotkeyAction::TogglePlay => "Play or pause the current track",
             HotkeyAction::ToggleRandom => "Toggle random/shuffle mode",
@@ -481,6 +485,7 @@ impl HotkeyAction {
             | HotkeyAction::SwitchToSongs
             | HotkeyAction::SwitchToGenres
             | HotkeyAction::SwitchToPlaylists
+            | HotkeyAction::SwitchToRadios
             | HotkeyAction::SwitchToSettings => "Views",
 
             HotkeyAction::TogglePlay
@@ -533,6 +538,7 @@ impl HotkeyAction {
             HotkeyAction::SwitchToSongs => KeyCombo::key(KeyCode::Char('4')),
             HotkeyAction::SwitchToGenres => KeyCombo::key(KeyCode::Char('5')),
             HotkeyAction::SwitchToPlaylists => KeyCombo::key(KeyCode::Char('6')),
+            HotkeyAction::SwitchToRadios => KeyCombo::key(KeyCode::Char('7')),
             HotkeyAction::SwitchToSettings => KeyCombo::key(KeyCode::Char('`')),
             // Playback
             HotkeyAction::TogglePlay => KeyCombo::key(KeyCode::Space),
@@ -588,6 +594,7 @@ impl HotkeyAction {
             HotkeyAction::SwitchToSongs => "switch_to_songs",
             HotkeyAction::SwitchToGenres => "switch_to_genres",
             HotkeyAction::SwitchToPlaylists => "switch_to_playlists",
+            HotkeyAction::SwitchToRadios => "switch_to_radios",
             HotkeyAction::SwitchToSettings => "switch_to_settings",
             HotkeyAction::TogglePlay => "toggle_play",
             HotkeyAction::ToggleRandom => "toggle_random",
@@ -635,6 +642,7 @@ impl HotkeyAction {
             "switch_to_songs" => HotkeyAction::SwitchToSongs,
             "switch_to_genres" => HotkeyAction::SwitchToGenres,
             "switch_to_playlists" => HotkeyAction::SwitchToPlaylists,
+            "switch_to_radios" => HotkeyAction::SwitchToRadios,
             "switch_to_settings" => HotkeyAction::SwitchToSettings,
             "toggle_play" => HotkeyAction::TogglePlay,
             "toggle_random" => HotkeyAction::ToggleRandom,

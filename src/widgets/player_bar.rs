@@ -60,6 +60,7 @@ pub(crate) struct PlayerBarViewData {
     pub volume: f32,
     pub show_volume_percentage: bool,
     pub has_queue: bool,
+    pub is_radio: bool,
     pub show_sfx_volume_percentage: bool,
     // Mode states
     pub is_random_mode: bool,
@@ -178,7 +179,7 @@ pub(crate) fn player_bar<'a>(
     info_strip: Option<Element<'a, PlayerBarMessage>>,
 ) -> Element<'a, PlayerBarMessage> {
     // Player controls with SVG icons
-    let has_queue = data.has_queue;
+    let has_queue = data.has_queue && !data.is_radio;
     let playback_playing = data.playback_playing;
     let playback_paused = data.playback_paused;
 
@@ -255,20 +256,28 @@ pub(crate) fn player_bar<'a>(
     .spacing(4);
 
     // Progress bar section
-    let pos_str = format!(
-        "{}:{:02}",
-        data.playback_position / 60,
-        data.playback_position % 60
-    );
-    let dur_str = format!(
-        "{}:{:02}",
-        data.playback_duration / 60,
-        data.playback_duration % 60
-    );
-
-    // Use custom progress bar widget with exact 3D styling and click/drag seek
     let duration = data.playback_duration as f32;
     let position = data.playback_position as f32;
+
+    let pos_str = if data.is_radio {
+        "--:--".to_string()
+    } else {
+        format!(
+            "{}:{:02}",
+            position.floor() as u32 / 60,
+            position.floor() as u32 % 60
+        )
+    };
+
+    let dur_str = if data.is_radio {
+        "--:--".to_string()
+    } else {
+        format!(
+            "{}:{:02}",
+            duration.floor() as u32 / 60,
+            duration.floor() as u32 % 60
+        )
+    };
 
     // Build metadata for scrolling overlay on the progress bar track
     // Colored segments matching the track info strip: title/artist/album each get their own color
@@ -325,6 +334,13 @@ pub(crate) fn player_bar<'a>(
             });
         }
 
+        if data.is_radio {
+            meta_segments.push(OverlaySegment {
+                text: " · LIVE STREAM".to_string(),
+                color: theme::accent_bright(),
+            });
+        }
+
         if crate::theme::strip_show_format_info()
             && let Some((left, right)) = super::format_info::format_audio_info_split(
                 &data.format_suffix,
@@ -342,6 +358,7 @@ pub(crate) fn player_bar<'a>(
     let mut custom_progress_bar =
         widgets::progress_bar::progress_bar(position, duration, PlayerBarMessage::Seek)
             .is_playing(data.playback_playing && !data.playback_paused)
+            .hide_handle(data.is_radio)
             .width(Length::Fill)
             .height(24.0);
     if !meta_segments.is_empty() {

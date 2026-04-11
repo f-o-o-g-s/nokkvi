@@ -27,6 +27,7 @@ fn map_nav_bar_message(msg: widgets::NavBarMessage) -> Message {
                 widgets::NavView::Genres => View::Genres,
                 widgets::NavView::Songs => View::Songs,
                 widgets::NavView::Playlists => View::Playlists,
+                widgets::NavView::Radios => View::Radios,
             };
             Message::SwitchView(view)
         }
@@ -77,6 +78,7 @@ impl Nokkvi {
             volume: self.playback.volume,
             show_volume_percentage: self.playback.show_volume_percentage,
             has_queue,
+            is_radio: self.active_playback.is_radio(),
             is_random_mode: self.modes.random,
             is_repeat_mode: self.modes.repeat,
             is_repeat_queue_mode: self.modes.repeat_queue,
@@ -97,6 +99,17 @@ impl Nokkvi {
             bitrate: self.playback.bitrate,
         };
 
+        // Optional radio metadata mapping
+        let (radio_name, radio_url, icy_artist, icy_title) = match &self.active_playback {
+            crate::state::ActivePlayback::Radio(state) => (
+                Some(state.station.name.as_str()),
+                Some(state.station.stream_url.as_str()),
+                state.icy_artist.as_deref(),
+                state.icy_title.as_deref(),
+            ),
+            _ => (None, None, None, None),
+        };
+
         // Shared strip data — borrows playback state, no clones needed.
         let strip_data = widgets::track_info_strip::TrackInfoStripData {
             title: &self.playback.title,
@@ -105,6 +118,10 @@ impl Nokkvi {
             format_suffix: &self.playback.format_suffix,
             sample_rate: self.playback.sample_rate,
             bitrate: self.playback.bitrate,
+            radio_name,
+            radio_url,
+            icy_artist,
+            icy_title,
         };
 
         // Build the player bar info strip if PlayerBar mode is active
@@ -118,24 +135,28 @@ impl Nokkvi {
                 None
             };
 
-        // Wrap player bar strip in context menu for right-click actions
+        // Wrap player bar strip in context menu for right-click actions (if not radio)
         let player_strip: Option<Element<'_, widgets::PlayerBarMessage>> =
             player_strip.map(|strip| {
-                let has_local_path = !self.local_music_path.is_empty();
-                let is_starred = self.is_current_track_starred();
-                widgets::context_menu::context_menu(
-                    strip,
-                    widgets::context_menu::strip_entries(has_local_path),
-                    move |entry, length| {
-                        widgets::context_menu::strip_entry_view(
-                            entry,
-                            length,
-                            is_starred,
-                            widgets::PlayerBarMessage::StripContextAction,
-                        )
-                    },
-                )
-                .into()
+                if radio_name.is_some() {
+                    strip
+                } else {
+                    let has_local_path = !self.local_music_path.is_empty();
+                    let is_starred = self.is_current_track_starred();
+                    widgets::context_menu::context_menu(
+                        strip,
+                        widgets::context_menu::strip_entries(has_local_path),
+                        move |entry, length| {
+                            widgets::context_menu::strip_entry_view(
+                                entry,
+                                length,
+                                is_starred,
+                                widgets::PlayerBarMessage::StripContextAction,
+                            )
+                        },
+                    )
+                    .into()
+                }
             });
 
         // Base layout: nav bar + content + player bar
@@ -149,6 +170,7 @@ impl Nokkvi {
                 View::Genres => widgets::NavView::Genres,
                 View::Songs => widgets::NavView::Songs,
                 View::Playlists => widgets::NavView::Playlists,
+                View::Radios => widgets::NavView::Radios,
             };
             let side_data = widgets::SideNavBarData {
                 current_view: side_nav_view,
@@ -164,21 +186,25 @@ impl Nokkvi {
                     &strip_data,
                     Some(Message::StripClicked),
                 );
-                let has_local_path = !self.local_music_path.is_empty();
-                let is_starred = self.is_current_track_starred();
-                let wrapped: Element<'_, Message> = widgets::context_menu::context_menu(
-                    strip,
-                    widgets::context_menu::strip_entries(has_local_path),
-                    move |entry, length| {
-                        widgets::context_menu::strip_entry_view(
-                            entry,
-                            length,
-                            is_starred,
-                            Message::StripContextAction,
-                        )
-                    },
-                )
-                .into();
+                let wrapped: Element<'_, Message> = if radio_name.is_some() {
+                    strip
+                } else {
+                    let has_local_path = !self.local_music_path.is_empty();
+                    let is_starred = self.is_current_track_starred();
+                    widgets::context_menu::context_menu(
+                        strip,
+                        widgets::context_menu::strip_entries(has_local_path),
+                        move |entry, length| {
+                            widgets::context_menu::strip_entry_view(
+                                entry,
+                                length,
+                                is_starred,
+                                Message::StripContextAction,
+                            )
+                        },
+                    )
+                    .into()
+                };
                 outer = outer.push(wrapped);
                 // Bottom separator to delineate strip from content below
                 outer = outer.push(crate::theme::horizontal_separator::<Message>(1.0));
@@ -482,15 +508,29 @@ impl Nokkvi {
             View::Genres => widgets::NavView::Genres,
             View::Songs => widgets::NavView::Songs,
             View::Playlists => widgets::NavView::Playlists,
+            View::Radios => widgets::NavView::Radios,
         };
 
-        // Create NavBarViewData with current playback state
+        // Create NavBarViewData with current playback state or radio overrides
+        let (track_title, track_artist, track_album) =
+            self.active_playback.nav_metadata(&self.playback);
+
+        let (radio_name, radio_url, icy_artist, icy_title) = match &self.active_playback {
+            crate::state::ActivePlayback::Radio(state) => (
+                Some(state.station.name.clone()),
+                Some(state.station.stream_url.clone()),
+                state.icy_artist.clone(),
+                state.icy_title.clone(),
+            ),
+            _ => (None, None, None, None),
+        };
+
         let nav_bar_data = widgets::NavBarViewData {
             current_view: current_nav_view,
-            track_title: self.playback.title.clone(),
-            track_artist: self.playback.artist.clone(),
-            track_album: self.playback.album.clone(),
-            is_playing: self.playback.has_track(),
+            track_title,
+            track_artist,
+            track_album,
+            is_playing: self.playback.has_track() || self.active_playback.is_radio(),
             format_suffix: self.playback.format_suffix.clone(),
             sample_rate_khz: self.playback.sample_rate as f32 / 1000.0,
             bitrate_kbps: self.playback.bitrate,
@@ -500,6 +540,10 @@ impl Nokkvi {
             settings_open,
             local_music_path: self.local_music_path.clone(),
             is_current_starred: self.is_current_track_starred(),
+            radio_name,
+            radio_url,
+            icy_artist,
+            icy_title,
         };
 
         // Use the nav_bar component, mapping NavBarMessage to app Message
@@ -829,6 +873,18 @@ impl Nokkvi {
                 self.settings_page
                     .view(settings_data)
                     .map(Message::Settings)
+            }
+            View::Radios => {
+                let filtered_stations = self.filter_radio_stations();
+                let view_data = views::RadiosViewData {
+                    stations: filtered_stations,
+                    window_width: self.window.width,
+                    window_height: self.window.height,
+                    scale_factor: self.window.scale_factor,
+                    loading: false, // TODO: add loading state for radio stations
+                    total_station_count: self.library.radio_stations.len(),
+                };
+                self.radios_page.view(view_data).map(Message::Radios)
             }
         }
     }
