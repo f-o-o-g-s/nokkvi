@@ -421,6 +421,7 @@ impl QueuePage {
             None,                             // No refresh button for queue
             data.current_playing_queue_index
                 .map(|idx| QueueMessage::FocusCurrentPlaying(idx, true)),
+            None, // on_add
             true, // show_search
             QueueMessage::SearchQueryChanged,
         );

@@ -35,6 +35,7 @@ pub(crate) fn get_svg(path: &str) -> &'static str {
         "assets/icons/list-minus.svg" => LIST_MINUS,
         "assets/icons/list-music.svg" => LIST_MUSIC,
         "assets/icons/list-plus.svg" => LIST_PLUS,
+        "assets/icons/plus.svg" => PLUS,
         "assets/icons/list.svg" => LIST,
         "assets/icons/menu.svg" => MENU,
         "assets/icons/mic.svg" => MIC,
@@ -165,6 +166,7 @@ const LIST_END: &str = include_str!("../assets/icons/list-end.svg");
 const LIST_MINUS: &str = include_str!("../assets/icons/list-minus.svg");
 const LIST_MUSIC: &str = include_str!("../assets/icons/list-music.svg");
 const LIST_PLUS: &str = include_str!("../assets/icons/list-plus.svg");
+const PLUS: &str = include_str!("../assets/icons/plus.svg");
 const LIST: &str = include_str!("../assets/icons/list.svg");
 const MENU: &str = include_str!("../assets/icons/menu.svg");
 const MIC: &str = include_str!("../assets/icons/mic.svg");
@@ -250,6 +252,7 @@ fn is_registered(path: &str) -> bool {
         "assets/icons/list-minus.svg",
         "assets/icons/list-music.svg",
         "assets/icons/list-plus.svg",
+        "assets/icons/plus.svg",
         "assets/icons/list.svg",
         "assets/icons/menu.svg",
         "assets/icons/mic.svg",
@@ -409,6 +412,7 @@ mod tests {
             "assets/icons/list-minus.svg",
             "assets/icons/list-music.svg",
             "assets/icons/list-plus.svg",
+            "assets/icons/plus.svg",
             "assets/icons/list.svg",
             "assets/icons/menu.svg",
             "assets/icons/mic.svg",

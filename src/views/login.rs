@@ -212,6 +212,7 @@ impl LoginPage {
                     .on_input(LoginMessage::ServerUrlChanged)
                     .padding(12)
                     .width(input_width)
+                    .font(theme::ui_font())
                     .style(|_theme, status| {
                         let border_color = match status {
                             text_input::Status::Focused { .. } => theme::accent(),
@@ -238,6 +239,7 @@ impl LoginPage {
                     .on_input(LoginMessage::UsernameChanged)
                     .padding(12)
                     .width(input_width)
+                    .font(theme::ui_font())
                     .style(|_theme, status| {
                         let border_color = match status {
                             text_input::Status::Focused { .. } => theme::accent(),
@@ -265,6 +267,7 @@ impl LoginPage {
                     .secure(true)
                     .padding(12)
                     .width(input_width)
+                    .font(theme::ui_font())
                     .on_submit(LoginMessage::LoginPressed)
                     .style(|_theme, status| {
                         let border_color = match status {

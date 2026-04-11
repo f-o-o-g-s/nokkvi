@@ -399,6 +399,7 @@ impl SongsPage {
             None, // No shuffle button for songs
             Some(SongsMessage::RefreshViewData),
             Some(SongsMessage::CenterOnPlaying),
+            None, // on_add
             true, // show_search
             SongsMessage::SearchQueryChanged,
         );

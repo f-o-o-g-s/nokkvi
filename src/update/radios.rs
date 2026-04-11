@@ -79,6 +79,21 @@ impl Nokkvi {
             RadiosAction::RefreshViewData => {
                 return self.handle_load_radio_stations();
             }
+            RadiosAction::AddRadioStation => {
+                self.text_input_dialog.open_two_fields(
+                    "Add Radio Station",
+                    "",
+                    "Station Name...",
+                    "",
+                    "Stream URL...",
+                    crate::widgets::text_input_dialog::TextInputDialogAction::CreateRadioStation,
+                );
+                return Task::none();
+            }
+            RadiosAction::DeleteStation(id, name) => {
+                self.text_input_dialog.open_delete_radio_confirmation(id, name);
+                return Task::none();
+            }
             RadiosAction::PlayRadioStation(station) => {
                 // Wait! This is the core logic.
                 // We transition ActivePlayback into RadioPlaybackState.

@@ -646,6 +646,7 @@ impl GenresPage {
             None, // No shuffle button for genres
             Some(GenresMessage::RefreshViewData),
             Some(GenresMessage::CenterOnPlaying),
+            None, // on_add
             true, // show_search
             GenresMessage::SearchQueryChanged,
         );

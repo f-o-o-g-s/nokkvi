@@ -59,6 +59,13 @@ pub enum RadiosMessage {
 
     // Data loading
     RadioStationsLoaded(Result<Vec<RadioStation>, String>),
+    
+    // Context Menu Actions
+    DeleteStationConfirmation(String, String),
+    CopyStreamUrl(String),
+
+    AddRadioStation,
+    NoOp,
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -66,6 +73,8 @@ pub enum RadiosMessage {
 pub enum RadiosAction {
     /// User activated a radio station — root should transition to radio playback
     PlayRadioStation(RadioStation),
+    AddRadioStation,
+    DeleteStation(String, String),
     SearchChanged(String),
     SortModeChanged(SortMode),
     SortOrderChanged(bool),
@@ -186,6 +195,18 @@ impl RadiosPage {
             }
             RadiosMessage::RefreshViewData => (Task::none(), RadiosAction::RefreshViewData),
 
+            RadiosMessage::AddRadioStation => (Task::none(), RadiosAction::AddRadioStation),
+
+            RadiosMessage::DeleteStationConfirmation(id, name) => {
+                (Task::none(), RadiosAction::DeleteStation(id, name))
+            }
+            RadiosMessage::CopyStreamUrl(url) => {
+                let task = iced::clipboard::write(url).map(|_| RadiosMessage::NoOp);
+                (task, RadiosAction::None)
+            }
+
+            RadiosMessage::NoOp => (Task::none(), RadiosAction::None),
+
             // Data loading — handled at root level
             RadiosMessage::RadioStationsLoaded(_) => (Task::none(), RadiosAction::None),
         }
@@ -211,7 +232,8 @@ impl RadiosPage {
             None, // No shuffle button
             Some(RadiosMessage::RefreshViewData),
             None, // No "center on playing" — radio has no queue position
-            true,
+            Some(RadiosMessage::AddRadioStation), // on_add
+            true, // show_search
             RadiosMessage::SearchQueryChanged,
         );
 
@@ -318,7 +340,32 @@ impl RadiosPage {
                     RadiosMessage::SlotListClickPlay(ctx.item_index)
                 };
 
-                iced::widget::mouse_area(slot).on_press(click_msg).into()
+                let slot_button: Element<'a, RadiosMessage> =
+                    iced::widget::mouse_area(slot).on_press(click_msg).into();
+
+                crate::widgets::context_menu::context_menu(
+                    slot_button,
+                    crate::widgets::context_menu::radio_entries(),
+                    {
+                        let id = station.id.clone();
+                        let name = station.name.clone();
+                        let stream_url = station.stream_url.clone();
+                        move |entry, length| {
+                            let id = id.clone();
+                            let name = name.clone();
+                            let stream_url = stream_url.clone();
+                            crate::widgets::context_menu::radio_entry_view(entry, length, move |e| match e {
+                                crate::widgets::context_menu::RadioContextEntry::Delete => {
+                                    RadiosMessage::DeleteStationConfirmation(id.clone(), name.clone())
+                                }
+                                crate::widgets::context_menu::RadioContextEntry::CopyStreamUrl => {
+                                    RadiosMessage::CopyStreamUrl(stream_url.clone())
+                                }
+                            })
+                        }
+                    },
+                )
+                .into()
             },
         );
 

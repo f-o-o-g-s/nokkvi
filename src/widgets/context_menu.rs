@@ -262,6 +262,43 @@ pub(crate) fn strip_entry_view<'a, Message: Clone + 'a>(
 }
 
 // ============================================================================
+// Radio Context Menu Entry
+// ============================================================================
+
+/// Context menu entries for internet radio stations.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum RadioContextEntry {
+    Delete,
+    CopyStreamUrl,
+}
+
+pub(crate) fn radio_entries() -> Vec<RadioContextEntry> {
+    vec![
+        RadioContextEntry::CopyStreamUrl,
+        RadioContextEntry::Delete,
+    ]
+}
+
+pub(crate) fn radio_entry_view<'a, Message: Clone + 'a>(
+    entry: RadioContextEntry,
+    _length: Length,
+    on_action: impl Fn(RadioContextEntry) -> Message,
+) -> Element<'a, Message> {
+    match entry {
+        RadioContextEntry::CopyStreamUrl => menu_button(
+            Some("assets/icons/copy.svg"),
+            "Copy Stream URL",
+            on_action(RadioContextEntry::CopyStreamUrl),
+        ),
+        RadioContextEntry::Delete => menu_button(
+            Some("assets/icons/trash-2.svg"),
+            "Delete Station",
+            on_action(RadioContextEntry::Delete),
+        ),
+    }
+}
+
+// ============================================================================
 // Public API
 // ============================================================================
 

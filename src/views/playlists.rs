@@ -553,6 +553,7 @@ impl PlaylistsPage {
             None, // No shuffle button for playlists
             Some(PlaylistsMessage::RefreshViewData),
             None, // Playlists view doesn't need center on playing button
+            None, // Optional add button
             true, // show_search
             PlaylistsMessage::SearchQueryChanged,
         );

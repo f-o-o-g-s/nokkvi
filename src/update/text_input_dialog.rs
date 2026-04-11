@@ -19,6 +19,12 @@ impl Nokkvi {
                 self.text_input_dialog.value = val;
                 Task::none()
             }
+            TextInputDialogMessage::SecondaryValueChanged(val) => {
+                if self.text_input_dialog.secondary_value.is_some() {
+                    self.text_input_dialog.secondary_value = Some(val);
+                }
+                Task::none()
+            }
             TextInputDialogMessage::Cancel => {
                 self.text_input_dialog.close();
                 Task::none()
@@ -238,6 +244,72 @@ impl Nokkvi {
                     self.toast_success("Visualizer settings reset to defaults");
                     Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
                 }
+            }
+            Some(TextInputDialogAction::CreateRadioStation) => {
+                let name = self.text_input_dialog.value.trim().to_string();
+                let stream_url = self.text_input_dialog.secondary_value.clone().unwrap_or_default().trim().to_string();
+                
+                if name.is_empty() || stream_url.is_empty() {
+                    self.toast_warn("Name and Stream URL are required");
+                    return Task::none();
+                }
+                
+                self.text_input_dialog.close();
+                self.shell_task(
+                    move |shell| async move {
+                        let service = shell.radios_api().await?;
+                        service.create_radio_station(&name, &stream_url, None).await
+                    },
+                    move |result: Result<(), anyhow::Error>| match result {
+                        Ok(_) => {
+                            Message::Toast(crate::app_message::ToastMessage::PushThen(
+                                nokkvi_data::types::toast::Toast::new(
+                                    "Radio station created".to_string(),
+                                    nokkvi_data::types::toast::ToastLevel::Success,
+                                ),
+                                Box::new(Message::LoadRadioStations),
+                            ))
+                        }
+                        Err(e) => {
+                            tracing::error!(" Failed to create radio station: {e}");
+                            Message::Toast(crate::app_message::ToastMessage::Push(
+                                nokkvi_data::types::toast::Toast::new(
+                                    format!("Failed to create radio station: {e}"),
+                                    nokkvi_data::types::toast::ToastLevel::Error,
+                                ),
+                            ))
+                        }
+                    },
+                )
+            }
+            Some(TextInputDialogAction::DeleteRadioStation(station_id, name)) => {
+                self.text_input_dialog.close();
+                self.shell_task(
+                    move |shell| async move {
+                        let service = shell.radios_api().await?;
+                        service.delete_radio_station(&station_id).await
+                    },
+                    move |result: Result<(), anyhow::Error>| match result {
+                        Ok(_) => {
+                            Message::Toast(crate::app_message::ToastMessage::PushThen(
+                                nokkvi_data::types::toast::Toast::new(
+                                    format!("Deleted radio station '{name}'"),
+                                    nokkvi_data::types::toast::ToastLevel::Success,
+                                ),
+                                Box::new(Message::LoadRadioStations),
+                            ))
+                        }
+                        Err(e) => {
+                            tracing::error!(" Failed to delete radio station: {e}");
+                            Message::Toast(crate::app_message::ToastMessage::Push(
+                                nokkvi_data::types::toast::Toast::new(
+                                    format!("Failed to delete radio station: {e}"),
+                                    nokkvi_data::types::toast::ToastLevel::Error,
+                                ),
+                            ))
+                        }
+                    },
+                )
             }
             None => Task::none(),
         }

@@ -103,6 +103,42 @@ impl RadiosApiService {
 
         Ok(stations)
     }
+
+    /// Create a new internet radio station
+    pub async fn create_radio_station(
+        &self,
+        name: &str,
+        stream_url: &str,
+        homepage_url: Option<&str>,
+    ) -> Result<()> {
+        let mut params = vec![("name", name), ("streamUrl", stream_url)];
+        if let Some(url) = homepage_url {
+            params.push(("homepageUrl", url));
+        }
+
+        crate::services::api::subsonic::subsonic_post_ok(
+            &self.client.http_client(),
+            &self.server_url,
+            "createInternetRadioStation",
+            &self.subsonic_credential,
+            &params,
+            "Failed to create internet radio station",
+        )
+        .await
+    }
+
+    /// Delete an internet radio station
+    pub async fn delete_radio_station(&self, id: &str) -> Result<()> {
+        crate::services::api::subsonic::subsonic_post_ok(
+            &self.client.http_client(),
+            &self.server_url,
+            "deleteInternetRadioStation",
+            &self.subsonic_credential,
+            &[("id", id)],
+            "Failed to delete internet radio station",
+        )
+        .await
+    }
 }
 
 impl Clone for RadiosApiService {

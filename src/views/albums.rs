@@ -553,6 +553,7 @@ impl AlbumsPage {
             None, // No shuffle button for albums
             Some(AlbumsMessage::RefreshViewData),
             Some(AlbumsMessage::CenterOnPlaying),
+            None, // on_add
             true, // show_search
             AlbumsMessage::SearchQueryChanged,
         );

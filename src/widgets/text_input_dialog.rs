@@ -34,6 +34,10 @@ pub enum TextInputDialogAction {
     ResetVisualizerSettings,
     /// Reset all hotkey bindings to defaults
     ResetAllHotkeys,
+    /// Create a new internet radio station
+    CreateRadioStation,
+    /// Delete an internet radio station (holds station id, station name)
+    DeleteRadioStation(String, String),
 }
 
 /// An option in the playlist selection combo_box.
@@ -72,6 +76,10 @@ pub struct TextInputDialogState {
     pub confirmation_only: bool,
     /// Warning/description message shown in confirmation-only mode
     pub confirmation_message: String,
+    
+    // Optional secondary input (for radio stations)
+    pub secondary_value: Option<String>,
+    pub secondary_placeholder: String,
 }
 
 impl Default for TextInputDialogState {
@@ -87,6 +95,8 @@ impl Default for TextInputDialogState {
             save_playlist_mode: false,
             confirmation_only: false,
             confirmation_message: String::new(),
+            secondary_value: None,
+            secondary_placeholder: String::new(),
         }
     }
 }
@@ -104,6 +114,32 @@ impl TextInputDialogState {
         self.title = title.into();
         self.value = value.into();
         self.placeholder = placeholder.into();
+        self.action = Some(action);
+        self.playlist_combo_state = combo_box::State::new(Vec::new());
+        self.selected_playlist = None;
+        self.save_playlist_mode = false;
+        self.confirmation_only = false;
+        self.confirmation_message.clear();
+        self.secondary_value = None;
+        self.secondary_placeholder.clear();
+    }
+
+    /// Open the dialog with two input fields.
+    pub fn open_two_fields(
+        &mut self,
+        title: impl Into<String>,
+        value1: impl Into<String>,
+        placeholder1: impl Into<String>,
+        value2: impl Into<String>,
+        placeholder2: impl Into<String>,
+        action: TextInputDialogAction,
+    ) {
+        self.visible = true;
+        self.title = title.into();
+        self.value = value1.into();
+        self.placeholder = placeholder1.into();
+        self.secondary_value = Some(value2.into());
+        self.secondary_placeholder = placeholder2.into();
         self.action = Some(action);
         self.playlist_combo_state = combo_box::State::new(Vec::new());
         self.selected_playlist = None;
@@ -178,6 +214,23 @@ impl TextInputDialogState {
         self.confirmation_only = true;
     }
 
+    /// Open a confirmation-only dialog for deleting a radio station.
+    pub fn open_delete_radio_confirmation(&mut self, station_id: String, station_name: String) {
+        self.visible = true;
+        self.title = "Delete Radio Station".to_string();
+        self.confirmation_message = format!("This will permanently delete \"{station_name}\".");
+        self.value.clear();
+        self.placeholder.clear();
+        self.action = Some(TextInputDialogAction::DeleteRadioStation(
+            station_id,
+            station_name,
+        ));
+        self.playlist_combo_state = combo_box::State::new(Vec::new());
+        self.selected_playlist = None;
+        self.save_playlist_mode = false;
+        self.confirmation_only = true;
+    }
+
     /// Open a confirmation dialog for resetting visualizer settings.
     pub fn open_reset_visualizer_confirmation(&mut self) {
         self.visible = true;
@@ -220,6 +273,8 @@ impl TextInputDialogState {
         self.save_playlist_mode = false;
         self.confirmation_only = false;
         self.confirmation_message.clear();
+        self.secondary_value = None;
+        self.secondary_placeholder.clear();
     }
 }
 
@@ -228,8 +283,11 @@ impl TextInputDialogState {
 pub enum TextInputDialogMessage {
     /// Text input value changed
     ValueChanged(String),
+    /// Secondary text input value changed
+    SecondaryValueChanged(String),
     /// User submitted (Enter key or Submit button)
     Submit,
+
     /// User cancelled (Escape key or Cancel button)
     Cancel,
     /// User selected a playlist option from the combo_box
@@ -341,6 +399,7 @@ pub(crate) fn text_input_dialog_overlay<'a>(
             .on_submit(TextInputDialogMessage::Submit)
             .padding(8)
             .size(14)
+            .font(theme::ui_font())
             .width(Length::Fill)
             .style(|_theme, status| text_input::Style {
                 background: theme::bg0_soft().into(),
@@ -359,6 +418,33 @@ pub(crate) fn text_input_dialog_overlay<'a>(
                 selection: theme::selection_color(),
             });
         content = content.push(input);
+
+        if let Some(sec_val) = &state.secondary_value {
+            let input2 = text_input(&state.secondary_placeholder, sec_val)
+                .on_input(TextInputDialogMessage::SecondaryValueChanged)
+                .on_submit(TextInputDialogMessage::Submit)
+                .padding(8)
+                .size(14)
+                .font(theme::ui_font())
+                .width(Length::Fill)
+                .style(|_theme, status| text_input::Style {
+                    background: theme::bg0_soft().into(),
+                    border: iced::Border {
+                        color: if matches!(status, text_input::Status::Focused { .. }) {
+                            theme::accent_bright()
+                        } else {
+                            iced::Color::TRANSPARENT
+                        },
+                        width: 2.0,
+                        radius: theme::ui_border_radius(),
+                    },
+                    icon: theme::fg4(),
+                    placeholder: theme::fg4(),
+                    value: theme::fg0(),
+                    selection: theme::selection_color(),
+                });
+            content = content.push(input2);
+        }
     }
 
     // Overwrite/append confirmation message

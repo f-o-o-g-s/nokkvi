@@ -30,6 +30,7 @@ pub(crate) fn view_header<
     on_shuffle: Option<Message>,           // Optional shuffle button
     on_refresh: Option<Message>,           // Optional refresh button
     on_center_on_playing: Option<Message>, // Optional center button
+    on_add: Option<Message>,               // Optional add button
     show_search: bool,
     on_search_change: impl Fn(String) -> Message + 'a,
 ) -> Element<'a, Message> {
@@ -138,6 +139,11 @@ pub(crate) fn view_header<
         header_icon_button("assets/icons/locate.svg", "Center on Playing", center_msg)
     });
 
+    // Optional add button
+    let add_button = on_add.map(|add_msg| {
+        header_icon_button("assets/icons/plus.svg", "Add Item", add_msg)
+    });
+
     let search_field = if show_search {
         Some(crate::widgets::search_bar::search_bar(
             search_query,
@@ -181,6 +187,9 @@ pub(crate) fn view_header<
     }
     if let Some(center_btn) = center_button {
         header_row = header_row.push(center_btn);
+    }
+    if let Some(add_btn) = add_button {
+        header_row = header_row.push(add_btn);
     }
     if let Some(search_element) = search_field {
         header_row = header_row.push(search_element);

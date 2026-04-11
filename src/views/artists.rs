@@ -703,6 +703,7 @@ impl ArtistsPage {
             None, // No shuffle button for artists
             Some(ArtistsMessage::RefreshViewData),
             Some(ArtistsMessage::CenterOnPlaying),
+            None, // on_add
             true, // show_search
             ArtistsMessage::SearchQueryChanged,
         );
