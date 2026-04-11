@@ -137,6 +137,8 @@ pub struct AudioDecoder {
     infinite_stream: bool,
     /// Arc passed in by the AudioEngine, populated by `IcyMetadataReader` if this stream supports ICY.
     live_icy_metadata: std::sync::Arc<tokio::sync::Mutex<Option<String>>>,
+    /// The short-name of the actual hardware codec (e.g., "mp3", "aac", "vorbis").
+    live_codec: Option<String>,
 }
 
 impl AudioDecoder {
@@ -154,6 +156,7 @@ impl AudioDecoder {
             smoothed_bitrate_kbps: 0.0,
             infinite_stream: false,
             live_icy_metadata,
+            live_codec: None,
         }
     }
 
@@ -469,6 +472,11 @@ impl AudioDecoder {
 
         // Get format info
         let codec_params = &track.codec_params;
+        let mut codec_name = None;
+        if let Some(desc) = symphonia::default::get_codecs().get_codec(codec_params.codec) {
+            codec_name = Some(desc.short_name.to_string());
+        }
+
         let sample_rate = codec_params.sample_rate.unwrap_or(44100);
         let channels = codec_params.channels.map_or(2, |c| c.count()) as u32;
 
@@ -515,6 +523,7 @@ impl AudioDecoder {
         self.track_id = Some(track_id);
         self.format = audio_format;
         self.duration = duration_ms;
+        self.live_codec = codec_name;
         self.initialized = true;
         self.eof = false;
         self.frame_buffer.clear();
@@ -533,6 +542,7 @@ impl AudioDecoder {
         self.eof = false;
         self.frame_buffer.clear();
         self.smoothed_bitrate_kbps = 0.0;
+        self.live_codec = None;
     }
 
     /// Extract format hint from URL (file extension or query parameter)
@@ -663,6 +673,9 @@ impl AudioDecoder {
                                             sample_rate,
                                             channels as u32,
                                         );
+                                        if let Some(desc) = symphonia::default::get_codecs().get_codec(track.codec_params.codec) {
+                                            self.live_codec = Some(desc.short_name.to_string());
+                                        }
                                         // Retry reading the packet with the new decoder
                                         continue;
                                     }
@@ -950,6 +963,10 @@ impl AudioDecoder {
     /// Returns 0 if no packets have been decoded yet.
     pub fn live_bitrate(&self) -> u32 {
         self.smoothed_bitrate_kbps.round() as u32
+    }
+
+    pub fn live_codec(&self) -> Option<String> {
+        self.live_codec.clone()
     }
 
     /// Stop decoding

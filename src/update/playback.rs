@@ -40,6 +40,7 @@ impl Nokkvi {
                 // Live compressed bitrate from decoder (0 if not yet decoding)
                 let engine_live_bitrate = engine.live_bitrate();
                 let engine_live_icy_metadata = engine.live_icy_metadata();
+                let engine_live_codec = engine.live_codec();
                 drop(engine);
 
                 let qm_arc = shell.queue().queue_manager();
@@ -47,7 +48,18 @@ impl Nokkvi {
                 let song = qm.get_current_song();
                 let current_index = qm.get_queue().current_index;
                 let (title, artist, album, cover_art, album_id, song_id, format_suffix, bitrate) =
-                    if let Some(s) = &song {
+                    if let Some(station) = &radio_station {
+                        (
+                            station.name.clone(),
+                            String::new(), // Artist handles name sometimes? No, artist is empty
+                            String::new(),
+                            None,
+                            None,
+                            Some(station.id.clone()),
+                            engine_live_codec.unwrap_or_else(|| "radio".to_string()),
+                            engine_live_bitrate,
+                        )
+                    } else if let Some(s) = &song {
                         // Extract format suffix from file path (e.g., "flac" from "/path/to/song.flac")
                         let suffix = s
                             .path
@@ -70,17 +82,6 @@ impl Nokkvi {
                             Some(s.id.clone()),
                             suffix,
                             br,
-                        )
-                    } else if let Some(station) = &radio_station {
-                        (
-                            station.name.clone(),
-                            String::new(), // Artist handles name sometimes? No, artist is empty
-                            String::new(),
-                            None,
-                            None,
-                            Some(station.id.clone()),
-                            "radio".to_string(), // Will be updated in Phase 5 to use engine format
-                            engine_live_bitrate,
                         )
                     } else {
                         (
@@ -189,17 +190,17 @@ impl Nokkvi {
             // Split icy meta "Artist - Title" format. Not all stations follow this exactly,
             // but it's the standard convention used by majority of SHOUTcast/Icecast stations.
             let mut parts = icy_meta.splitn(2, " - ");
-            let (artist, title) =
-                if let (Some(artist), Some(title)) = (parts.next(), parts.next()) {
-                    // It had a dash, treat as Artist - Title
-                    (
-                        Some(artist.trim().to_string()),
-                        Some(title.trim().to_string()),
-                    )
-                } else {
-                    // No dash found, fallback: put everything in title
-                    (None, Some(icy_meta.trim().to_string()))
-                };
+            let (artist, title) = if let (Some(artist), Some(title)) = (parts.next(), parts.next())
+            {
+                // It had a dash, treat as Artist - Title
+                (
+                    Some(artist.trim().to_string()),
+                    Some(title.trim().to_string()),
+                )
+            } else {
+                // No dash found, fallback: put everything in title
+                (None, Some(icy_meta.trim().to_string()))
+            };
 
             // Dispatch the metadata update directly
             // (Using handle_radio_metadata_update directly since we are already in the update fn)

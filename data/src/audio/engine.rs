@@ -42,6 +42,7 @@ pub struct GaplessTransitionInfo {
     pub source: String,
     pub duration: u64,
     pub format: AudioFormat,
+    pub codec: Option<String>,
 }
 
 /// Calculate buffer size for one decode chunk (~100ms of audio).
@@ -159,6 +160,9 @@ pub struct CustomAudioEngine {
 
     /// Raw ICY-metadata parsed by IcyMetadataReader
     live_icy_metadata: Arc<tokio::sync::Mutex<Option<String>>>,
+
+    /// Extracted stream codec based on Symphonia probing (e.g. mp3, aac)
+    live_codec_name: Arc<std::sync::RwLock<Option<String>>>,
 }
 
 impl CustomAudioEngine {
@@ -199,6 +203,7 @@ impl CustomAudioEngine {
             gapless_transition_info: Arc::new(tokio::sync::Mutex::new(None)),
             next_source_shared: Arc::new(tokio::sync::Mutex::new(String::new())),
             live_icy_metadata,
+            live_codec_name: Arc::new(std::sync::RwLock::new(None)),
         }
     }
 
@@ -230,6 +235,9 @@ impl CustomAudioEngine {
         if let Ok(mut guard) = self.live_icy_metadata.try_lock() {
             *guard = None;
         }
+        if let Ok(mut guard) = self.live_codec_name.write() {
+            *guard = None;
+        }
 
         trace!(" AudioEngine: creating fresh decoder for new source");
         self.decoder = Arc::new(tokio::sync::Mutex::new(AudioDecoder::new(
@@ -248,6 +256,14 @@ impl CustomAudioEngine {
     pub fn live_icy_metadata(&self) -> Option<String> {
         self.live_icy_metadata
             .try_lock()
+            .ok()
+            .and_then(|guard| guard.clone())
+    }
+
+    /// Get current live codec name
+    pub fn live_codec(&self) -> Option<String> {
+        self.live_codec_name
+            .read()
             .ok()
             .and_then(|guard| guard.clone())
     }
@@ -337,6 +353,9 @@ impl CustomAudioEngine {
                         decoder.duration()
                     );
                     self.duration = decoder.duration();
+                    if let Ok(mut guard) = self.live_codec_name.write() {
+                        *guard = decoder.live_codec();
+                    }
                 }
                 Err(e) => {
                     error!(" AudioEngine: decoder initialization FAILED: {:?}", e);
@@ -702,6 +721,7 @@ impl CustomAudioEngine {
                                         let next_duration = next_dec.duration();
                                         let next_source_url =
                                             next_source_shared.lock().await.clone();
+                                        let next_codec = next_dec.live_codec();
 
                                         // Swap into primary decoder
                                         *decoder.lock().await = next_dec;
@@ -724,6 +744,7 @@ impl CustomAudioEngine {
                                                 source: next_source_url,
                                                 duration: next_duration,
                                                 format: next_fmt,
+                                                codec: next_codec,
                                             });
                                         }
 
@@ -1100,6 +1121,9 @@ impl CustomAudioEngine {
             self.duration = info.duration;
             self.position = 0;
             self.current_format = info.format;
+            if let Ok(mut guard) = self.live_codec_name.write() {
+                *guard = info.codec;
+            }
             self.next_source.clear();
             *self.next_source_shared.lock().await = String::new();
             self.live_sample_rate

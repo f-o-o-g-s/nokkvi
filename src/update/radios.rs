@@ -62,10 +62,10 @@ impl Nokkvi {
             false,
         );
 
+        let filtered_stations = self.filter_radio_stations().into_owned();
+
         // Capture data before passing slice
-        let (cmd, action) = self
-            .radios_page
-            .update(msg.clone(), &self.library.radio_stations);
+        let (cmd, action) = self.radios_page.update(msg.clone(), &filtered_stations);
 
         match action {
             RadiosAction::SortModeChanged(_) | RadiosAction::SortOrderChanged(_) => {

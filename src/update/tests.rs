@@ -2283,3 +2283,38 @@ fn test_handle_radio_metadata_update() {
         panic!("Should still be in Radio playback state");
     }
 }
+
+#[test]
+fn radios_play_filtered_station_plays_correct_station() {
+    use crate::views::RadiosMessage;
+    let mut app = test_app();
+    app.current_view = crate::View::Radios;
+
+    let s1 = nokkvi_data::types::radio_station::RadioStation {
+        id: "r1".into(),
+        name: "BBC Radio".into(),
+        stream_url: "url3".into(),
+        home_page_url: None,
+    };
+    let s2 = nokkvi_data::types::radio_station::RadioStation {
+        id: "r2".into(),
+        name: "SomaFM".into(),
+        stream_url: "url1".into(),
+        home_page_url: None,
+    };
+
+    app.library.radio_stations = vec![s1, s2];
+
+    let _ = app.handle_radios(RadiosMessage::SearchQueryChanged("soma".to_string()));
+    let _ = app.handle_radios(RadiosMessage::SlotListClickPlay(0));
+
+    match &app.active_playback {
+        crate::state::ActivePlayback::Radio(state) => {
+            assert_eq!(
+                state.station.name, "SomaFM",
+                "Should play the filtered station, not the first station in unfiltered list"
+            );
+        }
+        _ => panic!("Expected Radio playback"),
+    }
+}
