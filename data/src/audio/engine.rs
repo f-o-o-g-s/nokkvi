@@ -509,6 +509,7 @@ impl CustomAudioEngine {
             let mut stream_is_infinite_cached = false;
             let mut radio_music_jitter_filled = false;
             let mut last_heartbeat = std::time::Instant::now();
+            let mut empty_buffer_count: u64 = 0;
 
             'decode_loop: loop {
                 loop_count += 1;
@@ -674,15 +675,17 @@ impl CustomAudioEngine {
                         let sec_rem = buffered as f32 / 88_200.0;
                         let peak_ms = ur_peak as f32 / 88.2;
                         tracing::info!(
-                            "🔌 [STREAM HEALTH] Buffer: {} ({:.1}s) | Underruns: {} (peak {:.0}ms) | Silence: {} | HW: {} LW: {}",
+                            "🔌 [STREAM HEALTH] Buffer: {} ({:.1}s) | Underruns: {} (peak {:.0}ms) | Silence: {} | EmptyBufs: {} | HW: {} LW: {}",
                             buffered,
                             sec_rem,
                             ur_count,
                             peak_ms,
                             ur_total,
+                            empty_buffer_count,
                             high_watermark,
                             low_watermark,
                         );
+                        empty_buffer_count = 0;
                         last_heartbeat = std::time::Instant::now();
                     }
                 } else if is_eof {
@@ -844,6 +847,7 @@ impl CustomAudioEngine {
                     drop(decoder_guard);
 
                     // Temporary empty buffer (network stall, seek refill, etc.)
+                    empty_buffer_count += 1;
                     tracing::trace!(
                         "📭 [DECODE LOOP] Empty/invalid buffer received, waiting for decoder"
                     );

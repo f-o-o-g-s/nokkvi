@@ -247,13 +247,19 @@ impl Nokkvi {
             }
             Some(TextInputDialogAction::CreateRadioStation) => {
                 let name = self.text_input_dialog.value.trim().to_string();
-                let stream_url = self.text_input_dialog.secondary_value.clone().unwrap_or_default().trim().to_string();
-                
+                let stream_url = self
+                    .text_input_dialog
+                    .secondary_value
+                    .clone()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+
                 if name.is_empty() || stream_url.is_empty() {
                     self.toast_warn("Name and Stream URL are required");
                     return Task::none();
                 }
-                
+
                 self.text_input_dialog.close();
                 self.shell_task(
                     move |shell| async move {
@@ -261,15 +267,13 @@ impl Nokkvi {
                         service.create_radio_station(&name, &stream_url, None).await
                     },
                     move |result: Result<(), anyhow::Error>| match result {
-                        Ok(_) => {
-                            Message::Toast(crate::app_message::ToastMessage::PushThen(
-                                nokkvi_data::types::toast::Toast::new(
-                                    "Radio station created".to_string(),
-                                    nokkvi_data::types::toast::ToastLevel::Success,
-                                ),
-                                Box::new(Message::LoadRadioStations),
-                            ))
-                        }
+                        Ok(_) => Message::Toast(crate::app_message::ToastMessage::PushThen(
+                            nokkvi_data::types::toast::Toast::new(
+                                "Radio station created".to_string(),
+                                nokkvi_data::types::toast::ToastLevel::Success,
+                            ),
+                            Box::new(Message::LoadRadioStations),
+                        )),
                         Err(e) => {
                             tracing::error!(" Failed to create radio station: {e}");
                             Message::Toast(crate::app_message::ToastMessage::Push(
@@ -290,15 +294,13 @@ impl Nokkvi {
                         service.delete_radio_station(&station_id).await
                     },
                     move |result: Result<(), anyhow::Error>| match result {
-                        Ok(_) => {
-                            Message::Toast(crate::app_message::ToastMessage::PushThen(
-                                nokkvi_data::types::toast::Toast::new(
-                                    format!("Deleted radio station '{name}'"),
-                                    nokkvi_data::types::toast::ToastLevel::Success,
-                                ),
-                                Box::new(Message::LoadRadioStations),
-                            ))
-                        }
+                        Ok(_) => Message::Toast(crate::app_message::ToastMessage::PushThen(
+                            nokkvi_data::types::toast::Toast::new(
+                                format!("Deleted radio station '{name}'"),
+                                nokkvi_data::types::toast::ToastLevel::Success,
+                            ),
+                            Box::new(Message::LoadRadioStations),
+                        )),
                         Err(e) => {
                             tracing::error!(" Failed to delete radio station: {e}");
                             Message::Toast(crate::app_message::ToastMessage::Push(
@@ -313,29 +315,35 @@ impl Nokkvi {
             }
             Some(TextInputDialogAction::EditRadioStation(station_id)) => {
                 let name = self.text_input_dialog.value.trim().to_string();
-                let stream_url = self.text_input_dialog.secondary_value.clone().unwrap_or_default().trim().to_string();
-                
+                let stream_url = self
+                    .text_input_dialog
+                    .secondary_value
+                    .clone()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+
                 if name.is_empty() || stream_url.is_empty() {
                     self.toast_warn("Name and Stream URL are required");
                     return Task::none();
                 }
-                
+
                 self.text_input_dialog.close();
                 self.shell_task(
                     move |shell| async move {
                         let service = shell.radios_api().await?;
-                        service.update_radio_station(&station_id, &name, &stream_url, None).await
+                        service
+                            .update_radio_station(&station_id, &name, &stream_url, None)
+                            .await
                     },
                     move |result: Result<(), anyhow::Error>| match result {
-                        Ok(_) => {
-                            Message::Toast(crate::app_message::ToastMessage::PushThen(
-                                nokkvi_data::types::toast::Toast::new(
-                                    "Radio station updated".to_string(),
-                                    nokkvi_data::types::toast::ToastLevel::Success,
-                                ),
-                                Box::new(Message::LoadRadioStations),
-                            ))
-                        }
+                        Ok(_) => Message::Toast(crate::app_message::ToastMessage::PushThen(
+                            nokkvi_data::types::toast::Toast::new(
+                                "Radio station updated".to_string(),
+                                nokkvi_data::types::toast::ToastLevel::Success,
+                            ),
+                            Box::new(Message::LoadRadioStations),
+                        )),
                         Err(e) => {
                             tracing::error!(" Failed to update radio station: {e}");
                             Message::Toast(crate::app_message::ToastMessage::Push(

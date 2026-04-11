@@ -59,7 +59,7 @@ pub enum RadiosMessage {
 
     // Data loading
     RadioStationsLoaded(Result<Vec<RadioStation>, String>),
-    
+
     // Context Menu Actions
     EditStationDialog(RadioStation),
     DeleteStationConfirmation(String, String),

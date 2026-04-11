@@ -78,7 +78,7 @@ pub struct TextInputDialogState {
     pub confirmation_only: bool,
     /// Warning/description message shown in confirmation-only mode
     pub confirmation_message: String,
-    
+
     // Optional secondary input (for radio stations)
     pub secondary_value: Option<String>,
     pub secondary_placeholder: String,

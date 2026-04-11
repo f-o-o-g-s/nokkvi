@@ -140,9 +140,8 @@ pub(crate) fn view_header<
     });
 
     // Optional add button
-    let add_button = on_add.map(|add_msg| {
-        header_icon_button("assets/icons/plus.svg", "Add Item", add_msg)
-    });
+    let add_button =
+        on_add.map(|add_msg| header_icon_button("assets/icons/plus.svg", "Add Item", add_msg));
 
     let search_field = if show_search {
         Some(crate::widgets::search_bar::search_bar(

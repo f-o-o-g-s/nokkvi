@@ -91,7 +91,8 @@ impl Nokkvi {
                 return Task::none();
             }
             RadiosAction::DeleteStation(id, name) => {
-                self.text_input_dialog.open_delete_radio_confirmation(id, name);
+                self.text_input_dialog
+                    .open_delete_radio_confirmation(id, name);
                 return Task::none();
             }
             RadiosAction::EditRadioStation(station) => {
