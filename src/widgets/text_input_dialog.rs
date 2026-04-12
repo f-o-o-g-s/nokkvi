@@ -104,6 +104,23 @@ impl Default for TextInputDialogState {
 }
 
 impl TextInputDialogState {
+    /// Reset all transient fields to defaults. Called at the start of every `open_*` method
+    /// so each opener only needs to set the fields unique to its mode.
+    fn reset_fields(&mut self) {
+        self.visible = true;
+        self.title.clear();
+        self.value.clear();
+        self.placeholder.clear();
+        self.action = None;
+        self.playlist_combo_state = combo_box::State::new(Vec::new());
+        self.selected_playlist = None;
+        self.save_playlist_mode = false;
+        self.confirmation_only = false;
+        self.confirmation_message.clear();
+        self.secondary_value = None;
+        self.secondary_placeholder.clear();
+    }
+
     /// Open the dialog with the given configuration.
     pub fn open(
         &mut self,
@@ -112,18 +129,11 @@ impl TextInputDialogState {
         placeholder: impl Into<String>,
         action: TextInputDialogAction,
     ) {
-        self.visible = true;
+        self.reset_fields();
         self.title = title.into();
         self.value = value.into();
         self.placeholder = placeholder.into();
         self.action = Some(action);
-        self.playlist_combo_state = combo_box::State::new(Vec::new());
-        self.selected_playlist = None;
-        self.save_playlist_mode = false;
-        self.confirmation_only = false;
-        self.confirmation_message.clear();
-        self.secondary_value = None;
-        self.secondary_placeholder.clear();
     }
 
     /// Open the dialog with two input fields.
@@ -136,27 +146,21 @@ impl TextInputDialogState {
         placeholder2: impl Into<String>,
         action: TextInputDialogAction,
     ) {
-        self.visible = true;
+        self.reset_fields();
         self.title = title.into();
         self.value = value1.into();
         self.placeholder = placeholder1.into();
         self.secondary_value = Some(value2.into());
         self.secondary_placeholder = placeholder2.into();
         self.action = Some(action);
-        self.playlist_combo_state = combo_box::State::new(Vec::new());
-        self.selected_playlist = None;
-        self.save_playlist_mode = false;
-        self.confirmation_only = false;
-        self.confirmation_message.clear();
     }
 
     /// Open the "Save Queue as Playlist" dialog with existing playlist choices.
     ///
     /// `playlists` is a slice of `(id, name)` tuples for existing playlists.
     pub fn open_save_playlist(&mut self, playlists: &[(String, String)]) {
-        self.visible = true;
+        self.reset_fields();
         self.title = "Save Queue as Playlist".to_string();
-        self.value.clear();
         self.placeholder = "Playlist name...".to_string();
         self.action = Some(TextInputDialogAction::CreatePlaylistFromQueue);
 
@@ -179,9 +183,8 @@ impl TextInputDialogState {
     /// `playlists` is a slice of `(id, name)` tuples for existing playlists.
     /// `song_ids` are the pre-resolved song IDs to add.
     pub fn open_add_to_playlist(&mut self, playlists: &[(String, String)], song_ids: Vec<String>) {
-        self.visible = true;
+        self.reset_fields();
         self.title = "Add to Playlist".to_string();
-        self.value.clear();
         self.placeholder = "Playlist name...".to_string();
         self.action = Some(TextInputDialogAction::CreatePlaylistWithSongs(song_ids));
 
@@ -201,82 +204,52 @@ impl TextInputDialogState {
 
     /// Open a confirmation-only dialog (no text input, just a message + Delete/Cancel).
     pub fn open_delete_confirmation(&mut self, playlist_id: String, playlist_name: String) {
-        self.visible = true;
+        self.reset_fields();
         self.title = "Delete Playlist".to_string();
         self.confirmation_message = format!("This will permanently delete \"{playlist_name}\".");
-        self.value.clear();
-        self.placeholder.clear();
         self.action = Some(TextInputDialogAction::DeletePlaylist(
             playlist_id,
             playlist_name,
         ));
-        self.playlist_combo_state = combo_box::State::new(Vec::new());
-        self.selected_playlist = None;
-        self.save_playlist_mode = false;
         self.confirmation_only = true;
     }
 
     /// Open a confirmation-only dialog for deleting a radio station.
     pub fn open_delete_radio_confirmation(&mut self, station_id: String, station_name: String) {
-        self.visible = true;
+        self.reset_fields();
         self.title = "Delete Radio Station".to_string();
         self.confirmation_message = format!("This will permanently delete \"{station_name}\".");
-        self.value.clear();
-        self.placeholder.clear();
         self.action = Some(TextInputDialogAction::DeleteRadioStation(
             station_id,
             station_name,
         ));
-        self.playlist_combo_state = combo_box::State::new(Vec::new());
-        self.selected_playlist = None;
-        self.save_playlist_mode = false;
         self.confirmation_only = true;
     }
 
     /// Open a confirmation dialog for resetting visualizer settings.
     pub fn open_reset_visualizer_confirmation(&mut self) {
-        self.visible = true;
+        self.reset_fields();
         self.title = "Reset Visualizer Settings".to_string();
         self.confirmation_message =
             "This will reset all non-color visualizer settings to their defaults.".to_string();
-        self.value.clear();
-        self.placeholder.clear();
         self.action = Some(TextInputDialogAction::ResetVisualizerSettings);
-        self.playlist_combo_state = combo_box::State::new(Vec::new());
-        self.selected_playlist = None;
-        self.save_playlist_mode = false;
         self.confirmation_only = true;
     }
 
     /// Open a confirmation dialog for resetting all hotkey bindings.
     pub fn open_reset_hotkeys_confirmation(&mut self) {
-        self.visible = true;
+        self.reset_fields();
         self.title = "Reset All Hotkeys".to_string();
         self.confirmation_message =
             "This will restore all hotkey bindings to their defaults.".to_string();
-        self.value.clear();
-        self.placeholder.clear();
         self.action = Some(TextInputDialogAction::ResetAllHotkeys);
-        self.playlist_combo_state = combo_box::State::new(Vec::new());
-        self.selected_playlist = None;
-        self.save_playlist_mode = false;
         self.confirmation_only = true;
     }
 
     /// Close and reset the dialog.
     pub fn close(&mut self) {
+        self.reset_fields();
         self.visible = false;
-        self.title.clear();
-        self.value.clear();
-        self.placeholder.clear();
-        self.action = None;
-        self.playlist_combo_state = combo_box::State::new(Vec::new());
-        self.selected_playlist = None;
-        self.save_playlist_mode = false;
-        self.confirmation_only = false;
-        self.confirmation_message.clear();
-        self.secondary_value = None;
-        self.secondary_placeholder.clear();
     }
 }
 
@@ -298,6 +271,26 @@ pub enum TextInputDialogMessage {
 
 /// Unique text_input ID for the dialog (for focus management)
 pub(crate) const DIALOG_INPUT_ID: &str = "text_input_dialog_input";
+
+/// Shared text_input styling for all dialog input fields (primary, secondary, combo_box).
+fn dialog_input_style(_theme: &iced::Theme, status: text_input::Status) -> text_input::Style {
+    text_input::Style {
+        background: theme::bg0_soft().into(),
+        border: iced::Border {
+            color: if matches!(status, text_input::Status::Focused { .. }) {
+                theme::accent_bright()
+            } else {
+                iced::Color::TRANSPARENT
+            },
+            width: 2.0,
+            radius: theme::ui_border_radius(),
+        },
+        icon: theme::fg4(),
+        placeholder: theme::fg4(),
+        value: theme::fg0(),
+        selection: theme::selection_color(),
+    }
+}
 
 /// Render the dialog overlay. Returns `None` if not visible.
 ///
@@ -337,22 +330,7 @@ pub(crate) fn text_input_dialog_overlay<'a>(
         .size(13.0)
         .font(theme::ui_font())
         .padding([8, 8])
-        .input_style(|_theme, status| text_input::Style {
-            background: theme::bg0_soft().into(),
-            border: iced::Border {
-                color: if matches!(status, text_input::Status::Focused { .. }) {
-                    theme::accent_bright()
-                } else {
-                    iced::Color::TRANSPARENT
-                },
-                width: 2.0,
-                radius: theme::ui_border_radius(),
-            },
-            icon: theme::fg4(),
-            placeholder: theme::fg4(),
-            value: theme::fg0(),
-            selection: theme::selection_color(),
-        })
+        .input_style(dialog_input_style)
         .menu_style(|_theme| iced::widget::overlay::menu::Style {
             text_color: theme::fg0(),
             background: theme::bg1().into(),
@@ -403,22 +381,7 @@ pub(crate) fn text_input_dialog_overlay<'a>(
             .size(14)
             .font(theme::ui_font())
             .width(Length::Fill)
-            .style(|_theme, status| text_input::Style {
-                background: theme::bg0_soft().into(),
-                border: iced::Border {
-                    color: if matches!(status, text_input::Status::Focused { .. }) {
-                        theme::accent_bright()
-                    } else {
-                        iced::Color::TRANSPARENT
-                    },
-                    width: 2.0,
-                    radius: theme::ui_border_radius(),
-                },
-                icon: theme::fg4(),
-                placeholder: theme::fg4(),
-                value: theme::fg0(),
-                selection: theme::selection_color(),
-            });
+            .style(dialog_input_style);
         content = content.push(input);
 
         if let Some(sec_val) = &state.secondary_value {
@@ -429,22 +392,7 @@ pub(crate) fn text_input_dialog_overlay<'a>(
                 .size(14)
                 .font(theme::ui_font())
                 .width(Length::Fill)
-                .style(|_theme, status| text_input::Style {
-                    background: theme::bg0_soft().into(),
-                    border: iced::Border {
-                        color: if matches!(status, text_input::Status::Focused { .. }) {
-                            theme::accent_bright()
-                        } else {
-                            iced::Color::TRANSPARENT
-                        },
-                        width: 2.0,
-                        radius: theme::ui_border_radius(),
-                    },
-                    icon: theme::fg4(),
-                    placeholder: theme::fg4(),
-                    value: theme::fg0(),
-                    selection: theme::selection_color(),
-                });
+                .style(dialog_input_style);
             content = content.push(input2);
         }
     }

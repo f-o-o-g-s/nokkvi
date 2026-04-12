@@ -497,6 +497,45 @@ impl Nokkvi {
         })
     }
 
+    /// Execute a radio API mutation, showing a success toast and reloading
+    /// the station list on success. DRYs the create/edit/delete radio handlers.
+    pub(crate) fn radio_mutation_task<F, Fut>(
+        &self,
+        api_fn: F,
+        success_label: impl Into<String> + Send + 'static,
+        error_ctx: &'static str,
+    ) -> Task<Message>
+    where
+        F: FnOnce(nokkvi_data::services::api::radios::RadiosApiService) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = anyhow::Result<()>> + Send,
+    {
+        let success_label = success_label.into();
+        self.shell_task(
+            move |shell| async move {
+                let service = shell.radios_api().await?;
+                api_fn(service).await
+            },
+            move |result: Result<(), anyhow::Error>| match result {
+                Ok(()) => Message::Toast(crate::app_message::ToastMessage::PushThen(
+                    nokkvi_data::types::toast::Toast::new(
+                        success_label,
+                        nokkvi_data::types::toast::ToastLevel::Success,
+                    ),
+                    Box::new(Message::LoadRadioStations),
+                )),
+                Err(e) => {
+                    tracing::error!(" Failed to {}: {e}", error_ctx);
+                    Message::Toast(crate::app_message::ToastMessage::Push(
+                        nokkvi_data::types::toast::Toast::new(
+                            format!("Failed to {error_ctx}: {e}"),
+                            nokkvi_data::types::toast::ToastLevel::Error,
+                        ),
+                    ))
+                }
+            },
+        )
+    }
+
     /// Handle the common view actions (SearchChanged, SortModeChanged, SortOrderChanged, None)
     /// that are identical across all 5 non-Queue views.
     ///

@@ -62,7 +62,13 @@ impl Nokkvi {
             false,
         );
 
-        let filtered_stations = self.filter_radio_stations().into_owned();
+        // Inline the filter call to decouple borrows.
+        // `filtered_stations` borrows `self.library.radio_stations` immutably,
+        // which leaves `self.radios_page` free to be borrowed mutably below.
+        let filtered_stations = nokkvi_data::utils::search::filter_items(
+            &self.library.radio_stations,
+            &self.radios_page.common.search_query,
+        );
 
         // Capture data before passing slice
         let (cmd, action) = self.radios_page.update(msg.clone(), &filtered_stations);

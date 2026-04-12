@@ -33,7 +33,7 @@ struct AsyncNetworkBuffer {
 
 impl AsyncNetworkBuffer {
     pub fn new(mut read: Box<dyn std::io::Read + Send + 'static>) -> Self {
-        let (tx, rx) = std::sync::mpsc::sync_channel(4096);
+        let (tx, rx) = std::sync::mpsc::sync_channel(64);
         std::thread::Builder::new()
             .name("nokkvi-network-fetch".into())
             .spawn(move || {
@@ -655,10 +655,8 @@ impl AudioDecoder {
                             &symphonia::core::meta::MetadataOptions::default(),
                         ) {
                             Ok(probed) => {
-                                self.format_reader = Some(probed.format);
-                                if let Some(track) =
-                                    self.format_reader.as_ref().unwrap().default_track()
-                                {
+                                let format_reader = probed.format;
+                                if let Some(track) = format_reader.default_track() {
                                     self.track_id = Some(track.id);
                                     let decoder = symphonia::default::get_codecs().make(
                                         &track.codec_params,
@@ -688,12 +686,14 @@ impl AudioDecoder {
                                             self.live_codec = Some(desc.short_name.to_string());
                                         }
                                         // Retry reading the packet with the new decoder
+                                        self.format_reader = Some(format_reader);
                                         continue;
                                     }
                                     error!(" [DECODER] Failed to make decoder after reprobing");
                                 } else {
                                     error!(" [DECODER] No default track found after reprobing");
                                 }
+                                self.format_reader = Some(format_reader);
                             }
                             Err(e) => {
                                 error!(

@@ -261,56 +261,21 @@ impl Nokkvi {
                 }
 
                 self.text_input_dialog.close();
-                self.shell_task(
-                    move |shell| async move {
-                        let service = shell.radios_api().await?;
+                self.radio_mutation_task(
+                    move |service| async move {
                         service.create_radio_station(&name, &stream_url, None).await
                     },
-                    move |result: Result<(), anyhow::Error>| match result {
-                        Ok(_) => Message::Toast(crate::app_message::ToastMessage::PushThen(
-                            nokkvi_data::types::toast::Toast::new(
-                                "Radio station created".to_string(),
-                                nokkvi_data::types::toast::ToastLevel::Success,
-                            ),
-                            Box::new(Message::LoadRadioStations),
-                        )),
-                        Err(e) => {
-                            tracing::error!(" Failed to create radio station: {e}");
-                            Message::Toast(crate::app_message::ToastMessage::Push(
-                                nokkvi_data::types::toast::Toast::new(
-                                    format!("Failed to create radio station: {e}"),
-                                    nokkvi_data::types::toast::ToastLevel::Error,
-                                ),
-                            ))
-                        }
-                    },
+                    "Radio station created",
+                    "create radio station",
                 )
             }
             Some(TextInputDialogAction::DeleteRadioStation(station_id, name)) => {
                 self.text_input_dialog.close();
-                self.shell_task(
-                    move |shell| async move {
-                        let service = shell.radios_api().await?;
-                        service.delete_radio_station(&station_id).await
-                    },
-                    move |result: Result<(), anyhow::Error>| match result {
-                        Ok(_) => Message::Toast(crate::app_message::ToastMessage::PushThen(
-                            nokkvi_data::types::toast::Toast::new(
-                                format!("Deleted radio station '{name}'"),
-                                nokkvi_data::types::toast::ToastLevel::Success,
-                            ),
-                            Box::new(Message::LoadRadioStations),
-                        )),
-                        Err(e) => {
-                            tracing::error!(" Failed to delete radio station: {e}");
-                            Message::Toast(crate::app_message::ToastMessage::Push(
-                                nokkvi_data::types::toast::Toast::new(
-                                    format!("Failed to delete radio station: {e}"),
-                                    nokkvi_data::types::toast::ToastLevel::Error,
-                                ),
-                            ))
-                        }
-                    },
+                let success_msg = format!("Deleted radio station '{name}'");
+                self.radio_mutation_task(
+                    move |service| async move { service.delete_radio_station(&station_id).await },
+                    success_msg,
+                    "delete radio station",
                 )
             }
             Some(TextInputDialogAction::EditRadioStation(station_id)) => {
@@ -329,31 +294,14 @@ impl Nokkvi {
                 }
 
                 self.text_input_dialog.close();
-                self.shell_task(
-                    move |shell| async move {
-                        let service = shell.radios_api().await?;
+                self.radio_mutation_task(
+                    move |service| async move {
                         service
                             .update_radio_station(&station_id, &name, &stream_url, None)
                             .await
                     },
-                    move |result: Result<(), anyhow::Error>| match result {
-                        Ok(_) => Message::Toast(crate::app_message::ToastMessage::PushThen(
-                            nokkvi_data::types::toast::Toast::new(
-                                "Radio station updated".to_string(),
-                                nokkvi_data::types::toast::ToastLevel::Success,
-                            ),
-                            Box::new(Message::LoadRadioStations),
-                        )),
-                        Err(e) => {
-                            tracing::error!(" Failed to update radio station: {e}");
-                            Message::Toast(crate::app_message::ToastMessage::Push(
-                                nokkvi_data::types::toast::Toast::new(
-                                    format!("Failed to update radio station: {e}"),
-                                    nokkvi_data::types::toast::ToastLevel::Error,
-                                ),
-                            ))
-                        }
-                    },
+                    "Radio station updated",
+                    "update radio station",
                 )
             }
             None => Task::none(),
