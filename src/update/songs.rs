@@ -14,7 +14,7 @@ use crate::{
 };
 
 impl Nokkvi {
-    pub(crate) fn handle_load_songs(&mut self) -> Task<Message> {
+    pub(crate) fn handle_load_songs(&mut self, background: bool, anchor_id: Option<String>) -> Task<Message> {
         debug!(" LoadSongs message received, loading from songs viewmodel...");
         let view_str =
             views::SongsPage::sort_mode_to_api_string(self.songs_page.common.current_sort_mode);
@@ -60,8 +60,13 @@ impl Nokkvi {
                     Err(e) => (Err(e.to_string()), 0),
                 }
             },
-            |(result, total_count)| {
-                Message::Songs(views::SongsMessage::SongsLoaded(result, total_count))
+            move |(result, total_count)| {
+                Message::Songs(views::SongsMessage::SongsLoaded {
+                    result,
+                    total_count,
+                    background,
+                    anchor_id: anchor_id.clone(),
+                })
             },
         )
     }
@@ -129,6 +134,8 @@ impl Nokkvi {
         &mut self,
         result: Result<Vec<SongUIViewData>, String>,
         total_count: usize,
+        background: bool,
+        anchor_id: Option<String>,
     ) -> Task<Message> {
         self.library.counts.songs = total_count;
         match result {
@@ -139,7 +146,16 @@ impl Nokkvi {
                     total_count
                 );
                 self.library.songs.set_first_page(new_songs, total_count);
-                self.songs_page.common.slot_list.viewport_offset = 0;
+                
+                if !background {
+                    self.songs_page.common.slot_list.viewport_offset = 0;
+                    self.songs_page.common.slot_list.selected_indices.clear();
+                } else if let Some(ref id) = anchor_id {
+                    let songs = &self.library.songs;
+                    if let Some(new_idx) = songs.iter().position(|a| a.id == *id) {
+                        self.songs_page.common.slot_list.viewport_offset = new_idx;
+                    }
+                }
                 let mut tasks: Vec<Task<Message>> = Vec::new();
 
                 // Load artwork for visible songs using canonical prefetch

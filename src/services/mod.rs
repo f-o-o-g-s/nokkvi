@@ -3,4 +3,5 @@
 pub(crate) mod collage_artwork;
 pub(crate) mod loop_subscription;
 pub(crate) mod mpris;
+pub(crate) mod navidrome_sse;
 pub(crate) mod queue_changed_subscription;

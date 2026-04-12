@@ -576,7 +576,7 @@ fn albums_loaded_error_clears_loading() {
     app.library.albums.set_loading(true);
     assert!(app.library.albums.is_loading());
 
-    let _ = app.handle_albums_loaded(Err("network error".to_string()), 0);
+    let _ = app.handle_albums_loaded(Err("network error".to_string()), 0, false, None);
     assert!(
         !app.library.albums.is_loading(),
         "loading flag should be cleared on error"
@@ -589,7 +589,7 @@ fn artists_loaded_error_clears_loading() {
     app.library.artists.set_loading(true);
     assert!(app.library.artists.is_loading());
 
-    let _ = app.handle_artists_loaded(Err("network error".to_string()), 0);
+    let _ = app.handle_artists_loaded(Err("network error".to_string()), 0, false, None);
     assert!(
         !app.library.artists.is_loading(),
         "loading flag should be cleared on error"
@@ -602,7 +602,7 @@ fn songs_loaded_error_clears_loading() {
     app.library.songs.set_loading(true);
     assert!(app.library.songs.is_loading());
 
-    let _ = app.handle_songs_loaded(Err("network error".to_string()), 0);
+    let _ = app.handle_songs_loaded(Err("network error".to_string()), 0, false, None);
     assert!(
         !app.library.songs.is_loading(),
         "loading flag should be cleared on error"

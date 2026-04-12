@@ -236,6 +236,12 @@ impl Nokkvi {
                     services::queue_changed_subscription::register_receiver(rx);
                 }
 
+                // Register Navidrome SSE connection for library auto-refresh
+                services::navidrome_sse::register(services::navidrome_sse::SseConnectionInfo {
+                    server_url: self.login_page.server_url.clone(),
+                    auth_gateway: shell.auth().clone(),
+                });
+
                 // Initialize scrobble state from persisted queue to prevent spurious
                 // now-playing scrobbles on startup
                 let shell_for_scrobble = shell.clone();

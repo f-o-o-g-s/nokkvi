@@ -12,7 +12,7 @@ use crate::{
 };
 
 impl Nokkvi {
-    pub(crate) fn handle_load_artists(&mut self) -> Task<Message> {
+    pub(crate) fn handle_load_artists(&mut self, background: bool, anchor_id: Option<String>) -> Task<Message> {
         debug!(" LoadArtists message received, loading from app_service...");
         let view_str =
             views::ArtistsPage::sort_mode_to_api_string(self.artists_page.common.current_sort_mode);
@@ -64,11 +64,13 @@ impl Nokkvi {
                     Err(e) => (Err(e.to_string()), 0),
                 }
             },
-            |(result, total_count)| {
-                Message::Artists(crate::views::ArtistsMessage::ArtistsLoaded(
+            move |(result, total_count)| {
+                Message::Artists(crate::views::ArtistsMessage::ArtistsLoaded {
                     result,
                     total_count,
-                ))
+                    background,
+                    anchor_id: anchor_id.clone(),
+                })
             },
         )
     }
@@ -154,6 +156,8 @@ impl Nokkvi {
         &mut self,
         result: Result<Vec<ArtistUIViewData>, String>,
         total_count: usize,
+        background: bool,
+        anchor_id: Option<String>,
     ) -> Task<Message> {
         self.library.counts.artists = total_count;
         match result {
@@ -166,7 +170,16 @@ impl Nokkvi {
                 self.library
                     .artists
                     .set_first_page(new_artists, total_count);
-                self.artists_page.common.slot_list.viewport_offset = 0;
+                
+                if !background {
+                    self.artists_page.common.slot_list.viewport_offset = 0;
+                    self.artists_page.common.slot_list.selected_indices.clear();
+                } else if let Some(ref id) = anchor_id {
+                    let artists = &self.library.artists;
+                    if let Some(new_idx) = artists.iter().position(|a| a.id == *id) {
+                        self.artists_page.common.slot_list.viewport_offset = new_idx;
+                    }
+                }
 
                 // Load artwork for artists using Navidrome getCoverArt API
                 // The API supports ar-{artistId} and auto-falls back to album covers

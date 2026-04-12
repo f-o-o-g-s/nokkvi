@@ -14,7 +14,7 @@ use crate::{
 };
 
 impl Nokkvi {
-    pub(crate) fn handle_load_albums(&mut self) -> Task<Message> {
+    pub(crate) fn handle_load_albums(&mut self, background: bool, anchor_id: Option<String>) -> Task<Message> {
         debug!(" LoadAlbums message received, loading from app_service...");
         let view_str =
             views::AlbumsPage::sort_mode_to_api_string(self.albums_page.common.current_sort_mode);
@@ -56,11 +56,13 @@ impl Nokkvi {
                     Err(e) => (Err(e.to_string()), 0),
                 }
             },
-            |(result, total_count)| {
-                Message::Albums(crate::views::AlbumsMessage::AlbumsLoaded(
+            move |(result, total_count)| {
+                Message::Albums(crate::views::AlbumsMessage::AlbumsLoaded {
                     result,
                     total_count,
-                ))
+                    background,
+                    anchor_id: anchor_id.clone(),
+                })
             },
         )
     }
@@ -136,6 +138,8 @@ impl Nokkvi {
         &mut self,
         result: Result<Vec<AlbumUIViewData>, String>,
         total_count: usize,
+        background: bool,
+        anchor_id: Option<String>,
     ) -> Task<Message> {
         self.library.counts.albums = total_count;
         match result {
@@ -153,9 +157,15 @@ impl Nokkvi {
                 }
                 self.library.albums.set_first_page(new_albums, total_count);
 
-                // Reset slot list to first item when filtering via search or clearing
-                // This ensures the center slot focuses on the first matching result
-                self.albums_page.common.slot_list.viewport_offset = 0;
+                if !background {
+                    self.albums_page.common.slot_list.viewport_offset = 0;
+                    self.albums_page.common.slot_list.selected_indices.clear();
+                } else if let Some(ref id) = anchor_id {
+                    let albums = &self.library.albums;
+                    if let Some(new_idx) = albums.iter().position(|a| a.id == *id) {
+                        self.albums_page.common.slot_list.viewport_offset = new_idx;
+                    }
+                }
                 let mut tasks: Vec<Task<Message>> = Vec::new();
 
                 // NOTE: Don't re-focus search field here - text_input maintains its own focus state.

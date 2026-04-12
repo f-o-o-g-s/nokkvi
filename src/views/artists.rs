@@ -85,7 +85,12 @@ pub enum ArtistsMessage {
     CenterOnPlaying,
 
     // Data loading (moved from root Message enum)
-    ArtistsLoaded(Result<Vec<ArtistUIViewData>, String>, usize), // result, total_count
+    ArtistsLoaded {
+        result: Result<Vec<ArtistUIViewData>, String>,
+        total_count: usize,
+        background: bool,
+        anchor_id: Option<String>,
+    },
     ArtistsPageLoaded(Result<Vec<ArtistUIViewData>, String>, usize), // result, total_count (subsequent page)
 
     NavigateAndSearch(crate::View, String), // Navigate to target view and search
@@ -434,7 +439,7 @@ impl ArtistsPage {
                 }
 
                 // Data loading messages (handled at root level, no action needed here)
-                ArtistsMessage::ArtistsLoaded(_, _) => (Task::none(), ArtistsAction::None),
+                ArtistsMessage::ArtistsLoaded { .. } => (Task::none(), ArtistsAction::None),
                 ArtistsMessage::ArtistsPageLoaded(_, _) => (Task::none(), ArtistsAction::None),
                 ArtistsMessage::RefreshViewData => (Task::none(), ArtistsAction::RefreshViewData),
                 ArtistsMessage::CenterOnPlaying => (Task::none(), ArtistsAction::CenterOnPlaying),

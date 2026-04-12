@@ -80,7 +80,12 @@ pub enum AlbumsMessage {
     RefreshViewData,
 
     // Data loading (moved from root Message enum)
-    AlbumsLoaded(Result<Vec<AlbumUIViewData>, String>, usize), // result, total_count
+    AlbumsLoaded {
+        result: Result<Vec<AlbumUIViewData>, String>,
+        total_count: usize,
+        background: bool,
+        anchor_id: Option<String>,
+    },
     AlbumsPageLoaded(Result<Vec<AlbumUIViewData>, String>, usize), // result, total_count (subsequent page)
 
     // Artwork loading (moved from root Message enum)
@@ -359,7 +364,7 @@ impl AlbumsPage {
                     (Task::none(), AlbumsAction::AddBatchToQueue(payload))
                 }
                 // Data loading messages (handled at root level, no action needed here)
-                AlbumsMessage::AlbumsLoaded(_, _) => (Task::none(), AlbumsAction::None),
+                AlbumsMessage::AlbumsLoaded { .. } => (Task::none(), AlbumsAction::None),
                 AlbumsMessage::AlbumsPageLoaded(_, _) => (Task::none(), AlbumsAction::None),
                 AlbumsMessage::ArtworkLoaded(_, _) => (Task::none(), AlbumsAction::None),
                 AlbumsMessage::LargeArtworkLoaded(_, _) => (Task::none(), AlbumsAction::None),

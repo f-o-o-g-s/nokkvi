@@ -62,7 +62,12 @@ pub enum SongsMessage {
     CenterOnPlaying,
 
     // Data loading (moved from root Message enum)
-    SongsLoaded(Result<Vec<SongUIViewData>, String>, usize), // result, total_count
+    SongsLoaded {
+        result: Result<Vec<SongUIViewData>, String>,
+        total_count: usize,
+        background: bool,
+        anchor_id: Option<String>,
+    },
     SongsPageLoaded(Result<Vec<SongUIViewData>, String>, usize), // result, total_count (subsequent page)
     /// Refresh artwork for a specific album (album_id)
     RefreshArtwork(String),
@@ -344,7 +349,7 @@ impl SongsPage {
             }
 
             // Data loading messages (handled at root level, no action needed here)
-            SongsMessage::SongsLoaded(_, _) | SongsMessage::SongsPageLoaded(_, _) => {
+            SongsMessage::SongsLoaded { .. } | SongsMessage::SongsPageLoaded(_, _) => {
                 (Task::none(), SongsAction::None)
             }
             SongsMessage::RefreshViewData => (Task::none(), SongsAction::RefreshViewData),

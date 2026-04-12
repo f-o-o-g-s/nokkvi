@@ -287,6 +287,8 @@ pub enum Message {
     ServerVersionFetched(Option<String>),
 
     // --- Data Loading ---
+    /// SSE: Navidrome library scan completed with changes
+    LibraryChanged,
     LoadAlbums,
     LoadQueue,
     LoadArtists,

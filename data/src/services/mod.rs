@@ -8,6 +8,7 @@ pub mod api;
 pub mod artwork_prefetch;
 pub mod auth;
 pub mod font_discovery;
+pub mod navidrome_events;
 pub mod playback;
 pub mod queue;
 pub mod settings;
