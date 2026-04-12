@@ -4,13 +4,14 @@
 //! When a `refreshResource` event is received, emits `SseEvent::LibraryChanged`
 //! to trigger a transparent background UI refresh.
 
-use std::sync::OnceLock;
-use std::time::Duration;
+use std::{sync::OnceLock, time::Duration};
 
 use futures::StreamExt;
 use iced::task::{Never, Sipper, sipper};
-use nokkvi_data::backend::auth::AuthGateway;
-use nokkvi_data::services::navidrome_events::{NavidromeEvent, parse_sse_event};
+use nokkvi_data::{
+    backend::auth::AuthGateway,
+    services::navidrome_events::{NavidromeEvent, parse_sse_event},
+};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
