@@ -244,7 +244,7 @@ impl RadiosPage {
             None, // No shuffle button
             Some(RadiosMessage::RefreshViewData),
             None, // No "center on playing" — radio has no queue position
-            Some(RadiosMessage::AddRadioStation), // on_add
+            Some(("Add Station", RadiosMessage::AddRadioStation)), // on_add
             true, // show_search
             RadiosMessage::SearchQueryChanged,
         );
