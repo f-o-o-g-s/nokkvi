@@ -7,7 +7,7 @@ use crate::{Nokkvi, app_message::Message};
 impl Nokkvi {
     pub(crate) fn handle_library_changed(&mut self) -> Task<Message> {
         info!("🔄 Navidrome library changed event received, initiating background refresh");
-        
+
         let mut tasks = Vec::new();
 
         // 1. Snapshot current viewport state and trigger reload for Albums if needed
@@ -30,7 +30,7 @@ impl Nokkvi {
             let anchor_id = self.library.songs.get(offset).map(|a| a.id.clone());
             tasks.push(self.handle_load_songs(true, anchor_id));
         }
-        
+
         // Notify the user gently
         self.toast_info("Library refreshed automatically");
 

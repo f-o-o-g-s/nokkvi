@@ -14,7 +14,11 @@ use crate::{
 };
 
 impl Nokkvi {
-    pub(crate) fn handle_load_songs(&mut self, background: bool, anchor_id: Option<String>) -> Task<Message> {
+    pub(crate) fn handle_load_songs(
+        &mut self,
+        background: bool,
+        anchor_id: Option<String>,
+    ) -> Task<Message> {
         debug!(" LoadSongs message received, loading from songs viewmodel...");
         let view_str =
             views::SongsPage::sort_mode_to_api_string(self.songs_page.common.current_sort_mode);
@@ -146,7 +150,7 @@ impl Nokkvi {
                     total_count
                 );
                 self.library.songs.set_first_page(new_songs, total_count);
-                
+
                 if !background {
                     self.songs_page.common.slot_list.viewport_offset = 0;
                     self.songs_page.common.slot_list.selected_indices.clear();

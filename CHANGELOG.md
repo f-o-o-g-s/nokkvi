@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## v0.2.13 — 2026-04-12
+
+### Features
+- **Background Library Refresh** — implemented an event-driven background refresh mechanism via Navidrome SSE that keeps the UI seamlessly in sync with server changes, preserving scrolling viewports.
+- **Login Button Effects** — added hover and pressed interactive effects to the login button.
+
 ## v0.2.12 — 2026-04-11
 
 ### Features

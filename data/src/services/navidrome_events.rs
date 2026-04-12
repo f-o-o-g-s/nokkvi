@@ -66,11 +66,23 @@ mod tests {
     #[test]
     fn test_parse_scan_status() {
         let event = parse_sse_event("scanStatus", r#"{"scanning":true,"count":1337}"#);
-        assert_eq!(event, NavidromeEvent::ScanStatus { scanning: true, count: 1337 });
+        assert_eq!(
+            event,
+            NavidromeEvent::ScanStatus {
+                scanning: true,
+                count: 1337
+            }
+        );
 
         // Missing fields should use default
         let event = parse_sse_event("scanStatus", "{}");
-        assert_eq!(event, NavidromeEvent::ScanStatus { scanning: false, count: 0 });
+        assert_eq!(
+            event,
+            NavidromeEvent::ScanStatus {
+                scanning: false,
+                count: 0
+            }
+        );
     }
 
     #[test]

@@ -466,8 +466,8 @@ impl Nokkvi {
         let queue_changed_sub = iced::Subscription::run(services::queue_changed_subscription::run)
             .map(|()| Message::LoadQueue);
 
-        let sse_sub = iced::Subscription::run(services::navidrome_sse::run)
-            .map(|event| match event {
+        let sse_sub =
+            iced::Subscription::run(services::navidrome_sse::run).map(|event| match event {
                 services::navidrome_sse::SseEvent::LibraryChanged => Message::LibraryChanged,
             });
 

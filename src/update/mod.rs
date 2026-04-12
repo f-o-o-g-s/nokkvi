@@ -208,9 +208,12 @@ impl Nokkvi {
             // Data Loading: Albums
             // -----------------------------------------------------------------
             Message::LoadAlbums => self.handle_load_albums(false, None),
-            Message::Albums(crate::views::AlbumsMessage::AlbumsLoaded { result, total_count, background, anchor_id }) => {
-                self.handle_albums_loaded(result, total_count, background, anchor_id)
-            }
+            Message::Albums(crate::views::AlbumsMessage::AlbumsLoaded {
+                result,
+                total_count,
+                background,
+                anchor_id,
+            }) => self.handle_albums_loaded(result, total_count, background, anchor_id),
             Message::Albums(crate::views::AlbumsMessage::AlbumsPageLoaded(result, total_count)) => {
                 self.handle_albums_page_loaded(result, total_count)
             }
@@ -245,9 +248,12 @@ impl Nokkvi {
             // Data Loading: Artists
             // -----------------------------------------------------------------
             Message::LoadArtists => self.handle_load_artists(false, None),
-            Message::Artists(crate::views::ArtistsMessage::ArtistsLoaded { result, total_count, background, anchor_id }) => {
-                self.handle_artists_loaded(result, total_count, background, anchor_id)
-            }
+            Message::Artists(crate::views::ArtistsMessage::ArtistsLoaded {
+                result,
+                total_count,
+                background,
+                anchor_id,
+            }) => self.handle_artists_loaded(result, total_count, background, anchor_id),
             Message::Artists(crate::views::ArtistsMessage::ArtistsPageLoaded(
                 result,
                 total_count,
@@ -257,9 +263,12 @@ impl Nokkvi {
             // Data Loading: Songs
             // -----------------------------------------------------------------
             Message::LoadSongs => self.handle_load_songs(false, None),
-            Message::Songs(crate::views::SongsMessage::SongsLoaded { result, total_count, background, anchor_id }) => {
-                self.handle_songs_loaded(result, total_count, background, anchor_id)
-            }
+            Message::Songs(crate::views::SongsMessage::SongsLoaded {
+                result,
+                total_count,
+                background,
+                anchor_id,
+            }) => self.handle_songs_loaded(result, total_count, background, anchor_id),
             Message::Songs(crate::views::SongsMessage::SongsPageLoaded(result, total_count)) => {
                 self.handle_songs_page_loaded(result, total_count)
             }

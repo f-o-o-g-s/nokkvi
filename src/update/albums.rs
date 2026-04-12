@@ -14,7 +14,11 @@ use crate::{
 };
 
 impl Nokkvi {
-    pub(crate) fn handle_load_albums(&mut self, background: bool, anchor_id: Option<String>) -> Task<Message> {
+    pub(crate) fn handle_load_albums(
+        &mut self,
+        background: bool,
+        anchor_id: Option<String>,
+    ) -> Task<Message> {
         debug!(" LoadAlbums message received, loading from app_service...");
         let view_str =
             views::AlbumsPage::sort_mode_to_api_string(self.albums_page.common.current_sort_mode);

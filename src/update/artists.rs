@@ -12,7 +12,11 @@ use crate::{
 };
 
 impl Nokkvi {
-    pub(crate) fn handle_load_artists(&mut self, background: bool, anchor_id: Option<String>) -> Task<Message> {
+    pub(crate) fn handle_load_artists(
+        &mut self,
+        background: bool,
+        anchor_id: Option<String>,
+    ) -> Task<Message> {
         debug!(" LoadArtists message received, loading from app_service...");
         let view_str =
             views::ArtistsPage::sort_mode_to_api_string(self.artists_page.common.current_sort_mode);
@@ -170,7 +174,7 @@ impl Nokkvi {
                 self.library
                     .artists
                     .set_first_page(new_artists, total_count);
-                
+
                 if !background {
                     self.artists_page.common.slot_list.viewport_offset = 0;
                     self.artists_page.common.slot_list.selected_indices.clear();

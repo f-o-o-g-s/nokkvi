@@ -10,7 +10,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use iced::task::{Never, Sipper, sipper};
 use nokkvi_data::backend::auth::AuthGateway;
-use nokkvi_data::services::navidrome_events::{parse_sse_event, NavidromeEvent};
+use nokkvi_data::services::navidrome_events::{NavidromeEvent, parse_sse_event};
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
@@ -45,7 +45,7 @@ pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
             .timeout(Duration::from_secs(60 * 60 * 24)) // 24 hour total connection timeout
             .build()
             .unwrap_or_default();
-            
+
         let mut backoff = Duration::from_secs(2);
 
         loop {
@@ -84,7 +84,11 @@ pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
                 Ok(response) => {
                     let status = response.status();
                     if !status.is_success() {
-                        warn!(" [SSE] Connection failed with status {}: {:?}", status, response.text().await.unwrap_or_default());
+                        warn!(
+                            " [SSE] Connection failed with status {}: {:?}",
+                            status,
+                            response.text().await.unwrap_or_default()
+                        );
                         tokio::time::sleep(backoff).await;
                         backoff = std::cmp::min(backoff * 2, Duration::from_secs(30));
                         continue;
@@ -97,8 +101,8 @@ pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
                     let mut buffer = String::new();
                     let mut event_type = String::new();
                     let mut data = String::new();
-                    
-                    // Navidrome sends keepAlive every 15s. If we don't hear from the server for 45s, 
+
+                    // Navidrome sends keepAlive every 15s. If we don't hear from the server for 45s,
                     // consider the connection dead.
                     let read_timeout = Duration::from_secs(45);
 
@@ -129,11 +133,19 @@ pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
                                             if !event_type.is_empty() {
                                                 match parse_sse_event(&event_type, &data) {
                                                     NavidromeEvent::RefreshResource => {
-                                                        debug!(" [SSE] Received refreshResource — emitting LibraryChanged");
+                                                        debug!(
+                                                            " [SSE] Received refreshResource — emitting LibraryChanged"
+                                                        );
                                                         output.send(SseEvent::LibraryChanged).await;
                                                     }
-                                                    NavidromeEvent::ScanStatus { scanning, count } => {
-                                                        debug!(" [SSE] ScanStatus: scanning={}, count={}", scanning, count);
+                                                    NavidromeEvent::ScanStatus {
+                                                        scanning,
+                                                        count,
+                                                    } => {
+                                                        debug!(
+                                                            " [SSE] ScanStatus: scanning={}, count={}",
+                                                            scanning, count
+                                                        );
                                                     }
                                                     NavidromeEvent::KeepAlive => {
                                                         // Heartbeat, just keeps loop active
@@ -161,7 +173,10 @@ pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
                                 break;
                             }
                             Err(_) => {
-                                warn!(" [SSE] Read timeout (no keepAlive for {}s), reconnecting...", read_timeout.as_secs());
+                                warn!(
+                                    " [SSE] Read timeout (no keepAlive for {}s), reconnecting...",
+                                    read_timeout.as_secs()
+                                );
                                 break;
                             }
                         }
