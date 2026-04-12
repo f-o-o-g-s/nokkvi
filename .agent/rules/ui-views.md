@@ -26,7 +26,7 @@ All views use `SlotListPageState`: search query, scroll position, focus index. V
 - **Stable viewport** (default): non-center clicks → `handle_select_offset()` (highlight in-place). Center clicks → `SlotListActivateCenter`.
 - **Legacy mode**: non-center clicks → `SlotListClickPlay` (direct play)
 - Activation flash: `slot_list.flash_center()` on activation/transitions
-- Clickable text links: inline album/artist text routing to respective views (`NavigateAndSearch`) via `mouse_area` overlays.
+- Clickable text links: inline album/artist text routing to respective views via `NavigateAndFilter(View, LibraryFilter)` through `mouse_area` overlays. When browsing panel is active, navigation updates the panel's internal tab instead of switching the main view.
 - Clickable star ratings + clickable hearts on all slots via `mouse_area`.
 - Scrollbar timers carry target `View` — fixes browsing panel routing.
 - `dispatch_view_with_seek!` macro handles `SlotListScrollSeek` messages
@@ -65,7 +65,9 @@ Root dispatch in `update/mod.rs`. `ls src/update/` for handler files. Common hel
 
 ## View Data Refresh
 
-View data (lists, artwork) can be explicitly refreshed via UI (header Refresh button) and hotkeys (F5 / Ctrl+R), which calls `set_needs_fetch()` on the underlying `PagedBuffer` to trigger a reload.
+View data can be refreshed via:
+- **Manual**: header Refresh button / hotkeys (F5 / Ctrl+R) → `set_needs_fetch()` on `PagedBuffer`
+- **Automatic**: Navidrome SSE events → `update/library_refresh.rs` → background reload with ID-based anchor to preserve scroll position. The `background: true` flag on loaded messages prevents scroll jumps.
 ## Modals
 
 - **Equalizer**: 10-band + presets (`widgets/eq_modal.rs`, `update/eq_modal.rs`). Selecting preset auto-enables EQ. Sliders visually reset to 0 dB when disabled.

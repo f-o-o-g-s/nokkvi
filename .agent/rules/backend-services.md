@@ -16,6 +16,7 @@ AppService (orchestrator)
 ├── Domain Services (Albums, Artists, Songs, Genres, Playlists, Radios, Similar, Queue, Settings, Auth)
 │   └── Lazy-initialized via `tokio::sync::OnceCell` (not Mutex<Option<T>>)
 ├── ArtworkPrefetch — background artwork loading with pagination, progress tracking, and dynamic cache key mappings
+├── NavidromeEvents — SSE subscription (`services/navidrome_events.rs`) → parses server-sent events → triggers background library refresh with ID-based anchoring
 └── TaskManager (centralized spawn tracking)
 ```
 
@@ -56,7 +57,7 @@ Owns `PlayerSettings`, `TomlSettings`, `TomlViewPreferences`, `HotkeyConfig`, `S
 
 ## Domain Types
 
-Types are **iced-free**. Key types: `PagedBuffer<T>`, `HotkeyConfig` (HashMap with O(1) lookup), `PlayerSettings` (read the struct for fields — includes `font_family`, `library_page_size`), `Queue`, `QueueSortMode` (physical sort), `PlaylistEditState` (dirty detection), `SongPool`, `BatchPayload`/`BatchItem`.
+Types are **iced-free**. Key types: `PagedBuffer<T>`, `HotkeyConfig` (HashMap with O(1) lookup), `PlayerSettings` (read the struct for fields — includes `font_family`, `library_page_size`), `Queue`, `QueueSortMode` (physical sort), `PlaylistEditState` (dirty detection), `SongPool`, `BatchPayload`/`BatchItem`, `LibraryFilter` (ID-based cross-view navigation filter).
 
 ## API Patterns
 

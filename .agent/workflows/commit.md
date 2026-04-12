@@ -39,13 +39,26 @@ Use the primary area affected: `audio`, `queue`, `ui`, `api`, `settings`, `theme
 
 3. Review the staged diff to understand the changes: `git -C /home/foogs/nokkvi diff --cached`
 
-4. Determine the commit type, scope, and description:
+4. Run the quality gate (fix any issues before committing):
+   ```bash
+   cargo +nightly fmt --all
+   ```
+   ```bash
+   cargo clippy --all-targets -- -D warnings
+   ```
+   ```bash
+   cargo test
+   ```
+   - If fmt made changes, stage them: `git -C /home/foogs/nokkvi add -A`
+   - If clippy or tests fail, fix the issues and re-run before proceeding
+
+5. Determine the commit type, scope, and description:
    - Analyze the diff for what changed
    - Pick the most appropriate type from the table above
    - If multiple types apply, use the most significant one (e.g. `feat` over `refactor`)
    - Keep the description lowercase, imperative mood, no period at end
    - If the change is breaking, add `!` after the scope: `type(scope)!: description`
 
-5. Commit directly: `git -C /home/foogs/nokkvi commit -m "type(scope): description"`
+6. Commit directly: `git -C /home/foogs/nokkvi commit -m "type(scope): description"`
    - Add a body `-m "body text"` only if the change is complex or non-obvious
    - Do NOT ask for approval — just commit

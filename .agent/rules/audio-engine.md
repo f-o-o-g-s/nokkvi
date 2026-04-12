@@ -11,7 +11,7 @@ globs: data/src/audio/**
 CustomAudioEngine
 ├── AudioDecoder (Symphonia)
 │   ├── Standard: HTTP streaming via RangeHttpReader (256KB chunks, 16-chunk LRU, next-chunk prefetch)
-│   └── Radio: HTTP streaming via AsyncNetworkBuffer (infinite stream, bounded 64-chunk sync channel) with generation-gated auto-reconnect loop
+│   └── Radio: HTTP streaming via AsyncNetworkBuffer (tokio async → bounded 64-chunk mpsc channel → sync Read) with generation-gated auto-reconnect loop
 ├── AudioRenderer (ring buffers) → Visualizer callback from StreamingSource
 │   └── RodioOutput (shared rodio Mixer) → creates ActiveStream per track
 │       └── StreamingSource (rodio::Source) → EqProcessor → lock-free ring buffer → pipewire callback
