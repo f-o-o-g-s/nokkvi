@@ -93,7 +93,7 @@ pub enum ArtistsMessage {
     },
     ArtistsPageLoaded(Result<Vec<ArtistUIViewData>, String>, usize), // result, total_count (subsequent page)
 
-    NavigateAndSearch(crate::View, String), // Navigate to target view and search
+    NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
 
     // Open external URL
     OpenExternalUrl(String),
@@ -129,7 +129,7 @@ pub enum ArtistsAction {
     FindSimilar(String, String), // (entity_id, label) - open similar tab
     TopSongs(String, String),  // (artist_name, label) - open similar tab for top songs
     CenterOnPlaying,
-    NavigateAndSearch(crate::View, String),
+    NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
     None,
 }
 
@@ -141,8 +141,8 @@ impl super::HasCommonAction for ArtistsAction {
             Self::SortOrderChanged(a) => super::CommonViewAction::SortOrderChanged(*a),
             Self::RefreshViewData => super::CommonViewAction::RefreshViewData,
             Self::CenterOnPlaying => super::CommonViewAction::CenterOnPlaying,
-            Self::NavigateAndSearch(v, q) => {
-                super::CommonViewAction::NavigateAndSearch(*v, q.clone())
+            Self::NavigateAndFilter(v, f) => {
+                super::CommonViewAction::NavigateAndFilter(*v, f.clone())
             }
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
@@ -443,8 +443,8 @@ impl ArtistsPage {
                 ArtistsMessage::ArtistsPageLoaded(_, _) => (Task::none(), ArtistsAction::None),
                 ArtistsMessage::RefreshViewData => (Task::none(), ArtistsAction::RefreshViewData),
                 ArtistsMessage::CenterOnPlaying => (Task::none(), ArtistsAction::CenterOnPlaying),
-                ArtistsMessage::NavigateAndSearch(view, query) => {
-                    (Task::none(), ArtistsAction::NavigateAndSearch(view, query))
+                ArtistsMessage::NavigateAndFilter(view, filter) => {
+                    (Task::none(), ArtistsAction::NavigateAndFilter(view, filter))
                 }
                 ArtistsMessage::ClickSetRating(item_index, rating) => {
                     use nokkvi_data::utils::formatters::compute_rating_toggle;
@@ -1194,9 +1194,12 @@ impl ArtistsPage {
             false, // artist is already the parent row
             Some(ArtistsMessage::ClickToggleStar(ctx.item_index)),
             Some(ArtistsMessage::FocusAndExpandAlbum(ctx.item_index)),
-            Some(ArtistsMessage::NavigateAndSearch(
+            Some(ArtistsMessage::NavigateAndFilter(
                 crate::View::Albums,
-                album.name.clone(),
+                nokkvi_data::types::filter::LibraryFilter::AlbumId {
+                    id: album.id.clone(),
+                    title: album.name.clone(),
+                },
             )),
             None, // artist click - artist is already the parent
             1,    // depth 1: child albums under artist

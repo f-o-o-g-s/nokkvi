@@ -167,6 +167,12 @@ impl SettingsService {
         sm.set_stable_viewport(enabled)
     }
 
+    /// Set album artists only mode and persist
+    pub async fn set_show_album_artists_only(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_show_album_artists_only(enabled)
+    }
+
     /// Set rounded corners mode and persist
     pub async fn set_rounded_mode(&self, enabled: bool) -> anyhow::Result<()> {
         let mut sm = self.settings_manager.lock().await;

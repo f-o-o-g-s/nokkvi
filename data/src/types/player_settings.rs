@@ -594,6 +594,8 @@ pub struct PlayerSettings {
     pub library_page_size: LibraryPageSize,
     /// Artwork resolution for the large artwork panel.
     pub artwork_resolution: ArtworkResolution,
+    /// Whether the Artists view shows only album artists
+    pub show_album_artists_only: bool,
 }
 
 #[cfg(test)]

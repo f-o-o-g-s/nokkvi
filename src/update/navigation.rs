@@ -305,47 +305,45 @@ impl Nokkvi {
     }
 
     /// Handles clicking an inline link (like Artist or Album) from a slot text column.
-    /// Uses TDD Red step: returns Task::none() for now so tests fail.
-    pub(crate) fn handle_navigate_and_search(
+    pub(crate) fn handle_navigate_and_filter(
         &mut self,
         view: crate::View,
-        query: String,
+        filter: nokkvi_data::types::filter::LibraryFilter,
     ) -> Task<Message> {
         let switch_task = self.handle_switch_view(view);
 
-        // Defocus the search input so cursor doesn't blink in the target view.
-        // The query and offset are handled by the SearchQueryChanged dispatch below.
+        // Defocus search input
         if let Some(page) = self.current_view_page_mut() {
             page.common_mut().search_input_focused = false;
         }
 
-        // Dispatch the view-specific SearchQueryChanged message so the target view
-        // re-filters, caches artwork, and updates its query properly.
-        let search_task = match view {
-            View::Queue => Task::done(Message::Queue(views::QueueMessage::SearchQueryChanged(
-                query,
-            ))),
-            View::Albums => Task::done(Message::Albums(views::AlbumsMessage::SearchQueryChanged(
-                query,
-            ))),
-            View::Artists => Task::done(Message::Artists(
-                views::ArtistsMessage::SearchQueryChanged(query),
-            )),
-            View::Songs => Task::done(Message::Songs(views::SongsMessage::SearchQueryChanged(
-                query,
-            ))),
-            View::Genres => Task::done(Message::Genres(views::GenresMessage::SearchQueryChanged(
-                query,
-            ))),
-            View::Playlists => Task::done(Message::Playlists(
-                views::PlaylistsMessage::SearchQueryChanged(query),
-            )),
-            View::Radios => Task::done(Message::Radios(views::RadiosMessage::SearchQueryChanged(
-                query,
-            ))),
-            View::Settings => Task::none(),
+        // Set the active filter on the target view and update search display text
+        let display = filter.display_text();
+        match view {
+            View::Albums => {
+                self.albums_page.common.active_filter = Some(filter);
+                self.albums_page.common.search_query = display;
+            }
+            View::Songs => {
+                self.songs_page.common.active_filter = Some(filter);
+                self.songs_page.common.search_query = display;
+            }
+            View::Artists => {
+                self.artists_page.common.active_filter = Some(filter);
+                self.artists_page.common.search_query = display;
+            }
+            // Genres view is top-level — doesn't receive filters from links
+            _ => {}
+        }
+
+        // Trigger a data reload with the active filter
+        let load_task = match view {
+            View::Albums => Task::done(Message::LoadAlbums),
+            View::Songs => Task::done(Message::LoadSongs),
+            View::Artists => Task::done(Message::LoadArtists),
+            _ => Task::none(),
         };
 
-        Task::batch([switch_task, search_task])
+        Task::batch([switch_task, load_task])
     }
 }

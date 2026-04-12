@@ -24,6 +24,7 @@ pub struct AlbumUIViewData {
     pub id: String,
     pub name: String,
     pub artist: String,
+    pub artist_id: String,
     pub song_count: u32,
     pub artwork_url: String,
     pub year: Option<u32>,
@@ -79,6 +80,11 @@ impl AlbumUIViewData {
             id: album.id.clone(),
             name: album.name.clone(),
             artist: album.display_artist().to_string(),
+            artist_id: album
+                .album_artist_id
+                .clone()
+                .or_else(|| album.artist_id.clone())
+                .unwrap_or_default(),
             artwork_url,
             song_count: album.song_count.unwrap_or(0),
             year: album.year.or(album.max_year),
@@ -276,9 +282,10 @@ impl AlbumsService {
         sort_mode: Option<&str>,
         sort_order: Option<&str>,
         search_query: Option<&str>,
+        filter: Option<&crate::types::filter::LibraryFilter>,
     ) -> Result<Vec<Album>> {
         use crate::types::paged_buffer::PAGE_SIZE;
-        self.load_raw_albums_page(sort_mode, sort_order, search_query, 0, PAGE_SIZE)
+        self.load_raw_albums_page(sort_mode, sort_order, search_query, filter, 0, PAGE_SIZE)
             .await
     }
 
@@ -288,6 +295,7 @@ impl AlbumsService {
         sort_mode: Option<&str>,
         sort_order: Option<&str>,
         search_query: Option<&str>,
+        filter: Option<&crate::types::filter::LibraryFilter>,
         offset: usize,
         limit: usize,
     ) -> Result<Vec<Album>> {
@@ -298,7 +306,14 @@ impl AlbumsService {
         let search_opt = search_query.filter(|s| !s.is_empty());
 
         match service
-            .load_albums(sort_mode, sort_order, search_opt, Some(offset), Some(limit))
+            .load_albums(
+                sort_mode,
+                sort_order,
+                search_opt,
+                filter,
+                Some(offset),
+                Some(limit),
+            )
             .await
         {
             Ok((mut albums, total_count)) => {
@@ -631,7 +646,7 @@ impl AlbumsService {
             let limit = 500;
             loop {
                 match service
-                    .load_albums("name", "ASC", None, Some(offset), Some(limit))
+                    .load_albums("name", "ASC", None, None, Some(offset), Some(limit))
                     .await
                 {
                     Ok((mut batch, total_count)) => {

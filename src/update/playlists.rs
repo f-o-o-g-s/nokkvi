@@ -415,8 +415,8 @@ impl Nokkvi {
                         .await
                 });
             }
-            views::PlaylistsAction::NavigateAndSearch(view, query) => {
-                return Task::done(Message::NavigateAndSearch(view, query));
+            views::PlaylistsAction::NavigateAndFilter(view, filter) => {
+                return Task::done(Message::NavigateAndFilter(view, filter));
             }
             _ => {} // None + already-handled common actions
         }

@@ -34,6 +34,7 @@ impl AlbumsApiService {
         sort_mode: &str,
         sort_order: &str,
         search_query: Option<&str>,
+        filter: Option<&crate::types::filter::LibraryFilter>,
         offset: Option<usize>,
         limit: Option<usize>,
     ) -> Result<(Vec<Album>, u32)> {
@@ -64,10 +65,21 @@ impl AlbumsApiService {
         params.push(("_start", &start_str));
         params.push(("_end", &end_str));
 
-        // Add search query if provided
-        if let Some(query) = search_query
+        // Apply ID filter if present
+        if let Some(f) = filter {
+            match f {
+                crate::types::filter::LibraryFilter::ArtistId { id, .. } => {
+                    params.push(("artist_id", id));
+                }
+                crate::types::filter::LibraryFilter::GenreId { name, .. } => {
+                    params.push(("genre_id", name));
+                }
+                crate::types::filter::LibraryFilter::AlbumId { id, .. } => params.push(("id", id)),
+            }
+        } else if let Some(query) = search_query
             && !query.is_empty()
         {
+            // Only fall back to text search if no ID filter is active
             params.push(("name", query));
         }
 

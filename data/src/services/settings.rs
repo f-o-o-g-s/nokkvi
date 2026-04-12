@@ -218,6 +218,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_show_album_artists_only(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.show_album_artists_only = enabled;
+        self.save()
+    }
+
     pub fn set_rounded_mode(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.rounded_mode = enabled;
         self.save()
@@ -528,6 +533,7 @@ impl SettingsManager {
             custom_eq_presets: p.custom_eq_presets.clone(),
             verbose_config: p.verbose_config,
             artwork_resolution: p.artwork_resolution,
+            show_album_artists_only: p.show_album_artists_only,
         }
     }
 
@@ -592,6 +598,7 @@ fn apply_toml_settings_to_internal(
     p.verbose_config = ts.verbose_config;
     p.library_page_size = ts.library_page_size;
     p.artwork_resolution = ts.artwork_resolution;
+    p.show_album_artists_only = ts.show_album_artists_only;
 }
 
 /// Convert `AllViewPreferences` into the internal `ViewPreferences` for redb storage.

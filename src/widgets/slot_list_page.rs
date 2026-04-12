@@ -13,6 +13,7 @@ pub struct SlotListPageState {
     pub current_sort_mode: SortMode,
     pub sort_ascending: bool,
     pub search_input_focused: bool,
+    pub active_filter: Option<nokkvi_data::types::filter::LibraryFilter>,
 }
 
 impl SlotListPageState {
@@ -24,6 +25,7 @@ impl SlotListPageState {
             current_sort_mode: default_sort_mode,
             sort_ascending: default_sort_ascending,
             search_input_focused: false,
+            active_filter: None,
         }
     }
 
@@ -175,6 +177,7 @@ impl SlotListPageState {
         query: String,
         total_items: usize,
     ) -> SlotListPageAction {
+        self.active_filter = None;
         self.search_query = query.clone();
         self.slot_list.set_offset(0, total_items); // Reset to top on search
         SlotListPageAction::SearchChanged(query)

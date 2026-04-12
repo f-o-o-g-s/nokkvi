@@ -158,18 +158,31 @@ impl ArtistsService {
         sort_mode: Option<&str>,
         sort_order: Option<&str>,
         search_query: Option<&str>,
+        filter: Option<&crate::types::filter::LibraryFilter>,
+        album_artists_only: bool,
     ) -> Result<Vec<Artist>> {
         use crate::types::paged_buffer::PAGE_SIZE;
-        self.load_raw_artists_page(sort_mode, sort_order, search_query, 0, PAGE_SIZE)
-            .await
+        self.load_raw_artists_page(
+            sort_mode,
+            sort_order,
+            search_query,
+            filter,
+            album_artists_only,
+            0,
+            PAGE_SIZE,
+        )
+        .await
     }
 
     /// Load a specific page of artists with explicit offset/limit.
+    #[allow(clippy::too_many_arguments)]
     pub async fn load_raw_artists_page(
         &self,
         sort_mode: Option<&str>,
         sort_order: Option<&str>,
         search_query: Option<&str>,
+        filter: Option<&crate::types::filter::LibraryFilter>,
+        album_artists_only: bool,
         offset: usize,
         limit: usize,
     ) -> Result<Vec<Artist>> {
@@ -180,7 +193,15 @@ impl ArtistsService {
         let search_opt = search_query.filter(|s| !s.is_empty());
 
         match service
-            .load_artists(sort_mode, sort_order, search_opt, Some(offset), Some(limit))
+            .load_artists(
+                sort_mode,
+                sort_order,
+                search_opt,
+                filter,
+                album_artists_only,
+                Some(offset),
+                Some(limit),
+            )
             .await
         {
             Ok((artists, total_count)) => {

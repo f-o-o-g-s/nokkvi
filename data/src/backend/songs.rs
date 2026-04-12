@@ -222,9 +222,10 @@ impl SongsService {
         sort_mode: Option<&str>,
         sort_order: Option<&str>,
         search_query: Option<&str>,
+        filter: Option<&crate::types::filter::LibraryFilter>,
     ) -> Result<Vec<Song>> {
         use crate::types::paged_buffer::PAGE_SIZE;
-        self.load_raw_songs_page(sort_mode, sort_order, search_query, 0, PAGE_SIZE)
+        self.load_raw_songs_page(sort_mode, sort_order, search_query, filter, 0, PAGE_SIZE)
             .await
     }
 
@@ -235,6 +236,7 @@ impl SongsService {
         sort_mode: Option<&str>,
         sort_order: Option<&str>,
         search_query: Option<&str>,
+        filter: Option<&crate::types::filter::LibraryFilter>,
         offset: usize,
         limit: usize,
     ) -> Result<Vec<Song>> {
@@ -245,7 +247,14 @@ impl SongsService {
         let search_opt = search_query.filter(|s| !s.is_empty());
 
         match service
-            .load_songs(sort_mode, sort_order, search_opt, Some(offset), Some(limit))
+            .load_songs(
+                sort_mode,
+                sort_order,
+                search_opt,
+                filter,
+                Some(offset),
+                Some(limit),
+            )
             .await
         {
             Ok((songs, total_count)) => {

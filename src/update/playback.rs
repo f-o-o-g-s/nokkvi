@@ -1078,6 +1078,7 @@ impl Nokkvi {
         self.quick_add_to_playlist = settings.quick_add_to_playlist;
         self.verbose_config = settings.verbose_config;
         self.artwork_resolution = settings.artwork_resolution;
+        self.show_album_artists_only = settings.show_album_artists_only;
 
         // Restore active playlist context from persisted settings
         self.active_playlist_info = settings.active_playlist_id.clone().map(|id| {

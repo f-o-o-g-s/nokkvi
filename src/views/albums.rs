@@ -96,8 +96,8 @@ pub enum AlbumsMessage {
     /// Refresh artwork for a specific album (album_id)
     RefreshArtwork(String),
 
-    /// Navigate to a view and set its search query
-    NavigateAndSearch(crate::View, String),
+    /// Navigate to a view and apply an ID filter
+    NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -129,7 +129,7 @@ pub enum AlbumsAction {
     ShowSongInFolder(String), // song path - open containing folder directly (expansion child)
     RefreshArtwork(String), // album_id - refresh artwork from server
     FindSimilar(String, String), // (entity_id, label) - open similar tab
-    NavigateAndSearch(crate::View, String), // Navigate to target view and search
+    NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     None,
 }
 
@@ -141,8 +141,8 @@ impl super::HasCommonAction for AlbumsAction {
             Self::SortOrderChanged(a) => super::CommonViewAction::SortOrderChanged(*a),
             Self::RefreshViewData => super::CommonViewAction::RefreshViewData,
             Self::CenterOnPlaying => super::CommonViewAction::CenterOnPlaying,
-            Self::NavigateAndSearch(v, q) => {
-                super::CommonViewAction::NavigateAndSearch(*v, q.clone())
+            Self::NavigateAndFilter(v, f) => {
+                super::CommonViewAction::NavigateAndFilter(*v, f.clone())
             }
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
@@ -530,8 +530,8 @@ impl AlbumsPage {
                 }
                 // Common arms already handled by macro above
                 AlbumsMessage::CenterOnPlaying => (Task::none(), AlbumsAction::CenterOnPlaying),
-                AlbumsMessage::NavigateAndSearch(view, query) => {
-                    (Task::none(), AlbumsAction::NavigateAndSearch(view, query))
+                AlbumsMessage::NavigateAndFilter(view, filter) => {
+                    (Task::none(), AlbumsAction::NavigateAndFilter(view, filter))
                 }
                 _ => (Task::none(), AlbumsAction::None),
             },
@@ -799,9 +799,12 @@ impl AlbumsPage {
             },
             {
                 use crate::widgets::slot_list::slot_list_text_column;
-                let artist_click = Some(AlbumsMessage::NavigateAndSearch(
+                let artist_click = Some(AlbumsMessage::NavigateAndFilter(
                     crate::View::Artists,
-                    album_artist.clone(),
+                    nokkvi_data::types::filter::LibraryFilter::ArtistId {
+                        id: album.artist_id.clone(),
+                        name: album_artist.clone(),
+                    },
                 ));
                 let title_click = Some(AlbumsMessage::ContextMenuAction(
                     ctx.item_index,
@@ -846,9 +849,12 @@ impl AlbumsPage {
                 } else if !extra_value.is_empty() {
                     let mut click_msg = None;
                     if current_sort_mode == SortMode::Genre {
-                        click_msg = Some(AlbumsMessage::NavigateAndSearch(
+                        click_msg = Some(AlbumsMessage::NavigateAndFilter(
                             crate::View::Genres,
-                            extra_value.clone(),
+                            nokkvi_data::types::filter::LibraryFilter::GenreId {
+                                id: extra_value.clone(),
+                                name: extra_value.clone(),
+                            },
                         ));
                     }
                     use crate::widgets::slot_list::slot_list_metadata_column;
@@ -943,10 +949,15 @@ impl AlbumsPage {
                 AlbumsMessage::SlotListClickPlay(ctx.item_index)
             },
             Some(AlbumsMessage::ClickToggleStar(ctx.item_index)),
-            Some(AlbumsMessage::NavigateAndSearch(
-                crate::View::Artists,
-                song.artist.clone(),
-            )),
+            song.artist_id.as_ref().map(|id| {
+                AlbumsMessage::NavigateAndFilter(
+                    crate::View::Artists,
+                    nokkvi_data::types::filter::LibraryFilter::ArtistId {
+                        id: id.clone(),
+                        name: song.artist.clone(),
+                    },
+                )
+            }),
             1, // depth 1: child tracks under album
         );
 

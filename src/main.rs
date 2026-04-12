@@ -198,6 +198,8 @@ pub struct Nokkvi {
     pub stable_viewport: bool,
     /// Whether auto-follow playing track is enabled (default: true)
     pub auto_follow_playing: bool,
+    /// Whether the Artists view shows only album artists
+    pub show_album_artists_only: bool,
     /// What Enter does in the Songs view (default: PlayAll)
     pub enter_behavior: nokkvi_data::types::player_settings::EnterBehavior,
     /// Local filesystem prefix for opening files in the file manager (default: empty = not set)
@@ -283,6 +285,7 @@ impl Default for Nokkvi {
             start_view_applied: false,
             stable_viewport: true,
             auto_follow_playing: true,
+            show_album_artists_only: false,
             enter_behavior: nokkvi_data::types::player_settings::EnterBehavior::default(),
             local_music_path: String::new(),
             library_page_size: nokkvi_data::types::player_settings::LibraryPageSize::Default,

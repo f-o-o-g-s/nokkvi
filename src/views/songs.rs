@@ -71,8 +71,8 @@ pub enum SongsMessage {
     SongsPageLoaded(Result<Vec<SongUIViewData>, String>, usize), // result, total_count (subsequent page)
     /// Refresh artwork for a specific album (album_id)
     RefreshArtwork(String),
-    /// Navigate to a view and set its search query
-    NavigateAndSearch(crate::View, String),
+    /// Navigate to a view and apply an ID filter
+    NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -99,7 +99,7 @@ pub enum SongsAction {
     FindSimilar(String, String), // (id, label) - Find similar to this song
     TopSongs(String, String),    // (artist, label) - Find top songs by artist
     CenterOnPlaying,
-    NavigateAndSearch(crate::View, String), // Navigate to target view and search
+    NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     None,
 }
 
@@ -111,8 +111,8 @@ impl super::HasCommonAction for SongsAction {
             Self::SortOrderChanged(a) => super::CommonViewAction::SortOrderChanged(*a),
             Self::RefreshViewData => super::CommonViewAction::RefreshViewData,
             Self::CenterOnPlaying => super::CommonViewAction::CenterOnPlaying,
-            Self::NavigateAndSearch(v, q) => {
-                super::CommonViewAction::NavigateAndSearch(*v, q.clone())
+            Self::NavigateAndFilter(v, f) => {
+                super::CommonViewAction::NavigateAndFilter(*v, f.clone())
             }
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
@@ -357,8 +357,8 @@ impl SongsPage {
                 (Task::none(), SongsAction::RefreshArtwork(album_id))
             }
             SongsMessage::CenterOnPlaying => (Task::none(), SongsAction::CenterOnPlaying),
-            SongsMessage::NavigateAndSearch(view, query) => {
-                (Task::none(), SongsAction::NavigateAndSearch(view, query))
+            SongsMessage::NavigateAndFilter(view, filter) => {
+                (Task::none(), SongsAction::NavigateAndFilter(view, filter))
             }
         }
     }
@@ -515,10 +515,15 @@ impl SongsPage {
                     // 2. Title + Artist (40%)
                     {
                         use crate::widgets::slot_list::slot_list_text_column;
-                        let artist_click = Some(SongsMessage::NavigateAndSearch(
-                            crate::View::Artists,
-                            song_artist.clone(),
-                        ));
+                        let artist_click = song.artist_id.as_ref().map(|id| {
+                            SongsMessage::NavigateAndFilter(
+                                crate::View::Artists,
+                                nokkvi_data::types::filter::LibraryFilter::ArtistId {
+                                    id: id.clone(),
+                                    name: song_artist.clone(),
+                                },
+                            )
+                        });
                         let title_click = Some(SongsMessage::ContextMenuAction(
                             ctx.item_index,
                             crate::widgets::context_menu::LibraryContextEntry::GetInfo,
@@ -538,10 +543,15 @@ impl SongsPage {
                     // 3. Album (25%)
                     {
                         use crate::widgets::slot_list::slot_list_metadata_column;
-                        let album_click = Some(SongsMessage::NavigateAndSearch(
-                            crate::View::Albums,
-                            song_album.clone(),
-                        ));
+                        let album_click = song.album_id.as_ref().map(|id| {
+                            SongsMessage::NavigateAndFilter(
+                                crate::View::Albums,
+                                nokkvi_data::types::filter::LibraryFilter::AlbumId {
+                                    id: id.clone(),
+                                    title: song_album.clone(),
+                                },
+                            )
+                        });
                         slot_list_metadata_column(song_album, album_click, metadata_size, style, 25)
                     },
                     // 4. Extra Column (18%) - Dynamic based on current sort mode
@@ -561,9 +571,12 @@ impl SongsPage {
                         } else if !extra_value.is_empty() {
                             let mut click_msg = None;
                             if current_sort_mode == SortMode::Genre {
-                                click_msg = Some(SongsMessage::NavigateAndSearch(
+                                click_msg = Some(SongsMessage::NavigateAndFilter(
                                     crate::View::Genres,
-                                    extra_value.clone(),
+                                    nokkvi_data::types::filter::LibraryFilter::GenreId {
+                                        id: extra_value.clone(),
+                                        name: extra_value.clone(),
+                                    },
                                 ));
                             }
                             use crate::widgets::slot_list::slot_list_metadata_column;

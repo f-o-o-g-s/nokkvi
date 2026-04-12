@@ -71,6 +71,7 @@ impl SettingsPage {
                     verbose_config: data.verbose_config,
                     library_page_size: data.library_page_size,
                     artwork_resolution: data.artwork_resolution,
+                    show_album_artists_only: data.show_album_artists_only,
                 };
                 items::build_general_items(&gdata)
             }

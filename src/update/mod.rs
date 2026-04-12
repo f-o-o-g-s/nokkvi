@@ -156,7 +156,9 @@ impl Nokkvi {
             // -----------------------------------------------------------------
             Message::SwitchView(view) => self.handle_switch_view(view),
             Message::LibraryChanged => self.handle_library_changed(),
-            Message::NavigateAndSearch(view, query) => self.handle_navigate_and_search(view, query),
+            Message::NavigateAndFilter(view, filter) => {
+                self.handle_navigate_and_filter(view, filter)
+            }
             Message::StripClicked => {
                 use nokkvi_data::types::player_settings::StripClickAction;
                 match crate::theme::strip_click_action() {

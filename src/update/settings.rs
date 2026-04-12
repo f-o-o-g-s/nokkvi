@@ -34,6 +34,7 @@ impl Nokkvi {
             enter_behavior: self.enter_behavior.as_label(),
             local_music_path: self.local_music_path.clone(),
             library_page_size: self.library_page_size.as_label(),
+            show_album_artists_only: self.show_album_artists_only,
             rounded_mode: crate::theme::is_rounded_mode(),
             nav_layout: if crate::theme::is_side_nav() {
                 "Side"
@@ -636,6 +637,17 @@ impl Nokkvi {
                         shell.settings().set_library_page_size(size).await?;
                         Ok(())
                     });
+                }
+                Task::none()
+            }
+            "general.show_album_artists_only" => {
+                if let crate::views::settings::items::SettingValue::Bool(enabled) = value {
+                    self.show_album_artists_only = enabled;
+                    self.shell_spawn("persist_show_album_artists_only", move |shell| async move {
+                        shell.settings().set_show_album_artists_only(enabled).await?;
+                        Ok(())
+                    });
+                    return Task::done(Message::LoadArtists);
                 }
                 Task::none()
             }

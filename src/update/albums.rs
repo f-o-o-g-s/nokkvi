@@ -28,6 +28,7 @@ impl Nokkvi {
             "DESC"
         };
         let search_query_clone = self.albums_page.common.search_query.clone();
+        let filter_clone = self.albums_page.common.active_filter.clone();
 
         // Mark buffer as loading to prevent duplicate fetches
         self.library.albums.set_loading(true);
@@ -45,7 +46,12 @@ impl Nokkvi {
                     view_str, sort_order, search_query
                 );
                 match albums_vm
-                    .load_raw_albums(Some(view_str), Some(sort_order), search_query)
+                    .load_raw_albums(
+                        Some(view_str),
+                        Some(sort_order),
+                        search_query,
+                        filter_clone.as_ref(),
+                    )
                     .await
                 {
                     Ok(albums) => {
@@ -87,6 +93,7 @@ impl Nokkvi {
             "DESC"
         };
         let search_query_clone = self.albums_page.common.search_query.clone();
+        let filter_clone = self.albums_page.common.active_filter.clone();
 
         self.library.albums.set_loading(true);
 
@@ -103,6 +110,7 @@ impl Nokkvi {
                         Some(view_str),
                         Some(sort_order),
                         search_query,
+                        filter_clone.as_ref(),
                         offset,
                         page_size,
                     )
@@ -530,7 +538,7 @@ impl Nokkvi {
 
             // Load ALL artists from the API (limit=None defaults to 999999)
             let all_artists = artists_vm
-                .load_raw_artists_page(Some("name"), Some("ASC"), None, 0, 999999)
+                .load_raw_artists_page(Some("name"), Some("ASC"), None, None, false, 0, 999999)
                 .await;
 
             match all_artists {

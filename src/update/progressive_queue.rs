@@ -42,6 +42,7 @@ impl Nokkvi {
                         Some(&sort_m),
                         Some(&sort_o),
                         search_q.as_deref(),
+                        None,
                         offset,
                         page_size,
                     )

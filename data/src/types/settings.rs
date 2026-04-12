@@ -138,6 +138,9 @@ pub struct PlayerSettings {
     /// Artwork resolution for the large panel (Default / High / Ultra / Original)
     #[serde(default)]
     pub artwork_resolution: ArtworkResolution,
+    /// Whether the Artists view shows only album artists
+    #[serde(default = "default_true")]
+    pub show_album_artists_only: bool,
 }
 
 fn default_eq_gains() -> [f32; 10] {
@@ -222,6 +225,7 @@ impl Default for PlayerSettings {
             verbose_config: false,
             library_page_size: LibraryPageSize::default(),
             artwork_resolution: ArtworkResolution::default(),
+            show_album_artists_only: default_true(),
         }
     }
 }

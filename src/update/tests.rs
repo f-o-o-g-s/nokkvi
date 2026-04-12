@@ -976,7 +976,13 @@ fn handle_common_view_action_navigate_and_search_returns_task() {
     let persist_fn = |_s, _m, _a| async { Ok(()) };
 
     let task = app.handle_common_view_action(
-        crate::views::CommonViewAction::NavigateAndSearch(View::Artists, "Beatles".to_string()),
+        crate::views::CommonViewAction::NavigateAndFilter(
+            View::Artists,
+            nokkvi_data::types::filter::LibraryFilter::ArtistId {
+                id: "Beatles".to_string(),
+                name: "Beatles".to_string(),
+            },
+        ),
         crate::app_message::Message::LoadAlbums,
         "albums",
         crate::widgets::view_header::SortMode::Name,
@@ -986,7 +992,7 @@ fn handle_common_view_action_navigate_and_search_returns_task() {
 
     assert!(
         task.is_some(),
-        "NavigateAndSearch should be handled by common action handler"
+        "NavigateAndFilter should be handled by common action handler"
     );
 }
 
@@ -1030,6 +1036,7 @@ fn make_settings_view_data() -> crate::views::SettingsViewData {
         enter_behavior: "PlayAll",
         local_music_path: String::new(),
         library_page_size: "Default",
+        show_album_artists_only: true,
         rounded_mode: false,
         nav_layout: "Top",
         nav_display_mode: "IconsAndLabels",
@@ -1458,12 +1465,18 @@ fn dominant_color_calculated_updates_global_snapshot() {
 // ============================================================================
 
 #[test]
-fn handle_navigate_and_search_updates_view_and_defocuses() {
+fn handle_navigate_and_filter_updates_view_and_defocuses() {
     let mut app = test_app();
     app.current_view = View::Queue; // Start at Queue
     app.artists_page.common.search_input_focused = true;
 
-    let _ = app.handle_navigate_and_search(View::Artists, "The Beatles".to_string());
+    let _ = app.handle_navigate_and_filter(
+        View::Artists,
+        nokkvi_data::types::filter::LibraryFilter::ArtistId {
+            id: "The Beatles".to_string(),
+            name: "The Beatles".to_string(),
+        },
+    );
 
     assert_eq!(app.current_view, View::Artists);
     // search_input_focused is cleared synchronously; the actual query is set
@@ -1472,63 +1485,96 @@ fn handle_navigate_and_search_updates_view_and_defocuses() {
 }
 
 #[test]
-fn handle_navigate_and_search_updates_queue_properly() {
+fn handle_navigate_and_filter_updates_queue_properly() {
     let mut app = test_app();
     app.current_view = View::Songs; // Start at Songs
     app.queue_page.common.search_input_focused = true;
 
-    let _ = app.handle_navigate_and_search(View::Queue, "Master".to_string());
+    let _ = app.handle_navigate_and_filter(
+        View::Queue,
+        nokkvi_data::types::filter::LibraryFilter::AlbumId {
+            id: "Master".to_string(),
+            title: "Master".to_string(),
+        },
+    );
 
     assert_eq!(app.current_view, View::Queue);
     assert!(!app.queue_page.common.search_input_focused);
 }
 
 #[test]
-fn queue_page_navigate_and_search_returns_action() {
+fn queue_page_navigate_and_filter_returns_action() {
     let mut app = test_app();
     let (_, action) = app.queue_page.update(
-        crate::views::QueueMessage::NavigateAndSearch(View::Albums, "Daft Punk".to_string()),
+        crate::views::QueueMessage::NavigateAndFilter(
+            View::Albums,
+            nokkvi_data::types::filter::LibraryFilter::AlbumId {
+                id: "Daft Punk".to_string(),
+                title: "Daft Punk".to_string(),
+            },
+        ),
         &[],
     );
     match action {
-        crate::views::QueueAction::NavigateAndSearch(v, q) => {
+        crate::views::QueueAction::NavigateAndFilter(v, f) => {
             assert_eq!(v, View::Albums);
-            assert_eq!(q, "Daft Punk");
+            assert!(matches!(
+                f,
+                nokkvi_data::types::filter::LibraryFilter::AlbumId { .. }
+            ));
         }
-        _ => panic!("Expected NavigateAndSearch action"),
+        _ => panic!("Expected NavigateAndFilter action"),
     }
 }
 
 #[test]
-fn songs_page_navigate_and_search_returns_action() {
+fn songs_page_navigate_and_filter_returns_action() {
     let mut app = test_app();
     let (_, action) = app.songs_page.update(
-        crate::views::SongsMessage::NavigateAndSearch(View::Artists, "Pink".to_string()),
+        crate::views::SongsMessage::NavigateAndFilter(
+            View::Artists,
+            nokkvi_data::types::filter::LibraryFilter::ArtistId {
+                id: "Pink".to_string(),
+                name: "Pink".to_string(),
+            },
+        ),
         &[],
     );
     match action {
-        crate::views::SongsAction::NavigateAndSearch(v, q) => {
+        crate::views::SongsAction::NavigateAndFilter(v, f) => {
             assert_eq!(v, View::Artists);
-            assert_eq!(q, "Pink");
+            assert!(matches!(
+                f,
+                nokkvi_data::types::filter::LibraryFilter::ArtistId { .. }
+            ));
         }
-        _ => panic!("Expected NavigateAndSearch action"),
+        _ => panic!("Expected NavigateAndFilter action"),
     }
 }
 
 #[test]
-fn albums_page_navigate_and_search_returns_action() {
+fn albums_page_navigate_and_filter_returns_action() {
     let mut app = test_app();
     let (_, action) = app.albums_page.update(
-        crate::views::AlbumsMessage::NavigateAndSearch(View::Songs, "Get Lucky".to_string()),
+        crate::views::AlbumsMessage::NavigateAndFilter(
+            View::Songs,
+            nokkvi_data::types::filter::LibraryFilter::AlbumId {
+                id: "Get Lucky".to_string(),
+                title: "Get Lucky".to_string(),
+            },
+        ),
         0,
         &[],
     );
     match action {
-        crate::views::AlbumsAction::NavigateAndSearch(v, q) => {
+        crate::views::AlbumsAction::NavigateAndFilter(v, f) => {
             assert_eq!(v, View::Songs);
-            assert_eq!(q, "Get Lucky");
+            assert!(matches!(
+                f,
+                nokkvi_data::types::filter::LibraryFilter::AlbumId { .. }
+            ));
         }
-        _ => panic!("Expected NavigateAndSearch action"),
+        _ => panic!("Expected NavigateAndFilter action"),
     }
 }
 

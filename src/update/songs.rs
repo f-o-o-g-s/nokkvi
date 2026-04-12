@@ -28,6 +28,7 @@ impl Nokkvi {
             "DESC"
         };
         let search_query_clone = self.songs_page.common.search_query.clone();
+        let filter_clone = self.songs_page.common.active_filter.clone();
 
         // Mark buffer as loading to prevent duplicate fetches
         self.library.songs.set_loading(true);
@@ -50,6 +51,7 @@ impl Nokkvi {
                         Some(view_str),
                         Some(sort_order),
                         search_query,
+                        filter_clone.as_ref(),
                         0,
                         page_size,
                     )
@@ -88,6 +90,7 @@ impl Nokkvi {
             "DESC"
         };
         let search_query_clone = self.songs_page.common.search_query.clone();
+        let filter_clone = self.songs_page.common.active_filter.clone();
 
         // Mark loading to prevent duplicate fetches
         self.library.songs.set_loading(true);
@@ -105,6 +108,7 @@ impl Nokkvi {
                         Some(view_str),
                         Some(sort_order),
                         search_query,
+                        filter_clone.as_ref(),
                         offset,
                         page_size,
                     )

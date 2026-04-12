@@ -24,11 +24,14 @@ impl ArtistsApiService {
     /// sort_mode: Sort mode (name, favorited, albumCount, songCount, random)
     /// sort_order: Sort order (ASC or DESC)
     /// search_query: Optional search query
+    #[allow(clippy::too_many_arguments)]
     pub async fn load_artists(
         &self,
         sort_mode: &str,
         sort_order: &str,
         search_query: Option<&str>,
+        filter: Option<&crate::types::filter::LibraryFilter>,
+        album_artists_only: bool,
         offset: Option<usize>,
         limit: Option<usize>,
     ) -> Result<(Vec<Artist>, u32)> {
@@ -47,11 +50,11 @@ impl ArtistsApiService {
         };
 
         // Build query parameters
-        let mut params = vec![
-            ("_sort", sort_param.as_str()),
-            ("_order", order_param),
-            ("role", "albumartist"), // Only show album artists (per QML reference)
-        ];
+        let mut params = vec![("_sort", sort_param.as_str()), ("_order", order_param)];
+
+        if album_artists_only {
+            params.push(("role", "albumartist"));
+        }
 
         // Add pagination parameters
         let offset_val = offset.unwrap_or(0);
@@ -61,8 +64,12 @@ impl ArtistsApiService {
         params.push(("_start", &start_str));
         params.push(("_end", &end_str));
 
-        // Add search query if provided
-        if let Some(query) = search_query
+        // Apply ID filter if present
+        if let Some(f) = filter {
+            if let crate::types::filter::LibraryFilter::ArtistId { id, .. } = f {
+                params.push(("id", id));
+            }
+        } else if let Some(query) = search_query
             && !query.is_empty()
         {
             params.push(("name", query));

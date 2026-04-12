@@ -28,6 +28,8 @@ impl Nokkvi {
             "DESC"
         };
         let search_query_clone = self.artists_page.common.search_query.clone();
+        let filter_clone = self.artists_page.common.active_filter.clone();
+        let album_artists_only = self.show_album_artists_only;
 
         // Mark buffer as loading to prevent duplicate fetches
         self.library.artists.set_loading(true);
@@ -45,7 +47,13 @@ impl Nokkvi {
                     view_str, sort_order, search_query
                 );
                 match artists_vm
-                    .load_raw_artists(Some(view_str), Some(sort_order), search_query)
+                    .load_raw_artists(
+                        Some(view_str),
+                        Some(sort_order),
+                        search_query,
+                        filter_clone.as_ref(),
+                        album_artists_only,
+                    )
                     .await
                 {
                     Ok(artists) => {
@@ -97,6 +105,8 @@ impl Nokkvi {
             "DESC"
         };
         let search_query_clone = self.artists_page.common.search_query.clone();
+        let filter_clone = self.artists_page.common.active_filter.clone();
+        let album_artists_only = self.show_album_artists_only;
 
         self.library.artists.set_loading(true);
 
@@ -113,6 +123,8 @@ impl Nokkvi {
                         Some(view_str),
                         Some(sort_order),
                         search_query,
+                        filter_clone.as_ref(),
+                        album_artists_only,
                         offset,
                         page_size,
                     )

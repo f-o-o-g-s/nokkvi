@@ -147,7 +147,7 @@ pub enum PlaylistsMessage {
     // Data loading (moved from root Message enum)
     PlaylistsLoaded(Result<Vec<PlaylistUIViewData>, String>, usize), // result, total_count
 
-    NavigateAndSearch(crate::View, String), // Navigate to target view and search
+    NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -170,7 +170,7 @@ pub enum PlaylistsAction {
     EditPlaylist(String, String, String), // (playlist_id, playlist_name, comment) — enter split-view edit mode
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
     SetAsDefaultPlaylist(String, String), // (playlist_id, playlist_name) — set as quick-add default
-    NavigateAndSearch(crate::View, String), // Navigate to target view and search
+    NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
 
     None,
 }
@@ -182,8 +182,8 @@ impl super::HasCommonAction for PlaylistsAction {
             Self::SortModeChanged(m) => super::CommonViewAction::SortModeChanged(*m),
             Self::SortOrderChanged(a) => super::CommonViewAction::SortOrderChanged(*a),
             Self::RefreshViewData => super::CommonViewAction::RefreshViewData,
-            Self::NavigateAndSearch(v, q) => {
-                super::CommonViewAction::NavigateAndSearch(*v, q.clone())
+            Self::NavigateAndFilter(v, f) => {
+                super::CommonViewAction::NavigateAndFilter(*v, f.clone())
             }
 
             Self::None => super::CommonViewAction::None,
@@ -388,9 +388,9 @@ impl PlaylistsPage {
                 PlaylistsMessage::RefreshViewData => {
                     (Task::none(), PlaylistsAction::RefreshViewData)
                 }
-                PlaylistsMessage::NavigateAndSearch(view, query) => (
+                PlaylistsMessage::NavigateAndFilter(view, filter) => (
                     Task::none(),
-                    PlaylistsAction::NavigateAndSearch(view, query),
+                    PlaylistsAction::NavigateAndFilter(view, filter),
                 ),
 
                 PlaylistsMessage::ContextMenuAction(clicked_idx, entry) => {
@@ -921,10 +921,15 @@ impl PlaylistsPage {
                 PlaylistsMessage::SlotListClickPlay(ctx.item_index)
             },
             Some(PlaylistsMessage::ClickToggleStar(ctx.item_index)),
-            Some(PlaylistsMessage::NavigateAndSearch(
-                crate::View::Artists,
-                song.artist.clone(),
-            )),
+            song.artist_id.as_ref().map(|id| {
+                PlaylistsMessage::NavigateAndFilter(
+                    crate::View::Artists,
+                    nokkvi_data::types::filter::LibraryFilter::ArtistId {
+                        id: id.clone(),
+                        name: song.artist.clone(),
+                    },
+                )
+            }),
             1, // depth 1: child tracks under playlist
         )
     }

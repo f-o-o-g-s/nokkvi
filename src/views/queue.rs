@@ -104,8 +104,8 @@ pub enum QueueMessage {
     QueueLoaded(Result<Vec<QueueSongUIViewData>, String>), // queue_songs
     /// Refresh artwork for a specific album (album_id)
     RefreshArtwork(String),
-    /// Navigate to a view and set its search query
-    NavigateAndSearch(crate::View, String),
+    /// Navigate to a view and apply an ID filter
+    NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -137,7 +137,7 @@ pub enum QueueAction {
     RefreshArtwork(String),   // album_id - refresh artwork from server
     FindSimilar(usize),       // Open Find Similar panel for queue index
     TopSongs(usize),          // Open Top Songs panel for queue index
-    NavigateAndSearch(crate::View, String), // Navigate to target view and search
+    NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     None,
 }
 
@@ -202,8 +202,8 @@ impl QueuePage {
                 );
                 (Task::none(), QueueAction::FocusOnSong(queue_index, flash))
             }
-            QueueMessage::NavigateAndSearch(view, query) => {
-                (Task::none(), QueueAction::NavigateAndSearch(view, query))
+            QueueMessage::NavigateAndFilter(view, filter) => {
+                (Task::none(), QueueAction::NavigateAndFilter(view, filter))
             }
             QueueMessage::SortModeSelected(sort_mode) => {
                 self.queue_sort_mode = sort_mode;
@@ -774,9 +774,12 @@ impl QueuePage {
                         title,
                         title_click,
                         artist.clone(),
-                        Some(QueueMessage::NavigateAndSearch(
+                        Some(QueueMessage::NavigateAndFilter(
                             crate::View::Artists,
-                            artist,
+                            nokkvi_data::types::filter::LibraryFilter::ArtistId {
+                                id: song.artist_id.clone(),
+                                name: artist.clone(),
+                            },
                         )),
                         title_size,
                         subtitle_size,
@@ -793,8 +796,13 @@ impl QueuePage {
             if show_album_column {
                 content_row = content_row.push(
                     container({
-                        let click_album =
-                            QueueMessage::NavigateAndSearch(crate::View::Albums, album.clone());
+                        let click_album = QueueMessage::NavigateAndFilter(
+                            crate::View::Albums,
+                            nokkvi_data::types::filter::LibraryFilter::AlbumId {
+                                id: album_id.clone(),
+                                title: album.clone(),
+                            },
+                        );
                         let album_widget: Element<'_, QueueMessage> =
                             crate::widgets::link_text::LinkText::new(album)
                                 .size(subtitle_size)
@@ -807,8 +815,13 @@ impl QueuePage {
                         let content: Element<'_, QueueMessage> = if current_sort_mode
                             == QueueSortMode::Genre
                         {
-                            let click_genre =
-                                QueueMessage::NavigateAndSearch(crate::View::Genres, genre.clone());
+                            let click_genre = QueueMessage::NavigateAndFilter(
+                                crate::View::Genres,
+                                nokkvi_data::types::filter::LibraryFilter::GenreId {
+                                    id: genre.clone(),
+                                    name: genre.clone(),
+                                },
+                            );
                             let genre_font_size = nokkvi_data::utils::scale::calculate_font_size(
                                 10.0,
                                 ctx.row_height,

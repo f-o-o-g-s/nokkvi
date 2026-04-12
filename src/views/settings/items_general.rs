@@ -14,6 +14,7 @@ pub(crate) struct GeneralSettingsData<'a> {
     pub verbose_config: bool,
     pub library_page_size: &'a str,
     pub artwork_resolution: &'a str,
+    pub show_album_artists_only: bool,
 }
 
 /// Build settings entries for the General tab
@@ -85,6 +86,15 @@ pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEnt
                 "Ultra (2000px)",
                 "Original (Full Size)",
             ],
+        ),
+        SettingItem::bool_val(
+            meta!(
+                "general.show_album_artists_only",
+                "Album Artists Only",
+                "Only show artists that have explicitly released albums, hiding compilation/guest artists"
+            ),
+            data.show_album_artists_only,
+            true,
         ),
         SettingItem::bool_val(
             meta!(

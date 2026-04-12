@@ -584,8 +584,8 @@ impl Nokkvi {
             views::CommonViewAction::CenterOnPlaying => Some(Task::done(Message::Hotkey(
                 crate::app_message::HotkeyMessage::CenterOnPlaying,
             ))),
-            views::CommonViewAction::NavigateAndSearch(view, query) => {
-                Some(Task::done(Message::NavigateAndSearch(view, query)))
+            views::CommonViewAction::NavigateAndFilter(view, filter) => {
+                Some(Task::done(Message::NavigateAndFilter(view, filter)))
             }
             views::CommonViewAction::None | views::CommonViewAction::ViewSpecific => None,
         }
