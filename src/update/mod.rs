@@ -159,6 +159,9 @@ impl Nokkvi {
             Message::NavigateAndFilter(view, filter) => {
                 self.handle_navigate_and_filter(view, filter)
             }
+            Message::BrowserPaneNavigateAndFilter(view, filter) => {
+                self.handle_browser_pane_navigate_and_filter(view, filter)
+            }
             Message::StripClicked => {
                 use nokkvi_data::types::player_settings::StripClickAction;
                 match crate::theme::strip_click_action() {

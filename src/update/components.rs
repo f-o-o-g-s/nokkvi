@@ -585,6 +585,20 @@ impl Nokkvi {
                 crate::app_message::HotkeyMessage::CenterOnPlaying,
             ))),
             views::CommonViewAction::NavigateAndFilter(view, filter) => {
+                if self.browsing_panel.is_some() && self.current_view == crate::View::Queue {
+                    let browse_view = match view {
+                        crate::View::Albums => Some(crate::views::BrowsingView::Albums),
+                        crate::View::Songs => Some(crate::views::BrowsingView::Songs),
+                        crate::View::Artists => Some(crate::views::BrowsingView::Artists),
+                        crate::View::Genres => Some(crate::views::BrowsingView::Genres),
+                        _ => None,
+                    };
+                    if browse_view.is_some() {
+                        return Some(Task::done(Message::BrowserPaneNavigateAndFilter(
+                            view, filter,
+                        )));
+                    }
+                }
                 Some(Task::done(Message::NavigateAndFilter(view, filter)))
             }
             views::CommonViewAction::None | views::CommonViewAction::ViewSpecific => None,

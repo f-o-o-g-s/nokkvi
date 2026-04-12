@@ -272,6 +272,8 @@ pub enum Message {
     SwitchView(View),
     /// Navigate to a view and populate its active filter
     NavigateAndFilter(View, nokkvi_data::types::filter::LibraryFilter),
+    /// Navigate and filter exclusively targeting the browsing panel's internal tabs
+    BrowserPaneNavigateAndFilter(View, nokkvi_data::types::filter::LibraryFilter),
     /// Track info strip was clicked — dispatch depends on strip_click_action setting
     StripClicked,
     /// Track info strip right-click context menu action

@@ -350,4 +350,66 @@ impl Nokkvi {
 
         Task::batch([switch_task, load_task])
     }
+
+    /// Handles cross-view navigation specifically intercepted from within the right-side browsing pane.
+    /// Operates identically to `handle_navigate_and_filter` but targets `BrowsingPane` tab state
+    /// rather than disrupting the main structural `current_view` state (which stays as Queue).
+    pub(crate) fn handle_browser_pane_navigate_and_filter(
+        &mut self,
+        view: crate::View,
+        filter: nokkvi_data::types::filter::LibraryFilter,
+    ) -> Task<Message> {
+        let browse_view = match view {
+            View::Albums => Some(crate::views::BrowsingView::Albums),
+            View::Songs => Some(crate::views::BrowsingView::Songs),
+            View::Artists => Some(crate::views::BrowsingView::Artists),
+            View::Genres => Some(crate::views::BrowsingView::Genres),
+            _ => None,
+        };
+
+        let Some(bv) = browse_view else {
+            return Task::none();
+        };
+
+        let switch_task =
+            self.handle_browsing_panel_message(crate::views::BrowsingPanelMessage::SwitchView(bv));
+
+        // Defocus search input
+        if let Some(page) = self.current_view_page_mut() {
+            page.common_mut().search_input_focused = false;
+        }
+
+        // Set the active filter on the target view and update search display text
+        let display = filter.display_text();
+        match view {
+            View::Albums => {
+                self.albums_page.common.active_filter = Some(filter);
+                self.albums_page.common.search_query = display;
+            }
+            View::Songs => {
+                self.songs_page.common.active_filter = Some(filter);
+                self.songs_page.common.search_query = display;
+            }
+            View::Artists => {
+                self.artists_page.common.active_filter = Some(filter);
+                self.artists_page.common.search_query = display;
+            }
+            View::Genres => {
+                self.genres_page.common.active_filter = Some(filter);
+                self.genres_page.common.search_query = display;
+            }
+            _ => {}
+        }
+
+        // Trigger a data reload with the active filter
+        let load_task = match view {
+            View::Albums => Task::done(Message::LoadAlbums),
+            View::Songs => Task::done(Message::LoadSongs),
+            View::Artists => Task::done(Message::LoadArtists),
+            View::Genres => Task::done(Message::LoadGenres),
+            _ => Task::none(),
+        };
+
+        Task::batch([switch_task, load_task])
+    }
 }
