@@ -298,31 +298,36 @@ impl LoginPage {
             } else {
                 text(" ") // using empty text instead of nothing to preserve height, although iced handles missing fine
             },
-            button(
-                text(if self.login_in_progress {
-                    "Connecting..."
-                } else {
-                    "Login"
-                })
-                .width(Length::Fill)
-                .align_x(Alignment::Center)
-            )
-            .on_press(LoginMessage::LoginPressed)
-            .padding(14)
-            .width(input_width)
-            .style(|_theme, _status| {
-                button::Style {
-                    background: Some((theme::accent()).into()),
-                    text_color: theme::bg0_hard(),
-                    border: iced::Border {
-                        color: theme::accent_border_light(),
-                        width: 1.0,
-                        radius: 8.0.into(),
-                    },
-                    shadow: iced::Shadow::default(),
-                    snap: false,
-                }
-            }),
+            Element::from(
+                crate::widgets::hover_overlay::HoverOverlay::<'_, LoginMessage>::new(
+                    button(
+                        text(if self.login_in_progress {
+                            "Connecting..."
+                        } else {
+                            "Login"
+                        })
+                        .width(Length::Fill)
+                        .align_x(Alignment::Center)
+                    )
+                    .on_press(LoginMessage::LoginPressed)
+                    .padding(14)
+                    .width(input_width)
+                    .style(|_theme, _status| {
+                        button::Style {
+                            background: Some((theme::accent()).into()),
+                            text_color: theme::bg0_hard(),
+                            border: iced::Border {
+                                color: theme::accent_border_light(),
+                                width: 1.0,
+                                radius: 8.0.into(),
+                            },
+                            shadow: iced::Shadow::default(),
+                            snap: false,
+                        }
+                    })
+                )
+                .border_radius(8.0.into())
+            ),
         ]
         .spacing(16)
         .width(Length::Fixed(400.0));
