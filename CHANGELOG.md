@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## v0.2.14 — 2026-04-12
+
+### Features
+- **Navigation Architecture** — implemented id-based view filtering and album artist toggle to efficiently handle nested library associations.
+- **Browsing Panel Tabs** — cross-view navigation clicks inside the browsing panel are now intelligently routed to internal tabs rather than breaking layout.
+- **Custom Tooltips** — parameterized the `view_header` add button to allow contextual tooltips across different views.
+
+### Fixes
+- **Navigation Routing** — fixed a bug to correctly enable active filter routing for genres.
+
+### Improvements
+- **Cargo Metadata** — optimized package metadata for publishing and integrated funding link placeholder.
+- **Formatting** — standardized internal import styling and widget comment layout.
+
 ## v0.2.13 — 2026-04-12
 
 ### Features
