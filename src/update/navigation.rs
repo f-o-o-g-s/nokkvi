@@ -332,7 +332,10 @@ impl Nokkvi {
                 self.artists_page.common.active_filter = Some(filter);
                 self.artists_page.common.search_query = display;
             }
-            // Genres view is top-level — doesn't receive filters from links
+            View::Genres => {
+                self.genres_page.common.active_filter = Some(filter);
+                self.genres_page.common.search_query = display;
+            }
             _ => {}
         }
 
@@ -341,6 +344,7 @@ impl Nokkvi {
             View::Albums => Task::done(Message::LoadAlbums),
             View::Songs => Task::done(Message::LoadSongs),
             View::Artists => Task::done(Message::LoadArtists),
+            View::Genres => Task::done(Message::LoadGenres),
             _ => Task::none(),
         };
 
