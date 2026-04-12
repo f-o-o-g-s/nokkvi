@@ -888,6 +888,8 @@ impl Nokkvi {
                     scale_factor: self.window.scale_factor,
                     loading: false, // TODO: add loading state for radio stations
                     total_station_count: self.library.radio_stations.len(),
+                    stable_viewport: self.stable_viewport,
+                    modifiers: self.window.keyboard_modifiers,
                 };
                 self.radios_page.view(view_data).map(Message::Radios)
             }

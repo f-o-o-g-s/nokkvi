@@ -33,6 +33,8 @@ pub struct RadiosViewData<'a> {
     pub scale_factor: f32,
     pub loading: bool,
     pub total_station_count: usize,
+    pub stable_viewport: bool,
+    pub modifiers: iced::keyboard::Modifiers,
 }
 
 // ============================================================================
@@ -346,6 +348,8 @@ impl RadiosPage {
                 // Click handler: center slot → activate (play), other → focus
                 let click_msg = if ctx.is_center {
                     RadiosMessage::SlotListActivateCenter
+                } else if data.stable_viewport {
+                    RadiosMessage::SlotListSetOffset(ctx.item_index, data.modifiers)
                 } else {
                     RadiosMessage::SlotListClickPlay(ctx.item_index)
                 };
