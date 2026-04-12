@@ -56,6 +56,7 @@ Single source of truth: `chrome_height_with_header()`, `queue_slot_list_start_y(
 ## Slot Rendering
 
 `SlotListRowContext` bundles per-slot args. Center slot gets `flash_at`. Clickable stars via `slot_list_star_rating()`, clickable hearts via `slot_list_favorite_icon()`. Top-packing when items < slot_count. Multi-selection highlight: `selected_indices` set renders selected slots with center-highlight styling; suppressed during active Ctrl/Shift modifier hold.
+**Aesthetics**: Uses `SlotListRowMetrics` to compute sizing offsets dynamically based on the active structural layout (e.g., `slot_row_height()`).
 
 ## SVG Icons (`embedded_svg.rs`)
 

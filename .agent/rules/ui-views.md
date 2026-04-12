@@ -26,8 +26,9 @@ All views use `SlotListPageState`: search query, scroll position, focus index. V
 - **Stable viewport** (default): non-center clicks → `handle_select_offset()` (highlight in-place). Center clicks → `SlotListActivateCenter`.
 - **Legacy mode**: non-center clicks → `SlotListClickPlay` (direct play)
 - Activation flash: `slot_list.flash_center()` on activation/transitions
-- Clickable star ratings + clickable hearts on all slots via `mouse_area`
-- Scrollbar timers carry target `View` — fixes browsing panel routing
+- Clickable text links: inline album/artist text routing to respective views (`NavigateAndSearch`) via `mouse_area` overlays.
+- Clickable star ratings + clickable hearts on all slots via `mouse_area`.
+- Scrollbar timers carry target `View` — fixes browsing panel routing.
 - `dispatch_view_with_seek!` macro handles `SlotListScrollSeek` messages
 
 ## Inline Expansion
@@ -60,7 +61,7 @@ Shuffle on repeat-playlist wrap: re-shuffles the order array when the queue loop
 
 ## Update Handler Pattern
 
-Root dispatch in `update/mod.rs`. `ls src/update/` for handler files. Common helpers in `update/components.rs`: `shell_task`, `shell_spawn`, `guard_play_action`, `set_item_rating_task`, etc. Boilerplate extraction helpers in `widgets/slot_list_page.rs` (`get_queue_target_indices`, `compute_rating_toggle`) and `views/expansion.rs` (`build_batch_payload`, `get_batch_target_indices`).
+Root dispatch in `update/mod.rs`. `ls src/update/` for handler files. Common helpers in `update/components.rs`: `shell_task`, `shell_spawn`, `guard_play_action`, `set_item_rating_task`, `radio_mutation_task`, `handle_common_view_action` (applies generic Search/Sort actions to all 7 non-Queue library views). Boilerplate extraction helpers in `widgets/slot_list_page.rs` (`get_queue_target_indices`) and `views/expansion.rs` (`build_batch_payload`).
 
 ## View Data Refresh
 

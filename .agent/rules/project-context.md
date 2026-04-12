@@ -17,7 +17,7 @@ A Rust/Iced desktop client for [Navidrome](https://www.navidrome.org/) music ser
 
 **Key data structure:** `PagedBuffer<T>` (`data/src/types/paged_buffer.rs`) — replaces `Vec<T>` for all library data. `Deref<Target = [T]>` makes it a drop-in replacement. Load state tracked via `set_loading()` / `needs_fetch()`.
 
-**Consolidated state:** `src/state.rs` groups app state into domain structs (`PlaybackState`, `ScrobbleState`, `LibraryData`, `WindowState`, `ToastState`, `SimilarSongsState`, etc.).
+**Consolidated state:** `src/state.rs` groups app state into domain structs (`PlaybackState`, `ActivePlayback` (Queue/Radio), `ScrobbleState`, `LibraryData`, `WindowState`, `ToastState`, `SimilarSongsState`, etc.).
 
 ## Core Pattern: TEA (The Elm Architecture)
 
@@ -59,7 +59,7 @@ The root `Message` enum uses **namespaced sub-enums**: `PlaybackMessage`, `Scrob
 | Backend services | `data/src/backend/{name}.rs` |
 | API endpoints | `data/src/services/api/{name}.rs` |
 | Domain types | `data/src/types/{name}.rs` |
-| Slot list widgets | `widgets/slot_list.rs` (rendering), `widgets/slot_list_view.rs` (scroll state), `widgets/slot_list_page.rs` (page state) |
+| Slot list widgets | `widgets/slot_list.rs` (rendering via `SlotListRowMetrics`), `widgets/slot_list_view.rs` (scroll state), `widgets/slot_list_page.rs` (page state) |
 
 ## Directories to Skip
 

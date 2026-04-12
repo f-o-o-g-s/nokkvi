@@ -13,7 +13,7 @@ AppService (orchestrator)
 │   ├── Transport, volume, modes, gapless transitions
 │   ├── Playback history (Vec<Song>, capped, dedup-on-push)
 │   └── reset_next_track() on mode toggles
-├── Domain Services (Albums, Artists, Songs, Genres, Playlists, Queue, Settings, Auth)
+├── Domain Services (Albums, Artists, Songs, Genres, Playlists, Radios, Similar, Queue, Settings, Auth)
 │   └── Lazy-initialized via `tokio::sync::OnceCell` (not Mutex<Option<T>>)
 ├── ArtworkPrefetch — background artwork loading with pagination, progress tracking, and dynamic cache key mappings
 └── TaskManager (centralized spawn tracking)
@@ -60,4 +60,4 @@ Types are **iced-free**. Key types: `PagedBuffer<T>`, `HotkeyConfig` (HashMap wi
 
 ## API Patterns
 
-Per-domain modules in `services/api/`. Star API: optimistic UI + revert. Rating: +/- hotkeys. Playlist CRUD: Navidrome native REST (not Subsonic for writes). MPRIS: D-Bus background task.
+Per-domain modules in `services/api/`. Star API: optimistic UI + revert. Rating: +/- hotkeys. Playlist CRUD: Navidrome native REST (not Subsonic for writes). MPRIS: D-Bus background task (exposes full metadata, handles standard playback and radio). Internet Radio: Subsonic `getInternetRadioStations` + mutative CRUD tasks.
