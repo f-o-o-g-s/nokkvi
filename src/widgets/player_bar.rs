@@ -81,6 +81,7 @@ pub(crate) struct PlayerBarViewData {
     pub format_suffix: String,
     pub sample_rate: u32,
     pub bitrate: u32,
+    pub radio_name: Option<String>,
 }
 
 /// Messages emitted by player bar interactions
@@ -334,9 +335,9 @@ pub(crate) fn player_bar<'a>(
             });
         }
 
-        if data.is_radio {
+        if let Some(rname) = &data.radio_name {
             meta_segments.push(OverlaySegment {
-                text: " · LIVE STREAM".to_string(),
+                text: format!(" · {rname} (LIVE)"),
                 color: theme::accent_bright(),
             });
         }

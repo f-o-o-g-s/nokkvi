@@ -69,6 +69,17 @@ impl Nokkvi {
 
     /// Home screen layout (nav bar + content + player bar)
     fn home_view(&self) -> Element<'_, Message> {
+        // Optional radio metadata mapping
+        let (radio_name, radio_url, icy_artist, icy_title) = match &self.active_playback {
+            crate::state::ActivePlayback::Radio(state) => (
+                Some(state.station.name.as_str()),
+                Some(state.station.stream_url.as_str()),
+                state.icy_artist.as_deref(),
+                state.icy_title.as_deref(),
+            ),
+            _ => (None, None, None, None),
+        };
+
         let has_queue = !self.library.queue_songs.is_empty();
         let player_bar_data = widgets::PlayerBarViewData {
             playback_position: self.playback.position,
@@ -91,23 +102,17 @@ impl Nokkvi {
             visualization_mode: self.engine.visualization_mode,
             window_width: self.window.width,
             is_light_mode: crate::theme::is_light_mode(),
-            track_title: self.playback.title.clone(),
-            track_artist: self.playback.artist.clone(),
-            track_album: self.playback.album.clone(),
+            track_title: icy_title.unwrap_or(&self.playback.title).to_string(),
+            track_artist: icy_artist.unwrap_or(&self.playback.artist).to_string(),
+            track_album: if self.active_playback.is_radio() {
+                String::new()
+            } else {
+                self.playback.album.clone()
+            },
             format_suffix: self.playback.format_suffix.clone(),
             sample_rate: self.playback.sample_rate,
             bitrate: self.playback.bitrate,
-        };
-
-        // Optional radio metadata mapping
-        let (radio_name, radio_url, icy_artist, icy_title) = match &self.active_playback {
-            crate::state::ActivePlayback::Radio(state) => (
-                Some(state.station.name.as_str()),
-                Some(state.station.stream_url.as_str()),
-                state.icy_artist.as_deref(),
-                state.icy_title.as_deref(),
-            ),
-            _ => (None, None, None, None),
+            radio_name: radio_name.map(|s| s.to_string()),
         };
 
         // Shared strip data — borrows playback state, no clones needed.

@@ -76,6 +76,16 @@ impl Nokkvi {
                 self.sort_radio_stations(); // Re-sort and reset offset on search
                 return Task::none();
             }
+            RadiosAction::FocusOnStation(station_id) => {
+                if let Some(idx) = filtered_stations.iter().position(|s| s.id == station_id) {
+                    self.radios_page
+                        .common
+                        .slot_list
+                        .set_offset(idx, filtered_stations.len());
+                    self.radios_page.common.slot_list.flash_center();
+                }
+                return Task::none();
+            }
             RadiosAction::RefreshViewData => {
                 return self.handle_load_radio_stations();
             }

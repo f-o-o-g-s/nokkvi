@@ -655,7 +655,7 @@ impl Nokkvi {
 
     pub(crate) fn handle_next_track(&mut self) -> Task<Message> {
         if self.active_playback.is_radio() {
-            return Task::none();
+            return self.cycle_radio_station(true);
         }
         // NOTE: We intentionally do NOT reset the visualizer here.
         // The auto-sensitivity naturally adapts between tracks. Resetting it
@@ -687,7 +687,7 @@ impl Nokkvi {
 
     pub(crate) fn handle_prev_track(&mut self) -> Task<Message> {
         if self.active_playback.is_radio() {
-            return Task::none();
+            return self.cycle_radio_station(false);
         }
         // NOTE: We intentionally do NOT reset the visualizer here.
         // The auto-sensitivity naturally adapts between tracks. Resetting it
@@ -707,6 +707,75 @@ impl Nokkvi {
                 }
             },
         )
+    }
+
+    /// Cycles through the library's radio stations in order and begins playback.
+    fn cycle_radio_station(&mut self, forward: bool) -> Task<Message> {
+        if let crate::state::ActivePlayback::Radio(ref state) = self.active_playback {
+            if self.library.radio_stations.is_empty() {
+                return Task::none();
+            }
+
+            let current_id = &state.station.id;
+            let current_idx = self
+                .library
+                .radio_stations
+                .iter()
+                .position(|s| s.id == *current_id)
+                .unwrap_or(0);
+
+            let new_idx = if forward {
+                (current_idx + 1) % self.library.radio_stations.len()
+            } else {
+                if current_idx == 0 {
+                    self.library.radio_stations.len() - 1
+                } else {
+                    current_idx - 1
+                }
+            };
+
+            let next_station = self.library.radio_stations[new_idx].clone();
+
+            self.active_playback =
+                crate::state::ActivePlayback::Radio(crate::state::RadioPlaybackState {
+                    station: next_station.clone(),
+                    icy_artist: None,
+                    icy_title: None,
+                    icy_url: None,
+                });
+
+            let stream_url = next_station.stream_url;
+            let station_id = next_station.id.clone();
+
+            // Optimistic UI toggle immediately
+            self.playback.playing = true;
+            self.playback.paused = false;
+
+            let mut tasks = vec![];
+
+            // Auto follow for Radios page
+            if self.current_view == crate::View::Radios && self.auto_follow_playing {
+                tasks.push(Task::done(Message::Radios(
+                    crate::views::RadiosMessage::FocusCurrentPlaying(station_id),
+                )));
+            }
+
+            tasks.push(self.shell_action_task(
+                move |shell| async move {
+                    shell.playback().stop().await?;
+                    let engine_arc = shell.playback().audio_engine();
+                    let mut engine = engine_arc.lock().await;
+                    engine.set_source(stream_url).await;
+                    engine.play().await?;
+                    Ok(())
+                },
+                Message::Playback(PlaybackMessage::Tick),
+                "cycle radio station",
+            ));
+
+            return Task::batch(tasks);
+        }
+        Task::none()
     }
 
     pub(crate) fn handle_toggle_random(&mut self) -> Task<Message> {

@@ -49,6 +49,7 @@ pub enum RadiosMessage {
     SlotListScrollSeek(usize),
     SlotListActivateCenter, // Enter → play radio station
     SlotListClickPlay(usize),
+    FocusCurrentPlaying(String), // Auto-scroll slot list to center currently playing station (station_id)
 
     // View header
     SortModeSelected(SortMode),
@@ -74,6 +75,7 @@ pub enum RadiosMessage {
 pub enum RadiosAction {
     /// User activated a radio station — root should transition to radio playback
     PlayRadioStation(RadioStation),
+    FocusOnStation(String),
     AddRadioStation,
     EditRadioStation(RadioStation),
     DeleteStation(String, String),
@@ -151,6 +153,9 @@ impl RadiosPage {
             RadiosMessage::SlotListClickPlay(offset) => {
                 self.common.handle_set_offset(offset, total);
                 self.update(RadiosMessage::SlotListActivateCenter, stations)
+            }
+            RadiosMessage::FocusCurrentPlaying(station_id) => {
+                (Task::none(), RadiosAction::FocusOnStation(station_id))
             }
             RadiosMessage::SlotListActivateCenter => {
                 if let Some(center_idx) = self.common.get_center_item_index(total)
