@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+## v0.2.12 — 2026-04-11
+
+### Features
+- **Internet Radio Playback** — implemented full internet radio streaming support natively using the standard audio engine.
+- **Radio Station Management** — implemented full CRUD capabilities for internet radio stations, including creating, editing, and deleting saved stations.
+- **Radio Stream Codec Overlay** — extracted and surfaced actual live stream codec format (e.g. MP3, AAC) for radio playback instead of hiding zero values.
+- **Radio MPRIS Integration** — implemented MPRIS navigation, auto-focus, and live ICY metadata propagation so the desktop shell natively displays live radio track changes.
+
+### Fixes
+- **Application Shutdown Hang** — eliminated a significant player freeze caused by the network logic blocking the Tokio runtime during app exit when an internet radio stream was active by shifting the stream network fetch into pure async tasks.
+- **Radio Starvation** — eliminated network buffer accumulation delays to prevent radio stream playback starvation ("blips").
+- **Radio Page Playback Viewport** — forced the radio page to respect the `stable_viewport` setting uniformly.
+- **MPRIS Radio Guard** — updated MPRIS metadata for radio streams and added missing play guard protections across the codebase.
+- **Settings Typography** — standardized modal typography and applied custom font configurations consistently to all modal text inputs.
+
+### Improvements
+- **Network Pipeline Refactoring** — hardened radio streaming architecture from audit findings to eliminate `unwrap()` usage and safely gracefully recover from decoder errors.
+- **Slot Metrics Consolidation** — consolidated dynamic slot layout metrics into a centralized `SlotListRowMetrics` for greater UI consistency.
+- **Pill Overlay Deduplication** — deduplicated metadata pill layouts and consolidated their builder logic throughout the codebase.
+- **Player Bar Interactivity** — made the crossfade toggle button persistent in the player bar.
+
+### Internal
+- Synced agent rules and workflows with the current codebase architecture.
 ## v0.2.11 — 2026-04-09
 
 ### Fixes

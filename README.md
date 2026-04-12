@@ -32,7 +32,8 @@ Nokkvi draws heavy inspiration from several excellent projects:
 - GPU-accelerated visualizer (bars and line modes)
 
 ### Library & Playback
-- Browse by albums, artists, songs, genres, playlists, and algorithmic similarities
+- Browse by albums, artists, songs, genres, playlists, algorithmic similarities, and internet radios
+- **Internet Radios** — manage and stream endless internet radio stations securely and seamlessly
 - Algorithmic exploration — endlessly dive into mathematically related discographies via context menu "Find Similar" and "Top Songs" actions
 - Inline expansion — drill into artists/genres to see albums and tracks without leaving the view
 - Star ratings (0–5) and favorites on everything
@@ -55,7 +56,7 @@ Nokkvi draws heavy inspiration from several excellent projects:
 ### Non-Goals
 Nokkvi is designed to be a fast, highly-themed, keyboard-driven music player—not a full administrative dashboard or a 1:1 replica of the Navidrome web UI. The following Navidrome features are intentionally **not** implemented at this time (though some may be considered for future releases):
 - Server administration (triggering library scans, user management)
-- Internet Radio and Podcasts
+- Podcasts
 - Jukebox mode (server-side playback control)
 - Smart playlist generation (filtering rules configuration)
 - Bookmarks (audiobook/podcast resume positions)

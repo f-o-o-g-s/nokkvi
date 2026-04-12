@@ -20,7 +20,7 @@ unnested_or_patterns = "warn"
 
 [package]
 name = "nokkvi"
-version = "0.2.11"
+version = "0.2.12"
 edition = "2024"
 
 [lints]
