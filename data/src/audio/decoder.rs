@@ -32,28 +32,29 @@ struct AsyncNetworkBuffer {
 }
 
 impl AsyncNetworkBuffer {
-    pub fn new(mut read: Box<dyn std::io::Read + Send + 'static>) -> Self {
+    pub fn new_async(response: reqwest::Response) -> Self {
         let (tx, rx) = std::sync::mpsc::sync_channel(64);
-        std::thread::Builder::new()
-            .name("nokkvi-network-fetch".into())
-            .spawn(move || {
-                let mut buf = vec![0u8; 16384];
-                loop {
-                    match read.read(&mut buf) {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            // Send data immediately — no accumulation.
-                            // At 128kbps, accumulating 16KB would take ~1 second,
-                            // starving the decode thread and causing audible blips.
-                            if tx.send(buf[..n].to_vec()).is_err() {
-                                break;
-                            }
+        tokio::spawn(async move {
+            use futures::stream::StreamExt;
+            let mut stream = response.bytes_stream();
+            while let Some(chunk_res) = stream.next().await {
+                match chunk_res {
+                    Ok(chunk) => {
+                        let tx_clone = tx.clone();
+                        // block_in_place allows blocking send if channel is full,
+                        // without starving the executor.
+                        let sent = tokio::task::block_in_place(|| tx_clone.send(chunk.to_vec()));
+                        if sent.is_err() {
+                            break;
                         }
-                        Err(_) => break,
+                    }
+                    Err(e) => {
+                        warn!(" [NETWORK BUFFER] Stream error: {}", e);
+                        break;
                     }
                 }
-            })
-            .expect("failed to spawn nokkvi-network-fetch thread");
+            }
+        });
         Self {
             receiver: std::sync::Mutex::new(rx),
             buffer: Vec::new(),
@@ -341,24 +342,24 @@ impl AudioDecoder {
                 self.infinite_stream = true;
 
                 let url_copy = self.url.clone();
-                let (response, content_type) = tokio::task::block_in_place(|| {
-                    let client = reqwest::blocking::Client::builder()
-                        .timeout(std::time::Duration::from_secs(30))
-                        .user_agent(USER_AGENT)
-                        .build()
-                        .context("Failed to create blocking HTTP client")?;
-                    let resp = client
-                        .get(url_copy)
-                        .header("Icy-MetaData", "1")
-                        .send()
-                        .context("Failed to open infinite stream connection")?;
-                    let ct = resp
-                        .headers()
-                        .get("content-type")
-                        .and_then(|v| v.to_str().ok())
-                        .map(|s| s.to_string());
-                    Ok::<(reqwest::blocking::Response, Option<String>), anyhow::Error>((resp, ct))
-                })?;
+
+                let client = reqwest::Client::builder()
+                    .user_agent(USER_AGENT)
+                    .build()
+                    .context("Failed to create HTTP client")?;
+
+                let response = client
+                    .get(&url_copy)
+                    .header("Icy-MetaData", "1")
+                    .send()
+                    .await
+                    .context("Failed to open infinite stream connection")?;
+
+                let content_type = response
+                    .headers()
+                    .get("content-type")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
 
                 if let Some(ct) = content_type.as_ref()
                     && let Some(format_from_ct) = format_hint_from_content_type(ct)
@@ -379,8 +380,8 @@ impl AudioDecoder {
                 let icy_headers = IcyHeaders::parse_from_headers(response.headers());
                 let interval = icy_headers.metadata_interval();
 
-                // Buffer the response using a dedicated OS thread to prevent OS-level TCP starvation
-                let buffered_response = AsyncNetworkBuffer::new(Box::new(response));
+                // Buffer the response using a dedicated async tokio task
+                let buffered_response = AsyncNetworkBuffer::new_async(response);
 
                 let media_source: Box<dyn MediaSource> = if let Some(interval) = interval {
                     let interval_usize = interval.get();
