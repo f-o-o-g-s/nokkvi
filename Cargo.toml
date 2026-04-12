@@ -22,6 +22,10 @@ unnested_or_patterns = "warn"
 name = "nokkvi"
 version = "0.2.13"
 edition = "2024"
+description = "A fast and beautiful Rust/Iced desktop client for Navidrome"
+readme = "README.md"
+keywords = ["navidrome", "subsonic", "audio", "music", "player"]
+categories = ["multimedia::audio", "gui"]
 
 [lints]
 workspace = true
