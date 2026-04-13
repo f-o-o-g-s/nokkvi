@@ -79,6 +79,7 @@ fn hotkey_action_to_key(action: &HotkeyAction) -> &'static str {
         HotkeyAction::Escape => "hotkey.escape",
         HotkeyAction::ResetToDefault => "hotkey.reset_to_default",
         HotkeyAction::ToggleEqModal => "hotkey.toggle_eq_modal",
+        HotkeyAction::ToggleCrossfade => "hotkey.toggle_crossfade",
     }
 }
 
@@ -102,7 +103,7 @@ pub(crate) fn build_hotkeys_items(config: &HotkeyConfig) -> Vec<SettingsEntry> {
             "Playback" => PLAY,
             "Navigation" => NAVIGATION,
             "Item Actions" => ITEM,
-            "Sort" => SORT,
+            "Sort & View" => SORT,
             "Settings Edit" => EDIT,
             _ => NAV,
         }
@@ -114,7 +115,7 @@ pub(crate) fn build_hotkeys_items(config: &HotkeyConfig) -> Vec<SettingsEntry> {
         "Playback",
         "Navigation",
         "Item Actions",
-        "Sort",
+        "Sort & View",
         "Settings Edit",
     ];
 

@@ -274,6 +274,7 @@ pub enum HotkeyAction {
     ToggleSoundEffects,
     CycleVisualization,
     ToggleEqModal,
+    ToggleCrossfade,
 
     // --- Slot list navigation ---
     SlotListUp,
@@ -337,6 +338,7 @@ impl HotkeyAction {
         HotkeyAction::ToggleSoundEffects,
         HotkeyAction::CycleVisualization,
         HotkeyAction::ToggleEqModal,
+        HotkeyAction::ToggleCrossfade,
         // Slot List
         HotkeyAction::SlotListUp,
         HotkeyAction::SlotListDown,
@@ -396,6 +398,7 @@ impl HotkeyAction {
             HotkeyAction::ToggleSoundEffects => "Toggle SFX",
             HotkeyAction::CycleVisualization => "Cycle Visualizer",
             HotkeyAction::ToggleEqModal => "Toggle Equalizer",
+            HotkeyAction::ToggleCrossfade => "Toggle Crossfade",
             HotkeyAction::SlotListUp => "Slot List Up",
             HotkeyAction::SlotListDown => "Slot List Down",
             HotkeyAction::Activate => "Activate / Enter",
@@ -444,6 +447,7 @@ impl HotkeyAction {
             HotkeyAction::ToggleSoundEffects => "Enable or disable sound effects",
             HotkeyAction::CycleVisualization => "Cycle visualizer (off → bars → lines)",
             HotkeyAction::ToggleEqModal => "Open or close the 10-band graphic equalizer",
+            HotkeyAction::ToggleCrossfade => "Enable or disable gapless crossfading",
             HotkeyAction::SlotListUp => "Navigate up in the slot list",
             HotkeyAction::SlotListDown => "Navigate down in the slot list",
             HotkeyAction::Activate => "Activate the focused item",
@@ -494,7 +498,8 @@ impl HotkeyAction {
             | HotkeyAction::ToggleConsume
             | HotkeyAction::ToggleSoundEffects
             | HotkeyAction::CycleVisualization
-            | HotkeyAction::ToggleEqModal => "Playback",
+            | HotkeyAction::ToggleEqModal
+            | HotkeyAction::ToggleCrossfade => "Playback",
 
             HotkeyAction::SlotListUp
             | HotkeyAction::SlotListDown
@@ -548,6 +553,7 @@ impl HotkeyAction {
             HotkeyAction::ToggleSoundEffects => KeyCombo::key(KeyCode::Char('s')),
             HotkeyAction::CycleVisualization => KeyCombo::key(KeyCode::Char('v')),
             HotkeyAction::ToggleEqModal => KeyCombo::key(KeyCode::Char('q')),
+            HotkeyAction::ToggleCrossfade => KeyCombo::key(KeyCode::Char('f')),
             // Slot list navigation
             HotkeyAction::SlotListUp => KeyCombo::key(KeyCode::Backspace),
             HotkeyAction::SlotListDown => KeyCombo::key(KeyCode::Tab),
@@ -603,6 +609,7 @@ impl HotkeyAction {
             HotkeyAction::ToggleSoundEffects => "toggle_sound_effects",
             HotkeyAction::CycleVisualization => "cycle_visualization",
             HotkeyAction::ToggleEqModal => "toggle_eq_modal",
+            HotkeyAction::ToggleCrossfade => "toggle_crossfade",
             HotkeyAction::SlotListUp => "slot_list_up",
             HotkeyAction::SlotListDown => "slot_list_down",
             HotkeyAction::Activate => "activate",
@@ -651,6 +658,7 @@ impl HotkeyAction {
             "toggle_sound_effects" => HotkeyAction::ToggleSoundEffects,
             "cycle_visualization" => HotkeyAction::CycleVisualization,
             "toggle_eq_modal" => HotkeyAction::ToggleEqModal,
+            "toggle_crossfade" => HotkeyAction::ToggleCrossfade,
             "slot_list_up" => HotkeyAction::SlotListUp,
             "slot_list_down" => HotkeyAction::SlotListDown,
             "activate" => HotkeyAction::Activate,
