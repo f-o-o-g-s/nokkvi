@@ -187,6 +187,7 @@ All keyboard shortcuts are **user-configurable** via the Settings view (Hotkeys 
 | `s` | Toggle sound effects |
 | `v` | Cycle visualization mode |
 | `q` | Toggle 10-band equalizer |
+| `f` | Toggle gapless crossfade |
 
 ### Navigation & UI
 

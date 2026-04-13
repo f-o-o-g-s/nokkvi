@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+## v0.2.15 — 2026-04-12
+
+### Features
+- **Crossfade Hotkey** — added a configurable global hotkey (default `F`) for toggling gapless crossfade mode.
+- **TDD Parity** — comprehensive test-driven coverage achieved for hotkey dispatch, configuration serialization, and input normalization routines.
+
+### Fixes
+- **Settings UI Layout** — fixed string casing resolution to correctly display the "Sort & View" menu grouping in the hotkeys settings panel.
+
+### Improvements
+- **Audio Thread Sync** — streamlined synchronous backend transitions in `on_renderer_finished` by refactoring monolithic loops.
+- **Audio Async Refactoring** — replaced aggressive async threading contexts in `engine.rs` specifically for crossfade and seeking optimizations with native event loops.
+
+### Internal
+- Synced agent rules and workflows with the current codebase.
+
 ## v0.2.14 — 2026-04-12
 
 ### Features
