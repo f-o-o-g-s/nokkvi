@@ -631,8 +631,7 @@ impl Nokkvi {
                 {
                     let id = album.id.clone();
                     let name = album.name.clone();
-                    self.active_playlist_info = None;
-                    self.persist_active_playlist_info();
+                    self.clear_active_playlist();
                     return self.shell_fire_and_forget_task(
                         move |shell| async move { shell.add_album_and_play(&id).await },
                         format!("Playing '{name}'"),
@@ -669,8 +668,7 @@ impl Nokkvi {
             AlbumsAction::PlayBatch(payload) => {
                 let len = payload.items.len();
                 debug!(" Playing batch of {} items", len);
-                self.active_playlist_info = None;
-                self.persist_active_playlist_info();
+                self.clear_active_playlist();
                 self.albums_page.common.slot_list.selected_indices.clear();
                 return self.shell_task(
                     move |shell| async move { shell.play_batch(payload).await },

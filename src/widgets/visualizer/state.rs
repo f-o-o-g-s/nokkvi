@@ -7,7 +7,7 @@
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -253,8 +253,8 @@ pub(crate) struct VisualizerState {
     /// Spectrum engine (needs exclusive access, reinitializes on resize).
     /// `None` when initialization failed — tick() produces flat bars.
     engine: Arc<Mutex<Option<SpectrumEngine>>>,
-    /// Sample rate for sync calculations (rarely changes)
-    sample_rate: Arc<Mutex<u32>>,
+    /// Sample rate for sync calculations (rarely changes, lock-free)
+    sample_rate: Arc<AtomicU32>,
 
     // === Shared Config ===
     /// Shared config for hot-reloadable settings
@@ -323,7 +323,7 @@ impl VisualizerState {
             // Separate buffers
             sample_buffer: Arc::new(Mutex::new(Vec::new())),
             engine: Arc::new(Mutex::new(engine)),
-            sample_rate: Arc::new(Mutex::new(44100)),
+            sample_rate: Arc::new(AtomicU32::new(44100)),
             config,
             // Resize debouncing
             pending_bar_count: Arc::new(AtomicUsize::new(0)),
@@ -402,11 +402,11 @@ impl VisualizerState {
         let pending_engine_reinit = self.pending_engine_reinit.clone();
 
         move |samples: &[f32], sample_rate: u32| {
-            // Update sample rate and cached chunk size if changed
+            // Update sample rate and cached chunk size if changed (lock-free)
             {
-                let mut sr = sample_rate_arc.lock();
-                if *sr != sample_rate && sample_rate > 0 {
-                    *sr = sample_rate;
+                let sr = sample_rate_arc.load(Ordering::Relaxed);
+                if sr != sample_rate && sample_rate > 0 {
+                    sample_rate_arc.store(sample_rate, Ordering::Release);
                     // Calculate chunk size: samples for ~16.67ms at this rate
                     // Formula: (sample_rate * 2 channels) / 60 FPS
                     // Minimum 512 for efficiency
@@ -790,7 +790,7 @@ impl VisualizerState {
 
     /// Reinitialize the spectrum engine with the current sample rate.
     fn reinit_engine_with_current_sample_rate(&self) {
-        let sample_rate = *self.sample_rate.lock();
+        let sample_rate = self.sample_rate.load(Ordering::Relaxed);
         let fft_count = self.fft_bar_count();
 
         if let Some(new_engine) = build_spectrum_engine(fft_count, sample_rate, &self.config) {
@@ -916,7 +916,7 @@ impl VisualizerState {
         }
 
         let visual_count = pending;
-        let sample_rate = *self.sample_rate.lock();
+        let sample_rate = self.sample_rate.load(Ordering::Relaxed);
 
         // Store the desired visual count
         self.visual_bar_count.store(visual_count, Ordering::SeqCst);
@@ -961,7 +961,7 @@ impl VisualizerState {
     /// This may be less than the visual bar count; interpolation bridges the gap.
     fn fft_bar_count(&self) -> usize {
         let visual = self.visual_bar_count.load(Ordering::Relaxed);
-        let sample_rate = *self.sample_rate.lock();
+        let sample_rate = self.sample_rate.load(Ordering::Relaxed);
         let fft_limit = max_bars_for_sample_rate(sample_rate);
         visual.min(fft_limit)
     }

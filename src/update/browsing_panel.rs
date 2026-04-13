@@ -224,7 +224,8 @@ impl Nokkvi {
 
             // Sync edited name/comment back to active_playlist_info so the
             // read-only context bar shows updated values after exiting edit mode.
-            self.active_playlist_info = Some((id, name, comment));
+            self.active_playlist_info =
+                Some(crate::state::ActivePlaylistContext { id, name, comment });
             self.persist_active_playlist_info();
         }
 

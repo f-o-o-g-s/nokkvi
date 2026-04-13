@@ -1370,9 +1370,12 @@ fn playlist_created_from_queue_sets_active_playlist_info() {
         .active_playlist_info
         .as_ref()
         .expect("active_playlist_info should be set after Created with ID");
-    assert_eq!(info.0, "pl-123", "playlist ID should match");
-    assert_eq!(info.1, "My Queue Playlist", "playlist name should match");
-    assert_eq!(info.2, "", "comment should be empty for new playlists");
+    assert_eq!(info.id, "pl-123", "playlist ID should match");
+    assert_eq!(info.name, "My Queue Playlist", "playlist name should match");
+    assert_eq!(
+        info.comment, "",
+        "comment should be empty for new playlists"
+    );
 }
 
 #[test]
@@ -1391,8 +1394,8 @@ fn playlist_overwritten_from_queue_sets_active_playlist_info() {
         .active_playlist_info
         .as_ref()
         .expect("active_playlist_info should be set after Overwritten with ID");
-    assert_eq!(info.0, "pl-456");
-    assert_eq!(info.1, "Overwritten Playlist");
+    assert_eq!(info.id, "pl-456");
+    assert_eq!(info.name, "Overwritten Playlist");
 }
 
 #[test]

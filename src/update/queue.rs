@@ -489,13 +489,11 @@ impl Nokkvi {
             }
             QueueAction::EditPlaylist => {
                 // Enter edit mode for the currently-playing playlist
-                if let Some((playlist_id, playlist_name, comment)) =
-                    self.active_playlist_info.clone()
-                {
+                if let Some(ref ctx) = self.active_playlist_info {
                     return Task::done(Message::EnterPlaylistEditMode {
-                        playlist_id,
-                        playlist_name,
-                        playlist_comment: comment,
+                        playlist_id: ctx.id.clone(),
+                        playlist_name: ctx.name.clone(),
+                        playlist_comment: ctx.comment.clone(),
                     });
                 }
             }

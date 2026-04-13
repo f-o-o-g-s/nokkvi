@@ -70,8 +70,7 @@ impl Nokkvi {
         }
 
         // Clear playlist context bar (same pattern as guard_play_action)
-        self.active_playlist_info = None;
-        self.persist_active_playlist_info();
+        self.clear_active_playlist();
 
         self.toast_success("Queue cleared");
         self.shell_task(

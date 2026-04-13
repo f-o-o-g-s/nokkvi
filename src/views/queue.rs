@@ -44,8 +44,8 @@ pub struct QueueViewData<'a> {
     pub edit_mode_info: Option<(String, bool)>,
     /// Playlist comment when in edit mode
     pub edit_mode_comment: Option<String>,
-    /// When a playlist is loaded for playback (not editing): (playlist_id, playlist_name, comment)
-    pub playlist_context_info: Option<(String, String, String)>,
+    /// When a playlist is loaded for playback (not editing)
+    pub playlist_context_info: Option<crate::state::ActivePlaylistContext>,
 }
 
 /// Context menu entries for queue items
@@ -538,9 +538,7 @@ impl QueuePage {
 
             let sep_bottom: Element<'a, QueueMessage> = crate::theme::horizontal_separator(1.0);
             column![edit_bar, sep_bottom, header].into()
-        } else if let Some((ref _playlist_id, ref playlist_name, ref comment)) =
-            data.playlist_context_info
-        {
+        } else if let Some(ref ctx) = data.playlist_context_info {
             // Read-only playlist context bar (playing a playlist, not editing)
             use iced::widget::svg;
 
@@ -551,7 +549,7 @@ impl QueuePage {
                     color: Some(crate::theme::accent()),
                 });
 
-            let name_label = iced::widget::text(playlist_name.clone())
+            let name_label = iced::widget::text(ctx.name.clone())
                 .font(iced::font::Font {
                     weight: iced::font::Weight::Medium,
                     ..crate::theme::ui_font()
@@ -562,10 +560,10 @@ impl QueuePage {
             // Build name + optional comment as a column, constrained to prevent overflow.
             // Without a width constraint, long comments expand to intrinsic text width
             // and push save/edit icons off-screen, cascading layout breakage.
-            let name_area: Element<'a, QueueMessage> = if comment.is_empty() {
+            let name_area: Element<'a, QueueMessage> = if ctx.comment.is_empty() {
                 container(name_label).width(Length::Fill).clip(true).into()
             } else {
-                let comment_label = iced::widget::text(comment.clone())
+                let comment_label = iced::widget::text(ctx.comment.clone())
                     .font(crate::theme::ui_font())
                     .size(10)
                     .color(crate::theme::fg2())

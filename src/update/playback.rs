@@ -1081,13 +1081,15 @@ impl Nokkvi {
         self.show_album_artists_only = settings.show_album_artists_only;
 
         // Restore active playlist context from persisted settings
-        self.active_playlist_info = settings.active_playlist_id.clone().map(|id| {
-            (
-                id,
-                settings.active_playlist_name.clone(),
-                settings.active_playlist_comment.clone(),
-            )
-        });
+        self.active_playlist_info =
+            settings
+                .active_playlist_id
+                .clone()
+                .map(|id| crate::state::ActivePlaylistContext {
+                    id,
+                    name: settings.active_playlist_name.clone(),
+                    comment: settings.active_playlist_comment.clone(),
+                });
 
         // Apply start_view on first load (one-shot: only before first application)
         let mut start_view_task = Task::none();

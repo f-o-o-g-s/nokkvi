@@ -103,8 +103,8 @@ pub struct Nokkvi {
     // Auto-login flag (credentials stored in LoginPage)
     // -------------------------------------------------------------------------
     pub should_auto_login: bool,
-    /// Stored session for JWT-based auto-login (server_url, username, jwt_token, subsonic_credential)
-    pub stored_session: Option<(String, String, String, String)>,
+    /// Stored session for JWT-based auto-login.
+    pub stored_session: Option<crate::state::StoredSession>,
 
     // -------------------------------------------------------------------------
     // Library Data (consolidated data vectors + counts)
@@ -141,9 +141,9 @@ pub struct Nokkvi {
     // Playlist Edit Mode (split-view)
     // -------------------------------------------------------------------------
     pub playlist_edit: Option<nokkvi_data::types::playlist_edit::PlaylistEditState>,
-    /// Identity of the playlist currently loaded in the queue (playlist_id, playlist_name, comment).
+    /// Identity of the playlist currently loaded in the queue.
     /// Set on PlayPlaylist, cleared on non-playlist play.
-    pub active_playlist_info: Option<(String, String, String)>,
+    pub active_playlist_info: Option<crate::state::ActivePlaylistContext>,
     pub browsing_panel: Option<views::BrowsingPanel>,
     pub pane_focus: crate::state::PaneFocus,
     /// Active cross-pane drag from browsing panel to queue (None when idle)
@@ -245,8 +245,12 @@ impl Default for Nokkvi {
         // Try to load stored session (JWT + subsonic credential) from redb
         let stored_session = nokkvi_data::credentials::load_session();
         let should_auto_login = stored_session.is_some();
-        let stored_session =
-            stored_session.map(|(jwt, sub)| (server_url.clone(), username.clone(), jwt, sub));
+        let stored_session = stored_session.map(|(jwt, sub)| crate::state::StoredSession {
+            server_url: server_url.clone(),
+            username: username.clone(),
+            jwt_token: jwt,
+            subsonic_credential: sub,
+        });
 
         debug!(
             " Auto-login (session resume) enabled: {}",

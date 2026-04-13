@@ -314,8 +314,7 @@ impl Nokkvi {
                         EnterBehavior::PlaySingle => {
                             // Replace queue with just this song
                             let song: nokkvi_data::types::song::Song = song.clone().into();
-                            self.active_playlist_info = None;
-                            self.persist_active_playlist_info();
+                            self.clear_active_playlist();
                             let play_task = self.shell_task(
                                 move |shell| async move { shell.play_songs(vec![song], 0).await },
                                 |result| match result {
@@ -378,8 +377,7 @@ impl Nokkvi {
                             };
 
                             // Clear playlist context
-                            self.active_playlist_info = None;
-                            self.persist_active_playlist_info();
+                            self.clear_active_playlist();
 
                             // Phase 1: Play immediately with loaded songs
                             let play_task = self.shell_task(
@@ -519,8 +517,7 @@ impl Nokkvi {
             SongsAction::PlayBatch(payload) => {
                 let len = payload.items.len();
                 debug!(" Playing batch of {} items", len);
-                self.active_playlist_info = None;
-                self.persist_active_playlist_info();
+                self.clear_active_playlist();
                 self.songs_page.common.slot_list.selected_indices.clear();
                 return self.shell_task(
                     move |shell| async move { shell.play_batch(payload).await },

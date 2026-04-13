@@ -229,9 +229,18 @@ impl Nokkvi {
         // Cancel any in-progress progressive queue loading target so the header
         // doesn't show a stale "X of Y" count from a superseded play action.
         self.library.queue_loading_target = None;
+        self.clear_active_playlist();
+        None
+    }
+
+    /// Clear the active playlist context and persist the change.
+    ///
+    /// Single point of control — replaces the repeated two-line pattern
+    /// `self.active_playlist_info = None; self.persist_active_playlist_info();`
+    /// that was duplicated across 12+ call sites.
+    pub(crate) fn clear_active_playlist(&mut self) {
         self.active_playlist_info = None;
         self.persist_active_playlist_info();
-        None
     }
 
     /// Persist the current `active_playlist_info` state to redb.
@@ -240,7 +249,7 @@ impl Nokkvi {
     /// playlist context bar survives application restarts.
     pub(crate) fn persist_active_playlist_info(&self) {
         let (id, name, comment) = match &self.active_playlist_info {
-            Some((id, name, comment)) => (Some(id.clone()), name.clone(), comment.clone()),
+            Some(ctx) => (Some(ctx.id.clone()), ctx.name.clone(), ctx.comment.clone()),
             None => (None, String::new(), String::new()),
         };
         self.shell_spawn("persist_active_playlist", move |shell| async move {

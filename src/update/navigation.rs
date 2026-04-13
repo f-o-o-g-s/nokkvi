@@ -115,7 +115,13 @@ impl Nokkvi {
     pub(crate) fn handle_resume_session(&mut self) -> Task<Message> {
         let session = self.stored_session.take();
 
-        let Some((server_url, username, jwt_token, subsonic_credential)) = session else {
+        let Some(crate::state::StoredSession {
+            server_url,
+            username,
+            jwt_token,
+            subsonic_credential,
+        }) = session
+        else {
             warn!("Resume session called but no stored session found");
             return Task::none();
         };
