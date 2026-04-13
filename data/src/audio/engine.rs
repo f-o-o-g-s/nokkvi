@@ -978,80 +978,65 @@ impl CustomAudioEngine {
 
         let pos = position_ms.min(self.duration);
 
-        // Clone Arc for spawn_blocking
-        let decoder_arc = self.decoder.clone();
-        let renderer_arc = self.renderer.clone();
+        // Acquire the async decoder lock natively, then use block_in_place
+        // for the blocking HTTP I/O (RangeHttpReader uses reqwest::blocking).
+        // This matches the proven pattern in play() and the decode loop.
+        trace!("🔍 [SEEK] Acquiring decoder lock...");
+        let lock_start = std::time::Instant::now();
+        let mut decoder = self.decoder.lock().await;
+        trace!(
+            "🔍 [SEEK] Decoder lock acquired in {:?}",
+            lock_start.elapsed()
+        );
 
-        // CRITICAL FIX: Run decoder seek in spawn_blocking!
-        // The RangeHttpReader uses reqwest::blocking::Client which will block
-        // the entire tokio runtime if called from async context. By using
-        // spawn_blocking, we move the blocking I/O to a dedicated thread pool.
-        trace!("🔍 [SEEK] Spawning blocking task for decoder seek");
         let blocking_start = std::time::Instant::now();
-        let seek_result = tokio::task::spawn_blocking(move || {
-            // Use std::sync blocking for the tokio::sync::Mutex in spawn_blocking context
-            // We need to block on the async mutex - use futures::executor
-            let rt = tokio::runtime::Handle::current();
-            rt.block_on(async {
-                tracing::trace!("🔍 [SEEK/BLOCKING] Acquiring decoder lock...");
-                let lock_start = std::time::Instant::now();
-                let mut decoder = decoder_arc.lock().await;
-                tracing::trace!(
-                    "🔍 [SEEK/BLOCKING] Decoder lock acquired in {:?}",
-                    lock_start.elapsed()
-                );
+        let seek_result = tokio::task::block_in_place(|| {
+            trace!("🔍 [SEEK] Calling decoder.seek({})", pos);
+            let seek_op_start = std::time::Instant::now();
+            let seek_ok = decoder.seek(pos);
+            debug!(
+                "🔍 [SEEK] decoder.seek() completed in {:?}, success={}",
+                seek_op_start.elapsed(),
+                seek_ok
+            );
 
-                tracing::trace!("🔍 [SEEK/BLOCKING] Calling decoder.seek({})", pos);
-                let seek_op_start = std::time::Instant::now();
-                let seek_ok = decoder.seek(pos);
-                tracing::debug!(
-                    "🔍 [SEEK/BLOCKING] decoder.seek() completed in {:?}, success={}",
-                    seek_op_start.elapsed(),
-                    seek_ok
-                );
+            if seek_ok {
+                trace!("🔍 [SEEK] Acquiring renderer lock...");
+                let mut renderer = self.renderer.lock();
+                renderer.seek(pos);
 
-                if seek_ok {
-                    tracing::trace!("🔍 [SEEK/BLOCKING] Acquiring renderer lock...");
-                    let mut renderer = renderer_arc.lock();
-                    renderer.seek(pos);
+                // PREBUFFERING: Queue initial buffers after seek
+                const SEEK_PREBUFFER_COUNT: usize = 10;
+                trace!("🔍 [SEEK] Prebuffering {} buffers", SEEK_PREBUFFER_COUNT);
 
-                    // PREBUFFERING: Queue initial buffers after seek
-                    const SEEK_PREBUFFER_COUNT: usize = 10;
-                    tracing::trace!(
-                        "🔍 [SEEK/BLOCKING] Prebuffering {} buffers",
-                        SEEK_PREBUFFER_COUNT
-                    );
+                for i in 0..SEEK_PREBUFFER_COUNT {
+                    let buffer_size = decode_buffer_size(decoder.format());
 
-                    for i in 0..SEEK_PREBUFFER_COUNT {
-                        let buffer_size = decode_buffer_size(decoder.format());
-
-                        let buffer = decoder.read_buffer(buffer_size);
-                        if buffer.is_valid() && buffer.byte_count() > 0 {
-                            let samples = s16_bytes_to_f32(buffer.data());
-                            renderer.write_samples(&samples);
-                            tracing::trace!(
-                                "🔍 [SEEK/BLOCKING] Queued prebuffer {}/{}",
-                                i + 1,
-                                SEEK_PREBUFFER_COUNT
-                            );
-                        } else {
-                            tracing::trace!(
-                                "🔍 [SEEK/BLOCKING] Prebuffering stopped at {}/{} (no more data)",
-                                i + 1,
-                                SEEK_PREBUFFER_COUNT
-                            );
-                            break;
-                        }
+                    let buffer = decoder.read_buffer(buffer_size);
+                    if buffer.is_valid() && buffer.byte_count() > 0 {
+                        let samples = s16_bytes_to_f32(buffer.data());
+                        renderer.write_samples(&samples);
+                        trace!(
+                            "🔍 [SEEK] Queued prebuffer {}/{}",
+                            i + 1,
+                            SEEK_PREBUFFER_COUNT
+                        );
+                    } else {
+                        trace!(
+                            "🔍 [SEEK] Prebuffering stopped at {}/{} (no more data)",
+                            i + 1,
+                            SEEK_PREBUFFER_COUNT
+                        );
+                        break;
                     }
                 }
+            }
 
-                seek_ok
-            })
-        })
-        .await
-        .unwrap_or(false);
+            seek_ok
+        });
+        drop(decoder);
         debug!(
-            "🔍 [SEEK] Blocking task completed in {:?}, success={}",
+            "🔍 [SEEK] Seek + prebuffer completed in {:?}, success={}",
             blocking_start.elapsed(),
             seek_result
         );
@@ -1654,114 +1639,117 @@ impl CustomAudioEngine {
 
         let position = self.position();
 
-        // Use 200ms threshold like C++ version
-        let position_near_end = duration > 0 && position >= duration.saturating_sub(200);
-
         debug!(
-            " [RENDERER FINISHED] EOF={}, position={}ms, duration={}ms, position_near_end={}, playing={}, paused={}",
-            is_eof, position, duration, position_near_end, self.playing, self.paused
+            " [RENDERER FINISHED] EOF={}, position={}ms, duration={}ms, playing={}, paused={}",
+            is_eof, position, duration, self.playing, self.paused
         );
 
-        // If the outgoing track's buffers have drained during crossfade,
-        // finalize the crossfade so the incoming track takes over.
-        //
-        // Handle both phases:
-        //   Active + is_eof:      queue drained BEFORE decoder signaled EOF (race)
-        //   OutgoingFinished:     decoder already signaled EOF, queue drained after
-        let crossfade_queue_drained =
-            matches!(
-                self.crossfade_phase,
-                CrossfadePhase::Active | CrossfadePhase::OutgoingFinished
-            ) && (self.crossfade_phase == CrossfadePhase::OutgoingFinished || is_eof);
-
-        if crossfade_queue_drained {
-            debug!(
-                "🔀 [RENDERER FINISHED] Outgoing queue drained during crossfade (phase={:?}, eof={}) — finalizing",
-                self.crossfade_phase, is_eof
-            );
-            self.finalize_crossfade_engine().await;
+        // Phase 1: Crossfade finalization — outgoing queue drained
+        if self.try_finalize_crossfade(is_eof).await {
             return false;
         }
 
-        // If crossfade is enabled, phase is Idle, and we have a prepared next track,
-        // start the crossfade now instead of falling through to gapless/hard transition.
-        // This is the main crossfade entry point: render_tick's position-based trigger
-        // fired (pos >= track_duration - crossfade_duration), disarmed the trigger,
-        // and signaled us. We start the crossfade from the engine so the decode loop
-        // and stream creation happen together.
-        //
-        // NOTE: Do NOT gate on is_eof here — the position-based trigger fires
-        // intentionally BEFORE EOF so both tracks can overlap during the fade.
-        if self.crossfade_phase == CrossfadePhase::Idle
-            && self.crossfade_enabled
-            && self.crossfade_duration_ms > 0
-        {
-            let has_prepared = *self.next_track_prepared.lock().await;
-            if has_prepared {
-                debug!(
-                    "🔀 [RENDERER FINISHED] Starting crossfade (prepared={}, eof={})",
-                    has_prepared, is_eof
-                );
-                self.start_crossfade().await;
-                return false;
-            }
+        // Phase 2: Crossfade initiation — position-based trigger fired
+        if self.try_start_crossfade_transition(is_eof).await {
+            return false;
         }
 
-        // Check if decoder has actually finished producing data
-        // IMPORTANT: When duration is 0 (unknown), don't use position comparison since 0 >= 0 is always true
-        // In that case, only rely on actual EOF detection
+        // Phase 3: Normal track completion or buffer starvation
         let position_indicates_finished = duration > 0 && position >= duration;
         if is_eof || position_indicates_finished {
-            // Track is finished - either EOF reached or position reached duration
             debug!(
-                " [RENDERER FINISHED] Track is finished (EOF={}, position={} >= duration={}, pos_finished={}), calling on_decoder_finished",
+                " [RENDERER FINISHED] Track finished (EOF={}, pos={} >= dur={}, pos_finished={})",
                 is_eof, position, duration, position_indicates_finished
             );
             self.on_decoder_finished().await;
             true
         } else if !is_eof && self.playing && !self.paused {
-            // Buffers ran out but decoder hasn't reached EOF and we're still playing
-            // This could be temporary buffer starvation (e.g., after seek)
-            // Give the decoder more time to produce buffers before giving up
-            debug!(
-                " [RENDERER FINISHED] Temporary buffer starvation detected (EOF={}, pos={}, dur={}), waiting for decoder",
-                is_eof, position, duration
-            );
-
-            // Wait a short time to see if decoder produces more buffers
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-
-            // Check if buffers are now available
-            let has_buffers = !self.renderer.lock().is_buffer_queue_empty();
-            if has_buffers {
-                trace!(
-                    " [RENDERER FINISHED] Buffers became available after wait, continuing playback"
-                );
-                false
-            } else {
-                debug!(
-                    "🎵 [RENDERER FINISHED] Still no buffers after wait, checking decoder state"
-                );
-                // Check decoder state again
-                let decoder = self.decoder.lock().await;
-                let still_eof = decoder.is_eof();
-                drop(decoder);
-
-                if still_eof {
-                    debug!(
-                        "🎵 [RENDERER FINISHED] Decoder reached EOF after wait, finishing track"
-                    );
-                    self.on_decoder_finished().await;
-                    true
-                } else {
-                    trace!(
-                        " [RENDERER FINISHED] Decoder still producing but buffers delayed, continuing to wait"
-                    );
-                    false
-                }
-            }
+            self.handle_buffer_starvation(position, duration).await
         } else {
             trace!(" [RENDERER FINISHED] Not playing or paused, no action taken");
+            false
+        }
+    }
+
+    /// Check if an active crossfade's outgoing queue has drained and finalize it.
+    ///
+    /// Handles both phases:
+    /// - `Active + is_eof`: queue drained BEFORE decoder signaled EOF (race)
+    /// - `OutgoingFinished`: decoder already signaled EOF, queue drained after
+    async fn try_finalize_crossfade(&mut self, is_eof: bool) -> bool {
+        let should_finalize = matches!(
+            self.crossfade_phase,
+            CrossfadePhase::Active | CrossfadePhase::OutgoingFinished
+        ) && (self.crossfade_phase == CrossfadePhase::OutgoingFinished
+            || is_eof);
+
+        if should_finalize {
+            debug!(
+                "🔀 [RENDERER FINISHED] Outgoing queue drained during crossfade (phase={:?}, eof={}) — finalizing",
+                self.crossfade_phase, is_eof
+            );
+            self.finalize_crossfade_engine().await;
+        }
+        should_finalize
+    }
+
+    /// Try to start a crossfade transition if conditions are met.
+    ///
+    /// This is the main crossfade entry point: render_tick's position-based trigger
+    /// fired (pos >= track_duration - crossfade_duration), disarmed the trigger,
+    /// and signaled us. We start the crossfade from the engine so the decode loop
+    /// and stream creation happen together.
+    ///
+    /// NOTE: Does NOT gate on is_eof — the position-based trigger fires
+    /// intentionally BEFORE EOF so both tracks can overlap during the fade.
+    async fn try_start_crossfade_transition(&mut self, is_eof: bool) -> bool {
+        if self.crossfade_phase != CrossfadePhase::Idle
+            || !self.crossfade_enabled
+            || self.crossfade_duration_ms == 0
+        {
+            return false;
+        }
+
+        let has_prepared = *self.next_track_prepared.lock().await;
+        if has_prepared {
+            debug!(
+                "🔀 [RENDERER FINISHED] Starting crossfade (prepared={}, eof={})",
+                has_prepared, is_eof
+            );
+            self.start_crossfade().await;
+        }
+        has_prepared
+    }
+
+    /// Handle temporary buffer starvation when decoder hasn't reached EOF.
+    ///
+    /// Waits briefly for the decoder to produce more buffers (e.g., after seek
+    /// or transient network stall). Returns `true` if the track actually ended.
+    async fn handle_buffer_starvation(&mut self, position: u64, duration: u64) -> bool {
+        debug!(
+            " [RENDERER FINISHED] Buffer starvation detected (pos={}, dur={}), waiting",
+            position, duration
+        );
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        let has_buffers = !self.renderer.lock().is_buffer_queue_empty();
+        if has_buffers {
+            trace!(" [RENDERER FINISHED] Buffers recovered after wait");
+            return false;
+        }
+
+        // Still no buffers — re-check decoder state
+        let decoder = self.decoder.lock().await;
+        let still_eof = decoder.is_eof();
+        drop(decoder);
+
+        if still_eof {
+            debug!("🎵 [RENDERER FINISHED] Decoder reached EOF after wait, finishing track");
+            self.on_decoder_finished().await;
+            true
+        } else {
+            trace!(" [RENDERER FINISHED] Decoder still producing, continuing to wait");
             false
         }
     }
