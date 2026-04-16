@@ -113,8 +113,7 @@ pub fn build_stream_url(song_id: &str, server_url: &str, subsonic_credential: &s
 
     let cache_bust = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_millis());
 
     format!(
         "{server_url}/rest/stream?id={song_id}&{subsonic_credential}&f=json&v=1.8.0&c=nokkvi&_={cache_bust}"
