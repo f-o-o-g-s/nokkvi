@@ -301,8 +301,7 @@ pub fn is_cache_incomplete(disk_cache: &Option<DiskCache>, expected_count: usize
     let cache_path = cache.get_path("");
     let cache_dir = cache_path.parent().unwrap_or(&cache_path);
 
-    let file_count = std::fs::read_dir(cache_dir)
-        .map_or(0, |entries| entries.count());
+    let file_count = std::fs::read_dir(cache_dir).map_or(0, |entries| entries.count());
 
     // Expected: 2 files per album (thumbnail + large)
     let expected_files = expected_count * 2;
