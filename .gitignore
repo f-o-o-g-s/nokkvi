@@ -43,3 +43,6 @@ tmp/
 temp/
 *.tmp
 __pycache__/
+
+# Local scratch files
+newfeatbugs.md
