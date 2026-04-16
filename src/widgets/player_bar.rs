@@ -260,15 +260,11 @@ pub(crate) fn player_bar<'a>(
     let duration = data.playback_duration as f32;
     let position = data.playback_position as f32;
 
-    let pos_str = if data.is_radio {
-        "--:--".to_string()
-    } else {
-        format!(
-            "{}:{:02}",
-            position.floor() as u32 / 60,
-            position.floor() as u32 % 60
-        )
-    };
+    let pos_str = format!(
+        "{}:{:02}",
+        position.floor() as u32 / 60,
+        position.floor() as u32 % 60
+    );
 
     let dur_str = if data.is_radio {
         "--:--".to_string()
