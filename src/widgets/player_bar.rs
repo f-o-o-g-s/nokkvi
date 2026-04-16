@@ -181,6 +181,7 @@ pub(crate) fn player_bar<'a>(
 ) -> Element<'a, PlayerBarMessage> {
     // Player controls with SVG icons
     let has_queue = data.has_queue && !data.is_radio;
+    let controls_active = has_queue || data.is_radio;
     let playback_playing = data.playback_playing;
     let playback_paused = data.playback_paused;
 
@@ -190,7 +191,7 @@ pub(crate) fn player_bar<'a>(
             "assets/icons/skip-back.svg",
             PlayerBarMessage::PrevTrack,
             theme::bg1(),
-            if has_queue {
+            if controls_active {
                 theme::fg1()
             } else {
                 theme::fg4()
@@ -234,7 +235,7 @@ pub(crate) fn player_bar<'a>(
             "assets/icons/stop.svg",
             PlayerBarMessage::Stop,
             theme::bg1(),
-            if has_queue {
+            if controls_active {
                 theme::fg1()
             } else {
                 theme::fg4()
@@ -246,7 +247,7 @@ pub(crate) fn player_bar<'a>(
             "assets/icons/skip-forward.svg",
             PlayerBarMessage::NextTrack,
             theme::bg1(),
-            if has_queue {
+            if controls_active {
                 theme::fg1()
             } else {
                 theme::fg4()
