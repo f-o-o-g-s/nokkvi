@@ -105,23 +105,62 @@ impl SettingsPage {
 
         match message {
             SettingsMessage::SlotListUp => {
-                if sub.editing_color_index.is_none() {
-                    sub.slot_list.move_up(total);
+                let mut action = SettingsAction::None;
+                if sub.editing_color_index.is_some() {
+                    if let Some(normalized) = normalize_hex(&sub.hex_input) {
+                        if let Some(color) = sub.colors.get_mut(sub.editing_color_index.unwrap()) {
+                            *color = normalized.clone();
+                        }
+                        action = SettingsAction::WriteColorEntry {
+                            key: sub.key.clone(),
+                            index: sub.editing_color_index.unwrap(),
+                            hex_color: normalized,
+                        };
+                    }
+                    sub.editing_color_index = None;
+                    sub.hex_input.clear();
                 }
-                SettingsAction::None
+                sub.slot_list.move_up(total);
+                action
             }
             SettingsMessage::SlotListDown => {
-                if sub.editing_color_index.is_none() {
-                    sub.slot_list.move_down(total);
+                let mut action = SettingsAction::None;
+                if sub.editing_color_index.is_some() {
+                    if let Some(normalized) = normalize_hex(&sub.hex_input) {
+                        if let Some(color) = sub.colors.get_mut(sub.editing_color_index.unwrap()) {
+                            *color = normalized.clone();
+                        }
+                        action = SettingsAction::WriteColorEntry {
+                            key: sub.key.clone(),
+                            index: sub.editing_color_index.unwrap(),
+                            hex_color: normalized,
+                        };
+                    }
+                    sub.editing_color_index = None;
+                    sub.hex_input.clear();
                 }
-                SettingsAction::None
+                sub.slot_list.move_down(total);
+                action
             }
             SettingsMessage::SlotListSetOffset(offset, _)
             | SettingsMessage::SlotListClickItem(offset) => {
-                if sub.editing_color_index.is_none() {
-                    sub.slot_list.set_offset(offset, total);
+                let mut action = SettingsAction::None;
+                if sub.editing_color_index.is_some() {
+                    if let Some(normalized) = normalize_hex(&sub.hex_input) {
+                        if let Some(color) = sub.colors.get_mut(sub.editing_color_index.unwrap()) {
+                            *color = normalized.clone();
+                        }
+                        action = SettingsAction::WriteColorEntry {
+                            key: sub.key.clone(),
+                            index: sub.editing_color_index.unwrap(),
+                            hex_color: normalized,
+                        };
+                    }
+                    sub.editing_color_index = None;
+                    sub.hex_input.clear();
                 }
-                SettingsAction::None
+                sub.slot_list.set_offset(offset, total);
+                action
             }
             SettingsMessage::EditActivate => {
                 // Toggle hex input on center color

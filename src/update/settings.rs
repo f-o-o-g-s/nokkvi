@@ -123,6 +123,7 @@ impl Nokkvi {
             && self.settings_page.sub_list.is_none()
             && self.settings_page.font_sub_list.is_none()
             && self.settings_page.toggle_cursor.is_none()
+            && self.settings_page.editing_index.is_none()
         {
             let total = self.settings_page.cached_entries.len().max(1);
             match msg {

@@ -549,6 +549,10 @@ impl SettingsPage {
         let total = self.cached_entries.len().max(1);
         match message {
             SettingsMessage::SlotListUp => {
+                let mut action = SettingsAction::None;
+                if self.editing_index.is_some() {
+                    action = self.update(SettingsMessage::HexInputSubmit, data);
+                }
                 // When toggle cursor is active, Up enables the cursored badge
                 if let Some(cursor_idx) = self.toggle_cursor {
                     return self.toggle_set_cursor_set(cursor_idx, true);
@@ -558,9 +562,13 @@ impl SettingsPage {
                 self.slot_list.move_up(total);
                 self.snap_to_non_header(false);
                 self.update_description();
-                SettingsAction::None
+                action
             }
             SettingsMessage::SlotListDown => {
+                let mut action = SettingsAction::None;
+                if self.editing_index.is_some() {
+                    action = self.update(SettingsMessage::HexInputSubmit, data);
+                }
                 // When toggle cursor is active, Down disables the cursored badge
                 if let Some(cursor_idx) = self.toggle_cursor {
                     return self.toggle_set_cursor_set(cursor_idx, false);
@@ -570,15 +578,19 @@ impl SettingsPage {
                 self.slot_list.move_down(total);
                 self.snap_to_non_header(true);
                 self.update_description();
-                SettingsAction::None
+                action
             }
             SettingsMessage::SlotListSetOffset(offset, _) => {
+                let mut action = SettingsAction::None;
+                if self.editing_index.is_some() {
+                    action = self.update(SettingsMessage::HexInputSubmit, data);
+                }
                 self.editing_index = None;
                 self.toggle_cursor = None;
                 self.slot_list.set_offset(offset, total);
                 self.snap_to_non_header(true);
                 self.update_description();
-                SettingsAction::None
+                action
             }
             SettingsMessage::SlotListClickItem(offset) => {
                 self.editing_index = None;

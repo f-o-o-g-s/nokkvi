@@ -915,7 +915,11 @@ impl Nokkvi {
                         key,
                         iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape)
                     );
-                    if !is_escape && !modifiers.control() {
+                    let is_tab = matches!(
+                        key,
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab)
+                    );
+                    if !is_escape && !is_tab && !modifiers.control() {
                         return Task::none();
                     }
                 }
