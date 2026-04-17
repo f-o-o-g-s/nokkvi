@@ -49,5 +49,3 @@ newfeatbugs.md
 
 # Local scripts and tools
 /local/
-/scripts/*
-!/scripts/README.md
