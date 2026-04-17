@@ -46,3 +46,8 @@ __pycache__/
 
 # Local scratch files
 newfeatbugs.md
+
+# Local scripts and tools
+/local/
+/scripts/*
+!/scripts/README.md
