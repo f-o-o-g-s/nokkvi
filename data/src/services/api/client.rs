@@ -6,6 +6,9 @@ use reqwest::Client;
 use tracing::debug;
 use url::Url;
 
+use crate::types::error::NokkviError;
+
+
 /// Callback invoked when a refreshed JWT is received from the server.
 /// Called with the new token string so callers can persist it to redb.
 pub type TokenRefreshCallback = Arc<dyn Fn(&str) + Send + Sync>;
@@ -138,6 +141,8 @@ impl ApiClient {
 
         if status.is_success() {
             Ok(body)
+        } else if status == reqwest::StatusCode::UNAUTHORIZED {
+            Err(NokkviError::Unauthorized.into())
         } else {
             Err(anyhow::anyhow!(
                 "API request failed with status {status}: {body}"
@@ -197,6 +202,8 @@ impl ApiClient {
 
         if status.is_success() {
             Ok((body, total_count))
+        } else if status == reqwest::StatusCode::UNAUTHORIZED {
+            Err(NokkviError::Unauthorized.into())
         } else {
             Err(anyhow::anyhow!(
                 "API request failed with status {status}: {body}"
@@ -234,6 +241,8 @@ impl ApiClient {
 
         if status.is_success() {
             Ok(body)
+        } else if status == reqwest::StatusCode::UNAUTHORIZED {
+            Err(NokkviError::Unauthorized.into())
         } else {
             Err(anyhow::anyhow!(
                 "API POST {endpoint} failed with status {status}: {body}"
@@ -271,6 +280,8 @@ impl ApiClient {
 
         if status.is_success() {
             Ok(body)
+        } else if status == reqwest::StatusCode::UNAUTHORIZED {
+            Err(NokkviError::Unauthorized.into())
         } else {
             Err(anyhow::anyhow!(
                 "API PUT {endpoint} failed with status {status}: {body}"
@@ -298,6 +309,8 @@ impl ApiClient {
         let status = response.status();
         if status.is_success() {
             Ok(())
+        } else if status == reqwest::StatusCode::UNAUTHORIZED {
+            Err(NokkviError::Unauthorized.into())
         } else {
             let body = response.text().await.unwrap_or_default();
             Err(anyhow::anyhow!(

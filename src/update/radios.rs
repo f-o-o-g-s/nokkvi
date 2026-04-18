@@ -25,7 +25,7 @@ impl Nokkvi {
                         let total_count = stations.len();
                         (Ok(stations), total_count)
                     }
-                    Err(e) => (Err(e.to_string()), 0),
+                    Err(e) => (Err(format!("{e:#}")), 0),
                 }
             },
             |(result, _total_count)| {

@@ -11,6 +11,41 @@ use crate::{
 };
 
 impl Nokkvi {
+    pub(crate) fn handle_session_expired(&mut self) -> Task<Message> {
+        info!(" [SESSION] Session expired (401 Unauthorized)");
+        let stop_task = if let Some(ref shell) = self.app_service {
+            shell.task_manager().shutdown();
+            if let Err(e) = nokkvi_data::credentials::clear_session(shell.storage()) {
+                warn!(" [SESSION] Failed to clear session: {e}");
+            }
+            self.cached_storage = Some(shell.storage().clone());
+
+            let engine = shell.audio_engine();
+            Task::perform(
+                async move {
+                    let mut guard = engine.lock().await;
+                    guard.stop().await;
+                    debug!(" [SESSION] Audio engine stopped after expiry");
+                },
+                |_| Message::NoOp,
+            )
+        } else {
+            Task::none()
+        };
+
+        self.app_service = None;
+        self.stored_session = None;
+        self.should_auto_login = false;
+        self.screen = crate::Screen::Login;
+
+        // Reset library state to clear any stale data from the previous session
+        self.library = crate::state::LibraryData::default();
+
+        self.toast_info("Session expired. Please log in again.");
+
+        stop_task
+    }
+
     pub(crate) fn handle_switch_view(&mut self, view: View) -> Task<Message> {
         // Save current view before entering Settings so we can restore it on close
         if view == View::Settings && self.current_view != View::Settings {
@@ -77,12 +112,12 @@ impl Nokkvi {
                                 Some(storage) => AppService::new_with_storage(storage).await,
                                 None => AppService::new().await,
                             }
-                            .map_err(|e| e.to_string())?;
+                            .map_err(|e| format!("{e:#}"))?;
                             shell
                                 .auth()
                                 .login(server_url, username, password)
                                 .await
-                                .map_err(|e| e.to_string())?;
+                                .map_err(|e| format!("{e:#}"))?;
 
                             // Wire up token refresh persistence callback
                             let storage = shell.storage().clone();
@@ -137,12 +172,12 @@ impl Nokkvi {
                     Some(storage) => AppService::new_with_storage(storage).await,
                     None => AppService::new().await,
                 }
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| format!("{e:#}"))?;
                 shell
                     .auth()
                     .resume_session(server_url, username, jwt_token, subsonic_credential)
                     .await
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| format!("{e:#}"))?;
 
                 // Wire up token refresh persistence callback
                 let storage = shell.storage().clone();

@@ -63,7 +63,7 @@ impl Nokkvi {
                         let total_count = songs_vm.get_total_count() as usize;
                         (Ok(ui_songs), total_count)
                     }
-                    Err(e) => (Err(e.to_string()), 0),
+                    Err(e) => (Err(format!("{e:#}")), 0),
                 }
             },
             move |(result, total_count)| {
@@ -120,7 +120,7 @@ impl Nokkvi {
                         let total_count = songs_vm.get_total_count() as usize;
                         (Ok(ui_songs), total_count)
                     }
-                    Err(e) => (Err(e.to_string()), 0),
+                    Err(e) => (Err(format!("{e:#}")), 0),
                 }
             },
             |(result, total_count)| {
@@ -238,9 +238,13 @@ impl Nokkvi {
                 }
             }
             Err(e) => {
+                if e.contains("Unauthorized") {
+                    self.library.songs.set_loading(false);
+                    return self.handle_session_expired();
+                }
                 error!("Error loading songs: {}", e);
                 self.library.songs.set_loading(false);
-                self.toast_error("Failed to load songs");
+                self.toast_error(format!("Failed to load songs: {e}"));
             }
         }
         Task::none()
