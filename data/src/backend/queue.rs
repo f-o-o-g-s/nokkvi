@@ -246,20 +246,6 @@ impl QueueService {
         Ok(())
     }
 
-    /// Move a song to the top of the queue
-    pub async fn move_to_top(&self, index: usize) -> Result<()> {
-        let mut qm = self.queue_manager.lock().await;
-        qm.move_to_top(index)?;
-        Ok(())
-    }
-
-    /// Move a song to the bottom of the queue
-    pub async fn move_to_bottom(&self, index: usize) -> Result<()> {
-        let mut qm = self.queue_manager.lock().await;
-        qm.move_to_bottom(index)?;
-        Ok(())
-    }
-
     /// Insert songs at a specific position in the queue (cross-pane drag drop)
     pub async fn insert_songs_at(&self, index: usize, songs: Vec<Song>) -> Result<()> {
         {

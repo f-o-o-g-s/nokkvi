@@ -458,25 +458,6 @@ impl QueueManager {
         Ok(())
     }
 
-    /// Move a song to the first position in the queue.
-    /// Updates `current_index` so the currently-playing song isn't lost.
-    pub fn move_to_top(&mut self, index: usize) -> Result<()> {
-        if index == 0 || index >= self.queue.song_ids.len() {
-            return Ok(());
-        }
-        self.move_item(index, 0)
-    }
-
-    /// Move a song to the last position in the queue.
-    /// Updates `current_index` so the currently-playing song isn't lost.
-    pub fn move_to_bottom(&mut self, index: usize) -> Result<()> {
-        let last = self.queue.song_ids.len();
-        if last == 0 || index >= last {
-            return Ok(());
-        }
-        self.move_item(index, last)
-    }
-
     /// Insert a song at a specific index in the queue.
     /// Used to re-insert songs from history that were removed (consume mode).
     pub fn insert_song_at(&mut self, index: usize, song: Song) -> Result<()> {
@@ -693,18 +674,6 @@ pub(crate) mod tests {
         qm.move_item(0, 2).unwrap();
         let ids: Vec<&str> = qm.queue.song_ids.iter().map(|s| s.as_str()).collect();
         assert_eq!(ids, vec!["b", "a"]);
-    }
-
-    #[test]
-    fn move_to_bottom_two_items() {
-        let songs = vec![make_test_song("a"), make_test_song("b")];
-        let mut qm = make_test_manager(songs, Some(0));
-
-        qm.move_to_bottom(0).unwrap();
-        let ids: Vec<&str> = qm.queue.song_ids.iter().map(|s| s.as_str()).collect();
-        assert_eq!(ids, vec!["b", "a"]);
-        // current_index should follow the moved song
-        assert_eq!(qm.queue.current_index, Some(1));
     }
 
     // remove_song current_index tracking tests
