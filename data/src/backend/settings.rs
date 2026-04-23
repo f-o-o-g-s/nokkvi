@@ -283,6 +283,12 @@ impl SettingsService {
         sm.set_opacity_gradient(enabled)
     }
 
+    /// Set slot text links enabled and persist
+    pub async fn set_slot_text_links(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_slot_text_links(enabled)
+    }
+
     /// Set crossfade enabled and persist
     pub async fn set_crossfade_enabled(&self, enabled: bool) -> anyhow::Result<()> {
         let mut sm = self.settings_manager.lock().await;

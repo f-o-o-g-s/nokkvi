@@ -768,6 +768,7 @@ mod tests {
             track_info_display: "Off",
             slot_row_height: "Default",
             horizontal_volume: false,
+            slot_text_links: true,
             font_family: "",
             strip_show_title: true,
             strip_show_artist: true,
@@ -784,8 +785,8 @@ mod tests {
         );
         assert_eq!(
             count_items(&entries),
-            8,
-            "Expected 8 items (nav_layout, nav_display_mode, track_info_display, slot_row_height, horizontal_volume, font_family, visible_fields, click_action)"
+            9,
+            "Expected 9 items (nav_layout, nav_display_mode, track_info_display, slot_row_height, horizontal_volume, slot_text_links, font_family, visible_fields, click_action)"
         );
     }
 
@@ -934,6 +935,7 @@ mod tests {
             track_info_display: "Off",
             slot_row_height: "Default",
             horizontal_volume: false,
+            slot_text_links: true,
             font_family: "",
             strip_show_title: true,
             strip_show_artist: true,

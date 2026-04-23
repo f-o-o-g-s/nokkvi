@@ -548,6 +548,8 @@ pub struct PlayerSettings {
     pub slot_row_height: SlotRowHeight,
     /// Whether the opacity gradient on non-center slots is enabled
     pub opacity_gradient: bool,
+    /// Whether clickable text links in slot list items are enabled (default: true)
+    pub slot_text_links: bool,
     /// Whether crossfade between tracks is enabled
     pub crossfade_enabled: bool,
     /// Crossfade duration in seconds (1–12)

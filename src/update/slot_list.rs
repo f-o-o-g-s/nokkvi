@@ -258,7 +258,44 @@ impl Nokkvi {
     fn handle_slot_list_activate_center(&mut self) -> Task<Message> {
         // Play enter/activate sound (settings handles its own SFX)
         if self.current_view != View::Settings {
-            self.sfx_engine.play(audio::SfxType::Enter);
+            // Check if the current view is empty (accounts for search filtering).
+            // We use the same filter_* helpers as view() to detect when the
+            // results are empty even if the raw library is not.
+            let is_empty = match self.current_view {
+                View::Queue => self.filter_queue_songs().is_empty(),
+                View::Albums => self.filter_albums().is_empty(),
+                View::Songs => {
+                    // Filter songs manually since there's no main.rs helper for it yet
+                    nokkvi_data::utils::search::filter_items(
+                        &self.library.songs,
+                        &self.songs_page.common.search_query,
+                    )
+                    .is_empty()
+                }
+                View::Artists => nokkvi_data::utils::search::filter_items(
+                    &self.library.artists,
+                    &self.artists_page.common.search_query,
+                )
+                .is_empty(),
+                View::Genres => nokkvi_data::utils::search::filter_items(
+                    &self.library.genres,
+                    &self.genres_page.common.search_query,
+                )
+                .is_empty(),
+                View::Playlists => nokkvi_data::utils::search::filter_items(
+                    &self.library.playlists,
+                    &self.playlists_page.common.search_query,
+                )
+                .is_empty(),
+                View::Radios => self.filter_radio_stations().is_empty(),
+                _ => false,
+            };
+
+            if is_empty {
+                self.sfx_engine.play(audio::SfxType::Escape);
+            } else {
+                self.sfx_engine.play(audio::SfxType::Enter);
+            }
         }
         match self.current_view {
             View::Albums => Task::done(Message::Albums(

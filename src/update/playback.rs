@@ -1148,6 +1148,9 @@ impl Nokkvi {
         // Apply opacity gradient from persisted settings
         crate::theme::set_opacity_gradient(settings.opacity_gradient);
 
+        // Apply slot text links from persisted settings
+        crate::theme::set_slot_text_links(settings.slot_text_links);
+
         // Apply horizontal volume mode from persisted settings
         crate::theme::set_horizontal_volume(settings.horizontal_volume);
 

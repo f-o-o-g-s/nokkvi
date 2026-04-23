@@ -58,6 +58,8 @@ struct UiModeFlags {
     slot_row_height: AtomicU8,
     /// Whether the opacity gradient on non-center slots is enabled
     opacity_gradient: AtomicBool,
+    /// Whether clickable text links in slot list items are enabled
+    slot_text_links: AtomicBool,
     /// Whether volume sliders are displayed horizontally in the player bar
     horizontal_volume: AtomicBool,
     /// Whether the title field is shown in the track info strip
@@ -80,6 +82,7 @@ static UI_MODE: UiModeFlags = UiModeFlags {
     nav_display_mode: AtomicU8::new(0),
     slot_row_height: AtomicU8::new(1), // Default variant
     opacity_gradient: AtomicBool::new(true),
+    slot_text_links: AtomicBool::new(true),
     horizontal_volume: AtomicBool::new(false),
     strip_show_title: AtomicBool::new(true),
     strip_show_artist: AtomicBool::new(true),
@@ -402,6 +405,23 @@ pub(crate) fn is_opacity_gradient() -> bool {
 pub(crate) fn set_opacity_gradient(enabled: bool) {
     UI_MODE.opacity_gradient.store(enabled, Ordering::Relaxed);
     debug!(" Opacity gradient changed: opacity_gradient={}", enabled);
+}
+
+// ============================================================================
+// Slot Text Links Control
+// ============================================================================
+
+/// Returns true if clickable text links in slot list items are enabled
+#[inline]
+pub(crate) fn is_slot_text_links() -> bool {
+    UI_MODE.slot_text_links.load(Ordering::Relaxed)
+}
+
+/// Set slot text links state (call when user toggles the setting)
+#[inline]
+pub(crate) fn set_slot_text_links(enabled: bool) {
+    UI_MODE.slot_text_links.store(enabled, Ordering::Relaxed);
+    debug!(" Slot text links changed: slot_text_links={}", enabled);
 }
 
 // ============================================================================

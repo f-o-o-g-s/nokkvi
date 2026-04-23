@@ -69,6 +69,9 @@ pub struct PlayerSettings {
     /// Whether the opacity gradient on non-center slots is enabled (default: true)
     #[serde(default = "default_opacity_gradient")]
     pub opacity_gradient: bool,
+    /// Whether clickable text links in slot list items are enabled (default: true)
+    #[serde(default = "default_true")]
+    pub slot_text_links: bool,
     /// Whether crossfade between tracks is enabled (default: false)
     #[serde(default)]
     pub crossfade_enabled: bool,
@@ -202,6 +205,7 @@ impl Default for PlayerSettings {
             track_info_display: TrackInfoDisplay::default(),
             slot_row_height: SlotRowHeight::default(),
             opacity_gradient: default_opacity_gradient(),
+            slot_text_links: default_true(),
             crossfade_enabled: false,
             crossfade_duration_secs: default_crossfade_duration_secs(),
             default_playlist_id: None,

@@ -1043,6 +1043,7 @@ fn make_settings_view_data() -> crate::views::SettingsViewData {
         track_info_display: "Full",
         slot_row_height: "Default",
         opacity_gradient: true,
+        slot_text_links: true,
         crossfade_enabled: false,
         crossfade_duration_secs: 5,
         volume_normalization: false,

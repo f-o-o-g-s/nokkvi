@@ -43,6 +43,7 @@ pub struct TomlSettings {
     pub track_info_display: TrackInfoDisplay,
     pub slot_row_height: SlotRowHeight,
     pub opacity_gradient: bool,
+    pub slot_text_links: bool,
     pub horizontal_volume: bool,
     /// Font family override. Empty = system default sans-serif.
     #[serde(default)]
@@ -117,6 +118,7 @@ impl Default for TomlSettings {
             track_info_display: TrackInfoDisplay::default(),
             slot_row_height: SlotRowHeight::default(),
             opacity_gradient: true,
+            slot_text_links: true,
             horizontal_volume: false,
             font_family: String::new(),
             strip_show_title: true,
@@ -161,6 +163,7 @@ impl TomlSettings {
             track_info_display: ps.track_info_display,
             slot_row_height: ps.slot_row_height,
             opacity_gradient: ps.opacity_gradient,
+            slot_text_links: ps.slot_text_links,
             horizontal_volume: ps.horizontal_volume,
             font_family: ps.font_family.clone(),
             strip_show_title: ps.strip_show_title,

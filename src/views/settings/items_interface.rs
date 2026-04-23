@@ -9,6 +9,7 @@ pub(crate) struct InterfaceSettingsData<'a> {
     pub track_info_display: &'a str,
     pub slot_row_height: &'a str,
     pub horizontal_volume: bool,
+    pub slot_text_links: bool,
     pub font_family: &'a str,
     pub strip_show_title: bool,
     pub strip_show_artist: bool,
@@ -83,6 +84,15 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
             ),
             data.horizontal_volume,
             false,
+        ),
+        SettingItem::bool_val(
+            meta!(
+                "general.slot_text_links",
+                "Slot Text Links",
+                "Make title and artist text clickable to navigate to albums and artists"
+            ),
+            data.slot_text_links,
+            true,
         ),
         // --- Font ---
         SettingsEntry::Header {

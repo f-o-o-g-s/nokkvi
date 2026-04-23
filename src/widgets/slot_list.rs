@@ -770,6 +770,14 @@ pub(crate) fn slot_list_text_column<'a, Message: Clone + 'a + 'static>(
     is_bold: bool,
     portion: u16,
 ) -> Element<'a, Message> {
+    // When slot text links are disabled, suppress click messages
+    let links_enabled = crate::theme::is_slot_text_links();
+    let title_on_press = if links_enabled { title_on_press } else { None };
+    let subtitle_on_press = if links_enabled {
+        subtitle_on_press
+    } else {
+        None
+    };
     use iced::{
         Alignment,
         widget::text::{Ellipsis, Wrapping},
@@ -838,17 +846,18 @@ pub(crate) fn slot_list_metadata_column<'a, Message: Clone + 'a + 'static>(
 ) -> Element<'a, Message> {
     use iced::Alignment;
 
-    let text_widget: Element<'a, Message> = if let Some(msg) = on_press {
-        crate::widgets::link_text::LinkText::new(content)
-            .size(font_size)
-            .color(style.subtext_color)
-            .hover_color(style.hover_text_color)
-            .font(theme::ui_font())
-            .on_press(Some(msg))
-            .into()
-    } else {
-        slot_list_text(content, font_size, style.subtext_color).into()
-    };
+    let text_widget: Element<'a, Message> =
+        if let Some(msg) = on_press.filter(|_| crate::theme::is_slot_text_links()) {
+            crate::widgets::link_text::LinkText::new(content)
+                .size(font_size)
+                .color(style.subtext_color)
+                .hover_color(style.hover_text_color)
+                .font(theme::ui_font())
+                .on_press(Some(msg))
+                .into()
+        } else {
+            slot_list_text(content, font_size, style.subtext_color).into()
+        };
 
     container(text_widget)
         .width(Length::FillPortion(portion))

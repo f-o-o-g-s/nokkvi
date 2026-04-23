@@ -45,6 +45,7 @@ impl Nokkvi {
             track_info_display: crate::theme::track_info_display().as_label(),
             slot_row_height: crate::theme::slot_row_height_variant().as_label(),
             opacity_gradient: crate::theme::is_opacity_gradient(),
+            slot_text_links: crate::theme::is_slot_text_links(),
             crossfade_enabled: self.engine.crossfade_enabled,
             crossfade_duration_secs: self.engine.crossfade_duration_secs,
             volume_normalization: self.engine.volume_normalization,
@@ -791,6 +792,15 @@ impl Nokkvi {
                 |_s, v| crate::theme::set_horizontal_volume(v),
                 |shell: AppService, v| async move {
                     shell.settings().set_horizontal_volume(v).await
+                },
+                true,
+            ),
+            "general.slot_text_links" => self.persist_bool_setting(
+                &value,
+                "persist_slot_text_links",
+                |_s, v| crate::theme::set_slot_text_links(v),
+                |shell: AppService, v| async move {
+                    shell.settings().set_slot_text_links(v).await
                 },
                 true,
             ),

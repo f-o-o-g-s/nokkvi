@@ -268,6 +268,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_slot_text_links(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.slot_text_links = enabled;
+        self.save()
+    }
+
     pub fn set_crossfade_enabled(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.crossfade_enabled = enabled;
         self.save()
@@ -511,6 +516,7 @@ impl SettingsManager {
             track_info_display: p.track_info_display,
             slot_row_height: p.slot_row_height,
             opacity_gradient: p.opacity_gradient,
+            slot_text_links: p.slot_text_links,
             crossfade_enabled: p.crossfade_enabled,
             crossfade_duration_secs: p.crossfade_duration_secs,
             default_playlist_id: p.default_playlist_id.clone(),
@@ -575,6 +581,7 @@ fn apply_toml_settings_to_internal(
     p.track_info_display = ts.track_info_display;
     p.slot_row_height = ts.slot_row_height;
     p.opacity_gradient = ts.opacity_gradient;
+    p.slot_text_links = ts.slot_text_links;
     p.horizontal_volume = ts.horizontal_volume;
     p.font_family = ts.font_family.clone();
     p.strip_show_title = ts.strip_show_title;

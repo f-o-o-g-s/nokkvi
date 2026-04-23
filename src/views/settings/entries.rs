@@ -82,6 +82,7 @@ impl SettingsPage {
                     track_info_display: data.track_info_display,
                     slot_row_height: data.slot_row_height,
                     horizontal_volume: data.horizontal_volume,
+                    slot_text_links: data.slot_text_links,
                     font_family: &data.font_family,
                     strip_show_title: data.strip_show_title,
                     strip_show_artist: data.strip_show_artist,

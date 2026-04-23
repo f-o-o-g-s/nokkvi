@@ -801,13 +801,18 @@ impl QueuePage {
                                 title: album.clone(),
                             },
                         );
+                        let links_enabled = crate::theme::is_slot_text_links();
                         let album_widget: Element<'_, QueueMessage> =
                             crate::widgets::link_text::LinkText::new(album)
                                 .size(subtitle_size)
                                 .color(style.subtext_color)
                                 .hover_color(style.hover_text_color)
                                 .font(crate::theme::ui_font())
-                                .on_press(Some(click_album))
+                                .on_press(if links_enabled {
+                                    Some(click_album)
+                                } else {
+                                    None
+                                })
                                 .into();
 
                         let content: Element<'_, QueueMessage> = if current_sort_mode
@@ -835,7 +840,11 @@ impl QueuePage {
                                 .color(style.subtext_color)
                                 .hover_color(style.hover_text_color)
                                 .font(crate::theme::ui_font())
-                                .on_press(Some(click_genre))
+                                .on_press(if links_enabled {
+                                    Some(click_genre)
+                                } else {
+                                    None
+                                })
                                 .into();
 
                             column![album_widget, genre_widget].spacing(2.0).into()

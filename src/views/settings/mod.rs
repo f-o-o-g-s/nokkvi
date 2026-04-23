@@ -276,6 +276,7 @@ pub(crate) struct SettingsViewData {
     pub library_page_size: &'static str,
     pub show_album_artists_only: bool,
     pub rounded_mode: bool,
+    pub slot_text_links: bool,
     pub nav_layout: &'static str,
     pub nav_display_mode: &'static str,
     pub track_info_display: &'static str,
