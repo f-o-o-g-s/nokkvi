@@ -285,7 +285,7 @@ impl Nokkvi {
                     Ok(()) => Message::SwitchView(View::Queue),
                     Err(e) => {
                         if e.downcast_ref::<NokkviError>()
-                            .map_or(false, |err| matches!(err, NokkviError::Unauthorized))
+                            .is_some_and(|err| matches!(err, NokkviError::Unauthorized))
                         {
                             return Message::SessionExpired;
                         }
@@ -342,7 +342,7 @@ impl Nokkvi {
                     }
                     Err(e) => {
                         if e.downcast_ref::<NokkviError>()
-                            .map_or(false, |err| matches!(err, NokkviError::Unauthorized))
+                            .is_some_and(|err| matches!(err, NokkviError::Unauthorized))
                         {
                             return Message::SessionExpired;
                         }
@@ -407,7 +407,7 @@ impl Nokkvi {
                     }
                     Err(e) => {
                         if e.downcast_ref::<NokkviError>()
-                            .map_or(false, |err| matches!(err, NokkviError::Unauthorized))
+                            .is_some_and(|err| matches!(err, NokkviError::Unauthorized))
                         {
                             return Message::SessionExpired;
                         }
@@ -476,7 +476,7 @@ impl Nokkvi {
             Ok(()) => success_msg,
             Err(e) => {
                 if e.downcast_ref::<NokkviError>()
-                    .map_or(false, |err| matches!(err, NokkviError::Unauthorized))
+                    .is_some_and(|err| matches!(err, NokkviError::Unauthorized))
                 {
                     return Message::SessionExpired;
                 }
@@ -516,7 +516,7 @@ impl Nokkvi {
             }
             Err(e) => {
                 if e.downcast_ref::<NokkviError>()
-                    .map_or(false, |err| matches!(err, NokkviError::Unauthorized))
+                    .is_some_and(|err| matches!(err, NokkviError::Unauthorized))
                 {
                     return Message::SessionExpired;
                 }
@@ -559,7 +559,7 @@ impl Nokkvi {
                 )),
                 Err(e) => {
                     if e.downcast_ref::<NokkviError>()
-                        .map_or(false, |err| matches!(err, NokkviError::Unauthorized))
+                        .is_some_and(|err| matches!(err, NokkviError::Unauthorized))
                     {
                         return Message::SessionExpired;
                     }
@@ -693,7 +693,7 @@ impl Nokkvi {
             move |result| {
                 if let Err(e) = result {
                     if e.downcast_ref::<NokkviError>()
-                        .map_or(false, |err| matches!(err, NokkviError::Unauthorized))
+                        .is_some_and(|err| matches!(err, NokkviError::Unauthorized))
                     {
                         return Message::SessionExpired;
                     }
@@ -773,7 +773,7 @@ impl Nokkvi {
                 Ok(()) => Message::NoOp,
                 Err(e) => {
                     if e.downcast_ref::<NokkviError>()
-                        .map_or(false, |err| matches!(err, NokkviError::Unauthorized))
+                        .is_some_and(|err| matches!(err, NokkviError::Unauthorized))
                     {
                         return Message::SessionExpired;
                     }
@@ -845,7 +845,7 @@ impl Nokkvi {
             }
             Err(e) => {
                 if e.downcast_ref::<NokkviError>()
-                    .map_or(false, |err| matches!(err, NokkviError::Unauthorized))
+                    .is_some_and(|err| matches!(err, NokkviError::Unauthorized))
                 {
                     return Message::SessionExpired;
                 }

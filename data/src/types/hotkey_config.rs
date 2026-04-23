@@ -1213,11 +1213,10 @@ mod tests {
             let displayed = original.display();
             let parsed: KeyCombo = displayed
                 .parse()
-                .unwrap_or_else(|e| panic!("Failed to parse '{}': {}", displayed, e));
+                .unwrap_or_else(|e| panic!("Failed to parse '{displayed}': {e}"));
             assert_eq!(
                 original, parsed,
-                "Roundtrip failed: display='{}', original={:?}, parsed={:?}",
-                displayed, original, parsed
+                "Roundtrip failed: display='{displayed}', original={original:?}, parsed={parsed:?}"
             );
         }
     }

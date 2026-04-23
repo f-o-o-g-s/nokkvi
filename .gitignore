@@ -1,6 +1,5 @@
 # Build artifacts
 /target
-Cargo.lock
 /dist
 
 # Sensitive configuration and authentication
