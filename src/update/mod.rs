@@ -946,6 +946,29 @@ impl Nokkvi {
             Message::Toast(msg) => self.handle_toast(msg),
 
             // -----------------------------------------------------------------
+            // Task Manager Notifications
+            // -----------------------------------------------------------------
+            Message::TaskStatusChanged(handle, status) => {
+                use nokkvi_data::services::task_manager::TaskStatus;
+                match status {
+                    TaskStatus::Running => {
+                        // Optional: update active progress list or show a toast
+                        tracing::debug!(" [TASK] {} is running", handle.name);
+                    }
+                    TaskStatus::Completed => {
+                        tracing::debug!(" [TASK] {} completed", handle.name);
+                    }
+                    TaskStatus::Failed(e) => {
+                        self.toast_error(format!("Task failed: {} - {}", handle.name, e));
+                    }
+                    TaskStatus::Cancelled => {
+                        tracing::debug!(" [TASK] {} cancelled", handle.name);
+                    }
+                }
+                Task::none()
+            }
+
+            // -----------------------------------------------------------------
             // Text Input Dialog
             // -----------------------------------------------------------------
             Message::TextInputDialog(msg) => self.handle_text_input_dialog(msg),

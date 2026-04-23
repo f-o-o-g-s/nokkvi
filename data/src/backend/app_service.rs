@@ -181,6 +181,16 @@ impl AppService {
         self.queue_changed_rx.try_lock().ok()?.take()
     }
 
+    /// Take the task status receiver (once, synchronously).
+    ///
+    /// Returns the `UnboundedReceiver<(TaskHandle, TaskStatus)>` for background task updates.
+    /// The UI layer calls this once at login time to build an iced subscription.
+    pub fn take_task_status_receiver(
+        &self,
+    ) -> Option<crate::services::task_manager::TaskStatusReceiver> {
+        self.task_manager.take_status_receiver()
+    }
+
     // =========================================================================
     // Playback Delegation
     //

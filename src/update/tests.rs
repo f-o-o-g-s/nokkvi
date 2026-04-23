@@ -2407,3 +2407,47 @@ fn test_albums_loaded_unauthorized_triggers_logout() {
         "Should redirect to login on unauthorized error string"
     );
 }
+
+// ============================================================================
+// Task Manager Notifications (mod.rs)
+// ============================================================================
+
+#[test]
+fn task_status_changed_failed_pushes_toast() {
+    let mut app = test_app();
+    let handle = nokkvi_data::services::task_manager::TaskHandle {
+        id: 1,
+        name: "TestTask".to_string(),
+    };
+    let status =
+        nokkvi_data::services::task_manager::TaskStatus::Failed("simulated error".to_string());
+
+    let _ = app.update(crate::app_message::Message::TaskStatusChanged(
+        handle, status,
+    ));
+
+    // Toast list should now contain an error message
+    assert_eq!(app.toast.toasts.len(), 1);
+    let toast = &app.toast.toasts[0];
+    assert!(toast.message.contains("Task failed"));
+    assert!(toast.message.contains("TestTask"));
+    assert!(toast.message.contains("simulated error"));
+    assert_eq!(toast.level, nokkvi_data::types::toast::ToastLevel::Error);
+}
+
+#[test]
+fn task_status_changed_success_no_toast() {
+    let mut app = test_app();
+    let handle = nokkvi_data::services::task_manager::TaskHandle {
+        id: 1,
+        name: "TestTask".to_string(),
+    };
+    let status = nokkvi_data::services::task_manager::TaskStatus::Completed;
+
+    let _ = app.update(crate::app_message::Message::TaskStatusChanged(
+        handle, status,
+    ));
+
+    // Currently, successful tasks just log to debug, no toast
+    assert!(app.toast.toasts.is_empty());
+}

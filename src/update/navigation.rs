@@ -276,6 +276,9 @@ impl Nokkvi {
                 if let Some(rx) = shell.take_queue_changed_receiver() {
                     services::queue_changed_subscription::register_receiver(rx);
                 }
+                if let Some(rx) = shell.take_task_status_receiver() {
+                    services::task_subscription::register_receiver(rx);
+                }
 
                 // Register Navidrome SSE connection for library auto-refresh
                 services::navidrome_sse::register(services::navidrome_sse::SseConnectionInfo {

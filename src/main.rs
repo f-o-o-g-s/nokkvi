@@ -478,6 +478,9 @@ impl Nokkvi {
                 services::navidrome_sse::SseEvent::LibraryChanged => Message::LibraryChanged,
             });
 
+        let task_status_sub = iced::Subscription::run(services::task_subscription::run)
+            .map(|(handle, status)| Message::TaskStatusChanged(handle, status));
+
         iced::Subscription::batch(vec![
             tick,
             keyboard,
@@ -488,6 +491,7 @@ impl Nokkvi {
             loop_sub,
             queue_changed_sub,
             sse_sub,
+            task_status_sub,
         ])
     }
 }

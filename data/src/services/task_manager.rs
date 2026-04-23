@@ -41,14 +41,31 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
+/// Status of a background task
+#[derive(Debug, Clone, PartialEq)]
+pub enum TaskStatus {
+    Running,
+    Completed,
+    Failed(String),
+    Cancelled,
+}
+
+/// Progress update for a background task
+#[derive(Debug, Clone)]
+pub struct TaskProgress {
+    pub current: u64,
+    pub total: u64,
+    pub message: String,
+}
+
 /// A handle to a spawned task
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct TaskHandle {
     pub id: u64,
     pub name: String,
-    // TODO(R7.5): Add JoinHandle for awaiting completion
-    // TODO(R7.5): Add status channel for UI updates
 }
+
+pub type TaskStatusReceiver = tokio::sync::mpsc::UnboundedReceiver<(TaskHandle, TaskStatus)>;
 
 /// Lightweight task manager with shutdown support
 pub struct TaskManager {
@@ -56,15 +73,25 @@ pub struct TaskManager {
     cancellation_token: CancellationToken,
     // Track active tasks for debugging
     active_tasks: Arc<Mutex<Vec<TaskHandle>>>,
+    status_tx: tokio::sync::mpsc::UnboundedSender<(TaskHandle, TaskStatus)>,
+    status_rx: Arc<Mutex<Option<TaskStatusReceiver>>>,
 }
 
 impl TaskManager {
     pub fn new() -> Self {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         Self {
             next_id: AtomicU64::new(1),
             cancellation_token: CancellationToken::new(),
             active_tasks: Arc::new(Mutex::new(Vec::new())),
+            status_tx: tx,
+            status_rx: Arc::new(Mutex::new(Some(rx))),
         }
+    }
+
+    /// Take the status receiver (once) for UI integration
+    pub fn take_status_receiver(&self) -> Option<TaskStatusReceiver> {
+        self.status_rx.try_lock().ok()?.take()
     }
 
     /// Get the cancellation token for checking shutdown status
@@ -95,6 +122,7 @@ impl TaskManager {
 
         let active_tasks = self.active_tasks.clone();
         let handle_clone = handle.clone();
+        let status_tx = self.status_tx.clone();
 
         tokio::spawn(async move {
             // Register task
@@ -103,8 +131,12 @@ impl TaskManager {
                 tasks.push(handle_clone.clone());
             }
 
+            let _ = status_tx.send((handle_clone.clone(), TaskStatus::Running));
+
             // Run task
             future().await;
+
+            let _ = status_tx.send((handle_clone.clone(), TaskStatus::Completed));
 
             // Unregister task
             {
@@ -135,6 +167,7 @@ impl TaskManager {
 
         let active_tasks = self.active_tasks.clone();
         let handle_clone = handle.clone();
+        let status_tx = self.status_tx.clone();
 
         tokio::spawn(async move {
             // Register task
@@ -143,15 +176,18 @@ impl TaskManager {
                 tasks.push(handle_clone.clone());
             }
 
+            let _ = status_tx.send((handle_clone.clone(), TaskStatus::Running));
+
             // Run task and log errors
             match future().await {
                 Ok(_) => {
                     // Success - no logging needed for routine tasks
-                    // TODO(R7.5): Send success status to UI channel
+                    let _ = status_tx.send((handle_clone.clone(), TaskStatus::Completed));
                 }
                 Err(e) => {
                     error!(" [TASK] {} failed: {}", task_name, e);
-                    // TODO(R7.5): Send error status to UI channel
+                    let _ =
+                        status_tx.send((handle_clone.clone(), TaskStatus::Failed(e.to_string())));
                 }
             }
 
@@ -186,6 +222,7 @@ impl TaskManager {
         let token = self.cancellation_token.clone();
         let active_tasks = self.active_tasks.clone();
         let handle_clone = handle.clone();
+        let status_tx = self.status_tx.clone();
 
         tokio::spawn(async move {
             // Register task
@@ -195,11 +232,18 @@ impl TaskManager {
             }
 
             debug!(" [TASK] Started: {}", task_name);
+            let _ = status_tx.send((handle_clone.clone(), TaskStatus::Running));
 
             // Run task with cancellation token
-            future(token).await;
+            future(token.clone()).await;
 
-            info!(" [TASK] Completed: {}", task_name);
+            if token.is_cancelled() {
+                info!(" [TASK] Cancelled: {}", task_name);
+                let _ = status_tx.send((handle_clone.clone(), TaskStatus::Cancelled));
+            } else {
+                info!(" [TASK] Completed: {}", task_name);
+                let _ = status_tx.send((handle_clone.clone(), TaskStatus::Completed));
+            }
 
             // Unregister task
             {
@@ -232,30 +276,3 @@ impl Default for TaskManager {
         Self::new()
     }
 }
-
-// TODO(R7.5): Future UI notification enhancements
-//
-// pub enum TaskStatus {
-//     Running,
-//     Completed,
-//     Failed(String),
-//     Cancelled,
-// }
-//
-// pub struct TaskProgress {
-//     pub current: u64,
-//     pub total: u64,
-//     pub message: String,
-// }
-//
-// impl TaskManager {
-//     /// Subscribe to task status updates for UI display
-//     pub fn subscribe_status(&self) -> mpsc::Receiver<(TaskHandle, TaskStatus)> {
-//         // Returns a channel that receives status updates
-//     }
-//
-//     /// Subscribe to task progress updates for progress bars
-//     pub fn subscribe_progress(&self) -> mpsc::Receiver<(TaskHandle, TaskProgress)> {
-//         // Returns a channel that receives progress updates
-//     }
-// }

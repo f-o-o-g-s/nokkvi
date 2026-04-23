@@ -401,6 +401,12 @@ pub enum Message {
     // --- Toast Notifications ---
     Toast(ToastMessage),
 
+    // --- Task Manager Notifications ---
+    TaskStatusChanged(
+        nokkvi_data::services::task_manager::TaskHandle,
+        nokkvi_data::services::task_manager::TaskStatus,
+    ),
+
     // --- Text Input Dialog ---
     TextInputDialog(crate::widgets::text_input_dialog::TextInputDialogMessage),
 
