@@ -30,11 +30,6 @@ if command -v pipewire >/dev/null 2>&1; then
     update_version "PipeWire" "$VER" "pipewire"
 fi
 
-if command -v Hyprland >/dev/null 2>&1; then
-    VER=$(Hyprland --version 2>/dev/null | head -n 1 | awk '{print $2}')
-    update_version "Hyprland" "$VER" "hyprland"
-fi
-
 if [ $CHANGED_README -eq 1 ]; then
     git add README.md
 fi

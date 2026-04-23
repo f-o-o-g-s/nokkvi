@@ -746,7 +746,6 @@ impl ArtistsPage {
                 .with_modifiers(data.modifiers);
         let artists = data.artists; // Borrow slice to extend lifetime
         let artist_art = data.artist_art;
-        let current_sort_mode = self.common.current_sort_mode;
 
         // Build flattened list (artists + injected albums + injected tracks when expanded)
         let flattened = super::expansion::build_three_tier_list(
@@ -774,7 +773,6 @@ impl ArtistsPage {
                     artist,
                     &ctx,
                     artist_art,
-                    current_sort_mode,
                     data.stable_viewport,
                 ),
                 ThreeTierEntry::Child(album, _parent_artist_id) => {
@@ -970,7 +968,6 @@ impl ArtistsPage {
         artist: &ArtistUIViewData,
         ctx: &crate::widgets::slot_list::SlotListRowContext,
         artist_art: &'a HashMap<String, image::Handle>,
-        current_sort_mode: widgets::view_header::SortMode,
         stable_viewport: bool,
     ) -> Element<'a, ArtistsMessage> {
         use crate::widgets::slot_list::{
@@ -1019,57 +1016,39 @@ impl ArtistsPage {
             },
             // 2. Artist Name (50%) - with optional rating row
             {
-                use iced::widget::column;
-                let content: Element<'_, ArtistsMessage> =
-                    if current_sort_mode == crate::widgets::view_header::SortMode::Rating {
-                        use crate::widgets::slot_list::slot_list_star_rating;
-                        let star_icon_size = m.metadata_size;
-                        let idx = ctx.item_index;
+                use iced::widget::{column, container};
+                use crate::widgets::slot_list::slot_list_star_rating;
+                let title_click = Some(ArtistsMessage::ContextMenuAction(
+                    ctx.item_index,
+                    crate::widgets::context_menu::LibraryContextEntry::GetInfo,
+                ));
+                let link_color = if ctx.is_center {
+                    style.text_color
+                } else {
+                    crate::theme::accent_bright()
+                };
 
-                        let title_click = Some(ArtistsMessage::ContextMenuAction(
-                            ctx.item_index,
-                            crate::widgets::context_menu::LibraryContextEntry::GetInfo,
-                        ));
-                        let link_color = if ctx.is_center {
-                            style.text_color
-                        } else {
-                            crate::theme::accent_bright()
-                        };
+                let star_icon_size = m.metadata_size;
+                let idx = ctx.item_index;
 
-                        column![
-                            crate::widgets::link_text::LinkText::new(artist_name)
-                                .size(title_size)
-                                .color(style.text_color)
-                                .hover_color(link_color)
-                                .on_press(title_click),
-                            slot_list_star_rating(
-                                rating,
-                                star_icon_size,
-                                ctx.is_center,
-                                ctx.opacity,
-                                None,
-                                Some(move |star: usize| ArtistsMessage::ClickSetRating(idx, star)),
-                            ),
-                        ]
-                        .spacing(2.0)
-                        .into()
-                    } else {
-                        let title_click = Some(ArtistsMessage::ContextMenuAction(
-                            ctx.item_index,
-                            crate::widgets::context_menu::LibraryContextEntry::GetInfo,
-                        ));
-                        let link_color = if ctx.is_center {
-                            style.text_color
-                        } else {
-                            crate::theme::accent_bright()
-                        };
-                        crate::widgets::link_text::LinkText::new(artist_name)
-                            .size(title_size)
-                            .color(style.text_color)
-                            .hover_color(link_color)
-                            .on_press(title_click)
-                            .into()
-                    };
+                let content: Element<'_, ArtistsMessage> = column![
+                    crate::widgets::link_text::LinkText::new(artist_name)
+                        .size(title_size)
+                        .color(style.text_color)
+                        .hover_color(link_color)
+                        .on_press(title_click),
+                    slot_list_star_rating(
+                        rating,
+                        star_icon_size,
+                        ctx.is_center,
+                        ctx.opacity,
+                        None,
+                        Some(move |star: usize| ArtistsMessage::ClickSetRating(idx, star)),
+                    ),
+                ]
+                .spacing(2.0)
+                .into();
+
                 container(content)
                     .width(Length::FillPortion(50))
                     .height(Length::Fill)
