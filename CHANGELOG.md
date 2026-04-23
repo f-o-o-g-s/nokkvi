@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## v0.2.17 — 2026-04-23
+
+### Features
+- **Graceful Session Expiration** — integrated handling for 401 Unauthorized errors from Navidrome; the app now automatically stops playback, clears sensitive session data, and redirects to the login screen with a toast notification when a JWT expires.
+
 ## v0.2.16 — 2026-04-23
 
 ### Features
