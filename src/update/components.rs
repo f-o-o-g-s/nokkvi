@@ -21,8 +21,7 @@
 use std::collections::HashSet;
 
 use iced::{Task, widget::image};
-use nokkvi_data::backend::albums::AlbumsService;
-use nokkvi_data::types::error::NokkviError;
+use nokkvi_data::{backend::albums::AlbumsService, types::error::NokkviError};
 use tracing::{debug, error, info};
 
 use crate::{
