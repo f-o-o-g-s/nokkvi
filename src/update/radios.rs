@@ -25,7 +25,7 @@ impl Nokkvi {
                         let total_count = stations.len();
                         (Ok(stations), total_count)
                     }
-                    Err(e) => (Err(e.to_string()), 0),
+                    Err(e) => (Err(format!("{e:#}")), 0),
                 }
             },
             |(result, _total_count)| {
@@ -46,6 +46,9 @@ impl Nokkvi {
                 self.sort_radio_stations();
             }
             Err(e) => {
+                if e.contains("Unauthorized") {
+                    return self.handle_session_expired();
+                }
                 error!("Error loading radio stations: {}", e);
                 self.toast_error(format!("Failed to load radio stations: {e}"));
             }

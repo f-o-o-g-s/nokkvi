@@ -287,6 +287,9 @@ pub enum Message {
     ResumeSession,
     /// Response from pinging the server to fetch its native application version
     ServerVersionFetched(Option<String>),
+    /// Session was terminated (e.g. 401 Unauthorized) — logout and notify
+    SessionExpired,
+
 
     // --- Data Loading ---
     /// SSE: Navidrome library scan completed with changes

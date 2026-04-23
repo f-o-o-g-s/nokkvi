@@ -250,6 +250,9 @@ impl Nokkvi {
                 }
             }
             Err(e) => {
+                if e.contains("Unauthorized") {
+                    return self.handle_session_expired();
+                }
                 warn!("🎵 Failed to load similar songs: {}", e);
                 self.toast_error(format!("Failed to load similar songs: {e}"));
                 self.similar_songs = Some(SimilarSongsState {

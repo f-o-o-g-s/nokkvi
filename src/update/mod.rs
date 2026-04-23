@@ -22,6 +22,10 @@ macro_rules! impl_page_loaded_handler {
                 );
             }
             Err(e) => {
+                if e.contains("Unauthorized") {
+                    $self.library.$field.set_loading(false);
+                    return $self.handle_session_expired();
+                }
                 tracing::error!("Error loading {} page: {}", $label, e);
                 $self.library.$field.set_loading(false);
                 $self.toast_error(format!("Failed to load {}: {}", $label, e));
@@ -94,6 +98,7 @@ use crate::{
     Nokkvi, View,
     app_message::{HotkeyMessage, Message, PlaybackMessage, ScrobbleMessage},
 };
+
 
 /// Fetch album IDs for a genre from the API.
 /// Used as the `fetch_album_ids_fn` closure for genre collage artwork loading.
@@ -200,11 +205,12 @@ impl Nokkvi {
                 }
             }
             Message::Login(msg) => self.handle_login(msg),
-            Message::LoginResult(result) => self.handle_login_result(result),
+            Message::LoginResult(res) => self.handle_login_result(res),
             Message::ResumeSession => self.handle_resume_session(),
-            Message::ServerVersionFetched(version) => {
-                if version.is_some() {
-                    self.server_version = version;
+            Message::SessionExpired => self.handle_session_expired(),
+            Message::ServerVersionFetched(ver) => {
+                if ver.is_some() {
+                    self.server_version = ver;
                 }
                 Task::none()
             }

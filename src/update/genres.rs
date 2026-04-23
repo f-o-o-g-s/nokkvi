@@ -46,7 +46,7 @@ impl Nokkvi {
                             genres.into_iter().map(GenreUIViewData::from).collect();
                         (Ok(ui_genres), total_count as usize)
                     }
-                    Err(e) => (Err(e.to_string()), 0),
+                    Err(e) => (Err(format!("{e:#}")), 0),
                 }
             },
             |(result, total_count)| {
@@ -104,6 +104,10 @@ impl Nokkvi {
                 }
             }
             Err(e) => {
+                if e.contains("Unauthorized") {
+                    self.library.genres.set_loading(false);
+                    return self.handle_session_expired();
+                }
                 error!("Error loading genres: {}", e);
                 self.library.genres.set_loading(false);
                 self.toast_error(format!("Failed to load genres: {e}"));

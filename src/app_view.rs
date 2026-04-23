@@ -52,10 +52,12 @@ impl Nokkvi {
 
     /// Root view dispatcher
     pub fn view(&self) -> Element<'_, Message> {
-        match self.screen {
+        let screen_view = match self.screen {
             Screen::Login => self.login_view(),
             Screen::Home => self.home_view(),
-        }
+        };
+
+        self.wrap_with_global_overlays(screen_view)
     }
 
     // -------------------------------------------------------------------------
@@ -284,6 +286,13 @@ impl Nokkvi {
             stack = stack.push(visualizer_overlay);
         }
 
+        stack.into()
+    }
+
+    /// Wrap a base view with global overlays (modals, toasts, dialogs)
+    fn wrap_with_global_overlays<'a>(&'a self, base: Element<'a, Message>) -> Element<'a, Message> {
+        let mut stack = Stack::new().push(base);
+
         // Add text input dialog overlay (if visible)
         if let Some(dialog_overlay) =
             crate::widgets::text_input_dialog::text_input_dialog_overlay(&self.text_input_dialog)
@@ -348,8 +357,15 @@ impl Nokkvi {
                 .width(Length::Fill)
                 .align_x(h_align);
 
-            // Status bar at bottom of content area, above the player bar:
-            // Push to bottom with spacer, leave room for player bar (~56px)
+            // Status bar at bottom of content area.
+            // On Home screen, leave room for player bar (~56px).
+            // On Login screen, player bar is not visible.
+            let bottom_padding = if self.screen == Screen::Home {
+                widgets::player_bar::player_bar_height()
+            } else {
+                12.0 // Just a bit of margin from bottom
+            };
+
             let toast_bar = container(
                 container(toast_text)
                     .padding([4, 12])
@@ -370,9 +386,9 @@ impl Nokkvi {
             .padding(iced::Padding {
                 top: 0.0,
                 right: 0.0,
-                bottom: widgets::player_bar::player_bar_height(),
+                bottom: bottom_padding,
                 left: 0.0,
-            }); // Offset above player bar
+            });
 
             stack = stack.push(toast_bar);
         }

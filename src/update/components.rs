@@ -23,6 +23,8 @@ use std::collections::HashSet;
 use iced::{Task, widget::image};
 use nokkvi_data::backend::albums::AlbumsService;
 use tracing::{debug, error, info};
+use nokkvi_data::types::error::NokkviError;
+
 
 use crate::{
     Nokkvi, View,
@@ -284,6 +286,9 @@ impl Nokkvi {
                 move |result| match result {
                     Ok(()) => Message::SwitchView(View::Queue),
                     Err(e) => {
+                        if e.downcast_ref::<NokkviError>().map_or(false, |err| matches!(err, NokkviError::Unauthorized)) {
+                            return Message::SessionExpired;
+                        }
                         error!(" Failed to play {}: {}", entity_name, e);
                         Message::Toast(crate::app_message::ToastMessage::Push(
                             nokkvi_data::types::toast::Toast::new(
@@ -336,6 +341,9 @@ impl Nokkvi {
                         ))
                     }
                     Err(e) => {
+                        if e.downcast_ref::<NokkviError>().map_or(false, |err| matches!(err, NokkviError::Unauthorized)) {
+                            return Message::SessionExpired;
+                        }
                         error!(" Failed to add {} to queue: {}", entity_name, e);
                         Message::Toast(crate::app_message::ToastMessage::Push(
                             nokkvi_data::types::toast::Toast::new(
@@ -396,6 +404,9 @@ impl Nokkvi {
                         ))
                     }
                     Err(e) => {
+                        if e.downcast_ref::<NokkviError>().map_or(false, |err| matches!(err, NokkviError::Unauthorized)) {
+                            return Message::SessionExpired;
+                        }
                         error!(" Failed to insert {} to queue: {}", entity_name, e);
                         Message::Toast(crate::app_message::ToastMessage::Push(
                             nokkvi_data::types::toast::Toast::new(
@@ -460,6 +471,9 @@ impl Nokkvi {
         self.shell_task(action_fn, move |result| match result {
             Ok(()) => success_msg,
             Err(e) => {
+                if e.downcast_ref::<NokkviError>().map_or(false, |err| matches!(err, NokkviError::Unauthorized)) {
+                    return Message::SessionExpired;
+                }
                 error!(" Failed to {}: {}", error_ctx, e);
                 Message::Toast(crate::app_message::ToastMessage::Push(
                     nokkvi_data::types::toast::Toast::new(
@@ -495,6 +509,9 @@ impl Nokkvi {
                 ))
             }
             Err(e) => {
+                if e.downcast_ref::<NokkviError>().map_or(false, |err| matches!(err, NokkviError::Unauthorized)) {
+                    return Message::SessionExpired;
+                }
                 error!(" Failed to {}: {}", error_ctx, e);
                 Message::Toast(crate::app_message::ToastMessage::Push(
                     nokkvi_data::types::toast::Toast::new(
@@ -533,6 +550,9 @@ impl Nokkvi {
                     Box::new(Message::LoadRadioStations),
                 )),
                 Err(e) => {
+                    if e.downcast_ref::<NokkviError>().map_or(false, |err| matches!(err, NokkviError::Unauthorized)) {
+                        return Message::SessionExpired;
+                    }
                     tracing::error!(" Failed to {}: {e}", error_ctx);
                     Message::Toast(crate::app_message::ToastMessage::Push(
                         nokkvi_data::types::toast::Toast::new(
@@ -662,6 +682,9 @@ impl Nokkvi {
             },
             move |result| {
                 if let Err(e) = result {
+                    if e.downcast_ref::<NokkviError>().map_or(false, |err| matches!(err, NokkviError::Unauthorized)) {
+                        return Message::SessionExpired;
+                    }
                     error!(" Failed to {} {}: {}", action, item_type, e);
                     // Revert optimistic update by emitting the original starred state
                     return Self::starred_revert_message(revert_id, item_type, !star);
@@ -737,6 +760,9 @@ impl Nokkvi {
             move |result| match result {
                 Ok(()) => Message::NoOp,
                 Err(e) => {
+                    if e.downcast_ref::<NokkviError>().map_or(false, |err| matches!(err, NokkviError::Unauthorized)) {
+                        return Message::SessionExpired;
+                    }
                     error!(" Failed to set rating: {}", e);
                     Self::rating_revert_message(revert_id, &revert_type, current_rating)
                 }
@@ -804,6 +830,9 @@ impl Nokkvi {
                 Message::PlaylistsFetchedForAddToPlaylist(playlists, song_ids)
             }
             Err(e) => {
+                if e.downcast_ref::<NokkviError>().map_or(false, |err| matches!(err, NokkviError::Unauthorized)) {
+                    return Message::SessionExpired;
+                }
                 tracing::error!("Failed to {error_ctx}: {e}");
                 Message::Toast(crate::app_message::ToastMessage::Push(
                     nokkvi_data::types::toast::Toast::new(

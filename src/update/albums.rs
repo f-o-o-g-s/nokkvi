@@ -63,7 +63,7 @@ impl Nokkvi {
                         let total_count = albums_vm.get_total_count() as usize;
                         (Ok(ui_albums), total_count)
                     }
-                    Err(e) => (Err(e.to_string()), 0),
+                    Err(e) => (Err(format!("{e:#}")), 0),
                 }
             },
             move |(result, total_count)| {
@@ -125,7 +125,7 @@ impl Nokkvi {
                         let total_count = albums_vm.get_total_count() as usize;
                         (Ok(ui_albums), total_count)
                     }
-                    Err(e) => (Err(e.to_string()), 0),
+                    Err(e) => (Err(format!("{e:#}")), 0),
                 }
             },
             |(result, total_count)| {
@@ -227,6 +227,10 @@ impl Nokkvi {
                 return Task::batch(tasks);
             }
             Err(e) => {
+                if e.contains("Unauthorized") {
+                    self.library.albums.set_loading(false);
+                    return self.handle_session_expired();
+                }
                 error!("Error loading albums: {}", e);
                 self.library.albums.set_loading(false);
                 self.toast_error(format!("Failed to load albums: {e}"));

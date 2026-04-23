@@ -90,6 +90,9 @@ impl Nokkvi {
                 }
             }
             Err(e) => {
+                if e.contains("Unauthorized") {
+                    return self.handle_session_expired();
+                }
                 error!("Error loading queue: {}", e);
                 self.toast_error("Failed to load queue");
             }

@@ -49,7 +49,7 @@ impl Nokkvi {
                             .collect();
                         (Ok(ui_playlists), total_count as usize)
                     }
-                    Err(e) => (Err(e.to_string()), 0),
+                    Err(e) => (Err(format!("{e:#}")), 0),
                 }
             },
             |(result, total_count)| {
@@ -104,6 +104,10 @@ impl Nokkvi {
                 }
             }
             Err(e) => {
+                if e.contains("Unauthorized") {
+                    self.library.playlists.set_loading(false);
+                    return self.handle_session_expired();
+                }
                 error!("Error loading playlists: {}", e);
                 self.library.playlists.set_loading(false);
                 self.toast_error(format!("Failed to load playlists: {e}"));
