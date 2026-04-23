@@ -769,12 +769,9 @@ impl ArtistsPage {
                 move |f| ArtistsMessage::SlotListScrollSeek((f * total as f32) as usize)
             },
             |entry, ctx| match entry {
-                ThreeTierEntry::Parent(artist) => self.render_artist_row(
-                    artist,
-                    &ctx,
-                    artist_art,
-                    data.stable_viewport,
-                ),
+                ThreeTierEntry::Parent(artist) => {
+                    self.render_artist_row(artist, &ctx, artist_art, data.stable_viewport)
+                }
                 ThreeTierEntry::Child(album, _parent_artist_id) => {
                     self.render_album_child_row(album, &ctx, data.stable_viewport)
                 }
@@ -1017,6 +1014,7 @@ impl ArtistsPage {
             // 2. Artist Name (50%) - with optional rating row
             {
                 use iced::widget::{column, container};
+
                 use crate::widgets::slot_list::slot_list_star_rating;
                 let title_click = Some(ArtistsMessage::ContextMenuAction(
                     ctx.item_index,

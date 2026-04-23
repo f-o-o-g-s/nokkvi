@@ -52,6 +52,7 @@ Nokkvi draws heavy inspiration from several excellent projects:
 - Right-click context menus everywhere, including "Show in File Manager"
 - MPRIS D-Bus integration for desktop media controls
 - In-app settings editor with drill-down navigation and inline search
+- **Slot Text Links Toggle** — disable navigation links on metadata text to prevent accidental clicks
 
 ### Non-Goals
 Nokkvi is designed to be a fast, highly-themed, keyboard-driven music player—not a full administrative dashboard or a 1:1 replica of the Navidrome web UI. The following Navidrome features are intentionally **not** implemented at this time (though some may be considered for future releases):

@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## v0.2.16 — 2026-04-23
+
+### Features
+- **Slot Text Links Toggle** — added a user-configurable setting (Interface tab) to enable or disable clickable text links (Artist, Album, Genre) in library and queue views, preventing accidental navigation.
+- **Auditory Feedback** — implemented a "Play Sound on Finish" toggle for optional audio cues at the end of tracks.
+
+### Fixes
+- **Queue Link Gating** — ensured album and genre links in the queue view correctly respect the "Slot Text Links" configuration.
+
+### Internal
+- **Settings Persistence** — wired the slot text links toggle through the `SettingsService` for reliable state management.
+
 ## v0.2.15 — 2026-04-12
 
 ### Features
