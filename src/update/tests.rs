@@ -4,7 +4,6 @@
 
 use crate::{View, app_message::PlaybackStateUpdate, test_helpers::*};
 
-
 // ============================================================================
 // Mode Flag Handlers (playback.rs)
 // ============================================================================
@@ -2377,14 +2376,19 @@ fn test_session_expired_redirects_to_login() {
     let mut app = test_app();
     app.screen = crate::Screen::Home;
     app.current_view = View::Albums;
-    app.library.albums.set_from_vec(vec![make_album("a1", "A", "A")]);
+    app.library
+        .albums
+        .set_from_vec(vec![make_album("a1", "A", "A")]);
 
     let _ = app.handle_session_expired();
 
     assert_eq!(app.screen, crate::Screen::Login);
     assert!(app.app_service.is_none());
     assert!(app.stored_session.is_none());
-    assert!(app.library.albums.is_empty(), "Library should be reset on session expiry");
+    assert!(
+        app.library.albums.is_empty(),
+        "Library should be reset on session expiry"
+    );
 }
 
 #[test]
@@ -2392,10 +2396,14 @@ fn test_albums_loaded_unauthorized_triggers_logout() {
     let mut app = test_app();
     app.screen = crate::Screen::Home;
     app.current_view = View::Albums;
-    
+
     // Simulate a wrapped anyhow error that was stringified with {:#}
     let err_string = "Failed to fetch albums: Unauthorized: Session expired".to_string();
     let _ = app.handle_albums_loaded(Err(err_string), 0, false, None);
 
-    assert_eq!(app.screen, crate::Screen::Login, "Should redirect to login on unauthorized error string");
+    assert_eq!(
+        app.screen,
+        crate::Screen::Login,
+        "Should redirect to login on unauthorized error string"
+    );
 }

@@ -290,7 +290,6 @@ pub enum Message {
     /// Session was terminated (e.g. 401 Unauthorized) — logout and notify
     SessionExpired,
 
-
     // --- Data Loading ---
     /// SSE: Navidrome library scan completed with changes
     LibraryChanged,

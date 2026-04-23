@@ -8,7 +8,6 @@ use url::Url;
 
 use crate::types::error::NokkviError;
 
-
 /// Callback invoked when a refreshed JWT is received from the server.
 /// Called with the new token string so callers can persist it to redb.
 pub type TokenRefreshCallback = Arc<dyn Fn(&str) + Send + Sync>;

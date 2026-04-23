@@ -99,7 +99,6 @@ use crate::{
     app_message::{HotkeyMessage, Message, PlaybackMessage, ScrobbleMessage},
 };
 
-
 /// Fetch album IDs for a genre from the API.
 /// Used as the `fetch_album_ids_fn` closure for genre collage artwork loading.
 async fn load_genre_album_ids(

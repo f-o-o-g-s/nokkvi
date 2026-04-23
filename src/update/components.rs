@@ -22,9 +22,8 @@ use std::collections::HashSet;
 
 use iced::{Task, widget::image};
 use nokkvi_data::backend::albums::AlbumsService;
-use tracing::{debug, error, info};
 use nokkvi_data::types::error::NokkviError;
-
+use tracing::{debug, error, info};
 
 use crate::{
     Nokkvi, View,
@@ -286,7 +285,9 @@ impl Nokkvi {
                 move |result| match result {
                     Ok(()) => Message::SwitchView(View::Queue),
                     Err(e) => {
-                        if e.downcast_ref::<NokkviError>().map_or(false, |err| matches!(err, NokkviError::Unauthorized)) {
+                        if e.downcast_ref::<NokkviError>()
+                            .map_or(false, |err| matches!(err, NokkviError::Unauthorized))
+                        {
                             return Message::SessionExpired;
                         }
                         error!(" Failed to play {}: {}", entity_name, e);
@@ -341,7 +342,9 @@ impl Nokkvi {
                         ))
                     }
                     Err(e) => {
-                        if e.downcast_ref::<NokkviError>().map_or(false, |err| matches!(err, NokkviError::Unauthorized)) {
+                        if e.downcast_ref::<NokkviError>()
+                            .map_or(false, |err| matches!(err, NokkviError::Unauthorized))
+                        {
                             return Message::SessionExpired;
                         }
                         error!(" Failed to add {} to queue: {}", entity_name, e);
@@ -404,7 +407,9 @@ impl Nokkvi {
                         ))
                     }
                     Err(e) => {
-                        if e.downcast_ref::<NokkviError>().map_or(false, |err| matches!(err, NokkviError::Unauthorized)) {
+                        if e.downcast_ref::<NokkviError>()
+                            .map_or(false, |err| matches!(err, NokkviError::Unauthorized))
+                        {
                             return Message::SessionExpired;
                         }
                         error!(" Failed to insert {} to queue: {}", entity_name, e);
@@ -471,7 +476,9 @@ impl Nokkvi {
         self.shell_task(action_fn, move |result| match result {
             Ok(()) => success_msg,
             Err(e) => {
-                if e.downcast_ref::<NokkviError>().map_or(false, |err| matches!(err, NokkviError::Unauthorized)) {
+                if e.downcast_ref::<NokkviError>()
+                    .map_or(false, |err| matches!(err, NokkviError::Unauthorized))
+                {
                     return Message::SessionExpired;
                 }
                 error!(" Failed to {}: {}", error_ctx, e);
@@ -509,7 +516,9 @@ impl Nokkvi {
                 ))
             }
             Err(e) => {
-                if e.downcast_ref::<NokkviError>().map_or(false, |err| matches!(err, NokkviError::Unauthorized)) {
+                if e.downcast_ref::<NokkviError>()
+                    .map_or(false, |err| matches!(err, NokkviError::Unauthorized))
+                {
                     return Message::SessionExpired;
                 }
                 error!(" Failed to {}: {}", error_ctx, e);
@@ -550,7 +559,9 @@ impl Nokkvi {
                     Box::new(Message::LoadRadioStations),
                 )),
                 Err(e) => {
-                    if e.downcast_ref::<NokkviError>().map_or(false, |err| matches!(err, NokkviError::Unauthorized)) {
+                    if e.downcast_ref::<NokkviError>()
+                        .map_or(false, |err| matches!(err, NokkviError::Unauthorized))
+                    {
                         return Message::SessionExpired;
                     }
                     tracing::error!(" Failed to {}: {e}", error_ctx);
@@ -682,7 +693,9 @@ impl Nokkvi {
             },
             move |result| {
                 if let Err(e) = result {
-                    if e.downcast_ref::<NokkviError>().map_or(false, |err| matches!(err, NokkviError::Unauthorized)) {
+                    if e.downcast_ref::<NokkviError>()
+                        .map_or(false, |err| matches!(err, NokkviError::Unauthorized))
+                    {
                         return Message::SessionExpired;
                     }
                     error!(" Failed to {} {}: {}", action, item_type, e);
@@ -760,7 +773,9 @@ impl Nokkvi {
             move |result| match result {
                 Ok(()) => Message::NoOp,
                 Err(e) => {
-                    if e.downcast_ref::<NokkviError>().map_or(false, |err| matches!(err, NokkviError::Unauthorized)) {
+                    if e.downcast_ref::<NokkviError>()
+                        .map_or(false, |err| matches!(err, NokkviError::Unauthorized))
+                    {
                         return Message::SessionExpired;
                     }
                     error!(" Failed to set rating: {}", e);
@@ -830,7 +845,9 @@ impl Nokkvi {
                 Message::PlaylistsFetchedForAddToPlaylist(playlists, song_ids)
             }
             Err(e) => {
-                if e.downcast_ref::<NokkviError>().map_or(false, |err| matches!(err, NokkviError::Unauthorized)) {
+                if e.downcast_ref::<NokkviError>()
+                    .map_or(false, |err| matches!(err, NokkviError::Unauthorized))
+                {
                     return Message::SessionExpired;
                 }
                 tracing::error!("Failed to {error_ctx}: {e}");
