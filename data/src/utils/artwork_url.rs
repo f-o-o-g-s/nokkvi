@@ -30,6 +30,24 @@ pub fn build_cache_key(art_id: &str, size: Option<u32>) -> String {
     }
 }
 
+/// Parse album ID and size from a getCoverArt URL to build a stable cache key.
+///
+/// This ensures that URLs with and without the `size` parameter map to the same
+/// cache key format as `build_cache_key`.
+pub fn parse_cache_key_from_url(artwork_url: &str) -> String {
+    let album_id = artwork_url
+        .split("id=")
+        .nth(1)
+        .and_then(|s| s.split('&').next())
+        .unwrap_or("unknown");
+    let requested_size: Option<u32> = artwork_url
+        .split("size=")
+        .nth(1)
+        .and_then(|s| s.split('&').next())
+        .and_then(|s| s.parse().ok());
+    build_cache_key(album_id, requested_size)
+}
+
 /// Build a Subsonic getCoverArt URL
 ///
 /// # Arguments
@@ -319,5 +337,18 @@ mod tests {
         // Also handle auto-prefixing if art_id misses known prefixes
         assert_eq!(build_cache_key("123", Some(80)), "al-123_80");
         assert_eq!(build_cache_key("xyz", None), "al-xyz_original");
+    }
+
+    #[test]
+    fn test_parse_cache_key_from_url() {
+        let url_with_size = "http://srv/rest/getCoverArt?id=al-123&u=x&p=y&size=80";
+        assert_eq!(parse_cache_key_from_url(url_with_size), "al-123_80");
+
+        let url_original = "http://srv/rest/getCoverArt?id=al-abc&u=x&p=y";
+        assert_eq!(parse_cache_key_from_url(url_original), "al-abc_original");
+
+        // Regresson test for #large-artwork-bug: ensure no size doesn't fallback to _0
+        let url_no_size = "http://srv/rest/getCoverArt?id=123";
+        assert_eq!(parse_cache_key_from_url(url_no_size), "al-123_original");
     }
 }

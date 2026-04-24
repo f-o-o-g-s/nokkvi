@@ -401,18 +401,17 @@ impl AlbumsService {
         }
 
         // Extract album ID and size from URL for stable cache key (URL contains changing auth tokens)
+        let cache_key = crate::utils::artwork_url::parse_cache_key_from_url(artwork_url);
+        let requested_size: Option<u32> = artwork_url
+            .split("size=")
+            .nth(1)
+            .and_then(|s| s.split('&').next())
+            .and_then(|s| s.parse().ok());
         let album_id = artwork_url
             .split("id=")
             .nth(1)
             .and_then(|s| s.split('&').next())
             .unwrap_or("unknown");
-        let requested_size: u32 = artwork_url
-            .split("size=")
-            .nth(1)
-            .and_then(|s| s.split('&').next())
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
-        let cache_key = format!("{album_id}_{requested_size}");
 
         // Check disk cache using stable album ID + size as key
         if let Some(dc) = self.disk_cache.as_ref() {
@@ -425,14 +424,15 @@ impl AlbumsService {
             }
 
             // 2. Try resizing from larger cached sizes (1000px is prefetched on startup)
-            let target = target_size.unwrap_or(requested_size);
+            let target = target_size.or(requested_size).unwrap_or(0);
             if target > 0 && target < 1000 {
                 // Common prefetched sizes to try (larger first)
                 for fallback_size in [1000u32, 500, 300] {
                     if fallback_size <= target {
                         break; // No point resizing from smaller
                     }
-                    let fallback_key = format!("{album_id}_{fallback_size}");
+                    let fallback_key =
+                        crate::utils::artwork_url::build_cache_key(album_id, Some(fallback_size));
                     if let Some(large_bytes) = dc.get(&fallback_key)
                         && let Some(resized) = Self::resize_artwork_bytes(&large_bytes, target)
                     {
@@ -442,7 +442,8 @@ impl AlbumsService {
                         );
 
                         // Cache resized version to disk for future runs (avoids repeated resize CPU cost)
-                        let resized_key = format!("{album_id}_{target}");
+                        let resized_key =
+                            crate::utils::artwork_url::build_cache_key(album_id, Some(target));
                         dc.insert(&resized_key, &resized);
 
                         // Also cache in memory
@@ -477,7 +478,7 @@ impl AlbumsService {
             album_id,
             &server_url,
             &subsonic_credential,
-            Some(requested_size),
+            requested_size,
         )
         .await?;
 
@@ -510,18 +511,17 @@ impl AlbumsService {
             return None;
         }
 
+        let cache_key = crate::utils::artwork_url::parse_cache_key_from_url(artwork_url);
+        let requested_size: Option<u32> = artwork_url
+            .split("size=")
+            .nth(1)
+            .and_then(|s| s.split('&').next())
+            .and_then(|s| s.parse().ok());
         let album_id = artwork_url
             .split("id=")
             .nth(1)
             .and_then(|s| s.split('&').next())
             .unwrap_or("unknown");
-        let requested_size: u32 = artwork_url
-            .split("size=")
-            .nth(1)
-            .and_then(|s| s.split('&').next())
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
-        let cache_key = format!("{album_id}_{requested_size}");
 
         let dc = self.disk_cache.as_ref().as_ref()?;
 
@@ -531,13 +531,14 @@ impl AlbumsService {
         }
 
         // 2. Resize fallback from larger cached sizes
-        let target = target_size.unwrap_or(requested_size);
+        let target = target_size.or(requested_size).unwrap_or(0);
         if target > 0 && target < 1000 {
             for fallback_size in [1000u32, 500, 300] {
                 if fallback_size <= target {
                     break;
                 }
-                let fallback_key = format!("{album_id}_{fallback_size}");
+                let fallback_key =
+                    crate::utils::artwork_url::build_cache_key(album_id, Some(fallback_size));
                 if let Some(large_bytes) = dc.get(&fallback_key)
                     && let Some(resized) = Self::resize_artwork_bytes(&large_bytes, target)
                 {
@@ -545,7 +546,8 @@ impl AlbumsService {
                         " [RESIZE→PATH] {}px → {}px for {}",
                         fallback_size, target, album_id
                     );
-                    let resized_key = format!("{album_id}_{target}");
+                    let resized_key =
+                        crate::utils::artwork_url::build_cache_key(album_id, Some(target));
                     dc.insert(&resized_key, &resized);
                     return Some(dc.get_path(&resized_key));
                 }
@@ -561,7 +563,7 @@ impl AlbumsService {
             album_id,
             &server_url,
             &subsonic_credential,
-            Some(requested_size),
+            requested_size,
         )
         .await?;
 
