@@ -15,8 +15,12 @@ AppService (orchestrator)
 │   └── reset_next_track() on mode toggles
 ├── Domain Services (Albums, Artists, Songs, Genres, Playlists, Radios, Similar, Queue, Settings, Auth)
 │   └── Lazy-initialized via `tokio::sync::OnceCell` (not Mutex<Option<T>>)
-├── ArtworkPrefetch — background artwork loading with pagination, progress tracking, and dynamic cache key mappings
-├── NavidromeEvents — SSE subscription (`services/navidrome_events.rs`) → parses server-sent events → triggers background library refresh with ID-based anchoring
+├── Artwork — server-only, no client-side persistent cache
+│   ├── `AlbumsService::artwork_client: Arc<reqwest::Client>` (bare reqwest)
+│   ├── `AlbumsService::fetch_album_artwork(art_id, size, updated_at)` — single fetch path; every call goes to Navidrome
+│   ├── Session-scoped Handle reuse via UI's `album_art` (LRU 512) + `large_artwork` (LRU 200) maps
+│   └── On startup: legacy cache subdirs (`artwork/`, `artist_artwork/`, `genre_artwork/`, `playlist_artwork/`, `http/`) are deleted once
+├── NavidromeEvents — SSE subscription (`services/navidrome_events.rs`) → `RefreshResource { resources, is_wildcard }` → ID-anchored slot-list reload; non-wildcard events trigger silent re-fetch for any affected album in `album_art`/`large_artwork`
 └── TaskManager (centralized spawn tracking)
 ```
 
@@ -41,6 +45,7 @@ AppService (orchestrator)
 | **redb** | `services/state_storage.rs` | Queue ordering, encrypted password |
 | **TOML config** | `services/toml_settings_io.rs` | Hot-reloadable via `toml_edit`. `verbose_config` mode writes all defaults. |
 | **Theme files** | `services/theme_loader.rs` | Named `.toml` in `~/.config/nokkvi/themes/`. 21 built-in (compiled via `include_str!`, seeded on first run). Discovery, load/save, restore-builtin. |
+| **Artwork** | (no disk cache) | Server-only — every fetch hits Navidrome. Session-scoped Handle reuse in UI maps. Legacy `cache/artwork/`, `cache/artist_artwork/`, `cache/genre_artwork/`, `cache/playlist_artwork/`, `cache/http/` subdirs are deleted once at `AppService::new_with_storage`. |
 | **Config writer** | `src/config_writer.rs` (UI crate) | Per-key TOML updates. `update_config_value()` → config.toml; `update_theme_value()` → active theme file. Atomic via temp + rename. |
 | **Credentials** | `data/src/credentials.rs` | AES-256-GCM + PBKDF2, password in redb |
 

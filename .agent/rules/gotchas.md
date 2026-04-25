@@ -50,8 +50,11 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 - **Silent SVG fallbacks**: All UI SVG icons must be explicitly registered via macro in `src/embedded_svg.rs` (in the const list, the match table, and the `KNOWN` test array). Because the macro has a smooth fallback to `play.svg` to prevent render-loop crashes for unregistered paths, the compiler **will not warn you** if you forget to register an icon or typo the path. You must run `cargo test --bin nokkvi -- embedded_svg` to reliably catch unbound icons.
 
 ## Artwork
-- **Handle::from_bytes for refresh**: `Handle::from_path` uses file path as ID → stale GPU texture on overwrite. Use `Handle::from_bytes(data)` for content-derived IDs.
-- **Queue song mini vs large artwork**: Queue songs must request 80px thumbnails using the `album_id` to hit the prefetch cache. Large artwork fallback MUST ALWAYS construct the full-size URL (`size=1000`) rather than reusing the 80px thumbnail URL.
+- **No client-side persistent cache**: every artwork fetch goes straight to Navidrome via `AlbumsService::fetch_album_artwork(...)`. Session-scoped Handle reuse comes from the UI's `album_art` (LRU 512) and `large_artwork` (LRU 200) maps in `ArtworkState`.
+- **Always `Handle::from_bytes`**: `from_bytes` allocates a fresh `Id::Unique` per call, so safe **only** because Handles are stored in the LRUs and reused across renders. Never re-create Handles from bytes per frame — that bypasses Iced's GPU texture cache entirely (`reference-iced/wgpu/src/image/raster.rs:55`).
+- **`album_art` snapshot mirror**: `view()` borrows `album_art_snapshot` (a `HashMap` mirror), not `album_art` directly, because LRU `get` is `&mut`. Every `put` on `album_art` MUST be followed by `refresh_album_art_snapshot()` — same pattern as `large_artwork_snapshot`. Forget the refresh and the next render shows stale thumbnails.
+- **Queue song mini vs large artwork**: Queue songs must request 80px thumbnails using the `album_id` so `fetch_album_artwork` builds a consistent URL across consumers. Large artwork must construct the full-size URL (`size=artwork_resolution`) rather than reusing the 80px thumbnail URL.
+- **Wildcard SSE skips artwork**: `Message::LibraryChanged { is_wildcard: true }` (full-library scan) MUST NOT trigger silent re-fetch — it would re-download every cached cover. Slot-list reloads still run.
 
 ## Misc
 - **CenterOnPlaying (Shift+C)**: WHEN handling CenterOnPlaying, ALWAYS directly call `handle_set_offset()` rather than dispatching `SlotListMessage::SetOffset` (which routes through click-to-highlight path).
