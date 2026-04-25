@@ -26,6 +26,20 @@ pub struct QueuePage {
     pub queue_sort_mode: QueueSortMode,
 }
 
+/// Hide the queue stars column when the queue panel is narrower than this.
+/// Queue panel is measured (via `iced::widget::responsive`), so this fires
+/// correctly in split-view where the queue is roughly half the window.
+pub(crate) const BREAKPOINT_HIDE_QUEUE_STARS: f32 = 400.0;
+
+/// Pure decision: should the queue's stars rating column be rendered?
+///
+/// Stars are visible across all sort modes; previously gated by
+/// `QueueSortMode::Rating`. Hidden when the queue panel is narrower than
+/// `BREAKPOINT_HIDE_QUEUE_STARS`.
+pub(crate) fn rating_column_visible(_sort: QueueSortMode, panel_width: f32) -> bool {
+    panel_width >= BREAKPOINT_HIDE_QUEUE_STARS
+}
+
 /// View data passed from root (read-only)
 pub struct QueueViewData<'a> {
     pub queue_songs: std::borrow::Cow<'a, [QueueSongUIViewData]>,
@@ -711,307 +725,343 @@ impl QueuePage {
             let genre = song.genre.clone();
             let starred = song.starred;
             let rating = song.rating.unwrap_or(0).min(5) as usize;
+            let song_id = song.id.clone();
+            let artist_id = song.artist_id.clone();
+            let track_number = song.track_number;
+            let stable_viewport = data.stable_viewport;
 
             // Match on both song ID AND queue position (track_number) to
             // disambiguate duplicate tracks sharing the same song ID.
             // Suppressed while ctrl/shift is held (active multi-selection) so
             // users can clearly see which items are selected.
             let is_current = !(ctx.modifiers.shift() || ctx.modifiers.control())
-                && current_playing_queue_index
-                    .is_some_and(|idx| idx == song.track_number as usize - 1)
-                && current_playing_song_id.as_ref() == Some(&song.id);
+                && current_playing_queue_index.is_some_and(|idx| idx == track_number as usize - 1)
+                && current_playing_song_id.as_ref() == Some(&song_id);
 
-            // Get centralized slot list slot styling
-            use crate::widgets::slot_list::{
-                SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column, slot_list_text,
-            };
-            let style = SlotListSlotStyle::for_slot(
-                ctx.is_center,
-                is_current,
-                ctx.is_selected,
-                ctx.has_multi_selection,
-                ctx.opacity,
-                0,
-            );
+            // Wrap the row in `responsive(...)` so the queue-stars column hide
+            // is gated by the queue panel's measured width rather than the full
+            // window width. This is correct in split-view (Ctrl+E), where the
+            // queue panel is roughly half the window.
+            iced::widget::responsive(move |size| {
+                let panel_width = size.width;
 
-            let m = ctx.metrics;
-            let artwork_size = m.artwork_size;
-            let title_size = m.title_size_lg;
-            let subtitle_size = m.subtitle_size;
-            let index_size = m.metadata_size;
-            let duration_size = m.metadata_size;
-            let icon_size = m.star_size;
+                // Re-clone owned values each layout pass: the responsive
+                // closure is `Fn`, so it borrows captured strings; the row
+                // builders below take owned values.
+                let title = title.clone();
+                let artist = artist.clone();
+                let album = album.clone();
+                let album_id = album_id.clone();
+                let duration = duration.clone();
+                let genre = genre.clone();
+                let artist_id = artist_id.clone();
 
-            // Dynamic column proportions: title gets more space when album/rating columns are hidden
-            let show_rating_column = current_sort_mode == QueueSortMode::Rating;
-            let title_portion: u16 = if show_rating_column { 35 } else { 40 };
+                // Get centralized slot list slot styling
+                use crate::widgets::slot_list::{
+                    SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column,
+                    slot_list_text,
+                };
+                let style = SlotListSlotStyle::for_slot(
+                    ctx.is_center,
+                    is_current,
+                    ctx.is_selected,
+                    ctx.has_multi_selection,
+                    ctx.opacity,
+                    0,
+                );
 
-            // Layout: [Index] [Art] [Title/Artist] [Album?] [Rating?] [Duration] [Heart]
-            let mut content_row = row![
-                // 0. Index number (fixed width)
-                slot_list_index_column(ctx.item_index, index_size, style, ctx.opacity),
-                // 1. Album Art (fixed width) - match albums pattern
-                {
-                    use crate::widgets::slot_list::slot_list_artwork_column;
-                    slot_list_artwork_column(
-                        album_art.get(&album_id),
-                        artwork_size,
+                let m = ctx.metrics;
+                let artwork_size = m.artwork_size;
+                let title_size = m.title_size_lg;
+                let subtitle_size = m.subtitle_size;
+                let index_size = m.metadata_size;
+                let duration_size = m.metadata_size;
+                let icon_size = m.star_size;
+
+                // Dynamic column proportions: title gets more space when album/rating columns are hidden
+                let show_rating_column = rating_column_visible(current_sort_mode, panel_width);
+                let title_portion: u16 = if show_rating_column { 35 } else { 40 };
+
+                // Layout: [Index] [Art] [Title/Artist] [Album?] [Rating?] [Duration] [Heart]
+                let mut content_row = row![
+                    // 0. Index number (fixed width)
+                    slot_list_index_column(ctx.item_index, index_size, style, ctx.opacity),
+                    // 1. Album Art (fixed width) - match albums pattern
+                    {
+                        use crate::widgets::slot_list::slot_list_artwork_column;
+                        slot_list_artwork_column(
+                            album_art.get(&album_id),
+                            artwork_size,
+                            ctx.is_center,
+                            is_current,
+                            ctx.opacity,
+                        )
+                    },
+                    // 2. Title + Artist (always simple text column)
+                    {
+                        use crate::widgets::slot_list::slot_list_text_column;
+                        let title_click = Some(QueueMessage::ContextMenuAction(
+                            ctx.item_index,
+                            QueueContextEntry::GetInfo,
+                        ));
+                        slot_list_text_column(
+                            title,
+                            title_click,
+                            artist.clone(),
+                            Some(QueueMessage::NavigateAndFilter(
+                                crate::View::Artists,
+                                nokkvi_data::types::filter::LibraryFilter::ArtistId {
+                                    id: artist_id.clone(),
+                                    name: artist.clone(),
+                                },
+                            )),
+                            title_size,
+                            subtitle_size,
+                            style,
+                            ctx.is_center || is_current,
+                            title_portion,
+                        )
+                    },
+                ]
+                .spacing(6.0)
+                .align_y(Alignment::Center);
+
+                // 3. Album column — always shown
+                if show_album_column {
+                    content_row =
+                        content_row.push(
+                            container({
+                                let click_album = QueueMessage::NavigateAndFilter(
+                                    crate::View::Albums,
+                                    nokkvi_data::types::filter::LibraryFilter::AlbumId {
+                                        id: album_id.clone(),
+                                        title: album.clone(),
+                                    },
+                                );
+                                let links_enabled = crate::theme::is_slot_text_links();
+                                let album_widget: Element<'_, QueueMessage> =
+                                    crate::widgets::link_text::LinkText::new(album)
+                                        .size(subtitle_size)
+                                        .color(style.subtext_color)
+                                        .hover_color(style.hover_text_color)
+                                        .font(crate::theme::ui_font())
+                                        .on_press(if links_enabled {
+                                            Some(click_album)
+                                        } else {
+                                            None
+                                        })
+                                        .into();
+
+                                let content: Element<'_, QueueMessage> =
+                                    if current_sort_mode == QueueSortMode::Genre {
+                                        let click_genre = QueueMessage::NavigateAndFilter(
+                                            crate::View::Genres,
+                                            nokkvi_data::types::filter::LibraryFilter::GenreId {
+                                                id: genre.clone(),
+                                                name: genre.clone(),
+                                            },
+                                        );
+                                        let genre_font_size =
+                                            nokkvi_data::utils::scale::calculate_font_size(
+                                                10.0,
+                                                ctx.row_height,
+                                                ctx.scale_factor,
+                                            ) * ctx.scale_factor;
+                                        let genre_widget: Element<'_, QueueMessage> =
+                                            crate::widgets::link_text::LinkText::new(
+                                                if genre.is_empty() {
+                                                    "Unknown".to_string()
+                                                } else {
+                                                    genre
+                                                },
+                                            )
+                                            .size(genre_font_size)
+                                            .color(style.subtext_color)
+                                            .hover_color(style.hover_text_color)
+                                            .font(crate::theme::ui_font())
+                                            .on_press(if links_enabled {
+                                                Some(click_genre)
+                                            } else {
+                                                None
+                                            })
+                                            .into();
+
+                                        column![album_widget, genre_widget].spacing(2.0).into()
+                                    } else {
+                                        album_widget
+                                    };
+                                content
+                            })
+                            .width(Length::FillPortion(30))
+                            .height(Length::Fill)
+                            .clip(true)
+                            .align_y(Alignment::Center),
+                        );
+                }
+
+                // 4. Rating column — only shown for Rating sort mode (dedicated column, not inline with title)
+                if show_rating_column {
+                    let star_icon_size = m.title_size;
+                    let idx = ctx.item_index;
+                    use crate::widgets::slot_list::slot_list_star_rating;
+                    content_row = content_row.push(slot_list_star_rating(
+                        rating,
+                        star_icon_size,
                         ctx.is_center,
-                        is_current,
                         ctx.opacity,
-                    )
-                },
-                // 2. Title + Artist (always simple text column)
-                {
-                    use crate::widgets::slot_list::slot_list_text_column;
-                    let title_click = Some(QueueMessage::ContextMenuAction(
-                        ctx.item_index,
-                        QueueContextEntry::GetInfo,
+                        Some(15),
+                        Some(move |star: usize| QueueMessage::ClickSetRating(idx, star)),
                     ));
-                    slot_list_text_column(
-                        title,
-                        title_click,
-                        artist.clone(),
-                        Some(QueueMessage::NavigateAndFilter(
-                            crate::View::Artists,
-                            nokkvi_data::types::filter::LibraryFilter::ArtistId {
-                                id: song.artist_id.clone(),
-                                name: artist.clone(),
-                            },
-                        )),
-                        title_size,
-                        subtitle_size,
-                        style,
-                        ctx.is_center || is_current,
-                        title_portion,
-                    )
-                },
-            ]
-            .spacing(6.0)
-            .align_y(Alignment::Center);
+                }
 
-            // 3. Album column — always shown
-            if show_album_column {
+                // 5. Duration - right aligned
+                content_row = content_row.push(
+                    container(slot_list_text(duration, duration_size, style.subtext_color))
+                        .width(Length::FillPortion(10))
+                        .align_x(Alignment::End)
+                        .align_y(Alignment::Center),
+                );
+
+                // 5. Heart Icon - use reusable component, with symmetric padding for centering
                 content_row = content_row.push(
                     container({
-                        let click_album = QueueMessage::NavigateAndFilter(
-                            crate::View::Albums,
-                            nokkvi_data::types::filter::LibraryFilter::AlbumId {
-                                id: album_id.clone(),
-                                title: album.clone(),
-                            },
-                        );
-                        let links_enabled = crate::theme::is_slot_text_links();
-                        let album_widget: Element<'_, QueueMessage> =
-                            crate::widgets::link_text::LinkText::new(album)
-                                .size(subtitle_size)
-                                .color(style.subtext_color)
-                                .hover_color(style.hover_text_color)
-                                .font(crate::theme::ui_font())
-                                .on_press(if links_enabled {
-                                    Some(click_album)
-                                } else {
-                                    None
-                                })
-                                .into();
-
-                        let content: Element<'_, QueueMessage> = if current_sort_mode
-                            == QueueSortMode::Genre
-                        {
-                            let click_genre = QueueMessage::NavigateAndFilter(
-                                crate::View::Genres,
-                                nokkvi_data::types::filter::LibraryFilter::GenreId {
-                                    id: genre.clone(),
-                                    name: genre.clone(),
-                                },
-                            );
-                            let genre_font_size = nokkvi_data::utils::scale::calculate_font_size(
-                                10.0,
-                                ctx.row_height,
-                                ctx.scale_factor,
-                            ) * ctx.scale_factor;
-                            let genre_widget: Element<'_, QueueMessage> =
-                                crate::widgets::link_text::LinkText::new(if genre.is_empty() {
-                                    "Unknown".to_string()
-                                } else {
-                                    genre
-                                })
-                                .size(genre_font_size)
-                                .color(style.subtext_color)
-                                .hover_color(style.hover_text_color)
-                                .font(crate::theme::ui_font())
-                                .on_press(if links_enabled {
-                                    Some(click_genre)
-                                } else {
-                                    None
-                                })
-                                .into();
-
-                            column![album_widget, genre_widget].spacing(2.0).into()
-                        } else {
-                            album_widget
-                        };
-                        content
+                        use crate::widgets::slot_list::slot_list_favorite_icon;
+                        slot_list_favorite_icon(
+                            starred,
+                            ctx.is_center,
+                            is_current,
+                            ctx.opacity,
+                            icon_size,
+                            "heart",
+                            Some(QueueMessage::ClickToggleStar(ctx.item_index)),
+                        )
                     })
-                    .width(Length::FillPortion(30))
-                    .height(Length::Fill)
-                    .clip(true)
+                    .width(Length::FillPortion(5))
+                    .padding(iced::Padding {
+                        left: 4.0,
+                        right: 4.0,
+                        ..Default::default()
+                    })
+                    .align_x(Alignment::Center)
                     .align_y(Alignment::Center),
                 );
-            }
 
-            // 4. Rating column — only shown for Rating sort mode (dedicated column, not inline with title)
-            if show_rating_column {
-                let star_icon_size = m.title_size;
-                let idx = ctx.item_index;
-                use crate::widgets::slot_list::slot_list_star_rating;
-                content_row = content_row.push(slot_list_star_rating(
-                    rating,
-                    star_icon_size,
-                    ctx.is_center,
-                    ctx.opacity,
-                    Some(15),
-                    Some(move |star: usize| QueueMessage::ClickSetRating(idx, star)),
-                ));
-            }
+                let content = content_row
+                    .padding(iced::Padding {
+                        left: SLOT_LIST_SLOT_PADDING,
+                        right: 4.0,
+                        top: 4.0,
+                        bottom: 4.0,
+                    })
+                    .height(Length::Fill);
 
-            // 5. Duration - right aligned
-            content_row = content_row.push(
-                container(slot_list_text(duration, duration_size, style.subtext_color))
-                    .width(Length::FillPortion(10))
-                    .align_x(Alignment::End)
-                    .align_y(Alignment::Center),
-            );
+                // Wrap in clickable container
+                let clickable = container(content)
+                    .style(move |_theme| style.to_container_style())
+                    .width(Length::Fill);
 
-            // 5. Heart Icon - use reusable component, with symmetric padding for centering
-            content_row = content_row.push(
-                container({
-                    use crate::widgets::slot_list::slot_list_favorite_icon;
-                    slot_list_favorite_icon(
-                        starred,
-                        ctx.is_center,
-                        is_current,
-                        ctx.opacity,
-                        icon_size,
-                        "heart",
-                        Some(QueueMessage::ClickToggleStar(ctx.item_index)),
-                    )
+                // Make it interactive
+                let slot_button = button(clickable)
+                    .on_press(if ctx.modifiers.control() || ctx.modifiers.shift() {
+                        QueueMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
+                    } else if ctx.is_center {
+                        QueueMessage::SlotListActivateCenter
+                    } else if stable_viewport {
+                        QueueMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
+                    } else {
+                        QueueMessage::SlotListClickPlay(ctx.item_index)
+                    })
+                    .style(|_theme, _status| button::Style {
+                        background: None,
+                        border: iced::Border::default(),
+                        ..Default::default()
+                    })
+                    .padding(0)
+                    .width(Length::Fill);
+
+                // Wrap in context menu
+                use crate::widgets::context_menu::{context_menu, menu_button, menu_separator};
+                let item_idx = ctx.item_index;
+                let entries = vec![
+                    QueueContextEntry::Play,
+                    QueueContextEntry::PlayNext,
+                    QueueContextEntry::Separator,
+                    QueueContextEntry::RemoveFromQueue,
+                    QueueContextEntry::Separator,
+                    QueueContextEntry::AddToPlaylist,
+                    QueueContextEntry::SaveAsPlaylist,
+                    QueueContextEntry::Separator,
+                    QueueContextEntry::OpenBrowsingPanel,
+                    QueueContextEntry::Separator,
+                    QueueContextEntry::GetInfo,
+                    QueueContextEntry::ShowInFolder,
+                    QueueContextEntry::FindSimilar,
+                    QueueContextEntry::TopSongs,
+                ];
+
+                context_menu(slot_button, entries, move |entry, _length| match entry {
+                    QueueContextEntry::Play => menu_button(
+                        Some("assets/icons/circle-play.svg"),
+                        "Play",
+                        QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::Play),
+                    ),
+                    QueueContextEntry::PlayNext => menu_button(
+                        Some("assets/icons/list-end.svg"),
+                        "Play Next",
+                        QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::PlayNext),
+                    ),
+                    QueueContextEntry::RemoveFromQueue => menu_button(
+                        Some("assets/icons/trash-2.svg"),
+                        "Remove from Queue",
+                        QueueMessage::ContextMenuAction(
+                            item_idx,
+                            QueueContextEntry::RemoveFromQueue,
+                        ),
+                    ),
+                    QueueContextEntry::Separator => menu_separator(),
+                    QueueContextEntry::AddToPlaylist => menu_button(
+                        Some("assets/icons/list-music.svg"),
+                        "Add to Playlist",
+                        QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::AddToPlaylist),
+                    ),
+                    QueueContextEntry::SaveAsPlaylist => menu_button(
+                        Some("assets/icons/list-music.svg"),
+                        "Save Queue as Playlist",
+                        QueueMessage::ContextMenuAction(
+                            item_idx,
+                            QueueContextEntry::SaveAsPlaylist,
+                        ),
+                    ),
+                    QueueContextEntry::OpenBrowsingPanel => menu_button(
+                        Some("assets/icons/panel-right-open.svg"),
+                        "Library Browser",
+                        QueueMessage::ContextMenuAction(
+                            item_idx,
+                            QueueContextEntry::OpenBrowsingPanel,
+                        ),
+                    ),
+                    QueueContextEntry::GetInfo => menu_button(
+                        Some("assets/icons/info.svg"),
+                        "Get Info",
+                        QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::GetInfo),
+                    ),
+                    QueueContextEntry::ShowInFolder => menu_button(
+                        Some("assets/icons/folder-open.svg"),
+                        "Show in File Manager",
+                        QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::ShowInFolder),
+                    ),
+                    QueueContextEntry::FindSimilar => menu_button(
+                        Some("assets/icons/radar.svg"),
+                        "Find Similar",
+                        QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::FindSimilar),
+                    ),
+                    QueueContextEntry::TopSongs => menu_button(
+                        Some("assets/icons/star.svg"),
+                        "Top Songs",
+                        QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::TopSongs),
+                    ),
                 })
-                .width(Length::FillPortion(5))
-                .padding(iced::Padding {
-                    left: 4.0,
-                    right: 4.0,
-                    ..Default::default()
-                })
-                .align_x(Alignment::Center)
-                .align_y(Alignment::Center),
-            );
-
-            let content = content_row
-                .padding(iced::Padding {
-                    left: SLOT_LIST_SLOT_PADDING,
-                    right: 4.0,
-                    top: 4.0,
-                    bottom: 4.0,
-                })
-                .height(Length::Fill);
-
-            // Wrap in clickable container
-            let clickable = container(content)
-                .style(move |_theme| style.to_container_style())
-                .width(Length::Fill);
-
-            // Make it interactive
-            let slot_button = button(clickable)
-                .on_press(if ctx.modifiers.control() || ctx.modifiers.shift() {
-                    QueueMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
-                } else if ctx.is_center {
-                    QueueMessage::SlotListActivateCenter
-                } else if data.stable_viewport {
-                    QueueMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
-                } else {
-                    QueueMessage::SlotListClickPlay(ctx.item_index)
-                })
-                .style(|_theme, _status| button::Style {
-                    background: None,
-                    border: iced::Border::default(),
-                    ..Default::default()
-                })
-                .padding(0)
-                .width(Length::Fill);
-
-            // Wrap in context menu
-            use crate::widgets::context_menu::{context_menu, menu_button, menu_separator};
-            let item_idx = ctx.item_index;
-            let entries = vec![
-                QueueContextEntry::Play,
-                QueueContextEntry::PlayNext,
-                QueueContextEntry::Separator,
-                QueueContextEntry::RemoveFromQueue,
-                QueueContextEntry::Separator,
-                QueueContextEntry::AddToPlaylist,
-                QueueContextEntry::SaveAsPlaylist,
-                QueueContextEntry::Separator,
-                QueueContextEntry::OpenBrowsingPanel,
-                QueueContextEntry::Separator,
-                QueueContextEntry::GetInfo,
-                QueueContextEntry::ShowInFolder,
-                QueueContextEntry::FindSimilar,
-                QueueContextEntry::TopSongs,
-            ];
-
-            context_menu(slot_button, entries, move |entry, _length| match entry {
-                QueueContextEntry::Play => menu_button(
-                    Some("assets/icons/circle-play.svg"),
-                    "Play",
-                    QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::Play),
-                ),
-                QueueContextEntry::PlayNext => menu_button(
-                    Some("assets/icons/list-end.svg"),
-                    "Play Next",
-                    QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::PlayNext),
-                ),
-                QueueContextEntry::RemoveFromQueue => menu_button(
-                    Some("assets/icons/trash-2.svg"),
-                    "Remove from Queue",
-                    QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::RemoveFromQueue),
-                ),
-                QueueContextEntry::Separator => menu_separator(),
-                QueueContextEntry::AddToPlaylist => menu_button(
-                    Some("assets/icons/list-music.svg"),
-                    "Add to Playlist",
-                    QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::AddToPlaylist),
-                ),
-                QueueContextEntry::SaveAsPlaylist => menu_button(
-                    Some("assets/icons/list-music.svg"),
-                    "Save Queue as Playlist",
-                    QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::SaveAsPlaylist),
-                ),
-                QueueContextEntry::OpenBrowsingPanel => menu_button(
-                    Some("assets/icons/panel-right-open.svg"),
-                    "Library Browser",
-                    QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::OpenBrowsingPanel),
-                ),
-                QueueContextEntry::GetInfo => menu_button(
-                    Some("assets/icons/info.svg"),
-                    "Get Info",
-                    QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::GetInfo),
-                ),
-                QueueContextEntry::ShowInFolder => menu_button(
-                    Some("assets/icons/folder-open.svg"),
-                    "Show in File Manager",
-                    QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::ShowInFolder),
-                ),
-                QueueContextEntry::FindSimilar => menu_button(
-                    Some("assets/icons/radar.svg"),
-                    "Find Similar",
-                    QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::FindSimilar),
-                ),
-                QueueContextEntry::TopSongs => menu_button(
-                    Some("assets/icons/star.svg"),
-                    "Top Songs",
-                    QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::TopSongs),
-                ),
+                .into()
             })
             .into()
         };
@@ -1111,4 +1161,51 @@ impl super::ViewPage for QueuePage {
 
     // Queue items are already in the queue, so add_to_queue_message returns None (default).
     // Queue has no reload_message (client-side filtering, no server fetch needed on Escape).
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const WIDE_PANEL: f32 = 1200.0;
+
+    #[test]
+    fn rating_column_visible_for_all_sort_modes() {
+        for sort in QueueSortMode::all() {
+            assert!(
+                rating_column_visible(sort, WIDE_PANEL),
+                "stars column should render for sort mode {sort:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rating_column_hidden_below_breakpoint() {
+        for sort in QueueSortMode::all() {
+            assert!(
+                !rating_column_visible(sort, BREAKPOINT_HIDE_QUEUE_STARS - 1.0),
+                "stars column should hide below breakpoint for {sort:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rating_column_visible_at_breakpoint() {
+        // Boundary is `>=`: the exact breakpoint width keeps stars visible.
+        for sort in QueueSortMode::all() {
+            assert!(
+                rating_column_visible(sort, BREAKPOINT_HIDE_QUEUE_STARS),
+                "stars column should remain visible at exact breakpoint for {sort:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rating_column_responsive_overrides_sort_mode() {
+        // Width wins over sort mode: even Rating sort hides when too narrow.
+        assert!(!rating_column_visible(
+            QueueSortMode::Rating,
+            BREAKPOINT_HIDE_QUEUE_STARS - 1.0
+        ));
+    }
 }
