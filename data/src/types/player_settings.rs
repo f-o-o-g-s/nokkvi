@@ -598,6 +598,9 @@ pub struct PlayerSettings {
     pub artwork_resolution: ArtworkResolution,
     /// Whether the Artists view shows only album artists
     pub show_album_artists_only: bool,
+    /// Whether to suppress the toast notification shown on Navidrome library-refresh
+    /// events. Default false (toasts shown).
+    pub suppress_library_refresh_toasts: bool,
 }
 
 #[cfg(test)]

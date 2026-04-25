@@ -30,6 +30,7 @@ pub struct TomlSettings {
     pub library_page_size: LibraryPageSize,
     pub artwork_resolution: ArtworkResolution,
     pub show_album_artists_only: bool,
+    pub suppress_library_refresh_toasts: bool,
 
     // -- Behavior --
     pub stable_viewport: bool,
@@ -109,6 +110,7 @@ impl Default for TomlSettings {
             library_page_size: LibraryPageSize::default(),
             artwork_resolution: ArtworkResolution::default(),
             show_album_artists_only: true,
+            suppress_library_refresh_toasts: false,
             stable_viewport: true,
             auto_follow_playing: true,
             light_mode: false,
@@ -154,6 +156,7 @@ impl TomlSettings {
             library_page_size: ps.library_page_size,
             artwork_resolution: ps.artwork_resolution,
             show_album_artists_only: ps.show_album_artists_only,
+            suppress_library_refresh_toasts: ps.suppress_library_refresh_toasts,
             stable_viewport: ps.stable_viewport,
             auto_follow_playing: ps.auto_follow_playing,
             light_mode: false, // Will be read from theme.light_mode or fresh default

@@ -173,6 +173,12 @@ impl SettingsService {
         sm.set_show_album_artists_only(enabled)
     }
 
+    /// Set suppress-library-refresh-toasts mode and persist
+    pub async fn set_suppress_library_refresh_toasts(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_suppress_library_refresh_toasts(enabled)
+    }
+
     /// Set rounded corners mode and persist
     pub async fn set_rounded_mode(&self, enabled: bool) -> anyhow::Result<()> {
         let mut sm = self.settings_manager.lock().await;

@@ -43,8 +43,11 @@ impl Nokkvi {
             tasks.push(self.handle_load_songs(true, anchor_id));
         }
 
-        // Notify the user gently
-        self.toast_info("Library refreshed automatically");
+        // Notify the user gently (skipped when the user has opted to suppress
+        // these notifications via Settings → General → Application).
+        if !self.suppress_library_refresh_toasts {
+            self.toast_info("Library refreshed automatically");
+        }
 
         // 4. On non-wildcard events, surgically refresh artwork for the changed
         //    albums in any in-RAM Handle map. With no client-side disk cache,
@@ -73,7 +76,7 @@ impl Nokkvi {
                 }
             }
 
-            if refreshed_in_ui > 0 {
+            if refreshed_in_ui > 0 && !self.suppress_library_refresh_toasts {
                 let suffix = if refreshed_in_ui == 1 { "" } else { "s" };
                 self.toast_info(format!(
                     "Updated artwork for {refreshed_in_ui} album{suffix}"

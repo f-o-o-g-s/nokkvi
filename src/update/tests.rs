@@ -1086,6 +1086,7 @@ fn make_settings_view_data() -> crate::views::SettingsViewData {
         local_music_path: String::new(),
         library_page_size: "Default",
         show_album_artists_only: true,
+        suppress_library_refresh_toasts: false,
         rounded_mode: false,
         nav_layout: "Top",
         nav_display_mode: "IconsAndLabels",
@@ -2499,4 +2500,44 @@ fn task_status_changed_success_no_toast() {
 
     // Currently, successful tasks just log to debug, no toast
     assert!(app.toast.toasts.is_empty());
+}
+
+// ============================================================================
+// Library Refresh Toast Suppression (library_refresh.rs)
+// ============================================================================
+
+#[test]
+fn library_refreshed_emits_toast_by_default() {
+    let mut app = test_app();
+    assert!(!app.suppress_library_refresh_toasts);
+    assert!(app.toast.toasts.is_empty());
+
+    let _ = app.handle_library_changed(Vec::new(), true);
+
+    assert_eq!(
+        app.toast.toasts.len(),
+        1,
+        "Wildcard refresh should emit one info toast by default"
+    );
+    let toast = &app.toast.toasts[0];
+    assert!(
+        toast.message.contains("Library refreshed"),
+        "Expected 'Library refreshed' message, got: {}",
+        toast.message
+    );
+    assert_eq!(toast.level, nokkvi_data::types::toast::ToastLevel::Info);
+}
+
+#[test]
+fn library_refreshed_suppresses_toast_when_flag_set() {
+    let mut app = test_app();
+    app.suppress_library_refresh_toasts = true;
+    assert!(app.toast.toasts.is_empty());
+
+    let _ = app.handle_library_changed(Vec::new(), true);
+
+    assert!(
+        app.toast.toasts.is_empty(),
+        "No toast should be pushed when suppress_library_refresh_toasts is true"
+    );
 }

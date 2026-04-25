@@ -15,6 +15,7 @@ pub(crate) struct GeneralSettingsData<'a> {
     pub library_page_size: &'a str,
     pub artwork_resolution: &'a str,
     pub show_album_artists_only: bool,
+    pub suppress_library_refresh_toasts: bool,
 }
 
 /// Build settings entries for the General tab
@@ -93,6 +94,15 @@ pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEnt
             ),
             data.show_album_artists_only,
             true,
+        ),
+        SettingItem::bool_val(
+            meta!(
+                "general.suppress_library_refresh_toasts",
+                "Suppress Library Refresh Toasts",
+                "Hide the notification shown when the server reports a library refresh"
+            ),
+            data.suppress_library_refresh_toasts,
+            false,
         ),
         SettingItem::bool_val(
             meta!(

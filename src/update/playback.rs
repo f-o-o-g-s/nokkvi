@@ -1050,6 +1050,7 @@ impl Nokkvi {
         self.verbose_config = settings.verbose_config;
         self.artwork_resolution = settings.artwork_resolution;
         self.show_album_artists_only = settings.show_album_artists_only;
+        self.suppress_library_refresh_toasts = settings.suppress_library_refresh_toasts;
 
         // Restore active playlist context from persisted settings
         self.active_playlist_info =

@@ -144,6 +144,10 @@ pub struct PlayerSettings {
     /// Whether the Artists view shows only album artists
     #[serde(default = "default_true")]
     pub show_album_artists_only: bool,
+    /// Whether to suppress the toast notification shown when Navidrome
+    /// emits a library-refresh event (default: false = toasts shown).
+    #[serde(default)]
+    pub suppress_library_refresh_toasts: bool,
 }
 
 fn default_eq_gains() -> [f32; 10] {
@@ -230,6 +234,7 @@ impl Default for PlayerSettings {
             library_page_size: LibraryPageSize::default(),
             artwork_resolution: ArtworkResolution::default(),
             show_album_artists_only: default_true(),
+            suppress_library_refresh_toasts: false,
         }
     }
 }

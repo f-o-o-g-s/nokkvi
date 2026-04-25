@@ -200,6 +200,9 @@ pub struct Nokkvi {
     pub auto_follow_playing: bool,
     /// Whether the Artists view shows only album artists
     pub show_album_artists_only: bool,
+    /// Whether to suppress the toast shown on Navidrome library-refresh events
+    /// (default: false = toasts shown).
+    pub suppress_library_refresh_toasts: bool,
     /// What Enter does in the Songs view (default: PlayAll)
     pub enter_behavior: nokkvi_data::types::player_settings::EnterBehavior,
     /// Local filesystem prefix for opening files in the file manager (default: empty = not set)
@@ -290,6 +293,7 @@ impl Default for Nokkvi {
             stable_viewport: true,
             auto_follow_playing: true,
             show_album_artists_only: false,
+            suppress_library_refresh_toasts: false,
             enter_behavior: nokkvi_data::types::player_settings::EnterBehavior::default(),
             local_music_path: String::new(),
             library_page_size: nokkvi_data::types::player_settings::LibraryPageSize::Default,

@@ -223,6 +223,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_suppress_library_refresh_toasts(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.suppress_library_refresh_toasts = enabled;
+        self.save()
+    }
+
     pub fn set_rounded_mode(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.rounded_mode = enabled;
         self.save()
@@ -540,6 +545,7 @@ impl SettingsManager {
             verbose_config: p.verbose_config,
             artwork_resolution: p.artwork_resolution,
             show_album_artists_only: p.show_album_artists_only,
+            suppress_library_refresh_toasts: p.suppress_library_refresh_toasts,
         }
     }
 
@@ -606,6 +612,7 @@ fn apply_toml_settings_to_internal(
     p.library_page_size = ts.library_page_size;
     p.artwork_resolution = ts.artwork_resolution;
     p.show_album_artists_only = ts.show_album_artists_only;
+    p.suppress_library_refresh_toasts = ts.suppress_library_refresh_toasts;
 }
 
 /// Convert `AllViewPreferences` into the internal `ViewPreferences` for redb storage.
