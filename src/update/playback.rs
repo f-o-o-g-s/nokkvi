@@ -858,10 +858,8 @@ impl Nokkvi {
 
     pub(crate) fn handle_sfx_volume_changed(&mut self, vol: f32) -> Task<Message> {
         self.sfx.volume = vol.clamp(0.0, 1.0);
-        self.sfx.show_percentage = true;
-        self.sfx.volume_change_id = self.sfx.volume_change_id.wrapping_add(1);
-        let current_id = self.sfx.volume_change_id;
         self.sfx_engine.set_volume(self.sfx.volume);
+        Self::push_volume_toast(&mut self.toast, "SFX Volume", self.sfx.volume);
 
         // Persist to storage
         let vol = self.sfx.volume;
@@ -869,16 +867,6 @@ impl Nokkvi {
             shell.settings().set_sfx_volume(vol).await
         });
 
-        Self::create_percentage_hide_timer(current_id, |id| {
-            Message::Playback(PlaybackMessage::HideSfxVolumePercentage(id))
-        })
-    }
-
-    pub(crate) fn handle_hide_sfx_volume_percentage(&mut self, id: u64) -> Task<Message> {
-        // Only hide if this is the most recent SFX volume change
-        if id == self.sfx.volume_change_id {
-            self.sfx.show_percentage = false;
-        }
         Task::none()
     }
 
@@ -931,9 +919,7 @@ impl Nokkvi {
 
         // Always update UI state immediately for smooth visual feedback
         self.playback.volume = val;
-        self.playback.show_volume_percentage = true;
-        self.playback.volume_change_id = self.playback.volume_change_id.wrapping_add(1);
-        let current_id = self.playback.volume_change_id;
+        Self::push_volume_toast(&mut self.toast, "Volume", val);
 
         // Sync volume to MPRIS D-Bus (this is fast, no throttling needed)
         if let Some(ref conn) = self.mpris_connection {
@@ -958,7 +944,7 @@ impl Nokkvi {
             }
         };
 
-        let volume_task = if should_persist {
+        if should_persist {
             self.shell_task(
                 move |shell| async move {
                     let _ = shell.set_volume(val).await;
@@ -975,22 +961,7 @@ impl Nokkvi {
                 },
                 |_| Message::NoOp,
             )
-        };
-
-        // Always create hide timer so percentage disappears after user stops dragging
-        let hide_timer = Self::create_percentage_hide_timer(current_id, |id| {
-            Message::Playback(PlaybackMessage::HideVolumePercentage(id))
-        });
-
-        Task::batch([volume_task, hide_timer])
-    }
-
-    pub(crate) fn handle_hide_volume_percentage(&mut self, id: u64) -> Task<Message> {
-        // Only hide if this is the most recent volume change
-        if id == self.playback.volume_change_id {
-            self.playback.show_volume_percentage = false;
         }
-        Task::none()
     }
 
     pub(crate) fn handle_prepare_next_for_gapless(&mut self) -> Task<Message> {
@@ -1256,18 +1227,15 @@ impl Nokkvi {
         ])
     }
 
-    // Helper for percentage hide timers
-    pub(crate) fn create_percentage_hide_timer<F>(id: u64, f: F) -> Task<Message>
-    where
-        F: FnOnce(u64) -> Message + Send + 'static,
-    {
-        Task::perform(
-            async move {
-                tokio::time::sleep(Duration::from_millis(1500)).await;
-                id
-            },
-            f,
-        )
+    /// Push a right-aligned, short-duration "Volume: NN%" / "SFX Volume: NN%" toast.
+    /// Single source of truth for volume-change feedback across slider drag,
+    /// scroll-wheel, and MPRIS — replaces the old hover-tooltip percentage.
+    fn push_volume_toast(toast: &mut crate::state::ToastState, label: &str, vol: f32) {
+        let pct = (vol.clamp(0.0, 1.0) * 100.0) as u32;
+        toast.push(
+            nokkvi_data::types::toast::Toast::info_short(format!("{label}: {pct}%"))
+                .right_aligned(),
+        );
     }
 
     pub(crate) fn handle_radio_metadata_update(

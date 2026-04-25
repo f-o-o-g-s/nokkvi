@@ -52,16 +52,7 @@ impl Nokkvi {
             }
             PlayerBarMessage::ScrollVolume(delta) => {
                 let new_vol = (self.playback.volume + delta).clamp(0.0, 1.0);
-                let pct = (new_vol * 100.0) as u32;
-                let toast =
-                    nokkvi_data::types::toast::Toast::info_short(format!("Volume: {pct}%",))
-                        .right_aligned();
-                Task::batch([
-                    Task::done(Message::Playback(PlaybackMessage::VolumeChanged(new_vol))),
-                    Task::done(Message::Toast(crate::app_message::ToastMessage::Push(
-                        toast,
-                    ))),
-                ])
+                Task::done(Message::Playback(PlaybackMessage::VolumeChanged(new_vol)))
             }
             PlayerBarMessage::OpenSettings => {
                 Task::done(Message::SwitchView(crate::View::Settings))

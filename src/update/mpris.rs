@@ -6,11 +6,7 @@ use iced::Task;
 use mpris_server::LoopStatus;
 use tracing::debug;
 
-use crate::{
-    Message, Nokkvi,
-    app_message::{PlaybackMessage, ToastMessage},
-    services::mpris::MprisEvent,
-};
+use crate::{Message, Nokkvi, app_message::PlaybackMessage, services::mpris::MprisEvent};
 
 impl Nokkvi {
     /// Handle MPRIS events from D-Bus
@@ -71,15 +67,9 @@ impl Nokkvi {
                 // Clamp to valid 0.0-1.0 range to prevent playerctl from going above 100%
                 let volume_f32 = (volume as f32).clamp(0.0, 1.0);
                 debug!(" MPRIS: SetVolume {volume} → {volume_f32}");
-                let pct = (volume_f32 * 100.0) as u32;
-                let toast = nokkvi_data::types::toast::Toast::info_short(format!("Volume: {pct}%"))
-                    .right_aligned();
-                Task::batch([
-                    Task::done(Message::Playback(PlaybackMessage::VolumeChanged(
-                        volume_f32,
-                    ))),
-                    Task::done(Message::Toast(ToastMessage::Push(toast))),
-                ])
+                Task::done(Message::Playback(PlaybackMessage::VolumeChanged(
+                    volume_f32,
+                )))
             }
 
             MprisEvent::SetLoopStatus(status) => {

@@ -155,8 +155,6 @@ pub struct PlaybackState {
     /// Album name of the currently playing track
     pub album: String,
     pub volume: f32,
-    pub show_volume_percentage: bool,
-    pub volume_change_id: u64,
     /// Audio format suffix (e.g., "flac", "mp3", "opus")
     pub format_suffix: String,
     /// Sample rate in Hz (e.g., 44100, 48000, 96000)
@@ -189,8 +187,6 @@ impl Default for PlaybackState {
             artist: String::new(),
             album: String::new(),
             volume: 1.0,
-            show_volume_percentage: false,
-            volume_change_id: 0,
             format_suffix: String::new(),
             sample_rate: 0,
             bitrate: 0,
@@ -262,8 +258,6 @@ pub struct PlaybackModes {
 pub struct SfxState {
     pub enabled: bool,
     pub volume: f32,
-    pub show_percentage: bool,
-    pub volume_change_id: u64,
 }
 
 impl Default for SfxState {
@@ -271,8 +265,6 @@ impl Default for SfxState {
         Self {
             enabled: true,
             volume: 0.68,
-            show_percentage: false,
-            volume_change_id: 0,
         }
     }
 }

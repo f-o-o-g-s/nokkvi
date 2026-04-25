@@ -594,16 +594,10 @@ impl Nokkvi {
                     }
                     PlaybackMessage::ToggleSoundEffects => self.handle_toggle_sound_effects(),
                     PlaybackMessage::SfxVolumeChanged(vol) => self.handle_sfx_volume_changed(vol),
-                    PlaybackMessage::HideSfxVolumePercentage(id) => {
-                        self.handle_hide_sfx_volume_percentage(id)
-                    }
                     PlaybackMessage::CycleVisualization => self.handle_cycle_visualization(),
                     PlaybackMessage::ToggleCrossfade => self.handle_toggle_crossfade(),
                     PlaybackMessage::Seek(val) => self.handle_seek(val),
                     PlaybackMessage::VolumeChanged(val) => self.handle_volume_changed(val),
-                    PlaybackMessage::HideVolumePercentage(id) => {
-                        self.handle_hide_volume_percentage(id)
-                    }
                     PlaybackMessage::PrepareNextForGapless => {
                         self.handle_prepare_next_for_gapless()
                     }

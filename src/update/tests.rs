@@ -949,6 +949,55 @@ fn toast_dismiss_key_removes_matching() {
 }
 
 // ============================================================================
+// Volume Handlers (playback.rs) — toast-on-change unification
+// ============================================================================
+
+#[test]
+fn volume_changed_sets_state_and_pushes_toast() {
+    let mut app = test_app();
+    assert!(app.toast.toasts.is_empty());
+
+    let _ = app.handle_volume_changed(0.42);
+
+    assert!((app.playback.volume - 0.42).abs() < f32::EPSILON);
+    let last = app
+        .toast
+        .toasts
+        .back()
+        .expect("a volume toast should have been pushed");
+    assert_eq!(last.message, "Volume: 42%");
+    assert!(last.right_aligned, "volume toast is right-aligned");
+}
+
+#[test]
+fn sfx_volume_changed_sets_state_and_pushes_toast() {
+    let mut app = test_app();
+    assert!(app.toast.toasts.is_empty());
+
+    let _ = app.handle_sfx_volume_changed(0.7);
+
+    assert!((app.sfx.volume - 0.7).abs() < f32::EPSILON);
+    let last = app
+        .toast
+        .toasts
+        .back()
+        .expect("an sfx volume toast should have been pushed");
+    assert_eq!(last.message, "SFX Volume: 70%");
+    assert!(last.right_aligned, "sfx volume toast is right-aligned");
+}
+
+#[test]
+fn sfx_volume_changed_clamps_above_one() {
+    let mut app = test_app();
+    let _ = app.handle_sfx_volume_changed(1.5);
+    assert!((app.sfx.volume - 1.0).abs() < f32::EPSILON);
+    assert_eq!(
+        app.toast.toasts.back().map(|t| t.message.as_str()),
+        Some("SFX Volume: 100%")
+    );
+}
+
+// ============================================================================
 // View Action Handlers (components.rs)
 // ============================================================================
 

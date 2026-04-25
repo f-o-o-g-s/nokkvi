@@ -58,10 +58,8 @@ pub(crate) struct PlayerBarViewData {
     pub playback_playing: bool,
     pub playback_paused: bool, // Distinguish paused from stopped
     pub volume: f32,
-    pub show_volume_percentage: bool,
     pub has_queue: bool,
     pub is_radio: bool,
-    pub show_sfx_volume_percentage: bool,
     // Mode states
     pub is_random_mode: bool,
     pub is_repeat_mode: bool,
@@ -631,28 +629,11 @@ pub(crate) fn player_bar<'a>(
     let mode_toggles = mode_toggles_row;
 
     // Volume control - horizontal layout with conditional sfx visibility
-    // SFX slider is also hidden at narrow widths (show_sfx_slider flag)
-    //
-    // Volume percentages are shown in the tooltip label (not as separate widgets)
-    // to keep the widget tree stable during slider drags. Adding/removing/resizing
-    // percentage text widgets shifts child indices and causes Iced to reset the
-    // slider's State (including is_dragging) mid-drag. Iced's Row::push also
-    // skips void-sized children, so zero-width text tricks don't work either.
+    // SFX slider is also hidden at narrow widths (show_sfx_slider flag).
+    // Hover percentage was removed: every volume change now emits a unified
+    // toast (see handle_volume_changed / handle_sfx_volume_changed).
     let volume = data.volume;
 
-    // Tooltip labels: show percentage while adjusting, otherwise show descriptive label
-    let vol_label: String = if data.show_volume_percentage {
-        format!("{}%", (volume * 100.0) as u32)
-    } else {
-        "Volume".to_string()
-    };
-    let sfx_label: String = if data.show_sfx_volume_percentage {
-        format!("{}%", (sfx_volume * 100.0) as u32)
-    } else {
-        "SFX Volume".to_string()
-    };
-
-    // Tooltip-wrapped volume slider helpers
     let is_horizontal = crate::theme::is_horizontal_volume();
     let stacked = is_horizontal && sound_effects_enabled && show_sfx_slider;
     // When both horizontal sliders stack, size each so combined height matches buttons.
@@ -664,13 +645,7 @@ pub(crate) fn player_bar<'a>(
     if is_horizontal {
         vol = vol.thickness(stacked_thickness);
     }
-    let vol_slider = tooltip(
-        vol,
-        container(text(vol_label).size(11.0).font(theme::ui_font())).padding(4),
-        tooltip::Position::Top,
-    )
-    .gap(4)
-    .style(theme::container_tooltip);
+    let vol_slider: Element<'_, PlayerBarMessage> = vol.into();
 
     let mut sfx = widgets::volume_slider(sfx_volume, PlayerBarMessage::SfxVolumeChanged)
         .variant(widgets::SliderVariant::Sfx)
@@ -678,13 +653,7 @@ pub(crate) fn player_bar<'a>(
     if stacked {
         sfx = sfx.thickness(stacked_thickness);
     }
-    let sfx_slider = tooltip(
-        sfx,
-        container(text(sfx_label).size(11.0).font(theme::ui_font())).padding(4),
-        tooltip::Position::Top,
-    )
-    .gap(4)
-    .style(theme::container_tooltip);
+    let sfx_slider: Element<'_, PlayerBarMessage> = sfx.into();
 
     let volume_control: Element<'_, PlayerBarMessage> = if is_horizontal {
         // Horizontal mode: stack sliders vertically (SFX on top, volume below),

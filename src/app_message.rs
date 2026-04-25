@@ -105,10 +105,6 @@ pub enum PlaybackMessage {
     ToggleCrossfade,
     Seek(f32),
     VolumeChanged(f32),
-    /// Timer-triggered message with ID to hide volume %
-    HideVolumePercentage(u64),
-    /// Timer-triggered message with ID to hide SFX volume %
-    HideSfxVolumePercentage(u64),
     /// Trigger gapless preparation when track is ~80% complete
     PrepareNextForGapless,
     /// Persisted player settings loaded from redb
