@@ -40,11 +40,11 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
             meta!(
                 "general.nav_layout",
                 "Navigation Layout",
-                "Top bar tabs or vertical sidebar"
+                "Top bar tabs, vertical sidebar, or no navigation chrome"
             ),
             data.nav_layout,
             "Top",
-            vec!["Top", "Side"],
+            vec!["Top", "Side", "None"],
         ),
         SettingItem::enum_val(
             meta!(

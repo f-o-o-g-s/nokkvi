@@ -39,6 +39,8 @@ impl Nokkvi {
             rounded_mode: crate::theme::is_rounded_mode(),
             nav_layout: if crate::theme::is_side_nav() {
                 "Side"
+            } else if crate::theme::is_none_nav() {
+                "None"
             } else {
                 "Top"
             },

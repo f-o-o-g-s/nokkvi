@@ -605,8 +605,10 @@ pub(crate) fn player_bar<'a>(
         ));
     }
 
-    // Application menu — always visible in side nav mode
-    if crate::theme::is_side_nav() {
+    // Application menu — always visible when there is no top nav bar
+    // (i.e. in side and none layouts), since otherwise the user has no way to
+    // reach Settings/About/Quit.
+    if !crate::theme::is_top_nav() {
         use crate::widgets::hamburger_menu::{HamburgerMenu, MenuAction};
         let is_light = data.is_light_mode;
         let sfx_on = sound_effects_enabled;

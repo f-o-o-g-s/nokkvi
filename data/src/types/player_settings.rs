@@ -146,6 +146,8 @@ pub enum NavLayout {
     Top,
     /// Navigation tabs in a vertical sidebar on the left
     Side,
+    /// No navigation chrome — only the active page and player bar are rendered
+    None,
 }
 
 impl NavLayout {
@@ -153,6 +155,7 @@ impl NavLayout {
     pub fn from_label(label: &str) -> Self {
         match label {
             "Side" => Self::Side,
+            "None" => Self::None,
             _ => Self::Top,
         }
     }
@@ -162,6 +165,7 @@ impl NavLayout {
         match self {
             Self::Top => "Top",
             Self::Side => "Side",
+            Self::None => "None",
         }
     }
 }
@@ -171,6 +175,7 @@ impl std::fmt::Display for NavLayout {
         match self {
             Self::Top => write!(f, "top"),
             Self::Side => write!(f, "side"),
+            Self::None => write!(f, "none"),
         }
     }
 }
@@ -686,7 +691,7 @@ mod tests {
 
     #[test]
     fn nav_layout_serde_roundtrip() {
-        let layouts = [NavLayout::Top, NavLayout::Side];
+        let layouts = [NavLayout::Top, NavLayout::Side, NavLayout::None];
         for layout in layouts {
             let json = serde_json::to_string(&layout).unwrap();
             let deserialized: NavLayout = serde_json::from_str(&json).unwrap();
@@ -696,7 +701,7 @@ mod tests {
 
     #[test]
     fn nav_layout_label_roundtrip() {
-        for layout in [NavLayout::Top, NavLayout::Side] {
+        for layout in [NavLayout::Top, NavLayout::Side, NavLayout::None] {
             assert_eq!(NavLayout::from_label(layout.as_label()), layout);
         }
     }

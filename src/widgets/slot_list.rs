@@ -228,39 +228,39 @@ use super::player_bar::player_bar_height;
 
 /// Total height of chrome elements for views with headers.
 ///
-/// In top nav mode: nav_bar(32) + player_bar(56+) + view_header(48)
-/// In side nav mode: player_bar(56+) + view_header(48) (no top bar)
-///   + TopBar strip (21+1) when TrackInfoDisplay::TopBar is active
+/// In top nav mode: nav_bar(32) + player_bar(56+) + view_header(48).
+/// In side and none nav modes: player_bar(56+) + view_header(48) (no top bar),
+/// plus the TopBar strip (21+1) when TrackInfoDisplay::TopBar is active.
 pub(crate) fn chrome_height_with_header() -> f32 {
-    if crate::theme::is_side_nav() {
-        // Side mode: no top nav bar, but TopBar track info strip adds height above content
+    if crate::theme::is_top_nav() {
+        NAV_BAR_HEIGHT + player_bar_height() + VIEW_HEADER_HEIGHT
+    } else {
+        // Side or None mode: no top nav bar, but TopBar track info strip may add height
         let top_bar_strip = if crate::theme::show_top_bar_strip() {
             super::track_info_strip::STRIP_HEIGHT_WITH_SEPARATOR
         } else {
             0.0
         };
         player_bar_height() + VIEW_HEADER_HEIGHT + top_bar_strip
-    } else {
-        NAV_BAR_HEIGHT + player_bar_height() + VIEW_HEADER_HEIGHT
     }
 }
 
 /// Y-coordinate where the queue slot list begins in window space.
 ///
-/// Encapsulates the `is_side_nav` / `show_top_bar_strip` / nav-bar branching
-/// that was previously inlined in `app_view.rs` and `cross_pane_drag.rs`.
+/// Encapsulates the nav-layout / `show_top_bar_strip` branching that was
+/// previously inlined in `app_view.rs` and `cross_pane_drag.rs`.
 ///
 /// `edit_bar_height`: extra height from playlist edit/context bars (typically 0 or 32).
 pub(crate) fn queue_slot_list_start_y(edit_bar_height: f32) -> f32 {
-    if crate::theme::is_side_nav() {
+    if crate::theme::is_top_nav() {
+        NAV_BAR_HEIGHT + VIEW_HEADER_HEIGHT + edit_bar_height
+    } else {
         let top_strip = if crate::theme::show_top_bar_strip() {
             super::track_info_strip::STRIP_HEIGHT_WITH_SEPARATOR
         } else {
             0.0
         };
         top_strip + VIEW_HEADER_HEIGHT + edit_bar_height
-    } else {
-        NAV_BAR_HEIGHT + VIEW_HEADER_HEIGHT + edit_bar_height
     }
 }
 

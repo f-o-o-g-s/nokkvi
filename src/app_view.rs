@@ -164,28 +164,18 @@ impl Nokkvi {
                 }
             });
 
-        // Base layout: nav bar + content + player bar
-        // In Side mode, add vertical sidebar next to content
+        // Base layout:
+        //   Top mode:  nav_bar  + content + player_bar
+        //   Side mode: [strip] + (sidebar + content) + player_bar
+        //   None mode: [strip] +  content            + player_bar  (minimalist — no nav chrome)
 
-        let base_layer: Element<'_, Message> = if crate::theme::is_side_nav() {
-            let side_nav_view = match self.current_view {
-                View::Queue | View::Settings => widgets::NavView::Queue,
-                View::Albums => widgets::NavView::Albums,
-                View::Artists => widgets::NavView::Artists,
-                View::Genres => widgets::NavView::Genres,
-                View::Songs => widgets::NavView::Songs,
-                View::Playlists => widgets::NavView::Playlists,
-                View::Radios => widgets::NavView::Radios,
-            };
-            let side_data = widgets::SideNavBarData {
-                current_view: side_nav_view,
-                settings_open: self.current_view == View::Settings,
-            };
-
-            // Build the outer column: optionally top bar strip → sidebar+content row → player bar
+        let base_layer: Element<'_, Message> = if crate::theme::is_side_nav()
+            || crate::theme::is_none_nav()
+        {
+            // Build the outer column: optionally top bar strip → main row/content → player bar
             let mut outer = iced::widget::Column::new();
 
-            // Top bar info strip (full window width, above sidebar)
+            // Top bar info strip (full window width, above sidebar/content)
             if crate::theme::show_top_bar_strip() {
                 let strip = widgets::track_info_strip::track_info_strip(
                     &strip_data,
@@ -215,11 +205,28 @@ impl Nokkvi {
                 outer = outer.push(crate::theme::horizontal_separator::<Message>(1.0));
             }
 
-            // Sidebar + content row
-            outer = outer.push(iced::widget::row![
-                widgets::side_nav_bar(side_data).map(map_nav_bar_message),
-                self.main_content(),
-            ]);
+            if crate::theme::is_side_nav() {
+                let side_nav_view = match self.current_view {
+                    View::Queue | View::Settings => widgets::NavView::Queue,
+                    View::Albums => widgets::NavView::Albums,
+                    View::Artists => widgets::NavView::Artists,
+                    View::Genres => widgets::NavView::Genres,
+                    View::Songs => widgets::NavView::Songs,
+                    View::Playlists => widgets::NavView::Playlists,
+                    View::Radios => widgets::NavView::Radios,
+                };
+                let side_data = widgets::SideNavBarData {
+                    current_view: side_nav_view,
+                    settings_open: self.current_view == View::Settings,
+                };
+                outer = outer.push(iced::widget::row![
+                    widgets::side_nav_bar(side_data).map(map_nav_bar_message),
+                    self.main_content(),
+                ]);
+            } else {
+                // None mode: content fills the full width — no sidebar
+                outer = outer.push(self.main_content());
+            }
 
             // Player bar
             outer = outer

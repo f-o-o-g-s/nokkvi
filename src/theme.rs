@@ -50,7 +50,7 @@ struct UiModeFlags {
     rounded_mode: AtomicBool,
     /// Track info display mode: 0 = Off, 1 = PlayerBar, 2 = TopBar
     track_info_display: AtomicU8,
-    /// Navigation layout: 0 = Top, 1 = Side
+    /// Navigation layout: 0 = Top, 1 = Side, 2 = None
     nav_layout: AtomicU8,
     /// Navigation display: 0 = TextOnly, 1 = TextAndIcons, 2 = IconsOnly
     nav_display_mode: AtomicU8,
@@ -295,7 +295,7 @@ pub(crate) fn show_player_bar_strip() -> bool {
 /// **Single source of truth** — use this instead of ad-hoc compound checks.
 #[inline]
 pub(crate) fn show_top_bar_strip() -> bool {
-    track_info_display() == TrackInfoDisplay::TopBar && is_side_nav()
+    track_info_display() == TrackInfoDisplay::TopBar && !is_top_nav()
 }
 
 // ============================================================================
@@ -310,12 +310,25 @@ pub(crate) fn is_side_nav() -> bool {
     UI_MODE.nav_layout.load(Ordering::Relaxed) == 1
 }
 
+/// Returns true if the minimalist (no-chrome) layout is active
+#[inline]
+pub(crate) fn is_none_nav() -> bool {
+    UI_MODE.nav_layout.load(Ordering::Relaxed) == 2
+}
+
+/// Returns true if the top-bar navigation layout is active (the default)
+#[inline]
+pub(crate) fn is_top_nav() -> bool {
+    UI_MODE.nav_layout.load(Ordering::Relaxed) == 0
+}
+
 /// Set the navigation layout from a NavLayout enum value
 #[inline]
 pub(crate) fn set_nav_layout(layout: NavLayout) {
     let val = match layout {
         NavLayout::Top => 0,
         NavLayout::Side => 1,
+        NavLayout::None => 2,
     };
     UI_MODE.nav_layout.store(val, Ordering::Relaxed);
     debug!(" Nav layout changed: nav_layout={}", layout);
