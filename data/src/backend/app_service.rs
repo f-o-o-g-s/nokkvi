@@ -61,11 +61,16 @@ impl AppService {
 
     /// Remove the pre-B legacy artwork disk cache subdirectories on first launch
     /// after the migration. Best-effort; failures are logged and ignored. The
-    /// new cacache directory at `cache/http/` is populated lazily as views render.
+    /// artwork pipeline is now server-only, so the entire `cache/` directory is
+    /// removed once its known legacy subdirs are gone.
     fn cleanup_pre_b_artwork_cache() {
-        let Ok(cache_dir) = crate::utils::paths::get_cache_dir() else {
+        let Ok(app_dir) = crate::utils::paths::get_app_dir() else {
             return;
         };
+        let cache_dir = app_dir.join("cache");
+        if !cache_dir.exists() {
+            return;
+        }
         for legacy in [
             "artwork",
             "artist_artwork",
@@ -87,6 +92,19 @@ impl AppService {
                     }
                 }
             }
+        }
+        // Remove the now-unused cache parent. `remove_dir` is non-recursive,
+        // so unknown user files (if any) are preserved and the directory stays.
+        match std::fs::remove_dir(&cache_dir) {
+            Ok(()) => tracing::info!(
+                " [migration] removed empty cache directory: {}",
+                cache_dir.display()
+            ),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => tracing::debug!(
+                " [migration] cache directory not removed ({}): {e}",
+                cache_dir.display()
+            ),
         }
     }
 
