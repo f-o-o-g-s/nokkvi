@@ -233,10 +233,6 @@ pub(crate) enum SettingsAction {
         key: String,
         value: items::SettingValue,
     },
-    /// Clear and rebuild non-artist artwork cache (albums, genres, playlists)
-    RebuildArtworkCache,
-    /// Clear and rebuild artist artwork cache (Last.fm lookups)
-    RebuildArtistCache,
     /// Logout: clear session and return to login screen
     Logout,
     /// Open the TextInputDialog to edit a free-text general setting
@@ -647,15 +643,9 @@ impl SettingsPage {
                                         return SettingsAction::ApplyPreset(idx);
                                     }
                                 }
-                                // Action button sentinels (cache rebuild, etc.)
+                                // Action button sentinels
                                 k if items::is_action_key(k) => {
                                     return match k {
-                                        "__action_rebuild_artwork" => {
-                                            SettingsAction::RebuildArtworkCache
-                                        }
-                                        "__action_rebuild_artist" => {
-                                            SettingsAction::RebuildArtistCache
-                                        }
                                         "__action_logout" => SettingsAction::Logout,
                                         _ => SettingsAction::None,
                                     };

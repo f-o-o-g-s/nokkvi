@@ -159,7 +159,10 @@ impl Nokkvi {
             // Navigation
             // -----------------------------------------------------------------
             Message::SwitchView(view) => self.handle_switch_view(view),
-            Message::LibraryChanged => self.handle_library_changed(),
+            Message::LibraryChanged {
+                album_ids,
+                is_wildcard,
+            } => self.handle_library_changed(album_ids, is_wildcard),
             Message::NavigateAndFilter(view, filter) => {
                 self.handle_navigate_and_filter(view, filter)
             }
@@ -379,13 +382,14 @@ impl Nokkvi {
                         self.artwork.refresh_dominant_colors_snapshot();
                         Task::none()
                     }
-                    ArtworkMessage::StartPrefetch => self.handle_start_artwork_prefetch(None),
-                    ArtworkMessage::StartArtistPrefetch => self.handle_start_artist_prefetch(None),
                     ArtworkMessage::RefreshAlbumArtwork(album_id) => {
                         self.handle_refresh_album_artwork(album_id)
                     }
-                    ArtworkMessage::RefreshComplete(album_id, thumb, large) => {
-                        self.handle_refresh_complete(album_id, thumb, large)
+                    ArtworkMessage::RefreshAlbumArtworkSilent(album_id) => {
+                        self.handle_refresh_album_artwork_silent(album_id)
+                    }
+                    ArtworkMessage::RefreshComplete(album_id, thumb, large, silent) => {
+                        self.handle_refresh_complete(album_id, thumb, large, silent)
                     }
                     // Collage artwork pipeline (genre / playlist)
                     ArtworkMessage::LoadCollage(target, id, server_url, cred, album_ids) => {

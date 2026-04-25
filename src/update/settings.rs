@@ -273,12 +273,6 @@ impl Nokkvi {
             }
 
             // System actions
-            crate::views::SettingsAction::RebuildArtworkCache => {
-                self.handle_settings_rebuild_artwork()
-            }
-            crate::views::SettingsAction::RebuildArtistCache => {
-                self.handle_settings_rebuild_artist()
-            }
             crate::views::SettingsAction::Logout => self.handle_settings_logout(),
             crate::views::SettingsAction::OpenTextInput {
                 key,
@@ -907,78 +901,6 @@ impl Nokkvi {
     // =========================================================================
     // System Actions
     // =========================================================================
-
-    fn handle_settings_rebuild_artwork(&mut self) -> Task<Message> {
-        self.sfx_engine.play(nokkvi_data::audio::SfxType::Enter);
-        // Clear in-memory artwork handles so they get re-fetched
-        self.artwork.album_art.clear();
-        self.artwork.large_artwork.clear();
-        self.artwork.genre.mini.clear();
-        self.artwork.genre.collage.clear();
-        self.artwork.genre.pending.clear();
-        self.artwork.playlist.mini.clear();
-        self.artwork.playlist.collage.clear();
-        self.artwork.playlist.pending.clear();
-        self.artwork.album_prefetch_triggered = false;
-        // Clear genre/playlist disk caches
-        if let Some(ref cache) = self.artwork.genre_disk_cache {
-            let removed = cache.clear();
-            tracing::info!(" [SETTINGS] Cleared {removed} files from genre artwork cache");
-        }
-        if let Some(ref cache) = self.artwork.playlist_disk_cache {
-            let removed = cache.clear();
-            tracing::info!(" [SETTINGS] Cleared {removed} files from playlist artwork cache");
-        }
-        // Create progress handle for album artwork rebuild
-        let album_progress =
-            nokkvi_data::types::progress::ProgressHandle::new("Rebuilding artwork", 0);
-        self.active_progress.push(album_progress.clone());
-        self.toast.push(nokkvi_data::types::toast::Toast::keyed(
-            album_progress.toast_key(),
-            "Rebuilding artwork…",
-            nokkvi_data::types::toast::ToastLevel::Info,
-        ));
-        // Clear album disk cache + in-memory LRU via AlbumsService
-        let artwork_size = self.artwork_resolution.to_size();
-        let album_task = self.shell_task(
-            move |shell| async move {
-                let albums_vm = shell.albums().clone();
-                let removed = albums_vm.clear_and_reset_cache().await;
-                tracing::info!(" [SETTINGS] Cleared {removed} files from album artwork cache");
-                albums_vm
-                    .start_artwork_prefetch(Some(album_progress), artwork_size)
-                    .await;
-                Ok::<(), anyhow::Error>(())
-            },
-            |_result| Message::NoOp,
-        );
-        // Also rebuild artist artwork cache (reuse dedicated handler to avoid duplication
-        // and ensure artist disk cache is actually cleared — was previously missed)
-        let artist_task = self.handle_settings_rebuild_artist();
-        Task::batch([album_task, artist_task])
-    }
-
-    fn handle_settings_rebuild_artist(&mut self) -> Task<Message> {
-        self.sfx_engine.play(nokkvi_data::audio::SfxType::Enter);
-        if let Some(ref cache) = self.artwork.artist_disk_cache {
-            let removed = cache.clear();
-            tracing::info!(" [SETTINGS] Cleared {removed} files from artist artwork cache");
-        }
-        self.artwork.artist_prefetch_triggered = false;
-        let artist_progress =
-            nokkvi_data::types::progress::ProgressHandle::new("Rebuilding artist artwork", 0);
-        self.active_progress.push(artist_progress.clone());
-        self.toast.push(nokkvi_data::types::toast::Toast::keyed(
-            artist_progress.toast_key(),
-            "Rebuilding artist artwork…",
-            nokkvi_data::types::toast::ToastLevel::Info,
-        ));
-        if self.library.artists.is_empty() {
-            Task::done(Message::LoadArtists)
-        } else {
-            self.handle_start_artist_prefetch(Some(artist_progress))
-        }
-    }
 
     fn handle_settings_logout(&mut self) -> Task<Message> {
         tracing::info!(" [SETTINGS] Logout requested");

@@ -753,10 +753,10 @@ mod tests {
 
         assert_eq!(
             count_headers(&entries),
-            4,
-            "Expected 4 sections: Application, Mouse Behavior, Account, Cache"
+            3,
+            "Expected 3 sections: Application, Mouse Behavior, Account"
         );
-        assert_eq!(count_items(&entries), 14, "Expected 14 items");
+        assert_eq!(count_items(&entries), 12, "Expected 12 items");
     }
 
     #[test]

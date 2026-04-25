@@ -73,8 +73,8 @@ where
             let vm = albums_vm.clone();
             Task::perform(
                 async move {
-                    let path = vm.get_artwork_cache_path(&url, Some(80)).await;
-                    (id, path.map(image::Handle::from_path))
+                    let bytes = vm.fetch_artwork_by_url(&url).await.ok();
+                    (id, bytes.map(image::Handle::from_bytes))
                 },
                 |(id, handle)| Message::Artwork(ArtworkMessage::Loaded(id, handle)),
             )
@@ -117,15 +117,8 @@ pub(super) fn prefetch_song_artwork_tasks(
             let id = album_id;
             Task::perform(
                 async move {
-                    let (url, cred) = vm.get_server_config().await;
-                    let artwork_url = nokkvi_data::utils::artwork_url::build_cover_art_url(
-                        &id,
-                        &url,
-                        &cred,
-                        Some(80),
-                    );
-                    let path = vm.get_artwork_cache_path(&artwork_url, Some(80)).await;
-                    (id, path.map(image::Handle::from_path))
+                    let bytes = vm.fetch_album_artwork(&id, Some(80), None).await.ok();
+                    (id, bytes.map(image::Handle::from_bytes))
                 },
                 |(id, handle)| {
                     Message::Artwork(crate::app_message::ArtworkMessage::SongMiniLoaded(
@@ -170,15 +163,8 @@ pub(crate) fn prefetch_raw_song_artwork_tasks(
             let id = album_id;
             Task::perform(
                 async move {
-                    let (url, cred) = vm.get_server_config().await;
-                    let artwork_url = nokkvi_data::utils::artwork_url::build_cover_art_url(
-                        &id,
-                        &url,
-                        &cred,
-                        Some(80),
-                    );
-                    let path = vm.get_artwork_cache_path(&artwork_url, Some(80)).await;
-                    (id, path.map(image::Handle::from_path))
+                    let bytes = vm.fetch_album_artwork(&id, Some(80), None).await.ok();
+                    (id, bytes.map(image::Handle::from_bytes))
                 },
                 |(id, handle)| {
                     Message::Artwork(crate::app_message::ArtworkMessage::SongMiniLoaded(

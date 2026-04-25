@@ -14,6 +14,10 @@ use lru::LruCache;
 /// Maximum entries in the large artwork LRU cache.
 /// Each 500px image handle is ~80KB, so 200 entries ≈ 16MB cap.
 const LARGE_ARTWORK_CACHE_CAPACITY: usize = 200;
+/// Capacity for the mini-artwork (`album_art`) LRU. Sized roughly 6× a typical
+/// 80px slot list viewport so recently-visited slot regions stay warm but
+/// memory stays bounded as the user scrolls a large library.
+const MINI_ARTWORK_CACHE_CAPACITY: usize = 512;
 
 // ============================================================================
 // Pane Focus (split-view playlist editing)
@@ -306,8 +310,13 @@ pub struct CollageArtworkCache {
 /// Artwork caches and loading state
 #[derive(Clone)]
 pub struct ArtworkState {
-    /// Mini artwork cache (album_id -> Handle)
-    pub album_art: HashMap<String, image::Handle>,
+    /// Mini artwork cache (album_id -> Handle), bounded LRU.
+    /// Without a persistent disk cache, this is the only thing keeping recently-
+    /// rendered thumbnails warm. Capacity must stay above the typical viewport
+    /// + scrollback or slot lists thrash.
+    pub album_art: LruCache<String, image::Handle>,
+    /// Read-only snapshot of `album_art` for view() borrowing (refreshed after LRU mutations).
+    pub album_art_snapshot: HashMap<String, image::Handle>,
     /// Large artwork cache for detail views (LRU-bounded)
     pub large_artwork: LruCache<String, image::Handle>,
     /// Read-only snapshot of large_artwork for view() borrowing (refreshed after LRU mutations)
@@ -322,16 +331,6 @@ pub struct ArtworkState {
     pub playlist: CollageArtworkCache,
     /// Currently loading large artwork album ID
     pub loading_large_artwork: Option<String>,
-    /// Whether album artwork prefetch has been triggered
-    pub album_prefetch_triggered: bool,
-    /// Whether artist artwork prefetch has been triggered
-    pub artist_prefetch_triggered: bool,
-    /// Disk cache for artist artwork
-    pub artist_disk_cache: Option<nokkvi_data::utils::cache::DiskCache>,
-    /// Disk cache for genre mini artwork (300px covers)
-    pub genre_disk_cache: Option<nokkvi_data::utils::cache::DiskCache>,
-    /// Disk cache for playlist mini artwork (300px covers)
-    pub playlist_disk_cache: Option<nokkvi_data::utils::cache::DiskCache>,
 }
 
 impl ArtworkState {
@@ -340,6 +339,16 @@ impl ArtworkState {
     pub fn refresh_large_artwork_snapshot(&mut self) {
         self.large_artwork_snapshot = self
             .large_artwork
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+    }
+
+    /// Refresh the read-only snapshot of mini album art from the LRU cache.
+    /// Call after any mutation to `album_art` (put/get/pop).
+    pub fn refresh_album_art_snapshot(&mut self) {
+        self.album_art_snapshot = self
+            .album_art
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
@@ -358,7 +367,10 @@ impl ArtworkState {
 impl Default for ArtworkState {
     fn default() -> Self {
         Self {
-            album_art: HashMap::new(),
+            album_art: LruCache::new(
+                NonZeroUsize::new(MINI_ARTWORK_CACHE_CAPACITY).expect("capacity must be > 0"),
+            ),
+            album_art_snapshot: HashMap::new(),
             large_artwork: LruCache::new(
                 NonZeroUsize::new(LARGE_ARTWORK_CACHE_CAPACITY).expect("capacity must be > 0"),
             ),
@@ -370,11 +382,6 @@ impl Default for ArtworkState {
             genre: CollageArtworkCache::default(),
             playlist: CollageArtworkCache::default(),
             loading_large_artwork: None,
-            album_prefetch_triggered: false,
-            artist_prefetch_triggered: false,
-            artist_disk_cache: None,
-            genre_disk_cache: None,
-            playlist_disk_cache: None,
         }
     }
 }
@@ -383,6 +390,7 @@ impl std::fmt::Debug for ArtworkState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ArtworkState")
             .field("album_art", &self.album_art.len())
+            .field("album_art_snapshot", &self.album_art_snapshot.len())
             .field("large_artwork", &self.large_artwork.len())
             .field("large_artwork_snapshot", &self.large_artwork_snapshot.len())
             .field("album_dominant_colors", &self.album_dominant_colors.len())
@@ -393,11 +401,6 @@ impl std::fmt::Debug for ArtworkState {
             .field("genre", &self.genre)
             .field("playlist", &self.playlist)
             .field("loading_large_artwork", &self.loading_large_artwork)
-            .field("album_prefetch_triggered", &self.album_prefetch_triggered)
-            .field("artist_prefetch_triggered", &self.artist_prefetch_triggered)
-            .field("artist_disk_cache", &self.artist_disk_cache.is_some())
-            .field("genre_disk_cache", &self.genre_disk_cache.is_some())
-            .field("playlist_disk_cache", &self.playlist_disk_cache.is_some())
             .finish()
     }
 }

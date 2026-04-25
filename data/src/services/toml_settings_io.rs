@@ -321,8 +321,10 @@ volume_normalization = true
     fn test_settings_roundtrip_verbose_config_flag() {
         use crate::types::toml_settings::TomlSettings;
 
-        let mut settings = TomlSettings::default();
-        settings.verbose_config = true;
+        let settings = TomlSettings {
+            verbose_config: true,
+            ..Default::default()
+        };
 
         // Serialize → parse → verify flag survives
         let toml_str = toml::to_string_pretty(&settings).unwrap();

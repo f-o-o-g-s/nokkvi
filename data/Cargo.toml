@@ -13,7 +13,6 @@ chrono = "0.4.44"
 color-thief = "0.2.2"
 directories = "6.0.0"
 image = "0.25.10"
-md5 = "0.8.0"
 rand = "0.10"
 reqwest = { version = "0.13.2", features = ["json", "blocking", "stream"] }
 serde = { version = "1.0.228", features = ["derive"] }
@@ -32,7 +31,6 @@ ringbuf = "0.4"
 rustfft = "6"
 redb = "3.1.1"
 httpdate = "1.0.3"
-filetime = "0.2.27"
 font-kit = "0.14"
 parking_lot = "0.12.5"
 bincode-next = { version = "2.1", features = ["serde"] }

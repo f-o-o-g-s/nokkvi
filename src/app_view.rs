@@ -603,7 +603,7 @@ impl Nokkvi {
 
             let queue_view_data = views::QueueViewData {
                 queue_songs: filtered_queue_songs,
-                album_art: &self.artwork.album_art,
+                album_art: &self.artwork.album_art_snapshot,
                 large_artwork,
                 window_width: self.window.width * 0.55,
                 window_height: self.window.height,
@@ -684,7 +684,7 @@ impl Nokkvi {
                     views::BrowsingView::Albums => {
                         let view_data = views::AlbumsViewData {
                             albums: &self.library.albums,
-                            album_art: &self.artwork.album_art,
+                            album_art: &self.artwork.album_art_snapshot,
                             large_artwork,
                             dominant_colors: &self.artwork.album_dominant_colors_snapshot,
                             window_width: self.window.width * 0.45,
@@ -700,7 +700,7 @@ impl Nokkvi {
                     views::BrowsingView::Songs => {
                         let view_data = views::SongsViewData {
                             songs: &self.library.songs,
-                            album_art: &self.artwork.album_art,
+                            album_art: &self.artwork.album_art_snapshot,
                             large_artwork,
                             dominant_colors: &self.artwork.album_dominant_colors_snapshot,
                             window_width: self.window.width * 0.45,
@@ -716,7 +716,7 @@ impl Nokkvi {
                     views::BrowsingView::Artists => {
                         let view_data = views::ArtistsViewData {
                             artists: &self.library.artists,
-                            artist_art: &self.artwork.album_art,
+                            artist_art: &self.artwork.album_art_snapshot,
                             large_artwork,
                             dominant_colors: &self.artwork.album_dominant_colors_snapshot,
                             window_width: self.window.width * 0.45,
@@ -751,7 +751,7 @@ impl Nokkvi {
                         };
                         let view_data = views::SimilarViewData {
                             songs,
-                            album_art: &self.artwork.album_art,
+                            album_art: &self.artwork.album_art_snapshot,
                             large_artwork,
                             window_width: self.window.width * 0.45,
                             window_height: browser_height,
@@ -788,7 +788,7 @@ impl Nokkvi {
             View::Albums => {
                 let view_data = views::AlbumsViewData {
                     albums: &self.library.albums,
-                    album_art: &self.artwork.album_art,
+                    album_art: &self.artwork.album_art_snapshot,
                     large_artwork,
                     dominant_colors: &self.artwork.album_dominant_colors_snapshot,
                     window_width: self.window.width,
@@ -806,7 +806,7 @@ impl Nokkvi {
                 let current_playing_song_id = self.scrobble.current_song_id.clone();
                 let view_data = views::QueueViewData {
                     queue_songs: filtered_queue_songs,
-                    album_art: &self.artwork.album_art,
+                    album_art: &self.artwork.album_art_snapshot,
                     large_artwork,
                     window_width: self.window.width,
                     window_height: self.window.height,
@@ -829,7 +829,7 @@ impl Nokkvi {
             View::Artists => {
                 let view_data = views::ArtistsViewData {
                     artists: &self.library.artists,
-                    artist_art: &self.artwork.album_art, // Reuse album art cache for artist images
+                    artist_art: &self.artwork.album_art_snapshot, // Reuse album art cache for artist images
                     large_artwork,
                     dominant_colors: &self.artwork.album_dominant_colors_snapshot,
                     window_width: self.window.width,
@@ -845,7 +845,7 @@ impl Nokkvi {
             View::Songs => {
                 let view_data = views::SongsViewData {
                     songs: &self.library.songs,
-                    album_art: &self.artwork.album_art,
+                    album_art: &self.artwork.album_art_snapshot,
                     large_artwork,
                     dominant_colors: &self.artwork.album_dominant_colors_snapshot,
                     window_width: self.window.width,

@@ -308,12 +308,7 @@ impl Default for Nokkvi {
             modes: crate::state::PlaybackModes::default(),
             sfx: crate::state::SfxState::default(),
             engine: crate::state::EngineState::default(),
-            artwork: crate::state::ArtworkState {
-                artist_disk_cache: nokkvi_data::utils::cache::DiskCache::new("artist_artwork"),
-                genre_disk_cache: nokkvi_data::utils::cache::DiskCache::new("genre_artwork"),
-                playlist_disk_cache: nokkvi_data::utils::cache::DiskCache::new("playlist_artwork"),
-                ..Default::default()
-            },
+            artwork: crate::state::ArtworkState::default(),
             window: crate::state::WindowState::default(),
             // Misc state
             last_queue_current_index: None,
@@ -475,7 +470,13 @@ impl Nokkvi {
 
         let sse_sub =
             iced::Subscription::run(services::navidrome_sse::run).map(|event| match event {
-                services::navidrome_sse::SseEvent::LibraryChanged => Message::LibraryChanged,
+                services::navidrome_sse::SseEvent::LibraryChanged {
+                    album_ids,
+                    is_wildcard,
+                } => Message::LibraryChanged {
+                    album_ids,
+                    is_wildcard,
+                },
             });
 
         let task_status_sub = iced::Subscription::run(services::task_subscription::run)

@@ -42,7 +42,8 @@ impl Nokkvi {
                     let total = self.library.queue_songs.len();
                     if total > 0 {
                         // Mini artwork prefetch using canonical helper
-                        let cached: HashSet<&String> = self.artwork.album_art.keys().collect();
+                        let cached: HashSet<&String> =
+                            self.artwork.album_art.iter().map(|(k, _)| k).collect();
                         tasks.extend(prefetch_album_artwork_tasks(
                             &self.queue_page.common.slot_list,
                             &self.library.queue_songs,
@@ -582,7 +583,7 @@ impl Nokkvi {
             && let Some(shell) = &self.app_service
         {
             // Prefetch mini artwork using canonical helper
-            let cached: HashSet<&String> = self.artwork.album_art.keys().collect();
+            let cached: HashSet<&String> = self.artwork.album_art.iter().map(|(k, _)| k).collect();
             let prefetch_tasks = prefetch_album_artwork_tasks(
                 &self.queue_page.common.slot_list,
                 &filtered_queue,
@@ -633,7 +634,7 @@ impl Nokkvi {
         if total > 0
             && let Some(shell) = &self.app_service
         {
-            let cached: HashSet<&String> = self.artwork.album_art.keys().collect();
+            let cached: HashSet<&String> = self.artwork.album_art.iter().map(|(k, _)| k).collect();
             tasks.extend(prefetch_album_artwork_tasks(
                 &self.queue_page.common.slot_list,
                 items,
@@ -672,7 +673,7 @@ impl Nokkvi {
         if total > 0
             && let Some(shell) = &self.app_service
         {
-            let cached: HashSet<&String> = self.artwork.album_art.keys().collect();
+            let cached: HashSet<&String> = self.artwork.album_art.iter().map(|(k, _)| k).collect();
             tasks.extend(prefetch_album_artwork_tasks(
                 &self.queue_page.common.slot_list,
                 &filtered,

@@ -1,20 +1,20 @@
-//! Albums service — data loading, artwork caching, and UI projection
+//! Albums service — data loading, on-demand artwork fetching, and UI projection
 //!
-//! `AlbumsService` loads albums via the Navidrome API, manages a two-tier
-//! artwork cache (in-memory LRU + on-disk), and projects `Album` models
-//! into `AlbumUIViewData` for the view layer.
+//! `AlbumsService` loads albums via the Navidrome API and projects `Album`
+//! models into `AlbumUIViewData` for the view layer. Artwork is fetched
+//! on-demand from Navidrome (no client-side persistent cache); UI Handle
+//! maps in `ArtworkState` provide session-scoped render caching.
 
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use anyhow::Result;
-use tokio::sync::{Mutex, OnceCell};
+use tokio::sync::OnceCell;
 use tracing::debug;
 
 use crate::{
     backend::auth::AuthGateway,
     services::api::albums::AlbumsApiService,
     types::{album::Album, reactive::ReactiveInt},
-    utils::cache::DiskCache,
 };
 
 /// UI-specific view data for albums
@@ -202,10 +202,11 @@ pub struct AlbumsService {
     // Reactive properties
     pub total_count: ReactiveInt,
 
-    // Internal state for caching
-    artwork_cache: Arc<Mutex<lru::LruCache<String, Vec<u8>>>>,
-    disk_cache: Arc<Option<DiskCache>>,
-    prefetch_started: Arc<std::sync::atomic::AtomicBool>,
+    /// Bare HTTP client for `getCoverArt`. No on-disk cache — every fetch goes
+    /// straight to Navidrome (which has its own `ImageCacheSize` cache). Session-
+    /// scoped Handle reuse is provided by the UI's `album_art` / `large_artwork`
+    /// maps in `ArtworkState`.
+    artwork_client: Arc<reqwest::Client>,
 
     // Dependencies
     auth_gateway: Arc<OnceCell<AuthGateway>>,
@@ -222,13 +223,61 @@ impl AlbumsService {
         Self {
             albums_service: Arc::new(OnceCell::new()),
             total_count: ReactiveInt::new(0),
-            artwork_cache: Arc::new(Mutex::new(lru::LruCache::new(
-                std::num::NonZeroUsize::new(50).expect("non-zero cap"),
-            ))),
-            disk_cache: Arc::new(DiskCache::new("artwork")),
-            prefetch_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            artwork_client: Arc::new(reqwest::Client::new()),
             auth_gateway: Arc::new(OnceCell::new()),
         }
+    }
+
+    /// Fetch album artwork from Navidrome, given a fully-built URL. No client
+    /// cache — every call goes to the server. Returns the raw image bytes.
+    pub async fn fetch_artwork_by_url(&self, url: &str) -> Result<Vec<u8>> {
+        if url.is_empty() {
+            return Err(anyhow::anyhow!("empty artwork url"));
+        }
+
+        let response = self
+            .artwork_client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("artwork fetch failed: {e}"))?;
+
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!(
+                "artwork fetch returned {}",
+                response.status()
+            ));
+        }
+
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|e| anyhow::anyhow!("artwork body read failed: {e}"))?;
+
+        Ok(bytes.to_vec())
+    }
+
+    /// Convenience wrapper: build the URL from `art_id`/`size`/`updated_at` and
+    /// dispatch to [`fetch_artwork_by_url`]. Used when callers don't already have
+    /// the URL constructed.
+    pub async fn fetch_album_artwork(
+        &self,
+        art_id: &str,
+        size: Option<u32>,
+        updated_at: Option<&str>,
+    ) -> Result<Vec<u8>> {
+        let (server_url, subsonic_credential) = self.get_server_config().await;
+        if server_url.is_empty() || subsonic_credential.is_empty() {
+            return Err(anyhow::anyhow!("missing server config"));
+        }
+        let url = crate::utils::artwork_url::build_cover_art_url_with_timestamp(
+            art_id,
+            &server_url,
+            &subsonic_credential,
+            size,
+            updated_at,
+        );
+        self.fetch_artwork_by_url(&url).await
     }
 
     /// Associate an authentication gateway.
@@ -258,21 +307,11 @@ impl AlbumsService {
             .await
     }
 
-    /// Clear the album artwork disk + memory caches and reset the prefetch flag
-    /// so `start_artwork_prefetch()` will re-run.
+    /// No-op kept for API compatibility with the Settings → Clear Artwork
+    /// Cache handler. The on-disk cache is gone; UI Handle maps live in the
+    /// frontend and are cleared there.
     pub async fn clear_and_reset_cache(&self) -> usize {
-        // Clear disk cache
-        let removed = if let Some(dc) = self.disk_cache.as_ref() {
-            dc.clear()
-        } else {
-            0
-        };
-        // Clear in-memory LRU
-        self.artwork_cache.lock().await.clear();
-        // Reset prefetch flag so it can run again
-        self.prefetch_started
-            .store(false, std::sync::atomic::Ordering::SeqCst);
-        removed
+        0
     }
 
     /// Load albums and return raw Album structs (first page only).
@@ -376,417 +415,5 @@ impl AlbumsService {
         );
 
         songs_service.load_album_songs(album_id).await
-    }
-
-    /// Load album artwork and return as raw bytes (which is Send)
-    ///
-    /// Optimization: If the requested size isn't cached, try resizing from a larger
-    /// cached version (e.g., 1000px) to avoid network calls. This is especially useful
-    /// for genres/playlists which need 300px artwork that may not be prefetched.
-    pub async fn load_album_artwork_buffer(
-        &self,
-        artwork_url: &str,
-        target_size: Option<u32>,
-    ) -> Option<Vec<u8>> {
-        if artwork_url.is_empty() {
-            return None;
-        }
-
-        // Check in-memory cache first
-        {
-            let mut cache = self.artwork_cache.lock().await;
-            if let Some(cached) = cache.get(artwork_url) {
-                return Some(cached.clone());
-            }
-        }
-
-        // Extract album ID and size from URL for stable cache key (URL contains changing auth tokens)
-        let cache_key = crate::utils::artwork_url::parse_cache_key_from_url(artwork_url);
-        let requested_size: Option<u32> = artwork_url
-            .split("size=")
-            .nth(1)
-            .and_then(|s| s.split('&').next())
-            .and_then(|s| s.parse().ok());
-        let album_id = artwork_url
-            .split("id=")
-            .nth(1)
-            .and_then(|s| s.split('&').next())
-            .unwrap_or("unknown");
-
-        // Check disk cache using stable album ID + size as key
-        if let Some(dc) = self.disk_cache.as_ref() {
-            // 1. Try exact size match first
-            if let Some(cached) = dc.get(&cache_key) {
-                // Cache in memory and return
-                let mut mem_cache = self.artwork_cache.lock().await;
-                mem_cache.put(artwork_url.to_string(), cached.clone());
-                return Some(cached);
-            }
-
-            // 2. Try resizing from larger cached sizes (1000px is prefetched on startup)
-            let target = target_size.or(requested_size).unwrap_or(0);
-            if target > 0 && target < 1000 {
-                // Common prefetched sizes to try (larger first)
-                for fallback_size in [1000u32, 500, 300] {
-                    if fallback_size <= target {
-                        break; // No point resizing from smaller
-                    }
-                    let fallback_key =
-                        crate::utils::artwork_url::build_cache_key(album_id, Some(fallback_size));
-                    if let Some(large_bytes) = dc.get(&fallback_key)
-                        && let Some(resized) = Self::resize_artwork_bytes(&large_bytes, target)
-                    {
-                        debug!(
-                            " [RESIZE] {}px → {}px for {}",
-                            fallback_size, target, album_id
-                        );
-
-                        // Cache resized version to disk for future runs (avoids repeated resize CPU cost)
-                        let resized_key =
-                            crate::utils::artwork_url::build_cache_key(album_id, Some(target));
-                        dc.insert(&resized_key, &resized);
-
-                        // Also cache in memory
-                        let mut mem_cache = self.artwork_cache.lock().await;
-                        mem_cache.put(artwork_url.to_string(), resized.clone());
-                        return Some(resized);
-                    }
-                }
-            }
-        }
-
-        // 3. No usable cache - fetch from network via POST (credentials in body, not URL)
-        // Use get_service() to lazily initialize the API client. Using .get() alone
-        // returns None when genres/playlists load before albums, causing all collage
-        // tile fetches to silently fail.
-        let service = match self.get_service().await {
-            Ok(s) => s,
-            Err(e) => {
-                debug!(
-                    " [ARTWORK] Network fallback skipped — {} (album_id={})",
-                    e, album_id
-                );
-                return None;
-            }
-        };
-        let client = service.get_http_client();
-
-        let (server_url, subsonic_credential) = self.get_server_config().await;
-
-        let bytes = crate::utils::artwork_url::fetch_cover_art(
-            &client,
-            album_id,
-            &server_url,
-            &subsonic_credential,
-            requested_size,
-        )
-        .await?;
-
-        // Save to disk cache using stable album ID + size as key
-        if let Some(dc) = self.disk_cache.as_ref() {
-            dc.insert(&cache_key, &bytes);
-        }
-
-        // Cache in memory
-        {
-            let mut cache = self.artwork_cache.lock().await;
-            cache.put(artwork_url.to_string(), bytes.clone());
-        }
-
-        Some(bytes)
-    }
-
-    /// Get the disk cache path for album artwork, ensuring the file exists.
-    ///
-    /// Mirrors `load_album_artwork_buffer()` logic (disk cache check, resize fallback,
-    /// network fetch) but returns the stable file path instead of bytes. This enables
-    /// `Handle::from_path()` which produces stable hash-based IDs that Iced's GPU
-    /// texture cache can recognize across frames, eliminating first-frame flicker.
-    pub async fn get_artwork_cache_path(
-        &self,
-        artwork_url: &str,
-        target_size: Option<u32>,
-    ) -> Option<PathBuf> {
-        if artwork_url.is_empty() {
-            return None;
-        }
-
-        let cache_key = crate::utils::artwork_url::parse_cache_key_from_url(artwork_url);
-        let requested_size: Option<u32> = artwork_url
-            .split("size=")
-            .nth(1)
-            .and_then(|s| s.split('&').next())
-            .and_then(|s| s.parse().ok());
-        let album_id = artwork_url
-            .split("id=")
-            .nth(1)
-            .and_then(|s| s.split('&').next())
-            .unwrap_or("unknown");
-
-        let dc = self.disk_cache.as_ref().as_ref()?;
-
-        // 1. Exact size match on disk
-        if dc.contains(&cache_key) {
-            return Some(dc.get_path(&cache_key));
-        }
-
-        // 2. Resize fallback from larger cached sizes
-        let target = target_size.or(requested_size).unwrap_or(0);
-        if target > 0 && target < 1000 {
-            for fallback_size in [1000u32, 500, 300] {
-                if fallback_size <= target {
-                    break;
-                }
-                let fallback_key =
-                    crate::utils::artwork_url::build_cache_key(album_id, Some(fallback_size));
-                if let Some(large_bytes) = dc.get(&fallback_key)
-                    && let Some(resized) = Self::resize_artwork_bytes(&large_bytes, target)
-                {
-                    debug!(
-                        " [RESIZE→PATH] {}px → {}px for {}",
-                        fallback_size, target, album_id
-                    );
-                    let resized_key =
-                        crate::utils::artwork_url::build_cache_key(album_id, Some(target));
-                    dc.insert(&resized_key, &resized);
-                    return Some(dc.get_path(&resized_key));
-                }
-            }
-        }
-
-        // 3. Fetch from network, write to disk, return path
-        let client = self.get_service().await.ok()?.get_http_client();
-        let (server_url, subsonic_credential) = self.get_server_config().await;
-
-        let bytes = crate::utils::artwork_url::fetch_cover_art(
-            &client,
-            album_id,
-            &server_url,
-            &subsonic_credential,
-            requested_size,
-        )
-        .await?;
-
-        dc.insert(&cache_key, &bytes);
-        Some(dc.get_path(&cache_key))
-    }
-
-    /// Get cache path for a given art_id + size directly (no URL parsing).
-    ///
-    /// Returns `Some(path)` if the file exists on disk, `None` otherwise.
-    /// Used by artist/collage code that already has the art ID.
-    pub fn get_cache_path_for_id(&self, art_id: &str, size: u32) -> Option<PathBuf> {
-        let dc = self.disk_cache.as_ref().as_ref()?;
-        let cache_key = format!("{art_id}_{size}");
-        if dc.contains(&cache_key) {
-            Some(dc.get_path(&cache_key))
-        } else {
-            None
-        }
-    }
-
-    /// Resize image bytes to target dimensions, returning JPEG-encoded bytes.
-    /// Returns None if decoding or encoding fails.
-    fn resize_artwork_bytes(bytes: &[u8], target_size: u32) -> Option<Vec<u8>> {
-        use std::io::Cursor;
-
-        use image::{GenericImageView, ImageFormat};
-
-        // Decode the source image
-        let img = image::load_from_memory(bytes).ok()?;
-
-        // Skip if already smaller than target
-        let (width, height) = img.dimensions();
-        if width <= target_size && height <= target_size {
-            return Some(bytes.to_vec());
-        }
-
-        // Resize using Lanczos3 for quality (good for downscaling)
-        let resized = img.resize(
-            target_size,
-            target_size,
-            image::imageops::FilterType::Lanczos3,
-        );
-
-        // Encode as JPEG (good compression, fast)
-        let mut output = Cursor::new(Vec::new());
-        resized.write_to(&mut output, ImageFormat::Jpeg).ok()?;
-
-        Some(output.into_inner())
-    }
-
-    /// Start background prefetch of all album artwork
-    /// This downloads thumbnails and large artwork for all albums in the background
-    /// Only runs once per session and skips if cache is already mostly complete
-    pub async fn start_artwork_prefetch(
-        &self,
-        progress: Option<crate::types::progress::ProgressHandle>,
-        high_res_size: Option<u32>,
-    ) {
-        use std::sync::atomic::Ordering;
-
-        // Only run once per session
-        if self.prefetch_started.swap(true, Ordering::SeqCst) {
-            debug!(" [PREFETCH] Already started, skipping");
-            return;
-        }
-
-        // Check if cache is already mostly complete
-        let total_albums = self.total_count.get() as usize;
-        if !crate::services::artwork_prefetch::is_cache_incomplete(&self.disk_cache, total_albums) {
-            debug!(
-                " [PREFETCH] Cache appears complete ({} albums), skipping",
-                total_albums
-            );
-            return;
-        }
-
-        // Get all albums for prefetching, paginating if there are many
-        let mut albums = Vec::new();
-        if let Some(service) = self.albums_service.get() {
-            let mut offset = 0;
-            let limit = 500;
-            loop {
-                match service
-                    .load_albums("name", "ASC", None, None, Some(offset), Some(limit))
-                    .await
-                {
-                    Ok((mut batch, total_count)) => {
-                        let batch_len = batch.len();
-                        albums.append(&mut batch);
-                        if batch_len < limit || albums.len() >= total_count as usize {
-                            break;
-                        }
-                        offset += limit;
-                    }
-                    Err(e) => {
-                        debug!(" [PREFETCH] Failed to load albums batch: {}", e);
-                        if albums.is_empty() {
-                            return;
-                        }
-                        break; // proceed with what we have
-                    }
-                }
-            }
-        } else {
-            debug!(" [PREFETCH] Service not initialized");
-            return;
-        };
-
-        // Get server config
-        let (server_url, subsonic_credential) = self.get_server_config().await;
-
-        if server_url.is_empty() || subsonic_credential.is_empty() {
-            debug!(" [PREFETCH] Missing server config");
-            return;
-        }
-
-        debug!(
-            " [PREFETCH] Starting background prefetch for {} albums...",
-            albums.len()
-        );
-
-        // Start the prefetch in background
-        let _rx = crate::services::artwork_prefetch::start_prefetch(
-            albums,
-            server_url,
-            subsonic_credential,
-            self.disk_cache.clone(),
-            progress,
-            high_res_size,
-        );
-    }
-
-    /// Refresh artwork for a single album: evict from disk + memory caches, re-fetch all sizes.
-    ///
-    /// This allows updating one album's artwork without rebuilding the entire cache.
-    /// Re-fetches thumbnail (80px) and the specified high-res size from the server.
-    /// Returns the raw bytes for each size so callers can build handles directly,
-    /// bypassing any cache re-read race conditions.
-    pub async fn refresh_single_album_artwork(
-        &self,
-        album_id: &str,
-        high_res_size: Option<u32>,
-    ) -> Result<Vec<(Option<u32>, Vec<u8>)>> {
-        use crate::utils::artwork_url;
-
-        let (server_url, subsonic_credential) = self.get_server_config().await;
-        if server_url.is_empty() || subsonic_credential.is_empty() {
-            return Err(anyhow::anyhow!("Missing server config"));
-        }
-
-        // Normalize art_id (add "al-" prefix if needed)
-        let art_id = if album_id.starts_with("al-")
-            || album_id.starts_with("ar-")
-            || album_id.starts_with("mf-")
-        {
-            album_id.to_string()
-        } else {
-            format!("al-{album_id}")
-        };
-
-        let sizes = vec![Some(artwork_url::THUMBNAIL_SIZE), high_res_size];
-        let mut fetched = Vec::new();
-
-        // Evict from disk cache and re-fetch each size
-        for size in sizes {
-            let cache_key = artwork_url::build_cache_key(&art_id, size);
-
-            // Remove from disk cache
-            if let Some(dc) = self.disk_cache.as_ref() {
-                let path = dc.get_path(&cache_key);
-                let _ = std::fs::remove_file(&path);
-            }
-
-            // Remove from in-memory cache (keyed by full artwork URL)
-            {
-                let mut mem = self.artwork_cache.lock().await;
-                // In-memory cache is keyed by full URL, but we need to evict by album_id pattern.
-                // Pop all entries matching this album_id (we'll just evict all cached sizes for this ID to be safe)
-                let keys_to_remove: Vec<String> = mem
-                    .iter()
-                    .filter(|(k, _)| k.contains(&format!("id={art_id}")))
-                    .map(|(k, _)| k.clone())
-                    .collect();
-                for key in keys_to_remove {
-                    mem.pop(&key);
-                }
-            }
-
-            // Re-fetch from server
-            let bytes = artwork_url::fetch_cover_art(
-                &self
-                    .albums_service
-                    .get()
-                    .ok_or_else(|| anyhow::anyhow!("Service not initialized"))?
-                    .get_http_client(),
-                &art_id,
-                &server_url,
-                &subsonic_credential,
-                size,
-            )
-            .await;
-
-            if let Some(data) = bytes {
-                // Re-insert into disk cache
-                if let Some(dc) = self.disk_cache.as_ref() {
-                    dc.insert(&cache_key, &data);
-                }
-                debug!(
-                    " [REFRESH] Re-fetched {:?}px artwork for {} ({} bytes)",
-                    size,
-                    album_id,
-                    data.len()
-                );
-                fetched.push((size, data));
-            } else {
-                debug!(
-                    " [REFRESH] No artwork returned for {} at {:?}px",
-                    album_id, size
-                );
-            }
-        }
-
-        Ok(fetched)
     }
 }

@@ -2,10 +2,9 @@
 //!
 //! Includes Navidrome API client (`api/`), auth, queue management (redb persistence),
 //! playback navigation (QueueNavigator with playback history), settings management,
-//! artwork prefetch, task management, and state storage.
+//! task management, and state storage.
 
 pub mod api;
-pub mod artwork_prefetch;
 pub mod auth;
 pub mod font_discovery;
 pub mod navidrome_events;

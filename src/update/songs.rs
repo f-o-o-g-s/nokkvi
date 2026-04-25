@@ -179,7 +179,7 @@ impl Nokkvi {
                                 && let Some(album_id) = &song.album_id
                             {
                                 // Skip if already cached or already queued for loading
-                                if self.artwork.album_art.contains_key(album_id)
+                                if self.artwork.album_art.contains(album_id)
                                     || loaded_album_ids.contains(album_id)
                                 {
                                     continue;
@@ -190,17 +190,11 @@ impl Nokkvi {
                                 let vm = albums_vm.clone();
                                 tasks.push(Task::perform(
                                     async move {
-                                        let (url, cred) = vm.get_server_config().await;
-                                        let artwork_url =
-                                            nokkvi_data::utils::artwork_url::build_cover_art_url(
-                                                &art_id,
-                                                &url,
-                                                &cred,
-                                                Some(80),
-                                            );
-                                        let path =
-                                            vm.get_artwork_cache_path(&artwork_url, Some(80)).await;
-                                        (art_id, path.map(image::Handle::from_path))
+                                        let bytes = vm
+                                            .fetch_album_artwork(&art_id, Some(80), None)
+                                            .await
+                                            .ok();
+                                        (art_id, bytes.map(image::Handle::from_bytes))
                                     },
                                     |(id, handle)| {
                                         Message::Artwork(ArtworkMessage::SongMiniLoaded(id, handle))
@@ -256,7 +250,8 @@ impl Nokkvi {
         handle: Option<image::Handle>,
     ) -> Task<Message> {
         if let Some(h) = handle {
-            self.artwork.album_art.insert(album_id, h);
+            self.artwork.album_art.put(album_id, h);
+            self.artwork.refresh_album_art_snapshot();
         }
         Task::none()
     }
@@ -472,7 +467,8 @@ impl Nokkvi {
 
                 // Prefetch mini artwork for visible viewport using canonical helper
                 if let Some(shell) = &self.app_service {
-                    let cached: HashSet<&String> = self.artwork.album_art.keys().collect();
+                    let cached: HashSet<&String> =
+                        self.artwork.album_art.iter().map(|(k, _)| k).collect();
                     let prefetch_tasks = prefetch_song_artwork_tasks(
                         &self.songs_page.common.slot_list,
                         &self.library.songs,

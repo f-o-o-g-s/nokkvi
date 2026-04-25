@@ -22,9 +22,7 @@ pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEnt
     const APP: &str = "assets/icons/monitor.svg";
     const MOUSE: &str = "assets/icons/mouse-pointer.svg";
     const ACC: &str = "assets/icons/user-round.svg";
-    const CACHE: &str = "assets/icons/database.svg";
     const LOGOUT: &str = "assets/icons/log-out.svg";
-    const REBUILD: &str = "assets/icons/refresh-cw.svg";
 
     vec![
         // --- Application ---
@@ -161,33 +159,6 @@ pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEnt
             "Press Enter to logout",
             "",
             LOGOUT,
-        ),
-        // --- Cache ---
-        SettingsEntry::Header {
-            label: "Cache",
-            icon: CACHE,
-        },
-        SettingItem::text_with_icon(
-            meta!(
-                "__action_rebuild_artwork",
-                "Rebuild Artwork Cache",
-                "Cache",
-                "Re-download album, genre, and playlist artwork"
-            ),
-            "Press Enter to rebuild",
-            "",
-            REBUILD,
-        ),
-        SettingItem::text_with_icon(
-            meta!(
-                "__action_rebuild_artist",
-                "Rebuild Artist Cache",
-                "Cache",
-                "Re-fetch artist photos from Last.fm (slow)"
-            ),
-            "Press Enter to rebuild",
-            "",
-            REBUILD,
         ),
     ]
 }

@@ -277,7 +277,6 @@ impl Nokkvi {
 
                     let ctx = CollageArtworkContext {
                         slot_list: &self.playlists_page.common.slot_list,
-                        disk_cache: self.artwork.playlist_disk_cache.as_ref(),
                         pending_ids: &self.artwork.playlist.pending,
                         memory_artwork: &self.artwork.playlist.mini,
                         memory_collage: &self.artwork.playlist.collage,
@@ -287,7 +286,6 @@ impl Nokkvi {
                         collage_artwork::load_visible_artwork(
                             &self.library.playlists,
                             &ctx,
-                            300,
                             shell.auth().clone(),
                             |a, b, c, d| {
                                 Message::Artwork(ArtworkMessage::LoadCollage(
@@ -325,7 +323,6 @@ impl Nokkvi {
                 if let Some(shell) = &self.app_service {
                     let ctx = CollageArtworkContext {
                         slot_list: &self.playlists_page.common.slot_list,
-                        disk_cache: self.artwork.playlist_disk_cache.as_ref(),
                         pending_ids: &self.artwork.playlist.pending,
                         memory_artwork: &self.artwork.playlist.mini,
                         memory_collage: &self.artwork.playlist.collage,

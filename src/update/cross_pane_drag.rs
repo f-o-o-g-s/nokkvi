@@ -369,7 +369,7 @@ impl Nokkvi {
             match panel.active_view {
                 views::BrowsingView::Albums => self.library.albums.get(center_idx).map(|a| {
                     (
-                        self.artwork.album_art.get(&a.id),
+                        self.artwork.album_art.peek(&a.id),
                         a.name.clone(),
                         a.artist.clone(),
                         format!("{} songs", a.song_count),
@@ -379,7 +379,7 @@ impl Nokkvi {
                     (
                         s.album_id
                             .as_ref()
-                            .and_then(|aid| self.artwork.album_art.get(aid)),
+                            .and_then(|aid| self.artwork.album_art.peek(aid)),
                         s.title.clone(),
                         s.artist.clone(),
                         s.album.clone(),
@@ -387,7 +387,7 @@ impl Nokkvi {
                 }),
                 views::BrowsingView::Artists => self.library.artists.get(center_idx).map(|a| {
                     (
-                        self.artwork.album_art.get(&a.id),
+                        self.artwork.album_art.peek(&a.id),
                         a.name.clone(),
                         format!("{} albums", a.album_count),
                         format!("{} songs", a.song_count),
@@ -406,7 +406,7 @@ impl Nokkvi {
                         (
                             s.album_id
                                 .as_ref()
-                                .and_then(|aid| self.artwork.album_art.get(aid)),
+                                .and_then(|aid| self.artwork.album_art.peek(aid)),
                             s.title.clone(),
                             s.artist.clone(),
                             s.album.clone(),

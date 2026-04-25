@@ -185,7 +185,8 @@ impl Nokkvi {
 
                 // Load artwork for currently displayed albums using canonical prefetch
                 if let Some(shell) = &self.app_service {
-                    let cached: HashSet<&String> = self.artwork.album_art.keys().collect();
+                    let cached: HashSet<&String> =
+                        self.artwork.album_art.iter().map(|(k, _)| k).collect();
                     let prefetch_tasks = prefetch_album_artwork_tasks(
                         &self.albums_page.common.slot_list,
                         &self.library.albums,
@@ -207,12 +208,6 @@ impl Nokkvi {
                     tasks.push(Task::done(Message::Artwork(ArtworkMessage::LoadLarge(
                         album.id.clone(),
                     ))));
-                }
-
-                // Trigger background prefetch on first load if cache is incomplete
-                if !self.artwork.album_prefetch_triggered {
-                    self.artwork.album_prefetch_triggered = true;
-                    tasks.push(Task::done(Message::Artwork(ArtworkMessage::StartPrefetch)));
                 }
 
                 // If CenterOnPlaying triggered this reload (item wasn't in buffer),
@@ -245,7 +240,8 @@ impl Nokkvi {
         handle: Option<image::Handle>,
     ) -> Task<Message> {
         if let Some(h) = handle {
-            self.artwork.album_art.insert(id, h);
+            self.artwork.album_art.put(id, h);
+            self.artwork.refresh_album_art_snapshot();
         } else {
             warn!(" Mini artwork failed to load for album: {}", id);
         }
@@ -270,78 +266,22 @@ impl Nokkvi {
 
         if let Some(shell) = &self.app_service {
             let albums_vm = shell.albums().clone();
-
-            // First try to find in albums list
-            if let Some(album) = self.library.albums.iter().find(|a| a.id == album_id) {
-                let art_id = album.id.clone();
-                let artwork_size = self.artwork_resolution.to_size();
-                return Task::perform(
-                    async move {
-                        let (url, cred) = albums_vm.get_server_config().await;
-                        let artwork_url = nokkvi_data::utils::artwork_url::build_cover_art_url(
-                            &art_id,
-                            &url,
-                            &cred,
-                            artwork_size,
-                        );
-                        let path = albums_vm
-                            .get_artwork_cache_path(&artwork_url, artwork_size)
-                            .await;
-                        let handle = path.map(image::Handle::from_path);
-                        (art_id, handle)
-                    },
-                    |(id, handle)| Message::Artwork(ArtworkMessage::LargeLoaded(id, handle)),
-                );
-            }
-
-            // Fallback: Check queue songs (fixes artwork loading when albums list is empty/filtered)
-            // Construct a full-size URL from the album_id rather than reusing the
-            // queue song's pre-baked thumbnail URL (which is only 80px).
-            if self
-                .library
-                .queue_songs
-                .iter()
-                .any(|s| s.album_id == album_id)
-            {
-                let art_id = album_id.clone();
-                let artwork_size = self.artwork_resolution.to_size();
-                return Task::perform(
-                    async move {
-                        let (url, cred) = albums_vm.get_server_config().await;
-                        let artwork_url = nokkvi_data::utils::artwork_url::build_cover_art_url(
-                            &art_id,
-                            &url,
-                            &cred,
-                            artwork_size,
-                        );
-                        let path = albums_vm
-                            .get_artwork_cache_path(&artwork_url, artwork_size)
-                            .await;
-                        let handle = path.map(image::Handle::from_path);
-                        (art_id, handle)
-                    },
-                    |(id, handle)| Message::Artwork(ArtworkMessage::LargeLoaded(id, handle)),
-                );
-            }
-
-            // Final fallback: construct artwork URL directly from album_id
-            // This handles songs whose albums aren't in the paginated buffer
-            let art_id = album_id.clone();
             let artwork_size = self.artwork_resolution.to_size();
+            // Resolve the art_id (and updated_at, when known) from the albums list
+            // first — falls back to the bare album_id which `fetch_album_artwork`
+            // will normalize with the `al-` prefix.
+            let (art_id, updated_at) = match self.library.albums.iter().find(|a| a.id == album_id) {
+                Some(album) => (album.id.clone(), album.updated_at.clone()),
+                None => (album_id.clone(), None),
+            };
+
             return Task::perform(
                 async move {
-                    let (url, cred) = albums_vm.get_server_config().await;
-                    let artwork_url = nokkvi_data::utils::artwork_url::build_cover_art_url(
-                        &art_id,
-                        &url,
-                        &cred,
-                        artwork_size,
-                    );
-                    let path = albums_vm
-                        .get_artwork_cache_path(&artwork_url, artwork_size)
-                        .await;
-                    let handle = path.map(image::Handle::from_path);
-                    (art_id, handle)
+                    let bytes = albums_vm
+                        .fetch_album_artwork(&art_id, artwork_size, updated_at.as_deref())
+                        .await
+                        .ok();
+                    (art_id, bytes.map(image::Handle::from_bytes))
                 },
                 |(id, handle)| Message::Artwork(ArtworkMessage::LargeLoaded(id, handle)),
             );
@@ -349,12 +289,28 @@ impl Nokkvi {
         Task::none()
     }
 
-    /// Refresh a specific album's artwork: evict large cache, re-fetch from server,
-    /// and reload both mini and large artwork via `RefreshComplete`.
+    /// Force-refresh a specific album's artwork (user-initiated, with toasts).
     pub(crate) fn handle_refresh_album_artwork(&mut self, album_id: String) -> Task<Message> {
+        self.refresh_album_artwork_inner(album_id, false)
+    }
+
+    /// Same as `handle_refresh_album_artwork` but suppresses progress/success
+    /// toasts. Used by the SSE-driven invalidation path so background updates
+    /// don't spam the user with notifications.
+    pub(crate) fn handle_refresh_album_artwork_silent(
+        &mut self,
+        album_id: String,
+    ) -> Task<Message> {
+        self.refresh_album_artwork_inner(album_id, true)
+    }
+
+    fn refresh_album_artwork_inner(&mut self, album_id: String, silent: bool) -> Task<Message> {
         use tracing::info;
 
-        info!(" [REFRESH] Refreshing artwork for album {}", album_id);
+        info!(
+            " [REFRESH] Refreshing artwork for album {} (silent={silent})",
+            album_id
+        );
 
         // Only evict large artwork so the panel shows a placeholder during refresh.
         // Do NOT evict from album_art — that would gray out every slot list row
@@ -363,65 +319,59 @@ impl Nokkvi {
         self.artwork.large_artwork.pop(&album_id);
         self.artwork.refresh_large_artwork_snapshot();
 
-        if let Some(shell) = &self.app_service {
-            let albums_vm = shell.albums().clone();
-            let id = album_id.clone();
-            let artwork_size = self.artwork_resolution.to_size();
+        let Some(shell) = &self.app_service else {
+            return Task::none();
+        };
+        let albums_vm = shell.albums().clone();
+        let id = album_id.clone();
+        let artwork_size = self.artwork_resolution.to_size();
+        let updated_at = self
+            .library
+            .albums
+            .iter()
+            .find(|a| a.id == album_id)
+            .and_then(|a| a.updated_at.clone());
 
-            let refresh_task = Task::perform(
-                async move {
-                    // Backend: evict caches + re-fetch, returns raw bytes per size
-                    let fetched = albums_vm
-                        .refresh_single_album_artwork(&id, artwork_size)
-                        .await?;
+        let refresh_task = Task::perform(
+            async move {
+                use nokkvi_data::utils::artwork_url::THUMBNAIL_SIZE;
 
-                    // Build handles from fresh bytes (not disk paths)
-                    let mut thumb_handle: Option<image::Handle> = None;
-                    let mut large_handle: Option<image::Handle> = None;
+                // No client cache to evict — go straight to the server. The
+                // server's `Cache-Control: max-age=315360000` is irrelevant on
+                // our side now; Navidrome's own ImageCacheSize keeps the
+                // response fast.
+                let thumb_bytes = albums_vm
+                    .fetch_album_artwork(&id, Some(THUMBNAIL_SIZE), updated_at.as_deref())
+                    .await
+                    .ok();
+                let large_bytes = albums_vm
+                    .fetch_album_artwork(&id, artwork_size, updated_at.as_deref())
+                    .await
+                    .ok();
 
-                    for (size, data) in fetched {
-                        // Use Handle::from_bytes — NOT Handle::from_path.
-                        // Iced's GPU texture cache keys on the Handle ID, which for
-                        // from_path is derived from the file path. Since refresh
-                        // overwrites the same disk cache path, from_path produces an
-                        // identical ID and Iced serves the stale texture. from_bytes
-                        // derives the ID from content, busting the stale cache entry.
-                        let handle = image::Handle::from_bytes(data);
-                        if size == Some(nokkvi_data::utils::artwork_url::THUMBNAIL_SIZE) {
-                            thumb_handle = Some(handle);
-                        } else if size == artwork_size {
-                            large_handle = Some(handle);
-                        }
-                    }
+                // `Handle::from_bytes` derives a unique Id per call, busting Iced's
+                // GPU texture cache so the new bytes upload (refresh path requires this).
+                let thumb_handle = thumb_bytes.map(image::Handle::from_bytes);
+                let large_handle = large_bytes.map(image::Handle::from_bytes);
 
-                    Ok::<_, anyhow::Error>((id, thumb_handle, large_handle))
-                },
-                |result| match result {
-                    Ok((id, thumb, large)) => {
-                        Message::Artwork(ArtworkMessage::RefreshComplete(id, thumb, large))
-                    }
-                    Err(e) => {
-                        tracing::error!(" [REFRESH] Failed to refresh artwork: {e}");
-                        Message::Toast(crate::app_message::ToastMessage::Push(
-                            nokkvi_data::types::toast::Toast::new(
-                                format!("Failed to refresh artwork: {e}"),
-                                nokkvi_data::types::toast::ToastLevel::Error,
-                            ),
-                        ))
-                    }
-                },
-            );
+                (id, thumb_handle, large_handle)
+            },
+            move |(id, thumb, large)| {
+                Message::Artwork(ArtworkMessage::RefreshComplete(id, thumb, large, silent))
+            },
+        );
 
+        if silent {
+            refresh_task
+        } else {
             let toast_task = Task::done(Message::Toast(crate::app_message::ToastMessage::Push(
                 nokkvi_data::types::toast::Toast::new(
                     "Refreshing artwork…".to_string(),
                     nokkvi_data::types::toast::ToastLevel::Info,
                 ),
             )));
-
-            return Task::batch([toast_task, refresh_task]);
+            Task::batch([toast_task, refresh_task])
         }
-        Task::none()
     }
 
     /// Handle the result of an artwork refresh — cache both mini and large atomically.
@@ -430,19 +380,25 @@ impl Nokkvi {
         album_id: String,
         thumb: Option<image::Handle>,
         large: Option<image::Handle>,
+        silent: bool,
     ) -> Task<Message> {
         if thumb.is_none() && large.is_none() {
-            self.toast_warn("No artwork found on server for this album");
+            if !silent {
+                self.toast_warn("No artwork found on server for this album");
+            }
             return Task::none();
         }
         if let Some(h) = thumb {
-            self.artwork.album_art.insert(album_id.clone(), h);
+            self.artwork.album_art.put(album_id.clone(), h);
+            self.artwork.refresh_album_art_snapshot();
         }
         if let Some(h) = large {
             self.artwork.large_artwork.put(album_id, h);
             self.artwork.refresh_large_artwork_snapshot();
         }
-        self.toast_success("Artwork refreshed");
+        if !silent {
+            self.toast_success("Artwork refreshed");
+        }
         Task::none()
     }
 
@@ -466,29 +422,25 @@ impl Nokkvi {
 
                 fetch_color_task = Task::perform(
                     async move {
-                        let (url, cred) = albums_vm.get_server_config().await;
-                        let artwork_url = nokkvi_data::utils::artwork_url::build_cover_art_url(
-                            &art_id,
-                            &url,
-                            &cred,
-                            artwork_size,
-                        );
-                        let path = albums_vm
-                            .get_artwork_cache_path(&artwork_url, artwork_size)
-                            .await;
-                        if let Some(p) = path
-                            && let Ok(bytes) = tokio::fs::read(p).await
-                        {
-                            let dominant = tokio::task::spawn_blocking(move || {
-                                nokkvi_data::utils::dominant_color::extract_dominant_color(&bytes)
-                            })
+                        // Re-fetch through the cached client (warm cache hit, no network)
+                        // and run dominant-color extraction on the bytes. Cheaper than
+                        // the previous path-read because cacache holds the bytes already.
+                        match albums_vm
+                            .fetch_album_artwork(&art_id, artwork_size, None)
                             .await
-                            .unwrap_or(None);
-
-                            return dominant
-                                .map(|(r, g, b)| (art_id, iced::Color::from_rgb8(r, g, b)));
+                        {
+                            Ok(bytes) => {
+                                let dominant = tokio::task::spawn_blocking(move || {
+                                    nokkvi_data::utils::dominant_color::extract_dominant_color(
+                                        &bytes,
+                                    )
+                                })
+                                .await
+                                .unwrap_or(None);
+                                dominant.map(|(r, g, b)| (art_id, iced::Color::from_rgb8(r, g, b)))
+                            }
+                            Err(_) => None,
                         }
-                        None
                     },
                     |result| {
                         if let Some((id, c)) = result {
@@ -505,69 +457,6 @@ impl Nokkvi {
             self.artwork.loading_large_artwork = None;
         }
         fetch_color_task
-    }
-
-    pub(crate) fn handle_start_artwork_prefetch(
-        &mut self,
-        progress: Option<nokkvi_data::types::progress::ProgressHandle>,
-    ) -> Task<Message> {
-        // Start background prefetch of all album artwork
-        let artwork_size = self.artwork_resolution.to_size();
-        self.shell_spawn("album_artwork_prefetch", move |shell| async move {
-            let albums_vm = shell.albums().clone();
-            albums_vm
-                .start_artwork_prefetch(progress, artwork_size)
-                .await;
-            Ok(())
-        });
-        Task::none()
-    }
-
-    pub(crate) fn handle_start_artist_prefetch(
-        &mut self,
-        progress: Option<nokkvi_data::types::progress::ProgressHandle>,
-    ) -> Task<Message> {
-        // Start background prefetch of all artist artwork.
-        // Fetches the full artist list directly from the API (not the PagedBuffer)
-        // to ensure we cover all artists, not just the currently loaded page.
-        let disk_cache = self.artwork.artist_disk_cache.clone();
-
-        self.shell_spawn("artist_artwork_prefetch", move |shell| async move {
-            let artists_vm = shell.artists().clone();
-            let albums_vm = shell.albums().clone();
-            let (server_url, subsonic_cred) = albums_vm.get_server_config().await;
-            if server_url.is_empty() || subsonic_cred.is_empty() {
-                return Ok(());
-            }
-
-            // Load ALL artists from the API (limit=None defaults to 999999)
-            let all_artists = artists_vm
-                .load_raw_artists_page(Some("name"), Some("ASC"), None, None, false, 0, 999999)
-                .await;
-
-            match all_artists {
-                Ok(artists) => {
-                    let artist_ids: Vec<(String, String)> =
-                        artists.into_iter().map(|a| (a.id, a.name)).collect();
-                    debug!(
-                        " [PREFETCH] Fetched {} artists from API for prefetch",
-                        artist_ids.len()
-                    );
-                    let _rx = nokkvi_data::services::artwork_prefetch::start_artist_prefetch(
-                        artist_ids,
-                        server_url,
-                        subsonic_cred,
-                        disk_cache,
-                        progress,
-                    );
-                }
-                Err(e) => {
-                    debug!(" [PREFETCH] Failed to load artists for prefetch: {}", e);
-                }
-            }
-            Ok(())
-        });
-        Task::none()
     }
 
     pub(crate) fn handle_albums(&mut self, msg: views::AlbumsMessage) -> Task<Message> {
@@ -715,7 +604,8 @@ impl Nokkvi {
 
                     // Prefetch mini artwork for viewport using canonical helper
                     if let Some(shell) = &self.app_service {
-                        let cached: HashSet<&String> = self.artwork.album_art.keys().collect();
+                        let cached: HashSet<&String> =
+                            self.artwork.album_art.iter().map(|(k, _)| k).collect();
                         let prefetch_tasks = prefetch_album_artwork_tasks(
                             &self.albums_page.common.slot_list,
                             &self.library.albums,

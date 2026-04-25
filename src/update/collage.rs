@@ -8,7 +8,6 @@
 use std::future::Future;
 
 use iced::{Task, widget::image};
-use nokkvi_data::utils::cache::DiskCache;
 
 use crate::{
     Nokkvi,
@@ -22,14 +21,6 @@ impl Nokkvi {
         match target {
             CollageTarget::Genre => &mut self.artwork.genre,
             CollageTarget::Playlist => &mut self.artwork.playlist,
-        }
-    }
-
-    /// Returns a clone of the disk cache for the given collage target.
-    pub(crate) fn collage_disk_cache(&self, target: CollageTarget) -> Option<DiskCache> {
-        match target {
-            CollageTarget::Genre => self.artwork.genre_disk_cache.clone(),
-            CollageTarget::Playlist => self.artwork.playlist_disk_cache.clone(),
         }
     }
 
@@ -58,7 +49,6 @@ impl Nokkvi {
         Fut: Future<Output = Vec<String>> + Send,
     {
         let entity_id_clone = entity_id.clone();
-        let disk_cache = self.collage_disk_cache(target);
         let artwork_size = self.artwork_resolution.to_size();
 
         self.shell_task(
@@ -87,64 +77,30 @@ impl Nokkvi {
                     return (entity_id_clone, None, Vec::new(), Vec::new());
                 }
 
-                // Cache key includes first album ID for invalidation when content changes
-                let first_album_id = &album_ids[0];
-                let cache_key = format!("{entity_id_clone}_{first_album_id}_300");
-
-                // Check disk cache first for pre-generated 300px artwork (mini only)
-                let cached_mini_handle = if let Some(ref cache) = disk_cache {
-                    if cache.contains(&cache_key) {
-                        Some(image::Handle::from_path(cache.get_path(&cache_key)))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
+                // 1. Load mini artwork (first album) at 300px via the cached client.
+                let first_album_id = album_ids[0].clone();
+                let mini_vm = albums_vm.clone();
+                let mini_handle_fut = async move {
+                    mini_vm
+                        .fetch_album_artwork(&first_album_id, Some(300), None)
+                        .await
+                        .ok()
+                        .map(image::Handle::from_bytes)
                 };
 
-                // 1. Load mini artwork (first album) at 300px — use cache if available
-                let mini_handle_fut = async {
-                    if let Some(handle) = cached_mini_handle {
-                        Some(handle)
-                    } else {
-                        let mini_artwork_url = nokkvi_data::utils::artwork_url::build_cover_art_url(
-                            first_album_id,
-                            &server_url,
-                            &subsonic_credential,
-                            Some(300),
-                        );
-
-                        albums_vm
-                            .load_album_artwork_buffer(&mini_artwork_url, Some(300))
-                            .await
-                            .map(|bytes| {
-                                if let Some(ref cache) = disk_cache {
-                                    cache.insert(&cache_key, &bytes);
-                                    image::Handle::from_path(cache.get_path(&cache_key))
-                                } else {
-                                    image::Handle::from_bytes(bytes)
-                                }
-                            })
-                    }
-                };
-
-                // 2. Load collage handles (up to 9 albums) in parallel
-                // Special case: single album gets full-res artwork
+                // 2. Single-album special case: full-res artwork as the sole tile.
                 if album_ids.len() == 1 {
-                    let full_res_url = nokkvi_data::utils::artwork_url::build_cover_art_url(
-                        &album_ids[0],
-                        &server_url,
-                        &subsonic_credential,
-                        artwork_size.or(Some(nokkvi_data::utils::artwork_url::HIGH_RES_SIZE)),
-                    );
-
-                    let (mini_handle, full_res_bytes) = futures::join!(
-                        mini_handle_fut,
-                        albums_vm.load_album_artwork_buffer(
-                            &full_res_url,
-                            artwork_size.or(Some(nokkvi_data::utils::artwork_url::HIGH_RES_SIZE))
-                        )
-                    );
+                    let full_size =
+                        artwork_size.or(Some(nokkvi_data::utils::artwork_url::HIGH_RES_SIZE));
+                    let full_vm = albums_vm.clone();
+                    let only_id = album_ids[0].clone();
+                    let (mini_handle, full_res_bytes) =
+                        futures::join!(mini_handle_fut, async move {
+                            full_vm
+                                .fetch_album_artwork(&only_id, full_size, None)
+                                .await
+                                .ok()
+                        });
 
                     let mut collage_handles = Vec::new();
                     if let Some(bytes) = full_res_bytes {
@@ -154,19 +110,14 @@ impl Nokkvi {
                     return (entity_id_clone, mini_handle, collage_handles, album_ids);
                 }
 
-                // Multiple albums: fetch up to 9 tiles in parallel
+                // Multiple albums: fetch up to 9 tiles at 300px in parallel.
                 let collage_tiles_futs: Vec<_> = album_ids
                     .iter()
                     .take(9)
+                    .cloned()
                     .map(|id| {
                         let vm = albums_vm.clone();
-                        let url = nokkvi_data::utils::artwork_url::build_cover_art_url(
-                            id,
-                            &server_url,
-                            &subsonic_credential,
-                            Some(300),
-                        );
-                        async move { vm.load_album_artwork_buffer(&url, Some(300)).await }
+                        async move { vm.fetch_album_artwork(&id, Some(300), None).await.ok() }
                     })
                     .collect();
 
@@ -310,57 +261,25 @@ impl Nokkvi {
             count
         );
 
-        let disk_cache = self.collage_disk_cache(target);
-
         self.shell_task(
             move |shell| async move {
                 let albums_vm = shell.albums().clone();
                 let mut results: crate::app_message::ArtworkBatchData = Vec::new();
 
                 for (item_id, first_album_id) in items_to_load {
-                    let cache_key = format!("{item_id}_{first_album_id}_300");
-
-                    // Check if already in disk cache
-                    if let Some(ref cache) = disk_cache
-                        && cache.contains(&cache_key)
-                    {
-                        // Already cached — build handle from path
-                        results.push(crate::app_message::ArtworkBatchEntry {
-                            id: item_id,
-                            mini_artwork: Some(iced::widget::image::Handle::from_path(
-                                cache.get_path(&cache_key),
-                            )),
-                            collage_handles: Vec::new(),
-                            // Don't overwrite artwork_album_ids — the full list was already
-                            // stored by StartCollagePrefetch. Passing empty here means
-                            // set_collage_item_album_ids is a no-op.
-                            album_ids: Vec::new(),
-                        });
-                        continue;
-                    }
-
-                    let (url, cred) = albums_vm.get_server_config().await;
-                    let artwork_url = nokkvi_data::utils::artwork_url::build_cover_art_url(
-                        &first_album_id,
-                        &url,
-                        &cred,
-                        Some(300),
-                    );
-
-                    // Load and cache the 300px artwork
-                    if let Some(bytes) = albums_vm
-                        .load_album_artwork_buffer(&artwork_url, Some(300))
+                    // The dedicated genre/playlist disk cache is gone — every fetch
+                    // now goes through the cached HTTP client, which already
+                    // deduplicates album-artwork URLs at 300px regardless of which
+                    // collage refers to them.
+                    if let Ok(bytes) = albums_vm
+                        .fetch_album_artwork(&first_album_id, Some(300), None)
                         .await
-                        && let Some(ref cache) = disk_cache
                     {
-                        cache.insert(&cache_key, &bytes);
                         results.push(crate::app_message::ArtworkBatchEntry {
                             id: item_id,
-                            mini_artwork: Some(iced::widget::image::Handle::from_path(
-                                cache.get_path(&cache_key),
-                            )),
+                            mini_artwork: Some(iced::widget::image::Handle::from_bytes(bytes)),
                             collage_handles: Vec::new(),
-                            // Don't overwrite artwork_album_ids — same reasoning as above.
+                            // Don't overwrite artwork_album_ids — full list already stored.
                             album_ids: Vec::new(),
                         });
                     }

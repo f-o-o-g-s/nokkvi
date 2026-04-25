@@ -202,12 +202,15 @@ pub enum ArtworkMessage {
     LargeArtistLoaded(String, Option<image::Handle>, Option<iced::Color>),
     LoadLarge(String),
     DominantColorCalculated(String, iced::Color),
-    StartPrefetch,
-    StartArtistPrefetch,
-    /// Force-refresh a specific album's artwork (evict all cached sizes, re-fetch)
+    /// Force-refresh a specific album's artwork (evict all cached sizes, re-fetch).
+    /// User-initiated: shows "Refreshing artwork…" / "Artwork refreshed" toasts.
     RefreshAlbumArtwork(String),
-    /// Result of a refresh: (album_id, thumb_handle, large_handle)
-    RefreshComplete(String, Option<image::Handle>, Option<image::Handle>),
+    /// Same as `RefreshAlbumArtwork` but suppresses progress/success toasts.
+    /// Dispatched by SSE-driven invalidation so background updates are quiet.
+    RefreshAlbumArtworkSilent(String),
+    /// Result of a refresh: (album_id, thumb_handle, large_handle, silent).
+    /// `silent = true` suppresses the success toast in the completion handler.
+    RefreshComplete(String, Option<image::Handle>, Option<image::Handle>, bool),
 
     // --- Collage Artwork (Genre / Playlist) ---
     LoadCollage(CollageTarget, String, String, String, Vec<String>),
@@ -291,8 +294,15 @@ pub enum Message {
     SessionExpired,
 
     // --- Data Loading ---
-    /// SSE: Navidrome library scan completed with changes
-    LibraryChanged,
+    /// SSE: Navidrome library scan completed with changes.
+    ///
+    /// `album_ids` carries the album IDs the server reports as changed. Empty
+    /// alongside `is_wildcard = true` (full-scan signal) — handlers should reload
+    /// slot lists either way but skip per-album artwork eviction on wildcards.
+    LibraryChanged {
+        album_ids: Vec<String>,
+        is_wildcard: bool,
+    },
     LoadAlbums,
     LoadQueue,
     LoadArtists,

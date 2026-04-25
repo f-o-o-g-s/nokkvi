@@ -18,7 +18,7 @@
 use std::collections::{HashMap, HashSet};
 
 use iced::{Task, widget::image};
-use nokkvi_data::{backend::auth::AuthGateway, utils::cache::DiskCache};
+use nokkvi_data::backend::auth::AuthGateway;
 use tracing::trace;
 
 use crate::{app_message::Message, widgets::SlotListView};
@@ -41,8 +41,6 @@ pub(crate) use nokkvi_data::types::collage_artwork::CollageArtworkItem;
 pub(crate) struct CollageArtworkContext<'a> {
     /// Slot list view for determining visible slots
     pub slot_list: &'a SlotListView,
-    /// Optional disk cache for mini artwork
-    pub disk_cache: Option<&'a DiskCache>,
     /// IDs of items currently being loaded (prevents duplicate requests)
     pub pending_ids: &'a HashSet<String>,
     /// In-memory mini artwork cache
@@ -51,61 +49,34 @@ pub(crate) struct CollageArtworkContext<'a> {
     pub memory_collage: &'a HashMap<String, Vec<image::Handle>>,
 }
 
-/// Result of checking disk cache for an item
+/// Result of checking in-memory state for a collage item.
+///
+/// The dedicated genre/playlist disk caches were retired with the HTTP-cache
+/// migration; sync disk hits are no longer possible (the cached client serves
+/// async). All cache misses become `NeedNetwork`, which the caller then routes
+/// through `AlbumsService::fetch_album_artwork`.
 #[derive(Debug)]
 pub(crate) enum CacheCheckResult {
     /// Both mini and collage already in memory - skip
     FullyCached,
-    /// Mini loaded from disk, but need network for collage
-    MiniCached(image::Handle),
-    /// Need full network load
+    /// Need network load
     NeedNetwork,
     /// Already pending - skip
     AlreadyPending,
 }
 
-/// Check disk cache for a collage item
-///
-/// # Arguments
-/// * `item` - The item to check cache for
-/// * `ctx` - Context containing cache references
-/// * `cache_size` - Size suffix for cache key (e.g., 300 for "id_albumid_300")
 pub(crate) fn check_cache<T: CollageArtworkItem>(
     item: &T,
     ctx: &CollageArtworkContext,
-    cache_size: u32,
 ) -> CacheCheckResult {
     let id = item.id();
 
-    // Skip if already pending
     if ctx.pending_ids.contains(id) {
         return CacheCheckResult::AlreadyPending;
     }
-
-    // Skip if both mini and collage already in memory
     if ctx.memory_artwork.contains_key(id) && ctx.memory_collage.contains_key(id) {
         return CacheCheckResult::FullyCached;
     }
-
-    // Try disk cache for mini artwork
-    let first_album_id = item.artwork_album_ids().first();
-    if let Some(album_id) = first_album_id
-        && let Some(cache) = ctx.disk_cache
-    {
-        let cache_key = format!("{id}_{album_id}_{cache_size}");
-        if cache.contains(&cache_key) {
-            // Disk cache hit - but check if we still need collage
-            if ctx.memory_collage.contains_key(id) {
-                // Both mini (from disk) and collage already loaded
-                return CacheCheckResult::FullyCached;
-            }
-            // Mini cached but no collage yet - need network for collage
-            return CacheCheckResult::MiniCached(image::Handle::from_path(
-                cache.get_path(&cache_key),
-            ));
-        }
-    }
-
     CacheCheckResult::NeedNetwork
 }
 
@@ -128,7 +99,6 @@ pub(crate) fn check_cache<T: CollageArtworkItem>(
 pub(crate) fn load_visible_artwork<T, F>(
     items: &[T],
     ctx: &CollageArtworkContext,
-    cache_size: u32,
     auth_vm: AuthGateway,
     create_message: F,
 ) -> LoadArtworkResult
@@ -142,40 +112,16 @@ where
     }
 
     let mut pending_inserts: Vec<String> = Vec::new();
-    let mut cache_inserts: Vec<(String, image::Handle)> = Vec::new();
+    let cache_inserts: Vec<(String, image::Handle)> = Vec::new();
     let mut tasks: Vec<Task<Message>> = Vec::new();
 
-    // Get indices for all visible slot list slots + nearby items for prefetch
     let indices_to_load: Vec<usize> = ctx.slot_list.prefetch_indices(total).collect();
 
     for idx in indices_to_load {
         if let Some(item) = items.get(idx) {
-            match check_cache(item, ctx, cache_size) {
-                CacheCheckResult::FullyCached | CacheCheckResult::AlreadyPending => {
-                    // Skip - nothing to do
-                    continue;
-                }
-                CacheCheckResult::MiniCached(handle) => {
-                    // Insert the cached mini artwork, but still need network for collage
-                    let id = item.id().to_string();
-                    cache_inserts.push((id.clone(), handle));
-                    pending_inserts.push(id.clone());
-
-                    // Create network task for collage
-                    let auth_vm_clone = auth_vm.clone();
-                    let album_ids = item.artwork_album_ids().to_vec();
-                    let create_msg = create_message.clone();
-                    tasks.push(Task::perform(
-                        async move {
-                            let server_url = auth_vm_clone.get_server_url().await;
-                            let subsonic_credential = auth_vm_clone.get_subsonic_credential().await;
-                            (id, server_url, subsonic_credential, album_ids)
-                        },
-                        move |(id, url, cred, album_ids)| create_msg(id, url, cred, album_ids),
-                    ));
-                }
+            match check_cache(item, ctx) {
+                CacheCheckResult::FullyCached | CacheCheckResult::AlreadyPending => continue,
                 CacheCheckResult::NeedNetwork => {
-                    // Full network load needed
                     let id = item.id().to_string();
                     pending_inserts.push(id.clone());
 

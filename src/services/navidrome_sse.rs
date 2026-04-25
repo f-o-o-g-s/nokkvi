@@ -36,7 +36,16 @@ pub(crate) fn register(info: SseConnectionInfo) {
 /// Events yielded to the iced runloop
 #[derive(Debug, Clone)]
 pub(crate) enum SseEvent {
-    LibraryChanged,
+    /// Library scan emitted a refreshResource event.
+    ///
+    /// `album_ids` carries the IDs whose data/artwork the server says changed.
+    /// `is_wildcard` is `true` when the payload was `{"*": "*"}` (full scan)
+    /// — consumers should reload slot lists but skip per-album artwork eviction
+    /// to avoid mass re-downloads.
+    LibraryChanged {
+        album_ids: Vec<String>,
+        is_wildcard: bool,
+    },
 }
 
 /// Start the SSE subscription loop
@@ -133,11 +142,24 @@ pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
                                             // Empty line marks end of frame
                                             if !event_type.is_empty() {
                                                 match parse_sse_event(&event_type, &data) {
-                                                    NavidromeEvent::RefreshResource => {
+                                                    NavidromeEvent::RefreshResource {
+                                                        resources,
+                                                        is_wildcard,
+                                                    } => {
+                                                        let album_ids = resources
+                                                            .get("album")
+                                                            .cloned()
+                                                            .unwrap_or_default();
                                                         debug!(
-                                                            " [SSE] Received refreshResource — emitting LibraryChanged"
+                                                            " [SSE] refreshResource — wildcard={is_wildcard}, album_ids={}",
+                                                            album_ids.len()
                                                         );
-                                                        output.send(SseEvent::LibraryChanged).await;
+                                                        output
+                                                            .send(SseEvent::LibraryChanged {
+                                                                album_ids,
+                                                                is_wildcard,
+                                                            })
+                                                            .await;
                                                     }
                                                     NavidromeEvent::ScanStatus {
                                                         scanning,

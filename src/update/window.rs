@@ -43,7 +43,8 @@ impl Nokkvi {
         match self.current_view {
             View::Albums => {
                 let albums_vm = shell.albums().clone();
-                let cached: HashSet<&String> = self.artwork.album_art.keys().collect();
+                let cached: HashSet<&String> =
+                    self.artwork.album_art.iter().map(|(k, _)| k).collect();
                 let tasks = prefetch_album_artwork_tasks(
                     &self.albums_page.common.slot_list,
                     &self.library.albums,
@@ -55,7 +56,8 @@ impl Nokkvi {
             }
             View::Queue => {
                 let albums_vm = shell.albums().clone();
-                let cached: HashSet<&String> = self.artwork.album_art.keys().collect();
+                let cached: HashSet<&String> =
+                    self.artwork.album_art.iter().map(|(k, _)| k).collect();
                 let items = self.filter_queue_songs();
                 let tasks = prefetch_album_artwork_tasks(
                     &self.queue_page.common.slot_list,
@@ -68,7 +70,8 @@ impl Nokkvi {
             }
             View::Songs => {
                 let albums_vm = shell.albums().clone();
-                let cached: HashSet<&String> = self.artwork.album_art.keys().collect();
+                let cached: HashSet<&String> =
+                    self.artwork.album_art.iter().map(|(k, _)| k).collect();
                 let tasks = prefetch_song_artwork_tasks(
                     &self.songs_page.common.slot_list,
                     &self.library.songs,
@@ -77,10 +80,7 @@ impl Nokkvi {
                 );
                 Task::batch(tasks)
             }
-            View::Artists => {
-                self.load_artist_mini_artwork_from_cache();
-                Task::none()
-            }
+            View::Artists => self.prefetch_artist_mini_artwork_tasks(),
             View::Genres if !self.library.genres.is_empty() => {
                 // Re-dispatch a SetOffset to trigger collage artwork loading
                 let offset = self.genres_page.common.slot_list.viewport_offset;
@@ -117,27 +117,43 @@ impl Nokkvi {
 
     /// Load mini artist artwork from disk cache for all prefetch-visible slots.
     ///
+    /// Dispatch async fetches for any uncached artist mini artwork in the
+    /// current viewport. Returns a batch of tasks producing
+    /// `ArtworkMessage::Loaded`.
+    ///
     /// Shared by: `handle_artists_loaded`, `handle_artists` (slot list change),
     /// and `prefetch_viewport_artwork` (window resize / view switch).
-    pub(crate) fn load_artist_mini_artwork_from_cache(&mut self) {
+    pub(crate) fn prefetch_artist_mini_artwork_tasks(&self) -> Task<Message> {
+        use iced::widget::image;
+
         let total = self.library.artists.len();
         if total == 0 {
-            return;
+            return Task::none();
         }
-        let cache_ref = self.artwork.artist_disk_cache.as_ref();
+        let albums_vm = match self.app_service.as_ref() {
+            Some(svc) => svc.albums().clone(),
+            None => return Task::none(),
+        };
+
+        let mut tasks = Vec::new();
         for idx in self.artists_page.common.slot_list.prefetch_indices(total) {
             if let Some(artist) = self.library.artists.get(idx)
-                && !self.artwork.album_art.contains_key(&artist.id)
-                && let Some(cache) = cache_ref
+                && !self.artwork.album_art.contains(&artist.id)
             {
-                let cache_key = format!("ar-{}_80", artist.id);
-                if cache.contains(&cache_key) {
-                    self.artwork.album_art.insert(
-                        artist.id.clone(),
-                        iced::widget::image::Handle::from_path(cache.get_path(&cache_key)),
-                    );
-                }
+                let id = artist.id.clone();
+                let art_id = format!("ar-{id}");
+                let vm = albums_vm.clone();
+                tasks.push(Task::perform(
+                    async move {
+                        let bytes = vm.fetch_album_artwork(&art_id, Some(80), None).await.ok();
+                        (id, bytes.map(image::Handle::from_bytes))
+                    },
+                    |(id, handle)| {
+                        Message::Artwork(crate::app_message::ArtworkMessage::Loaded(id, handle))
+                    },
+                ));
             }
         }
+        Task::batch(tasks)
     }
 }

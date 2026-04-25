@@ -1,7 +1,8 @@
-//! Centralized artwork URL generation and fetching for Navidrome Subsonic API
+//! Centralized artwork URL generation for Navidrome Subsonic API.
 //!
-//! This module provides a single source of truth for building cover art URLs
-//! and fetching artwork via POST (credentials in body, not URL).
+//! Single source of truth for `getCoverArt` URLs. Fetches go through
+//! `AlbumsService::fetch_album_artwork` against the bare reqwest client; there
+//! is no client-side cache, so URL form is the only thing that matters here.
 
 /// Known Subsonic cover art ID prefixes
 const KNOWN_PREFIXES: [&str; 5] = ["al-", "ar-", "mf-", "pl-", "sh-"];
@@ -11,42 +12,6 @@ pub const HIGH_RES_SIZE: u32 = 1000;
 
 /// Default size for thumbnails
 pub const THUMBNAIL_SIZE: u32 = 80;
-
-/// Safely construct a consistent string cache key for a given artwork ID and size
-/// Maps the requested size to the filename string. Omitted size is 'original'.
-pub fn build_cache_key(art_id: &str, size: Option<u32>) -> String {
-    let normalized_id = if KNOWN_PREFIXES
-        .iter()
-        .any(|prefix| art_id.starts_with(prefix))
-    {
-        art_id.to_string()
-    } else {
-        format!("al-{art_id}")
-    };
-
-    match size {
-        Some(s) => format!("{normalized_id}_{s}"),
-        None => format!("{normalized_id}_original"),
-    }
-}
-
-/// Parse album ID and size from a getCoverArt URL to build a stable cache key.
-///
-/// This ensures that URLs with and without the `size` parameter map to the same
-/// cache key format as `build_cache_key`.
-pub fn parse_cache_key_from_url(artwork_url: &str) -> String {
-    let album_id = artwork_url
-        .split("id=")
-        .nth(1)
-        .and_then(|s| s.split('&').next())
-        .unwrap_or("unknown");
-    let requested_size: Option<u32> = artwork_url
-        .split("size=")
-        .nth(1)
-        .and_then(|s| s.split('&').next())
-        .and_then(|s| s.parse().ok());
-    build_cache_key(album_id, requested_size)
-}
 
 /// Build a Subsonic getCoverArt URL
 ///
@@ -138,91 +103,6 @@ pub fn build_stream_url(song_id: &str, server_url: &str, subsonic_credential: &s
     )
 }
 
-/// Build the POST endpoint URL and form body for a getCoverArt request.
-///
-/// Returns `(url, form_body)` where:
-/// - `url` is the endpoint without credentials: `{server_url}/rest/getCoverArt`
-/// - `form_body` is `application/x-www-form-urlencoded` with all params including credentials
-///
-/// Returns `None` if art_id is empty or credentials are missing.
-pub fn build_cover_art_post_params(
-    art_id: &str,
-    server_url: &str,
-    subsonic_credential: &str,
-    size: Option<u32>,
-    updated_at: Option<&str>,
-) -> Option<(String, String)> {
-    if art_id.is_empty() || subsonic_credential.is_empty() {
-        return None;
-    }
-
-    // HTTP URLs are external, can't POST to them
-    if art_id.starts_with("http") {
-        return None;
-    }
-
-    // Normalize ID: add "al-" prefix if no known prefix present
-    let final_id = if KNOWN_PREFIXES
-        .iter()
-        .any(|prefix| art_id.starts_with(prefix))
-    {
-        art_id.to_string()
-    } else {
-        format!("al-{art_id}")
-    };
-
-    let actual_size = size.unwrap_or(HIGH_RES_SIZE);
-    let cache_buster = updated_at.unwrap_or("");
-    let url = format!("{server_url}/rest/getCoverArt");
-    let body = format!(
-        "id={final_id}&{subsonic_credential}&size={actual_size}&square=true&f=json&v=1.8.0&c=nokkvi&_u={cache_buster}"
-    );
-
-    Some((url, body))
-}
-
-/// Fetch cover art via POST request (credentials in form body, not URL).
-///
-/// Falls back to GET for external HTTP URLs that can't be POSTed to.
-/// Returns raw image bytes on success.
-pub async fn fetch_cover_art(
-    client: &reqwest::Client,
-    art_id: &str,
-    server_url: &str,
-    subsonic_credential: &str,
-    size: Option<u32>,
-) -> Option<Vec<u8>> {
-    if art_id.is_empty() || subsonic_credential.is_empty() {
-        return None;
-    }
-
-    // External HTTP URLs: GET directly (can't POST to third-party servers)
-    if art_id.starts_with("http") {
-        let response = client.get(art_id).send().await.ok()?;
-        if response.status().is_success() {
-            return response.bytes().await.ok().map(|b| b.to_vec());
-        }
-        return None;
-    }
-
-    let (url, body) =
-        build_cover_art_post_params(art_id, server_url, subsonic_credential, size, None)?;
-
-    let response = client
-        .post(&url)
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(body)
-        .send()
-        .await
-        .ok()?;
-
-    if response.status().is_success() {
-        response.bytes().await.ok().map(|b| b.to_vec())
-    } else {
-        None
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,17 +169,6 @@ mod tests {
     }
 
     #[test]
-    fn post_params_id_matches_get_url_id() {
-        let get_url = build_cover_art_url("al-abc", "http://srv", "u=x", Some(80));
-        let (_, post_body) =
-            build_cover_art_post_params("al-abc", "http://srv", "u=x", Some(80), None)
-                .expect("should produce params");
-        // Both must contain identical id= values
-        assert!(get_url.contains("id=al-abc"));
-        assert!(post_body.contains("id=al-abc"));
-    }
-
-    #[test]
     fn timestamp_cache_buster_included() {
         let url = build_cover_art_url_with_timestamp(
             "al-123",
@@ -326,29 +195,5 @@ mod tests {
             "",
             "empty credential"
         );
-    }
-
-    #[test]
-    fn test_build_cache_key() {
-        assert_eq!(build_cache_key("al-123", Some(1000)), "al-123_1000");
-        assert_eq!(build_cache_key("ar-xyz", Some(1500)), "ar-xyz_1500");
-        assert_eq!(build_cache_key("mf-abc", None), "mf-abc_original");
-
-        // Also handle auto-prefixing if art_id misses known prefixes
-        assert_eq!(build_cache_key("123", Some(80)), "al-123_80");
-        assert_eq!(build_cache_key("xyz", None), "al-xyz_original");
-    }
-
-    #[test]
-    fn test_parse_cache_key_from_url() {
-        let url_with_size = "http://srv/rest/getCoverArt?id=al-123&u=x&p=y&size=80";
-        assert_eq!(parse_cache_key_from_url(url_with_size), "al-123_80");
-
-        let url_original = "http://srv/rest/getCoverArt?id=al-abc&u=x&p=y";
-        assert_eq!(parse_cache_key_from_url(url_original), "al-abc_original");
-
-        // Regresson test for #large-artwork-bug: ensure no size doesn't fallback to _0
-        let url_no_size = "http://srv/rest/getCoverArt?id=123";
-        assert_eq!(parse_cache_key_from_url(url_no_size), "al-123_original");
     }
 }
