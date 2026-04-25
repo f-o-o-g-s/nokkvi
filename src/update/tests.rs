@@ -1763,6 +1763,327 @@ fn genres_context_menu_show_in_folder_on_grandchild_song() {
 }
 
 // ============================================================================
+// Shift+Enter (ExpandCenter) Collapse Behavior — Artists & Genres (3-tier views)
+// ============================================================================
+//
+// PROMPT 11 — In Albums/Playlists, Shift+Enter on an already-expanded parent
+// row collapses it. In Artists/Genres the same input was a no-op because the
+// dispatcher routed to ExpandAlbum, which only acts on Child/Grandchild rows.
+// These tests pin down the corrected routing: the same ExpandCenter message
+// must close the outer expansion when the parent row is centered, while still
+// toggling the inner album expansion when a child/grandchild is centered.
+
+#[test]
+fn artists_shift_enter_on_parent_collapses_outer_expansion() {
+    let mut app = test_app();
+    let artists = vec![make_artist("ar1", "Artist 1")];
+    app.library.artists.set_from_vec(artists.clone());
+
+    // Outer expansion open on ar1; viewport centered on parent (idx 0).
+    let album = make_album("a1", "Album 1", "Artist 1");
+    app.artists_page.expansion.expanded_id = Some("ar1".to_string());
+    app.artists_page.expansion.parent_offset = 0;
+    app.artists_page.expansion.children = vec![album];
+    app.artists_page.common.slot_list.selected_offset = Some(0);
+
+    let (_, _action) = app.artists_page.update(
+        crate::views::ArtistsMessage::ExpandCenter,
+        artists.len(),
+        &artists,
+    );
+
+    assert_eq!(
+        app.artists_page.expansion.expanded_id, None,
+        "outer expansion should be collapsed when ExpandCenter fires on the parent row"
+    );
+}
+
+#[test]
+fn artists_shift_enter_on_parent_clears_sub_expansion_too() {
+    let mut app = test_app();
+    let artists = vec![make_artist("ar1", "Artist 1")];
+    app.library.artists.set_from_vec(artists.clone());
+
+    let album = make_album("a1", "Album 1", "Artist 1");
+    app.artists_page.expansion.expanded_id = Some("ar1".to_string());
+    app.artists_page.expansion.parent_offset = 0;
+    app.artists_page.expansion.children = vec![album];
+
+    let song = make_song("s1", "Song 1", "Artist 1");
+    app.artists_page.sub_expansion.expanded_id = Some("a1".to_string());
+    app.artists_page.sub_expansion.parent_offset = 1;
+    app.artists_page.sub_expansion.children = vec![song];
+
+    // Center on the parent artist row.
+    app.artists_page.common.slot_list.selected_offset = Some(0);
+
+    let _ = app.artists_page.update(
+        crate::views::ArtistsMessage::ExpandCenter,
+        artists.len(),
+        &artists,
+    );
+
+    assert_eq!(
+        app.artists_page.expansion.expanded_id, None,
+        "outer expansion should collapse"
+    );
+    assert_eq!(
+        app.artists_page.sub_expansion.expanded_id, None,
+        "sub expansion should also be cleared"
+    );
+}
+
+#[test]
+fn artists_shift_enter_on_child_album_routes_to_expand_album() {
+    let mut app = test_app();
+    let artists = vec![make_artist("ar1", "Artist 1")];
+    app.library.artists.set_from_vec(artists.clone());
+
+    let album = make_album("a1", "Album 1", "Artist 1");
+    app.artists_page.expansion.expanded_id = Some("ar1".to_string());
+    app.artists_page.expansion.parent_offset = 0;
+    app.artists_page.expansion.children = vec![album];
+
+    // Center on the child album row (3-tier idx 1).
+    app.artists_page.common.slot_list.selected_offset = Some(1);
+
+    let (_, action) = app.artists_page.update(
+        crate::views::ArtistsMessage::ExpandCenter,
+        artists.len(),
+        &artists,
+    );
+
+    match action {
+        crate::views::ArtistsAction::ExpandAlbum(id) => assert_eq!(id, "a1"),
+        other => panic!("Expected ArtistsAction::ExpandAlbum(\"a1\"), got {other:?}"),
+    }
+    assert_eq!(
+        app.artists_page.expansion.expanded_id.as_deref(),
+        Some("ar1"),
+        "outer expansion should remain open"
+    );
+}
+
+#[test]
+fn artists_shift_enter_on_already_sub_expanded_child_collapses_sub() {
+    let mut app = test_app();
+    let artists = vec![make_artist("ar1", "Artist 1")];
+    app.library.artists.set_from_vec(artists.clone());
+
+    let album = make_album("a1", "Album 1", "Artist 1");
+    app.artists_page.expansion.expanded_id = Some("ar1".to_string());
+    app.artists_page.expansion.parent_offset = 0;
+    app.artists_page.expansion.children = vec![album];
+
+    let song = make_song("s1", "Song 1", "Artist 1");
+    app.artists_page.sub_expansion.expanded_id = Some("a1".to_string());
+    app.artists_page.sub_expansion.parent_offset = 1;
+    app.artists_page.sub_expansion.children = vec![song];
+
+    // Center on the child album row (3-tier idx 1, the sub-expanded album).
+    app.artists_page.common.slot_list.selected_offset = Some(1);
+
+    let _ = app.artists_page.update(
+        crate::views::ArtistsMessage::ExpandCenter,
+        artists.len(),
+        &artists,
+    );
+
+    assert_eq!(
+        app.artists_page.sub_expansion.expanded_id, None,
+        "sub expansion should be cleared when ExpandCenter hits an already sub-expanded child"
+    );
+    assert_eq!(
+        app.artists_page.expansion.expanded_id.as_deref(),
+        Some("ar1"),
+        "outer expansion should remain open"
+    );
+}
+
+#[test]
+fn artists_shift_enter_on_grandchild_collapses_sub_expansion() {
+    let mut app = test_app();
+    let artists = vec![make_artist("ar1", "Artist 1")];
+    app.library.artists.set_from_vec(artists.clone());
+
+    let album = make_album("a1", "Album 1", "Artist 1");
+    app.artists_page.expansion.expanded_id = Some("ar1".to_string());
+    app.artists_page.expansion.parent_offset = 0;
+    app.artists_page.expansion.children = vec![album];
+
+    let song = make_song("s1", "Song 1", "Artist 1");
+    app.artists_page.sub_expansion.expanded_id = Some("a1".to_string());
+    app.artists_page.sub_expansion.parent_offset = 1;
+    app.artists_page.sub_expansion.children = vec![song];
+
+    // Center on the grandchild track (3-tier idx 2).
+    app.artists_page.common.slot_list.selected_offset = Some(2);
+
+    let _ = app.artists_page.update(
+        crate::views::ArtistsMessage::ExpandCenter,
+        artists.len(),
+        &artists,
+    );
+
+    assert_eq!(
+        app.artists_page.sub_expansion.expanded_id, None,
+        "sub expansion should be cleared when ExpandCenter hits a grandchild"
+    );
+    assert_eq!(
+        app.artists_page.expansion.expanded_id.as_deref(),
+        Some("ar1"),
+        "outer expansion should remain open"
+    );
+}
+
+#[test]
+fn artists_shift_enter_on_unexpanded_parent_opens_expansion() {
+    let mut app = test_app();
+    let artists = vec![make_artist("ar1", "Artist 1")];
+    app.library.artists.set_from_vec(artists.clone());
+
+    // No expansion. Center on the parent row.
+    app.artists_page.common.slot_list.selected_offset = Some(0);
+
+    let (_, action) = app.artists_page.update(
+        crate::views::ArtistsMessage::ExpandCenter,
+        artists.len(),
+        &artists,
+    );
+
+    match action {
+        crate::views::ArtistsAction::ExpandArtist(id) => assert_eq!(id, "ar1"),
+        other => panic!("Expected ArtistsAction::ExpandArtist(\"ar1\"), got {other:?}"),
+    }
+}
+
+#[test]
+fn genres_shift_enter_on_parent_collapses_outer_expansion() {
+    let mut app = test_app();
+    let genres = vec![make_genre("g1", "Rock")];
+    app.library.genres.set_from_vec(genres.clone());
+
+    let album = make_album("a1", "Album 1", "Artist 1");
+    app.genres_page.expansion.expanded_id = Some("g1".to_string());
+    app.genres_page.expansion.parent_offset = 0;
+    app.genres_page.expansion.children = vec![album];
+    app.genres_page.common.slot_list.selected_offset = Some(0);
+
+    let _ = app.genres_page.update(
+        crate::views::GenresMessage::ExpandCenter,
+        genres.len(),
+        &genres,
+    );
+
+    assert_eq!(
+        app.genres_page.expansion.expanded_id, None,
+        "outer expansion should be collapsed when ExpandCenter fires on the parent row"
+    );
+}
+
+#[test]
+fn genres_shift_enter_on_parent_clears_sub_expansion_too() {
+    let mut app = test_app();
+    let genres = vec![make_genre("g1", "Rock")];
+    app.library.genres.set_from_vec(genres.clone());
+
+    let album = make_album("a1", "Album 1", "Artist 1");
+    app.genres_page.expansion.expanded_id = Some("g1".to_string());
+    app.genres_page.expansion.parent_offset = 0;
+    app.genres_page.expansion.children = vec![album];
+
+    let song = make_song("s1", "Song 1", "Artist 1");
+    app.genres_page.sub_expansion.expanded_id = Some("a1".to_string());
+    app.genres_page.sub_expansion.parent_offset = 1;
+    app.genres_page.sub_expansion.children = vec![song];
+
+    app.genres_page.common.slot_list.selected_offset = Some(0);
+
+    let _ = app.genres_page.update(
+        crate::views::GenresMessage::ExpandCenter,
+        genres.len(),
+        &genres,
+    );
+
+    assert_eq!(app.genres_page.expansion.expanded_id, None);
+    assert_eq!(app.genres_page.sub_expansion.expanded_id, None);
+}
+
+#[test]
+fn genres_shift_enter_on_child_album_routes_to_expand_album() {
+    let mut app = test_app();
+    let genres = vec![make_genre("g1", "Rock")];
+    app.library.genres.set_from_vec(genres.clone());
+
+    let album = make_album("a1", "Album 1", "Artist 1");
+    app.genres_page.expansion.expanded_id = Some("g1".to_string());
+    app.genres_page.expansion.parent_offset = 0;
+    app.genres_page.expansion.children = vec![album];
+
+    app.genres_page.common.slot_list.selected_offset = Some(1);
+
+    let (_, action) = app.genres_page.update(
+        crate::views::GenresMessage::ExpandCenter,
+        genres.len(),
+        &genres,
+    );
+
+    match action {
+        crate::views::GenresAction::ExpandAlbum(id) => assert_eq!(id, "a1"),
+        other => panic!("Expected GenresAction::ExpandAlbum(\"a1\"), got {other:?}"),
+    }
+    assert_eq!(app.genres_page.expansion.expanded_id.as_deref(), Some("g1"),);
+}
+
+#[test]
+fn genres_shift_enter_on_grandchild_collapses_sub_expansion() {
+    let mut app = test_app();
+    let genres = vec![make_genre("g1", "Rock")];
+    app.library.genres.set_from_vec(genres.clone());
+
+    let album = make_album("a1", "Album 1", "Artist 1");
+    app.genres_page.expansion.expanded_id = Some("g1".to_string());
+    app.genres_page.expansion.parent_offset = 0;
+    app.genres_page.expansion.children = vec![album];
+
+    let song = make_song("s1", "Song 1", "Artist 1");
+    app.genres_page.sub_expansion.expanded_id = Some("a1".to_string());
+    app.genres_page.sub_expansion.parent_offset = 1;
+    app.genres_page.sub_expansion.children = vec![song];
+
+    app.genres_page.common.slot_list.selected_offset = Some(2);
+
+    let _ = app.genres_page.update(
+        crate::views::GenresMessage::ExpandCenter,
+        genres.len(),
+        &genres,
+    );
+
+    assert_eq!(app.genres_page.sub_expansion.expanded_id, None);
+    assert_eq!(app.genres_page.expansion.expanded_id.as_deref(), Some("g1"),);
+}
+
+#[test]
+fn genres_shift_enter_on_unexpanded_parent_opens_expansion() {
+    let mut app = test_app();
+    let genres = vec![make_genre("g1", "Rock")];
+    app.library.genres.set_from_vec(genres.clone());
+
+    app.genres_page.common.slot_list.selected_offset = Some(0);
+
+    let (_, action) = app.genres_page.update(
+        crate::views::GenresMessage::ExpandCenter,
+        genres.len(),
+        &genres,
+    );
+
+    match action {
+        crate::views::GenresAction::ExpandGenre(_, id) => assert_eq!(id, "g1"),
+        other => panic!("Expected GenresAction::ExpandGenre(_, \"g1\"), got {other:?}"),
+    }
+}
+
+// ============================================================================
 // Focus and Expand Artwork Fetching Bug (albums.rs / etc)
 // ============================================================================
 
@@ -2539,5 +2860,149 @@ fn library_refreshed_suppresses_toast_when_flag_set() {
     assert!(
         app.toast.toasts.is_empty(),
         "No toast should be pushed when suppress_library_refresh_toasts is true"
+    );
+}
+
+// ============================================================================
+// Scrollbar Seek → Large Artwork Loading (regression: missing large artwork
+// after rapid scroll in albums view)
+// ============================================================================
+//
+// User-reported bug: after scrolling rapidly via the scrollbar in the Albums
+// view and then stopping, the large artwork column sometimes stays blank. The
+// mini thumbnails for visible slots load fine, and stepping one slot up/down
+// with the keyboard then back fixes it. Eventually an SSE-driven artwork
+// refresh races in and populates the missing artwork ("Updated artwork for 1
+// album" toast).
+//
+// Architecture intent: SlotListScrollSeek is a hot-path event that should NOT
+// trigger a fetch. After 150ms idle, `seek_settled_timer` fires
+// `SlotListMessage::SeekSettled`, which synthesises a `SlotListSetOffset` for
+// the target view; that path is supposed to dispatch LoadLargeArtwork for the
+// centred album.
+//
+// The `LoadLargeArtwork` action is also dispatched by the existing nav paths,
+// so its handler is what eventually puts the album into `loading_large_artwork`
+// and kicks off the fetch — which means a synchronous side-effect on
+// `loading_large_artwork` is the right TDD signal that the chain is wired
+// correctly without depending on the async iced runtime.
+
+#[test]
+fn albums_scroll_seek_does_not_load_artwork_immediately() {
+    // Hot-path scroll events should only update viewport state. Artwork loading
+    // is deferred to the seek_settled debounce timer.
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    let albums: Vec<_> = (0..50)
+        .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
+        .collect();
+    app.library.albums.set_from_vec(albums);
+
+    let _ = app.handle_albums(crate::views::AlbumsMessage::SlotListScrollSeek(25));
+
+    assert_eq!(app.albums_page.common.slot_list.viewport_offset, 25);
+    assert_eq!(
+        app.artwork.loading_large_artwork, None,
+        "scroll seek alone should not start a fetch"
+    );
+}
+
+#[test]
+fn albums_scroll_seek_bumps_scroll_generation_id() {
+    // The seek_settled timer is gated by scroll_generation_id; each scroll
+    // event must bump it so stale timers from earlier seeks are skipped.
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    let albums: Vec<_> = (0..20)
+        .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
+        .collect();
+    app.library.albums.set_from_vec(albums);
+
+    let initial = app.albums_page.common.slot_list.scroll_generation_id;
+    let _ = app.handle_albums(crate::views::AlbumsMessage::SlotListScrollSeek(5));
+
+    assert!(
+        app.albums_page.common.slot_list.scroll_generation_id > initial,
+        "scroll seek should bump scroll_generation_id"
+    );
+}
+
+#[test]
+fn albums_seek_settled_dispatches_load_large_artwork_for_centered_album() {
+    // The bug: this is the chain that fails to fire the artwork load after a
+    // rapid-scroll-then-stop in the Albums view. Synthesising the SeekSettled
+    // message reproduces what the 150ms debounce timer does in production.
+    use crate::app_message::SlotListMessage;
+
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    let albums: Vec<_> = (0..50)
+        .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
+        .collect();
+    app.library.albums.set_from_vec(albums);
+
+    let _ = app.handle_albums(crate::views::AlbumsMessage::SlotListScrollSeek(25));
+    let gen_id = app.albums_page.common.slot_list.scroll_generation_id;
+
+    let _ = app.handle_slot_list_message(SlotListMessage::SeekSettled(View::Albums, gen_id));
+
+    assert_eq!(
+        app.artwork.loading_large_artwork.as_deref(),
+        Some("a25"),
+        "seek_settled should trigger LoadLargeArtwork for the centered album"
+    );
+}
+
+#[test]
+fn songs_seek_settled_dispatches_load_large_artwork_for_centered_song_album() {
+    // Songs view is reported to never have the bug — keep it green as a
+    // regression sentinel so the fix in albums doesn't break the working path.
+    use crate::app_message::SlotListMessage;
+
+    let mut app = test_app();
+    app.current_view = View::Songs;
+    app.library.songs.set_from_vec(
+        (0..50)
+            .map(|i| make_song(&format!("s{i}"), &format!("Song {i}"), "Artist"))
+            .collect(),
+    );
+
+    let _ = app.handle_songs(crate::views::SongsMessage::SlotListScrollSeek(25));
+    let gen_id = app.songs_page.common.slot_list.scroll_generation_id;
+
+    let _ = app.handle_slot_list_message(SlotListMessage::SeekSettled(View::Songs, gen_id));
+
+    // make_song defaults album_id to "album_{id}", so song s25 → album_s25.
+    assert_eq!(
+        app.artwork.loading_large_artwork.as_deref(),
+        Some("album_s25"),
+        "seek_settled should trigger LoadLargeArtwork for the centered song's album"
+    );
+}
+
+#[test]
+fn albums_seek_settled_skipped_when_generation_id_is_stale() {
+    // Sanity check: if a newer scroll has bumped gen_id, a stale timer's gen_id
+    // is rejected and no artwork load happens. Verifies the guard keeps working
+    // alongside the fix.
+    use crate::app_message::SlotListMessage;
+
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    let albums: Vec<_> = (0..20)
+        .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
+        .collect();
+    app.library.albums.set_from_vec(albums);
+
+    let _ = app.handle_albums(crate::views::AlbumsMessage::SlotListScrollSeek(5));
+    let stale_gen = app.albums_page.common.slot_list.scroll_generation_id;
+    // Subsequent scroll bumps gen_id, leaving stale_gen behind.
+    let _ = app.handle_albums(crate::views::AlbumsMessage::SlotListScrollSeek(10));
+
+    let _ = app.handle_slot_list_message(SlotListMessage::SeekSettled(View::Albums, stale_gen));
+
+    assert_eq!(
+        app.artwork.loading_large_artwork, None,
+        "stale-generation seek_settled timer must not start a fetch"
     );
 }

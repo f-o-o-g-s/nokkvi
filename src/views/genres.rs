@@ -206,6 +206,38 @@ impl GenresPage {
         total_items: usize,
         genres: &[GenreUIViewData],
     ) -> (Task<GenresMessage>, GenresAction) {
+        // Shift+Enter routing for the 3-tier list — see the matching block in
+        // artists.rs for the rationale. Routes Child/Grandchild rows to
+        // ExpandAlbum and Parent rows to a direct outer collapse.
+        if matches!(message, GenresMessage::ExpandCenter) && self.expansion.is_expanded() {
+            let total = super::expansion::three_tier_flattened_len(
+                genres,
+                &self.expansion,
+                self.sub_expansion.children.len(),
+            );
+            let entry = self.common.get_center_item_index(total).and_then(|idx| {
+                super::expansion::three_tier_get_entry_at(
+                    idx,
+                    genres,
+                    &self.expansion,
+                    &self.sub_expansion,
+                    |g| &g.id,
+                    |a| &a.id,
+                )
+            });
+            match entry {
+                Some(ThreeTierEntry::Child(_, _) | ThreeTierEntry::Grandchild(_, _)) => {
+                    return self.update(GenresMessage::ExpandAlbum, total_items, genres);
+                }
+                Some(ThreeTierEntry::Parent(_)) => {
+                    self.sub_expansion.clear();
+                    self.expansion.collapse(genres, |g| &g.id, &mut self.common);
+                    return (Task::none(), GenresAction::None);
+                }
+                None => {}
+            }
+        }
+
         match super::impl_expansion_update!(
             self, message, genres, total_items,
             id_fn: |g| &g.id,
@@ -1013,11 +1045,11 @@ impl super::ViewPage for GenresPage {
         Some(Message::Genres(GenresMessage::AddCenterToQueue))
     }
     fn expand_center_message(&self) -> Option<Message> {
-        if self.expansion.is_expanded() {
-            Some(Message::Genres(GenresMessage::ExpandAlbum))
-        } else {
-            Some(Message::Genres(GenresMessage::ExpandCenter))
-        }
+        // Always dispatch ExpandCenter; update() inspects the centered 3-tier
+        // entry and routes parent rows to outer-collapse and child/grandchild
+        // rows to the album sub-expansion handler. Mirrors Albums/Playlists
+        // toggle-on-self semantics.
+        Some(Message::Genres(GenresMessage::ExpandCenter))
     }
     fn reload_message(&self) -> Option<Message> {
         Some(Message::LoadGenres)

@@ -191,6 +191,43 @@ impl ArtistsPage {
         total_items: usize,
         artists: &[ArtistUIViewData],
     ) -> (Task<ArtistsMessage>, ArtistsAction) {
+        // Shift+Enter routing for the 3-tier list. The macro's ExpandCenter
+        // handler operates on the 2-tier (parent + first-level children) view,
+        // which is wrong once a sub-expansion has injected grandchildren below
+        // a child album. Inspect the centered entry first and re-route:
+        //   * Child / Grandchild → ExpandAlbum (toggles the inner expansion)
+        //   * Parent (outer already expanded) → collapse outer + clear sub
+        //   * otherwise (no expansion) → fall through to macro to open it.
+        if matches!(message, ArtistsMessage::ExpandCenter) && self.expansion.is_expanded() {
+            let total = super::expansion::three_tier_flattened_len(
+                artists,
+                &self.expansion,
+                self.sub_expansion.children.len(),
+            );
+            let entry = self.common.get_center_item_index(total).and_then(|idx| {
+                super::expansion::three_tier_get_entry_at(
+                    idx,
+                    artists,
+                    &self.expansion,
+                    &self.sub_expansion,
+                    |a| &a.id,
+                    |a| &a.id,
+                )
+            });
+            match entry {
+                Some(ThreeTierEntry::Child(_, _) | ThreeTierEntry::Grandchild(_, _)) => {
+                    return self.update(ArtistsMessage::ExpandAlbum, total_items, artists);
+                }
+                Some(ThreeTierEntry::Parent(_)) => {
+                    self.sub_expansion.clear();
+                    self.expansion
+                        .collapse(artists, |a| &a.id, &mut self.common);
+                    return (Task::none(), ArtistsAction::None);
+                }
+                None => {}
+            }
+        }
+
         match super::impl_expansion_update!(
             self, message, artists, total_items,
             id_fn: |a| &a.id,
@@ -1241,12 +1278,11 @@ impl super::ViewPage for ArtistsPage {
         Some(Message::Artists(ArtistsMessage::AddCenterToQueue))
     }
     fn expand_center_message(&self) -> Option<Message> {
-        if self.expansion.is_expanded() {
-            // If albums are open, Shift+Enter now expands tracks on the centered album
-            Some(Message::Artists(ArtistsMessage::ExpandAlbum))
-        } else {
-            Some(Message::Artists(ArtistsMessage::ExpandCenter))
-        }
+        // Always dispatch ExpandCenter; update() inspects the centered 3-tier
+        // entry and routes parent rows to outer-collapse and child/grandchild
+        // rows to the album sub-expansion handler. Mirrors Albums/Playlists
+        // toggle-on-self semantics.
+        Some(Message::Artists(ArtistsMessage::ExpandCenter))
     }
     fn reload_message(&self) -> Option<Message> {
         Some(Message::LoadArtists)
