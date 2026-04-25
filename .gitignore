@@ -31,6 +31,7 @@ reference-*/
 
 # Agent/AI assistant data
 .gemini/
+.claude/settings.local.json
 
 # Logs and debugging
 *.log
