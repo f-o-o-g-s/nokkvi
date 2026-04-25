@@ -461,9 +461,9 @@ impl Nokkvi {
                 return self.set_item_rating_task(song_id, "song", new_rating, current);
             }
             SongsAction::LoadLargeArtwork(album_id) => {
-                let mut tasks = vec![Task::done(Message::Artwork(ArtworkMessage::LoadLarge(
-                    album_id,
-                )))];
+                // Direct call (rather than dispatching Message::Artwork(LoadLarge))
+                // so loading_large_artwork is set in the same tick as the action.
+                let mut tasks = vec![self.handle_load_large_artwork(album_id)];
 
                 // Prefetch mini artwork for visible viewport using canonical helper
                 if let Some(shell) = &self.app_service {

@@ -580,26 +580,30 @@ impl Nokkvi {
                 );
             }
             AlbumsAction::LoadLargeArtwork(album_id_str) => {
-                if let Ok(_index) = album_id_str.parse::<usize>() {
-                    let mut tasks = Vec::new();
-
-                    // Resolve the actual album ID using the expansion state and the passed index
-                    if let Some(entry) =
-                        self.albums_page
-                            .expansion
-                            .get_entry_at(_index, &self.library.albums, |a| &a.id)
-                    {
-                        let album_id = match entry {
+                if let Ok(index) = album_id_str.parse::<usize>() {
+                    // Resolve the actual album ID using the expansion state and
+                    // the passed index. Drop the borrow before calling &mut self
+                    // methods below.
+                    let resolved_album_id = self
+                        .albums_page
+                        .expansion
+                        .get_entry_at(index, &self.library.albums, |a| &a.id)
+                        .map(|entry| match entry {
                             crate::views::expansion::SlotListEntry::Parent(album) => {
                                 album.id.clone()
                             }
                             crate::views::expansion::SlotListEntry::Child(_song, parent_id) => {
                                 parent_id.clone()
                             }
-                        };
-                        tasks.push(Task::done(Message::Artwork(ArtworkMessage::LoadLarge(
-                            album_id,
-                        ))));
+                        });
+
+                    let mut tasks = Vec::new();
+                    // Direct call (rather than dispatching Message::Artwork(LoadLarge))
+                    // so loading_large_artwork is set in the same tick as the action.
+                    // Prevents racing with subsequent LoadLargeArtwork actions during
+                    // rapid scroll/seek-settled cycles.
+                    if let Some(album_id) = resolved_album_id {
+                        tasks.push(self.handle_load_large_artwork(album_id));
                     }
 
                     // Prefetch mini artwork for viewport using canonical helper
