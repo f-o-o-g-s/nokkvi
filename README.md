@@ -115,15 +115,14 @@ All application data and configuration is localized to `~/.config/nokkvi/`:
 
 - `config.toml`: User preferences, theme selection, and visualizer settings (hot-reloadable).
 - `app.redb`: Unified database file storing your session tokens, saved queue state, and application settings.
-- `cache/`: Persistent disk cache for album and artist artwork.
 - `themes/`: Directory containing all built-in and user-created `.toml` theme files.
 - `sfx/`: Directory containing all UI sound effects (you can drop in custom `.wav` files to override the defaults).
 
-### Artwork Prefetching & Cache
+### Artwork
 
-To guarantee instantaneous load times and a fluid, 60fps scrolling experience, Nokkvi doesn't fetch album art on-the-fly like a web browser. Instead, a background service automatically downloads and caches your *entire* library's album and artist artwork (both thumbnail and high-resolution sizes) to `~/.config/nokkvi/cache/` after you log in. 
+Artwork is fetched on demand from your Navidrome server — there is no client-side disk cache. An in-memory LRU (capped at 512 entries) keeps recently viewed artwork warm so GPU textures stay loaded during normal navigation. When Navidrome pushes a library-change event over its SSE stream, any affected album already in memory is silently re-fetched so you see updated art immediately without restarting.
 
-Depending on your library size, this means Nokkvi will consume local disk space to store these images (often a few hundred megabytes for larger libraries). This aggressive caching strategy is what allows the native application interface to remain perfectly responsive during rapid navigation without being bottlenecked by network latency.
+For best results, enable server-side image caching in Navidrome (`ImageCacheSize` in your config). All artwork reads hit the server's own cache rather than re-transcoding on every request.
 
 ### Built-in Themes
 
