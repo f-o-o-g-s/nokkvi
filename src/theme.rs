@@ -6,10 +6,11 @@
 //! All color accessors are functions (not statics) so they react to hot-reload via `reload_theme()`.
 
 use std::sync::{
-    LazyLock,
+    Arc, LazyLock,
     atomic::{AtomicBool, AtomicU8, Ordering},
 };
 
+use arc_swap::ArcSwap;
 use iced::{Color, Font};
 use nokkvi_data::types::theme_file::{ThemeFile, VisualizerColors};
 use parking_lot::RwLock;
@@ -20,16 +21,20 @@ use crate::theme_config::{
 };
 
 // ============================================================================
-// Global theme state (with hot-reload support via RwLock)
+// Global theme state (with hot-reload support via lock-free ArcSwap)
 // ============================================================================
 
 /// Global resolved dual theme — parsed `iced::Color` values for rendering.
-static DUAL_THEME: LazyLock<RwLock<ResolvedDualTheme>> = LazyLock::new(|| {
+///
+/// Uses `ArcSwap` for lock-free reads from the render path. Each color
+/// accessor performs an atomic Arc clone (~1 ns) instead of acquiring a
+/// reader lock or cloning the whole 22-field struct.
+static DUAL_THEME: LazyLock<ArcSwap<ResolvedDualTheme>> = LazyLock::new(|| {
     // Seed any missing built-in themes to ~/.config/nokkvi/themes/ on first access
     if let Err(e) = nokkvi_data::services::theme_loader::seed_builtin_themes() {
         tracing::warn!("Failed to seed built-in themes: {e}");
     }
-    RwLock::new(load_resolved_dual_theme())
+    ArcSwap::from(Arc::new(load_resolved_dual_theme()))
 });
 
 /// Global raw theme file — hex strings for visualizer colors and UI that
@@ -113,10 +118,7 @@ pub(crate) fn reload_theme() {
     let new_file = load_active_theme_file();
     let new_resolved = ResolvedDualTheme::from_theme_file(&new_file);
 
-    {
-        let mut theme = DUAL_THEME.write();
-        *theme = new_resolved;
-    }
+    DUAL_THEME.store(Arc::new(new_resolved));
     {
         let mut file = THEME_FILE.write();
         *file = new_file;
@@ -137,16 +139,20 @@ pub(crate) fn get_visualizer_colors() -> VisualizerColors {
     }
 }
 
-/// Get a clone of current theme based on light mode
-/// (Clones to avoid holding RwLock read guard across function calls)
+/// Read a single color field from the active mode's theme without cloning the
+/// 22-field `ResolvedTheme`. The closure receives a borrow of the active
+/// palette (dark or light) and returns the desired `Color`. `ArcSwap::load`
+/// is lock-free (one atomic Arc clone), so this is safe to call from the
+/// render path at any frequency.
 #[inline]
-fn current_theme() -> ResolvedTheme {
-    let guard = DUAL_THEME.read();
-    if UI_MODE.light_mode.load(Ordering::Relaxed) {
-        guard.light.clone()
+fn read_color<F: FnOnce(&ResolvedTheme) -> Color>(f: F) -> Color {
+    let dual = DUAL_THEME.load();
+    let theme = if UI_MODE.light_mode.load(Ordering::Relaxed) {
+        &dual.light
     } else {
-        guard.dark.clone()
-    }
+        &dual.dark
+    };
+    f(theme)
 }
 
 // ============================================================================
@@ -630,27 +636,27 @@ pub(crate) fn set_playlists_artwork_overlay(enabled: bool) {
 
 #[inline]
 pub(crate) fn bg0_hard() -> Color {
-    current_theme().bg0_hard
+    read_color(|t| t.bg0_hard)
 }
 #[inline]
 pub(crate) fn bg0() -> Color {
-    current_theme().bg0
+    read_color(|t| t.bg0)
 }
 #[inline]
 pub(crate) fn bg0_soft() -> Color {
-    current_theme().bg0_soft
+    read_color(|t| t.bg0_soft)
 }
 #[inline]
 pub(crate) fn bg1() -> Color {
-    current_theme().bg1
+    read_color(|t| t.bg1)
 }
 #[inline]
 pub(crate) fn bg2() -> Color {
-    current_theme().bg2
+    read_color(|t| t.bg2)
 }
 #[inline]
 pub(crate) fn bg3() -> Color {
-    current_theme().bg3
+    read_color(|t| t.bg3)
 }
 
 // ============================================================================
@@ -659,23 +665,23 @@ pub(crate) fn bg3() -> Color {
 
 #[inline]
 pub(crate) fn fg4() -> Color {
-    current_theme().fg4
+    read_color(|t| t.fg4)
 }
 #[inline]
 pub(crate) fn fg3() -> Color {
-    current_theme().fg3
+    read_color(|t| t.fg3)
 }
 #[inline]
 pub(crate) fn fg2() -> Color {
-    current_theme().fg2
+    read_color(|t| t.fg2)
 }
 #[inline]
 pub(crate) fn fg1() -> Color {
-    current_theme().fg1
+    read_color(|t| t.fg1)
 }
 #[inline]
 pub(crate) fn fg0() -> Color {
-    current_theme().fg0
+    read_color(|t| t.fg0)
 }
 
 // ============================================================================
@@ -684,15 +690,15 @@ pub(crate) fn fg0() -> Color {
 
 #[inline]
 pub(crate) fn accent() -> Color {
-    current_theme().accent
+    read_color(|t| t.accent)
 }
 #[inline]
 pub(crate) fn accent_bright() -> Color {
-    current_theme().accent_bright
+    read_color(|t| t.accent_bright)
 }
 #[inline]
 pub(crate) fn accent_border_light() -> Color {
-    current_theme().accent_border_light
+    read_color(|t| t.accent_border_light)
 }
 
 /// Dedicated now-playing slot highlight color.
@@ -702,7 +708,7 @@ pub(crate) fn accent_border_light() -> Color {
 /// affecting nav bars, borders, or other accent-colored UI.
 #[inline]
 pub(crate) fn now_playing_color() -> Color {
-    current_theme().now_playing
+    read_color(|t| t.now_playing)
 }
 
 /// Dedicated selected/center slot highlight color.
@@ -712,7 +718,7 @@ pub(crate) fn now_playing_color() -> Color {
 /// without affecting nav bars, borders, or other accent-colored UI.
 #[inline]
 pub(crate) fn selected_color() -> Color {
-    current_theme().selected
+    read_color(|t| t.selected)
 }
 
 /// Semi-transparent accent color for text input selection highlights.
@@ -736,32 +742,32 @@ pub(crate) fn selection_color() -> Color {
 
 #[inline]
 pub(crate) fn danger() -> Color {
-    current_theme().danger
+    read_color(|t| t.danger)
 }
 #[inline]
 pub(crate) fn danger_bright() -> Color {
-    current_theme().danger_bright
+    read_color(|t| t.danger_bright)
 }
 #[inline]
 pub(crate) fn success() -> Color {
-    current_theme().success
+    read_color(|t| t.success)
 }
 #[inline]
 pub(crate) fn warning() -> Color {
-    current_theme().warning
+    read_color(|t| t.warning)
 }
 #[inline]
 pub(crate) fn warning_bright() -> Color {
-    current_theme().warning_bright
+    read_color(|t| t.warning_bright)
 }
 #[inline]
 #[allow(dead_code)] // Base variant available for future use (bright variant used by star ratings)
 pub(crate) fn star() -> Color {
-    current_theme().star
+    read_color(|t| t.star)
 }
 #[inline]
 pub(crate) fn star_bright() -> Color {
-    current_theme().star_bright
+    read_color(|t| t.star_bright)
 }
 
 // ============================================================================
@@ -1030,13 +1036,17 @@ mod tests {
 
     use super::*;
 
-    /// Phase 0 micro-bench: measures cumulative cost of `theme::fg0()` over
-    /// 10,000 calls. Captures the baseline before Phase 2A's accessor de-clone.
-    /// Numbers print to stderr (use `cargo test -- --nocapture` to view).
+    /// Micro-bench: measures cumulative cost of `theme::fg0()` over 10,000
+    /// calls. Numbers print to stderr (use `cargo test -- --nocapture` to view).
     ///
-    /// The upper bound is generous — the goal is a regression net, not a
-    /// per-machine wall-clock guarantee. Phase 2A should drop the elapsed time
-    /// by ≥10× when this same test re-runs against the rewritten accessors.
+    /// Recorded baselines (release build, this machine):
+    /// - Pre-2A `RwLock<ResolvedDualTheme>` + 352-byte struct clone: ~13.1 ns/call.
+    /// - Post-2A `ArcSwap<ResolvedDualTheme>` + lock-free Guard load: ~12.5 ns/call.
+    ///
+    /// The raw per-call delta is small because both paths bottleneck on a few
+    /// atomic ops; the durable win of 2A is **lock-freedom** — the visualizer
+    /// FFT thread no longer competes with the render thread for a theme lock.
+    /// The upper bound is generous (regression net, not wall-clock guarantee).
     #[test]
     fn theme_accessor_microbench_fg0_x10000() {
         // Touch the theme once so any first-call setup (DUAL_THEME LazyLock
