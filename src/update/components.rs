@@ -121,14 +121,21 @@ where
 
 /// Generate song artwork prefetch tasks for a slot list viewport.
 ///
-/// Variant of `prefetch_album_artwork_tasks` for songs that have `Option<album_id>`.
-/// Uses `Message::SongArtworkLoaded` instead of `Message::ArtworkLoaded`.
-pub(super) fn prefetch_song_artwork_tasks(
+/// Variant of `prefetch_album_artwork_tasks` for songs that have
+/// `Option<album_id>`. Generic over the slice element type — Songs page
+/// passes `SongUIViewData`, Similar page passes raw `Song`. The
+/// `extract_album_id` closure pulls the optional album id out of each
+/// element. Dispatches `Message::Artwork(ArtworkMessage::SongMiniLoaded)`.
+pub(super) fn prefetch_song_artwork_tasks<T, F>(
     slot_list: &SlotListView,
-    songs: &[nokkvi_data::backend::songs::SongUIViewData],
+    songs: &[T],
     cached_ids: &HashSet<&String>,
     albums_vm: AlbumsService,
-) -> Vec<Task<Message>> {
+    extract_album_id: F,
+) -> Vec<Task<Message>>
+where
+    F: Fn(&T) -> Option<&String>,
+{
     let total = songs.len();
     if total == 0 {
         return Vec::new();
@@ -140,53 +147,7 @@ pub(super) fn prefetch_song_artwork_tasks(
         .prefetch_indices(total)
         .filter_map(|idx| songs.get(idx))
         .filter_map(|song| {
-            song.album_id.as_ref().and_then(|id| {
-                if cached_ids.contains(id) || already_queued.contains(id) {
-                    None
-                } else {
-                    already_queued.insert(id.clone());
-                    Some(id.clone())
-                }
-            })
-        })
-        .map(|album_id| {
-            let vm = albums_vm.clone();
-            let id = album_id;
-            Task::perform(
-                async move {
-                    let bytes = vm.fetch_album_artwork(&id, Some(80), None).await.ok();
-                    (id, bytes.map(image::Handle::from_bytes))
-                },
-                |(id, handle)| {
-                    Message::Artwork(crate::app_message::ArtworkMessage::SongMiniLoaded(
-                        id, handle,
-                    ))
-                },
-            )
-        })
-        .collect()
-}
-
-/// Generate song artwork prefetch tasks for a slot list viewport using raw Song types.
-/// Used by Similar page which circumvents SongUIViewData wrapping.
-pub(crate) fn prefetch_raw_song_artwork_tasks(
-    slot_list: &SlotListView,
-    songs: &[nokkvi_data::types::song::Song],
-    cached_ids: &HashSet<&String>,
-    albums_vm: AlbumsService,
-) -> Vec<Task<Message>> {
-    let total = songs.len();
-    if total == 0 {
-        return Vec::new();
-    }
-
-    let mut already_queued = HashSet::new();
-
-    slot_list
-        .prefetch_indices(total)
-        .filter_map(|idx| songs.get(idx))
-        .filter_map(|song| {
-            song.album_id.as_ref().and_then(|id| {
+            extract_album_id(song).and_then(|id| {
                 if cached_ids.contains(id) || already_queued.contains(id) {
                     None
                 } else {

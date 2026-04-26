@@ -77,6 +77,7 @@ impl Nokkvi {
                     &self.library.songs,
                     &cached,
                     albums_vm,
+                    |s| s.album_id.as_ref(),
                 );
                 Task::batch(tasks)
             }

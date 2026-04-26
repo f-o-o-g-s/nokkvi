@@ -439,6 +439,7 @@ impl Nokkvi {
                         &self.library.songs,
                         &cached,
                         shell.albums().clone(),
+                        |s| s.album_id.as_ref(),
                     );
                     tasks.extend(prefetch_tasks);
                 }

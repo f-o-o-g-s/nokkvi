@@ -73,13 +73,13 @@ impl Nokkvi {
                     let cached: std::collections::HashSet<&String> =
                         self.artwork.album_art.iter().map(|(k, _)| k).collect();
                     if let Some(state) = &self.similar_songs {
-                        let prefetch_tasks =
-                            crate::update::components::prefetch_raw_song_artwork_tasks(
-                                &self.similar_page.common.slot_list,
-                                &state.songs,
-                                &cached,
-                                shell.albums().clone(),
-                            );
+                        let prefetch_tasks = crate::update::components::prefetch_song_artwork_tasks(
+                            &self.similar_page.common.slot_list,
+                            &state.songs,
+                            &cached,
+                            shell.albums().clone(),
+                            |s| s.album_id.as_ref(),
+                        );
                         tasks.extend(prefetch_tasks);
                     }
                 }
@@ -232,13 +232,13 @@ impl Nokkvi {
                     if let Some(shell) = &self.app_service {
                         let cached: std::collections::HashSet<&String> =
                             self.artwork.album_art.iter().map(|(k, _)| k).collect();
-                        let prefetch_tasks =
-                            crate::update::components::prefetch_raw_song_artwork_tasks(
-                                &self.similar_page.common.slot_list,
-                                &state.songs,
-                                &cached,
-                                shell.albums().clone(),
-                            );
+                        let prefetch_tasks = crate::update::components::prefetch_song_artwork_tasks(
+                            &self.similar_page.common.slot_list,
+                            &state.songs,
+                            &cached,
+                            shell.albums().clone(),
+                            |s| s.album_id.as_ref(),
+                        );
                         tasks.extend(prefetch_tasks);
                     }
                 }
