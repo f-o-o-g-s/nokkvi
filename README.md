@@ -83,7 +83,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions, guidelines, and t
 
 ## Support
 
-Nokkvi is free and open source. If you'd like to chip in, you can [buy me a coffee on Ko-fi](https://ko-fi.com/foogsnokkvi).
+Nokkvi is free and open source. If you'd like to chip in, you can buy me a coffee on Ko-fi:
+
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/foogsnokkvi)
 
 ## License
 
