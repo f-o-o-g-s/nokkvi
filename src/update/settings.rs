@@ -51,10 +51,12 @@ impl Nokkvi {
             slot_text_links: crate::theme::is_slot_text_links(),
             crossfade_enabled: self.engine.crossfade_enabled,
             crossfade_duration_secs: self.engine.crossfade_duration_secs,
-            // PR 1 keeps the UI toggle as bool — Agc → on, anything else → off.
-            // The four-mode picker lands in PR 3.
-            volume_normalization: self.engine.volume_normalization.is_agc(),
+            volume_normalization: self.engine.volume_normalization.as_label(),
             normalization_level: self.engine.normalization_level.as_label(),
+            replay_gain_preamp_db: self.engine.replay_gain_preamp_db.round() as i32,
+            replay_gain_fallback_db: self.engine.replay_gain_fallback_db.round() as i32,
+            replay_gain_fallback_to_agc: self.engine.replay_gain_fallback_to_agc,
+            replay_gain_prevent_clipping: self.engine.replay_gain_prevent_clipping,
             default_playlist_name: self.default_playlist_name.clone(),
             quick_add_to_playlist: self.quick_add_to_playlist,
             horizontal_volume: crate::theme::is_horizontal_volume(),
@@ -739,17 +741,8 @@ impl Nokkvi {
                 Task::none()
             }
             "general.volume_normalization" => {
-                if let crate::views::settings::items::SettingValue::Bool(enabled) = value {
-                    // PR 2: UI still emits bool (AGC on/off). Translate at the
-                    // dispatch boundary; ReplayGain modes remain reachable
-                    // only by editing config.toml until PR 3 lands the
-                    // four-mode picker.
-                    use nokkvi_data::types::player_settings::VolumeNormalizationMode;
-                    let mode = if enabled {
-                        VolumeNormalizationMode::Agc
-                    } else {
-                        VolumeNormalizationMode::Off
-                    };
+                if let crate::views::settings::items::SettingValue::Enum { val, .. } = value {
+                    let mode = nokkvi_data::types::player_settings::VolumeNormalizationMode::from_label(&val);
                     self.engine.volume_normalization = mode;
                     let target_level = self.engine.normalization_level.target_level();
                     let preamp_db = self.engine.replay_gain_preamp_db;
@@ -769,6 +762,126 @@ impl Nokkvi {
                                 fallback_db,
                                 fallback_to_agc,
                                 prevent_clipping,
+                            );
+                            Ok::<(), anyhow::Error>(())
+                        },
+                    );
+                }
+                Task::none()
+            }
+            "general.replay_gain_preamp_db" => {
+                if let crate::views::settings::items::SettingValue::Int { val, .. } = value {
+                    let db = val as f32;
+                    self.engine.replay_gain_preamp_db = db;
+                    let mode = self.engine.volume_normalization;
+                    let target_level = self.engine.normalization_level.target_level();
+                    let fallback_db = self.engine.replay_gain_fallback_db;
+                    let fallback_to_agc = self.engine.replay_gain_fallback_to_agc;
+                    let prevent_clipping = self.engine.replay_gain_prevent_clipping;
+                    self.shell_spawn(
+                        "persist_replay_gain_preamp_db",
+                        move |shell| async move {
+                            shell.settings().set_replay_gain_preamp_db(db).await?;
+                            let engine = shell.audio_engine();
+                            let mut guard = engine.lock().await;
+                            guard.set_volume_normalization(
+                                mode,
+                                target_level,
+                                db,
+                                fallback_db,
+                                fallback_to_agc,
+                                prevent_clipping,
+                            );
+                            Ok::<(), anyhow::Error>(())
+                        },
+                    );
+                }
+                Task::none()
+            }
+            "general.replay_gain_fallback_db" => {
+                if let crate::views::settings::items::SettingValue::Int { val, .. } = value {
+                    let db = val as f32;
+                    self.engine.replay_gain_fallback_db = db;
+                    let mode = self.engine.volume_normalization;
+                    let target_level = self.engine.normalization_level.target_level();
+                    let preamp_db = self.engine.replay_gain_preamp_db;
+                    let fallback_to_agc = self.engine.replay_gain_fallback_to_agc;
+                    let prevent_clipping = self.engine.replay_gain_prevent_clipping;
+                    self.shell_spawn(
+                        "persist_replay_gain_fallback_db",
+                        move |shell| async move {
+                            shell.settings().set_replay_gain_fallback_db(db).await?;
+                            let engine = shell.audio_engine();
+                            let mut guard = engine.lock().await;
+                            guard.set_volume_normalization(
+                                mode,
+                                target_level,
+                                preamp_db,
+                                db,
+                                fallback_to_agc,
+                                prevent_clipping,
+                            );
+                            Ok::<(), anyhow::Error>(())
+                        },
+                    );
+                }
+                Task::none()
+            }
+            "general.replay_gain_fallback_to_agc" => {
+                if let crate::views::settings::items::SettingValue::Bool(enabled) = value {
+                    self.engine.replay_gain_fallback_to_agc = enabled;
+                    let mode = self.engine.volume_normalization;
+                    let target_level = self.engine.normalization_level.target_level();
+                    let preamp_db = self.engine.replay_gain_preamp_db;
+                    let fallback_db = self.engine.replay_gain_fallback_db;
+                    let prevent_clipping = self.engine.replay_gain_prevent_clipping;
+                    self.shell_spawn(
+                        "persist_replay_gain_fallback_to_agc",
+                        move |shell| async move {
+                            shell
+                                .settings()
+                                .set_replay_gain_fallback_to_agc(enabled)
+                                .await?;
+                            let engine = shell.audio_engine();
+                            let mut guard = engine.lock().await;
+                            guard.set_volume_normalization(
+                                mode,
+                                target_level,
+                                preamp_db,
+                                fallback_db,
+                                enabled,
+                                prevent_clipping,
+                            );
+                            Ok::<(), anyhow::Error>(())
+                        },
+                    );
+                }
+                Task::none()
+            }
+            "general.replay_gain_prevent_clipping" => {
+                if let crate::views::settings::items::SettingValue::Bool(enabled) = value {
+                    self.engine.replay_gain_prevent_clipping = enabled;
+                    let mode = self.engine.volume_normalization;
+                    let target_level = self.engine.normalization_level.target_level();
+                    let preamp_db = self.engine.replay_gain_preamp_db;
+                    let fallback_db = self.engine.replay_gain_fallback_db;
+                    let fallback_to_agc = self.engine.replay_gain_fallback_to_agc;
+                    self.shell_spawn(
+                        "persist_replay_gain_prevent_clipping",
+                        move |shell| async move {
+                            shell
+                                .settings()
+                                .set_replay_gain_prevent_clipping(enabled)
+                                .await?;
+                            let engine = shell.audio_engine();
+                            let mut guard = engine.lock().await;
+                            guard.set_volume_normalization(
+                                mode,
+                                target_level,
+                                preamp_db,
+                                fallback_db,
+                                fallback_to_agc,
+                                enabled,
                             );
                             Ok::<(), anyhow::Error>(())
                         },

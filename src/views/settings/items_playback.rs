@@ -9,8 +9,17 @@ use super::items::{SettingItem, SettingsEntry};
 pub(crate) struct PlaybackSettingsData<'a> {
     pub crossfade_enabled: bool,
     pub crossfade_duration_secs: i64,
-    pub volume_normalization: bool,
+    /// Volume-normalization mode label ("Off" / "AGC" / "ReplayGain (Track)" / "ReplayGain (Album)")
+    pub volume_normalization: &'a str,
     pub normalization_level: &'a str,
+    /// Pre-amp dB applied on top of resolved ReplayGain (rounded to int for UI).
+    pub replay_gain_preamp_db: i64,
+    /// Fallback dB for tracks with no ReplayGain tags.
+    pub replay_gain_fallback_db: i64,
+    /// Whether untagged tracks fall through to AGC.
+    pub replay_gain_fallback_to_agc: bool,
+    /// Whether the resolver clamps gain so peak·gain ≤ 1.0.
+    pub replay_gain_prevent_clipping: bool,
     pub scrobbling_enabled: bool,
     /// Scrobble threshold as a fraction (0.25–0.90)
     pub scrobble_threshold: f64,
@@ -27,7 +36,7 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
     // Map scrobble threshold fraction to percentage integer (e.g. 0.50 -> 50)
     let threshold_pct = (data.scrobble_threshold * 100.0).round() as i64;
 
-    vec![
+    let mut items: Vec<SettingsEntry> = vec![
         // --- Playback ---
         SettingsEntry::Header {
             label: "Playback",
@@ -55,25 +64,85 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             1,
             "s",
         ),
-        SettingItem::bool_val(
+        SettingItem::enum_val(
             meta!(
                 "general.volume_normalization",
                 "Volume Normalization",
-                "Automatic gain control · normalizes loudness across tracks"
+                "Off · ReplayGain (track or album) · AGC (real-time)"
             ),
             data.volume_normalization,
-            false,
+            "Off",
+            vec!["Off", "ReplayGain (Track)", "ReplayGain (Album)", "AGC"],
         ),
-        SettingItem::enum_val(
+    ];
+
+    // AGC-only knob: target loudness applies only when AGC is selected.
+    if data.volume_normalization == "AGC" {
+        items.push(SettingItem::enum_val(
             meta!(
                 "general.normalization_level",
-                "Normalization Level",
-                "Target loudness: Quiet (headroom), Normal, Loud (boost)"
+                "AGC Target Level",
+                "Quiet (headroom) · Normal · Loud (boost)"
             ),
             data.normalization_level,
             "Normal",
             vec!["Quiet", "Normal", "Loud"],
-        ),
+        ));
+    }
+
+    // ReplayGain-only knobs: appear when either RG mode is selected.
+    let is_rg = matches!(
+        data.volume_normalization,
+        "ReplayGain (Track)" | "ReplayGain (Album)"
+    );
+    if is_rg {
+        items.push(SettingItem::int(
+            meta!(
+                "general.replay_gain_preamp_db",
+                "ReplayGain Pre-amp",
+                "Boost on top of the tag value · 0 dB matches reference, +6 is typical for modern listeners"
+            ),
+            data.replay_gain_preamp_db,
+            0,
+            -15,
+            15,
+            1,
+            "dB",
+        ));
+        items.push(SettingItem::int(
+            meta!(
+                "general.replay_gain_fallback_db",
+                "Untagged Track Fallback",
+                "dB applied when a track has no ReplayGain tags · ignored if Use AGC for Untagged is on"
+            ),
+            data.replay_gain_fallback_db,
+            0,
+            -15,
+            15,
+            1,
+            "dB",
+        ));
+        items.push(SettingItem::bool_val(
+            meta!(
+                "general.replay_gain_fallback_to_agc",
+                "Use AGC for Untagged Tracks",
+                "Falls through to real-time AGC when a track has no ReplayGain tags"
+            ),
+            data.replay_gain_fallback_to_agc,
+            false,
+        ));
+        items.push(SettingItem::bool_val(
+            meta!(
+                "general.replay_gain_prevent_clipping",
+                "Prevent Clipping",
+                "Clamp gain so track_peak × gain ≤ 1.0"
+            ),
+            data.replay_gain_prevent_clipping,
+            true,
+        ));
+    }
+
+    items.extend([
         // --- Scrobbling ---
         SettingsEntry::Header {
             label: "Scrobbling",
@@ -128,5 +197,7 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             },
             "Not set",
         ),
-    ]
+    ]);
+
+    items
 }

@@ -797,13 +797,17 @@ mod tests {
     }
 
     #[test]
-    fn playback_items_structure() {
+    fn playback_items_structure_off_mode() {
         use super::super::items_playback::{PlaybackSettingsData, build_playback_items};
         let data = PlaybackSettingsData {
             crossfade_enabled: false,
             crossfade_duration_secs: 5,
-            volume_normalization: false,
+            volume_normalization: "Off",
             normalization_level: "Normal",
+            replay_gain_preamp_db: 0,
+            replay_gain_fallback_db: 0,
+            replay_gain_fallback_to_agc: false,
+            replay_gain_prevent_clipping: true,
             scrobbling_enabled: true,
             scrobble_threshold: 0.50,
             quick_add_to_playlist: false,
@@ -816,11 +820,56 @@ mod tests {
             3,
             "Expected 3 sections: Playback, Scrobbling, Playlists"
         );
+        // Off mode hides AGC level + RG knobs.
         assert_eq!(
             count_items(&entries),
-            8,
-            "Expected 8 items (crossfade_enabled, crossfade_duration, volume_normalization, normalization_level, scrobbling_enabled, scrobble_threshold, quick_add_to_playlist, default_playlist_name)"
+            7,
+            "Off mode: crossfade_enabled, crossfade_duration, volume_normalization, scrobbling_enabled, scrobble_threshold, quick_add_to_playlist, default_playlist_name"
         );
+    }
+
+    #[test]
+    fn playback_items_structure_agc_mode_shows_target_level() {
+        use super::super::items_playback::{PlaybackSettingsData, build_playback_items};
+        let data = PlaybackSettingsData {
+            crossfade_enabled: false,
+            crossfade_duration_secs: 5,
+            volume_normalization: "AGC",
+            normalization_level: "Normal",
+            replay_gain_preamp_db: 0,
+            replay_gain_fallback_db: 0,
+            replay_gain_fallback_to_agc: false,
+            replay_gain_prevent_clipping: true,
+            scrobbling_enabled: true,
+            scrobble_threshold: 0.50,
+            quick_add_to_playlist: false,
+            default_playlist_name: "",
+        };
+        let entries = build_playback_items(&data);
+        // AGC mode adds the target-level dropdown.
+        assert_eq!(count_items(&entries), 8);
+    }
+
+    #[test]
+    fn playback_items_structure_replay_gain_mode_shows_rg_knobs() {
+        use super::super::items_playback::{PlaybackSettingsData, build_playback_items};
+        let data = PlaybackSettingsData {
+            crossfade_enabled: false,
+            crossfade_duration_secs: 5,
+            volume_normalization: "ReplayGain (Track)",
+            normalization_level: "Normal",
+            replay_gain_preamp_db: 0,
+            replay_gain_fallback_db: 0,
+            replay_gain_fallback_to_agc: false,
+            replay_gain_prevent_clipping: true,
+            scrobbling_enabled: true,
+            scrobble_threshold: 0.50,
+            quick_add_to_playlist: false,
+            default_playlist_name: "",
+        };
+        let entries = build_playback_items(&data);
+        // RG modes add 4 knobs: preamp, fallback_db, fallback_to_agc, prevent_clipping.
+        assert_eq!(count_items(&entries), 11);
     }
 
     #[test]
@@ -958,8 +1007,12 @@ mod tests {
         let playback = crate::views::settings::items_playback::PlaybackSettingsData {
             crossfade_enabled: false,
             crossfade_duration_secs: 5,
-            volume_normalization: false,
+            volume_normalization: "Off",
             normalization_level: "Normal",
+            replay_gain_preamp_db: 0,
+            replay_gain_fallback_db: 0,
+            replay_gain_fallback_to_agc: false,
+            replay_gain_prevent_clipping: true,
             scrobbling_enabled: true,
             scrobble_threshold: 0.50,
             quick_add_to_playlist: false,
