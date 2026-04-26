@@ -16,6 +16,7 @@ pub(crate) mod radios;
 pub(crate) mod settings;
 pub(crate) mod similar;
 pub(crate) mod songs;
+pub(crate) mod sort_api;
 
 // Re-export commonly used items
 pub(crate) use albums::{AlbumsAction, AlbumsColumn, AlbumsMessage, AlbumsPage, AlbumsViewData};

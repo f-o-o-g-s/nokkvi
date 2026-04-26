@@ -440,27 +440,10 @@ impl SongsPage {
         }
     }
 
-    /// Convert SortMode to API string for ViewModel
+    /// Convert SortMode to API string for ViewModel.
+    /// Thin shim — the unified mapping lives in `views/sort_api.rs`.
     pub fn sort_mode_to_api_string(sort_mode: SortMode) -> &'static str {
-        match sort_mode {
-            SortMode::RecentlyAdded => "recentlyAdded",
-            SortMode::RecentlyPlayed => "recentlyPlayed",
-            SortMode::MostPlayed => "mostPlayed",
-            SortMode::Favorited => "favorited",
-            SortMode::Random => "random",
-            SortMode::Title | SortMode::Name => "title",
-            SortMode::Album => "album",
-            SortMode::Artist => "artist",
-            SortMode::AlbumArtist => "albumArtist",
-            SortMode::ReleaseYear => "year",
-            SortMode::Duration => "duration",
-            SortMode::Bpm => "bpm",
-            SortMode::Channels => "channels",
-            SortMode::Genre => "genre",
-            SortMode::Rating => "rating",
-            SortMode::Comment => "comment",
-            SortMode::SongCount | SortMode::AlbumCount | SortMode::UpdatedAt => "recentlyAdded", // Fallback
-        }
+        super::sort_api::sort_mode_to_api_string(crate::View::Songs, sort_mode)
     }
 
     /// Build the view

@@ -151,17 +151,12 @@ impl GenresPage {
         Self::default()
     }
 
-    /// Convert sort mode to API string for server requests
+    /// Convert sort mode to API string for server requests.
+    /// Thin shim — the unified mapping lives in `views/sort_api.rs`.
     pub fn sort_mode_to_api_string(
         sort_mode: crate::widgets::view_header::SortMode,
     ) -> &'static str {
-        match sort_mode {
-            crate::widgets::view_header::SortMode::Name => "name",
-            crate::widgets::view_header::SortMode::AlbumCount => "albumCount",
-            crate::widgets::view_header::SortMode::SongCount => "songCount",
-            crate::widgets::view_header::SortMode::Random => "random",
-            _ => "name", // Default to name for unsupported types
-        }
+        super::sort_api::sort_mode_to_api_string(crate::View::Genres, sort_mode)
     }
 
     /// Resolve the centered item to a LoadArtwork action.

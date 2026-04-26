@@ -240,21 +240,12 @@ impl ArtistsPage {
         Self::default()
     }
 
-    /// Convert sort mode to API string for server requests
+    /// Convert sort mode to API string for server requests.
+    /// Thin shim — the unified mapping lives in `views/sort_api.rs`.
     pub fn sort_mode_to_api_string(
         sort_mode: crate::widgets::view_header::SortMode,
     ) -> &'static str {
-        use crate::widgets::view_header::SortMode;
-        match sort_mode {
-            SortMode::Name => "name",
-            SortMode::Favorited => "favorited",
-            SortMode::MostPlayed => "mostPlayed",
-            SortMode::AlbumCount => "albumCount",
-            SortMode::SongCount => "songCount",
-            SortMode::Random => "random",
-            SortMode::Rating => "name", // load all, sort client-side
-            _ => "random",              // Default to random for artists
-        }
+        super::sort_api::sort_mode_to_api_string(crate::View::Artists, sort_mode)
     }
 
     /// Update internal state and return actions for root

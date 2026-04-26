@@ -26,34 +26,171 @@ pub enum SortMode {
     UpdatedAt, // For playlists view - sort by last updated
 }
 
+/// Compact per-variant metadata: human-readable display string + snake_case
+/// TOML key. The `Display` impl, `to_toml_key`, and `from_toml_key` all read
+/// from this single table — adding a variant is a one-row edit.
+struct SortModeMeta {
+    display: &'static str,
+    toml_key: &'static str,
+}
+
+const TABLE: &[(SortMode, SortModeMeta)] = &[
+    (
+        SortMode::RecentlyAdded,
+        SortModeMeta {
+            display: "Recently Added",
+            toml_key: "recently_added",
+        },
+    ),
+    (
+        SortMode::RecentlyPlayed,
+        SortModeMeta {
+            display: "Recently Played",
+            toml_key: "recently_played",
+        },
+    ),
+    (
+        SortMode::MostPlayed,
+        SortModeMeta {
+            display: "Most Played",
+            toml_key: "most_played",
+        },
+    ),
+    (
+        SortMode::Favorited,
+        SortModeMeta {
+            display: "Favorited",
+            toml_key: "favorited",
+        },
+    ),
+    (
+        SortMode::Random,
+        SortModeMeta {
+            display: "Random",
+            toml_key: "random",
+        },
+    ),
+    (
+        SortMode::Name,
+        SortModeMeta {
+            display: "Name",
+            toml_key: "name",
+        },
+    ),
+    (
+        SortMode::AlbumArtist,
+        SortModeMeta {
+            display: "Album Artist",
+            toml_key: "album_artist",
+        },
+    ),
+    (
+        SortMode::Artist,
+        SortModeMeta {
+            display: "Artist",
+            toml_key: "artist",
+        },
+    ),
+    (
+        SortMode::ReleaseYear,
+        SortModeMeta {
+            display: "Release Year",
+            toml_key: "release_year",
+        },
+    ),
+    (
+        SortMode::SongCount,
+        SortModeMeta {
+            display: "Song Count",
+            toml_key: "song_count",
+        },
+    ),
+    (
+        SortMode::AlbumCount,
+        SortModeMeta {
+            display: "Album Count",
+            toml_key: "album_count",
+        },
+    ),
+    (
+        SortMode::Duration,
+        SortModeMeta {
+            display: "Duration",
+            toml_key: "duration",
+        },
+    ),
+    (
+        SortMode::Rating,
+        SortModeMeta {
+            display: "Rating",
+            toml_key: "rating",
+        },
+    ),
+    (
+        SortMode::Genre,
+        SortModeMeta {
+            display: "Genre",
+            toml_key: "genre",
+        },
+    ),
+    (
+        SortMode::Title,
+        SortModeMeta {
+            display: "Title",
+            toml_key: "title",
+        },
+    ),
+    (
+        SortMode::Album,
+        SortModeMeta {
+            display: "Album",
+            toml_key: "album",
+        },
+    ),
+    (
+        SortMode::Bpm,
+        SortModeMeta {
+            display: "BPM",
+            toml_key: "bpm",
+        },
+    ),
+    (
+        SortMode::Channels,
+        SortModeMeta {
+            display: "Channels",
+            toml_key: "channels",
+        },
+    ),
+    (
+        SortMode::Comment,
+        SortModeMeta {
+            display: "Comment",
+            toml_key: "comment",
+        },
+    ),
+    (
+        SortMode::UpdatedAt,
+        SortModeMeta {
+            display: "Updated At",
+            toml_key: "updated_at",
+        },
+    ),
+];
+
 impl std::fmt::Display for SortMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SortMode::RecentlyAdded => write!(f, "Recently Added"),
-            SortMode::RecentlyPlayed => write!(f, "Recently Played"),
-            SortMode::MostPlayed => write!(f, "Most Played"),
-            SortMode::Favorited => write!(f, "Favorited"),
-            SortMode::Random => write!(f, "Random"),
-            SortMode::Name => write!(f, "Name"),
-            SortMode::AlbumArtist => write!(f, "Album Artist"),
-            SortMode::Artist => write!(f, "Artist"),
-            SortMode::ReleaseYear => write!(f, "Release Year"),
-            SortMode::SongCount => write!(f, "Song Count"),
-            SortMode::AlbumCount => write!(f, "Album Count"),
-            SortMode::Duration => write!(f, "Duration"),
-            SortMode::Rating => write!(f, "Rating"),
-            SortMode::Genre => write!(f, "Genre"),
-            SortMode::Title => write!(f, "Title"),
-            SortMode::Album => write!(f, "Album"),
-            SortMode::Bpm => write!(f, "BPM"),
-            SortMode::Channels => write!(f, "Channels"),
-            SortMode::Comment => write!(f, "Comment"),
-            SortMode::UpdatedAt => write!(f, "Updated At"),
-        }
+        f.write_str(self.meta().display)
     }
 }
 
 impl SortMode {
+    fn meta(self) -> &'static SortModeMeta {
+        TABLE
+            .iter()
+            .find_map(|(m, meta)| if *m == self { Some(meta) } else { None })
+            .expect("every SortMode variant must have a TABLE row")
+    }
+
     /// Sort mode options for Albums view
     pub const ALBUM_OPTIONS: &[SortMode] = &[
         SortMode::RecentlyAdded,
@@ -121,55 +258,15 @@ impl SortMode {
 
     /// Convert to a snake_case TOML key string.
     pub fn to_toml_key(self) -> &'static str {
-        match self {
-            SortMode::RecentlyAdded => "recently_added",
-            SortMode::RecentlyPlayed => "recently_played",
-            SortMode::MostPlayed => "most_played",
-            SortMode::Favorited => "favorited",
-            SortMode::Random => "random",
-            SortMode::Name => "name",
-            SortMode::AlbumArtist => "album_artist",
-            SortMode::Artist => "artist",
-            SortMode::ReleaseYear => "release_year",
-            SortMode::SongCount => "song_count",
-            SortMode::AlbumCount => "album_count",
-            SortMode::Duration => "duration",
-            SortMode::Rating => "rating",
-            SortMode::Genre => "genre",
-            SortMode::Title => "title",
-            SortMode::Album => "album",
-            SortMode::Bpm => "bpm",
-            SortMode::Channels => "channels",
-            SortMode::Comment => "comment",
-            SortMode::UpdatedAt => "updated_at",
-        }
+        self.meta().toml_key
     }
 
     /// Parse from a snake_case TOML key string. Falls back to `Name` for unknown values.
     pub fn from_toml_key(s: &str) -> SortMode {
-        match s {
-            "recently_added" => SortMode::RecentlyAdded,
-            "recently_played" => SortMode::RecentlyPlayed,
-            "most_played" => SortMode::MostPlayed,
-            "favorited" => SortMode::Favorited,
-            "random" => SortMode::Random,
-            "name" => SortMode::Name,
-            "album_artist" => SortMode::AlbumArtist,
-            "artist" => SortMode::Artist,
-            "release_year" => SortMode::ReleaseYear,
-            "song_count" => SortMode::SongCount,
-            "album_count" => SortMode::AlbumCount,
-            "duration" => SortMode::Duration,
-            "rating" => SortMode::Rating,
-            "genre" => SortMode::Genre,
-            "title" => SortMode::Title,
-            "album" => SortMode::Album,
-            "bpm" => SortMode::Bpm,
-            "channels" => SortMode::Channels,
-            "comment" => SortMode::Comment,
-            "updated_at" => SortMode::UpdatedAt,
-            _ => SortMode::Name,
-        }
+        TABLE
+            .iter()
+            .find_map(|(m, meta)| if meta.toml_key == s { Some(*m) } else { None })
+            .unwrap_or(SortMode::Name)
     }
 
     /// Cycle to next/previous sort mode in a list
@@ -186,10 +283,68 @@ impl SortMode {
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
+
     use super::*;
+
+    /// Every SortMode variant. Used by exhaustive tests below.
+    const ALL_VARIANTS: &[SortMode] = &[
+        SortMode::RecentlyAdded,
+        SortMode::RecentlyPlayed,
+        SortMode::MostPlayed,
+        SortMode::Favorited,
+        SortMode::Random,
+        SortMode::Name,
+        SortMode::AlbumArtist,
+        SortMode::Artist,
+        SortMode::ReleaseYear,
+        SortMode::SongCount,
+        SortMode::AlbumCount,
+        SortMode::Duration,
+        SortMode::Rating,
+        SortMode::Genre,
+        SortMode::Title,
+        SortMode::Album,
+        SortMode::Bpm,
+        SortMode::Channels,
+        SortMode::Comment,
+        SortMode::UpdatedAt,
+    ];
 
     #[test]
     fn artist_options_includes_most_played() {
         assert!(SortMode::ARTIST_OPTIONS.contains(&SortMode::MostPlayed));
+    }
+
+    #[test]
+    fn table_covers_every_variant() {
+        for &variant in ALL_VARIANTS {
+            assert!(
+                TABLE.iter().any(|(m, _)| *m == variant),
+                "TABLE missing entry for {variant:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn toml_keys_are_unique() {
+        let mut seen: std::collections::HashSet<&'static str> = std::collections::HashSet::new();
+        for (variant, meta) in TABLE {
+            assert!(
+                seen.insert(meta.toml_key),
+                "duplicate toml_key {} for variant {variant:?}",
+                meta.toml_key
+            );
+        }
+    }
+
+    proptest! {
+        /// Round-trip: every variant survives `to_toml_key → from_toml_key`.
+        #[test]
+        fn toml_key_round_trip(variant in proptest::sample::select(ALL_VARIANTS)) {
+            let key = variant.to_toml_key();
+            let parsed = SortMode::from_toml_key(key);
+            prop_assert_eq!(parsed, variant);
+        }
     }
 }
