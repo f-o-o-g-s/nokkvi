@@ -21,11 +21,22 @@ impl Nokkvi {
     where
         M: FnOnce((Result<Vec<SongUIViewData>, String>, usize)) -> Message + Send + 'static,
     {
+        let page_size = self.library_page_size.to_usize();
+        // Phase 5A defensive gate — see load_albums_internal for rationale.
+        if offset > 0
+            && self
+                .library
+                .songs
+                .needs_fetch(self.songs_page.common.slot_list.viewport_offset, page_size)
+                .is_none()
+        {
+            return Task::none();
+        }
         let params = PaginatedFetch::from_common(
             &self.songs_page.common,
             views::SongsPage::sort_mode_to_api_string,
             offset,
-            self.library_page_size.to_usize(),
+            page_size,
         );
         debug!(
             " LoadSongs: offset={}, page_size={}, view={}, sort={}, search={:?}",

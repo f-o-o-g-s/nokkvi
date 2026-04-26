@@ -23,11 +23,26 @@ impl Nokkvi {
     where
         M: FnOnce((Result<Vec<AlbumUIViewData>, String>, usize)) -> Message + Send + 'static,
     {
+        let page_size = self.library_page_size.to_usize();
+        // Phase 5A defensive gate: page-load follow-ups (offset > 0) must
+        // pass needs_fetch. Catches duplicate dispatches that race past
+        // the upstream needs_fetch check at the action site. Initial
+        // loads (offset 0) always proceed — sort/search changes need a
+        // fresh page even if the old one is still in flight.
+        if offset > 0
+            && self
+                .library
+                .albums
+                .needs_fetch(self.albums_page.common.slot_list.viewport_offset, page_size)
+                .is_none()
+        {
+            return Task::none();
+        }
         let params = PaginatedFetch::from_common(
             &self.albums_page.common,
             views::AlbumsPage::sort_mode_to_api_string,
             offset,
-            self.library_page_size.to_usize(),
+            page_size,
         );
         debug!(
             " LoadAlbums: offset={}, page_size={}, view={}, sort={}, search={:?}",

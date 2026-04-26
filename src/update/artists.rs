@@ -34,11 +34,25 @@ impl Nokkvi {
     where
         M: FnOnce((Result<Vec<ArtistUIViewData>, String>, usize)) -> Message + Send + 'static,
     {
+        let page_size = self.library_page_size.to_usize();
+        // Phase 5A defensive gate — see load_albums_internal for rationale.
+        if offset > 0
+            && self
+                .library
+                .artists
+                .needs_fetch(
+                    self.artists_page.common.slot_list.viewport_offset,
+                    page_size,
+                )
+                .is_none()
+        {
+            return Task::none();
+        }
         let params = PaginatedFetch::from_common(
             &self.artists_page.common,
             views::ArtistsPage::sort_mode_to_api_string,
             offset,
-            self.library_page_size.to_usize(),
+            page_size,
         );
         let is_rating_sort =
             self.artists_page.common.current_sort_mode == widgets::view_header::SortMode::Rating;
