@@ -148,6 +148,16 @@ pub struct PlayerSettings {
     /// emits a library-refresh event (default: false = toasts shown).
     #[serde(default)]
     pub suppress_library_refresh_toasts: bool,
+    /// Whether the queue's stars rating column is visible (default: true).
+    /// Subject to a separate responsive width gate — see queue.rs.
+    #[serde(default = "default_true")]
+    pub queue_show_stars: bool,
+    /// Whether the queue's album column is visible (default: true).
+    #[serde(default = "default_true")]
+    pub queue_show_album: bool,
+    /// Whether the queue's duration column is visible (default: true).
+    #[serde(default = "default_true")]
+    pub queue_show_duration: bool,
 }
 
 fn default_eq_gains() -> [f32; 10] {
@@ -235,6 +245,9 @@ impl Default for PlayerSettings {
             artwork_resolution: ArtworkResolution::default(),
             show_album_artists_only: default_true(),
             suppress_library_refresh_toasts: false,
+            queue_show_stars: true,
+            queue_show_album: true,
+            queue_show_duration: true,
         }
     }
 }

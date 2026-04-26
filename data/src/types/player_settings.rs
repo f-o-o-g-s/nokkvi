@@ -606,6 +606,13 @@ pub struct PlayerSettings {
     /// Whether to suppress the toast notification shown on Navidrome library-refresh
     /// events. Default false (toasts shown).
     pub suppress_library_refresh_toasts: bool,
+    /// Whether the queue's stars rating column is visible (subject to a
+    /// separate responsive width gate — see queue.rs).
+    pub queue_show_stars: bool,
+    /// Whether the queue's album column is visible.
+    pub queue_show_album: bool,
+    /// Whether the queue's duration column is visible.
+    pub queue_show_duration: bool,
 }
 
 #[cfg(test)]

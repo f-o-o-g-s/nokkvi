@@ -31,6 +31,9 @@ pub struct TomlSettings {
     pub artwork_resolution: ArtworkResolution,
     pub show_album_artists_only: bool,
     pub suppress_library_refresh_toasts: bool,
+    pub queue_show_stars: bool,
+    pub queue_show_album: bool,
+    pub queue_show_duration: bool,
 
     // -- Behavior --
     pub stable_viewport: bool,
@@ -111,6 +114,9 @@ impl Default for TomlSettings {
             artwork_resolution: ArtworkResolution::default(),
             show_album_artists_only: true,
             suppress_library_refresh_toasts: false,
+            queue_show_stars: true,
+            queue_show_album: true,
+            queue_show_duration: true,
             stable_viewport: true,
             auto_follow_playing: true,
             light_mode: false,
@@ -157,6 +163,9 @@ impl TomlSettings {
             artwork_resolution: ps.artwork_resolution,
             show_album_artists_only: ps.show_album_artists_only,
             suppress_library_refresh_toasts: ps.suppress_library_refresh_toasts,
+            queue_show_stars: ps.queue_show_stars,
+            queue_show_album: ps.queue_show_album,
+            queue_show_duration: ps.queue_show_duration,
             stable_viewport: ps.stable_viewport,
             auto_follow_playing: ps.auto_follow_playing,
             light_mode: false, // Will be read from theme.light_mode or fresh default
@@ -228,6 +237,20 @@ mod tests {
             toml_str.contains("strip_click_action = \"go_to_queue\""),
             "Expected go_to_queue, got:\n{toml_str}"
         );
+    }
+
+    #[test]
+    fn toml_roundtrip_queue_column_visibility() {
+        let mut settings = TomlSettings::default();
+        settings.queue_show_stars = false;
+        settings.queue_show_album = true;
+        settings.queue_show_duration = false;
+
+        let toml_str = toml::to_string_pretty(&settings).expect("serialize");
+        let parsed: TomlSettings = toml::from_str(&toml_str).expect("deserialize");
+        assert!(!parsed.queue_show_stars);
+        assert!(parsed.queue_show_album);
+        assert!(!parsed.queue_show_duration);
     }
 
     #[test]

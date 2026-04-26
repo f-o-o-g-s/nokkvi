@@ -344,6 +344,21 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_queue_show_stars(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.queue_show_stars = enabled;
+        self.save()
+    }
+
+    pub fn set_queue_show_album(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.queue_show_album = enabled;
+        self.save()
+    }
+
+    pub fn set_queue_show_duration(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.queue_show_duration = enabled;
+        self.save()
+    }
+
     pub fn set_active_playlist(
         &mut self,
         id: Option<String>,
@@ -546,6 +561,9 @@ impl SettingsManager {
             artwork_resolution: p.artwork_resolution,
             show_album_artists_only: p.show_album_artists_only,
             suppress_library_refresh_toasts: p.suppress_library_refresh_toasts,
+            queue_show_stars: p.queue_show_stars,
+            queue_show_album: p.queue_show_album,
+            queue_show_duration: p.queue_show_duration,
         }
     }
 
@@ -613,6 +631,9 @@ fn apply_toml_settings_to_internal(
     p.artwork_resolution = ts.artwork_resolution;
     p.show_album_artists_only = ts.show_album_artists_only;
     p.suppress_library_refresh_toasts = ts.suppress_library_refresh_toasts;
+    p.queue_show_stars = ts.queue_show_stars;
+    p.queue_show_album = ts.queue_show_album;
+    p.queue_show_duration = ts.queue_show_duration;
 }
 
 /// Convert `AllViewPreferences` into the internal `ViewPreferences` for redb storage.

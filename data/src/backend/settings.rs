@@ -370,6 +370,24 @@ impl SettingsService {
         sm.set_strip_show_format_info(enabled)
     }
 
+    /// Set queue's stars column visibility and persist
+    pub async fn set_queue_show_stars(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_queue_show_stars(enabled)
+    }
+
+    /// Set queue's album column visibility and persist
+    pub async fn set_queue_show_album(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_queue_show_album(enabled)
+    }
+
+    /// Set queue's duration column visibility and persist
+    pub async fn set_queue_show_duration(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_queue_show_duration(enabled)
+    }
+
     /// Set strip click action and persist
     pub async fn set_strip_click_action(
         &self,
