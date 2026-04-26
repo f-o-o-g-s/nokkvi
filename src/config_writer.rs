@@ -11,6 +11,93 @@ use tracing::debug;
 
 use crate::views::settings::items::SettingValue;
 
+/// Typed config key — picks the correct writer at compile time.
+///
+/// Settings actions (`SettingsAction::WriteConfig`, `WriteColorEntry`) carry a
+/// `ConfigKey` instead of a raw string so the dispatch handler matches on the
+/// variant rather than sniffing prefixes (`key.starts_with("dark.")`). The
+/// only place that classifies a key string is `for_value` / `for_array` below;
+/// every other call site reads the type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ConfigKey {
+    /// Scalar value in config.toml (e.g. `general.scrobble_threshold`).
+    AppScalar(String),
+    /// Color array entry in config.toml (e.g. `visualizer.bars.dark.bar_gradient_colors`).
+    AppArrayEntry(String),
+    /// Scalar value in the active theme file (e.g. `dark.background.hard`).
+    Theme(String),
+    /// Color array entry in the active theme file (e.g. `dark.background.gradient`).
+    ThemeArrayEntry(String),
+}
+
+impl ConfigKey {
+    /// Classify a TOML key path for writing a scalar value. Theme-relative
+    /// keys (`dark.*`, `light.*`) route to the active theme file; everything
+    /// else lands in config.toml.
+    pub(crate) fn for_value(key: String) -> Self {
+        if Self::is_theme_path(&key) {
+            Self::Theme(key)
+        } else {
+            Self::AppScalar(key)
+        }
+    }
+
+    /// Classify a TOML key path for writing a color array entry. Same routing
+    /// as `for_value`, but produces the array-aware variants.
+    pub(crate) fn for_array(key: String) -> Self {
+        if Self::is_theme_path(&key) {
+            Self::ThemeArrayEntry(key)
+        } else {
+            Self::AppArrayEntry(key)
+        }
+    }
+
+    fn is_theme_path(key: &str) -> bool {
+        key.starts_with("dark.") || key.starts_with("light.")
+    }
+
+    /// True when the key targets the active theme file (either scalar or array).
+    /// Used by the dispatch handler to know when `reload_theme()` is required.
+    pub(crate) fn is_theme(&self) -> bool {
+        matches!(self, Self::Theme(_) | Self::ThemeArrayEntry(_))
+    }
+
+    /// Borrow the underlying TOML key path, regardless of variant.
+    pub(crate) fn as_str(&self) -> &str {
+        match self {
+            Self::AppScalar(k)
+            | Self::AppArrayEntry(k)
+            | Self::Theme(k)
+            | Self::ThemeArrayEntry(k) => k,
+        }
+    }
+
+    /// Write a scalar value through the writer that matches this key's variant.
+    /// Returns an error when invoked on an array-entry variant — those callers
+    /// must use `write_color` instead.
+    pub(crate) fn write(&self, value: &SettingValue, comment: Option<&str>) -> Result<()> {
+        match self {
+            Self::AppScalar(k) => update_config_value(k, value, comment),
+            Self::Theme(k) => update_theme_value(k, value),
+            Self::AppArrayEntry(_) | Self::ThemeArrayEntry(_) => {
+                anyhow::bail!("ConfigKey::write requires a scalar variant; got {self:?}")
+            }
+        }
+    }
+
+    /// Write a color array entry through the writer that matches this key's
+    /// variant. Returns an error when invoked on a scalar variant.
+    pub(crate) fn write_color(&self, index: usize, hex_color: &str) -> Result<()> {
+        match self {
+            Self::AppArrayEntry(k) => update_color_array_entry(k, index, hex_color),
+            Self::ThemeArrayEntry(k) => update_theme_color_array_entry(k, index, hex_color),
+            Self::AppScalar(_) | Self::Theme(_) => anyhow::bail!(
+                "ConfigKey::write_color requires an array-entry variant; got {self:?}"
+            ),
+        }
+    }
+}
+
 /// Update a single value in config.toml, preserving all other content.
 ///
 /// # Arguments
@@ -506,6 +593,70 @@ mod tests {
     fn defaults_from_toml(section: &str, toml_str: &str) -> toml_edit::Table {
         let doc: DocumentMut = toml_str.parse().unwrap();
         doc[section].as_table().unwrap().clone()
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    //  ConfigKey routing
+    // ══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn config_key_for_value_routes_theme_prefixes() {
+        assert!(matches!(
+            ConfigKey::for_value("dark.background.hard".to_string()),
+            ConfigKey::Theme(k) if k == "dark.background.hard"
+        ));
+        assert!(matches!(
+            ConfigKey::for_value("light.foreground.bright".to_string()),
+            ConfigKey::Theme(k) if k == "light.foreground.bright"
+        ));
+        assert!(matches!(
+            ConfigKey::for_value("visualizer.bars.gap".to_string()),
+            ConfigKey::AppScalar(k) if k == "visualizer.bars.gap"
+        ));
+        assert!(matches!(
+            ConfigKey::for_value("general.scrobble_threshold".to_string()),
+            ConfigKey::AppScalar(k) if k == "general.scrobble_threshold"
+        ));
+    }
+
+    #[test]
+    fn config_key_for_array_routes_theme_prefixes() {
+        assert!(matches!(
+            ConfigKey::for_array("dark.background.gradient".to_string()),
+            ConfigKey::ThemeArrayEntry(k) if k == "dark.background.gradient"
+        ));
+        assert!(matches!(
+            ConfigKey::for_array("visualizer.bars.dark.bar_gradient_colors".to_string()),
+            ConfigKey::AppArrayEntry(k) if k == "visualizer.bars.dark.bar_gradient_colors"
+        ));
+    }
+
+    #[test]
+    fn config_key_is_theme_predicate() {
+        assert!(ConfigKey::Theme("dark.x".into()).is_theme());
+        assert!(ConfigKey::ThemeArrayEntry("light.x".into()).is_theme());
+        assert!(!ConfigKey::AppScalar("general.x".into()).is_theme());
+        assert!(!ConfigKey::AppArrayEntry("visualizer.x".into()).is_theme());
+    }
+
+    #[test]
+    fn config_key_write_rejects_array_variant() {
+        let key = ConfigKey::AppArrayEntry("visualizer.x".into());
+        let err = key.write(&SettingValue::Bool(true), None).unwrap_err();
+        assert!(
+            err.to_string().contains("requires a scalar variant"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn config_key_write_color_rejects_scalar_variant() {
+        let key = ConfigKey::AppScalar("visualizer.x".into());
+        let err = key.write_color(0, "#ff0000").unwrap_err();
+        assert!(
+            err.to_string().contains("requires an array-entry variant"),
+            "got: {err}"
+        );
     }
 
     // ══════════════════════════════════════════════════════════════════

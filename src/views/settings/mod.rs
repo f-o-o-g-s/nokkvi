@@ -184,16 +184,17 @@ pub(crate) enum SettingsAction {
     None,
     /// Request to exit settings view (Escape pressed)
     ExitSettings,
-    /// Write a changed value to config.toml
+    /// Write a changed value to config.toml or the active theme file.
+    /// The `ConfigKey` variant chooses the writer at compile time.
     WriteConfig {
-        key: String,
+        key: crate::config_writer::ConfigKey,
         value: items::SettingValue,
         /// Setting description added as a TOML comment above new keys
         description: Option<String>,
     },
-    /// Write a single color in a color array to config.toml
+    /// Write a single color in a color array to config.toml or the active theme.
     WriteColorEntry {
-        key: String,
+        key: crate::config_writer::ConfigKey,
         index: usize,
         hex_color: String,
     },
@@ -802,7 +803,7 @@ impl SettingsPage {
                                 };
                             }
                             return SettingsAction::WriteConfig {
-                                key,
+                                key: crate::config_writer::ConfigKey::for_value(key),
                                 value: default_value,
                                 description: None,
                             };
@@ -887,7 +888,7 @@ impl SettingsPage {
                     self.hex_input.clear();
                     if !key.is_empty() && !key.starts_with("__") {
                         return SettingsAction::WriteConfig {
-                            key,
+                            key: crate::config_writer::ConfigKey::for_value(key),
                             value: SettingValue::HexColor(normalized),
                             description: None,
                         };
@@ -1115,7 +1116,7 @@ impl SettingsPage {
                     };
                 }
                 return SettingsAction::WriteConfig {
-                    key,
+                    key: crate::config_writer::ConfigKey::for_value(key),
                     value: new_value,
                     description: self.cached_entries.get(edit_idx).and_then(|e| match e {
                         SettingsEntry::Item(item) => item.subtitle.map(String::from),

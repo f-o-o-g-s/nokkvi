@@ -195,15 +195,10 @@ impl Nokkvi {
                 index,
                 hex_color,
             } => {
-                let is_theme_key = key.starts_with("dark.") || key.starts_with("light.");
-                let result = if is_theme_key {
-                    crate::config_writer::update_theme_color_array_entry(&key, index, &hex_color)
-                } else {
-                    crate::config_writer::update_color_array_entry(&key, index, &hex_color)
-                };
-                if let Err(e) = result {
+                let is_theme = key.is_theme();
+                if let Err(e) = key.write_color(index, &hex_color) {
                     tracing::warn!(" [SETTINGS] Failed to write color entry: {e}");
-                } else if is_theme_key {
+                } else if is_theme {
                     crate::theme::reload_theme();
                     self.settings_page.config_dirty = true;
                 } else {
@@ -324,36 +319,29 @@ impl Nokkvi {
 
     fn handle_settings_write_config(
         &mut self,
-        key: String,
+        key: crate::config_writer::ConfigKey,
         value: crate::views::settings::items::SettingValue,
         description: Option<String>,
     ) -> Task<Message> {
         self.sfx_engine.play(nokkvi_data::audio::SfxType::Backspace);
 
-        // Route theme-file-relative keys to the theme file writer
-        let is_theme_key = key.starts_with("dark.") || key.starts_with("light.");
+        let is_theme = key.is_theme();
+        let key_str = key.as_str().to_string();
 
-        if is_theme_key {
-            if let Err(e) = crate::config_writer::update_theme_value(&key, &value) {
-                tracing::warn!(" [SETTINGS] Failed to write theme value: {e}");
-                self.toast_warn(format!("Failed to save setting: {e}"));
-            } else {
-                crate::theme::reload_theme();
-                self.settings_page.config_dirty = true;
-            }
-        } else if let Err(e) =
-            crate::config_writer::update_config_value(&key, &value, description.as_deref())
-        {
+        if let Err(e) = key.write(&value, description.as_deref()) {
             tracing::warn!(" [SETTINGS] Failed to write config: {e}");
             self.toast_warn(format!("Failed to save setting: {e}"));
-        } else if key.starts_with("visualizer.") {
+        } else if is_theme {
+            crate::theme::reload_theme();
+            self.settings_page.config_dirty = true;
+        } else if key_str.starts_with("visualizer.") {
             self.reload_visualizer_config();
         }
         // Mutual exclusivity: waves and monstercat can't both be active.
         // When one is enabled, auto-disable the other in config AND update the
         // cached settings entry in-place so the GUI reflects the change immediately
         // (without clearing search state).
-        match key.as_str() {
+        match key_str.as_str() {
             "visualizer.monstercat" => {
                 if matches!(value, crate::views::settings::items::SettingValue::Float { val, .. } if val >= crate::visualizer_config::MONSTERCAT_MIN_EFFECTIVE)
                 {

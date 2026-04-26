@@ -105,7 +105,7 @@ fn commit_pending_hex_edit(sub: &mut SubListState) -> SettingsAction {
             *color = normalized.clone();
         }
         SettingsAction::WriteColorEntry {
-            key: sub.key.clone(),
+            key: crate::config_writer::ConfigKey::for_array(sub.key.clone()),
             index: idx,
             hex_color: normalized,
         }
@@ -174,9 +174,8 @@ impl SettingsPage {
                     }
                     sub.editing_color_index = None;
                     sub.hex_input.clear();
-                    let key = sub.key.clone();
                     return SettingsAction::WriteColorEntry {
-                        key,
+                        key: crate::config_writer::ConfigKey::for_array(sub.key.clone()),
                         index: color_idx,
                         hex_color: normalized,
                     };
