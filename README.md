@@ -65,33 +65,9 @@ More detail in the docs:
 - [Connecting to Navidrome](https://f-o-o-g-s.github.io/nokkvi-docs/guides/navidrome/)
 - [Configuration reference](https://f-o-o-g-s.github.io/nokkvi-docs/reference/config/)
 - [Keyboard shortcuts](https://f-o-o-g-s.github.io/nokkvi-docs/reference/hotkeys/)
+- [Media controls (MPRIS)](https://f-o-o-g-s.github.io/nokkvi-docs/guides/mpris/)
 
 Build setup and contributor workflow (including the **nightly** rustfmt requirement) are in [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Media Controls (MPRIS)
-
-Nokkvi registers as `nokkvi` on the MPRIS D-Bus interface. Use `playerctl` from keybinds or scripts.
-
-### Hyprland example
-
-```conf
-# Media player controls via playerctl (MPRIS)
-bind = $mainMod ALT, space, exec, playerctl -p nokkvi play-pause
-bind = $mainMod ALT, right, exec, playerctl -p nokkvi next
-bind = $mainMod ALT, left, exec, playerctl -p nokkvi previous
-binde = $mainMod ALT, up, exec, playerctl -p nokkvi volume 0.01+
-binde = $mainMod ALT, down, exec, playerctl -p nokkvi volume 0.01-
-```
-
-### CLI
-
-```bash
-playerctl -p nokkvi play-pause
-playerctl -p nokkvi next
-playerctl -p nokkvi previous
-playerctl -p nokkvi volume 0.05+
-playerctl -p nokkvi metadata
-```
 
 ## Known Issues
 
