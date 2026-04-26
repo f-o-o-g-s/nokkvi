@@ -40,39 +40,28 @@ impl Nokkvi {
                         item_type: "song",
                     })
             }
-            View::Albums => {
-                let total = self
-                    .albums_page
-                    .expansion
-                    .flattened_len(&self.library.albums);
-                self.albums_page
-                    .common
-                    .slot_list
-                    .get_center_item_index(total)
-                    .and_then(|idx| {
-                        self.albums_page
-                            .expansion
-                            .get_entry_at(idx, &self.library.albums, |a| &a.id)
-                    })
-                    .map(|entry| match entry {
-                        SlotListEntry::Child(song, _) => CenterItemInfo {
-                            id: song.id.clone(),
-                            name: song.title.clone(),
-                            artist: song.artist.clone(),
-                            starred: song.is_starred,
-                            rating: song.rating.unwrap_or(0),
-                            item_type: "song",
-                        },
-                        SlotListEntry::Parent(album) => CenterItemInfo {
-                            id: album.id.clone(),
-                            name: album.name.clone(),
-                            artist: album.artist.clone(),
-                            starred: album.is_starred,
-                            rating: album.rating.unwrap_or(0),
-                            item_type: "album",
-                        },
-                    })
-            }
+            View::Albums => self
+                .albums_page
+                .expansion
+                .resolve_center(&self.library.albums, &self.albums_page.common, |a| &a.id)
+                .map(|entry| match entry {
+                    SlotListEntry::Child(song, _) => CenterItemInfo {
+                        id: song.id.clone(),
+                        name: song.title.clone(),
+                        artist: song.artist.clone(),
+                        starred: song.is_starred,
+                        rating: song.rating.unwrap_or(0),
+                        item_type: "song",
+                    },
+                    SlotListEntry::Parent(album) => CenterItemInfo {
+                        id: album.id.clone(),
+                        name: album.name.clone(),
+                        artist: album.artist.clone(),
+                        starred: album.is_starred,
+                        rating: album.rating.unwrap_or(0),
+                        item_type: "album",
+                    },
+                }),
             View::Songs => self
                 .songs_page
                 .common
@@ -87,121 +76,84 @@ impl Nokkvi {
                     rating: song.rating.unwrap_or(0),
                     item_type: "song",
                 }),
-            View::Artists => {
-                let total = expansion::three_tier_flattened_len(
-                    &self.library.artists,
-                    &self.artists_page.expansion,
-                    self.artists_page.sub_expansion.children.len(),
-                );
-                self.artists_page
-                    .common
-                    .slot_list
-                    .get_center_item_index(total)
-                    .and_then(|idx| {
-                        expansion::three_tier_get_entry_at(
-                            idx,
-                            &self.library.artists,
-                            &self.artists_page.expansion,
-                            &self.artists_page.sub_expansion,
-                            |a| &a.id,
-                            |a| &a.id,
-                        )
-                    })
-                    .map(|entry| match entry {
-                        ThreeTierEntry::Grandchild(song, _) => CenterItemInfo {
-                            id: song.id.clone(),
-                            name: song.title.clone(),
-                            artist: song.artist.clone(),
-                            starred: song.is_starred,
-                            rating: song.rating.unwrap_or(0),
-                            item_type: "song",
-                        },
-                        ThreeTierEntry::Child(album, _) => CenterItemInfo {
-                            id: album.id.clone(),
-                            name: album.name.clone(),
-                            artist: album.artist.clone(),
-                            starred: album.is_starred,
-                            rating: album.rating.unwrap_or(0),
-                            item_type: "album",
-                        },
-                        ThreeTierEntry::Parent(artist) => CenterItemInfo {
-                            id: artist.id.clone(),
-                            name: artist.name.clone(),
-                            artist: String::new(),
-                            starred: artist.is_starred,
-                            rating: artist.rating.unwrap_or(0),
-                            item_type: "artist",
-                        },
-                    })
-            }
-            View::Playlists => {
-                let total = self
-                    .playlists_page
-                    .expansion
-                    .flattened_len(&self.library.playlists);
-                self.playlists_page
-                    .common
-                    .slot_list
-                    .get_center_item_index(total)
-                    .and_then(|idx| {
-                        self.playlists_page.expansion.get_entry_at(
-                            idx,
-                            &self.library.playlists,
-                            |p| &p.id,
-                        )
-                    })
-                    .and_then(|entry| match entry {
-                        SlotListEntry::Child(song, _) => Some(CenterItemInfo {
-                            id: song.id.clone(),
-                            name: song.title.clone(),
-                            artist: song.artist.clone(),
-                            starred: song.is_starred,
-                            rating: song.rating.unwrap_or(0),
-                            item_type: "song",
-                        }),
-                        SlotListEntry::Parent(_) => None, // playlists themselves can't be starred/rated
-                    })
-            }
-            View::Genres => {
-                let total = expansion::three_tier_flattened_len(
-                    &self.library.genres,
-                    &self.genres_page.expansion,
-                    self.genres_page.sub_expansion.children.len(),
-                );
-                self.genres_page
-                    .common
-                    .slot_list
-                    .get_center_item_index(total)
-                    .and_then(|idx| {
-                        expansion::three_tier_get_entry_at(
-                            idx,
-                            &self.library.genres,
-                            &self.genres_page.expansion,
-                            &self.genres_page.sub_expansion,
-                            |g| &g.id,
-                            |a| &a.id,
-                        )
-                    })
-                    .and_then(|entry| match entry {
-                        ThreeTierEntry::Grandchild(song, _) => Some(CenterItemInfo {
-                            id: song.id.clone(),
-                            name: song.title.clone(),
-                            artist: song.artist.clone(),
-                            starred: song.is_starred,
-                            rating: song.rating.unwrap_or(0),
-                            item_type: "song",
-                        }),
-                        ThreeTierEntry::Child(album, _) => Some(CenterItemInfo {
-                            id: album.id.clone(),
-                            name: album.name.clone(),
-                            artist: album.artist.clone(),
-                            starred: album.is_starred,
-                            rating: album.rating.unwrap_or(0),
-                            item_type: "album",
-                        }),
-                        ThreeTierEntry::Parent(_) => None, // genres themselves can't be starred/rated
-                    })
-            }
+            View::Artists => expansion::resolve_three_tier_center(
+                &self.library.artists,
+                &self.artists_page.expansion,
+                &self.artists_page.sub_expansion,
+                &self.artists_page.common,
+                |a| &a.id,
+                |a| &a.id,
+            )
+            .map(|entry| match entry {
+                ThreeTierEntry::Grandchild(song, _) => CenterItemInfo {
+                    id: song.id.clone(),
+                    name: song.title.clone(),
+                    artist: song.artist.clone(),
+                    starred: song.is_starred,
+                    rating: song.rating.unwrap_or(0),
+                    item_type: "song",
+                },
+                ThreeTierEntry::Child(album, _) => CenterItemInfo {
+                    id: album.id.clone(),
+                    name: album.name.clone(),
+                    artist: album.artist.clone(),
+                    starred: album.is_starred,
+                    rating: album.rating.unwrap_or(0),
+                    item_type: "album",
+                },
+                ThreeTierEntry::Parent(artist) => CenterItemInfo {
+                    id: artist.id.clone(),
+                    name: artist.name.clone(),
+                    artist: String::new(),
+                    starred: artist.is_starred,
+                    rating: artist.rating.unwrap_or(0),
+                    item_type: "artist",
+                },
+            }),
+            View::Playlists => self
+                .playlists_page
+                .expansion
+                .resolve_center(&self.library.playlists, &self.playlists_page.common, |p| {
+                    &p.id
+                })
+                .and_then(|entry| match entry {
+                    SlotListEntry::Child(song, _) => Some(CenterItemInfo {
+                        id: song.id.clone(),
+                        name: song.title.clone(),
+                        artist: song.artist.clone(),
+                        starred: song.is_starred,
+                        rating: song.rating.unwrap_or(0),
+                        item_type: "song",
+                    }),
+                    SlotListEntry::Parent(_) => None, // playlists themselves can't be starred/rated
+                }),
+            View::Genres => expansion::resolve_three_tier_center(
+                &self.library.genres,
+                &self.genres_page.expansion,
+                &self.genres_page.sub_expansion,
+                &self.genres_page.common,
+                |g| &g.id,
+                |a| &a.id,
+            )
+            .and_then(|entry| match entry {
+                ThreeTierEntry::Grandchild(song, _) => Some(CenterItemInfo {
+                    id: song.id.clone(),
+                    name: song.title.clone(),
+                    artist: song.artist.clone(),
+                    starred: song.is_starred,
+                    rating: song.rating.unwrap_or(0),
+                    item_type: "song",
+                }),
+                ThreeTierEntry::Child(album, _) => Some(CenterItemInfo {
+                    id: album.id.clone(),
+                    name: album.name.clone(),
+                    artist: album.artist.clone(),
+                    starred: album.is_starred,
+                    rating: album.rating.unwrap_or(0),
+                    item_type: "album",
+                }),
+                ThreeTierEntry::Parent(_) => None, // genres themselves can't be starred/rated
+            }),
             _ => None,
         }
     }

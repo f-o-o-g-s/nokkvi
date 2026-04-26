@@ -194,26 +194,14 @@ impl Nokkvi {
                 }
             }
             View::Artists => {
-                let total = expansion::three_tier_flattened_len(
+                if let Some(entry) = expansion::resolve_three_tier_center(
                     &self.library.artists,
                     &self.artists_page.expansion,
-                    self.artists_page.sub_expansion.children.len(),
-                );
-                let center_idx = self
-                    .artists_page
-                    .common
-                    .slot_list
-                    .get_center_item_index(total);
-                if let Some(entry) = center_idx.and_then(|idx| {
-                    expansion::three_tier_get_entry_at(
-                        idx,
-                        &self.library.artists,
-                        &self.artists_page.expansion,
-                        &self.artists_page.sub_expansion,
-                        |a| &a.id,
-                        |a| &a.id,
-                    )
-                }) {
+                    &self.artists_page.sub_expansion,
+                    &self.artists_page.common,
+                    |a| &a.id,
+                    |a| &a.id,
+                ) {
                     let item = match entry {
                         ThreeTierEntry::Grandchild(song, _) => {
                             InfoModalItem::from_song_view_data(song)

@@ -143,6 +143,23 @@ impl<C: Clone> ExpansionState<C> {
         0
     }
 
+    /// Resolve the entry at the slot list's current center, if any.
+    ///
+    /// Wraps the three-step lookup (`flattened_len → get_center_item_index →
+    /// get_entry_at`) into a single call so handlers don't have to repeat
+    /// the dance at every site. Returns `None` when the list is empty or the
+    /// center is past the end.
+    pub fn resolve_center<'a, P>(
+        &'a self,
+        parents: &'a [P],
+        common: &SlotListPageState,
+        id_fn: impl Fn(&P) -> &str,
+    ) -> Option<SlotListEntry<&'a P, &'a C>> {
+        let total = self.flattened_len(parents);
+        let idx = common.slot_list.get_center_item_index(total)?;
+        self.get_entry_at(idx, parents, id_fn)
+    }
+
     /// Get a single entry at a flattened index without building the full list.
     ///
     /// Returns a borrowed `SlotListEntry` reference, avoiding the full Vec allocation
@@ -401,6 +418,25 @@ pub(crate) fn three_tier_flattened_len<P, C: Clone>(
     } else {
         parents.len()
     }
+}
+
+/// Resolve the entry at the slot list's current center for a three-tier view.
+///
+/// Wraps the three-step lookup (`three_tier_flattened_len → get_center_item_index
+/// → three_tier_get_entry_at`) into a single call. Mirrors
+/// `ExpansionState::resolve_center` for the artist/genre views that have a
+/// second level of inline expansion.
+pub(crate) fn resolve_three_tier_center<'a, P, C: Clone, G: Clone>(
+    parents: &'a [P],
+    outer: &'a ExpansionState<C>,
+    inner: &'a ExpansionState<G>,
+    common: &SlotListPageState,
+    parent_id_fn: impl Fn(&P) -> &str,
+    child_id_fn: impl Fn(&C) -> &str,
+) -> Option<ThreeTierEntry<&'a P, &'a C, &'a G>> {
+    let total = three_tier_flattened_len(parents, outer, inner.children.len());
+    let idx = common.slot_list.get_center_item_index(total)?;
+    three_tier_get_entry_at(idx, parents, outer, inner, parent_id_fn, child_id_fn)
 }
 
 /// Get a single entry at a flat index in a three-tier list without allocating.
