@@ -746,6 +746,7 @@ impl ArtistsPage {
             Some(ArtistsMessage::RefreshViewData),
             Some(ArtistsMessage::CenterOnPlaying),
             None, // on_add
+            None, // trailing_button
             true, // show_search
             ArtistsMessage::SearchQueryChanged,
         );

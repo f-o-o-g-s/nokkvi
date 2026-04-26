@@ -405,6 +405,7 @@ impl SongsPage {
             Some(SongsMessage::RefreshViewData),
             Some(SongsMessage::CenterOnPlaying),
             None, // on_add
+            None, // trailing_button
             true, // show_search
             SongsMessage::SearchQueryChanged,
         );

@@ -679,6 +679,7 @@ impl GenresPage {
             Some(GenresMessage::RefreshViewData),
             Some(GenresMessage::CenterOnPlaying),
             None, // on_add
+            None, // trailing_button
             true, // show_search
             GenresMessage::SearchQueryChanged,
         );

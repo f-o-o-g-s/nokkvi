@@ -24,7 +24,9 @@ pub(crate) use browsing_panel::{BrowsingPanel, BrowsingPanelMessage, BrowsingVie
 pub(crate) use genres::{GenresAction, GenresMessage, GenresPage, GenresViewData};
 pub(crate) use login::{LoginAction, LoginMessage, LoginPage};
 pub(crate) use playlists::{PlaylistsAction, PlaylistsMessage, PlaylistsPage, PlaylistsViewData};
-pub(crate) use queue::{QueueAction, QueueMessage, QueuePage, QueueSortMode, QueueViewData};
+pub(crate) use queue::{
+    QueueAction, QueueColumn, QueueMessage, QueuePage, QueueSortMode, QueueViewData,
+};
 pub(crate) use radios::{RadiosAction, RadiosMessage, RadiosPage, RadiosViewData};
 pub(crate) use settings::{SettingsAction, SettingsMessage, SettingsPage, SettingsViewData};
 pub(crate) use similar::{SimilarAction, SimilarMessage, SimilarPage, SimilarViewData};

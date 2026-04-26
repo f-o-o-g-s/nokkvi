@@ -245,6 +245,7 @@ impl RadiosPage {
             Some(RadiosMessage::RefreshViewData),
             None, // No "center on playing" — radio has no queue position
             Some(("Add Station", RadiosMessage::AddRadioStation)), // on_add
+            None, // trailing_button
             true, // show_search
             RadiosMessage::SearchQueryChanged,
         );

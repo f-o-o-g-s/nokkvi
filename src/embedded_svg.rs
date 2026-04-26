@@ -90,6 +90,7 @@ pub(crate) fn get_svg(path: &str) -> &'static str {
         "assets/icons/locate.svg" => LOCATE,
         "assets/icons/library.svg" => LIBRARY,
         "assets/icons/list-tree.svg" => LIST_TREE,
+        "assets/icons/columns-3-cog.svg" => COLUMNS_3_COG,
         _ => {
             warn!("  Unknown SVG path: {}", path);
             PLAY // Fallback to play icon
@@ -221,6 +222,7 @@ const TAGS: &str = include_str!("../assets/icons/tags.svg");
 const LOCATE: &str = include_str!("../assets/icons/locate.svg");
 const LIBRARY: &str = include_str!("../assets/icons/library.svg");
 const LIST_TREE: &str = include_str!("../assets/icons/list-tree.svg");
+const COLUMNS_3_COG: &str = include_str!("../assets/icons/columns-3-cog.svg");
 
 /// Check whether a given SVG path is registered in the embedded icon table.
 /// Returns `false` for paths that would hit the fallback arm.
@@ -307,6 +309,7 @@ fn is_registered(path: &str) -> bool {
         "assets/icons/locate.svg",
         "assets/icons/library.svg",
         "assets/icons/list-tree.svg",
+        "assets/icons/columns-3-cog.svg",
     ];
     KNOWN.contains(&path)
 }

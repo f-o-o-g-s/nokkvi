@@ -554,6 +554,7 @@ impl PlaylistsPage {
             Some(PlaylistsMessage::RefreshViewData),
             None, // Playlists view doesn't need center on playing button
             None, // Optional add button
+            None, // trailing_button
             true, // show_search
             PlaylistsMessage::SearchQueryChanged,
         );

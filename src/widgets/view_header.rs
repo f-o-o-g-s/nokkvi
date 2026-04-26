@@ -31,6 +31,9 @@ pub(crate) fn view_header<
     on_refresh: Option<Message>,             // Optional refresh button
     on_center_on_playing: Option<Message>,   // Optional center button
     on_add: Option<(&'static str, Message)>, // Optional add button (tooltip, message)
+    // Optional trailing element rendered between built-in buttons and the
+    // search field — view-specific controls like the columns dropdown.
+    trailing_button: Option<Element<'a, Message>>,
     show_search: bool,
     on_search_change: impl Fn(String) -> Message + 'a,
 ) -> Element<'a, Message> {
@@ -189,6 +192,9 @@ pub(crate) fn view_header<
     }
     if let Some(add_btn) = add_button {
         header_row = header_row.push(add_btn);
+    }
+    if let Some(trailing) = trailing_button {
+        header_row = header_row.push(trailing);
     }
     if let Some(search_element) = search_field {
         header_row = header_row.push(search_element);

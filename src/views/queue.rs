@@ -24,6 +24,54 @@ pub struct QueuePage {
     /// Queue uses its own sort mode enum (QueueSortMode), separate from
     /// the library views' SortMode.
     pub queue_sort_mode: QueueSortMode,
+    /// Per-column visibility toggles surfaced via the columns-3-cog dropdown
+    /// in the view header. Persisted to config.toml.
+    pub column_visibility: QueueColumnVisibility,
+}
+
+/// Toggleable queue columns. `Stars`, `Album`, and `Duration` are user-toggleable
+/// from the columns dropdown; the index/title/artwork/heart columns stay always-on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueColumn {
+    Stars,
+    Album,
+    Duration,
+}
+
+/// User-toggle state for each toggleable queue column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QueueColumnVisibility {
+    pub stars: bool,
+    pub album: bool,
+    pub duration: bool,
+}
+
+impl Default for QueueColumnVisibility {
+    fn default() -> Self {
+        Self {
+            stars: true,
+            album: true,
+            duration: true,
+        }
+    }
+}
+
+impl QueueColumnVisibility {
+    pub fn get(&self, col: QueueColumn) -> bool {
+        match col {
+            QueueColumn::Stars => self.stars,
+            QueueColumn::Album => self.album,
+            QueueColumn::Duration => self.duration,
+        }
+    }
+
+    pub fn set(&mut self, col: QueueColumn, value: bool) {
+        match col {
+            QueueColumn::Stars => self.stars = value,
+            QueueColumn::Album => self.album = value,
+            QueueColumn::Duration => self.duration = value,
+        }
+    }
 }
 
 /// Hide the queue stars column when the queue panel is narrower than this.
@@ -33,11 +81,26 @@ pub(crate) const BREAKPOINT_HIDE_QUEUE_STARS: f32 = 400.0;
 
 /// Pure decision: should the queue's stars rating column be rendered?
 ///
-/// Stars are visible across all sort modes; previously gated by
-/// `QueueSortMode::Rating`. Hidden when the queue panel is narrower than
-/// `BREAKPOINT_HIDE_QUEUE_STARS`.
-pub(crate) fn rating_column_visible(_sort: QueueSortMode, panel_width: f32) -> bool {
-    panel_width >= BREAKPOINT_HIDE_QUEUE_STARS
+/// Two independent gates: the user toggle (always wins when off) and the
+/// responsive width gate (always wins when below the breakpoint).
+pub(crate) fn rating_column_visible(
+    _sort: QueueSortMode,
+    panel_width: f32,
+    user_visible: bool,
+) -> bool {
+    user_visible && panel_width >= BREAKPOINT_HIDE_QUEUE_STARS
+}
+
+/// Pure decision: should the album column be rendered? User toggle only —
+/// no responsive gate yet (the album column carries inline genre when
+/// sort = Genre, so hiding it on narrow widths is a separate question).
+pub(crate) fn album_column_visible(user_visible: bool) -> bool {
+    user_visible
+}
+
+/// Pure decision: should the duration column be rendered? User toggle only.
+pub(crate) fn duration_column_visible(user_visible: bool) -> bool {
+    user_visible
 }
 
 /// View data passed from root (read-only)
@@ -105,6 +168,7 @@ pub enum QueueMessage {
     ToggleSortOrder,
     ShuffleQueue,
     SearchQueryChanged(String),
+    ToggleColumnVisible(QueueColumn),
 
     // Playlist edit mode
     SavePlaylist,
@@ -125,33 +189,41 @@ pub enum QueueMessage {
 /// Actions that bubble up to root for global state mutation
 #[derive(Debug, Clone)]
 pub enum QueueAction {
-    PlaySong(usize),                                  // song index in queue
-    FocusOnSong(usize, bool), // queue index to scroll to (bubbles up to handler), flash
+    PlaySong(usize),                // song index in queue
+    FocusOnSong(usize, bool),       // queue index to scroll to (bubbles up to handler), flash
     SortModeChanged(QueueSortMode), // trigger reload/resort
-    SortOrderChanged(bool),   // trigger resort
-    ShuffleQueue,             // shuffle queue order
-    SearchChanged(String),    // trigger filter
-    SetRating(String, usize), // (song_id, rating) - set absolute rating
-    ToggleStar(String, bool), // (song_id, new_starred) - toggle starred state
-    MoveItem { from: usize, to: usize }, // drag-and-drop reorder (absolute item indices)
-    MoveBatch { indices: Vec<usize>, target: usize }, // multi-selection drag reorder
-    RemoveFromQueue(Vec<usize>), // remove songs at indices
-    PlayNext(Vec<usize>),     // insert songs after currently playing
-    ShowToast(String),        // informational toast (e.g. drag disabled reason)
-    SaveAsPlaylist,           // open dialog to save queue as new playlist
-    OpenBrowsingPanel,        // toggle the library browser panel
-    AddToPlaylist(Vec<String>), // song_ids - add to playlist dialog
-    SavePlaylist,             // save playlist edits (edit mode)
-    DiscardEdits,             // discard edits and exit edit mode
-    PlaylistNameChanged(String), // playlist name edited inline
+    SortOrderChanged(bool),         // trigger resort
+    ShuffleQueue,                   // shuffle queue order
+    SearchChanged(String),          // trigger filter
+    SetRating(String, usize),       // (song_id, rating) - set absolute rating
+    ToggleStar(String, bool),       // (song_id, new_starred) - toggle starred state
+    MoveItem {
+        from: usize,
+        to: usize,
+    }, // drag-and-drop reorder (absolute item indices)
+    MoveBatch {
+        indices: Vec<usize>,
+        target: usize,
+    }, // multi-selection drag reorder
+    RemoveFromQueue(Vec<usize>),    // remove songs at indices
+    PlayNext(Vec<usize>),           // insert songs after currently playing
+    ShowToast(String),              // informational toast (e.g. drag disabled reason)
+    SaveAsPlaylist,                 // open dialog to save queue as new playlist
+    OpenBrowsingPanel,              // toggle the library browser panel
+    AddToPlaylist(Vec<String>),     // song_ids - add to playlist dialog
+    SavePlaylist,                   // save playlist edits (edit mode)
+    DiscardEdits,                   // discard edits and exit edit mode
+    PlaylistNameChanged(String),    // playlist name edited inline
     PlaylistCommentChanged(String), // playlist comment edited inline
-    EditPlaylist,             // enter edit mode from playlist context bar
-    ShowInfo(usize),          // Open info modal (queue index for full Song lookup)
-    ShowInFolder(usize),      // Open containing folder (queue index, path fetched via API)
-    RefreshArtwork(String),   // album_id - refresh artwork from server
-    FindSimilar(usize),       // Open Find Similar panel for queue index
-    TopSongs(usize),          // Open Top Songs panel for queue index
+    EditPlaylist,                   // enter edit mode from playlist context bar
+    ShowInfo(usize),                // Open info modal (queue index for full Song lookup)
+    ShowInFolder(usize),            // Open containing folder (queue index, path fetched via API)
+    RefreshArtwork(String),         // album_id - refresh artwork from server
+    FindSimilar(usize),             // Open Find Similar panel for queue index
+    TopSongs(usize),                // Open Top Songs panel for queue index
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
+    /// User toggled a queue column's visibility — persist to config.toml.
+    ColumnVisibilityChanged(QueueColumn, bool),
     None,
 }
 
@@ -160,6 +232,7 @@ impl Default for QueuePage {
         Self {
             common: SlotListPageState::new_without_sort_mode(),
             queue_sort_mode: QueueSortMode::Album,
+            column_visibility: QueueColumnVisibility::default(),
         }
     }
 }
@@ -238,6 +311,14 @@ impl QueuePage {
                 self.common.search_query = query.clone();
                 self.common.slot_list.set_offset(0, total_items); // Reset to top on search
                 (Task::none(), QueueAction::SearchChanged(query))
+            }
+            QueueMessage::ToggleColumnVisible(col) => {
+                let new_value = !self.column_visibility.get(col);
+                self.column_visibility.set(col, new_value);
+                (
+                    Task::none(),
+                    QueueAction::ColumnVisibilityChanged(col, new_value),
+                )
             }
 
             // Data loading messages (handled at root level, no action needed here)
@@ -420,6 +501,29 @@ impl QueuePage {
             QueueSortMode::Rating,
         ];
 
+        // Build the columns-visibility dropdown for the queue's view header.
+        // Indices match the order in `items` below; the closure converts
+        // them back to `QueueColumn` variants for the toggle message.
+        let column_dropdown: Element<'a, QueueMessage> = {
+            use crate::widgets::checkbox_dropdown::checkbox_dropdown;
+            let items = vec![
+                ("Stars".to_string(), self.column_visibility.stars),
+                ("Album".to_string(), self.column_visibility.album),
+                ("Duration".to_string(), self.column_visibility.duration),
+            ];
+            checkbox_dropdown(
+                "assets/icons/columns-3-cog.svg",
+                "Show/hide columns",
+                items,
+                |idx| match idx {
+                    0 => QueueMessage::ToggleColumnVisible(QueueColumn::Stars),
+                    1 => QueueMessage::ToggleColumnVisible(QueueColumn::Album),
+                    _ => QueueMessage::ToggleColumnVisible(QueueColumn::Duration),
+                },
+            )
+            .into()
+        };
+
         let header = widgets::view_header::view_header(
             self.queue_sort_mode,
             QUEUE_VIEW_OPTIONS,
@@ -435,8 +539,9 @@ impl QueuePage {
             None,                             // No refresh button for queue
             data.current_playing_queue_index
                 .map(|idx| QueueMessage::FocusCurrentPlaying(idx, true)),
-            None, // on_add
-            true, // show_search
+            None,                  // on_add
+            Some(column_dropdown), // trailing_button
+            true,                  // show_search
             QueueMessage::SearchQueryChanged,
         );
 
@@ -709,8 +814,11 @@ impl QueuePage {
         let album_art = data.album_art; // Move artwork maps
         let large_artwork = data.large_artwork;
         let queue_songs = data.queue_songs; // Move ownership to extend lifetime
-        // Always show the album column to provide context across all sort modes
-        let show_album_column = true;
+        // User-toggle gates from the columns dropdown; combined with responsive
+        // gates inside the per-row `responsive(...)` closure below.
+        let column_visibility = self.column_visibility;
+        let show_album_column = album_column_visible(column_visibility.album);
+        let show_duration_column = duration_column_visible(column_visibility.duration);
 
         // Build the render_item closure (shared between drag and non-drag paths)
         let render_item = |song: &QueueSongUIViewData,
@@ -779,7 +887,8 @@ impl QueuePage {
                 let icon_size = m.star_size;
 
                 // Dynamic column proportions: title gets more space when album/rating columns are hidden
-                let show_rating_column = rating_column_visible(current_sort_mode, panel_width);
+                let show_rating_column =
+                    rating_column_visible(current_sort_mode, panel_width, column_visibility.stars);
                 let title_portion: u16 = if show_rating_column { 35 } else { 40 };
 
                 // Layout: [Index] [Art] [Title/Artist] [Album?] [Rating?] [Duration] [Heart]
@@ -914,13 +1023,15 @@ impl QueuePage {
                     ));
                 }
 
-                // 5. Duration - right aligned
-                content_row = content_row.push(
-                    container(slot_list_text(duration, duration_size, style.subtext_color))
-                        .width(Length::FillPortion(10))
-                        .align_x(Alignment::End)
-                        .align_y(Alignment::Center),
-                );
+                // 5. Duration - right aligned (user-toggleable)
+                if show_duration_column {
+                    content_row = content_row.push(
+                        container(slot_list_text(duration, duration_size, style.subtext_color))
+                            .width(Length::FillPortion(10))
+                            .align_x(Alignment::End)
+                            .align_y(Alignment::Center),
+                    );
+                }
 
                 // 5. Heart Icon - use reusable component, with symmetric padding for centering
                 content_row = content_row.push(
@@ -1173,7 +1284,7 @@ mod tests {
     fn rating_column_visible_for_all_sort_modes() {
         for sort in QueueSortMode::all() {
             assert!(
-                rating_column_visible(sort, WIDE_PANEL),
+                rating_column_visible(sort, WIDE_PANEL, true),
                 "stars column should render for sort mode {sort:?}"
             );
         }
@@ -1183,7 +1294,7 @@ mod tests {
     fn rating_column_hidden_below_breakpoint() {
         for sort in QueueSortMode::all() {
             assert!(
-                !rating_column_visible(sort, BREAKPOINT_HIDE_QUEUE_STARS - 1.0),
+                !rating_column_visible(sort, BREAKPOINT_HIDE_QUEUE_STARS - 1.0, true),
                 "stars column should hide below breakpoint for {sort:?}"
             );
         }
@@ -1194,7 +1305,7 @@ mod tests {
         // Boundary is `>=`: the exact breakpoint width keeps stars visible.
         for sort in QueueSortMode::all() {
             assert!(
-                rating_column_visible(sort, BREAKPOINT_HIDE_QUEUE_STARS),
+                rating_column_visible(sort, BREAKPOINT_HIDE_QUEUE_STARS, true),
                 "stars column should remain visible at exact breakpoint for {sort:?}"
             );
         }
@@ -1205,7 +1316,104 @@ mod tests {
         // Width wins over sort mode: even Rating sort hides when too narrow.
         assert!(!rating_column_visible(
             QueueSortMode::Rating,
-            BREAKPOINT_HIDE_QUEUE_STARS - 1.0
+            BREAKPOINT_HIDE_QUEUE_STARS - 1.0,
+            true,
         ));
+    }
+
+    #[test]
+    fn rating_column_user_toggle_off_overrides_wide_panel() {
+        // User toggle wins over width: a wide panel still hides stars when
+        // the user has toggled them off.
+        for sort in QueueSortMode::all() {
+            assert!(
+                !rating_column_visible(sort, WIDE_PANEL, false),
+                "user toggle off should hide stars even at wide panel ({sort:?})"
+            );
+        }
+    }
+
+    #[test]
+    fn rating_column_responsive_still_hides_when_user_visible_true() {
+        // The two gates AND together: user wants stars visible, but the
+        // panel is too narrow → still hidden.
+        assert!(!rating_column_visible(
+            QueueSortMode::Album,
+            BREAKPOINT_HIDE_QUEUE_STARS - 1.0,
+            true,
+        ));
+    }
+
+    #[test]
+    fn album_column_visible_follows_user_toggle() {
+        assert!(album_column_visible(true));
+        assert!(!album_column_visible(false));
+    }
+
+    #[test]
+    fn duration_column_visible_follows_user_toggle() {
+        assert!(duration_column_visible(true));
+        assert!(!duration_column_visible(false));
+    }
+
+    #[test]
+    fn queue_column_visibility_default_shows_all() {
+        let v = QueueColumnVisibility::default();
+        assert!(v.stars);
+        assert!(v.album);
+        assert!(v.duration);
+    }
+
+    #[test]
+    fn queue_column_visibility_get_set_round_trip() {
+        let mut v = QueueColumnVisibility::default();
+        assert!(v.get(QueueColumn::Stars));
+        v.set(QueueColumn::Stars, false);
+        assert!(!v.get(QueueColumn::Stars));
+        // Other columns unchanged.
+        assert!(v.get(QueueColumn::Album));
+        assert!(v.get(QueueColumn::Duration));
+
+        v.set(QueueColumn::Album, false);
+        v.set(QueueColumn::Duration, false);
+        assert!(!v.get(QueueColumn::Album));
+        assert!(!v.get(QueueColumn::Duration));
+    }
+
+    #[test]
+    fn toggle_column_visible_flips_state() {
+        let mut page = QueuePage::default();
+        let songs: Vec<QueueSongUIViewData> = Vec::new();
+
+        // Stars: true → false → true.
+        let (_t, action) = page.update(
+            QueueMessage::ToggleColumnVisible(QueueColumn::Stars),
+            &songs,
+        );
+        assert!(!page.column_visibility.stars);
+        assert!(matches!(
+            action,
+            QueueAction::ColumnVisibilityChanged(QueueColumn::Stars, false)
+        ));
+
+        let (_t, action) = page.update(
+            QueueMessage::ToggleColumnVisible(QueueColumn::Stars),
+            &songs,
+        );
+        assert!(page.column_visibility.stars);
+        assert!(matches!(
+            action,
+            QueueAction::ColumnVisibilityChanged(QueueColumn::Stars, true)
+        ));
+
+        // Album and Duration use the same path, just spot-check Album.
+        let (_t, _action) = page.update(
+            QueueMessage::ToggleColumnVisible(QueueColumn::Album),
+            &songs,
+        );
+        assert!(!page.column_visibility.album);
+        // Other columns unaffected.
+        assert!(page.column_visibility.stars);
+        assert!(page.column_visibility.duration);
     }
 }

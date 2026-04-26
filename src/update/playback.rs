@@ -1052,6 +1052,11 @@ impl Nokkvi {
         self.show_album_artists_only = settings.show_album_artists_only;
         self.suppress_library_refresh_toasts = settings.suppress_library_refresh_toasts;
 
+        // Restore queue column visibility from persisted settings.
+        self.queue_page.column_visibility.stars = settings.queue_show_stars;
+        self.queue_page.column_visibility.album = settings.queue_show_album;
+        self.queue_page.column_visibility.duration = settings.queue_show_duration;
+
         // Restore active playlist context from persisted settings
         self.active_playlist_info =
             settings

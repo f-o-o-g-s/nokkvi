@@ -264,6 +264,7 @@ impl SimilarPage {
             None,  // Hide refresh
             None,  // Hide center on playing
             None,  // on_add
+            None,  // trailing_button
             false, // Hide search
             |_| SimilarMessage::NoOp,
         );

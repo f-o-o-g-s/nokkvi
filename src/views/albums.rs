@@ -559,6 +559,7 @@ impl AlbumsPage {
             Some(AlbumsMessage::RefreshViewData),
             Some(AlbumsMessage::CenterOnPlaying),
             None, // on_add
+            None, // trailing_button
             true, // show_search
             AlbumsMessage::SearchQueryChanged,
         );

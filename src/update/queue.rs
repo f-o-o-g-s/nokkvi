@@ -571,6 +571,9 @@ impl Nokkvi {
             QueueAction::NavigateAndFilter(view, filter) => {
                 return Task::done(Message::NavigateAndFilter(view, filter));
             }
+            QueueAction::ColumnVisibilityChanged(col, value) => {
+                return self.persist_queue_column_visibility(col, value);
+            }
             QueueAction::None => {}
         }
 
@@ -737,5 +740,33 @@ impl Nokkvi {
             shell.settings().set_queue_prefs(sort_mode, ascending).await
         });
         std::borrow::Cow::Owned(filtered)
+    }
+
+    /// Persist the user's queue column visibility toggle to config.toml +
+    /// redb via `AppService::settings()`. The page's in-memory state was
+    /// already mutated in `QueuePage::update`.
+    pub(crate) fn persist_queue_column_visibility(
+        &self,
+        col: views::QueueColumn,
+        value: bool,
+    ) -> Task<Message> {
+        match col {
+            views::QueueColumn::Stars => {
+                self.shell_spawn("persist_queue_show_stars", move |shell| async move {
+                    shell.settings().set_queue_show_stars(value).await
+                });
+            }
+            views::QueueColumn::Album => {
+                self.shell_spawn("persist_queue_show_album", move |shell| async move {
+                    shell.settings().set_queue_show_album(value).await
+                });
+            }
+            views::QueueColumn::Duration => {
+                self.shell_spawn("persist_queue_show_duration", move |shell| async move {
+                    shell.settings().set_queue_show_duration(value).await
+                });
+            }
+        }
+        Task::none()
     }
 }
