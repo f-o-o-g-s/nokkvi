@@ -613,6 +613,8 @@ pub struct PlayerSettings {
     pub queue_show_album: bool,
     /// Whether the queue's duration column is visible.
     pub queue_show_duration: bool,
+    /// Whether the queue's love (heart) column is visible.
+    pub queue_show_love: bool,
 }
 
 #[cfg(test)]

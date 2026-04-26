@@ -766,6 +766,11 @@ impl Nokkvi {
                     shell.settings().set_queue_show_duration(value).await
                 });
             }
+            views::QueueColumn::Love => {
+                self.shell_spawn("persist_queue_show_love", move |shell| async move {
+                    shell.settings().set_queue_show_love(value).await
+                });
+            }
         }
         Task::none()
     }

@@ -29,13 +29,15 @@ pub struct QueuePage {
     pub column_visibility: QueueColumnVisibility,
 }
 
-/// Toggleable queue columns. `Stars`, `Album`, and `Duration` are user-toggleable
-/// from the columns dropdown; the index/title/artwork/heart columns stay always-on.
+/// Toggleable queue columns. `Stars`, `Album`, `Duration`, and `Love` are
+/// user-toggleable from the columns dropdown; the index/title/artwork columns
+/// stay always-on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueColumn {
     Stars,
     Album,
     Duration,
+    Love,
 }
 
 /// User-toggle state for each toggleable queue column.
@@ -44,6 +46,7 @@ pub struct QueueColumnVisibility {
     pub stars: bool,
     pub album: bool,
     pub duration: bool,
+    pub love: bool,
 }
 
 impl Default for QueueColumnVisibility {
@@ -52,6 +55,7 @@ impl Default for QueueColumnVisibility {
             stars: true,
             album: true,
             duration: true,
+            love: true,
         }
     }
 }
@@ -62,6 +66,7 @@ impl QueueColumnVisibility {
             QueueColumn::Stars => self.stars,
             QueueColumn::Album => self.album,
             QueueColumn::Duration => self.duration,
+            QueueColumn::Love => self.love,
         }
     }
 
@@ -70,6 +75,7 @@ impl QueueColumnVisibility {
             QueueColumn::Stars => self.stars = value,
             QueueColumn::Album => self.album = value,
             QueueColumn::Duration => self.duration = value,
+            QueueColumn::Love => self.love = value,
         }
     }
 }
@@ -100,6 +106,11 @@ pub(crate) fn album_column_visible(user_visible: bool) -> bool {
 
 /// Pure decision: should the duration column be rendered? User toggle only.
 pub(crate) fn duration_column_visible(user_visible: bool) -> bool {
+    user_visible
+}
+
+/// Pure decision: should the love (heart) column be rendered? User toggle only.
+pub(crate) fn love_column_visible(user_visible: bool) -> bool {
     user_visible
 }
 
@@ -510,6 +521,7 @@ impl QueuePage {
                 ("Stars".to_string(), self.column_visibility.stars),
                 ("Album".to_string(), self.column_visibility.album),
                 ("Duration".to_string(), self.column_visibility.duration),
+                ("Love".to_string(), self.column_visibility.love),
             ];
             checkbox_dropdown(
                 "assets/icons/columns-3-cog.svg",
@@ -518,7 +530,8 @@ impl QueuePage {
                 |idx| match idx {
                     0 => QueueMessage::ToggleColumnVisible(QueueColumn::Stars),
                     1 => QueueMessage::ToggleColumnVisible(QueueColumn::Album),
-                    _ => QueueMessage::ToggleColumnVisible(QueueColumn::Duration),
+                    2 => QueueMessage::ToggleColumnVisible(QueueColumn::Duration),
+                    _ => QueueMessage::ToggleColumnVisible(QueueColumn::Love),
                 },
             )
             .into()
@@ -819,6 +832,7 @@ impl QueuePage {
         let column_visibility = self.column_visibility;
         let show_album_column = album_column_visible(column_visibility.album);
         let show_duration_column = duration_column_visible(column_visibility.duration);
+        let show_love_column = love_column_visible(column_visibility.love);
 
         // Build the render_item closure (shared between drag and non-drag paths)
         let render_item = |song: &QueueSongUIViewData,
@@ -1033,29 +1047,32 @@ impl QueuePage {
                     );
                 }
 
-                // 5. Heart Icon - use reusable component, with symmetric padding for centering
-                content_row = content_row.push(
-                    container({
-                        use crate::widgets::slot_list::slot_list_favorite_icon;
-                        slot_list_favorite_icon(
-                            starred,
-                            ctx.is_center,
-                            is_current,
-                            ctx.opacity,
-                            icon_size,
-                            "heart",
-                            Some(QueueMessage::ClickToggleStar(ctx.item_index)),
-                        )
-                    })
-                    .width(Length::FillPortion(5))
-                    .padding(iced::Padding {
-                        left: 4.0,
-                        right: 4.0,
-                        ..Default::default()
-                    })
-                    .align_x(Alignment::Center)
-                    .align_y(Alignment::Center),
-                );
+                // 5. Heart Icon - use reusable component, with symmetric padding
+                // for centering (user-toggleable via columns dropdown).
+                if show_love_column {
+                    content_row = content_row.push(
+                        container({
+                            use crate::widgets::slot_list::slot_list_favorite_icon;
+                            slot_list_favorite_icon(
+                                starred,
+                                ctx.is_center,
+                                is_current,
+                                ctx.opacity,
+                                icon_size,
+                                "heart",
+                                Some(QueueMessage::ClickToggleStar(ctx.item_index)),
+                            )
+                        })
+                        .width(Length::FillPortion(5))
+                        .padding(iced::Padding {
+                            left: 4.0,
+                            right: 4.0,
+                            ..Default::default()
+                        })
+                        .align_x(Alignment::Center)
+                        .align_y(Alignment::Center),
+                    );
+                }
 
                 let content = content_row
                     .padding(iced::Padding {
@@ -1362,6 +1379,7 @@ mod tests {
         assert!(v.stars);
         assert!(v.album);
         assert!(v.duration);
+        assert!(v.love);
     }
 
     #[test]
@@ -1373,11 +1391,14 @@ mod tests {
         // Other columns unchanged.
         assert!(v.get(QueueColumn::Album));
         assert!(v.get(QueueColumn::Duration));
+        assert!(v.get(QueueColumn::Love));
 
         v.set(QueueColumn::Album, false);
         v.set(QueueColumn::Duration, false);
+        v.set(QueueColumn::Love, false);
         assert!(!v.get(QueueColumn::Album));
         assert!(!v.get(QueueColumn::Duration));
+        assert!(!v.get(QueueColumn::Love));
     }
 
     #[test]
@@ -1415,5 +1436,15 @@ mod tests {
         // Other columns unaffected.
         assert!(page.column_visibility.stars);
         assert!(page.column_visibility.duration);
+        assert!(page.column_visibility.love);
+
+        // Love toggles independently and emits its own action.
+        let (_t, action) =
+            page.update(QueueMessage::ToggleColumnVisible(QueueColumn::Love), &songs);
+        assert!(!page.column_visibility.love);
+        assert!(matches!(
+            action,
+            QueueAction::ColumnVisibilityChanged(QueueColumn::Love, false)
+        ));
     }
 }

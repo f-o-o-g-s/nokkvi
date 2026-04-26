@@ -158,6 +158,9 @@ pub struct PlayerSettings {
     /// Whether the queue's duration column is visible (default: true).
     #[serde(default = "default_true")]
     pub queue_show_duration: bool,
+    /// Whether the queue's love (heart) column is visible (default: true).
+    #[serde(default = "default_true")]
+    pub queue_show_love: bool,
 }
 
 fn default_eq_gains() -> [f32; 10] {
@@ -248,6 +251,7 @@ impl Default for PlayerSettings {
             queue_show_stars: true,
             queue_show_album: true,
             queue_show_duration: true,
+            queue_show_love: true,
         }
     }
 }

@@ -388,6 +388,12 @@ impl SettingsService {
         sm.set_queue_show_duration(enabled)
     }
 
+    /// Set queue's love (heart) column visibility and persist
+    pub async fn set_queue_show_love(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_queue_show_love(enabled)
+    }
+
     /// Set strip click action and persist
     pub async fn set_strip_click_action(
         &self,
