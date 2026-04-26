@@ -53,7 +53,7 @@ Toggled via Ctrl+E from Queue. `BrowsingView` enum: Albums, Songs, Artists, Genr
 
 ## Queue Sort
 
-Physical sort via `QueueManager::sort_queue()`, persists to redb. Album column visible across all sort modes.
+Physical sort via `QueueManager::sort_queue()`, persists to redb. Album column visible across all sort modes. Stars column is always rendered and uses responsive hide (collapses with the rest of the columns at narrow widths) rather than being toggled per sort mode.
 
 ## Queue Shuffle
 

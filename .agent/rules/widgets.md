@@ -37,8 +37,11 @@ Custom `iced::advanced` seekable widget. `Vec<OverlaySegment>` for scrolling col
 | Text Input Dialog | `text_input_dialog.rs` | Modal with text input or confirmation mode. Save Queue uses `combo_box`. |
 | EQ Slider | `eq_slider.rs` | Vertical ±15 dB slider for 10-band EQ |
 | Drag Column | `drag_column.rs` | In-queue drag-and-drop reordering (supports multi-selection batch) |
-| Format Info | `format_info.rs` | Audio format display (codec, sample rate, bitrate) |
+| Format Info | `format_info.rs` | Audio format split-string helper (codec/bitrate sides) |
 | Hamburger Menu | `hamburger_menu.rs` | App menu (quit, light/dark toggle, about) |
+| Search Bar | `search_bar.rs` | Centralized search input with integrated clear button — used by every view header |
+| Link Text | `link_text.rs` | Hover-underlined clickable text widget (tight hitbox, accent on hover) — powers inline album/artist routing |
+| Metadata Pill | `metadata_pill.rs` | Composable artwork-panel metadata row builders (return `Option<Element>` for chainable display) |
 
 ## 3D Buttons
 

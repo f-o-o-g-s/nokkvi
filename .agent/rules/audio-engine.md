@@ -24,7 +24,7 @@ CustomAudioEngine
 One native PipeWire stream via a shared `rodio::Mixer`:
 - `SfxEngine` owns the app-wide `ActiveSink` (`NativePipewire` or `Cpal` fallback)
 - `NativePipeWireSink` runs a dedicated `pw_nokkvi_out` thread with its own PipeWire mainloop
-- Each track gets an `ActiveStream`: ring buffer (480K samples ≈ 5s at 48kHz stereo) + `StreamingSource` added to mixer
+- Each track gets an `ActiveStream`: ring buffer (`RING_BUFFER_CAPACITY = 5_000_000` samples ≈ 52s at 48kHz stereo, sized for radio network jitter) + `StreamingSource` added to mixer
 - `StreamingSource` implements `rodio::Source` (pull model) — pipewire callback pulls f32 samples
 
 ## Critical Rules

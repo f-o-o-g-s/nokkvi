@@ -17,7 +17,7 @@ A Rust/Iced desktop client for [Navidrome](https://www.navidrome.org/) music ser
 
 **Key data structure:** `PagedBuffer<T>` (`data/src/types/paged_buffer.rs`) — replaces `Vec<T>` for all library data. `Deref<Target = [T]>` makes it a drop-in replacement. Load state tracked via `set_loading()` / `needs_fetch()`.
 
-**Consolidated state:** `src/state.rs` groups app state into domain structs (`PlaybackState`, `ActivePlayback` (Queue/Radio), `ScrobbleState`, `LibraryData`, `WindowState`, `ToastState`, `SimilarSongsState`, etc.).
+**Consolidated state:** `src/state.rs` groups app state into domain structs (`PlaybackState`, `ActivePlayback` (Queue/Radio), `RadioPlaybackState`, `ScrobbleState`, `PlaybackModes`, `LibraryData`, `LibraryCounts`, `WindowState`, `ToastState`, `SimilarSongsState`, `ArtworkState`, `CollageArtworkCache`, `EngineState`, `SfxState`, `CrossPaneDragState`, `PaneFocus`, `StoredSession`, `ActivePlaylistContext`).
 
 ## Core Pattern: TEA (The Elm Architecture)
 
@@ -63,10 +63,10 @@ The root `Message` enum uses **namespaced sub-enums**: `PlaybackMessage`, `Scrob
 
 ## Directories to Skip
 
-`target/`, `dist/`, `docs/`, `scripts/` — not project code.
+`target/`, `dist/`, `docs/`, `tmp/`, `local/` — not project code.
 
 ## Reference Codebases
 
 External repos cloned locally for reference (not part of this project). Browse `reference-{name}/` when needed:
 
-`iced`, `iced-apps`, `symphonia`, `feishin`, `lucide` (icons), `navidrome`, `pipewire`, `pipewire-rs`, `rmpc`, `ferrosonic`, `saxon`, `wireplumber`, `mpd`, `rodio`, `rustfft`, `cava`, `bincode`, `toml`, `musikcube`
+`iced`, `iced-apps`, `iced-book`, `iced-docs`, `symphonia`, `feishin`, `lucide` (icons), `navidrome`, `rmpc`, `rmpc-docs`, `rodio`.
