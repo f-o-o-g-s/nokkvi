@@ -2,6 +2,39 @@
 
 ## [Unreleased]
 
+## v0.3.0 — 2026-04-25
+
+### Features
+- **Server-Only Artwork Pipeline** — migrated artwork to a server-only fetch model with SSE-driven per-album invalidation. The client no longer keeps a disk cache; an in-memory LRU keeps recently viewed art warm and Navidrome library events trigger silent re-fetches so updated art appears immediately.
+- **Task Manager Notifications** — added a centralized task manager with status updates surfaced through the toast system, providing visibility into background work.
+- **Suppress Library Refresh Toasts** — added a setting to silence routine library-refresh toast notifications for less interruption during background syncs.
+- **Minimalist Nav Layout** — added a "None" nav layout option for a maximally minimal player chrome.
+- **Column Visibility Dropdowns** — added column visibility dropdowns to the Queue, Albums, Songs, and Artists views, including hideable Love/stars columns.
+- **Responsive Stars Column** — the Queue stars column now stays visible by default and auto-hides responsively on narrow widths.
+- **Most Played Sort** — added a "Most Played" sort mode to Artists and the Queue.
+- **Strip Merged Mode** — introduced a setting to merge the metadata strip seamlessly across navigation layouts, including the top-bar nav.
+- **Per-View Artwork Text Overlay** — toggle the artwork text overlay on or off independently for each view.
+
+### Fixes
+- **Large Artwork Cache Key** — fixed a cache key mismatch that prevented refreshed large artwork from displaying, with a regression test.
+- **Seek-Settled Artwork Sync** — large artwork now reloads in sync with seek-settled events instead of going stale.
+- **SSE Random-Sort Stability** — background SSE reloads no longer corrupt the artwork reference when the active view is sorted Randomly.
+- **Albums Viewport Clamp** — the Albums viewport offset is now clamped on background refresh to keep the visible row stable.
+- **Outer Expansion Collapse** — Shift+Enter now correctly collapses the outer expansion in Artists and Genres views.
+- **Checkbox Dropdown Tooltip** — wired the tooltip on the `checkbox_dropdown` trigger so the affordance is discoverable.
+- **Login Border Radius** — restored the login screen's border radius for theme parity.
+
+### Improvements
+- **Unified Volume Feedback** — volume changes now surface via the toast system; the redundant hover tooltip was removed.
+- **Production Hardening** — replaced lingering `.unwrap()` calls in production paths with safe error handling.
+- **Documentation** — refreshed the README artwork section to reflect the server-only pipeline and updated the workspace dependency list.
+
+### Internal
+- **Cache Function Pruning** — removed dead client-side artwork cache helpers following the pipeline migration.
+- **Slash Commands** — added `/commit`, `/sync-rules`, and `/package` AI-assisted developer workflows under `.claude/`.
+- **Repo Hygiene** — un-ignored `Cargo.lock` and fixed remaining clippy lints to keep CI green.
+- **Agent Rules** — synced `.agent/rules/` and `.agent/workflows/` with the current codebase architecture, including the server-only artwork pipeline.
+
 ## v0.2.17 — 2026-04-23
 
 ### Features

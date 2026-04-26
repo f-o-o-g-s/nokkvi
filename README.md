@@ -46,7 +46,7 @@ Nokkvi draws heavy inspiration from several excellent projects:
 ### Interface
 - 21 built-in themes inspired by popular editor color schemes (Gruvbox, Catppuccin, Dracula, Nord, Tokyo Night, Kanagawa, Everforest, and more) — or create your own
 - Hot-reloadable configuration — themes, visualizer settings, and all preferences update live
-- Configurable layouts — side or top navigation, player bar or top-bar metadata strip, rounded corners mode
+- Configurable layouts — side, top, or no navigation; player bar or top-bar metadata strip; rounded corners mode; per-view column visibility for Queue, Albums, Songs, and Artists
 - User-configurable keyboard shortcuts for most actions
 - System font picker with live preview
 - Right-click context menus everywhere, including "Show in File Manager"
