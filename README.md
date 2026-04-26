@@ -81,6 +81,10 @@ I've filed a potential fix upstream ([PR #3292](https://github.com/iced-rs/iced/
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions, guidelines, and the AI disclosure.
 
+## Support
+
+Nokkvi is free and open source. If you'd like to chip in, you can [buy me a coffee on Ko-fi](https://ko-fi.com/foogsnokkvi).
+
 ## License
 
 [GNU General Public License v3.0](LICENSE). See [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md) for third-party attribution.
