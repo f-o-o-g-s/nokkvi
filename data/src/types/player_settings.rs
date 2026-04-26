@@ -641,6 +641,16 @@ pub struct PlayerSettings {
     pub artists_show_songcount: bool,
     pub artists_show_plays: bool,
     pub artists_show_love: bool,
+
+    // -- Per-view artwork text overlay toggles --
+    /// Whether the metadata text overlay is rendered on the large artwork in Albums view.
+    pub albums_artwork_overlay: bool,
+    /// Whether the metadata text overlay is rendered on the large artwork in Artists view.
+    pub artists_artwork_overlay: bool,
+    /// Whether the metadata text overlay is rendered on the large artwork in Songs view.
+    pub songs_artwork_overlay: bool,
+    /// Whether the metadata text overlay is rendered on the large artwork in Playlists view.
+    pub playlists_artwork_overlay: bool,
 }
 
 #[cfg(test)]

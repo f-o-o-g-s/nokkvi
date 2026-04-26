@@ -981,117 +981,123 @@ impl ArtistsPage {
         let active_dominant_color =
             centered_artist.and_then(|artist| data.dominant_colors.get(&artist.id).copied());
 
-        let pill_content = centered_artist.map(|artist| {
-            use iced::widget::{button, column, text};
+        let pill_content = centered_artist
+            .filter(|_| crate::theme::artists_artwork_overlay())
+            .map(|artist| {
+                use iced::widget::{button, column, text};
 
-            use crate::theme;
+                use crate::theme;
 
-            let mut col = column![
-                text(artist.name.clone())
-                    .size(24)
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Bold,
-                        ..theme::ui_font()
-                    })
-                    .color(theme::fg0()),
-            ]
-            .spacing(4)
-            .align_x(iced::Alignment::Center);
-
-            use crate::widgets::metadata_pill::{auth_status_row, dot_row, play_stats_row};
-
-            let mut lib_stats = vec![
-                format!("{} albums", artist.album_count),
-                format!("{} songs", artist.song_count),
-            ];
-            if let Some(plays) = artist.play_count {
-                lib_stats.push(format!("{plays} plays"));
-            }
-
-            if let Some(row) = dot_row::<ArtistsMessage>(lib_stats, 14.0, theme::fg2()) {
-                col = col.push(
-                    iced::widget::container(row)
-                        .width(iced::Length::Shrink)
-                        .center_x(iced::Length::Fill),
-                );
-            }
-
-            if let Some(row) = play_stats_row::<ArtistsMessage>(None, artist.play_date.as_deref()) {
-                col = col.push(
-                    iced::widget::container(row)
-                        .width(iced::Length::Shrink)
-                        .center_x(iced::Length::Fill),
-                );
-            }
-
-            if let Some(row) = auth_status_row::<ArtistsMessage>(artist.is_starred, artist.rating) {
-                col = col.push(row);
-            }
-
-            // Biography section (artists-specific)
-            if let Some(bio) = &artist.biography
-                && !bio.is_empty()
-            {
-                let bio_preview: String = bio.chars().take(350).collect();
-                let bio_preview = if bio.chars().count() > 350 {
-                    format!("{}...", bio_preview.trim_end())
-                } else {
-                    bio_preview
-                };
-
-                let mut bio_col = column![
-                    text(bio_preview)
-                        .size(13)
-                        .color(theme::fg1())
-                        .font(theme::ui_font())
-                        .center()
+                let mut col = column![
+                    text(artist.name.clone())
+                        .size(24)
+                        .font(iced::Font {
+                            weight: iced::font::Weight::Bold,
+                            ..theme::ui_font()
+                        })
+                        .color(theme::fg0()),
                 ]
                 .spacing(4)
                 .align_x(iced::Alignment::Center);
 
-                if let Some(url) = &artist.external_url {
-                    let read_more_btn = button(
-                        text("Read more on Last.fm")
-                            .size(11)
-                            .color(theme::accent_bright())
-                            .font(iced::Font {
-                                weight: iced::font::Weight::Bold,
-                                ..theme::ui_font()
-                            }),
-                    )
-                    .on_press(ArtistsMessage::OpenExternalUrl(url.clone()))
-                    .padding(iced::Padding {
-                        top: 2.0,
-                        bottom: 2.0,
-                        left: 6.0,
-                        right: 6.0,
-                    })
-                    .style(|_theme, status| {
-                        let opacity = match status {
-                            iced::widget::button::Status::Hovered
-                            | iced::widget::button::Status::Pressed => 0.75,
-                            _ => 1.0,
-                        };
-                        let mut color = theme::accent_bright();
-                        color.a = opacity;
-                        iced::widget::button::Style {
-                            background: None,
-                            border: iced::Border {
-                                width: 0.0,
-                                ..Default::default()
-                            },
-                            text_color: color,
-                            ..Default::default()
-                        }
-                    });
-                    bio_col = bio_col.push(read_more_btn);
+                use crate::widgets::metadata_pill::{auth_status_row, dot_row, play_stats_row};
+
+                let mut lib_stats = vec![
+                    format!("{} albums", artist.album_count),
+                    format!("{} songs", artist.song_count),
+                ];
+                if let Some(plays) = artist.play_count {
+                    lib_stats.push(format!("{plays} plays"));
                 }
 
-                col = col.push(bio_col);
-            }
+                if let Some(row) = dot_row::<ArtistsMessage>(lib_stats, 14.0, theme::fg2()) {
+                    col = col.push(
+                        iced::widget::container(row)
+                            .width(iced::Length::Shrink)
+                            .center_x(iced::Length::Fill),
+                    );
+                }
 
-            col.into()
-        });
+                if let Some(row) =
+                    play_stats_row::<ArtistsMessage>(None, artist.play_date.as_deref())
+                {
+                    col = col.push(
+                        iced::widget::container(row)
+                            .width(iced::Length::Shrink)
+                            .center_x(iced::Length::Fill),
+                    );
+                }
+
+                if let Some(row) =
+                    auth_status_row::<ArtistsMessage>(artist.is_starred, artist.rating)
+                {
+                    col = col.push(row);
+                }
+
+                // Biography section (artists-specific)
+                if let Some(bio) = &artist.biography
+                    && !bio.is_empty()
+                {
+                    let bio_preview: String = bio.chars().take(350).collect();
+                    let bio_preview = if bio.chars().count() > 350 {
+                        format!("{}...", bio_preview.trim_end())
+                    } else {
+                        bio_preview
+                    };
+
+                    let mut bio_col = column![
+                        text(bio_preview)
+                            .size(13)
+                            .color(theme::fg1())
+                            .font(theme::ui_font())
+                            .center()
+                    ]
+                    .spacing(4)
+                    .align_x(iced::Alignment::Center);
+
+                    if let Some(url) = &artist.external_url {
+                        let read_more_btn = button(
+                            text("Read more on Last.fm")
+                                .size(11)
+                                .color(theme::accent_bright())
+                                .font(iced::Font {
+                                    weight: iced::font::Weight::Bold,
+                                    ..theme::ui_font()
+                                }),
+                        )
+                        .on_press(ArtistsMessage::OpenExternalUrl(url.clone()))
+                        .padding(iced::Padding {
+                            top: 2.0,
+                            bottom: 2.0,
+                            left: 6.0,
+                            right: 6.0,
+                        })
+                        .style(|_theme, status| {
+                            let opacity = match status {
+                                iced::widget::button::Status::Hovered
+                                | iced::widget::button::Status::Pressed => 0.75,
+                                _ => 1.0,
+                            };
+                            let mut color = theme::accent_bright();
+                            color.a = opacity;
+                            iced::widget::button::Style {
+                                background: None,
+                                border: iced::Border {
+                                    width: 0.0,
+                                    ..Default::default()
+                                },
+                                text_color: color,
+                                ..Default::default()
+                            }
+                        });
+                        bio_col = bio_col.push(read_more_btn);
+                    }
+
+                    col = col.push(bio_col);
+                }
+
+                col.into()
+            });
 
         let artwork_content = Some(single_artwork_panel_with_pill(
             artwork_handle,

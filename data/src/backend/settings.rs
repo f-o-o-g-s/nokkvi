@@ -376,6 +376,30 @@ impl SettingsService {
         sm.set_strip_merged_mode(enabled)
     }
 
+    /// Set albums view's artwork text overlay visibility and persist
+    pub async fn set_albums_artwork_overlay(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_albums_artwork_overlay(enabled)
+    }
+
+    /// Set artists view's artwork text overlay visibility and persist
+    pub async fn set_artists_artwork_overlay(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_artists_artwork_overlay(enabled)
+    }
+
+    /// Set songs view's artwork text overlay visibility and persist
+    pub async fn set_songs_artwork_overlay(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_songs_artwork_overlay(enabled)
+    }
+
+    /// Set playlists view's artwork text overlay visibility and persist
+    pub async fn set_playlists_artwork_overlay(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_playlists_artwork_overlay(enabled)
+    }
+
     /// Set queue's stars column visibility and persist
     pub async fn set_queue_show_stars(&self, enabled: bool) -> anyhow::Result<()> {
         let mut sm = self.settings_manager.lock().await;

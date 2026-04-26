@@ -55,6 +55,12 @@ pub struct TomlSettings {
     pub artists_show_plays: bool,
     pub artists_show_love: bool,
 
+    // -- Per-view artwork text overlay toggles --
+    pub albums_artwork_overlay: bool,
+    pub artists_artwork_overlay: bool,
+    pub songs_artwork_overlay: bool,
+    pub playlists_artwork_overlay: bool,
+
     // -- Behavior --
     pub stable_viewport: bool,
     pub auto_follow_playing: bool,
@@ -154,6 +160,10 @@ impl Default for TomlSettings {
             artists_show_songcount: true,
             artists_show_plays: true,
             artists_show_love: true,
+            albums_artwork_overlay: true,
+            artists_artwork_overlay: true,
+            songs_artwork_overlay: true,
+            playlists_artwork_overlay: true,
             stable_viewport: true,
             auto_follow_playing: true,
             light_mode: false,
@@ -220,6 +230,10 @@ impl TomlSettings {
             artists_show_songcount: ps.artists_show_songcount,
             artists_show_plays: ps.artists_show_plays,
             artists_show_love: ps.artists_show_love,
+            albums_artwork_overlay: ps.albums_artwork_overlay,
+            artists_artwork_overlay: ps.artists_artwork_overlay,
+            songs_artwork_overlay: ps.songs_artwork_overlay,
+            playlists_artwork_overlay: ps.playlists_artwork_overlay,
             stable_viewport: ps.stable_viewport,
             auto_follow_playing: ps.auto_follow_playing,
             light_mode: false, // Will be read from theme.light_mode or fresh default

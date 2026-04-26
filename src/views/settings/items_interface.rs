@@ -17,11 +17,16 @@ pub(crate) struct InterfaceSettingsData<'a> {
     pub strip_show_format_info: bool,
     pub strip_merged_mode: bool,
     pub strip_click_action: &'a str,
+    pub albums_artwork_overlay: bool,
+    pub artists_artwork_overlay: bool,
+    pub songs_artwork_overlay: bool,
+    pub playlists_artwork_overlay: bool,
 }
 
 /// Build settings entries for the Interface tab
 pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<SettingsEntry> {
     const LAYOUT: &str = "assets/icons/panels-top-left.svg";
+    const VIEWS: &str = "assets/icons/layout-grid.svg";
     const FONT: &str = "assets/icons/type.svg";
     const STRIP: &str = "assets/icons/radio-tower.svg";
 
@@ -85,6 +90,40 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
             ),
             data.horizontal_volume,
             false,
+        ),
+        // --- Views ---
+        SettingsEntry::Header {
+            label: "Views",
+            icon: VIEWS,
+        },
+        SettingItem::toggle_set(
+            meta!(
+                "__toggle_artwork_overlays",
+                "Text Overlay On Artwork",
+                "Show the metadata text overlay on the large artwork in each view"
+            ),
+            vec![
+                (
+                    "Albums".to_string(),
+                    "general.albums_artwork_overlay".to_string(),
+                    data.albums_artwork_overlay,
+                ),
+                (
+                    "Artists".to_string(),
+                    "general.artists_artwork_overlay".to_string(),
+                    data.artists_artwork_overlay,
+                ),
+                (
+                    "Songs".to_string(),
+                    "general.songs_artwork_overlay".to_string(),
+                    data.songs_artwork_overlay,
+                ),
+                (
+                    "Playlists".to_string(),
+                    "general.playlists_artwork_overlay".to_string(),
+                    data.playlists_artwork_overlay,
+                ),
+            ],
         ),
         SettingItem::bool_val(
             meta!(

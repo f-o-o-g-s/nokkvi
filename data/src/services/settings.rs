@@ -344,6 +344,26 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_albums_artwork_overlay(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.albums_artwork_overlay = enabled;
+        self.save()
+    }
+
+    pub fn set_artists_artwork_overlay(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.artists_artwork_overlay = enabled;
+        self.save()
+    }
+
+    pub fn set_songs_artwork_overlay(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.songs_artwork_overlay = enabled;
+        self.save()
+    }
+
+    pub fn set_playlists_artwork_overlay(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.playlists_artwork_overlay = enabled;
+        self.save()
+    }
+
     pub fn set_strip_click_action(&mut self, action: StripClickAction) -> Result<()> {
         self.settings.player.strip_click_action = action;
         self.save()
@@ -666,6 +686,10 @@ impl SettingsManager {
             artists_show_songcount: p.artists_show_songcount,
             artists_show_plays: p.artists_show_plays,
             artists_show_love: p.artists_show_love,
+            albums_artwork_overlay: p.albums_artwork_overlay,
+            artists_artwork_overlay: p.artists_artwork_overlay,
+            songs_artwork_overlay: p.songs_artwork_overlay,
+            playlists_artwork_overlay: p.playlists_artwork_overlay,
         }
     }
 
@@ -753,6 +777,10 @@ fn apply_toml_settings_to_internal(
     p.artists_show_songcount = ts.artists_show_songcount;
     p.artists_show_plays = ts.artists_show_plays;
     p.artists_show_love = ts.artists_show_love;
+    p.albums_artwork_overlay = ts.albums_artwork_overlay;
+    p.artists_artwork_overlay = ts.artists_artwork_overlay;
+    p.songs_artwork_overlay = ts.songs_artwork_overlay;
+    p.playlists_artwork_overlay = ts.playlists_artwork_overlay;
 }
 
 /// Convert `AllViewPreferences` into the internal `ViewPreferences` for redb storage.

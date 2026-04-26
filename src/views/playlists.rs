@@ -643,59 +643,61 @@ impl PlaylistsPage {
         // Show single full-res when 0-1 albums, collage when 2+ albums
         let album_count = centered_playlist.map_or(0, |p| p.artwork_album_ids.len());
 
-        let pill_content = centered_playlist.map(|playlist| {
-            use iced::widget::{column, text};
+        let pill_content = centered_playlist
+            .filter(|_| crate::theme::playlists_artwork_overlay())
+            .map(|playlist| {
+                use iced::widget::{column, text};
 
-            use crate::theme;
+                use crate::theme;
 
-            let mut col = column![
-                text(playlist.name.clone())
-                    .size(24)
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Bold,
-                        ..theme::ui_font()
-                    })
-                    .color(theme::fg0()),
-            ]
-            .spacing(4)
-            .align_x(iced::Alignment::Center);
+                let mut col = column![
+                    text(playlist.name.clone())
+                        .size(24)
+                        .font(iced::Font {
+                            weight: iced::font::Weight::Bold,
+                            ..theme::ui_font()
+                        })
+                        .color(theme::fg0()),
+                ]
+                .spacing(4)
+                .align_x(iced::Alignment::Center);
 
-            if !playlist.comment.is_empty() {
-                let comment = &playlist.comment;
-                let preview: String = comment.chars().take(100).collect();
-                let preview = if comment.chars().count() > 100 {
-                    format!("{}...", preview.trim_end())
-                } else {
-                    preview
-                };
-                col = col.push(
-                    text(preview)
-                        .size(14)
-                        .color(theme::fg2())
-                        .font(theme::ui_font())
-                        .center(),
-                );
-            }
+                if !playlist.comment.is_empty() {
+                    let comment = &playlist.comment;
+                    let preview: String = comment.chars().take(100).collect();
+                    let preview = if comment.chars().count() > 100 {
+                        format!("{}...", preview.trim_end())
+                    } else {
+                        preview
+                    };
+                    col = col.push(
+                        text(preview)
+                            .size(14)
+                            .color(theme::fg2())
+                            .font(theme::ui_font())
+                            .center(),
+                    );
+                }
 
-            let duration_min = playlist.duration / 60.0;
-            let mut stats = vec![
-                format!("{} songs", playlist.song_count),
-                format!("{} mins", duration_min.round()),
-            ];
-            let ymd = playlist
-                .updated_at
-                .split('T')
-                .next()
-                .unwrap_or(&playlist.updated_at);
-            stats.push(format!("Updated: {ymd}"));
+                let duration_min = playlist.duration / 60.0;
+                let mut stats = vec![
+                    format!("{} songs", playlist.song_count),
+                    format!("{} mins", duration_min.round()),
+                ];
+                let ymd = playlist
+                    .updated_at
+                    .split('T')
+                    .next()
+                    .unwrap_or(&playlist.updated_at);
+                stats.push(format!("Updated: {ymd}"));
 
-            use crate::widgets::metadata_pill::dot_row;
-            if let Some(row) = dot_row::<PlaylistsMessage>(stats, 13.0, theme::fg3()) {
-                col = col.push(row);
-            }
+                use crate::widgets::metadata_pill::dot_row;
+                if let Some(row) = dot_row::<PlaylistsMessage>(stats, 13.0, theme::fg3()) {
+                    col = col.push(row);
+                }
 
-            col.into()
-        });
+                col.into()
+            });
 
         use crate::widgets::base_slot_list_layout::{
             collage_artwork_panel_with_pill, single_artwork_panel_with_pill,

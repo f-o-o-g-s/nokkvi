@@ -777,18 +777,22 @@ mod tests {
             strip_show_format_info: true,
             strip_merged_mode: false,
             strip_click_action: "Go to Queue",
+            albums_artwork_overlay: true,
+            artists_artwork_overlay: true,
+            songs_artwork_overlay: true,
+            playlists_artwork_overlay: true,
         };
         let entries = build_interface_items(&data);
 
         assert_eq!(
             count_headers(&entries),
-            3,
-            "Expected 3 sections: Layout, Font, Metadata Strip"
+            4,
+            "Expected 4 sections: Layout, Views, Font, Metadata Strip"
         );
         assert_eq!(
             count_items(&entries),
-            10,
-            "Expected 10 items (nav_layout, nav_display_mode, track_info_display, slot_row_height, horizontal_volume, slot_text_links, font_family, visible_fields, merged_mode, click_action)"
+            11,
+            "Expected 11 items (nav_layout, nav_display_mode, track_info_display, slot_row_height, horizontal_volume, artwork_overlays_toggle_set, slot_text_links, font_family, visible_fields, merged_mode, click_action)"
         );
     }
 
@@ -946,6 +950,10 @@ mod tests {
             strip_show_format_info: true,
             strip_merged_mode: false,
             strip_click_action: "Go to Queue",
+            albums_artwork_overlay: true,
+            artists_artwork_overlay: true,
+            songs_artwork_overlay: true,
+            playlists_artwork_overlay: true,
         };
         let playback = crate::views::settings::items_playback::PlaybackSettingsData {
             crossfade_enabled: false,

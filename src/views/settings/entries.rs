@@ -91,6 +91,10 @@ impl SettingsPage {
                     strip_show_format_info: data.strip_show_format_info,
                     strip_merged_mode: data.strip_merged_mode,
                     strip_click_action: data.strip_click_action,
+                    albums_artwork_overlay: data.albums_artwork_overlay,
+                    artists_artwork_overlay: data.artists_artwork_overlay,
+                    songs_artwork_overlay: data.songs_artwork_overlay,
+                    playlists_artwork_overlay: data.playlists_artwork_overlay,
                 };
                 items::build_interface_items(&idata)
             }

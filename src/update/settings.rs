@@ -63,6 +63,10 @@ impl Nokkvi {
             strip_show_format_info: crate::theme::strip_show_format_info(),
             strip_merged_mode: crate::theme::strip_merged_mode(),
             strip_click_action: crate::theme::strip_click_action().as_label(),
+            albums_artwork_overlay: crate::theme::albums_artwork_overlay(),
+            artists_artwork_overlay: crate::theme::artists_artwork_overlay(),
+            songs_artwork_overlay: crate::theme::songs_artwork_overlay(),
+            playlists_artwork_overlay: crate::theme::playlists_artwork_overlay(),
             verbose_config: self.verbose_config,
             artwork_resolution: self.artwork_resolution.as_label(),
         }
@@ -853,6 +857,42 @@ impl Nokkvi {
                 |_s, v| crate::theme::set_strip_merged_mode(v),
                 |shell: AppService, v| async move {
                     shell.settings().set_strip_merged_mode(v).await
+                },
+                true,
+            ),
+            "general.albums_artwork_overlay" => self.persist_bool_setting(
+                &value,
+                "persist_albums_artwork_overlay",
+                |_s, v| crate::theme::set_albums_artwork_overlay(v),
+                |shell: AppService, v| async move {
+                    shell.settings().set_albums_artwork_overlay(v).await
+                },
+                true,
+            ),
+            "general.artists_artwork_overlay" => self.persist_bool_setting(
+                &value,
+                "persist_artists_artwork_overlay",
+                |_s, v| crate::theme::set_artists_artwork_overlay(v),
+                |shell: AppService, v| async move {
+                    shell.settings().set_artists_artwork_overlay(v).await
+                },
+                true,
+            ),
+            "general.songs_artwork_overlay" => self.persist_bool_setting(
+                &value,
+                "persist_songs_artwork_overlay",
+                |_s, v| crate::theme::set_songs_artwork_overlay(v),
+                |shell: AppService, v| async move {
+                    shell.settings().set_songs_artwork_overlay(v).await
+                },
+                true,
+            ),
+            "general.playlists_artwork_overlay" => self.persist_bool_setting(
+                &value,
+                "persist_playlists_artwork_overlay",
+                |_s, v| crate::theme::set_playlists_artwork_overlay(v),
+                |shell: AppService, v| async move {
+                    shell.settings().set_playlists_artwork_overlay(v).await
                 },
                 true,
             ),

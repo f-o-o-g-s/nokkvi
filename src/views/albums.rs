@@ -753,87 +753,90 @@ impl AlbumsPage {
         let on_refresh =
             centered_album.map(|album| AlbumsMessage::RefreshArtwork(album.id.clone()));
 
-        // Overlay building
-        let overlay_content = centered_album.map(|album| {
-            use iced::widget::{column, text};
+        // Overlay building (gated by Settings → Interface → Views → Text Overlay On Artwork)
+        let overlay_content = centered_album
+            .filter(|_| crate::theme::albums_artwork_overlay())
+            .map(|album| {
+                use iced::widget::{column, text};
 
-            use crate::theme;
+                use crate::theme;
 
-            let mut col = column![
-                text(album.name.clone())
-                    .size(24)
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Bold,
-                        ..theme::ui_font()
-                    })
-                    .color(theme::fg0()),
-                text(album.artist.clone())
-                    .size(16)
-                    .color(theme::fg1())
-                    .font(theme::ui_font()),
-            ]
-            .spacing(4)
-            .align_x(iced::Alignment::Center);
-
-            // Date Resolution (Feishin logic cascade)
-            let date_text = if let Some(orig_date) = &album.original_date {
-                nokkvi_data::utils::formatters::format_release_date(orig_date)
-            } else if let Some(rel_date) = &album.release_date {
-                nokkvi_data::utils::formatters::format_release_date(rel_date)
-            } else if let Some(year) = album.original_year.or(album.year) {
-                year.to_string()
-            } else {
-                String::new()
-            };
-
-            let mut info_stats = Vec::new();
-            if !date_text.is_empty() {
-                let mut full_date = date_text;
-                if let (Some(orig_yr), Some(yr)) = (album.original_year, album.year)
-                    && orig_yr != yr
-                {
-                    full_date = format!("{full_date} ({yr})");
-                }
-                info_stats.push(full_date);
-            }
-
-            let count = album.song_count;
-            if count > 0 {
-                info_stats.push(format!("{count} tracks"));
-            }
-
-            if let Some(secs) = album.duration {
-                info_stats.push(nokkvi_data::utils::formatters::format_duration_short(secs));
-            }
-
-            use crate::widgets::metadata_pill::{auth_status_row, dot_row, play_stats_row};
-
-            if let Some(row) = dot_row::<AlbumsMessage>(info_stats, 14.0, theme::fg2()) {
-                col = col.push(row);
-            }
-
-            // Genre row
-            if let Some(genres_display) = &album.genres {
-                col = col.push(
-                    text(genres_display.clone())
-                        .size(13)
-                        .color(theme::fg3())
+                let mut col = column![
+                    text(album.name.clone())
+                        .size(24)
+                        .font(iced::Font {
+                            weight: iced::font::Weight::Bold,
+                            ..theme::ui_font()
+                        })
+                        .color(theme::fg0()),
+                    text(album.artist.clone())
+                        .size(16)
+                        .color(theme::fg1())
                         .font(theme::ui_font()),
-                );
-            }
+                ]
+                .spacing(4)
+                .align_x(iced::Alignment::Center);
 
-            if let Some(row) =
-                play_stats_row::<AlbumsMessage>(album.play_count, album.play_date.as_deref())
-            {
-                col = col.push(row);
-            }
+                // Date Resolution (Feishin logic cascade)
+                let date_text = if let Some(orig_date) = &album.original_date {
+                    nokkvi_data::utils::formatters::format_release_date(orig_date)
+                } else if let Some(rel_date) = &album.release_date {
+                    nokkvi_data::utils::formatters::format_release_date(rel_date)
+                } else if let Some(year) = album.original_year.or(album.year) {
+                    year.to_string()
+                } else {
+                    String::new()
+                };
 
-            if let Some(row) = auth_status_row::<AlbumsMessage>(album.is_starred, album.rating) {
-                col = col.push(row);
-            }
+                let mut info_stats = Vec::new();
+                if !date_text.is_empty() {
+                    let mut full_date = date_text;
+                    if let (Some(orig_yr), Some(yr)) = (album.original_year, album.year)
+                        && orig_yr != yr
+                    {
+                        full_date = format!("{full_date} ({yr})");
+                    }
+                    info_stats.push(full_date);
+                }
 
-            col.into()
-        });
+                let count = album.song_count;
+                if count > 0 {
+                    info_stats.push(format!("{count} tracks"));
+                }
+
+                if let Some(secs) = album.duration {
+                    info_stats.push(nokkvi_data::utils::formatters::format_duration_short(secs));
+                }
+
+                use crate::widgets::metadata_pill::{auth_status_row, dot_row, play_stats_row};
+
+                if let Some(row) = dot_row::<AlbumsMessage>(info_stats, 14.0, theme::fg2()) {
+                    col = col.push(row);
+                }
+
+                // Genre row
+                if let Some(genres_display) = &album.genres {
+                    col = col.push(
+                        text(genres_display.clone())
+                            .size(13)
+                            .color(theme::fg3())
+                            .font(theme::ui_font()),
+                    );
+                }
+
+                if let Some(row) =
+                    play_stats_row::<AlbumsMessage>(album.play_count, album.play_date.as_deref())
+                {
+                    col = col.push(row);
+                }
+
+                if let Some(row) = auth_status_row::<AlbumsMessage>(album.is_starred, album.rating)
+                {
+                    col = col.push(row);
+                }
+
+                col.into()
+            });
 
         let artwork_content = Some(single_artwork_panel_with_pill(
             artwork_handle,

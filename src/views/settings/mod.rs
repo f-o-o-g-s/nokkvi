@@ -293,6 +293,10 @@ pub(crate) struct SettingsViewData {
     pub strip_show_format_info: bool,
     pub strip_merged_mode: bool,
     pub strip_click_action: &'static str,
+    pub albums_artwork_overlay: bool,
+    pub artists_artwork_overlay: bool,
+    pub songs_artwork_overlay: bool,
+    pub playlists_artwork_overlay: bool,
     pub verbose_config: bool,
     pub artwork_resolution: &'static str,
 }

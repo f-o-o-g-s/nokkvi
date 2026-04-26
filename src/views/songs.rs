@@ -856,71 +856,73 @@ impl SongsPage {
             .and_then(|song| song.album_id.clone())
             .map(SongsMessage::RefreshArtwork);
 
-        let pill_content = centered_song.map(|song| {
-            use iced::widget::{column, text};
+        let pill_content = centered_song
+            .filter(|_| crate::theme::songs_artwork_overlay())
+            .map(|song| {
+                use iced::widget::{column, text};
 
-            use crate::theme;
+                use crate::theme;
 
-            let mut col = column![
-                text(song.title.clone())
-                    .size(20)
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Bold,
-                        ..theme::ui_font()
-                    })
-                    .color(theme::fg0()),
-                text(song.artist.clone())
-                    .size(16)
-                    .color(theme::fg1())
-                    .font(theme::ui_font()),
-            ]
-            .spacing(4)
-            .align_x(iced::Alignment::Center);
+                let mut col = column![
+                    text(song.title.clone())
+                        .size(20)
+                        .font(iced::Font {
+                            weight: iced::font::Weight::Bold,
+                            ..theme::ui_font()
+                        })
+                        .color(theme::fg0()),
+                    text(song.artist.clone())
+                        .size(16)
+                        .color(theme::fg1())
+                        .font(theme::ui_font()),
+                ]
+                .spacing(4)
+                .align_x(iced::Alignment::Center);
 
-            use crate::widgets::metadata_pill::{
-                auth_status_row, dot_row, play_stats_row, tech_specs_row,
-            };
+                use crate::widgets::metadata_pill::{
+                    auth_status_row, dot_row, play_stats_row, tech_specs_row,
+                };
 
-            // Row 1: Track • Year • Genre
-            let mut info_stats = Vec::new();
-            if let Some(track) = song.track {
-                info_stats.push(format!("Track {track}"));
-            }
-            if let Some(year) = song.year {
-                info_stats.push(year.to_string());
-            }
-            if let Some(genre) = &song.genre {
-                info_stats.push(genre.clone());
-            }
-            if let Some(row) = dot_row::<SongsMessage>(info_stats, 13.0, theme::fg2()) {
-                col = col.push(row);
-            }
+                // Row 1: Track • Year • Genre
+                let mut info_stats = Vec::new();
+                if let Some(track) = song.track {
+                    info_stats.push(format!("Track {track}"));
+                }
+                if let Some(year) = song.year {
+                    info_stats.push(year.to_string());
+                }
+                if let Some(genre) = &song.genre {
+                    info_stats.push(genre.clone());
+                }
+                if let Some(row) = dot_row::<SongsMessage>(info_stats, 13.0, theme::fg2()) {
+                    col = col.push(row);
+                }
 
-            // Row 2: Plays • Last played
-            if let Some(row) =
-                play_stats_row::<SongsMessage>(song.play_count, song.play_date.as_deref())
-            {
-                col = col.push(row);
-            }
+                // Row 2: Plays • Last played
+                if let Some(row) =
+                    play_stats_row::<SongsMessage>(song.play_count, song.play_date.as_deref())
+                {
+                    col = col.push(row);
+                }
 
-            // Row 3: Favorited / Rating
-            if let Some(row) = auth_status_row::<SongsMessage>(song.is_starred, song.rating) {
-                col = col.push(row);
-            }
+                // Row 3: Favorited / Rating
+                if let Some(row) = auth_status_row::<SongsMessage>(song.is_starred, song.rating) {
+                    col = col.push(row);
+                }
 
-            // Row 4: Tech specs
-            if let Some(row) = tech_specs_row::<SongsMessage>(
-                song.suffix.as_deref(),
-                song.bit_depth,
-                song.sample_rate,
-                song.bitrate,
-                song.bpm,
-            ) {
-                col = col.push(row);
-            }
+                // Row 4: Tech specs
+                if let Some(row) = tech_specs_row::<SongsMessage>(
+                    song.suffix.as_deref(),
+                    song.bit_depth,
+                    song.sample_rate,
+                    song.bitrate,
+                    song.bpm,
+                ) {
+                    col = col.push(row);
+                }
 
-            col.into()
-        });
+                col.into()
+            });
 
         let artwork_content = Some(single_artwork_panel_with_pill(
             artwork_handle,

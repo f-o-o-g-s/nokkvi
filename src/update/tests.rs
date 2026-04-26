@@ -77,6 +77,90 @@ fn settings_general_strip_merged_mode_flips_theme_cache() {
     assert!(!crate::theme::strip_merged_mode());
 }
 
+#[test]
+fn settings_general_albums_artwork_overlay_flips_theme_cache() {
+    use crate::views::settings::items::SettingValue;
+
+    let mut app = test_app();
+    crate::theme::set_albums_artwork_overlay(true);
+    assert!(crate::theme::albums_artwork_overlay());
+
+    let _ = app.handle_settings_general(
+        "general.albums_artwork_overlay".to_string(),
+        SettingValue::Bool(false),
+    );
+    assert!(!crate::theme::albums_artwork_overlay());
+
+    let _ = app.handle_settings_general(
+        "general.albums_artwork_overlay".to_string(),
+        SettingValue::Bool(true),
+    );
+    assert!(crate::theme::albums_artwork_overlay());
+}
+
+#[test]
+fn settings_general_artists_artwork_overlay_flips_theme_cache() {
+    use crate::views::settings::items::SettingValue;
+
+    let mut app = test_app();
+    crate::theme::set_artists_artwork_overlay(true);
+    assert!(crate::theme::artists_artwork_overlay());
+
+    let _ = app.handle_settings_general(
+        "general.artists_artwork_overlay".to_string(),
+        SettingValue::Bool(false),
+    );
+    assert!(!crate::theme::artists_artwork_overlay());
+
+    let _ = app.handle_settings_general(
+        "general.artists_artwork_overlay".to_string(),
+        SettingValue::Bool(true),
+    );
+    assert!(crate::theme::artists_artwork_overlay());
+}
+
+#[test]
+fn settings_general_songs_artwork_overlay_flips_theme_cache() {
+    use crate::views::settings::items::SettingValue;
+
+    let mut app = test_app();
+    crate::theme::set_songs_artwork_overlay(true);
+    assert!(crate::theme::songs_artwork_overlay());
+
+    let _ = app.handle_settings_general(
+        "general.songs_artwork_overlay".to_string(),
+        SettingValue::Bool(false),
+    );
+    assert!(!crate::theme::songs_artwork_overlay());
+
+    let _ = app.handle_settings_general(
+        "general.songs_artwork_overlay".to_string(),
+        SettingValue::Bool(true),
+    );
+    assert!(crate::theme::songs_artwork_overlay());
+}
+
+#[test]
+fn settings_general_playlists_artwork_overlay_flips_theme_cache() {
+    use crate::views::settings::items::SettingValue;
+
+    let mut app = test_app();
+    crate::theme::set_playlists_artwork_overlay(true);
+    assert!(crate::theme::playlists_artwork_overlay());
+
+    let _ = app.handle_settings_general(
+        "general.playlists_artwork_overlay".to_string(),
+        SettingValue::Bool(false),
+    );
+    assert!(!crate::theme::playlists_artwork_overlay());
+
+    let _ = app.handle_settings_general(
+        "general.playlists_artwork_overlay".to_string(),
+        SettingValue::Bool(true),
+    );
+    assert!(crate::theme::playlists_artwork_overlay());
+}
+
 // ============================================================================
 // Starred Status Handlers (hotkeys.rs)
 // ============================================================================
@@ -1134,6 +1218,10 @@ fn make_settings_view_data() -> crate::views::SettingsViewData {
         strip_show_format_info: true,
         strip_merged_mode: false,
         strip_click_action: "CenterOnPlaying",
+        albums_artwork_overlay: true,
+        artists_artwork_overlay: true,
+        songs_artwork_overlay: true,
+        playlists_artwork_overlay: true,
         verbose_config: false,
         artwork_resolution: "Default",
     }

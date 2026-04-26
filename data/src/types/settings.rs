@@ -217,6 +217,20 @@ pub struct PlayerSettings {
     /// Heart (favorite) column.
     #[serde(default = "default_true")]
     pub artists_show_love: bool,
+
+    // -- Per-view artwork text overlay toggles --
+    /// Whether the metadata text overlay is rendered on the large artwork in Albums view.
+    #[serde(default = "default_true")]
+    pub albums_artwork_overlay: bool,
+    /// Whether the metadata text overlay is rendered on the large artwork in Artists view.
+    #[serde(default = "default_true")]
+    pub artists_artwork_overlay: bool,
+    /// Whether the metadata text overlay is rendered on the large artwork in Songs view.
+    #[serde(default = "default_true")]
+    pub songs_artwork_overlay: bool,
+    /// Whether the metadata text overlay is rendered on the large artwork in Playlists view.
+    #[serde(default = "default_true")]
+    pub playlists_artwork_overlay: bool,
 }
 
 fn default_eq_gains() -> [f32; 10] {
@@ -324,6 +338,10 @@ impl Default for PlayerSettings {
             artists_show_songcount: true,
             artists_show_plays: true,
             artists_show_love: true,
+            albums_artwork_overlay: true,
+            artists_artwork_overlay: true,
+            songs_artwork_overlay: true,
+            playlists_artwork_overlay: true,
         }
     }
 }

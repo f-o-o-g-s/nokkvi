@@ -75,6 +75,14 @@ struct UiModeFlags {
     strip_merged_mode: AtomicBool,
     /// Strip click action: 0=GoToQueue, 1=GoToAlbum, 2=GoToArtist, 3=CopyTrackInfo, 4=DoNothing
     strip_click_action: AtomicU8,
+    /// Whether the metadata text overlay is rendered on the large artwork in Albums view
+    albums_artwork_overlay: AtomicBool,
+    /// Whether the metadata text overlay is rendered on the large artwork in Artists view
+    artists_artwork_overlay: AtomicBool,
+    /// Whether the metadata text overlay is rendered on the large artwork in Songs view
+    songs_artwork_overlay: AtomicBool,
+    /// Whether the metadata text overlay is rendered on the large artwork in Playlists view
+    playlists_artwork_overlay: AtomicBool,
 }
 
 static UI_MODE: UiModeFlags = UiModeFlags {
@@ -93,6 +101,10 @@ static UI_MODE: UiModeFlags = UiModeFlags {
     strip_show_format_info: AtomicBool::new(true),
     strip_merged_mode: AtomicBool::new(false),
     strip_click_action: AtomicU8::new(0), // GoToQueue
+    albums_artwork_overlay: AtomicBool::new(true),
+    artists_artwork_overlay: AtomicBool::new(true),
+    songs_artwork_overlay: AtomicBool::new(true),
+    playlists_artwork_overlay: AtomicBool::new(true),
 };
 
 /// Reload theme from theme file (hot-reload support).
@@ -550,6 +562,66 @@ pub(crate) fn set_strip_click_action(action: StripClickAction) {
         StripClickAction::DoNothing => 4,
     };
     UI_MODE.strip_click_action.store(val, Ordering::Relaxed);
+}
+
+// ============================================================================
+// Per-View Artwork Text Overlay Controls
+// ============================================================================
+
+/// Returns true if the metadata text overlay is shown on the large artwork in Albums view
+#[inline]
+pub(crate) fn albums_artwork_overlay() -> bool {
+    UI_MODE.albums_artwork_overlay.load(Ordering::Relaxed)
+}
+
+/// Set the Albums view artwork text overlay visibility
+#[inline]
+pub(crate) fn set_albums_artwork_overlay(enabled: bool) {
+    UI_MODE
+        .albums_artwork_overlay
+        .store(enabled, Ordering::Relaxed);
+}
+
+/// Returns true if the metadata text overlay is shown on the large artwork in Artists view
+#[inline]
+pub(crate) fn artists_artwork_overlay() -> bool {
+    UI_MODE.artists_artwork_overlay.load(Ordering::Relaxed)
+}
+
+/// Set the Artists view artwork text overlay visibility
+#[inline]
+pub(crate) fn set_artists_artwork_overlay(enabled: bool) {
+    UI_MODE
+        .artists_artwork_overlay
+        .store(enabled, Ordering::Relaxed);
+}
+
+/// Returns true if the metadata text overlay is shown on the large artwork in Songs view
+#[inline]
+pub(crate) fn songs_artwork_overlay() -> bool {
+    UI_MODE.songs_artwork_overlay.load(Ordering::Relaxed)
+}
+
+/// Set the Songs view artwork text overlay visibility
+#[inline]
+pub(crate) fn set_songs_artwork_overlay(enabled: bool) {
+    UI_MODE
+        .songs_artwork_overlay
+        .store(enabled, Ordering::Relaxed);
+}
+
+/// Returns true if the metadata text overlay is shown on the large artwork in Playlists view
+#[inline]
+pub(crate) fn playlists_artwork_overlay() -> bool {
+    UI_MODE.playlists_artwork_overlay.load(Ordering::Relaxed)
+}
+
+/// Set the Playlists view artwork text overlay visibility
+#[inline]
+pub(crate) fn set_playlists_artwork_overlay(enabled: bool) {
+    UI_MODE
+        .playlists_artwork_overlay
+        .store(enabled, Ordering::Relaxed);
 }
 
 // ============================================================================

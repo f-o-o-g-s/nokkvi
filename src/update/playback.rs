@@ -1164,6 +1164,12 @@ impl Nokkvi {
         crate::theme::set_strip_merged_mode(settings.strip_merged_mode);
         crate::theme::set_strip_click_action(settings.strip_click_action);
 
+        // Apply per-view artwork text overlay visibility from persisted settings
+        crate::theme::set_albums_artwork_overlay(settings.albums_artwork_overlay);
+        crate::theme::set_artists_artwork_overlay(settings.artists_artwork_overlay);
+        crate::theme::set_songs_artwork_overlay(settings.songs_artwork_overlay);
+        crate::theme::set_playlists_artwork_overlay(settings.playlists_artwork_overlay);
+
         // Sync volume to MPRIS D-Bus (prevents initial 100% jump on first playerctl command)
         if let Some(ref conn) = self.mpris_connection {
             conn.set_volume(f64::from(settings.volume));
