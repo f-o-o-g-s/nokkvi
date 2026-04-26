@@ -5,7 +5,7 @@ use tracing::debug;
 
 use crate::{
     Nokkvi,
-    app_message::{Message, ScrobbleMessage},
+    app_message::{HotkeyMessage, Message, ScrobbleMessage},
 };
 
 impl Nokkvi {
@@ -48,7 +48,7 @@ impl Nokkvi {
                     Err("No API client".to_string())
                 }
             },
-            |result| Message::Scrobble(ScrobbleMessage::Result(result.map(|_| ()))),
+            |result| Message::Scrobble(ScrobbleMessage::NowPlayingResult(result.map(|_| ()))),
         )
     }
 
@@ -58,6 +58,7 @@ impl Nokkvi {
             return Task::none();
         }
         debug!(" [SCROBBLE] Submitting scrobble for: {}", song_id);
+        let return_id = song_id.clone();
         self.shell_task(
             move |shell| async move {
                 let auth = shell.auth();
@@ -72,7 +73,7 @@ impl Nokkvi {
                     match http_client.get(&url).send().await {
                         Ok(resp) => {
                             if resp.status().is_success() {
-                                Ok(format!("Scrobble submitted for {song_id}"))
+                                Ok(return_id)
                             } else {
                                 Err(format!("HTTP {}", resp.status()))
                             }
@@ -83,16 +84,41 @@ impl Nokkvi {
                     Err("No API client".to_string())
                 }
             },
-            |result| Message::Scrobble(ScrobbleMessage::Result(result.map(|_| ()))),
+            |result| Message::Scrobble(ScrobbleMessage::SubmissionResult(result)),
         )
     }
 
-    pub(crate) fn handle_scrobble_result(&mut self, result: Result<(), String>) -> Task<Message> {
+    /// Handle the result of a now-playing heartbeat. The server doesn't count
+    /// these as plays, so no UI state changes — just log.
+    pub(crate) fn handle_scrobble_now_playing_result(
+        &mut self,
+        result: Result<(), String>,
+    ) -> Task<Message> {
         match result {
-            Ok(()) => debug!(" [SCROBBLE] ✅ Success"),
-            Err(e) => debug!(" [SCROBBLE] ❌ Error: {}", e),
+            Ok(()) => debug!(" [SCROBBLE] ✅ Now-playing accepted"),
+            Err(e) => debug!(" [SCROBBLE] ❌ Now-playing error: {}", e),
         }
         Task::none()
+    }
+
+    /// Handle the result of a scrobble submission. On success, dispatch a local
+    /// play-count increment so the UI tracks Navidrome without needing a refetch.
+    pub(crate) fn handle_scrobble_submission_result(
+        &mut self,
+        result: Result<String, String>,
+    ) -> Task<Message> {
+        match result {
+            Ok(song_id) => {
+                debug!(" [SCROBBLE] ✅ Submission accepted for {}", song_id);
+                Task::done(Message::Hotkey(HotkeyMessage::SongPlayCountIncremented(
+                    song_id,
+                )))
+            }
+            Err(e) => {
+                debug!(" [SCROBBLE] ❌ Submission error: {}", e);
+                Task::none()
+            }
+        }
     }
 
     /// Handle a track-looped event from the audio engine (repeat-one mode).

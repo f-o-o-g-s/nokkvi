@@ -612,6 +612,61 @@ impl Nokkvi {
         )
     }
 
+    /// Bump a song's play count by 1 across every in-memory song collection,
+    /// then persist the new count to the queue manager. Dispatched from
+    /// `handle_scrobble_submission_result` on a successful submission so the
+    /// UI mirrors what Navidrome just incremented server-side.
+    pub(crate) fn handle_song_play_count_incremented(&mut self, song_id: String) -> Task<Message> {
+        debug!("🔁 Bumping play count for song {}", song_id);
+        nokkvi_data::backend::increment_play_count_in_list(
+            &mut self.library.queue_songs,
+            &song_id,
+            "queue song",
+        );
+        nokkvi_data::backend::increment_play_count_in_list(
+            &mut self.library.songs,
+            &song_id,
+            "song",
+        );
+        if let Some(similar) = &mut self.similar_songs {
+            nokkvi_data::backend::increment_play_count_in_list(
+                &mut similar.songs,
+                &song_id,
+                "similar",
+            );
+        }
+        nokkvi_data::backend::increment_play_count_in_list(
+            &mut self.albums_page.expansion.children,
+            &song_id,
+            "album track",
+        );
+        nokkvi_data::backend::increment_play_count_in_list(
+            &mut self.playlists_page.expansion.children,
+            &song_id,
+            "playlist track",
+        );
+        nokkvi_data::backend::increment_play_count_in_list(
+            &mut self.artists_page.sub_expansion.children,
+            &song_id,
+            "artist track",
+        );
+        nokkvi_data::backend::increment_play_count_in_list(
+            &mut self.genres_page.sub_expansion.children,
+            &song_id,
+            "genre track",
+        );
+
+        let sid = song_id.clone();
+        self.shell_task(
+            move |shell| async move {
+                let queue_manager = shell.queue().queue_manager();
+                let mut qm = queue_manager.lock().await;
+                qm.increment_song_play_count(&sid).ok();
+            },
+            |_| Message::NoOp,
+        )
+    }
+
     /// Update album rating in local state after successful API call
     pub(crate) fn handle_album_rating_updated(
         &mut self,

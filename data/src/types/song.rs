@@ -200,6 +200,21 @@ impl crate::backend::Ratable for Song {
     }
 }
 
+impl crate::backend::PlayCountable for Song {
+    fn entity_id(&self) -> &str {
+        &self.id
+    }
+    fn play_count(&self) -> Option<u32> {
+        self.play_count
+    }
+    fn set_play_count(&mut self, count: Option<u32>) {
+        self.play_count = count;
+    }
+    fn display_label(&self) -> String {
+        format!("{} - {}", self.title, self.artist)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

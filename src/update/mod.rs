@@ -643,7 +643,12 @@ impl Nokkvi {
                     self.handle_scrobble_now_playing(timer_id, song_id)
                 }
                 ScrobbleMessage::Submit(song_id) => self.handle_scrobble_submit(song_id),
-                ScrobbleMessage::Result(result) => self.handle_scrobble_result(result),
+                ScrobbleMessage::SubmissionResult(result) => {
+                    self.handle_scrobble_submission_result(result)
+                }
+                ScrobbleMessage::NowPlayingResult(result) => {
+                    self.handle_scrobble_now_playing_result(result)
+                }
                 ScrobbleMessage::TrackLooped(song_id) => self.handle_scrobble_track_looped(song_id),
             },
 
@@ -691,6 +696,9 @@ impl Nokkvi {
                 HotkeyMessage::DecreaseRating => self.handle_decrease_rating(),
                 HotkeyMessage::SongRatingUpdated(song_id, new_rating) => {
                     self.handle_song_rating_updated(song_id, new_rating)
+                }
+                HotkeyMessage::SongPlayCountIncremented(song_id) => {
+                    self.handle_song_play_count_incremented(song_id)
                 }
                 HotkeyMessage::AlbumRatingUpdated(album_id, new_rating) => {
                     self.handle_album_rating_updated(album_id, new_rating)

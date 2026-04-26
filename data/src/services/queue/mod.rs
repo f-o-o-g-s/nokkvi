@@ -535,6 +535,17 @@ impl QueueManager {
         }
         Ok(())
     }
+
+    /// Bump the play count for a song in the persisted queue by 1 (O(1)).
+    /// `None` becomes `Some(1)`.
+    pub fn increment_song_play_count(&mut self, song_id: &str) -> Result<()> {
+        if let Some(song) = self.pool.get_mut(song_id) {
+            let next = song.play_count.unwrap_or(0).saturating_add(1);
+            song.play_count = Some(next);
+            self.save_songs()?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1120,5 +1131,35 @@ pub(crate) mod tests {
         assert_eq!(qm.queue.current_index, Some(2)); // unchanged
         assert_eq!(qm.queue.song_ids[2], "c");
         assert_eq!(qm.queue.song_ids.len(), 6);
+    }
+
+    #[test]
+    fn increment_song_play_count_bumps_existing_value() {
+        let mut song = make_test_song("a");
+        song.play_count = Some(3);
+        let mut qm = make_test_manager(vec![song], Some(0));
+
+        qm.increment_song_play_count("a").unwrap();
+        assert_eq!(qm.pool.get("a").unwrap().play_count, Some(4));
+    }
+
+    #[test]
+    fn increment_song_play_count_starts_from_none() {
+        let mut song = make_test_song("a");
+        song.play_count = None;
+        let mut qm = make_test_manager(vec![song], Some(0));
+
+        qm.increment_song_play_count("a").unwrap();
+        assert_eq!(qm.pool.get("a").unwrap().play_count, Some(1));
+    }
+
+    #[test]
+    fn increment_song_play_count_unknown_id_is_noop() {
+        let mut song = make_test_song("a");
+        song.play_count = Some(2);
+        let mut qm = make_test_manager(vec![song], Some(0));
+
+        qm.increment_song_play_count("nonexistent").unwrap();
+        assert_eq!(qm.pool.get("a").unwrap().play_count, Some(2));
     }
 }

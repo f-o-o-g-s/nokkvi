@@ -77,6 +77,37 @@ pub fn update_rating_in_list<T: Ratable>(
     false
 }
 
+/// Trait for entities whose play count can be incremented.
+pub trait PlayCountable {
+    fn entity_id(&self) -> &str;
+    fn play_count(&self) -> Option<u32>;
+    fn set_play_count(&mut self, count: Option<u32>);
+    fn display_label(&self) -> String;
+}
+
+/// Bump the play count of the first matching entity in a slice by 1.
+/// `None` becomes `Some(1)`. Returns true if an entity was found.
+pub fn increment_play_count_in_list<T: PlayCountable>(
+    items: &mut [T],
+    id: &str,
+    entity_type: &str,
+) -> bool {
+    for item in items.iter_mut() {
+        if item.entity_id() == id {
+            let next = item.play_count().unwrap_or(0).saturating_add(1);
+            item.set_play_count(Some(next));
+            tracing::debug!(
+                "✅ Bumped {}: {} play_count={}",
+                entity_type,
+                item.display_label(),
+                next
+            );
+            return true;
+        }
+    }
+    false
+}
+
 /// Flatten a participants map (role → artist list) into sorted display pairs.
 /// Groups by role, appending sub-roles in parentheses like Feishin does.
 /// Skips `albumartist` and `artist` roles (already shown as dedicated fields).

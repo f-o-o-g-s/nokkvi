@@ -122,8 +122,11 @@ pub enum ScrobbleMessage {
     NowPlaying(u64, String),
     /// song_id - submit scrobble
     Submit(String),
-    /// API result
-    Result(Result<(), String>),
+    /// Submission result — `Ok(song_id)` carries the scrobbled song so the UI
+    /// can optimistically bump its local play count to mirror Navidrome.
+    SubmissionResult(Result<String, String>),
+    /// Now-playing heartbeat result — does not affect server play counts.
+    NowPlayingResult(Result<(), String>),
     /// song_id — the same track looped in repeat-one mode.
     /// Triggers scrobble submission for the completed loop and resets state.
     TrackLooped(String),
@@ -159,6 +162,8 @@ pub enum HotkeyMessage {
     DecreaseRating,
     /// Update song rating locally (song_id, new_rating)
     SongRatingUpdated(String, u32),
+    /// Increment a song's local play count by 1 after a successful scrobble.
+    SongPlayCountIncremented(String),
     /// Update album rating locally (album_id, new_rating)
     AlbumRatingUpdated(String, u32),
     ArtistRatingUpdated(String, u32),

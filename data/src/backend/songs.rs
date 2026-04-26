@@ -78,6 +78,21 @@ impl crate::backend::Ratable for SongUIViewData {
     }
 }
 
+impl crate::backend::PlayCountable for SongUIViewData {
+    fn entity_id(&self) -> &str {
+        &self.id
+    }
+    fn play_count(&self) -> Option<u32> {
+        self.play_count
+    }
+    fn set_play_count(&mut self, count: Option<u32>) {
+        self.play_count = count;
+    }
+    fn display_label(&self) -> String {
+        format!("{} - {}", self.title, self.artist)
+    }
+}
+
 impl crate::utils::search::Searchable for SongUIViewData {
     fn matches_query(&self, query_lower: &str) -> bool {
         self.searchable_lower.contains(query_lower)
