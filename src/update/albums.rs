@@ -186,6 +186,9 @@ impl Nokkvi {
                         .and_then(|id| self.library.albums.iter().position(|a| a.id == *id))
                         .unwrap_or_else(|| current.min(new_len.saturating_sub(1)));
                     self.albums_page.common.slot_list.viewport_offset = new_offset;
+                    // Clear stale selected_offset: after re-ordering, the old absolute
+                    // index maps to a different album and would highlight the wrong slot.
+                    self.albums_page.common.slot_list.selected_offset = None;
                     self.albums_page
                         .common
                         .slot_list

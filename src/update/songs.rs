@@ -162,7 +162,15 @@ impl Nokkvi {
                     let songs = &self.library.songs;
                     if let Some(new_idx) = songs.iter().position(|a| a.id == *id) {
                         self.songs_page.common.slot_list.viewport_offset = new_idx;
+                    } else {
+                        // Anchor not found in this page (expected with Random sort — the new
+                        // first page is a different random sample). Reset rather than leaving
+                        // viewport_offset pointing at whoever now occupies the old index.
+                        self.songs_page.common.slot_list.viewport_offset = 0;
                     }
+                    // Clear stale selected_offset: after re-ordering, the old absolute index
+                    // maps to a different song and would highlight the wrong slot.
+                    self.songs_page.common.slot_list.selected_offset = None;
                 }
                 let mut tasks: Vec<Task<Message>> = Vec::new();
 

@@ -7,6 +7,7 @@ use tracing::info;
 use crate::{
     Nokkvi,
     app_message::{ArtworkMessage, Message},
+    widgets::view_header::SortMode,
 };
 
 impl Nokkvi {
@@ -22,22 +23,33 @@ impl Nokkvi {
 
         let mut tasks = Vec::new();
 
-        // 1. Snapshot current viewport state and trigger reload for Albums if needed
-        if !self.library.albums.is_empty() {
+        // 1. Snapshot current viewport state and trigger reload for Albums if needed.
+        // Skip when sort mode is Random: same reasoning as Artists/Songs below.
+        if !self.library.albums.is_empty()
+            && self.albums_page.common.current_sort_mode != SortMode::Random
+        {
             let offset = self.albums_page.common.slot_list.viewport_offset;
             let anchor_id = self.library.albums.get(offset).map(|a| a.id.clone());
             tasks.push(self.handle_load_albums(true, anchor_id));
         }
 
-        // 2. Snapshot current viewport state and trigger reload for Artists
-        if !self.library.artists.is_empty() {
+        // 2. Snapshot current viewport state and trigger reload for Artists.
+        // Skip when sort mode is Random: a background reload would return a new random
+        // order, corrupting the artwork reference and jarring the user mid-browse.
+        // The user can press F5 to re-randomize intentionally.
+        if !self.library.artists.is_empty()
+            && self.artists_page.common.current_sort_mode != SortMode::Random
+        {
             let offset = self.artists_page.common.slot_list.viewport_offset;
             let anchor_id = self.library.artists.get(offset).map(|a| a.id.clone());
             tasks.push(self.handle_load_artists(true, anchor_id));
         }
 
-        // 3. Snapshot current viewport state and trigger reload for Songs
-        if !self.library.songs.is_empty() {
+        // 3. Snapshot current viewport state and trigger reload for Songs.
+        // Skip when sort mode is Random: same reasoning as Artists above.
+        if !self.library.songs.is_empty()
+            && self.songs_page.common.current_sort_mode != SortMode::Random
+        {
             let offset = self.songs_page.common.slot_list.viewport_offset;
             let anchor_id = self.library.songs.get(offset).map(|a| a.id.clone());
             tasks.push(self.handle_load_songs(true, anchor_id));
