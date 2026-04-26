@@ -12,7 +12,7 @@ use crate::{
         hotkey_config::{HotkeyAction, HotkeyConfig, KeyCombo},
         player_settings::{
             ArtworkResolution, EnterBehavior, NavDisplayMode, NavLayout, NormalizationLevel,
-            SlotRowHeight, StripClickAction, TrackInfoDisplay,
+            SlotRowHeight, StripClickAction, TrackInfoDisplay, VolumeNormalizationMode,
         },
         queue::{QueueSortPreferences, SortPreferences},
         queue_sort_mode::QueueSortMode,
@@ -96,6 +96,22 @@ impl SettingsManager {
             settings.views = tv.to_all_view_prefs().into();
         }
 
+        // Phase 3.5: Legacy `volume_normalization: bool` migration. If the
+        // on-disk shape carried the old boolean (true ⇒ AGC was enabled),
+        // adopt it as the mode and clear the legacy field. Then re-save so
+        // future loads see the canonical shape only.
+        let mut migrated_legacy_norm = false;
+        if let Some(legacy) = settings.player.volume_normalization_legacy.take() {
+            if settings.player.volume_normalization == VolumeNormalizationMode::Off && legacy {
+                settings.player.volume_normalization = VolumeNormalizationMode::Agc;
+            }
+            tracing::info!(
+                "⚙️ [SETTINGS] Migrated legacy `volume_normalization: {legacy}` → mode={:?}",
+                settings.player.volume_normalization
+            );
+            migrated_legacy_norm = true;
+        }
+
         let manager = Self { settings, storage };
 
         // Phase 4: Migration — if config.toml had no [settings], export redb values
@@ -103,6 +119,11 @@ impl SettingsManager {
             tracing::info!("No [settings] section in config.toml — migrating from redb");
             if let Err(e) = manager.write_all_toml() {
                 tracing::error!("Failed to migrate settings to config.toml: {e}");
+            }
+        } else if migrated_legacy_norm {
+            // Persist the canonical shape so the legacy bool key stops appearing.
+            if let Err(e) = manager.save() {
+                tracing::error!("Failed to persist normalization-mode migration: {e}");
             }
         }
 
@@ -309,13 +330,33 @@ impl SettingsManager {
         self.save()
     }
 
-    pub fn set_volume_normalization(&mut self, enabled: bool) -> Result<()> {
-        self.settings.player.volume_normalization = enabled;
+    pub fn set_volume_normalization(&mut self, mode: VolumeNormalizationMode) -> Result<()> {
+        self.settings.player.volume_normalization = mode;
         self.save()
     }
 
     pub fn set_normalization_level(&mut self, level: NormalizationLevel) -> Result<()> {
         self.settings.player.normalization_level = level;
+        self.save()
+    }
+
+    pub fn set_replay_gain_preamp_db(&mut self, db: f32) -> Result<()> {
+        self.settings.player.replay_gain_preamp_db = db;
+        self.save()
+    }
+
+    pub fn set_replay_gain_fallback_db(&mut self, db: f32) -> Result<()> {
+        self.settings.player.replay_gain_fallback_db = db;
+        self.save()
+    }
+
+    pub fn set_replay_gain_fallback_to_agc(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.replay_gain_fallback_to_agc = enabled;
+        self.save()
+    }
+
+    pub fn set_replay_gain_prevent_clipping(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.replay_gain_prevent_clipping = enabled;
         self.save()
     }
 
@@ -651,6 +692,10 @@ impl SettingsManager {
             font_family: p.font_family.clone(),
             volume_normalization: p.volume_normalization,
             normalization_level: p.normalization_level,
+            replay_gain_preamp_db: p.replay_gain_preamp_db,
+            replay_gain_fallback_db: p.replay_gain_fallback_db,
+            replay_gain_fallback_to_agc: p.replay_gain_fallback_to_agc,
+            replay_gain_prevent_clipping: p.replay_gain_prevent_clipping,
             strip_show_title: p.strip_show_title,
             strip_show_artist: p.strip_show_artist,
             strip_show_album: p.strip_show_album,
@@ -742,8 +787,33 @@ fn apply_toml_settings_to_internal(
     p.strip_click_action = ts.strip_click_action;
     p.crossfade_enabled = ts.crossfade_enabled;
     p.crossfade_duration_secs = ts.crossfade_duration_secs;
-    p.volume_normalization = ts.volume_normalization;
+    // Volume normalization: prefer the new enum field; if it's Off but the
+    // legacy bool key was present and true, treat it as AGC. The redb-side
+    // migration in `SettingsManager::new` then re-saves once to canonicalize.
+    p.volume_normalization = match (ts.volume_normalization, ts.volume_normalization_legacy) {
+        (VolumeNormalizationMode::Off, Some(true)) => {
+            tracing::info!(
+                "⚙️ [SETTINGS] config.toml carried legacy `volume_normalization = true`; \
+                 promoting to mode=Agc"
+            );
+            VolumeNormalizationMode::Agc
+        }
+        (mode, Some(_)) => {
+            // New key already set explicitly; ignore legacy.
+            tracing::debug!(
+                "⚙️ [SETTINGS] Ignoring legacy `volume_normalization` bool — \
+                 explicit `volume_normalization_mode` ({mode:?}) takes precedence"
+            );
+            mode
+        }
+        (mode, None) => mode,
+    };
+    p.volume_normalization_legacy = None;
     p.normalization_level = ts.normalization_level;
+    p.replay_gain_preamp_db = ts.replay_gain_preamp_db;
+    p.replay_gain_fallback_db = ts.replay_gain_fallback_db;
+    p.replay_gain_fallback_to_agc = ts.replay_gain_fallback_to_agc;
+    p.replay_gain_prevent_clipping = ts.replay_gain_prevent_clipping;
     p.visualization_mode = ts.visualization_mode;
     p.sound_effects_enabled = ts.sound_effects_enabled;
     p.sfx_volume = ts.sfx_volume as f64;

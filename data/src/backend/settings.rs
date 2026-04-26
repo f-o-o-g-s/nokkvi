@@ -509,19 +509,46 @@ impl SettingsService {
         sm.set_strip_click_action(action)
     }
 
-    /// Set volume normalization enabled and persist
-    pub async fn set_volume_normalization(&self, enabled: bool) -> anyhow::Result<()> {
+    /// Set volume normalization mode and persist
+    pub async fn set_volume_normalization(
+        &self,
+        mode: crate::types::player_settings::VolumeNormalizationMode,
+    ) -> anyhow::Result<()> {
         let mut sm = self.settings_manager.lock().await;
-        sm.set_volume_normalization(enabled)
+        sm.set_volume_normalization(mode)
     }
 
-    /// Set normalization level and persist
+    /// Set normalization level and persist (AGC mode only)
     pub async fn set_normalization_level(
         &self,
         level: crate::types::player_settings::NormalizationLevel,
     ) -> anyhow::Result<()> {
         let mut sm = self.settings_manager.lock().await;
         sm.set_normalization_level(level)
+    }
+
+    /// Set ReplayGain pre-amp dB and persist
+    pub async fn set_replay_gain_preamp_db(&self, db: f32) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_replay_gain_preamp_db(db)
+    }
+
+    /// Set ReplayGain fallback dB (used when track has no tags) and persist
+    pub async fn set_replay_gain_fallback_db(&self, db: f32) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_replay_gain_fallback_db(db)
+    }
+
+    /// Set ReplayGain fallback-to-AGC behavior and persist
+    pub async fn set_replay_gain_fallback_to_agc(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_replay_gain_fallback_to_agc(enabled)
+    }
+
+    /// Set ReplayGain peak-aware clipping prevention and persist
+    pub async fn set_replay_gain_prevent_clipping(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_replay_gain_prevent_clipping(enabled)
     }
 
     /// Set verbose config mode and persist

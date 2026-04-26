@@ -51,7 +51,9 @@ impl Nokkvi {
             slot_text_links: crate::theme::is_slot_text_links(),
             crossfade_enabled: self.engine.crossfade_enabled,
             crossfade_duration_secs: self.engine.crossfade_duration_secs,
-            volume_normalization: self.engine.volume_normalization,
+            // PR 1 keeps the UI toggle as bool — Agc → on, anything else → off.
+            // The four-mode picker lands in PR 3.
+            volume_normalization: self.engine.volume_normalization.is_agc(),
             normalization_level: self.engine.normalization_level.as_label(),
             default_playlist_name: self.default_playlist_name.clone(),
             quick_add_to_playlist: self.quick_add_to_playlist,
@@ -738,18 +740,24 @@ impl Nokkvi {
             }
             "general.volume_normalization" => {
                 if let crate::views::settings::items::SettingValue::Bool(enabled) = value {
-                    self.engine.volume_normalization = enabled;
+                    // PR 1: UI still emits bool (AGC on/off). Translate at the
+                    // dispatch boundary; ReplayGain modes are reachable only by
+                    // editing config.toml until PR 3 lands the four-mode picker.
+                    use nokkvi_data::types::player_settings::VolumeNormalizationMode;
+                    let mode = if enabled {
+                        VolumeNormalizationMode::Agc
+                    } else {
+                        VolumeNormalizationMode::Off
+                    };
+                    self.engine.volume_normalization = mode;
                     let target_level = self.engine.normalization_level.target_level();
                     self.shell_spawn(
                         "persist_volume_normalization",
                         move |shell| async move {
-                            shell
-                                .settings()
-                                .set_volume_normalization(enabled)
-                                .await?;
+                            shell.settings().set_volume_normalization(mode).await?;
                             let engine = shell.audio_engine();
                             let mut guard = engine.lock().await;
-                            guard.set_volume_normalization(enabled, target_level);
+                            guard.set_volume_normalization(mode.is_agc(), target_level);
                             Ok::<(), anyhow::Error>(())
                         },
                     );
@@ -761,7 +769,7 @@ impl Nokkvi {
                     let level =
                         nokkvi_data::types::player_settings::NormalizationLevel::from_label(&val);
                     self.engine.normalization_level = level;
-                    let enabled = self.engine.volume_normalization;
+                    let agc_enabled = self.engine.volume_normalization.is_agc();
                     let target_level = level.target_level();
                     self.shell_spawn(
                         "persist_normalization_level",
@@ -769,7 +777,7 @@ impl Nokkvi {
                             shell.settings().set_normalization_level(level).await?;
                             let engine = shell.audio_engine();
                             let mut guard = engine.lock().await;
-                            guard.set_volume_normalization(enabled, target_level);
+                            guard.set_volume_normalization(agc_enabled, target_level);
                             Ok::<(), anyhow::Error>(())
                         },
                     );

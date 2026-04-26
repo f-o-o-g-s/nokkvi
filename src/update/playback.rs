@@ -994,6 +994,10 @@ impl Nokkvi {
         // Volume normalization settings
         self.engine.volume_normalization = settings.volume_normalization;
         self.engine.normalization_level = settings.normalization_level;
+        self.engine.replay_gain_preamp_db = settings.replay_gain_preamp_db;
+        self.engine.replay_gain_fallback_db = settings.replay_gain_fallback_db;
+        self.engine.replay_gain_fallback_to_agc = settings.replay_gain_fallback_to_agc;
+        self.engine.replay_gain_prevent_clipping = settings.replay_gain_prevent_clipping;
 
         // Apply EQ settings
         self.playback.eq_state.set_enabled(settings.eq_enabled);
@@ -1017,7 +1021,10 @@ impl Nokkvi {
             let shell = shell.clone();
             let enabled = settings.crossfade_enabled;
             let duration_secs = settings.crossfade_duration_secs;
-            let vol_norm = settings.volume_normalization;
+            // Audio engine still uses a bool for AGC enable/disable in PR 1.
+            // ReplayGain modes will not engage AGC; they behave as Off until
+            // PR 2 wires them through the rodio chain.
+            let agc_enabled = settings.volume_normalization.is_agc();
             let norm_target = settings.normalization_level.target_level();
             let eq_state = self.playback.eq_state.clone();
             Task::perform(
@@ -1026,7 +1033,7 @@ impl Nokkvi {
                     let mut engine_guard = engine.lock().await;
                     engine_guard.set_crossfade_enabled(enabled);
                     engine_guard.set_crossfade_duration(duration_secs);
-                    engine_guard.set_volume_normalization(vol_norm, norm_target);
+                    engine_guard.set_volume_normalization(agc_enabled, norm_target);
                     engine_guard.set_eq_state(eq_state);
                 },
                 |_| Message::NoOp,
