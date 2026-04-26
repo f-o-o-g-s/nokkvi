@@ -493,6 +493,29 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                 info_row = info_row.push(info_field("url:", url.clone(), theme::fg2()));
             }
             info_row = info_row.push(info_sep());
+        } else if theme::strip_merged_mode() {
+            let merged = super::track_info_strip::merged_strip_string(
+                show_title,
+                show_artist,
+                show_album,
+                &title,
+                &artist,
+                &album,
+            );
+            if !merged.is_empty() {
+                info_row = info_row.push(info_sep());
+                info_row = info_row.push(
+                    iced::widget::row![
+                        super::marquee_text::marquee_text(merged)
+                            .size(9.0)
+                            .font(theme::ui_font())
+                            .color(theme::selected_color()),
+                    ]
+                    .align_y(Alignment::Center)
+                    .width(Length::FillPortion(9)),
+                );
+                info_row = info_row.push(info_sep());
+            }
         } else {
             if show_title {
                 info_row = info_row.push(info_sep());
