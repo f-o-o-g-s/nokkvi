@@ -523,7 +523,11 @@ impl PlaybackController {
                     subsonic_credential,
                     chrono::Utc::now().timestamp_millis()
                 );
-                (Some(url), next_result.song.replay_gain.clone(), repeat_track)
+                (
+                    Some(url),
+                    next_result.song.replay_gain.clone(),
+                    repeat_track,
+                )
             } else {
                 (None, None, repeat_track)
             }

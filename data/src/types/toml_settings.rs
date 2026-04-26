@@ -91,17 +91,10 @@ pub struct TomlSettings {
     // -- Playback --
     pub crossfade_enabled: bool,
     pub crossfade_duration_secs: u32,
-    /// Volume normalization mode (default: Off).
-    ///
-    /// On-disk key is `volume_normalization_mode`; the legacy boolean
-    /// `volume_normalization` is read into `volume_normalization_legacy`
-    /// for one-shot migration.
+    /// Volume normalization mode (default: Off). On-disk key is
+    /// `volume_normalization_mode`.
     #[serde(rename = "volume_normalization_mode")]
     pub volume_normalization: VolumeNormalizationMode,
-    /// Legacy boolean shape — present only when migrating. Cleared
-    /// after migration. Do not read directly.
-    #[serde(default, rename = "volume_normalization", skip_serializing_if = "Option::is_none")]
-    pub volume_normalization_legacy: Option<bool>,
     pub normalization_level: NormalizationLevel,
     /// Pre-amp dB applied on top of resolved ReplayGain (default 0.0).
     #[serde(default, serialize_with = "round_f32")]
@@ -212,7 +205,6 @@ impl Default for TomlSettings {
             crossfade_enabled: false,
             crossfade_duration_secs: 5,
             volume_normalization: VolumeNormalizationMode::default(),
-            volume_normalization_legacy: None,
             normalization_level: NormalizationLevel::default(),
             replay_gain_preamp_db: 0.0,
             replay_gain_fallback_db: 0.0,
@@ -287,7 +279,6 @@ impl TomlSettings {
             crossfade_enabled: ps.crossfade_enabled,
             crossfade_duration_secs: ps.crossfade_duration_secs,
             volume_normalization: ps.volume_normalization,
-            volume_normalization_legacy: None,
             normalization_level: ps.normalization_level,
             replay_gain_preamp_db: ps.replay_gain_preamp_db,
             replay_gain_fallback_db: ps.replay_gain_fallback_db,
@@ -323,38 +314,9 @@ mod tests {
     }
 
     #[test]
-    fn toml_legacy_volume_normalization_bool_round_trips() {
-        // Older config.toml files only had `volume_normalization = true`.
-        // The new schema reads it into volume_normalization_legacy without
-        // dropping it; SettingsManager::new is responsible for promotion.
-        let toml_str = "volume_normalization = true\n";
-        let parsed: TomlSettings = toml::from_str(toml_str).expect("deserialize");
-        assert_eq!(parsed.volume_normalization_legacy, Some(true));
-        assert_eq!(
-            parsed.volume_normalization,
-            VolumeNormalizationMode::default()
-        );
-    }
-
-    #[test]
-    fn toml_explicit_mode_key_takes_precedence_over_legacy_bool() {
-        let toml_str = "volume_normalization = true\nvolume_normalization_mode = \"agc\"\n";
-        let parsed: TomlSettings = toml::from_str(toml_str).expect("deserialize");
-        assert_eq!(parsed.volume_normalization_legacy, Some(true));
-        assert_eq!(parsed.volume_normalization, VolumeNormalizationMode::Agc);
-    }
-
-    #[test]
-    fn toml_default_omits_legacy_bool_on_serialize() {
-        // The default TomlSettings has no legacy bool; it must not appear
-        // in the output (would confuse anyone reading config.toml).
+    fn toml_volume_normalization_mode_serializes_with_mode_key() {
         let settings = TomlSettings::default();
         let toml_str = toml::to_string_pretty(&settings).expect("serialize");
-        assert!(
-            !toml_str.lines().any(|l| l.trim() == "volume_normalization = true"
-                || l.trim() == "volume_normalization = false"),
-            "legacy bool should not be re-serialized:\n{toml_str}"
-        );
         assert!(
             toml_str.contains("volume_normalization_mode = \"off\""),
             "Expected mode=\"off\", got:\n{toml_str}"

@@ -12,10 +12,7 @@
 //! [`VolumeNormalizationMode`]: crate::types::player_settings::VolumeNormalizationMode
 //! [`ReplayGain`]: crate::types::song::ReplayGain
 
-use crate::types::{
-    player_settings::VolumeNormalizationMode,
-    song::ReplayGain,
-};
+use crate::types::{player_settings::VolumeNormalizationMode, song::ReplayGain};
 
 /// Resolved per-stream normalization decision.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -90,14 +87,8 @@ pub fn resolve_normalization(ctx: NormalizationContext<'_>) -> NormalizationConf
 
     let prefer_album = ctx.mode.prefers_album();
     let (gain_db, peak) = match ctx.replay_gain {
-        Some(r) if prefer_album => (
-            r.album_gain.or(r.track_gain),
-            r.album_peak.or(r.track_peak),
-        ),
-        Some(r) => (
-            r.track_gain.or(r.album_gain),
-            r.track_peak.or(r.album_peak),
-        ),
+        Some(r) if prefer_album => (r.album_gain.or(r.track_gain), r.album_peak.or(r.track_peak)),
+        Some(r) => (r.track_gain.or(r.album_gain), r.track_peak.or(r.album_peak)),
         None => (None, None),
     };
 
@@ -139,7 +130,12 @@ mod tests {
         }
     }
 
-    fn rg(track: Option<f64>, album: Option<f64>, t_peak: Option<f64>, a_peak: Option<f64>) -> ReplayGain {
+    fn rg(
+        track: Option<f64>,
+        album: Option<f64>,
+        t_peak: Option<f64>,
+        a_peak: Option<f64>,
+    ) -> ReplayGain {
         ReplayGain {
             track_gain: track,
             album_gain: album,

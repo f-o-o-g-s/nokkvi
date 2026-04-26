@@ -22,10 +22,7 @@ use crate::{
         rodio_output::{ActiveStream, RodioOutput},
         streaming_source::SharedVisualizerCallback,
     },
-    types::{
-        player_settings::VolumeNormalizationMode,
-        song::ReplayGain,
-    },
+    types::{player_settings::VolumeNormalizationMode, song::ReplayGain},
 };
 
 /// Callback for emitting audio samples to visualizer.
@@ -493,7 +490,8 @@ impl AudioRenderer {
         // current track's RG since we're not switching tracks — leave
         // pending_replay_gain alone and resolve from current_replay_gain.
         if let Some(ref output) = self.output {
-            let rg_for_seek = self.pending_replay_gain
+            let rg_for_seek = self
+                .pending_replay_gain
                 .as_ref()
                 .or(self.current_replay_gain.as_ref());
             let norm = self.resolve_norm_for(rg_for_seek);

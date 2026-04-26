@@ -96,22 +96,6 @@ impl SettingsManager {
             settings.views = tv.to_all_view_prefs().into();
         }
 
-        // Phase 3.5: Legacy `volume_normalization: bool` migration. If the
-        // on-disk shape carried the old boolean (true ⇒ AGC was enabled),
-        // adopt it as the mode and clear the legacy field. Then re-save so
-        // future loads see the canonical shape only.
-        let mut migrated_legacy_norm = false;
-        if let Some(legacy) = settings.player.volume_normalization_legacy.take() {
-            if settings.player.volume_normalization == VolumeNormalizationMode::Off && legacy {
-                settings.player.volume_normalization = VolumeNormalizationMode::Agc;
-            }
-            tracing::info!(
-                "⚙️ [SETTINGS] Migrated legacy `volume_normalization: {legacy}` → mode={:?}",
-                settings.player.volume_normalization
-            );
-            migrated_legacy_norm = true;
-        }
-
         let manager = Self { settings, storage };
 
         // Phase 4: Migration — if config.toml had no [settings], export redb values
@@ -119,11 +103,6 @@ impl SettingsManager {
             tracing::info!("No [settings] section in config.toml — migrating from redb");
             if let Err(e) = manager.write_all_toml() {
                 tracing::error!("Failed to migrate settings to config.toml: {e}");
-            }
-        } else if migrated_legacy_norm {
-            // Persist the canonical shape so the legacy bool key stops appearing.
-            if let Err(e) = manager.save() {
-                tracing::error!("Failed to persist normalization-mode migration: {e}");
             }
         }
 
@@ -787,28 +766,7 @@ fn apply_toml_settings_to_internal(
     p.strip_click_action = ts.strip_click_action;
     p.crossfade_enabled = ts.crossfade_enabled;
     p.crossfade_duration_secs = ts.crossfade_duration_secs;
-    // Volume normalization: prefer the new enum field; if it's Off but the
-    // legacy bool key was present and true, treat it as AGC. The redb-side
-    // migration in `SettingsManager::new` then re-saves once to canonicalize.
-    p.volume_normalization = match (ts.volume_normalization, ts.volume_normalization_legacy) {
-        (VolumeNormalizationMode::Off, Some(true)) => {
-            tracing::info!(
-                "⚙️ [SETTINGS] config.toml carried legacy `volume_normalization = true`; \
-                 promoting to mode=Agc"
-            );
-            VolumeNormalizationMode::Agc
-        }
-        (mode, Some(_)) => {
-            // New key already set explicitly; ignore legacy.
-            tracing::debug!(
-                "⚙️ [SETTINGS] Ignoring legacy `volume_normalization` bool — \
-                 explicit `volume_normalization_mode` ({mode:?}) takes precedence"
-            );
-            mode
-        }
-        (mode, None) => mode,
-    };
-    p.volume_normalization_legacy = None;
+    p.volume_normalization = ts.volume_normalization;
     p.normalization_level = ts.normalization_level;
     p.replay_gain_preamp_db = ts.replay_gain_preamp_db;
     p.replay_gain_fallback_db = ts.replay_gain_fallback_db;

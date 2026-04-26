@@ -1271,9 +1271,7 @@ impl CustomAudioEngine {
         &mut self,
         rg: Option<crate::types::song::ReplayGain>,
     ) {
-        self.renderer
-            .lock()
-            .set_pending_crossfade_replay_gain(rg);
+        self.renderer.lock().set_pending_crossfade_replay_gain(rg);
     }
 
     /// Update shared EQ state. Replaces existing eq state, taking effect on new streams.

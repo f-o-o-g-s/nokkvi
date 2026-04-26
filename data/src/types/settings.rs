@@ -94,18 +94,10 @@ pub struct PlayerSettings {
     /// Font family override (default: empty = system default sans-serif)
     #[serde(default)]
     pub font_family: String,
-    /// Volume normalization mode (default: Off).
-    ///
-    /// On-disk key is `volume_normalization_mode`; the legacy boolean
-    /// `volume_normalization` is read into `volume_normalization_legacy`
-    /// below for one-shot migration in `SettingsManager::new`.
+    /// Volume normalization mode (default: Off). On-disk key is
+    /// `volume_normalization_mode`.
     #[serde(default, rename = "volume_normalization_mode")]
     pub volume_normalization: VolumeNormalizationMode,
-    /// Legacy boolean shape — present only when migrating from a pre-RG
-    /// release. Cleared after migration. Do not read directly; use
-    /// `volume_normalization` instead.
-    #[serde(default, rename = "volume_normalization")]
-    pub volume_normalization_legacy: Option<bool>,
     /// AGC target level (default: Normal). Only meaningful when
     /// `volume_normalization == Agc`.
     #[serde(default)]
@@ -324,7 +316,6 @@ impl Default for PlayerSettings {
             horizontal_volume: false,
             font_family: String::new(),
             volume_normalization: VolumeNormalizationMode::default(),
-            volume_normalization_legacy: None,
             normalization_level: NormalizationLevel::default(),
             replay_gain_preamp_db: 0.0,
             replay_gain_fallback_db: 0.0,
@@ -464,30 +455,6 @@ mod tests {
         let json = r#"{}"#;
         let parsed: PlayerSettings = serde_json::from_str(json).expect("deserialize");
         assert!(!parsed.strip_merged_mode);
-    }
-
-    #[test]
-    fn legacy_volume_normalization_bool_round_trips_into_legacy_field() {
-        // Pre-migration on-disk shape: just the bool key, no mode key.
-        let json = r#"{"volume_normalization": true}"#;
-        let parsed: PlayerSettings = serde_json::from_str(json).expect("deserialize");
-        assert_eq!(parsed.volume_normalization_legacy, Some(true));
-        // The new mode field defaults to Off when only the legacy key is present.
-        // SettingsManager::new is responsible for promoting Some(true) → Agc.
-        assert_eq!(parsed.volume_normalization, VolumeNormalizationMode::Off);
-    }
-
-    #[test]
-    fn explicit_mode_key_takes_precedence() {
-        // Both keys present — the new `volume_normalization_mode` wins.
-        let json =
-            r#"{"volume_normalization": true, "volume_normalization_mode": "replay_gain_album"}"#;
-        let parsed: PlayerSettings = serde_json::from_str(json).expect("deserialize");
-        assert_eq!(parsed.volume_normalization_legacy, Some(true));
-        assert_eq!(
-            parsed.volume_normalization,
-            VolumeNormalizationMode::ReplayGainAlbum
-        );
     }
 
     #[test]

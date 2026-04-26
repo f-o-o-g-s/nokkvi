@@ -177,11 +177,8 @@ impl RodioOutput {
                 );
             }
             super::NormalizationConfig::Static(gain) => {
-                self.mixer.add(
-                    source
-                        .amplify(gain)
-                        .limit(LimitSettings::dynamic_content()),
-                );
+                self.mixer
+                    .add(source.amplify(gain).limit(LimitSettings::dynamic_content()));
                 debug!(
                     "🔊 [RODIO] Created stream with static gain ({:.3}× ≈ {:+.2} dB): {}ch, {}Hz, vol={:.2}",
                     gain,
