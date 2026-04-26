@@ -15,6 +15,7 @@ pub(crate) struct InterfaceSettingsData<'a> {
     pub strip_show_artist: bool,
     pub strip_show_album: bool,
     pub strip_show_format_info: bool,
+    pub strip_merged_mode: bool,
     pub strip_click_action: &'a str,
 }
 
@@ -142,6 +143,15 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
                     data.strip_show_format_info,
                 ),
             ],
+        ),
+        SettingItem::bool_val(
+            meta!(
+                "general.strip_merged_mode",
+                "Merged Mode",
+                "Render artist/album/title as a single scrolling unit with one set of bookends"
+            ),
+            data.strip_merged_mode,
+            false,
         ),
         SettingItem::enum_val(
             meta!(

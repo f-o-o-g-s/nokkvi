@@ -775,6 +775,7 @@ mod tests {
             strip_show_artist: true,
             strip_show_album: true,
             strip_show_format_info: true,
+            strip_merged_mode: false,
             strip_click_action: "Go to Queue",
         };
         let entries = build_interface_items(&data);
@@ -786,8 +787,8 @@ mod tests {
         );
         assert_eq!(
             count_items(&entries),
-            9,
-            "Expected 9 items (nav_layout, nav_display_mode, track_info_display, slot_row_height, horizontal_volume, slot_text_links, font_family, visible_fields, click_action)"
+            10,
+            "Expected 10 items (nav_layout, nav_display_mode, track_info_display, slot_row_height, horizontal_volume, slot_text_links, font_family, visible_fields, merged_mode, click_action)"
         );
     }
 
@@ -943,6 +944,7 @@ mod tests {
             strip_show_artist: true,
             strip_show_album: true,
             strip_show_format_info: true,
+            strip_merged_mode: false,
             strip_click_action: "Go to Queue",
         };
         let playback = crate::views::settings::items_playback::PlaybackSettingsData {

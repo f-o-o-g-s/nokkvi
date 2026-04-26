@@ -89,6 +89,7 @@ impl SettingsPage {
                     strip_show_artist: data.strip_show_artist,
                     strip_show_album: data.strip_show_album,
                     strip_show_format_info: data.strip_show_format_info,
+                    strip_merged_mode: data.strip_merged_mode,
                     strip_click_action: data.strip_click_action,
                 };
                 items::build_interface_items(&idata)

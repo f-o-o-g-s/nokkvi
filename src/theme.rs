@@ -70,6 +70,9 @@ struct UiModeFlags {
     strip_show_album: AtomicBool,
     /// Whether format info (codec/kHz/kbps) is shown in the track info strip
     strip_show_format_info: AtomicBool,
+    /// Whether the metastrip renders artist/album/title as a single shared
+    /// scrolling unit with one set of bookends.
+    strip_merged_mode: AtomicBool,
     /// Strip click action: 0=GoToQueue, 1=GoToAlbum, 2=GoToArtist, 3=CopyTrackInfo, 4=DoNothing
     strip_click_action: AtomicU8,
 }
@@ -88,6 +91,7 @@ static UI_MODE: UiModeFlags = UiModeFlags {
     strip_show_artist: AtomicBool::new(true),
     strip_show_album: AtomicBool::new(true),
     strip_show_format_info: AtomicBool::new(true),
+    strip_merged_mode: AtomicBool::new(false),
     strip_click_action: AtomicU8::new(0), // GoToQueue
 };
 
@@ -508,6 +512,19 @@ pub(crate) fn set_strip_show_format_info(enabled: bool) {
     UI_MODE
         .strip_show_format_info
         .store(enabled, Ordering::Relaxed);
+}
+
+/// Returns true if the metastrip renders artist/album/title as a single
+/// shared scrolling unit with one set of bookend separators.
+#[inline]
+pub(crate) fn strip_merged_mode() -> bool {
+    UI_MODE.strip_merged_mode.load(Ordering::Relaxed)
+}
+
+/// Set strip merged mode
+#[inline]
+pub(crate) fn set_strip_merged_mode(enabled: bool) {
+    UI_MODE.strip_merged_mode.store(enabled, Ordering::Relaxed);
 }
 
 /// Returns the current strip click action

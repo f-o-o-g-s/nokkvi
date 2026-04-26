@@ -52,6 +52,32 @@ fn consume_toggled_sets_flag() {
 }
 
 // ============================================================================
+// Settings Dispatch (settings.rs)
+// ============================================================================
+
+#[test]
+fn settings_general_strip_merged_mode_flips_theme_cache() {
+    use crate::views::settings::items::SettingValue;
+
+    let mut app = test_app();
+    // Reset cache to a known state to avoid bleed from other tests touching globals.
+    crate::theme::set_strip_merged_mode(false);
+    assert!(!crate::theme::strip_merged_mode());
+
+    let _ = app.handle_settings_general(
+        "general.strip_merged_mode".to_string(),
+        SettingValue::Bool(true),
+    );
+    assert!(crate::theme::strip_merged_mode());
+
+    let _ = app.handle_settings_general(
+        "general.strip_merged_mode".to_string(),
+        SettingValue::Bool(false),
+    );
+    assert!(!crate::theme::strip_merged_mode());
+}
+
+// ============================================================================
 // Starred Status Handlers (hotkeys.rs)
 // ============================================================================
 
@@ -1106,6 +1132,7 @@ fn make_settings_view_data() -> crate::views::SettingsViewData {
         strip_show_artist: true,
         strip_show_album: true,
         strip_show_format_info: true,
+        strip_merged_mode: false,
         strip_click_action: "CenterOnPlaying",
         verbose_config: false,
         artwork_resolution: "Default",
@@ -1630,6 +1657,72 @@ fn albums_page_navigate_and_filter_returns_action() {
         }
         _ => panic!("Expected NavigateAndFilter action"),
     }
+}
+
+// ============================================================================
+// Sort Mode: Most Played (PROMPT 6)
+// ============================================================================
+
+#[test]
+fn albums_sort_mode_most_played_updates_state_and_emits_action() {
+    use crate::widgets::view_header::SortMode;
+    let mut app = test_app();
+
+    let (_, action) = app.albums_page.update(
+        crate::views::AlbumsMessage::SortModeSelected(SortMode::MostPlayed),
+        0,
+        &[],
+    );
+
+    assert_eq!(
+        app.albums_page.common.current_sort_mode,
+        SortMode::MostPlayed
+    );
+    assert!(matches!(
+        action,
+        crate::views::AlbumsAction::SortModeChanged(SortMode::MostPlayed)
+    ));
+}
+
+#[test]
+fn songs_sort_mode_most_played_updates_state_and_emits_action() {
+    use crate::widgets::view_header::SortMode;
+    let mut app = test_app();
+
+    let (_, action) = app.songs_page.update(
+        crate::views::SongsMessage::SortModeSelected(SortMode::MostPlayed),
+        &[],
+    );
+
+    assert_eq!(
+        app.songs_page.common.current_sort_mode,
+        SortMode::MostPlayed
+    );
+    assert!(matches!(
+        action,
+        crate::views::SongsAction::SortModeChanged(SortMode::MostPlayed)
+    ));
+}
+
+#[test]
+fn artists_sort_mode_most_played_updates_state_and_emits_action() {
+    use crate::widgets::view_header::SortMode;
+    let mut app = test_app();
+
+    let (_, action) = app.artists_page.update(
+        crate::views::ArtistsMessage::SortModeSelected(SortMode::MostPlayed),
+        0,
+        &[],
+    );
+
+    assert_eq!(
+        app.artists_page.common.current_sort_mode,
+        SortMode::MostPlayed
+    );
+    assert!(matches!(
+        action,
+        crate::views::ArtistsAction::SortModeChanged(SortMode::MostPlayed)
+    ));
 }
 
 // ============================================================================

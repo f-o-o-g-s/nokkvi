@@ -339,6 +339,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_strip_merged_mode(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.strip_merged_mode = enabled;
+        self.save()
+    }
+
     pub fn set_strip_click_action(&mut self, action: StripClickAction) -> Result<()> {
         self.settings.player.strip_click_action = action;
         self.save()
@@ -555,6 +560,7 @@ impl SettingsManager {
             strip_show_artist: p.strip_show_artist,
             strip_show_album: p.strip_show_album,
             strip_show_format_info: p.strip_show_format_info,
+            strip_merged_mode: p.strip_merged_mode,
             strip_click_action: p.strip_click_action,
             active_playlist_id: p.active_playlist_id.clone(),
             active_playlist_name: p.active_playlist_name.clone(),
@@ -618,6 +624,7 @@ fn apply_toml_settings_to_internal(
     p.strip_show_artist = ts.strip_show_artist;
     p.strip_show_album = ts.strip_show_album;
     p.strip_show_format_info = ts.strip_show_format_info;
+    p.strip_merged_mode = ts.strip_merged_mode;
     p.strip_click_action = ts.strip_click_action;
     p.crossfade_enabled = ts.crossfade_enabled;
     p.crossfade_duration_secs = ts.crossfade_duration_secs;

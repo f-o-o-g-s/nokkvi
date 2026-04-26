@@ -581,6 +581,9 @@ pub struct PlayerSettings {
     pub strip_show_album: bool,
     /// Whether format info (codec/kHz/kbps) is visible in the track info strip (default: true)
     pub strip_show_format_info: bool,
+    /// Whether the metastrip renders artist/album/title as a single shared
+    /// scrolling unit with one set of bookend separators (default: false).
+    pub strip_merged_mode: bool,
     /// What happens when clicking the track info strip (default: GoToQueue)
     pub strip_click_action: StripClickAction,
     /// Active playlist ID loaded in the queue (None = no playlist context)

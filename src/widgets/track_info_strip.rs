@@ -127,39 +127,62 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
     let show_title = theme::strip_show_title();
     let show_artist = theme::strip_show_artist();
     let show_album = theme::strip_show_album();
+    let merged_mode = theme::strip_merged_mode();
 
     let mut center_row = iced::widget::Row::new()
         .spacing(6)
         .align_y(Alignment::Center);
-    let mut has_prev_field = false;
 
-    // Leading separator
-    if show_title || show_artist || show_album {
-        center_row = center_row.push(info_sep());
-    }
+    if merged_mode {
+        // Merged mode: one bookend pair around a single marquee that scrolls
+        // all visible fields together as one unit.
+        let merged =
+            merged_strip_string(show_title, show_artist, show_album, &title, &artist, &album);
+        if !merged.is_empty() {
+            center_row = center_row.push(info_sep());
+            center_row = center_row.push(
+                iced::widget::row![
+                    super::marquee_text::marquee_text(merged)
+                        .size(9.0)
+                        .font(theme::ui_font())
+                        .color(theme::selected_color()),
+                ]
+                .align_y(Alignment::Center)
+                .width(Length::FillPortion(9)),
+            );
+            center_row = center_row.push(info_sep());
+        }
+    } else {
+        let mut has_prev_field = false;
 
-    if show_title {
-        center_row = center_row.push(info_field("title:", title, theme::now_playing_color()));
-        has_prev_field = true;
-    }
-    if show_artist {
+        // Leading separator
+        if show_title || show_artist || show_album {
+            center_row = center_row.push(info_sep());
+        }
+
+        if show_title {
+            center_row = center_row.push(info_field("title:", title, theme::now_playing_color()));
+            has_prev_field = true;
+        }
+        if show_artist {
+            if has_prev_field {
+                center_row = center_row.push(info_sep());
+            }
+            center_row = center_row.push(info_field("artist:", artist, theme::selected_color()));
+            has_prev_field = true;
+        }
+        if show_album {
+            if has_prev_field {
+                center_row = center_row.push(info_sep());
+            }
+            center_row = center_row.push(info_field("album:", album, theme::fg2()));
+            has_prev_field = true;
+        }
+
+        // Trailing separator
         if has_prev_field {
             center_row = center_row.push(info_sep());
         }
-        center_row = center_row.push(info_field("artist:", artist, theme::selected_color()));
-        has_prev_field = true;
-    }
-    if show_album {
-        if has_prev_field {
-            center_row = center_row.push(info_sep());
-        }
-        center_row = center_row.push(info_field("album:", album, theme::fg2()));
-        has_prev_field = true;
-    }
-
-    // Trailing separator
-    if has_prev_field {
-        center_row = center_row.push(info_sep());
     }
 
     if let Some(radio_name) = data.radio_name {
@@ -263,4 +286,63 @@ pub(crate) fn track_info_strip_with_separator<'a, M: Clone + 'static>(
     let strip = track_info_strip(data, on_press);
     let separator = theme::horizontal_separator(1.0);
     iced::widget::column![separator, strip].into()
+}
+
+/// Build the merged-mode metadata string for the center row.
+///
+/// Joins the visible fields with `  ·  ` and prefixes each with its label,
+/// matching the labels used in the default per-field rendering. Hidden
+/// fields are dropped; the resulting string contains no orphan separators.
+pub(crate) fn merged_strip_string(
+    show_title: bool,
+    show_artist: bool,
+    show_album: bool,
+    title: &str,
+    artist: &str,
+    album: &str,
+) -> String {
+    const JOIN: &str = "  ·  ";
+    let mut parts: Vec<String> = Vec::with_capacity(3);
+    if show_title {
+        parts.push(format!("title: {title}"));
+    }
+    if show_artist {
+        parts.push(format!("artist: {artist}"));
+    }
+    if show_album {
+        parts.push(format!("album: {album}"));
+    }
+    parts.join(JOIN)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn merged_string_all_three_visible() {
+        let s = merged_strip_string(true, true, true, "T", "A", "L");
+        assert_eq!(s, "title: T  ·  artist: A  ·  album: L");
+    }
+
+    #[test]
+    fn merged_string_drops_hidden_fields_without_orphan_separators() {
+        let s = merged_strip_string(true, false, true, "T", "_", "L");
+        assert_eq!(s, "title: T  ·  album: L");
+
+        let s = merged_strip_string(false, true, false, "_", "A", "_");
+        assert_eq!(s, "artist: A");
+    }
+
+    #[test]
+    fn merged_string_all_hidden_is_empty() {
+        let s = merged_strip_string(false, false, false, "T", "A", "L");
+        assert_eq!(s, "");
+    }
+
+    #[test]
+    fn merged_string_only_title() {
+        let s = merged_strip_string(true, false, false, "Only Title", "_", "_");
+        assert_eq!(s, "title: Only Title");
+    }
 }

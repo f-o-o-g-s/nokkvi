@@ -111,6 +111,10 @@ pub struct PlayerSettings {
     /// Whether format info (codec/kHz/kbps) is visible in the track info strip (default: true)
     #[serde(default = "default_true")]
     pub strip_show_format_info: bool,
+    /// Whether the metastrip renders artist/album/title as a single shared
+    /// scrolling unit with one set of bookend separators (default: false).
+    #[serde(default)]
+    pub strip_merged_mode: bool,
     /// What happens when clicking the track info strip (default: GoToQueue)
     #[serde(default)]
     pub strip_click_action: StripClickAction,
@@ -236,6 +240,7 @@ impl Default for PlayerSettings {
             strip_show_artist: true,
             strip_show_album: true,
             strip_show_format_info: true,
+            strip_merged_mode: false,
             strip_click_action: StripClickAction::default(),
             active_playlist_id: None,
             active_playlist_name: String::new(),
@@ -319,4 +324,32 @@ pub struct UserSettings {
     pub views: ViewPreferences,
     #[serde(default)]
     pub hotkeys: HotkeyConfig,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_merged_mode_default_is_off() {
+        let p = PlayerSettings::default();
+        assert!(!p.strip_merged_mode);
+    }
+
+    #[test]
+    fn strip_merged_mode_roundtrips_through_serde() {
+        let mut p = PlayerSettings::default();
+        p.strip_merged_mode = true;
+        let json = serde_json::to_string(&p).expect("serialize");
+        let parsed: PlayerSettings = serde_json::from_str(&json).expect("deserialize");
+        assert!(parsed.strip_merged_mode);
+    }
+
+    #[test]
+    fn strip_merged_mode_missing_field_defaults_to_false() {
+        // Simulate older redb-stored settings without the field.
+        let json = r#"{}"#;
+        let parsed: PlayerSettings = serde_json::from_str(json).expect("deserialize");
+        assert!(!parsed.strip_merged_mode);
+    }
 }

@@ -370,6 +370,12 @@ impl SettingsService {
         sm.set_strip_show_format_info(enabled)
     }
 
+    /// Set strip merged mode and persist
+    pub async fn set_strip_merged_mode(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_strip_merged_mode(enabled)
+    }
+
     /// Set queue's stars column visibility and persist
     pub async fn set_queue_show_stars(&self, enabled: bool) -> anyhow::Result<()> {
         let mut sm = self.settings_manager.lock().await;

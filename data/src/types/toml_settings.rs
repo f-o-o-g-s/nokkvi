@@ -59,6 +59,7 @@ pub struct TomlSettings {
     pub strip_show_artist: bool,
     pub strip_show_album: bool,
     pub strip_show_format_info: bool,
+    pub strip_merged_mode: bool,
     pub strip_click_action: StripClickAction,
 
     // -- Playback --
@@ -135,6 +136,7 @@ impl Default for TomlSettings {
             strip_show_artist: true,
             strip_show_album: true,
             strip_show_format_info: true,
+            strip_merged_mode: false,
             strip_click_action: StripClickAction::default(),
             crossfade_enabled: false,
             crossfade_duration_secs: 5,
@@ -185,6 +187,7 @@ impl TomlSettings {
             strip_show_artist: ps.strip_show_artist,
             strip_show_album: ps.strip_show_album,
             strip_show_format_info: ps.strip_show_format_info,
+            strip_merged_mode: ps.strip_merged_mode,
             strip_click_action: ps.strip_click_action,
             crossfade_enabled: ps.crossfade_enabled,
             crossfade_duration_secs: ps.crossfade_duration_secs,
@@ -256,6 +259,21 @@ mod tests {
         assert!(parsed.queue_show_album);
         assert!(!parsed.queue_show_duration);
         assert!(!parsed.queue_show_love);
+    }
+
+    #[test]
+    fn toml_strip_merged_mode_default_is_off() {
+        let settings = TomlSettings::default();
+        assert!(!settings.strip_merged_mode);
+    }
+
+    #[test]
+    fn toml_strip_merged_mode_roundtrip() {
+        let mut settings = TomlSettings::default();
+        settings.strip_merged_mode = true;
+        let toml_str = toml::to_string_pretty(&settings).expect("serialize");
+        let parsed: TomlSettings = toml::from_str(&toml_str).expect("deserialize");
+        assert!(parsed.strip_merged_mode);
     }
 
     #[test]

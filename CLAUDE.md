@@ -112,6 +112,7 @@ Critical invariants:
 - **Dependencies**: do not add new ones casually. Allowed core deps: `reqwest`, `serde`, `bincode`, `redb`, `toml_edit`, `font-kit`, `lru`, `rodio`, `ringbuf`, `bytemuck`, `rustfft`, `pipewire`. Test-only deps (`proptest`, `tempfile`) are fine in `[dev-dependencies]`.
 - **Render output**: keep a view's root widget type stable across renders (e.g., always `Column`) — changing it destroys `text_input` focus. Use `base_slot_list_empty_state` for empty/loaded parity.
 - **Border radii**: use `ui_border_radius()` (theme-aware via `ROUNDED_MODE` atomic), not hardcoded values. Iced clips background to border radius even when the border is transparent — leave radius unset on flush-to-edge bars.
+- **Manual UI verification (overrides default Claude Code guidance)**: nokkvi is a native Rust/Iced desktop app — there is no browser, no dev server, no `npm run dev`. Ignore any default instruction to "start the dev server" or "test in a browser". When the human owner asks for a UI change, deliver code that compiles cleanly (`cargo build`), passes tests/clippy/fmt, and stop there. The human runs `cargo run` (or a release build) and tests the running window themselves; their feedback is the verification loop. If a change has UI implications you cannot validate from code alone (visual layout, focus, marquee timing, etc.), say so explicitly in the handoff so the owner knows what to look at.
 
 ## Red-Green TDD for handlers
 

@@ -61,6 +61,7 @@ impl Nokkvi {
             strip_show_artist: crate::theme::strip_show_artist(),
             strip_show_album: crate::theme::strip_show_album(),
             strip_show_format_info: crate::theme::strip_show_format_info(),
+            strip_merged_mode: crate::theme::strip_merged_mode(),
             strip_click_action: crate::theme::strip_click_action().as_label(),
             verbose_config: self.verbose_config,
             artwork_resolution: self.artwork_resolution.as_label(),
@@ -511,7 +512,7 @@ impl Nokkvi {
     // General Settings (redb-persisted app preferences)
     // =========================================================================
 
-    fn handle_settings_general(
+    pub(super) fn handle_settings_general(
         &mut self,
         key: String,
         value: crate::views::settings::items::SettingValue,
@@ -843,6 +844,15 @@ impl Nokkvi {
                 |_s, v| crate::theme::set_strip_show_format_info(v),
                 |shell: AppService, v| async move {
                     shell.settings().set_strip_show_format_info(v).await
+                },
+                true,
+            ),
+            "general.strip_merged_mode" => self.persist_bool_setting(
+                &value,
+                "persist_strip_merged_mode",
+                |_s, v| crate::theme::set_strip_merged_mode(v),
+                |shell: AppService, v| async move {
+                    shell.settings().set_strip_merged_mode(v).await
                 },
                 true,
             ),

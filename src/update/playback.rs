@@ -1140,6 +1140,7 @@ impl Nokkvi {
         crate::theme::set_strip_show_artist(settings.strip_show_artist);
         crate::theme::set_strip_show_album(settings.strip_show_album);
         crate::theme::set_strip_show_format_info(settings.strip_show_format_info);
+        crate::theme::set_strip_merged_mode(settings.strip_merged_mode);
         crate::theme::set_strip_click_action(settings.strip_click_action);
 
         // Sync volume to MPRIS D-Bus (prevents initial 100% jump on first playerctl command)
