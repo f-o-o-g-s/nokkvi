@@ -3,9 +3,12 @@
 //! Factory functions for constructing test data without boilerplate.
 //! Only compiled under `#[cfg(test)]`.
 
-use nokkvi_data::backend::{
-    albums::AlbumUIViewData, artists::ArtistUIViewData, queue::QueueSongUIViewData,
-    songs::SongUIViewData,
+use nokkvi_data::{
+    backend::{
+        albums::AlbumUIViewData, artists::ArtistUIViewData, queue::QueueSongUIViewData,
+        songs::SongUIViewData,
+    },
+    utils::search::build_searchable_lower,
 };
 
 use crate::Nokkvi;
@@ -38,6 +41,7 @@ pub(crate) fn make_queue_song(
         starred: false,
         rating: None,
         play_count: None,
+        searchable_lower: build_searchable_lower(&[title, artist, album, "Rock"]),
     }
 }
 
@@ -66,6 +70,7 @@ pub(crate) fn make_queue_song_full(
         starred: false,
         rating: None,
         play_count: None,
+        searchable_lower: build_searchable_lower(&[title, artist, album, genre]),
     }
 }
 
@@ -103,6 +108,7 @@ pub(crate) fn make_song(id: &str, title: &str, artist: &str) -> SongUIViewData {
         tags: None,
         path: format!("/music/{id}.flac"),
         participants: Vec::new(),
+        searchable_lower: build_searchable_lower(&[title, artist, "Test Album"]),
     }
 }
 
@@ -135,6 +141,7 @@ pub(crate) fn make_album(id: &str, name: &str, artist: &str) -> AlbumUIViewData 
         release_date: None,
         original_date: None,
         original_year: None,
+        searchable_lower: build_searchable_lower(&[name, artist]),
     }
 }
 
@@ -155,6 +162,7 @@ pub(crate) fn make_artist(id: &str, name: &str) -> ArtistUIViewData {
         mbz_artist_id: None,
         biography: None,
         external_url: None,
+        searchable_lower: build_searchable_lower(&[name]),
     }
 }
 
@@ -167,6 +175,7 @@ pub(crate) fn make_genre(id: &str, name: &str) -> nokkvi_data::backend::genres::
         song_count: 30,
         artwork_url: None,
         artwork_album_ids: Vec::new(),
+        searchable_lower: build_searchable_lower(&[name]),
     }
 }
 

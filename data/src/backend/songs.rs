@@ -50,6 +50,8 @@ pub struct SongUIViewData {
     pub replay_gain: Option<crate::types::song::ReplayGain>,
     pub tags: Option<HashMap<String, Vec<String>>>,
     pub participants: Vec<(String, String)>,
+    /// Pre-lowercased search index — see `crate::utils::search::Searchable`.
+    pub searchable_lower: String,
 }
 
 impl crate::backend::Starable for SongUIViewData {
@@ -77,14 +79,16 @@ impl crate::backend::Ratable for SongUIViewData {
 }
 
 impl crate::utils::search::Searchable for SongUIViewData {
-    fn searchable_fields(&self) -> Vec<&str> {
-        vec![&self.title, &self.artist, &self.album]
+    fn matches_query(&self, query_lower: &str) -> bool {
+        self.searchable_lower.contains(query_lower)
     }
 }
 
 impl From<Song> for SongUIViewData {
     fn from(song: Song) -> Self {
         let participants = crate::backend::flatten_participants(song.participants.as_ref());
+        let searchable_lower =
+            crate::utils::search::build_searchable_lower(&[&song.title, &song.artist, &song.album]);
         Self {
             id: song.id,
             title: song.title,
@@ -117,6 +121,7 @@ impl From<Song> for SongUIViewData {
             replay_gain: song.replay_gain,
             tags: song.tags,
             participants,
+            searchable_lower,
         }
     }
 }

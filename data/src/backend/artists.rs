@@ -33,6 +33,8 @@ pub struct ArtistUIViewData {
     pub mbz_artist_id: Option<String>,
     pub biography: Option<String>,
     pub external_url: Option<String>,
+    /// Pre-lowercased search index — see `crate::utils::search::Searchable`.
+    pub searchable_lower: String,
 }
 
 impl crate::backend::Starable for ArtistUIViewData {
@@ -72,6 +74,7 @@ impl From<Artist> for ArtistUIViewData {
         let album_count = a.get_album_count();
         let song_count = a.get_song_count();
         let is_starred = a.is_starred();
+        let searchable_lower = crate::utils::search::build_searchable_lower(&[&a.name]);
         Self {
             id: a.id,
             name: a.name,
@@ -87,13 +90,14 @@ impl From<Artist> for ArtistUIViewData {
             mbz_artist_id: a.mbz_artist_id,
             biography: a.biography,
             external_url: a.external_url,
+            searchable_lower,
         }
     }
 }
 
 impl crate::utils::search::Searchable for ArtistUIViewData {
-    fn searchable_fields(&self) -> Vec<&str> {
-        vec![&self.name]
+    fn matches_query(&self, query_lower: &str) -> bool {
+        self.searchable_lower.contains(query_lower)
     }
 }
 

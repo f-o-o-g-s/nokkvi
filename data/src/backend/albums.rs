@@ -50,6 +50,10 @@ pub struct AlbumUIViewData {
     pub original_date: Option<String>,
     /// Original release year (Feishin uses max_original_year)
     pub original_year: Option<u32>,
+    /// Pre-lowercased search index — built once at construction so the filter
+    /// loop avoids per-keystroke `to_lowercase()` allocations. See
+    /// `crate::utils::search::Searchable`.
+    pub searchable_lower: String,
 }
 
 impl AlbumUIViewData {
@@ -76,10 +80,14 @@ impl AlbumUIViewData {
         // Flatten participants into sorted (role, names) pairs
         let participants = crate::backend::flatten_participants(album.participants.as_ref());
 
+        let name = album.name.clone();
+        let artist = album.display_artist().to_string();
+        let searchable_lower = crate::utils::search::build_searchable_lower(&[&name, &artist]);
+
         Self {
             id: album.id.clone(),
-            name: album.name.clone(),
-            artist: album.display_artist().to_string(),
+            name,
+            artist,
             artist_id: album
                 .album_artist_id
                 .clone()
@@ -107,6 +115,7 @@ impl AlbumUIViewData {
             release_date: album.release_date.clone(),
             original_date: album.original_date.clone(),
             original_year: album.max_original_year,
+            searchable_lower,
         }
     }
 
@@ -189,8 +198,8 @@ impl crate::backend::Ratable for AlbumUIViewData {
 }
 
 impl crate::utils::search::Searchable for AlbumUIViewData {
-    fn searchable_fields(&self) -> Vec<&str> {
-        vec![&self.name, &self.artist]
+    fn matches_query(&self, query_lower: &str) -> bool {
+        self.searchable_lower.contains(query_lower)
     }
 }
 

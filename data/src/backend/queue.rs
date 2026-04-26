@@ -36,6 +36,8 @@ pub struct QueueSongUIViewData {
     pub starred: bool,
     pub rating: Option<u32>,
     pub play_count: Option<u32>, // For Most Played sort
+    /// Pre-lowercased search index — see `crate::utils::search::Searchable`.
+    pub searchable_lower: String,
 }
 
 impl crate::backend::Starable for QueueSongUIViewData {
@@ -63,9 +65,8 @@ impl crate::backend::Ratable for QueueSongUIViewData {
 }
 
 impl crate::utils::search::Searchable for QueueSongUIViewData {
-    fn searchable_fields(&self) -> Vec<&str> {
-        // Match QML implementation: search across title, artist, album, and genre
-        vec![&self.title, &self.artist, &self.album, &self.genre]
+    fn matches_query(&self, query_lower: &str) -> bool {
+        self.searchable_lower.contains(query_lower)
     }
 }
 
@@ -208,6 +209,12 @@ impl QueueService {
                 );
                 let duration_str = crate::utils::formatters::format_duration(song.duration);
                 let genre = song.genre.clone().unwrap_or_default();
+                let searchable_lower = crate::utils::search::build_searchable_lower(&[
+                    &song.title,
+                    &song.artist,
+                    &song.album,
+                    &genre,
+                ]);
 
                 Some(QueueSongUIViewData {
                     id: song.id.clone(),
@@ -224,6 +231,7 @@ impl QueueService {
                     starred: song.starred,
                     rating: song.rating,
                     play_count: song.play_count,
+                    searchable_lower,
                 })
             })
             .collect()

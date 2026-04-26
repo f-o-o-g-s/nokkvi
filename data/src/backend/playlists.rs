@@ -16,10 +16,14 @@ pub struct PlaylistUIViewData {
     pub updated_at: String,
     /// Album IDs for 3x3 collage (up to 9 albums)
     pub artwork_album_ids: Vec<String>,
+    /// Pre-lowercased search index — see `crate::utils::search::Searchable`.
+    pub searchable_lower: String,
 }
 
 impl From<Playlist> for PlaylistUIViewData {
     fn from(playlist: Playlist) -> Self {
+        let searchable_lower =
+            crate::utils::search::build_searchable_lower(&[&playlist.name, &playlist.comment]);
         Self {
             id: playlist.id,
             name: playlist.name,
@@ -30,12 +34,15 @@ impl From<Playlist> for PlaylistUIViewData {
             public: playlist.public,
             updated_at: playlist.updated_at,
             artwork_album_ids: Vec::new(),
+            searchable_lower,
         }
     }
 }
 
 impl From<&Playlist> for PlaylistUIViewData {
     fn from(playlist: &Playlist) -> Self {
+        let searchable_lower =
+            crate::utils::search::build_searchable_lower(&[&playlist.name, &playlist.comment]);
         Self {
             id: playlist.id.clone(),
             name: playlist.name.clone(),
@@ -46,13 +53,14 @@ impl From<&Playlist> for PlaylistUIViewData {
             public: playlist.public,
             updated_at: playlist.updated_at.clone(),
             artwork_album_ids: Vec::new(),
+            searchable_lower,
         }
     }
 }
 
 impl crate::utils::search::Searchable for PlaylistUIViewData {
-    fn searchable_fields(&self) -> Vec<&str> {
-        vec![&self.name, &self.comment]
+    fn matches_query(&self, query_lower: &str) -> bool {
+        self.searchable_lower.contains(query_lower)
     }
 }
 
