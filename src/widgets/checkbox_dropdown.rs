@@ -29,7 +29,7 @@ use iced::{
         widget::{self, tree},
     },
     keyboard, mouse,
-    widget::{column, container, mouse_area, row, svg, text},
+    widget::{column, container, mouse_area, row, svg, text, tooltip},
 };
 
 use crate::theme;
@@ -55,12 +55,13 @@ const MENU_MIN_WIDTH: f32 = 180.0;
 const MENU_ICON_SIZE: f32 = 14.0;
 const MENU_TEXT_SIZE: f32 = 13.0;
 
-/// Build the trigger element — a 40×40 styled container holding the icon.
-/// Mirrors `view_header::header_icon_button` chrome (without on_press, since the
-/// `CheckboxDropdown` Widget intercepts the left-click itself).
+/// Build the trigger element — a 40×40 styled container holding the icon,
+/// wrapped in a tooltip that mirrors `view_header::header_icon_button` chrome
+/// (without on_press, since the `CheckboxDropdown` Widget intercepts the
+/// left-click itself).
 fn trigger_button<'a, Message: 'a>(
     icon_path: &'static str,
-    _tooltip: &'static str,
+    tooltip_text: &'static str,
 ) -> Element<'a, Message> {
     let icon = crate::embedded_svg::svg_widget(icon_path)
         .width(Length::Fixed(TRIGGER_ICON_SIZE))
@@ -69,7 +70,7 @@ fn trigger_button<'a, Message: 'a>(
             color: Some(theme::fg0()),
         });
 
-    container(icon)
+    let trigger = container(icon)
         .width(Length::Fixed(TRIGGER_SIZE))
         .height(Length::Fixed(TRIGGER_SIZE))
         .style(|_theme| container::Style {
@@ -80,8 +81,16 @@ fn trigger_button<'a, Message: 'a>(
             },
             ..Default::default()
         })
-        .center(Length::Fixed(TRIGGER_SIZE))
-        .into()
+        .center(Length::Fixed(TRIGGER_SIZE));
+
+    tooltip(
+        trigger,
+        container(text(tooltip_text).size(11.0).font(theme::ui_font())).padding(4),
+        tooltip::Position::Top,
+    )
+    .gap(4)
+    .style(theme::container_tooltip)
+    .into()
 }
 
 /// Render a single dropdown item: check-or-empty icon + label.
