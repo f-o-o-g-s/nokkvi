@@ -124,4 +124,39 @@ mod tests {
         let result = filter_items(&items, "beatles");
         assert_eq!(result.len(), 1);
     }
+
+    /// Smoke test that locks down `filter_items` correctness on a 5,000-item
+    /// synthetic library — the regression net for Phase 4A (lowercase-once
+    /// rewrite) and Phase 4C (filter-result memoization).
+    ///
+    /// Asserts the filtered result contains exactly the items whose name or
+    /// description match the query, case-insensitively. Phase 4 changes will
+    /// keep this passing.
+    #[test]
+    fn filter_alloc_count_smoke_5000_items() {
+        // Synthetic library: 5,000 items where every 100th has "BEATLES"
+        // sprinkled into the description, so the matcher has 50 true hits.
+        let items: Vec<TestItem> = (0..5_000)
+            .map(|i| TestItem {
+                name: format!("Album {i}"),
+                description: if i % 100 == 0 {
+                    format!("Beatles tribute {i}")
+                } else {
+                    format!("Filler description {i}")
+                },
+            })
+            .collect();
+
+        let result = filter_items(&items, "BEATLES");
+        assert_eq!(result.len(), 50, "expected 50 matches in 5,000 items");
+        assert!(
+            result.iter().all(|it| it.description.contains("Beatles")),
+            "every match must have 'Beatles' in description"
+        );
+
+        // Empty-query path stays zero-cost (Cow::Borrowed): same length, no clone.
+        let passthrough = filter_items(&items, "");
+        assert_eq!(passthrough.len(), 5_000);
+        assert!(matches!(passthrough, std::borrow::Cow::Borrowed(_)));
+    }
 }

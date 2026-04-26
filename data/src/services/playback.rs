@@ -412,3 +412,88 @@ impl QueueNavigator {
         self.current_song_id.lock().await.clone()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    };
+
+    use tokio::sync::Mutex;
+
+    use super::*;
+    use crate::{
+        audio::engine::CustomAudioEngine,
+        services::{queue::QueueManager, state_storage::StateStorage},
+        types::song::Song,
+    };
+
+    fn temp_storage() -> StateStorage {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!(
+            "nokkvi_playback_test_{}_{}.redb",
+            std::process::id(),
+            id
+        ));
+        let _ = std::fs::remove_file(&path);
+        StateStorage::new(path).expect("temp storage")
+    }
+
+    fn make_song(id: &str) -> Song {
+        Song::test_default(id, &format!("Song {id}"))
+    }
+
+    fn manager_with_songs(songs: Vec<Song>, current_index: Option<usize>) -> QueueManager {
+        let storage = temp_storage();
+        let mut qm = QueueManager::new(storage).expect("queue manager");
+        let ids: Vec<String> = songs.iter().map(|s| s.id.clone()).collect();
+        qm.pool.insert_many(songs);
+        qm.queue.song_ids = ids;
+        qm.queue.current_index = current_index;
+        qm.rebuild_order_and_sync();
+        qm
+    }
+
+    /// Path 3 + empty queue: `on_track_finished` must clear `current_song_id`,
+    /// reset `current_index` to None, and return `Ok(None)` without panicking.
+    /// This is the regression net for Phase 1 (lock-across-await refactor) —
+    /// any rewrite of `on_track_finished` must preserve this behavior.
+    ///
+    /// PipeWire is never touched here: `engine.stop()` early-returns when not
+    /// playing, `load_prepared_track` returns Err immediately when no decoder
+    /// is prepared, and the test only sets up the empty-queue path.
+    #[tokio::test(flavor = "current_thread")]
+    async fn playback_callback_path3_empty_queue_clears_state() {
+        let song = make_song("only");
+        let mut qm = manager_with_songs(vec![song], Some(0));
+        // Drain peek so peek_next_song() returns None on the next call:
+        // the queue has one song, current_index=0, no repeat → no next song.
+        assert!(qm.peek_next_song().is_none());
+
+        let qm = Arc::new(Mutex::new(qm));
+        let nav = QueueNavigator::new(qm.clone()).await.expect("navigator");
+        // Simulate that "only" is currently playing.
+        nav.set_current_song_id(Some("only".to_string())).await;
+
+        let mut engine = CustomAudioEngine::new();
+        // Engine is in default Stopped state — `immediate_playing` is false,
+        // `load_prepared_track` returns Err (no prepared decoder), `stop` early-returns.
+        let result = nav
+            .on_track_finished(&mut engine, "http://example", "u=test&p=test")
+            .await
+            .expect("no error from path 3 empty queue");
+
+        assert!(result.is_none(), "no transition expected on empty queue");
+        assert!(
+            nav.get_current_song_id().await.is_none(),
+            "current_song_id must clear when queue is exhausted"
+        );
+        assert!(
+            qm.lock().await.get_queue().current_index.is_none(),
+            "current_index must reset to None"
+        );
+    }
+}

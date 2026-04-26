@@ -1023,3 +1023,44 @@ pub(crate) fn toast_level_color(level: nokkvi_data::types::toast::ToastLevel) ->
         ToastLevel::Error => danger(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Instant;
+
+    use super::*;
+
+    /// Phase 0 micro-bench: measures cumulative cost of `theme::fg0()` over
+    /// 10,000 calls. Captures the baseline before Phase 2A's accessor de-clone.
+    /// Numbers print to stderr (use `cargo test -- --nocapture` to view).
+    ///
+    /// The upper bound is generous — the goal is a regression net, not a
+    /// per-machine wall-clock guarantee. Phase 2A should drop the elapsed time
+    /// by ≥10× when this same test re-runs against the rewritten accessors.
+    #[test]
+    fn theme_accessor_microbench_fg0_x10000() {
+        // Touch the theme once so any first-call setup (DUAL_THEME LazyLock
+        // init, builtin theme seeding) is excluded from the measurement.
+        let _warm = fg0();
+
+        let iters = 10_000;
+        let start = Instant::now();
+        let mut acc_r = 0.0f32;
+        for _ in 0..iters {
+            // Use the result so the optimizer can't dead-code the call.
+            acc_r += fg0().r;
+        }
+        let elapsed = start.elapsed();
+
+        eprintln!(
+            "theme::fg0() x{iters} = {:?} ({:.1} ns/call), accumulator={acc_r}",
+            elapsed,
+            (elapsed.as_nanos() as f64) / (iters as f64)
+        );
+
+        assert!(
+            elapsed.as_millis() < 1_000,
+            "fg0() x{iters} unexpectedly slow: {elapsed:?}"
+        );
+    }
+}
