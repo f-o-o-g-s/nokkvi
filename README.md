@@ -12,6 +12,10 @@ A native Rust/Iced client for [Navidrome](https://www.navidrome.org/) music serv
 **Platform:** Linux only. Built and tested on Arch Linux (Wayland/Hyprland) with PipeWire v<!-- pipewire-version -->1.6.4<!-- /pipewire-version --> and Navidrome v<!-- navidrome-version -->0.61.2<!-- /navidrome-version -->. No Windows or macOS support.
 **Network:** Designed and tested primarily as a local network client (LAN). Performance and reliability over WAN/remote internet connections are unknown.
 
+## 📖 Documentation
+
+Full guides, configuration reference, theming palette, keyboard shortcuts, and visualizer internals live at the **[Nokkvi documentation site](https://f-o-o-g-s.github.io/nokkvi-docs/)**. The README below is an at-a-glance summary — anything deeper belongs in the docs.
+
 ## Inspirations
 
 Nokkvi draws heavy inspiration from several excellent projects:
@@ -23,38 +27,19 @@ Nokkvi draws heavy inspiration from several excellent projects:
 - **[StepMania](https://github.com/stepmania/stepmania)**: Inspired the video-game-like feel and drill-down navigation of the settings menu.
 - **Vim**: Inspired the built-in color schemes and the highly keyboard-centric approach to navigation.
 
-## Features
+## Highlights
 
-### Audio
-- Native PipeWire audio engine with gapless playback and crossfade
-- Real-time hardware volume synchronization with your desktop
-- 10-band graphic equalizer with custom presets
-- GPU-accelerated visualizer (bars and line modes)
+- Native PipeWire audio engine with gapless playback, crossfade, EBU R128 normalization, and a 10-band equalizer
+- GPU-accelerated visualizer with `bars` and `lines` modes plus rich gradient and peak controls
+- Browse albums, artists, songs, genres, playlists, internet radios, and algorithmic similarities — with inline expansion and split-view library browsing
+- 21 built-in themes (Gruvbox, Catppuccin, Dracula, Nord, Tokyo Night, Kanagawa, Everforest, …) with instant hot-reload — drop your own `.toml` in `~/.config/nokkvi/themes/` to add a custom theme
+- Persistent queue, multi-selection, drag-and-drop, star ratings, and scrobbling through Navidrome (Last.fm / ListenBrainz)
+- Keyboard-driven UI with user-configurable shortcuts, MPRIS D-Bus integration, and right-click context menus everywhere
 
-### Library & Playback
-- Browse by albums, artists, songs, genres, playlists, algorithmic similarities, and internet radios
-- **Internet Radios** — manage and stream endless internet radio stations securely and seamlessly
-- Algorithmic exploration — endlessly dive into mathematically related discographies via context menu "Find Similar" and "Top Songs" actions
-- Inline expansion — drill into artists/genres to see albums and tracks without leaving the view
-- Star ratings (0–5) and favorites on everything
-- Multi-selection with Ctrl/Shift — batch add to queue, rate, favorite, etc.
-- Drag-and-drop from library to queue, and reorder within the queue
-- Queue persistence across restarts
-- Scrobbling (last.fm / ListenBrainz via Navidrome)
-- Playlist management — create, rename, delete, and split-view editing with a library browser panel
-
-### Interface
-- 21 built-in themes inspired by popular editor color schemes (Gruvbox, Catppuccin, Dracula, Nord, Tokyo Night, Kanagawa, Everforest, and more) — or create your own
-- Hot-reloadable configuration — themes, visualizer settings, and all preferences update live
-- Configurable layouts — side, top, or no navigation; player bar or top-bar metadata strip; rounded corners mode; per-view column visibility for Queue, Albums, Songs, and Artists
-- User-configurable keyboard shortcuts for most actions
-- System font picker with live preview
-- Right-click context menus everywhere, including "Show in File Manager"
-- MPRIS D-Bus integration for desktop media controls
-- In-app settings editor with drill-down navigation and inline search
-- **Slot Text Links Toggle** — disable navigation links on metadata text to prevent accidental clicks
+See the [docs](https://f-o-o-g-s.github.io/nokkvi-docs/) for the full feature tour and every option exposed in `config.toml`.
 
 ### Non-Goals
+
 Nokkvi is designed to be a fast, highly-themed, keyboard-driven music player—not a full administrative dashboard or a 1:1 replica of the Navidrome web UI. The following Navidrome features are intentionally **not** implemented at this time (though some may be considered for future releases):
 - Server administration (triggering library scans, user management)
 - Podcasts
@@ -65,75 +50,25 @@ Nokkvi is designed to be a fast, highly-themed, keyboard-driven music player—n
 - Media downloading for offline usage
 - Lyrics integration
 
-## Dependencies (Arch Linux)
+## Quickstart
 
 ```bash
-pacman -S pipewire fontconfig pkg-config
+sudo pacman -S pipewire fontconfig pkg-config   # Arch system deps
+cargo build --release                           # build
+./install.sh                                    # install binary, .desktop, icon
 ```
 
-| Package | Purpose |
-|---------|---------|
-| `pipewire` | PipeWire development headers (native audio output via `libpipewire-0.3`) |
-| `fontconfig` | Font discovery for the system font picker (used by `font-kit`) |
-| `pkg-config` | Build-time dependency resolution for native libraries |
+The release binary lands at `target/release/nokkvi`; `install.sh` copies it to `~/.local/bin/nokkvi` and sets up the desktop entry and icon. Per-user data lives in `~/.config/nokkvi/` (`config.toml`, `app.redb`, `themes/`, `sfx/`).
 
-> **Troubleshooting:** No audio but volume looks correct? Ensure your desktop environments sound daemon (e.g. PipeWire) is running.
-> **Note:** Assumes you have Rust installed via [rustup](https://rustup.rs/) or the `rust` package. The **nightly toolchain** is required for formatting (`cargo +nightly fmt --all`). Keep your toolchain up to date (`rustup update`) — some dependencies require a recent compiler.
+Full setup, server connection, and configuration walkthroughs are in the docs:
+- [Installation](https://f-o-o-g-s.github.io/nokkvi-docs/guides/installation/)
+- [Connecting to Navidrome](https://f-o-o-g-s.github.io/nokkvi-docs/guides/navidrome/)
+- [Configuration reference](https://f-o-o-g-s.github.io/nokkvi-docs/reference/config/)
+- [Keyboard shortcuts](https://f-o-o-g-s.github.io/nokkvi-docs/reference/hotkeys/)
 
-## Building
+> **Troubleshooting:** No audio but volume looks correct? Ensure your desktop's sound daemon (PipeWire) is running.
 
-```bash
-cargo build --release
-```
-
-The binary will be at `target/release/nokkvi`.
-
-### Installation
-
-After building, install the binary, desktop entry, and icon for your user:
-
-```bash
-./install.sh
-```
-
-This copies the binary to `~/.local/bin/nokkvi` and sets up the `.desktop` file and SVG icon so your app launcher can find it.
-
-### Formatting
-
-Formatting requires the **nightly** toolchain:
-
-```bash
-rustup toolchain install nightly   # one-time setup
-cargo +nightly fmt --all            # format
-cargo +nightly fmt --all -- --check # verify without modifying
-```
-
-
-## Data & Configuration
-
-All application data and configuration is localized to `~/.config/nokkvi/`:
-
-- `config.toml`: User preferences, theme selection, and visualizer settings (hot-reloadable).
-- `app.redb`: Unified database file storing your session tokens, saved queue state, and application settings.
-- `themes/`: Directory containing all built-in and user-created `.toml` theme files.
-- `sfx/`: Directory containing all UI sound effects (you can drop in custom `.wav` files to override the defaults).
-
-### Artwork
-
-Artwork is fetched on demand from your Navidrome server — there is no client-side disk cache. An in-memory LRU (capped at 512 entries) keeps recently viewed artwork warm so GPU textures stay loaded during normal navigation. When Navidrome pushes a library-change event over its SSE stream, any affected album already in memory is silently re-fetched so you see updated art immediately without restarting.
-
-For best results, enable server-side image caching in Navidrome (`ImageCacheSize` in your config). All artwork reads hit the server's own cache rather than re-transcoding on every request.
-
-### Built-in Themes
-
-Nokkvi ships with 21 built-in themes that are automatically seeded to `~/.config/nokkvi/themes/` on first launch. These include popular editor and terminal color schemes like Adwaita (default), Gruvbox, Catppuccin, Dracula, Nord, Kanagawa, Everforest, Tokyo Night, Solarized, and more. Every theme includes both dark and light palettes plus visualizer colors.
-
-**To change your theme:** Simply open the in-app **Settings -> Theme** menu, and pick one from the "Select Theme" list. It will apply instantly.
-
-**To create a custom theme:**
-1. Copy an existing file in `~/.config/nokkvi/themes/` to a new name (e.g. `my_theme.toml`).
-2. Edit the hex colors in your new file.
-3. Open Nokkvi Settings, and your custom theme will automatically appear in the list!
+Build prerequisites and contributor workflow (including the **nightly** rustfmt requirement) are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Media Controls (MPRIS)
 
@@ -160,98 +95,10 @@ playerctl -p nokkvi volume 0.05+
 playerctl -p nokkvi metadata   # show current track info
 ```
 
-## Keyboard Shortcuts
-
-All keyboard shortcuts are **user-configurable** via the Settings view (Hotkeys tab). The defaults are listed below.
-
-### View Switching
-
-| Key | Action |
-|-----|--------|
-| `1` | Switch to Queue view |
-| `2` | Switch to Albums view |
-| `3` | Switch to Artists view |
-| `4` | Switch to Songs view |
-| `5` | Switch to Genres view |
-| `6` | Switch to Playlists view |
-| `` ` `` (backtick) | Toggle Settings view |
-
-### Playback Controls
-
-| Key | Action |
-|-----|--------|
-| `Space` | Toggle play/pause |
-| `x` | Toggle random/shuffle mode |
-| `z` | Toggle repeat mode |
-| `c` | Toggle consume mode |
-| `s` | Toggle sound effects |
-| `v` | Cycle visualization mode |
-| `q` | Toggle 10-band equalizer |
-| `f` | Toggle gapless crossfade |
-
-### Navigation & UI
-
-| Key | Action |
-|-----|--------|
-| `Backspace` | Navigate slot list up |
-| `Tab` | Navigate slot list down |
-| `Enter` | Activate center slot list item |
-| `Shift+Enter` | Expand center item inline (drill into children) |
-| `Ctrl+E` | Toggle library browser panel beside queue |
-| `/` | Focus search input |
-| `r` | Refresh current view data from the server |
-| `Esc` | Collapse inline expansion; if none, clear search; if in Settings, exit |
-
-### Sort Controls
-
-| Key | Action |
-|-----|--------|
-| `←` | Cycle sort mode backward |
-| `→` | Cycle sort mode forward |
-| `Page Up` | Toggle sort order (ascending/descending) |
-
-### Settings View
-
-| Key | Action |
-|-----|--------|
-| `Delete` | Reset focused setting to default |
-| `↑` | Toggle field up in ToggleSet (Visible Fields) |
-| `↓` | Toggle field down in ToggleSet (Visible Fields) |
-
-### Item Actions
-
-| Key | Action | Views |
-|-----|--------|-------|
-| `Shift+I` | Open Get Info modal for selected item | All library views + Queue |
-| `Shift+S` | Find similar songs for the currently playing track | All |
-| `Shift+T` | Show top songs for the currently playing track's artist | All |
-| `Shift+C` | Center on currently playing | All (view-aware: finds album, artist, song, or genre) |
-| `Shift+L` | Toggle star/favorite on selected item | Queue, Albums, Artists, Songs, Genres, Playlists (expansion-aware) |
-| `Shift+A` | Add centered item to queue | Albums, Artists, Songs, Genres, Playlists |
-| `=` / `-` | Increase / decrease rating (0–5 stars) | Queue, Albums, Artists, Songs, Genres, Playlists (expansion-aware) |
-| `Ctrl+D` | Remove centered item from queue | Queue only |
-| `Shift+D` | Clear entire queue | Queue only |
-| `Shift+↑` | Move centered track up in queue | Queue only |
-| `Shift+↓` | Move centered track down in queue | Queue only |
-| `Ctrl+S` | Save queue as playlist | Queue only |
-
-### Inline Expansion
-
-`Shift+Enter` expands the centered item to show its children inline within the slot list:
-
-| View | Expansion Levels |
-|------|------------------|
-| Albums | Album → Tracks |
-| Artists | Artist → Albums → Tracks |
-| Playlists | Playlist → Tracks |
-| Genres | Genre → Albums → Tracks |
-
-While expanded, `Shift+L`, `=`/`-`, and `Shift+A` act on the child item when the center slot is a child row. Press `Esc` to collapse back (collapses innermost level first).
-
 ## Known Issues
 
 ### Application crash on narrow window resize
-Resizing the application window horizontally to be extremely narrow will abruptly crash the application. This happens because our underlying user-interface framework (`iced`) currently struggles to safely draw images using your graphics card when they are shrunken down to less than a single pixel wide. 
+Resizing the application window horizontally to be extremely narrow will abruptly crash the application. This happens because our underlying user-interface framework (`iced`) currently struggles to safely draw images using your graphics card when they are shrunken down to less than a single pixel wide.
 
 During testing, we attempted to write safety checks in Nokkvi to hide artwork before it gets that small. However, we found that the framework attempts to calculate and draw those tiny images before our safety checks even have a chance to run, so we ultimately did not keep these ineffective workarounds in the codebase.
 
