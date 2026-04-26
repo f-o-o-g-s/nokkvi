@@ -28,8 +28,45 @@ use crate::{
     Nokkvi, View,
     app_message::{ArtworkMessage, HotkeyMessage, Message},
     views,
-    widgets::SlotListView,
+    widgets::{SlotListPageState, SlotListView, view_header::SortMode},
 };
+
+/// Bundled params for a paginated library fetch (Albums, Artists, Songs).
+///
+/// Built once at the call site from the page's common state via
+/// [`PaginatedFetch::from_common`], then moved into the spawned
+/// `shell_task` closure. Owned values (no lifetimes) so the struct can
+/// cross the `'static` boundary.
+pub(crate) struct PaginatedFetch {
+    pub view_str: &'static str,
+    pub sort_order: &'static str,
+    pub search_query: Option<String>,
+    pub filter: Option<nokkvi_data::types::filter::LibraryFilter>,
+    pub offset: usize,
+    pub page_size: usize,
+}
+
+impl PaginatedFetch {
+    pub(crate) fn from_common(
+        common: &SlotListPageState,
+        sort_to_api: fn(SortMode) -> &'static str,
+        offset: usize,
+        page_size: usize,
+    ) -> Self {
+        let view_str = sort_to_api(common.current_sort_mode);
+        let sort_order = if common.sort_ascending { "ASC" } else { "DESC" };
+        let search_query = (!common.search_query.is_empty()).then(|| common.search_query.clone());
+        let filter = common.active_filter.clone();
+        Self {
+            view_str,
+            sort_order,
+            search_query,
+            filter,
+            offset,
+            page_size,
+        }
+    }
+}
 
 /// Result type for the combined "resolve song IDs + fetch playlist list" async task.
 /// Pairs: `(playlist_id, playlist_name)` list + resolved song IDs.

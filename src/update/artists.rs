@@ -7,156 +7,105 @@ use tracing::{debug, error};
 use crate::{
     Nokkvi, View,
     app_message::{ArtworkMessage, Message},
+    update::components::PaginatedFetch,
     views::{self, ArtistsAction, ArtistsMessage, HasCommonAction},
     widgets,
 };
 
 impl Nokkvi {
+    /// Sort UI artists in-place by rating (Some > None, then desc by value).
+    /// Used by the rating-sort carve-out after every page load — the
+    /// Subsonic API doesn't expose rating sort, so we emulate it client-side.
+    pub(crate) fn artists_rating_sort(ui_artists: &mut [ArtistUIViewData]) {
+        ui_artists.sort_by(|a, b| match (a.rating, b.rating) {
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (Some(ra), Some(rb)) => rb.cmp(&ra),
+            (None, None) => std::cmp::Ordering::Equal,
+        });
+    }
+
+    /// Shared paginated fetch for Artists. Used by both the initial load
+    /// (`handle_load_artists`, offset 0) and follow-up page loads
+    /// (`handle_artists_load_page`, offset N). Preserves the rating-sort
+    /// carve-out: when the user picks "Rating" sort, the API can't sort
+    /// for us, so we sort client-side after each page completes.
+    fn load_artists_internal<M>(&mut self, offset: usize, msg_ctor: M) -> Task<Message>
+    where
+        M: FnOnce((Result<Vec<ArtistUIViewData>, String>, usize)) -> Message + Send + 'static,
+    {
+        let params = PaginatedFetch::from_common(
+            &self.artists_page.common,
+            views::ArtistsPage::sort_mode_to_api_string,
+            offset,
+            self.library_page_size.to_usize(),
+        );
+        let is_rating_sort =
+            self.artists_page.common.current_sort_mode == widgets::view_header::SortMode::Rating;
+        let album_artists_only = self.show_album_artists_only;
+
+        debug!(
+            " LoadArtists: offset={}, page_size={}, view={}, sort={}, search={:?}, album_artists_only={}",
+            params.offset,
+            params.page_size,
+            params.view_str,
+            params.sort_order,
+            params.search_query,
+            album_artists_only,
+        );
+
+        self.library.artists.set_loading(true);
+
+        self.shell_task(
+            move |shell| async move {
+                let artists_vm = shell.artists().clone();
+                match artists_vm
+                    .load_raw_artists_page(
+                        Some(params.view_str),
+                        Some(params.sort_order),
+                        params.search_query.as_deref(),
+                        params.filter.as_ref(),
+                        album_artists_only,
+                        params.offset,
+                        params.page_size,
+                    )
+                    .await
+                {
+                    Ok(artists) => {
+                        let mut ui_artists: Vec<ArtistUIViewData> =
+                            artists.into_iter().map(ArtistUIViewData::from).collect();
+                        if is_rating_sort {
+                            Nokkvi::artists_rating_sort(&mut ui_artists);
+                        }
+                        (Ok(ui_artists), artists_vm.get_total_count() as usize)
+                    }
+                    Err(e) => (Err(format!("{e:#}")), 0),
+                }
+            },
+            msg_ctor,
+        )
+    }
+
     pub(crate) fn handle_load_artists(
         &mut self,
         background: bool,
         anchor_id: Option<String>,
     ) -> Task<Message> {
-        debug!(" LoadArtists message received, loading from app_service...");
-        let view_str =
-            views::ArtistsPage::sort_mode_to_api_string(self.artists_page.common.current_sort_mode);
-        let is_rating_sort =
-            self.artists_page.common.current_sort_mode == widgets::view_header::SortMode::Rating;
-        let sort_order = if self.artists_page.common.sort_ascending {
-            "ASC"
-        } else {
-            "DESC"
-        };
-        let search_query_clone = self.artists_page.common.search_query.clone();
-        let filter_clone = self.artists_page.common.active_filter.clone();
-        let album_artists_only = self.show_album_artists_only;
-
-        // Mark buffer as loading to prevent duplicate fetches
-        self.library.artists.set_loading(true);
-
-        self.shell_task(
-            move |shell| async move {
-                let artists_vm = shell.artists().clone();
-                let search_query = if search_query_clone.is_empty() {
-                    None
-                } else {
-                    Some(search_query_clone.as_str())
-                };
-                debug!(
-                    "📥 LoadArtists: loading with view={}, sort={}, search={:?}",
-                    view_str, sort_order, search_query
-                );
-                match artists_vm
-                    .load_raw_artists(
-                        Some(view_str),
-                        Some(sort_order),
-                        search_query,
-                        filter_clone.as_ref(),
-                        album_artists_only,
-                    )
-                    .await
-                {
-                    Ok(artists) => {
-                        let mut ui_artists: Vec<ArtistUIViewData> =
-                            artists.into_iter().map(ArtistUIViewData::from).collect();
-                        let total_count = artists_vm.get_total_count() as usize;
-
-                        // Client-side sort by rating if needed
-                        if is_rating_sort {
-                            ui_artists.sort_by(|a, b| match (a.rating, b.rating) {
-                                (Some(_), None) => std::cmp::Ordering::Less,
-                                (None, Some(_)) => std::cmp::Ordering::Greater,
-                                (Some(ra), Some(rb)) => rb.cmp(&ra),
-                                (None, None) => std::cmp::Ordering::Equal,
-                            });
-                        }
-
-                        (Ok(ui_artists), total_count)
-                    }
-                    Err(e) => (Err(format!("{e:#}")), 0),
-                }
-            },
-            move |(result, total_count)| {
-                Message::Artists(crate::views::ArtistsMessage::ArtistsLoaded {
-                    result,
-                    total_count,
-                    background,
-                    anchor_id: anchor_id.clone(),
-                })
-            },
-        )
+        self.load_artists_internal(0, move |(result, total_count)| {
+            Message::Artists(ArtistsMessage::ArtistsLoaded {
+                result,
+                total_count,
+                background,
+                anchor_id: anchor_id.clone(),
+            })
+        })
     }
 
     /// Load a subsequent page of artists (triggered by scroll near edge of loaded data)
     pub(crate) fn handle_artists_load_page(&mut self, offset: usize) -> Task<Message> {
-        let page_size = self.library_page_size.to_usize();
-        debug!(
-            " LoadArtistsPage: offset={}, page_size={}",
-            offset, page_size
-        );
-
-        let view_str =
-            views::ArtistsPage::sort_mode_to_api_string(self.artists_page.common.current_sort_mode);
-        let is_rating_sort =
-            self.artists_page.common.current_sort_mode == widgets::view_header::SortMode::Rating;
-        let sort_order = if self.artists_page.common.sort_ascending {
-            "ASC"
-        } else {
-            "DESC"
-        };
-        let search_query_clone = self.artists_page.common.search_query.clone();
-        let filter_clone = self.artists_page.common.active_filter.clone();
-        let album_artists_only = self.show_album_artists_only;
-
-        self.library.artists.set_loading(true);
-
-        self.shell_task(
-            move |shell| async move {
-                let artists_vm = shell.artists().clone();
-                let search_query = if search_query_clone.is_empty() {
-                    None
-                } else {
-                    Some(search_query_clone.as_str())
-                };
-                match artists_vm
-                    .load_raw_artists_page(
-                        Some(view_str),
-                        Some(sort_order),
-                        search_query,
-                        filter_clone.as_ref(),
-                        album_artists_only,
-                        offset,
-                        page_size,
-                    )
-                    .await
-                {
-                    Ok(artists) => {
-                        let mut ui_artists: Vec<ArtistUIViewData> =
-                            artists.into_iter().map(ArtistUIViewData::from).collect();
-                        let total_count = artists_vm.get_total_count() as usize;
-
-                        // Client-side sort by rating if needed
-                        if is_rating_sort {
-                            ui_artists.sort_by(|a, b| match (a.rating, b.rating) {
-                                (Some(_), None) => std::cmp::Ordering::Less,
-                                (None, Some(_)) => std::cmp::Ordering::Greater,
-                                (Some(ra), Some(rb)) => rb.cmp(&ra),
-                                (None, None) => std::cmp::Ordering::Equal,
-                            });
-                        }
-
-                        (Ok(ui_artists), total_count)
-                    }
-                    Err(e) => (Err(format!("{e:#}")), 0),
-                }
-            },
-            |(result, total_count)| {
-                Message::Artists(crate::views::ArtistsMessage::ArtistsPageLoaded(
-                    result,
-                    total_count,
-                ))
-            },
-        )
+        self.load_artists_internal(offset, |(result, total_count)| {
+            Message::Artists(ArtistsMessage::ArtistsPageLoaded(result, total_count))
+        })
     }
 
     /// Handle a subsequent page of artists being loaded (appends to buffer)

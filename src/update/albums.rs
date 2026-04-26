@@ -6,7 +6,7 @@ use iced::{Task, widget::image};
 use nokkvi_data::backend::albums::AlbumUIViewData;
 use tracing::{debug, error, warn};
 
-use super::components::prefetch_album_artwork_tasks;
+use super::components::{PaginatedFetch, prefetch_album_artwork_tasks};
 use crate::{
     Nokkvi, View,
     app_message::{ArtworkMessage, Message},
@@ -14,127 +14,81 @@ use crate::{
 };
 
 impl Nokkvi {
+    /// Shared paginated fetch for Albums. Used by both the initial load
+    /// (`handle_load_albums`, offset 0) and follow-up page loads
+    /// (`handle_albums_load_page`, offset N). The caller supplies a
+    /// message constructor so the result lands on the right
+    /// `AlbumsMessage` variant.
+    fn load_albums_internal<M>(&mut self, offset: usize, msg_ctor: M) -> Task<Message>
+    where
+        M: FnOnce((Result<Vec<AlbumUIViewData>, String>, usize)) -> Message + Send + 'static,
+    {
+        let params = PaginatedFetch::from_common(
+            &self.albums_page.common,
+            views::AlbumsPage::sort_mode_to_api_string,
+            offset,
+            self.library_page_size.to_usize(),
+        );
+        debug!(
+            " LoadAlbums: offset={}, page_size={}, view={}, sort={}, search={:?}",
+            params.offset,
+            params.page_size,
+            params.view_str,
+            params.sort_order,
+            params.search_query,
+        );
+
+        self.library.albums.set_loading(true);
+
+        self.shell_task(
+            move |shell| async move {
+                let albums_vm = shell.albums().clone();
+                match albums_vm
+                    .load_raw_albums_page(
+                        Some(params.view_str),
+                        Some(params.sort_order),
+                        params.search_query.as_deref(),
+                        params.filter.as_ref(),
+                        params.offset,
+                        params.page_size,
+                    )
+                    .await
+                {
+                    Ok(albums) => {
+                        let (url, cred) = albums_vm.get_server_config().await;
+                        let ui_albums: Vec<AlbumUIViewData> = albums
+                            .iter()
+                            .map(|album| AlbumUIViewData::from_album(album, &url, &cred))
+                            .collect();
+                        (Ok(ui_albums), albums_vm.get_total_count() as usize)
+                    }
+                    Err(e) => (Err(format!("{e:#}")), 0),
+                }
+            },
+            msg_ctor,
+        )
+    }
+
     pub(crate) fn handle_load_albums(
         &mut self,
         background: bool,
         anchor_id: Option<String>,
     ) -> Task<Message> {
-        debug!(" LoadAlbums message received, loading from app_service...");
-        let view_str =
-            views::AlbumsPage::sort_mode_to_api_string(self.albums_page.common.current_sort_mode);
-        let sort_order = if self.albums_page.common.sort_ascending {
-            "ASC"
-        } else {
-            "DESC"
-        };
-        let search_query_clone = self.albums_page.common.search_query.clone();
-        let filter_clone = self.albums_page.common.active_filter.clone();
-
-        // Mark buffer as loading to prevent duplicate fetches
-        self.library.albums.set_loading(true);
-
-        self.shell_task(
-            move |shell| async move {
-                let albums_vm = shell.albums().clone();
-                let search_query = if search_query_clone.is_empty() {
-                    None
-                } else {
-                    Some(search_query_clone.as_str())
-                };
-                debug!(
-                    "📥 LoadAlbums: loading with view={}, sort={}, search={:?}",
-                    view_str, sort_order, search_query
-                );
-                match albums_vm
-                    .load_raw_albums(
-                        Some(view_str),
-                        Some(sort_order),
-                        search_query,
-                        filter_clone.as_ref(),
-                    )
-                    .await
-                {
-                    Ok(albums) => {
-                        let mut ui_albums = Vec::new();
-                        let (url, cred) = albums_vm.get_server_config().await;
-                        for album in &albums {
-                            ui_albums.push(AlbumUIViewData::from_album(album, &url, &cred));
-                        }
-                        let total_count = albums_vm.get_total_count() as usize;
-                        (Ok(ui_albums), total_count)
-                    }
-                    Err(e) => (Err(format!("{e:#}")), 0),
-                }
-            },
-            move |(result, total_count)| {
-                Message::Albums(crate::views::AlbumsMessage::AlbumsLoaded {
-                    result,
-                    total_count,
-                    background,
-                    anchor_id: anchor_id.clone(),
-                })
-            },
-        )
+        self.load_albums_internal(0, move |(result, total_count)| {
+            Message::Albums(AlbumsMessage::AlbumsLoaded {
+                result,
+                total_count,
+                background,
+                anchor_id: anchor_id.clone(),
+            })
+        })
     }
 
     /// Load a subsequent page of albums (triggered by scroll near edge of loaded data)
     pub(crate) fn handle_albums_load_page(&mut self, offset: usize) -> Task<Message> {
-        let page_size = self.library_page_size.to_usize();
-        debug!(
-            " LoadAlbumsPage: offset={}, page_size={}",
-            offset, page_size
-        );
-
-        let view_str =
-            views::AlbumsPage::sort_mode_to_api_string(self.albums_page.common.current_sort_mode);
-        let sort_order = if self.albums_page.common.sort_ascending {
-            "ASC"
-        } else {
-            "DESC"
-        };
-        let search_query_clone = self.albums_page.common.search_query.clone();
-        let filter_clone = self.albums_page.common.active_filter.clone();
-
-        self.library.albums.set_loading(true);
-
-        self.shell_task(
-            move |shell| async move {
-                let albums_vm = shell.albums().clone();
-                let search_query = if search_query_clone.is_empty() {
-                    None
-                } else {
-                    Some(search_query_clone.as_str())
-                };
-                match albums_vm
-                    .load_raw_albums_page(
-                        Some(view_str),
-                        Some(sort_order),
-                        search_query,
-                        filter_clone.as_ref(),
-                        offset,
-                        page_size,
-                    )
-                    .await
-                {
-                    Ok(albums) => {
-                        let mut ui_albums = Vec::new();
-                        let (url, cred) = albums_vm.get_server_config().await;
-                        for album in &albums {
-                            ui_albums.push(AlbumUIViewData::from_album(album, &url, &cred));
-                        }
-                        let total_count = albums_vm.get_total_count() as usize;
-                        (Ok(ui_albums), total_count)
-                    }
-                    Err(e) => (Err(format!("{e:#}")), 0),
-                }
-            },
-            |(result, total_count)| {
-                Message::Albums(crate::views::AlbumsMessage::AlbumsPageLoaded(
-                    result,
-                    total_count,
-                ))
-            },
-        )
+        self.load_albums_internal(offset, |(result, total_count)| {
+            Message::Albums(AlbumsMessage::AlbumsPageLoaded(result, total_count))
+        })
     }
 
     /// Handle a subsequent page of albums being loaded (appends to buffer)

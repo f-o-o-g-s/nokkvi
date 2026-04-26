@@ -3409,3 +3409,66 @@ fn albums_seek_settled_skipped_when_generation_id_is_stale() {
         "stale-generation seek_settled timer must not start a fetch"
     );
 }
+
+// ============================================================================
+// Artists rating-sort carve-out (Phase 3B regression net)
+//
+// The Subsonic API does not expose a "by rating" sort, so the artists handler
+// sorts client-side after each page load. Phase 3B's `load_paginated`
+// consolidation must preserve this behaviour — these tests pin the contract
+// of `Nokkvi::artists_rating_sort`.
+// ============================================================================
+
+#[test]
+fn artists_rating_sort_some_before_none_then_desc_by_value() {
+    use nokkvi_data::backend::artists::ArtistUIViewData;
+
+    use crate::Nokkvi;
+
+    fn make(id: &str, rating: Option<u32>) -> ArtistUIViewData {
+        ArtistUIViewData {
+            id: id.into(),
+            name: format!("Artist {id}"),
+            album_count: 0,
+            song_count: 0,
+            is_starred: false,
+            image_url: None,
+            artwork_url: None,
+            rating,
+            play_count: None,
+            play_date: None,
+            size: None,
+            mbz_artist_id: None,
+            biography: None,
+            external_url: None,
+            searchable_lower: String::new(),
+        }
+    }
+
+    let mut artists = vec![
+        make("none1", None),
+        make("low", Some(1)),
+        make("none2", None),
+        make("high", Some(5)),
+        make("mid", Some(3)),
+    ];
+    Nokkvi::artists_rating_sort(&mut artists);
+
+    let order: Vec<&str> = artists.iter().map(|a| a.id.as_str()).collect();
+    assert_eq!(
+        order,
+        vec!["high", "mid", "low", "none1", "none2"],
+        "rated artists come first sorted desc by value; unrated artists tail in original order"
+    );
+}
+
+#[test]
+fn artists_rating_sort_empty_is_noop() {
+    use nokkvi_data::backend::artists::ArtistUIViewData;
+
+    use crate::Nokkvi;
+
+    let mut artists: Vec<ArtistUIViewData> = vec![];
+    Nokkvi::artists_rating_sort(&mut artists);
+    assert!(artists.is_empty());
+}

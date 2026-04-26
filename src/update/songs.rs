@@ -6,7 +6,7 @@ use iced::{Task, widget::image};
 use nokkvi_data::backend::songs::SongUIViewData;
 use tracing::{debug, error};
 
-use super::components::prefetch_song_artwork_tasks;
+use super::components::{PaginatedFetch, prefetch_song_artwork_tasks};
 use crate::{
     Nokkvi, View,
     app_message::{ArtworkMessage, Message},
@@ -14,119 +14,76 @@ use crate::{
 };
 
 impl Nokkvi {
+    /// Shared paginated fetch for Songs. Used by both the initial load
+    /// (`handle_load_songs`, offset 0) and follow-up page loads
+    /// (`handle_songs_load_page`, offset N).
+    fn load_songs_internal<M>(&mut self, offset: usize, msg_ctor: M) -> Task<Message>
+    where
+        M: FnOnce((Result<Vec<SongUIViewData>, String>, usize)) -> Message + Send + 'static,
+    {
+        let params = PaginatedFetch::from_common(
+            &self.songs_page.common,
+            views::SongsPage::sort_mode_to_api_string,
+            offset,
+            self.library_page_size.to_usize(),
+        );
+        debug!(
+            " LoadSongs: offset={}, page_size={}, view={}, sort={}, search={:?}",
+            params.offset,
+            params.page_size,
+            params.view_str,
+            params.sort_order,
+            params.search_query,
+        );
+
+        self.library.songs.set_loading(true);
+
+        self.shell_task(
+            move |shell| async move {
+                let songs_vm = shell.songs().clone();
+                match songs_vm
+                    .load_raw_songs_page(
+                        Some(params.view_str),
+                        Some(params.sort_order),
+                        params.search_query.as_deref(),
+                        params.filter.as_ref(),
+                        params.offset,
+                        params.page_size,
+                    )
+                    .await
+                {
+                    Ok(songs) => {
+                        let ui_songs: Vec<SongUIViewData> =
+                            songs.into_iter().map(SongUIViewData::from).collect();
+                        (Ok(ui_songs), songs_vm.get_total_count() as usize)
+                    }
+                    Err(e) => (Err(format!("{e:#}")), 0),
+                }
+            },
+            msg_ctor,
+        )
+    }
+
     pub(crate) fn handle_load_songs(
         &mut self,
         background: bool,
         anchor_id: Option<String>,
     ) -> Task<Message> {
-        debug!(" LoadSongs message received, loading from songs viewmodel...");
-        let view_str =
-            views::SongsPage::sort_mode_to_api_string(self.songs_page.common.current_sort_mode);
-        let sort_order = if self.songs_page.common.sort_ascending {
-            "ASC"
-        } else {
-            "DESC"
-        };
-        let search_query_clone = self.songs_page.common.search_query.clone();
-        let filter_clone = self.songs_page.common.active_filter.clone();
-
-        // Mark buffer as loading to prevent duplicate fetches
-        self.library.songs.set_loading(true);
-        let page_size = self.library_page_size.to_usize();
-
-        self.shell_task(
-            move |shell| async move {
-                let songs_vm = shell.songs().clone();
-                let search_query = if search_query_clone.is_empty() {
-                    None
-                } else {
-                    Some(search_query_clone.as_str())
-                };
-                debug!(
-                    "📥 LoadSongs: loading with view={}, sort={}, search={:?}",
-                    view_str, sort_order, search_query
-                );
-                match songs_vm
-                    .load_raw_songs_page(
-                        Some(view_str),
-                        Some(sort_order),
-                        search_query,
-                        filter_clone.as_ref(),
-                        0,
-                        page_size,
-                    )
-                    .await
-                {
-                    Ok(songs) => {
-                        let ui_songs: Vec<SongUIViewData> =
-                            songs.into_iter().map(SongUIViewData::from).collect();
-                        let total_count = songs_vm.get_total_count() as usize;
-                        (Ok(ui_songs), total_count)
-                    }
-                    Err(e) => (Err(format!("{e:#}")), 0),
-                }
-            },
-            move |(result, total_count)| {
-                Message::Songs(views::SongsMessage::SongsLoaded {
-                    result,
-                    total_count,
-                    background,
-                    anchor_id: anchor_id.clone(),
-                })
-            },
-        )
+        self.load_songs_internal(0, move |(result, total_count)| {
+            Message::Songs(SongsMessage::SongsLoaded {
+                result,
+                total_count,
+                background,
+                anchor_id: anchor_id.clone(),
+            })
+        })
     }
 
     /// Load a subsequent page of songs (triggered by scroll near edge of loaded data)
     pub(crate) fn handle_songs_load_page(&mut self, offset: usize) -> Task<Message> {
-        let page_size = self.library_page_size.to_usize();
-        debug!(" LoadSongsPage: offset={}, page_size={}", offset, page_size);
-
-        let view_str =
-            views::SongsPage::sort_mode_to_api_string(self.songs_page.common.current_sort_mode);
-        let sort_order = if self.songs_page.common.sort_ascending {
-            "ASC"
-        } else {
-            "DESC"
-        };
-        let search_query_clone = self.songs_page.common.search_query.clone();
-        let filter_clone = self.songs_page.common.active_filter.clone();
-
-        // Mark loading to prevent duplicate fetches
-        self.library.songs.set_loading(true);
-
-        self.shell_task(
-            move |shell| async move {
-                let songs_vm = shell.songs().clone();
-                let search_query = if search_query_clone.is_empty() {
-                    None
-                } else {
-                    Some(search_query_clone.as_str())
-                };
-                match songs_vm
-                    .load_raw_songs_page(
-                        Some(view_str),
-                        Some(sort_order),
-                        search_query,
-                        filter_clone.as_ref(),
-                        offset,
-                        page_size,
-                    )
-                    .await
-                {
-                    Ok(songs) => {
-                        let ui_songs: Vec<SongUIViewData> =
-                            songs.into_iter().map(SongUIViewData::from).collect();
-                        let total_count = songs_vm.get_total_count() as usize;
-                        (Ok(ui_songs), total_count)
-                    }
-                    Err(e) => (Err(format!("{e:#}")), 0),
-                }
-            },
-            |(result, total_count)| {
-                Message::Songs(views::SongsMessage::SongsPageLoaded(result, total_count))
-            },
-        )
+        self.load_songs_internal(offset, |(result, total_count)| {
+            Message::Songs(SongsMessage::SongsPageLoaded(result, total_count))
+        })
     }
 
     /// Handle a subsequent page of songs being loaded (appends to buffer)
