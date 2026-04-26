@@ -169,14 +169,28 @@ impl Nokkvi {
                 }
                 self.library.albums.set_first_page(new_albums, total_count);
 
+                let new_len = self.library.albums.len();
                 if !background {
                     self.albums_page.common.slot_list.viewport_offset = 0;
                     self.albums_page.common.slot_list.selected_indices.clear();
-                } else if let Some(ref id) = anchor_id {
-                    let albums = &self.library.albums;
-                    if let Some(new_idx) = albums.iter().position(|a| a.id == *id) {
-                        self.albums_page.common.slot_list.viewport_offset = new_idx;
-                    }
+                } else {
+                    // Anchor wins when found; otherwise clamp the existing
+                    // offset so it stays within the new buffer. Without the
+                    // clamp, a shorter post-refresh list leaves viewport_offset
+                    // pointing past the end and every slot falls back to
+                    // `empty_slot()` — borders/backgrounds visible, text/artwork
+                    // blank.
+                    let current = self.albums_page.common.slot_list.viewport_offset;
+                    let new_offset = anchor_id
+                        .as_ref()
+                        .and_then(|id| self.library.albums.iter().position(|a| a.id == *id))
+                        .unwrap_or_else(|| current.min(new_len.saturating_sub(1)));
+                    self.albums_page.common.slot_list.viewport_offset = new_offset;
+                    self.albums_page
+                        .common
+                        .slot_list
+                        .selected_indices
+                        .retain(|&i| i < new_len);
                 }
                 let mut tasks: Vec<Task<Message>> = Vec::new();
 

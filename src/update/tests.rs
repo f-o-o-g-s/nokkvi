@@ -2864,6 +2864,191 @@ fn library_refreshed_suppresses_toast_when_flag_set() {
 }
 
 // ============================================================================
+// Albums library-refresh: viewport reconciliation (PROMPT 16)
+// ============================================================================
+//
+// Repro: idle on Albums view (sort=RecentlyAdded), SSE refresh fires, slots
+// render blank — borders and backgrounds remain but text/artwork are gone.
+//
+// Root cause: `handle_library_changed` snapshots `viewport_offset` and the
+// album at that offset as an anchor, then `handle_albums_loaded` only updates
+// `viewport_offset` when the anchor is *found* in the new list. If the new
+// list is shorter than the old offset (server pruned, reordered, or the
+// anchor album was removed), `viewport_offset` is left pointing past the end
+// of the buffer. `get_slot_item_index_with_center` then returns `None` for
+// every slot, and `build_slot_list_slots` falls back to `empty_slot()` —
+// which is exactly the "border/background remains, text blank" symptom.
+//
+// Tests target observable state: `viewport_offset` against new buffer length,
+// `selected_indices` purge, and the `library.counts.albums` / buffer-length
+// agreement after the load completes.
+
+#[test]
+fn albums_loaded_clamps_viewport_when_anchor_missing() {
+    // Old buffer had 50 albums, viewport was deep at 40. SSE-driven refresh
+    // returns 15 albums and the anchor ID isn't present. viewport_offset must
+    // land within the new buffer to keep slots rendering real items.
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    let old_albums: Vec<_> = (0..50)
+        .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
+        .collect();
+    app.library.albums.set_from_vec(old_albums);
+    app.albums_page.common.slot_list.viewport_offset = 40;
+
+    let new_albums: Vec<_> = (0..15)
+        .map(|i| make_album(&format!("b{i}"), &format!("New {i}"), "Artist"))
+        .collect();
+    let _ = app.handle_albums_loaded(Ok(new_albums), 15, true, Some("a40".to_string()));
+
+    assert_eq!(app.library.albums.len(), 15);
+    assert!(
+        app.albums_page.common.slot_list.viewport_offset < app.library.albums.len(),
+        "viewport_offset {} must stay within new buffer length {}",
+        app.albums_page.common.slot_list.viewport_offset,
+        app.library.albums.len()
+    );
+}
+
+#[test]
+fn albums_loaded_clamps_viewport_when_anchor_id_none() {
+    // Background reload with no anchor (pre-existing buffer empty at snapshot
+    // time, then offset advanced somehow). viewport_offset still must land
+    // within the new buffer.
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    let old_albums: Vec<_> = (0..30)
+        .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
+        .collect();
+    app.library.albums.set_from_vec(old_albums);
+    app.albums_page.common.slot_list.viewport_offset = 25;
+
+    let new_albums: Vec<_> = (0..10)
+        .map(|i| make_album(&format!("b{i}"), &format!("New {i}"), "Artist"))
+        .collect();
+    let _ = app.handle_albums_loaded(Ok(new_albums), 10, true, None);
+
+    assert!(
+        app.albums_page.common.slot_list.viewport_offset < app.library.albums.len(),
+        "viewport_offset {} must stay within new buffer length {}",
+        app.albums_page.common.slot_list.viewport_offset,
+        app.library.albums.len()
+    );
+}
+
+#[test]
+fn albums_loaded_anchor_match_takes_precedence_over_clamp() {
+    // When the anchor IS found, anchor wins — viewport jumps to the new
+    // index, even though that index is also within bounds. Locks the existing
+    // anchor-restore behavior so the clamp fix can't quietly override it.
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    let old_albums: Vec<_> = (0..50)
+        .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
+        .collect();
+    app.library.albums.set_from_vec(old_albums);
+    app.albums_page.common.slot_list.viewport_offset = 40;
+
+    // New list: a40 sits at index 5 (5 newer albums prepended, recently-added
+    // sort behavior).
+    let mut new_albums: Vec<_> = (0..5)
+        .map(|i| make_album(&format!("new{i}"), &format!("Newest {i}"), "Artist"))
+        .collect();
+    new_albums.push(make_album("a40", "Album 40", "Artist"));
+    new_albums
+        .extend((41..50).map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist")));
+
+    let _ = app.handle_albums_loaded(Ok(new_albums), 15, true, Some("a40".to_string()));
+
+    assert_eq!(
+        app.albums_page.common.slot_list.viewport_offset, 5,
+        "anchor lookup should jump viewport to the anchor's new index"
+    );
+}
+
+#[test]
+fn albums_loaded_purges_stale_selected_indices() {
+    // Selected indices that point past the new buffer must be removed —
+    // otherwise the slot list highlight + batch-action paths see phantom
+    // selections against items that no longer exist.
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    let old_albums: Vec<_> = (0..50)
+        .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
+        .collect();
+    app.library.albums.set_from_vec(old_albums);
+    app.albums_page.common.slot_list.viewport_offset = 40;
+    app.albums_page
+        .common
+        .slot_list
+        .selected_indices
+        .extend([3, 35, 40, 45]);
+
+    let new_albums: Vec<_> = (0..10)
+        .map(|i| make_album(&format!("b{i}"), &format!("New {i}"), "Artist"))
+        .collect();
+    let _ = app.handle_albums_loaded(Ok(new_albums), 10, true, None);
+
+    let stale: Vec<_> = app
+        .albums_page
+        .common
+        .slot_list
+        .selected_indices
+        .iter()
+        .copied()
+        .filter(|&i| i >= app.library.albums.len())
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "selected_indices should not retain entries past new buffer length, got stale: {stale:?}"
+    );
+}
+
+#[test]
+fn albums_loaded_total_count_matches_buffer_length() {
+    // Header total count and buffer length come from the same load — they
+    // must agree after `handle_albums_loaded` returns. Locks the assignment
+    // ordering so a future reorder doesn't introduce a transient mismatch.
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    let old_albums: Vec<_> = (0..50)
+        .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
+        .collect();
+    app.library.albums.set_from_vec(old_albums);
+    app.library.counts.albums = 50;
+
+    let new_albums: Vec<_> = (0..30)
+        .map(|i| make_album(&format!("b{i}"), &format!("New {i}"), "Artist"))
+        .collect();
+    let _ = app.handle_albums_loaded(Ok(new_albums), 30, true, None);
+
+    assert_eq!(app.library.albums.len(), 30);
+    assert_eq!(app.library.counts.albums, 30);
+}
+
+#[test]
+fn albums_loaded_background_preserves_viewport_when_safe() {
+    // Background refresh with anchor found at the same index must NOT reset
+    // viewport to 0 (foreground refresh resets, background preserves).
+    // Regression guard around the existing `if !background` branch in
+    // `handle_albums_loaded`.
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    let albums: Vec<_> = (0..50)
+        .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
+        .collect();
+    app.library.albums.set_from_vec(albums.clone());
+    app.albums_page.common.slot_list.viewport_offset = 12;
+
+    let _ = app.handle_albums_loaded(Ok(albums), 50, true, Some("a12".to_string()));
+
+    assert_eq!(
+        app.albums_page.common.slot_list.viewport_offset, 12,
+        "background refresh with stable anchor should preserve viewport_offset"
+    );
+}
+
+// ============================================================================
 // Scrollbar Seek → Large Artwork Loading (regression: missing large artwork
 // after rapid scroll in albums view)
 // ============================================================================
