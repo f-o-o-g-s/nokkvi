@@ -38,6 +38,23 @@ pub struct TomlSettings {
     #[serde(default)]
     pub queue_show_plays: bool,
 
+    pub albums_show_stars: bool,
+    pub albums_show_songcount: bool,
+    pub albums_show_plays: bool,
+    pub albums_show_love: bool,
+
+    pub songs_show_stars: bool,
+    pub songs_show_album: bool,
+    pub songs_show_duration: bool,
+    pub songs_show_plays: bool,
+    pub songs_show_love: bool,
+
+    pub artists_show_stars: bool,
+    pub artists_show_albumcount: bool,
+    pub artists_show_songcount: bool,
+    pub artists_show_plays: bool,
+    pub artists_show_love: bool,
+
     // -- Behavior --
     pub stable_viewport: bool,
     pub auto_follow_playing: bool,
@@ -123,6 +140,20 @@ impl Default for TomlSettings {
             queue_show_duration: true,
             queue_show_love: true,
             queue_show_plays: false,
+            albums_show_stars: false,
+            albums_show_songcount: true,
+            albums_show_plays: false,
+            albums_show_love: true,
+            songs_show_stars: false,
+            songs_show_album: true,
+            songs_show_duration: true,
+            songs_show_plays: false,
+            songs_show_love: true,
+            artists_show_stars: true,
+            artists_show_albumcount: true,
+            artists_show_songcount: true,
+            artists_show_plays: true,
+            artists_show_love: true,
             stable_viewport: true,
             auto_follow_playing: true,
             light_mode: false,
@@ -175,6 +206,20 @@ impl TomlSettings {
             queue_show_duration: ps.queue_show_duration,
             queue_show_love: ps.queue_show_love,
             queue_show_plays: ps.queue_show_plays,
+            albums_show_stars: ps.albums_show_stars,
+            albums_show_songcount: ps.albums_show_songcount,
+            albums_show_plays: ps.albums_show_plays,
+            albums_show_love: ps.albums_show_love,
+            songs_show_stars: ps.songs_show_stars,
+            songs_show_album: ps.songs_show_album,
+            songs_show_duration: ps.songs_show_duration,
+            songs_show_plays: ps.songs_show_plays,
+            songs_show_love: ps.songs_show_love,
+            artists_show_stars: ps.artists_show_stars,
+            artists_show_albumcount: ps.artists_show_albumcount,
+            artists_show_songcount: ps.artists_show_songcount,
+            artists_show_plays: ps.artists_show_plays,
+            artists_show_love: ps.artists_show_love,
             stable_viewport: ps.stable_viewport,
             auto_follow_playing: ps.auto_follow_playing,
             light_mode: false, // Will be read from theme.light_mode or fresh default
@@ -271,6 +316,48 @@ mod tests {
     fn toml_queue_show_plays_default_is_off() {
         let settings = TomlSettings::default();
         assert!(!settings.queue_show_plays);
+    }
+
+    #[test]
+    fn toml_view_column_defaults_preserve_today_behavior() {
+        let s = TomlSettings::default();
+        // Albums: stars + plays opt-in (today only show on their sort modes).
+        assert!(!s.albums_show_stars);
+        assert!(s.albums_show_songcount);
+        assert!(!s.albums_show_plays);
+        assert!(s.albums_show_love);
+        // Songs: same opt-in pattern.
+        assert!(!s.songs_show_stars);
+        assert!(s.songs_show_album);
+        assert!(s.songs_show_duration);
+        assert!(!s.songs_show_plays);
+        assert!(s.songs_show_love);
+        // Artists: everything on (today's permanent layout).
+        assert!(s.artists_show_stars);
+        assert!(s.artists_show_albumcount);
+        assert!(s.artists_show_songcount);
+        assert!(s.artists_show_plays);
+        assert!(s.artists_show_love);
+    }
+
+    #[test]
+    fn toml_roundtrip_view_column_visibility() {
+        let mut s = TomlSettings::default();
+        s.albums_show_stars = true;
+        s.albums_show_plays = true;
+        s.songs_show_stars = true;
+        s.songs_show_album = false;
+        s.artists_show_plays = false;
+        s.artists_show_love = false;
+
+        let toml_str = toml::to_string_pretty(&s).expect("serialize");
+        let parsed: TomlSettings = toml::from_str(&toml_str).expect("deserialize");
+        assert!(parsed.albums_show_stars);
+        assert!(parsed.albums_show_plays);
+        assert!(parsed.songs_show_stars);
+        assert!(!parsed.songs_show_album);
+        assert!(!parsed.artists_show_plays);
+        assert!(!parsed.artists_show_love);
     }
 
     #[test]

@@ -1059,6 +1059,26 @@ impl Nokkvi {
         self.queue_page.column_visibility.love = settings.queue_show_love;
         self.queue_page.column_visibility.plays = settings.queue_show_plays;
 
+        // Restore Artists view column visibility.
+        self.artists_page.column_visibility.stars = settings.artists_show_stars;
+        self.artists_page.column_visibility.albumcount = settings.artists_show_albumcount;
+        self.artists_page.column_visibility.songcount = settings.artists_show_songcount;
+        self.artists_page.column_visibility.plays = settings.artists_show_plays;
+        self.artists_page.column_visibility.love = settings.artists_show_love;
+
+        // Restore Albums view column visibility.
+        self.albums_page.column_visibility.stars = settings.albums_show_stars;
+        self.albums_page.column_visibility.songcount = settings.albums_show_songcount;
+        self.albums_page.column_visibility.plays = settings.albums_show_plays;
+        self.albums_page.column_visibility.love = settings.albums_show_love;
+
+        // Restore Songs view column visibility.
+        self.songs_page.column_visibility.stars = settings.songs_show_stars;
+        self.songs_page.column_visibility.album = settings.songs_show_album;
+        self.songs_page.column_visibility.duration = settings.songs_show_duration;
+        self.songs_page.column_visibility.plays = settings.songs_show_plays;
+        self.songs_page.column_visibility.love = settings.songs_show_love;
+
         // Restore active playlist context from persisted settings
         self.active_playlist_info =
             settings

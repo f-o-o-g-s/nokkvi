@@ -374,6 +374,76 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_albums_show_stars(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.albums_show_stars = enabled;
+        self.save()
+    }
+
+    pub fn set_albums_show_songcount(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.albums_show_songcount = enabled;
+        self.save()
+    }
+
+    pub fn set_albums_show_plays(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.albums_show_plays = enabled;
+        self.save()
+    }
+
+    pub fn set_albums_show_love(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.albums_show_love = enabled;
+        self.save()
+    }
+
+    pub fn set_songs_show_stars(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.songs_show_stars = enabled;
+        self.save()
+    }
+
+    pub fn set_songs_show_album(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.songs_show_album = enabled;
+        self.save()
+    }
+
+    pub fn set_songs_show_duration(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.songs_show_duration = enabled;
+        self.save()
+    }
+
+    pub fn set_songs_show_plays(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.songs_show_plays = enabled;
+        self.save()
+    }
+
+    pub fn set_songs_show_love(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.songs_show_love = enabled;
+        self.save()
+    }
+
+    pub fn set_artists_show_stars(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.artists_show_stars = enabled;
+        self.save()
+    }
+
+    pub fn set_artists_show_albumcount(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.artists_show_albumcount = enabled;
+        self.save()
+    }
+
+    pub fn set_artists_show_songcount(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.artists_show_songcount = enabled;
+        self.save()
+    }
+
+    pub fn set_artists_show_plays(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.artists_show_plays = enabled;
+        self.save()
+    }
+
+    pub fn set_artists_show_love(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.artists_show_love = enabled;
+        self.save()
+    }
+
     pub fn set_active_playlist(
         &mut self,
         id: Option<String>,
@@ -582,6 +652,20 @@ impl SettingsManager {
             queue_show_duration: p.queue_show_duration,
             queue_show_love: p.queue_show_love,
             queue_show_plays: p.queue_show_plays,
+            albums_show_stars: p.albums_show_stars,
+            albums_show_songcount: p.albums_show_songcount,
+            albums_show_plays: p.albums_show_plays,
+            albums_show_love: p.albums_show_love,
+            songs_show_stars: p.songs_show_stars,
+            songs_show_album: p.songs_show_album,
+            songs_show_duration: p.songs_show_duration,
+            songs_show_plays: p.songs_show_plays,
+            songs_show_love: p.songs_show_love,
+            artists_show_stars: p.artists_show_stars,
+            artists_show_albumcount: p.artists_show_albumcount,
+            artists_show_songcount: p.artists_show_songcount,
+            artists_show_plays: p.artists_show_plays,
+            artists_show_love: p.artists_show_love,
         }
     }
 
@@ -655,6 +739,20 @@ fn apply_toml_settings_to_internal(
     p.queue_show_duration = ts.queue_show_duration;
     p.queue_show_love = ts.queue_show_love;
     p.queue_show_plays = ts.queue_show_plays;
+    p.albums_show_stars = ts.albums_show_stars;
+    p.albums_show_songcount = ts.albums_show_songcount;
+    p.albums_show_plays = ts.albums_show_plays;
+    p.albums_show_love = ts.albums_show_love;
+    p.songs_show_stars = ts.songs_show_stars;
+    p.songs_show_album = ts.songs_show_album;
+    p.songs_show_duration = ts.songs_show_duration;
+    p.songs_show_plays = ts.songs_show_plays;
+    p.songs_show_love = ts.songs_show_love;
+    p.artists_show_stars = ts.artists_show_stars;
+    p.artists_show_albumcount = ts.artists_show_albumcount;
+    p.artists_show_songcount = ts.artists_show_songcount;
+    p.artists_show_plays = ts.artists_show_plays;
+    p.artists_show_love = ts.artists_show_love;
 }
 
 /// Convert `AllViewPreferences` into the internal `ViewPreferences` for redb storage.

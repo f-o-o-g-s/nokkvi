@@ -169,6 +169,54 @@ pub struct PlayerSettings {
     /// When sort = MostPlayed, the column auto-shows regardless of this toggle.
     #[serde(default)]
     pub queue_show_plays: bool,
+
+    // -- Albums view column toggles --
+    /// Stars column. Auto-shows when sort = Rating regardless of toggle.
+    #[serde(default)]
+    pub albums_show_stars: bool,
+    /// Song count column.
+    #[serde(default = "default_true")]
+    pub albums_show_songcount: bool,
+    /// Plays column. Auto-shows when sort = MostPlayed regardless of toggle.
+    #[serde(default)]
+    pub albums_show_plays: bool,
+    /// Heart (favorite) column.
+    #[serde(default = "default_true")]
+    pub albums_show_love: bool,
+
+    // -- Songs view column toggles --
+    /// Stars column. Auto-shows when sort = Rating regardless of toggle.
+    #[serde(default)]
+    pub songs_show_stars: bool,
+    /// Album column.
+    #[serde(default = "default_true")]
+    pub songs_show_album: bool,
+    /// Duration column.
+    #[serde(default = "default_true")]
+    pub songs_show_duration: bool,
+    /// Plays column. Auto-shows when sort = MostPlayed regardless of toggle.
+    #[serde(default)]
+    pub songs_show_plays: bool,
+    /// Heart (favorite) column.
+    #[serde(default = "default_true")]
+    pub songs_show_love: bool,
+
+    // -- Artists view column toggles --
+    /// Stars column. Auto-shows when sort = Rating regardless of toggle.
+    #[serde(default = "default_true")]
+    pub artists_show_stars: bool,
+    /// Album count column.
+    #[serde(default = "default_true")]
+    pub artists_show_albumcount: bool,
+    /// Song count column.
+    #[serde(default = "default_true")]
+    pub artists_show_songcount: bool,
+    /// Plays column. Auto-shows when sort = MostPlayed regardless of toggle.
+    #[serde(default = "default_true")]
+    pub artists_show_plays: bool,
+    /// Heart (favorite) column.
+    #[serde(default = "default_true")]
+    pub artists_show_love: bool,
 }
 
 fn default_eq_gains() -> [f32; 10] {
@@ -262,6 +310,20 @@ impl Default for PlayerSettings {
             queue_show_duration: true,
             queue_show_love: true,
             queue_show_plays: false,
+            albums_show_stars: false,
+            albums_show_songcount: true,
+            albums_show_plays: false,
+            albums_show_love: true,
+            songs_show_stars: false,
+            songs_show_album: true,
+            songs_show_duration: true,
+            songs_show_plays: false,
+            songs_show_love: true,
+            artists_show_stars: true,
+            artists_show_albumcount: true,
+            artists_show_songcount: true,
+            artists_show_plays: true,
+            artists_show_love: true,
         }
     }
 }

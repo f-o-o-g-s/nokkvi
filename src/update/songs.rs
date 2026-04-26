@@ -554,9 +554,50 @@ impl Nokkvi {
             SongsAction::TopSongs(artist_name, label) => {
                 return self.handle_find_top_songs(artist_name, label);
             }
+            SongsAction::ColumnVisibilityChanged(col, value) => {
+                return self.persist_songs_column_visibility(col, value);
+            }
             _ => {} // None + already-handled common actions
         }
 
         cmd.map(Message::Songs)
+    }
+
+    /// Persist the user's songs column visibility toggle to config.toml +
+    /// redb via `AppService::settings()`. The page's in-memory state was
+    /// already mutated in `SongsPage::update`.
+    pub(crate) fn persist_songs_column_visibility(
+        &self,
+        col: views::SongsColumn,
+        value: bool,
+    ) -> Task<Message> {
+        match col {
+            views::SongsColumn::Stars => {
+                self.shell_spawn("persist_songs_show_stars", move |shell| async move {
+                    shell.settings().set_songs_show_stars(value).await
+                });
+            }
+            views::SongsColumn::Album => {
+                self.shell_spawn("persist_songs_show_album", move |shell| async move {
+                    shell.settings().set_songs_show_album(value).await
+                });
+            }
+            views::SongsColumn::Duration => {
+                self.shell_spawn("persist_songs_show_duration", move |shell| async move {
+                    shell.settings().set_songs_show_duration(value).await
+                });
+            }
+            views::SongsColumn::Plays => {
+                self.shell_spawn("persist_songs_show_plays", move |shell| async move {
+                    shell.settings().set_songs_show_plays(value).await
+                });
+            }
+            views::SongsColumn::Love => {
+                self.shell_spawn("persist_songs_show_love", move |shell| async move {
+                    shell.settings().set_songs_show_love(value).await
+                });
+            }
+        }
+        Task::none()
     }
 }

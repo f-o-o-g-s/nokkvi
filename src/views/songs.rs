@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use iced::{
     Alignment, Element, Length, Task,
-    widget::{button, container, image, row, text},
+    widget::{button, container, image, row},
 };
 use nokkvi_data::{backend::songs::SongUIViewData, utils::formatters};
 
@@ -17,6 +17,72 @@ use crate::widgets::{self, SlotListPageState, view_header::SortMode};
 #[derive(Debug)]
 pub struct SongsPage {
     pub common: SlotListPageState,
+    /// Per-column visibility toggles surfaced via the columns-cog dropdown.
+    pub column_visibility: SongsColumnVisibility,
+}
+
+/// Toggleable songs columns. Index/Art/Title+Artist are always shown; the
+/// dynamic 18% slot still auto-renders Date/Year/Genre when sorted by those
+/// modes. Stars and Plays are now dedicated columns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SongsColumn {
+    Stars,
+    Album,
+    Duration,
+    Plays,
+    Love,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SongsColumnVisibility {
+    pub stars: bool,
+    pub album: bool,
+    pub duration: bool,
+    pub plays: bool,
+    pub love: bool,
+}
+
+impl Default for SongsColumnVisibility {
+    fn default() -> Self {
+        // Stars and Plays opt-in; Album/Duration/Love always-on today.
+        Self {
+            stars: false,
+            album: true,
+            duration: true,
+            plays: false,
+            love: true,
+        }
+    }
+}
+
+impl SongsColumnVisibility {
+    pub fn get(&self, col: SongsColumn) -> bool {
+        match col {
+            SongsColumn::Stars => self.stars,
+            SongsColumn::Album => self.album,
+            SongsColumn::Duration => self.duration,
+            SongsColumn::Plays => self.plays,
+            SongsColumn::Love => self.love,
+        }
+    }
+
+    pub fn set(&mut self, col: SongsColumn, value: bool) {
+        match col {
+            SongsColumn::Stars => self.stars = value,
+            SongsColumn::Album => self.album = value,
+            SongsColumn::Duration => self.duration = value,
+            SongsColumn::Plays => self.plays = value,
+            SongsColumn::Love => self.love = value,
+        }
+    }
+}
+
+pub(crate) fn songs_stars_visible(sort: SortMode, user_visible: bool) -> bool {
+    user_visible || matches!(sort, SortMode::Rating)
+}
+
+pub(crate) fn songs_plays_visible(sort: SortMode, user_visible: bool) -> bool {
+    user_visible || matches!(sort, SortMode::MostPlayed)
 }
 
 /// View data passed from root (read-only, borrows from app state to avoid allocations)
@@ -73,6 +139,7 @@ pub enum SongsMessage {
     RefreshArtwork(String),
     /// Navigate to a view and apply an ID filter
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
+    ToggleColumnVisible(SongsColumn),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -100,6 +167,7 @@ pub enum SongsAction {
     TopSongs(String, String),    // (artist, label) - Find top songs by artist
     CenterOnPlaying,
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
+    ColumnVisibilityChanged(SongsColumn, bool),
     None,
 }
 
@@ -127,6 +195,7 @@ impl Default for SongsPage {
                 widgets::view_header::SortMode::RecentlyAdded,
                 false, // sort_ascending
             ),
+            column_visibility: SongsColumnVisibility::default(),
         }
     }
 }
@@ -360,6 +429,14 @@ impl SongsPage {
             SongsMessage::NavigateAndFilter(view, filter) => {
                 (Task::none(), SongsAction::NavigateAndFilter(view, filter))
             }
+            SongsMessage::ToggleColumnVisible(col) => {
+                let new_value = !self.column_visibility.get(col);
+                self.column_visibility.set(col, new_value);
+                (
+                    Task::none(),
+                    SongsAction::ColumnVisibilityChanged(col, new_value),
+                )
+            }
         }
     }
 
@@ -390,6 +467,30 @@ impl SongsPage {
     pub fn view<'a>(&'a self, data: SongsViewData<'a>) -> Element<'a, SongsMessage> {
         use crate::widgets::view_header::SortMode;
 
+        let column_dropdown: Element<'a, SongsMessage> = {
+            use crate::widgets::checkbox_dropdown::checkbox_dropdown;
+            let items = vec![
+                ("Stars".to_string(), self.column_visibility.stars),
+                ("Album".to_string(), self.column_visibility.album),
+                ("Duration".to_string(), self.column_visibility.duration),
+                ("Plays".to_string(), self.column_visibility.plays),
+                ("Love".to_string(), self.column_visibility.love),
+            ];
+            checkbox_dropdown(
+                "assets/icons/columns-3-cog.svg",
+                "Show/hide columns",
+                items,
+                |idx| match idx {
+                    0 => SongsMessage::ToggleColumnVisible(SongsColumn::Stars),
+                    1 => SongsMessage::ToggleColumnVisible(SongsColumn::Album),
+                    2 => SongsMessage::ToggleColumnVisible(SongsColumn::Duration),
+                    3 => SongsMessage::ToggleColumnVisible(SongsColumn::Plays),
+                    _ => SongsMessage::ToggleColumnVisible(SongsColumn::Love),
+                },
+            )
+            .into()
+        };
+
         let header = widgets::view_header::view_header(
             self.common.current_sort_mode,
             SortMode::SONG_OPTIONS,
@@ -404,9 +505,9 @@ impl SongsPage {
             None, // No shuffle button for songs
             Some(SongsMessage::RefreshViewData),
             Some(SongsMessage::CenterOnPlaying),
-            None, // on_add
-            None, // trailing_button
-            true, // show_search
+            None,                  // on_add
+            Some(column_dropdown), // trailing_button
+            true,                  // show_search
             SongsMessage::SearchQueryChanged,
         );
 
@@ -496,12 +597,48 @@ impl SongsPage {
                 let metadata_size = m.metadata_size;
                 let star_size = m.star_size;
                 let index_size = m.metadata_size;
+                let play_count = song.play_count.unwrap_or(0);
 
-                // Layout: [Index] [Art] [Title/Artist (40%)] [Album (25%)] [Extra (18%)] [Duration (10%)] [Star (5%)]
-                let content = row![
-                    // 0. Index number (fixed width)
+                // Per-column visibility (Stars/Plays auto-shown by sort mode).
+                let vis = self.column_visibility;
+                let show_stars = songs_stars_visible(current_sort_mode, vis.stars);
+                let show_album = vis.album;
+                let show_plays = songs_plays_visible(current_sort_mode, vis.plays);
+                let show_duration = vis.duration;
+                let show_love = vis.love;
+                // Dynamic slot now only carries non-Rating/MostPlayed/Duration
+                // sort modes (those have dedicated columns or are redundant).
+                let show_dynamic_slot = !extra_value.is_empty();
+
+                const ALBUM_PORTION: u16 = 22;
+                const STARS_PORTION: u16 = 11;
+                const PLAYS_PORTION: u16 = 13;
+                const DYNAMIC_PORTION: u16 = 18;
+                const DURATION_PORTION: u16 = 10;
+                const LOVE_PORTION: u16 = 5;
+                let mut consumed: u16 = 0;
+                if show_album {
+                    consumed += ALBUM_PORTION;
+                }
+                if show_stars {
+                    consumed += STARS_PORTION;
+                }
+                if show_plays {
+                    consumed += PLAYS_PORTION;
+                }
+                if show_dynamic_slot {
+                    consumed += DYNAMIC_PORTION;
+                }
+                if show_duration {
+                    consumed += DURATION_PORTION;
+                }
+                if show_love {
+                    consumed += LOVE_PORTION;
+                }
+                let title_portion = 100u16.saturating_sub(consumed).max(20);
+
+                let mut content_row = row![
                     slot_list_index_column(ctx.item_index, index_size, style, ctx.opacity),
-                    // 1. Album Art (fixed width)
                     {
                         use crate::widgets::slot_list::slot_list_artwork_column;
                         let artwork_handle = album_id.as_ref().and_then(|id| song_artwork.get(id));
@@ -513,7 +650,6 @@ impl SongsPage {
                             ctx.opacity,
                         )
                     },
-                    // 2. Title + Artist (40%)
                     {
                         use crate::widgets::slot_list::slot_list_text_column;
                         let artist_click = song.artist_id.as_ref().map(|id| {
@@ -538,77 +674,98 @@ impl SongsPage {
                             subtitle_size,
                             style,
                             ctx.is_center,
-                            40,
+                            title_portion,
                         )
                     },
-                    // 3. Album (25%)
-                    {
-                        use crate::widgets::slot_list::slot_list_metadata_column;
-                        let album_click = song.album_id.as_ref().map(|id| {
-                            SongsMessage::NavigateAndFilter(
-                                crate::View::Albums,
-                                nokkvi_data::types::filter::LibraryFilter::AlbumId {
-                                    id: id.clone(),
-                                    title: song_album.clone(),
-                                },
-                            )
-                        });
-                        slot_list_metadata_column(song_album, album_click, metadata_size, style, 25)
-                    },
-                    // 4. Extra Column (18%) - Dynamic based on current sort mode
-                    {
-                        if current_sort_mode == SortMode::Rating {
-                            use crate::widgets::slot_list::slot_list_star_rating;
-                            let star_icon_size = m.title_size;
-                            let idx = ctx.item_index;
-                            slot_list_star_rating(
-                                rating,
-                                star_icon_size,
-                                ctx.is_center,
-                                ctx.opacity,
-                                Some(18),
-                                Some(move |star: usize| SongsMessage::ClickSetRating(idx, star)),
-                            )
-                        } else if !extra_value.is_empty() {
-                            let mut click_msg = None;
-                            if current_sort_mode == SortMode::Genre {
-                                click_msg = Some(SongsMessage::NavigateAndFilter(
-                                    crate::View::Genres,
-                                    nokkvi_data::types::filter::LibraryFilter::GenreId {
-                                        id: extra_value.clone(),
-                                        name: extra_value.clone(),
-                                    },
-                                ));
-                            }
-                            use crate::widgets::slot_list::slot_list_metadata_column;
-                            slot_list_metadata_column(
-                                extra_value,
-                                click_msg,
-                                m.title_size,
-                                style,
-                                18,
-                            )
-                        } else {
-                            container(text("")).width(Length::FillPortion(18)).into()
-                        }
-                    },
-                    // 5. Duration (10%)
-                    {
-                        let duration_str = formatters::format_time(duration);
+                ]
+                .spacing(6.0)
+                .align_y(Alignment::Center);
+
+                if show_album {
+                    use crate::widgets::slot_list::slot_list_metadata_column;
+                    let album_click = song.album_id.as_ref().map(|id| {
+                        SongsMessage::NavigateAndFilter(
+                            crate::View::Albums,
+                            nokkvi_data::types::filter::LibraryFilter::AlbumId {
+                                id: id.clone(),
+                                title: song_album.clone(),
+                            },
+                        )
+                    });
+                    content_row = content_row.push(slot_list_metadata_column(
+                        song_album,
+                        album_click,
+                        metadata_size,
+                        style,
+                        ALBUM_PORTION,
+                    ));
+                }
+
+                if show_stars {
+                    use crate::widgets::slot_list::slot_list_star_rating;
+                    let star_icon_size = m.title_size;
+                    let idx = ctx.item_index;
+                    content_row = content_row.push(slot_list_star_rating(
+                        rating,
+                        star_icon_size,
+                        ctx.is_center,
+                        ctx.opacity,
+                        Some(STARS_PORTION),
+                        Some(move |star: usize| SongsMessage::ClickSetRating(idx, star)),
+                    ));
+                }
+
+                if show_plays {
+                    use crate::widgets::slot_list::slot_list_metadata_column;
+                    content_row = content_row.push(slot_list_metadata_column(
+                        format!("{play_count} plays"),
+                        None,
+                        metadata_size,
+                        style,
+                        PLAYS_PORTION,
+                    ));
+                }
+
+                if show_dynamic_slot {
+                    let mut click_msg = None;
+                    if current_sort_mode == SortMode::Genre {
+                        click_msg = Some(SongsMessage::NavigateAndFilter(
+                            crate::View::Genres,
+                            nokkvi_data::types::filter::LibraryFilter::GenreId {
+                                id: extra_value.clone(),
+                                name: extra_value.clone(),
+                            },
+                        ));
+                    }
+                    use crate::widgets::slot_list::slot_list_metadata_column;
+                    content_row = content_row.push(slot_list_metadata_column(
+                        extra_value,
+                        click_msg,
+                        m.title_size,
+                        style,
+                        DYNAMIC_PORTION,
+                    ));
+                }
+
+                if show_duration {
+                    let duration_str = formatters::format_time(duration);
+                    content_row = content_row.push(
                         container(slot_list_text(
                             duration_str,
                             metadata_size,
                             style.subtext_color,
                         ))
-                        .width(Length::FillPortion(10))
+                        .width(Length::FillPortion(DURATION_PORTION))
                         .height(Length::Fill)
                         .align_x(Alignment::End)
-                        .align_y(Alignment::Center)
-                    },
-                    // 6. Star/Heart Icon (5%)
-                    container({
-                        use crate::widgets::slot_list::slot_list_favorite_icon;
-                        slot_list_favorite_icon(
+                        .align_y(Alignment::Center),
+                    );
+                }
+
+                if show_love {
+                    use crate::widgets::slot_list::slot_list_favorite_icon;
+                    content_row = content_row.push(
+                        container(slot_list_favorite_icon(
                             is_starred,
                             ctx.is_center,
                             false,
@@ -616,26 +773,27 @@ impl SongsPage {
                             star_size,
                             "heart",
                             Some(SongsMessage::ClickToggleStar(ctx.item_index)),
-                        )
-                    })
-                    .width(Length::FillPortion(5))
+                        ))
+                        .width(Length::FillPortion(LOVE_PORTION))
+                        .padding(iced::Padding {
+                            left: 4.0,
+                            right: 4.0,
+                            ..Default::default()
+                        })
+                        .align_x(Alignment::Center)
+                        .align_y(Alignment::Center),
+                    );
+                }
+
+                let content = content_row
                     .padding(iced::Padding {
-                        left: 4.0,
+                        left: SLOT_LIST_SLOT_PADDING,
                         right: 4.0,
-                        ..Default::default()
+                        top: 4.0,
+                        bottom: 4.0,
                     })
-                    .align_x(Alignment::Center)
-                    .align_y(Alignment::Center),
-                ]
-                .spacing(6.0)
-                .padding(iced::Padding {
-                    left: SLOT_LIST_SLOT_PADDING,
-                    right: 4.0,
-                    top: 4.0,
-                    bottom: 4.0,
-                })
-                .align_y(Alignment::Center)
-                .height(Length::Fill);
+                    .align_y(Alignment::Center)
+                    .height(Length::Fill);
 
                 // Wrap in clickable container
                 let clickable = container(content)
@@ -808,5 +966,51 @@ impl super::ViewPage for SongsPage {
     }
     fn reload_message(&self) -> Option<Message> {
         Some(Message::LoadSongs)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn songs_column_visibility_default_preserves_today_behavior() {
+        let v = SongsColumnVisibility::default();
+        assert!(!v.stars);
+        assert!(v.album);
+        assert!(v.duration);
+        assert!(!v.plays);
+        assert!(v.love);
+    }
+
+    #[test]
+    fn songs_stars_visible_auto_shows_on_rating_sort() {
+        assert!(songs_stars_visible(SortMode::Rating, false));
+        assert!(songs_stars_visible(SortMode::Rating, true));
+        assert!(!songs_stars_visible(SortMode::Title, false));
+        assert!(songs_stars_visible(SortMode::Title, true));
+    }
+
+    #[test]
+    fn songs_plays_visible_auto_shows_on_most_played() {
+        assert!(songs_plays_visible(SortMode::MostPlayed, false));
+        assert!(songs_plays_visible(SortMode::MostPlayed, true));
+        assert!(!songs_plays_visible(SortMode::Title, false));
+        assert!(songs_plays_visible(SortMode::Title, true));
+    }
+
+    #[test]
+    fn songs_toggle_column_visible_flips_state_and_emits_action() {
+        let mut page = SongsPage::default();
+        let empty: Vec<SongUIViewData> = vec![];
+        let (_t, action) = page.update(
+            SongsMessage::ToggleColumnVisible(SongsColumn::Plays),
+            &empty,
+        );
+        assert!(page.column_visibility.plays);
+        assert!(matches!(
+            action,
+            SongsAction::ColumnVisibilityChanged(SongsColumn::Plays, true)
+        ));
     }
 }

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use iced::{
     Alignment, Element, Length, Task,
-    widget::{button, container, image, row, text},
+    widget::{button, container, image, row},
 };
 use nokkvi_data::{
     backend::{albums::AlbumUIViewData, songs::SongUIViewData},
@@ -27,6 +27,72 @@ pub struct AlbumsPage {
     pub common: SlotListPageState,
     /// Inline expansion state (album → tracks)
     pub expansion: ExpansionState<SongUIViewData>,
+    /// Per-column visibility toggles surfaced via the columns-cog dropdown.
+    pub column_visibility: AlbumsColumnVisibility,
+}
+
+/// Toggleable albums columns. Index/Art/Title+Artist are always shown.
+/// The dynamic 21% slot still auto-renders Date/Year/Duration/Genre when
+/// sorted by those modes — Stars and Plays are now dedicated columns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlbumsColumn {
+    Stars,
+    SongCount,
+    Plays,
+    Love,
+}
+
+/// User-toggle state for each toggleable albums column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AlbumsColumnVisibility {
+    pub stars: bool,
+    pub songcount: bool,
+    pub plays: bool,
+    pub love: bool,
+}
+
+impl Default for AlbumsColumnVisibility {
+    fn default() -> Self {
+        // Stars and Plays default off — today they only appear when their
+        // sort mode is active. SongCount and Love default on (always-shown
+        // today).
+        Self {
+            stars: false,
+            songcount: true,
+            plays: false,
+            love: true,
+        }
+    }
+}
+
+impl AlbumsColumnVisibility {
+    pub fn get(&self, col: AlbumsColumn) -> bool {
+        match col {
+            AlbumsColumn::Stars => self.stars,
+            AlbumsColumn::SongCount => self.songcount,
+            AlbumsColumn::Plays => self.plays,
+            AlbumsColumn::Love => self.love,
+        }
+    }
+
+    pub fn set(&mut self, col: AlbumsColumn, value: bool) {
+        match col {
+            AlbumsColumn::Stars => self.stars = value,
+            AlbumsColumn::SongCount => self.songcount = value,
+            AlbumsColumn::Plays => self.plays = value,
+            AlbumsColumn::Love => self.love = value,
+        }
+    }
+}
+
+/// Stars auto-show when sort = Rating regardless of toggle.
+pub(crate) fn albums_stars_visible(sort: SortMode, user_visible: bool) -> bool {
+    user_visible || matches!(sort, SortMode::Rating)
+}
+
+/// Plays auto-show when sort = MostPlayed regardless of toggle.
+pub(crate) fn albums_plays_visible(sort: SortMode, user_visible: bool) -> bool {
+    user_visible || matches!(sort, SortMode::MostPlayed)
 }
 
 /// View data passed from root (read-only, borrows from app state to avoid allocations)
@@ -98,6 +164,7 @@ pub enum AlbumsMessage {
 
     /// Navigate to a view and apply an ID filter
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
+    ToggleColumnVisible(AlbumsColumn),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -130,6 +197,7 @@ pub enum AlbumsAction {
     RefreshArtwork(String), // album_id - refresh artwork from server
     FindSimilar(String, String), // (entity_id, label) - open similar tab
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
+    ColumnVisibilityChanged(AlbumsColumn, bool),
     None,
 }
 
@@ -158,6 +226,7 @@ impl Default for AlbumsPage {
                 false, // sort_ascending
             ),
             expansion: ExpansionState::default(),
+            column_visibility: AlbumsColumnVisibility::default(),
         }
     }
 }
@@ -533,6 +602,14 @@ impl AlbumsPage {
                 AlbumsMessage::NavigateAndFilter(view, filter) => {
                     (Task::none(), AlbumsAction::NavigateAndFilter(view, filter))
                 }
+                AlbumsMessage::ToggleColumnVisible(col) => {
+                    let new_value = !self.column_visibility.get(col);
+                    self.column_visibility.set(col, new_value);
+                    (
+                        Task::none(),
+                        AlbumsAction::ColumnVisibilityChanged(col, new_value),
+                    )
+                }
                 _ => (Task::none(), AlbumsAction::None),
             },
         }
@@ -543,6 +620,28 @@ impl AlbumsPage {
     /// Build the view
     pub fn view<'a>(&'a self, data: AlbumsViewData<'a>) -> Element<'a, AlbumsMessage> {
         use crate::widgets::view_header::SortMode;
+
+        let column_dropdown: Element<'a, AlbumsMessage> = {
+            use crate::widgets::checkbox_dropdown::checkbox_dropdown;
+            let items = vec![
+                ("Stars".to_string(), self.column_visibility.stars),
+                ("Song Count".to_string(), self.column_visibility.songcount),
+                ("Plays".to_string(), self.column_visibility.plays),
+                ("Love".to_string(), self.column_visibility.love),
+            ];
+            checkbox_dropdown(
+                "assets/icons/columns-3-cog.svg",
+                "Show/hide columns",
+                items,
+                |idx| match idx {
+                    0 => AlbumsMessage::ToggleColumnVisible(AlbumsColumn::Stars),
+                    1 => AlbumsMessage::ToggleColumnVisible(AlbumsColumn::SongCount),
+                    2 => AlbumsMessage::ToggleColumnVisible(AlbumsColumn::Plays),
+                    _ => AlbumsMessage::ToggleColumnVisible(AlbumsColumn::Love),
+                },
+            )
+            .into()
+        };
 
         let header = widgets::view_header::view_header(
             self.common.current_sort_mode,
@@ -558,9 +657,9 @@ impl AlbumsPage {
             None, // No shuffle button for albums
             Some(AlbumsMessage::RefreshViewData),
             Some(AlbumsMessage::CenterOnPlaying),
-            None, // on_add
-            None, // trailing_button
-            true, // show_search
+            None,                  // on_add
+            Some(column_dropdown), // trailing_button
+            true,                  // show_search
             AlbumsMessage::SearchQueryChanged,
         );
 
@@ -785,8 +884,42 @@ impl AlbumsPage {
         let song_count_size = m.metadata_size;
         let star_size = m.star_size;
         let index_size = m.metadata_size;
+        let play_count = album.play_count.unwrap_or(0);
 
-        let content = row![
+        // Per-column visibility (Stars/Plays auto-shown by their sort modes).
+        let vis = self.column_visibility;
+        let show_stars = albums_stars_visible(current_sort_mode, vis.stars);
+        let show_songcount = vis.songcount;
+        let show_plays = albums_plays_visible(current_sort_mode, vis.plays);
+        let show_love = vis.love;
+        // Dynamic slot now only carries Date/Year/Duration/Genre — Rating
+        // and MostPlayed have been promoted to dedicated columns.
+        let show_dynamic_slot = !extra_value.is_empty();
+
+        const SONGCOUNT_PORTION: u16 = 22;
+        const STARS_PORTION: u16 = 12;
+        const PLAYS_PORTION: u16 = 16;
+        const DYNAMIC_PORTION: u16 = 21;
+        const LOVE_PORTION: u16 = 5;
+        let mut consumed: u16 = 0;
+        if show_songcount {
+            consumed += SONGCOUNT_PORTION;
+        }
+        if show_stars {
+            consumed += STARS_PORTION;
+        }
+        if show_plays {
+            consumed += PLAYS_PORTION;
+        }
+        if show_dynamic_slot {
+            consumed += DYNAMIC_PORTION;
+        }
+        if show_love {
+            consumed += LOVE_PORTION;
+        }
+        let title_portion = 100u16.saturating_sub(consumed).max(20);
+
+        let mut content_row = row![
             slot_list_index_column(ctx.item_index, index_size, style, ctx.opacity),
             {
                 use crate::widgets::slot_list::slot_list_artwork_column;
@@ -820,53 +953,75 @@ impl AlbumsPage {
                     subtitle_size,
                     style,
                     ctx.is_center,
-                    50,
+                    title_portion,
                 )
             },
-            {
-                let idx = ctx.item_index;
-                use crate::widgets::slot_list::slot_list_metadata_column;
-                slot_list_metadata_column(
-                    format!("{song_count} songs"),
-                    Some(AlbumsMessage::FocusAndExpand(idx)),
-                    song_count_size,
-                    style,
-                    22,
-                )
-            },
-            {
-                if current_sort_mode == SortMode::Rating {
-                    let star_icon_size = m.title_size;
-                    let idx = ctx.item_index;
-                    use crate::widgets::slot_list::slot_list_star_rating;
-                    slot_list_star_rating(
-                        rating,
-                        star_icon_size,
-                        ctx.is_center,
-                        ctx.opacity,
-                        Some(21),
-                        Some(move |star: usize| AlbumsMessage::ClickSetRating(idx, star)),
-                    )
-                } else if !extra_value.is_empty() {
-                    let mut click_msg = None;
-                    if current_sort_mode == SortMode::Genre {
-                        click_msg = Some(AlbumsMessage::NavigateAndFilter(
-                            crate::View::Genres,
-                            nokkvi_data::types::filter::LibraryFilter::GenreId {
-                                id: extra_value.clone(),
-                                name: extra_value.clone(),
-                            },
-                        ));
-                    }
-                    use crate::widgets::slot_list::slot_list_metadata_column;
-                    slot_list_metadata_column(extra_value, click_msg, m.title_size, style, 21)
-                } else {
-                    container(text("")).width(Length::FillPortion(21)).into()
-                }
-            },
-            container({
-                use crate::widgets::slot_list::slot_list_favorite_icon;
-                slot_list_favorite_icon(
+        ]
+        .spacing(6.0)
+        .align_y(Alignment::Center);
+
+        if show_songcount {
+            let idx = ctx.item_index;
+            use crate::widgets::slot_list::slot_list_metadata_column;
+            content_row = content_row.push(slot_list_metadata_column(
+                format!("{song_count} songs"),
+                Some(AlbumsMessage::FocusAndExpand(idx)),
+                song_count_size,
+                style,
+                SONGCOUNT_PORTION,
+            ));
+        }
+
+        if show_stars {
+            let star_icon_size = m.title_size;
+            let idx = ctx.item_index;
+            use crate::widgets::slot_list::slot_list_star_rating;
+            content_row = content_row.push(slot_list_star_rating(
+                rating,
+                star_icon_size,
+                ctx.is_center,
+                ctx.opacity,
+                Some(STARS_PORTION),
+                Some(move |star: usize| AlbumsMessage::ClickSetRating(idx, star)),
+            ));
+        }
+
+        if show_plays {
+            use crate::widgets::slot_list::slot_list_metadata_column;
+            content_row = content_row.push(slot_list_metadata_column(
+                format!("{play_count} plays"),
+                None,
+                song_count_size,
+                style,
+                PLAYS_PORTION,
+            ));
+        }
+
+        if show_dynamic_slot {
+            let mut click_msg = None;
+            if current_sort_mode == SortMode::Genre {
+                click_msg = Some(AlbumsMessage::NavigateAndFilter(
+                    crate::View::Genres,
+                    nokkvi_data::types::filter::LibraryFilter::GenreId {
+                        id: extra_value.clone(),
+                        name: extra_value.clone(),
+                    },
+                ));
+            }
+            use crate::widgets::slot_list::slot_list_metadata_column;
+            content_row = content_row.push(slot_list_metadata_column(
+                extra_value,
+                click_msg,
+                m.title_size,
+                style,
+                DYNAMIC_PORTION,
+            ));
+        }
+
+        if show_love {
+            use crate::widgets::slot_list::slot_list_favorite_icon;
+            content_row = content_row.push(
+                container(slot_list_favorite_icon(
                     is_starred,
                     ctx.is_center,
                     false,
@@ -874,26 +1029,27 @@ impl AlbumsPage {
                     star_size,
                     "heart",
                     Some(AlbumsMessage::ClickToggleStar(ctx.item_index)),
-                )
-            })
-            .width(Length::FillPortion(5))
+                ))
+                .width(Length::FillPortion(LOVE_PORTION))
+                .padding(iced::Padding {
+                    left: 4.0,
+                    right: 4.0,
+                    ..Default::default()
+                })
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
+            );
+        }
+
+        let content = content_row
             .padding(iced::Padding {
-                left: 4.0,
+                left: SLOT_LIST_SLOT_PADDING,
                 right: 4.0,
-                ..Default::default()
+                top: 4.0,
+                bottom: 4.0,
             })
-            .align_x(Alignment::Center)
-            .align_y(Alignment::Center),
-        ]
-        .spacing(6.0)
-        .padding(iced::Padding {
-            left: SLOT_LIST_SLOT_PADDING,
-            right: 4.0,
-            top: 4.0,
-            bottom: 4.0,
-        })
-        .align_y(Alignment::Center)
-        .height(Length::Fill);
+            .align_y(Alignment::Center)
+            .height(Length::Fill);
 
         let clickable = container(content)
             .style(move |_theme| style.to_container_style())
@@ -979,43 +1135,43 @@ impl AlbumsPage {
     }
 }
 
-/// Get extra column value based on current sort mode (matches QML getExtraColumnData)
+/// Dynamic-slot value based on current sort mode. Rating and MostPlayed are
+/// no longer rendered here — they're dedicated, toggleable columns now.
 fn get_extra_column_value(album: &AlbumUIViewData, sort_mode: SortMode) -> String {
     match sort_mode {
-        SortMode::RecentlyAdded => {
-            album.created_at.as_ref()
-                .and_then(|d| formatters::format_date(d).ok())
-                .unwrap_or_default()
-        }
-        SortMode::RecentlyPlayed => {
-            album.play_date.as_ref().map_or_else(|| "never".to_string(), |d| d.split('T').next().unwrap_or(d).to_string())
-        }
-        SortMode::MostPlayed => {
-            let count = album.play_count.unwrap_or(0);
-            format!("{count} plays")
-        }
-        SortMode::ReleaseYear => {
-            album.year
-                .map(|y| y.to_string())
-                .unwrap_or_default()
-        }
-        SortMode::Duration => {
-            album.duration
-                .map(|d| formatters::format_time(d as u32))
-                .unwrap_or_default()
-        }
-        SortMode::Genre => {
-            album.genre
-                .clone()
-                .unwrap_or_default()
-        }
-        // No extra column for these views (they sort by name/artist already visible)
-        SortMode::Favorited | SortMode::Random | SortMode::Name |
-        SortMode::AlbumArtist | SortMode::Artist | SortMode::SongCount |
-        SortMode::Rating | SortMode::AlbumCount |
-        // Song-specific sort modes (not applicable to albums)
-        SortMode::Title | SortMode::Album | SortMode::Bpm |
-        SortMode::Channels | SortMode::Comment | SortMode::UpdatedAt => String::new(),
+        SortMode::RecentlyAdded => album
+            .created_at
+            .as_ref()
+            .and_then(|d| formatters::format_date(d).ok())
+            .unwrap_or_default(),
+        SortMode::RecentlyPlayed => album.play_date.as_ref().map_or_else(
+            || "never".to_string(),
+            |d| d.split('T').next().unwrap_or(d).to_string(),
+        ),
+        SortMode::ReleaseYear => album.year.map(|y| y.to_string()).unwrap_or_default(),
+        SortMode::Duration => album
+            .duration
+            .map(|d| formatters::format_time(d as u32))
+            .unwrap_or_default(),
+        SortMode::Genre => album.genre.clone().unwrap_or_default(),
+        // Stars and Plays are dedicated columns (auto-show on Rating /
+        // MostPlayed sort respectively). All other sort modes have no
+        // extra-column data.
+        SortMode::Rating
+        | SortMode::MostPlayed
+        | SortMode::Favorited
+        | SortMode::Random
+        | SortMode::Name
+        | SortMode::AlbumArtist
+        | SortMode::Artist
+        | SortMode::SongCount
+        | SortMode::AlbumCount
+        | SortMode::Title
+        | SortMode::Album
+        | SortMode::Bpm
+        | SortMode::Channels
+        | SortMode::Comment
+        | SortMode::UpdatedAt => String::new(),
     }
 }
 
@@ -1073,5 +1229,47 @@ mod tests {
         let (_, action) = page.update(AlbumsMessage::CenterOnPlaying, 0, &empty_albums);
 
         assert!(matches!(action, AlbumsAction::CenterOnPlaying));
+    }
+
+    #[test]
+    fn albums_column_visibility_default_preserves_today_behavior() {
+        let v = AlbumsColumnVisibility::default();
+        // Stars/Plays opt-in (today only show on their sort modes).
+        assert!(!v.stars);
+        assert!(v.songcount);
+        assert!(!v.plays);
+        assert!(v.love);
+    }
+
+    #[test]
+    fn albums_stars_visible_auto_shows_on_rating_sort() {
+        assert!(albums_stars_visible(SortMode::Rating, false));
+        assert!(albums_stars_visible(SortMode::Rating, true));
+        assert!(!albums_stars_visible(SortMode::Name, false));
+        assert!(albums_stars_visible(SortMode::Name, true));
+    }
+
+    #[test]
+    fn albums_plays_visible_auto_shows_on_most_played() {
+        assert!(albums_plays_visible(SortMode::MostPlayed, false));
+        assert!(albums_plays_visible(SortMode::MostPlayed, true));
+        assert!(!albums_plays_visible(SortMode::Name, false));
+        assert!(albums_plays_visible(SortMode::Name, true));
+    }
+
+    #[test]
+    fn albums_toggle_column_visible_flips_state_and_emits_action() {
+        let mut page = AlbumsPage::default();
+        let empty: Vec<AlbumUIViewData> = vec![];
+        let (_t, action) = page.update(
+            AlbumsMessage::ToggleColumnVisible(AlbumsColumn::Stars),
+            0,
+            &empty,
+        );
+        assert!(page.column_visibility.stars);
+        assert!(matches!(
+            action,
+            AlbumsAction::ColumnVisibilityChanged(AlbumsColumn::Stars, true)
+        ));
     }
 }

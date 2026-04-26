@@ -288,8 +288,9 @@ impl SongsService {
         }
     }
 
-    /// Get extra column data based on current sort mode
-    /// Returns contextual metadata to display in the extra column
+    /// Get extra column data based on current sort mode. Rating, MostPlayed,
+    /// and Duration are no longer rendered here — Stars/Plays are dedicated
+    /// columns and Duration has its own toggleable column.
     pub fn get_extra_column_data(song: &SongUIViewData, sort_mode: &str) -> String {
         match sort_mode {
             "recentlyAdded" => song
@@ -302,16 +303,7 @@ impl SongsService {
                 || "never".to_string(),
                 |d| d.split('T').next().unwrap_or(d).to_string(),
             ),
-            "mostPlayed" => song
-                .play_count
-                .map(|c| format!("{c} plays"))
-                .unwrap_or_default(),
             "year" => song.year.map(|y| y.to_string()).unwrap_or_default(),
-            "duration" => {
-                let mins = song.duration / 60;
-                let secs = song.duration % 60;
-                format!("{mins}:{secs:02}")
-            }
             "bpm" => song.bpm.map(|b| format!("{b} BPM")).unwrap_or_default(),
             "channels" => song
                 .channels
@@ -328,8 +320,8 @@ impl SongsService {
             "genre" => song.genre.clone().unwrap_or_default(),
             "comment" => song.comment.clone().unwrap_or_default(),
             "albumArtist" => song.album_artist.clone().unwrap_or_default(),
-            // No extra column for these views (they sort by data already visible)
-            "favorited" | "random" | "title" | "album" | "artist" | "rating" => String::new(),
+            // No extra column for these views: Rating/MostPlayed/Duration
+            // have dedicated columns; the rest sort by data already visible.
             _ => String::new(),
         }
     }

@@ -406,6 +406,76 @@ impl SettingsService {
         sm.set_queue_show_plays(enabled)
     }
 
+    pub async fn set_albums_show_stars(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_albums_show_stars(enabled)
+    }
+
+    pub async fn set_albums_show_songcount(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_albums_show_songcount(enabled)
+    }
+
+    pub async fn set_albums_show_plays(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_albums_show_plays(enabled)
+    }
+
+    pub async fn set_albums_show_love(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_albums_show_love(enabled)
+    }
+
+    pub async fn set_songs_show_stars(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_songs_show_stars(enabled)
+    }
+
+    pub async fn set_songs_show_album(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_songs_show_album(enabled)
+    }
+
+    pub async fn set_songs_show_duration(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_songs_show_duration(enabled)
+    }
+
+    pub async fn set_songs_show_plays(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_songs_show_plays(enabled)
+    }
+
+    pub async fn set_songs_show_love(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_songs_show_love(enabled)
+    }
+
+    pub async fn set_artists_show_stars(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_artists_show_stars(enabled)
+    }
+
+    pub async fn set_artists_show_albumcount(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_artists_show_albumcount(enabled)
+    }
+
+    pub async fn set_artists_show_songcount(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_artists_show_songcount(enabled)
+    }
+
+    pub async fn set_artists_show_plays(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_artists_show_plays(enabled)
+    }
+
+    pub async fn set_artists_show_love(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_artists_show_love(enabled)
+    }
+
     /// Set strip click action and persist
     pub async fn set_strip_click_action(
         &self,

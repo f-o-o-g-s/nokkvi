@@ -26,6 +26,75 @@ pub struct ArtistsPage {
     pub expansion: ExpansionState<AlbumUIViewData>,
     /// Sub-expansion state (album → tracks)
     pub sub_expansion: ExpansionState<nokkvi_data::backend::songs::SongUIViewData>,
+    /// Per-column visibility toggles surfaced via the columns-cog dropdown.
+    pub column_visibility: ArtistsColumnVisibility,
+}
+
+/// Toggleable artists columns. The artist name is always shown; everything
+/// else is user-toggleable through the columns-cog dropdown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArtistsColumn {
+    Stars,
+    AlbumCount,
+    SongCount,
+    Plays,
+    Love,
+}
+
+/// User-toggle state for each toggleable artists column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArtistsColumnVisibility {
+    pub stars: bool,
+    pub albumcount: bool,
+    pub songcount: bool,
+    pub plays: bool,
+    pub love: bool,
+}
+
+impl Default for ArtistsColumnVisibility {
+    fn default() -> Self {
+        // All-on matches today's permanent layout (after the Plays-column
+        // commit) — no surprise visual change on first launch.
+        Self {
+            stars: true,
+            albumcount: true,
+            songcount: true,
+            plays: true,
+            love: true,
+        }
+    }
+}
+
+impl ArtistsColumnVisibility {
+    pub fn get(&self, col: ArtistsColumn) -> bool {
+        match col {
+            ArtistsColumn::Stars => self.stars,
+            ArtistsColumn::AlbumCount => self.albumcount,
+            ArtistsColumn::SongCount => self.songcount,
+            ArtistsColumn::Plays => self.plays,
+            ArtistsColumn::Love => self.love,
+        }
+    }
+
+    pub fn set(&mut self, col: ArtistsColumn, value: bool) {
+        match col {
+            ArtistsColumn::Stars => self.stars = value,
+            ArtistsColumn::AlbumCount => self.albumcount = value,
+            ArtistsColumn::SongCount => self.songcount = value,
+            ArtistsColumn::Plays => self.plays = value,
+            ArtistsColumn::Love => self.love = value,
+        }
+    }
+}
+
+/// Stars auto-show when sort = Rating regardless of toggle.
+pub(crate) fn artists_stars_visible(sort: SortMode, user_visible: bool) -> bool {
+    user_visible || matches!(sort, SortMode::Rating)
+}
+
+/// Plays auto-show when sort = MostPlayed regardless of toggle.
+pub(crate) fn artists_plays_visible(sort: SortMode, user_visible: bool) -> bool {
+    user_visible || matches!(sort, SortMode::MostPlayed)
 }
 
 /// View data passed from root (read-only, borrows from app state to avoid allocations)
@@ -83,6 +152,7 @@ pub enum ArtistsMessage {
     SearchFocused(bool),
     RefreshViewData,
     CenterOnPlaying,
+    ToggleColumnVisible(ArtistsColumn),
 
     // Data loading (moved from root Message enum)
     ArtistsLoaded {
@@ -130,6 +200,7 @@ pub enum ArtistsAction {
     TopSongs(String, String),  // (artist_name, label) - open similar tab for top songs
     CenterOnPlaying,
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
+    ColumnVisibilityChanged(ArtistsColumn, bool),
     None,
 }
 
@@ -159,6 +230,7 @@ impl Default for ArtistsPage {
             ),
             expansion: ExpansionState::default(),
             sub_expansion: ExpansionState::default(),
+            column_visibility: ArtistsColumnVisibility::default(),
         }
     }
 }
@@ -484,6 +556,14 @@ impl ArtistsPage {
                 ArtistsMessage::NavigateAndFilter(view, filter) => {
                     (Task::none(), ArtistsAction::NavigateAndFilter(view, filter))
                 }
+                ArtistsMessage::ToggleColumnVisible(col) => {
+                    let new_value = !self.column_visibility.get(col);
+                    self.column_visibility.set(col, new_value);
+                    (
+                        Task::none(),
+                        ArtistsAction::ColumnVisibilityChanged(col, new_value),
+                    )
+                }
                 ArtistsMessage::ClickSetRating(item_index, rating) => {
                     use nokkvi_data::utils::formatters::compute_rating_toggle;
                     match super::expansion::three_tier_get_entry_at(
@@ -732,6 +812,31 @@ impl ArtistsPage {
     pub fn view<'a>(&'a self, data: ArtistsViewData<'a>) -> Element<'a, ArtistsMessage> {
         use crate::widgets::view_header::SortMode;
 
+        // Build the columns-visibility dropdown for the artists view header.
+        let column_dropdown: Element<'a, ArtistsMessage> = {
+            use crate::widgets::checkbox_dropdown::checkbox_dropdown;
+            let items = vec![
+                ("Stars".to_string(), self.column_visibility.stars),
+                ("Album Count".to_string(), self.column_visibility.albumcount),
+                ("Song Count".to_string(), self.column_visibility.songcount),
+                ("Plays".to_string(), self.column_visibility.plays),
+                ("Love".to_string(), self.column_visibility.love),
+            ];
+            checkbox_dropdown(
+                "assets/icons/columns-3-cog.svg",
+                "Show/hide columns",
+                items,
+                |idx| match idx {
+                    0 => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::Stars),
+                    1 => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::AlbumCount),
+                    2 => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::SongCount),
+                    3 => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::Plays),
+                    _ => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::Love),
+                },
+            )
+            .into()
+        };
+
         let header = widgets::view_header::view_header(
             self.common.current_sort_mode,
             SortMode::ARTIST_OPTIONS,
@@ -746,9 +851,9 @@ impl ArtistsPage {
             None, // No shuffle button for artists
             Some(ArtistsMessage::RefreshViewData),
             Some(ArtistsMessage::CenterOnPlaying),
-            None, // on_add
-            None, // trailing_button
-            true, // show_search
+            None,                  // on_add
+            Some(column_dropdown), // trailing_button
+            true,                  // show_search
             ArtistsMessage::SearchQueryChanged,
         );
 
@@ -1036,11 +1141,43 @@ impl ArtistsPage {
         let star_size = m.star_size;
         let index_size = m.metadata_size;
 
-        // Layout: [Index] [Art] [Artist Name (50%)] [Album Count (22%)] [Song Count (21%)] [Star (5%)]
-        let content = row![
-            // 0. Index number (fixed width)
+        // Per-column visibility (sort overrides Stars/Plays toggles).
+        let sort = self.common.current_sort_mode;
+        let vis = self.column_visibility;
+        let show_stars = artists_stars_visible(sort, vis.stars);
+        let show_albumcount = vis.albumcount;
+        let show_songcount = vis.songcount;
+        let show_plays = artists_plays_visible(sort, vis.plays);
+        let show_love = vis.love;
+
+        // Fixed portions for each toggleable column. Name column expands to
+        // fill whatever's left.
+        const STARS_PORTION: u16 = 12;
+        const ALBUMCOUNT_PORTION: u16 = 16;
+        const SONGCOUNT_PORTION: u16 = 16;
+        const PLAYS_PORTION: u16 = 16;
+        const LOVE_PORTION: u16 = 5;
+        let mut consumed: u16 = 0;
+        if show_stars {
+            consumed += STARS_PORTION;
+        }
+        if show_albumcount {
+            consumed += ALBUMCOUNT_PORTION;
+        }
+        if show_songcount {
+            consumed += SONGCOUNT_PORTION;
+        }
+        if show_plays {
+            consumed += PLAYS_PORTION;
+        }
+        if show_love {
+            consumed += LOVE_PORTION;
+        }
+        let name_portion = 100u16.saturating_sub(consumed).max(20);
+
+        // Always-on columns: Index, Art, Name.
+        let mut content_row = row![
             slot_list_index_column(ctx.item_index, index_size, style, ctx.opacity),
-            // 1. Artist Art (fixed width)
             {
                 use crate::widgets::slot_list::slot_list_artwork_column;
                 slot_list_artwork_column(
@@ -1051,11 +1188,7 @@ impl ArtistsPage {
                     ctx.opacity,
                 )
             },
-            // 2. Artist Name (50%) - with optional rating row
             {
-                use iced::widget::{column, container};
-
-                use crate::widgets::slot_list::slot_list_star_rating;
                 let title_click = Some(ArtistsMessage::ContextMenuAction(
                     ctx.item_index,
                     crate::widgets::context_menu::LibraryContextEntry::GetInfo,
@@ -1065,77 +1198,85 @@ impl ArtistsPage {
                 } else {
                     crate::theme::accent_bright()
                 };
-
-                let star_icon_size = m.metadata_size;
-                let idx = ctx.item_index;
-
-                let content: Element<'_, ArtistsMessage> = column![
+                container(
                     crate::widgets::link_text::LinkText::new(artist_name)
                         .size(title_size)
                         .color(style.text_color)
                         .hover_color(link_color)
                         .on_press(title_click),
-                    slot_list_star_rating(
-                        rating,
-                        star_icon_size,
-                        ctx.is_center,
-                        ctx.opacity,
-                        None,
-                        Some(move |star: usize| ArtistsMessage::ClickSetRating(idx, star)),
-                    ),
-                ]
-                .spacing(2.0)
-                .into();
+                )
+                .width(Length::FillPortion(name_portion))
+                .height(Length::Fill)
+                .clip(true)
+                .align_y(Alignment::Center)
+            },
+        ]
+        .spacing(6.0)
+        .align_y(Alignment::Center);
 
-                container(content)
-                    .width(Length::FillPortion(44))
-                    .height(Length::Fill)
-                    .clip(true)
-                    .align_y(Alignment::Center)
-            },
-            // 3. Album Count (17%)
-            {
-                use crate::widgets::slot_list::slot_list_metadata_column;
-                let album_text = if album_count == 1 {
-                    "1 album".to_string()
-                } else {
-                    format!("{album_count} albums")
-                };
-                let idx = ctx.item_index;
-                slot_list_metadata_column(
-                    album_text,
-                    Some(ArtistsMessage::FocusAndExpand(idx)),
-                    metadata_size,
-                    style,
-                    17,
-                )
-            },
-            // 4. Song Count (17%)
-            {
-                use crate::widgets::slot_list::slot_list_metadata_column;
-                slot_list_metadata_column(
-                    format!("{song_count} songs"),
-                    None,
-                    metadata_size,
-                    style,
-                    17,
-                )
-            },
-            // 5. Plays (17%)
-            {
-                use crate::widgets::slot_list::slot_list_metadata_column;
-                slot_list_metadata_column(
-                    format!("{play_count} plays"),
-                    None,
-                    metadata_size,
-                    style,
-                    17,
-                )
-            },
-            // 5. Star/Heart Icon (5%)
-            container({
-                use crate::widgets::slot_list::slot_list_favorite_icon;
-                slot_list_favorite_icon(
+        // Stars column (auto-show on sort=Rating). Replaces the old inline
+        // star widget under the artist name.
+        if show_stars {
+            use crate::widgets::slot_list::slot_list_star_rating;
+            let star_icon_size = m.title_size;
+            let idx = ctx.item_index;
+            content_row = content_row.push(slot_list_star_rating(
+                rating,
+                star_icon_size,
+                ctx.is_center,
+                ctx.opacity,
+                Some(STARS_PORTION),
+                Some(move |star: usize| ArtistsMessage::ClickSetRating(idx, star)),
+            ));
+        }
+
+        // Album Count column.
+        if show_albumcount {
+            use crate::widgets::slot_list::slot_list_metadata_column;
+            let album_text = if album_count == 1 {
+                "1 album".to_string()
+            } else {
+                format!("{album_count} albums")
+            };
+            let idx = ctx.item_index;
+            content_row = content_row.push(slot_list_metadata_column(
+                album_text,
+                Some(ArtistsMessage::FocusAndExpand(idx)),
+                metadata_size,
+                style,
+                ALBUMCOUNT_PORTION,
+            ));
+        }
+
+        // Song Count column.
+        if show_songcount {
+            use crate::widgets::slot_list::slot_list_metadata_column;
+            content_row = content_row.push(slot_list_metadata_column(
+                format!("{song_count} songs"),
+                None,
+                metadata_size,
+                style,
+                SONGCOUNT_PORTION,
+            ));
+        }
+
+        // Plays column (auto-show on sort=MostPlayed).
+        if show_plays {
+            use crate::widgets::slot_list::slot_list_metadata_column;
+            content_row = content_row.push(slot_list_metadata_column(
+                format!("{play_count} plays"),
+                None,
+                metadata_size,
+                style,
+                PLAYS_PORTION,
+            ));
+        }
+
+        // Heart (Love) column.
+        if show_love {
+            use crate::widgets::slot_list::slot_list_favorite_icon;
+            content_row = content_row.push(
+                container(slot_list_favorite_icon(
                     is_starred,
                     ctx.is_center,
                     false,
@@ -1143,26 +1284,26 @@ impl ArtistsPage {
                     star_size,
                     "heart",
                     Some(ArtistsMessage::ClickToggleStar(ctx.item_index)),
-                )
-            })
-            .width(Length::FillPortion(5))
+                ))
+                .width(Length::FillPortion(LOVE_PORTION))
+                .padding(iced::Padding {
+                    left: 4.0,
+                    right: 4.0,
+                    ..Default::default()
+                })
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
+            );
+        }
+
+        let content = content_row
             .padding(iced::Padding {
-                left: 4.0,
+                left: SLOT_LIST_SLOT_PADDING,
                 right: 4.0,
-                ..Default::default()
+                top: 4.0,
+                bottom: 4.0,
             })
-            .align_x(Alignment::Center)
-            .align_y(Alignment::Center),
-        ]
-        .spacing(6.0)
-        .padding(iced::Padding {
-            left: SLOT_LIST_SLOT_PADDING,
-            right: 4.0,
-            top: 4.0,
-            bottom: 4.0,
-        })
-        .align_y(Alignment::Center)
-        .height(Length::Fill);
+            .height(Length::Fill);
 
         // Wrap in clickable container
         let clickable = container(content)
@@ -1300,5 +1441,73 @@ impl super::ViewPage for ArtistsPage {
     }
     fn reload_message(&self) -> Option<Message> {
         Some(Message::LoadArtists)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn artists_column_visibility_default_all_on() {
+        let v = ArtistsColumnVisibility::default();
+        assert!(v.stars);
+        assert!(v.albumcount);
+        assert!(v.songcount);
+        assert!(v.plays);
+        assert!(v.love);
+    }
+
+    #[test]
+    fn artists_column_visibility_get_set_round_trip() {
+        let mut v = ArtistsColumnVisibility::default();
+        v.set(ArtistsColumn::Stars, false);
+        v.set(ArtistsColumn::Plays, false);
+        assert!(!v.get(ArtistsColumn::Stars));
+        assert!(v.get(ArtistsColumn::AlbumCount));
+        assert!(v.get(ArtistsColumn::SongCount));
+        assert!(!v.get(ArtistsColumn::Plays));
+        assert!(v.get(ArtistsColumn::Love));
+    }
+
+    #[test]
+    fn artists_stars_visible_auto_shows_on_rating_sort() {
+        assert!(artists_stars_visible(SortMode::Rating, false));
+        assert!(artists_stars_visible(SortMode::Rating, true));
+    }
+
+    #[test]
+    fn artists_stars_visible_follows_toggle_for_other_sorts() {
+        assert!(!artists_stars_visible(SortMode::Name, false));
+        assert!(artists_stars_visible(SortMode::Name, true));
+    }
+
+    #[test]
+    fn artists_plays_visible_auto_shows_on_most_played() {
+        assert!(artists_plays_visible(SortMode::MostPlayed, false));
+        assert!(artists_plays_visible(SortMode::MostPlayed, true));
+    }
+
+    #[test]
+    fn artists_plays_visible_follows_toggle_for_other_sorts() {
+        assert!(!artists_plays_visible(SortMode::Name, false));
+        assert!(artists_plays_visible(SortMode::Name, true));
+    }
+
+    #[test]
+    fn toggle_column_visible_flips_state_and_emits_action() {
+        let mut page = ArtistsPage::default();
+        let artists: Vec<ArtistUIViewData> = Vec::new();
+
+        let (_t, action) = page.update(
+            ArtistsMessage::ToggleColumnVisible(ArtistsColumn::Plays),
+            0,
+            &artists,
+        );
+        assert!(!page.column_visibility.plays);
+        assert!(matches!(
+            action,
+            ArtistsAction::ColumnVisibilityChanged(ArtistsColumn::Plays, false)
+        ));
     }
 }

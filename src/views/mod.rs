@@ -18,8 +18,10 @@ pub(crate) mod similar;
 pub(crate) mod songs;
 
 // Re-export commonly used items
-pub(crate) use albums::{AlbumsAction, AlbumsMessage, AlbumsPage, AlbumsViewData};
-pub(crate) use artists::{ArtistsAction, ArtistsMessage, ArtistsPage, ArtistsViewData};
+pub(crate) use albums::{AlbumsAction, AlbumsColumn, AlbumsMessage, AlbumsPage, AlbumsViewData};
+pub(crate) use artists::{
+    ArtistsAction, ArtistsColumn, ArtistsMessage, ArtistsPage, ArtistsViewData,
+};
 pub(crate) use browsing_panel::{BrowsingPanel, BrowsingPanelMessage, BrowsingView};
 pub(crate) use genres::{GenresAction, GenresMessage, GenresPage, GenresViewData};
 pub(crate) use login::{LoginAction, LoginMessage, LoginPage};
@@ -30,7 +32,7 @@ pub(crate) use queue::{
 pub(crate) use radios::{RadiosAction, RadiosMessage, RadiosPage, RadiosViewData};
 pub(crate) use settings::{SettingsAction, SettingsMessage, SettingsPage, SettingsViewData};
 pub(crate) use similar::{SimilarAction, SimilarMessage, SimilarPage, SimilarViewData};
-pub(crate) use songs::{SongsAction, SongsMessage, SongsPage, SongsViewData};
+pub(crate) use songs::{SongsAction, SongsColumn, SongsMessage, SongsPage, SongsViewData};
 
 use crate::{
     app_message::Message,
