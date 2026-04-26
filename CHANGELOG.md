@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Features
+- **ReplayGain Playback** — added per-track and per-album volume normalization driven by the `replayGain` tags surfaced by the Subsonic API. Replaces the boolean AGC toggle with a four-mode picker (Off / ReplayGain Track / ReplayGain Album / AGC), plus a pre-amp slider, untagged-track fallback (configurable dB or fall-through to AGC), and peak-aware clipping prevention. Static gains are applied via rodio's `amplify` source ahead of the limiter, so both sides of a crossfade are pre-leveled with no convergence delay. Existing `volume_normalization: true` settings are migrated in-place to AGC mode on first load.
+
 ## v0.3.0 — 2026-04-25
 
 ### Features
