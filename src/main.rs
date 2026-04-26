@@ -632,6 +632,11 @@ impl Nokkvi {
                     let b_rating = b.rating.unwrap_or(0);
                     b_rating.cmp(&a_rating)
                 }
+                QueueSortMode::MostPlayed => {
+                    let a_count = a.play_count.unwrap_or(0);
+                    let b_count = b.play_count.unwrap_or(0);
+                    b_count.cmp(&a_count)
+                }
             };
 
             if ascending { cmp } else { cmp.reverse() }

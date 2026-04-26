@@ -150,6 +150,7 @@ impl ArtistsApiService {
         match sort_mode {
             "name" => "name".to_string(),
             "favorited" => "starred_at".to_string(),
+            "mostPlayed" => "play_count".to_string(),
             "albumCount" => "album_count".to_string(),
             "songCount" => "song_count".to_string(),
             "random" => "name".to_string(), // Random is handled client-side
@@ -160,7 +161,7 @@ impl ArtistsApiService {
     /// Get default sort order for sort mode
     fn get_default_order(sort_mode: &str) -> &'static str {
         match sort_mode {
-            "favorited" | "albumCount" | "songCount" => "DESC",
+            "favorited" | "mostPlayed" | "albumCount" | "songCount" => "DESC",
             _ => "ASC",
         }
     }
@@ -171,5 +172,23 @@ impl Clone for ArtistsApiService {
         Self {
             client: self.client.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn most_played_maps_to_play_count() {
+        assert_eq!(
+            ArtistsApiService::map_sort_mode_to_sort_param("mostPlayed"),
+            "play_count"
+        );
+    }
+
+    #[test]
+    fn most_played_default_order_is_desc() {
+        assert_eq!(ArtistsApiService::get_default_order("mostPlayed"), "DESC");
     }
 }

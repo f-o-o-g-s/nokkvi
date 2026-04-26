@@ -369,6 +369,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_queue_show_plays(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.queue_show_plays = enabled;
+        self.save()
+    }
+
     pub fn set_active_playlist(
         &mut self,
         id: Option<String>,
@@ -576,6 +581,7 @@ impl SettingsManager {
             queue_show_album: p.queue_show_album,
             queue_show_duration: p.queue_show_duration,
             queue_show_love: p.queue_show_love,
+            queue_show_plays: p.queue_show_plays,
         }
     }
 
@@ -648,6 +654,7 @@ fn apply_toml_settings_to_internal(
     p.queue_show_album = ts.queue_show_album;
     p.queue_show_duration = ts.queue_show_duration;
     p.queue_show_love = ts.queue_show_love;
+    p.queue_show_plays = ts.queue_show_plays;
 }
 
 /// Convert `AllViewPreferences` into the internal `ViewPreferences` for redb storage.

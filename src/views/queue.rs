@@ -29,15 +29,16 @@ pub struct QueuePage {
     pub column_visibility: QueueColumnVisibility,
 }
 
-/// Toggleable queue columns. `Stars`, `Album`, `Duration`, and `Love` are
-/// user-toggleable from the columns dropdown; the index/title/artwork columns
-/// stay always-on.
+/// Toggleable queue columns. `Stars`, `Album`, `Duration`, `Love`, and `Plays`
+/// are user-toggleable from the columns dropdown; the index/title/artwork
+/// columns stay always-on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueColumn {
     Stars,
     Album,
     Duration,
     Love,
+    Plays,
 }
 
 /// User-toggle state for each toggleable queue column.
@@ -47,6 +48,7 @@ pub struct QueueColumnVisibility {
     pub album: bool,
     pub duration: bool,
     pub love: bool,
+    pub plays: bool,
 }
 
 impl Default for QueueColumnVisibility {
@@ -56,6 +58,7 @@ impl Default for QueueColumnVisibility {
             album: true,
             duration: true,
             love: true,
+            plays: false,
         }
     }
 }
@@ -67,6 +70,7 @@ impl QueueColumnVisibility {
             QueueColumn::Album => self.album,
             QueueColumn::Duration => self.duration,
             QueueColumn::Love => self.love,
+            QueueColumn::Plays => self.plays,
         }
     }
 
@@ -76,6 +80,7 @@ impl QueueColumnVisibility {
             QueueColumn::Album => self.album = value,
             QueueColumn::Duration => self.duration = value,
             QueueColumn::Love => self.love = value,
+            QueueColumn::Plays => self.plays = value,
         }
     }
 }
@@ -112,6 +117,13 @@ pub(crate) fn duration_column_visible(user_visible: bool) -> bool {
 /// Pure decision: should the love (heart) column be rendered? User toggle only.
 pub(crate) fn love_column_visible(user_visible: bool) -> bool {
     user_visible
+}
+
+/// Pure decision: should the plays column be rendered? Either the user toggle
+/// is on, OR the queue is sorted by Most Played (auto-show so the user always
+/// sees the data they're sorting by).
+pub(crate) fn plays_column_visible(sort: QueueSortMode, user_visible: bool) -> bool {
+    user_visible || matches!(sort, QueueSortMode::MostPlayed)
 }
 
 /// View data passed from root (read-only)
@@ -510,6 +522,7 @@ impl QueuePage {
             QueueSortMode::Duration,
             QueueSortMode::Genre,
             QueueSortMode::Rating,
+            QueueSortMode::MostPlayed,
         ];
 
         // Build the columns-visibility dropdown for the queue's view header.
@@ -522,6 +535,7 @@ impl QueuePage {
                 ("Album".to_string(), self.column_visibility.album),
                 ("Duration".to_string(), self.column_visibility.duration),
                 ("Love".to_string(), self.column_visibility.love),
+                ("Plays".to_string(), self.column_visibility.plays),
             ];
             checkbox_dropdown(
                 "assets/icons/columns-3-cog.svg",
@@ -531,7 +545,8 @@ impl QueuePage {
                     0 => QueueMessage::ToggleColumnVisible(QueueColumn::Stars),
                     1 => QueueMessage::ToggleColumnVisible(QueueColumn::Album),
                     2 => QueueMessage::ToggleColumnVisible(QueueColumn::Duration),
-                    _ => QueueMessage::ToggleColumnVisible(QueueColumn::Love),
+                    3 => QueueMessage::ToggleColumnVisible(QueueColumn::Love),
+                    _ => QueueMessage::ToggleColumnVisible(QueueColumn::Plays),
                 },
             )
             .into()
@@ -833,6 +848,7 @@ impl QueuePage {
         let show_album_column = album_column_visible(column_visibility.album);
         let show_duration_column = duration_column_visible(column_visibility.duration);
         let show_love_column = love_column_visible(column_visibility.love);
+        let show_plays_column = plays_column_visible(current_sort_mode, column_visibility.plays);
 
         // Build the render_item closure (shared between drag and non-drag paths)
         let render_item = |song: &QueueSongUIViewData,
@@ -847,6 +863,7 @@ impl QueuePage {
             let genre = song.genre.clone();
             let starred = song.starred;
             let rating = song.rating.unwrap_or(0).min(5) as usize;
+            let play_count = song.play_count.unwrap_or(0);
             let song_id = song.id.clone();
             let artist_id = song.artist_id.clone();
             let track_number = song.track_number;
@@ -1047,7 +1064,22 @@ impl QueuePage {
                     );
                 }
 
-                // 5. Heart Icon - use reusable component, with symmetric padding
+                // 6. Plays - right aligned. User-toggleable, also auto-shown
+                // when sort = MostPlayed.
+                if show_plays_column {
+                    content_row = content_row.push(
+                        container(slot_list_text(
+                            format!("{play_count} plays"),
+                            duration_size,
+                            style.subtext_color,
+                        ))
+                        .width(Length::FillPortion(10))
+                        .align_x(Alignment::End)
+                        .align_y(Alignment::Center),
+                    );
+                }
+
+                // 7. Heart Icon - use reusable component, with symmetric padding
                 // for centering (user-toggleable via columns dropdown).
                 if show_love_column {
                     content_row = content_row.push(
@@ -1374,12 +1406,14 @@ mod tests {
     }
 
     #[test]
-    fn queue_column_visibility_default_shows_all() {
+    fn queue_column_visibility_default_shows_legacy_columns_only() {
         let v = QueueColumnVisibility::default();
         assert!(v.stars);
         assert!(v.album);
         assert!(v.duration);
         assert!(v.love);
+        // Plays is opt-in (auto-shown only when sort = MostPlayed).
+        assert!(!v.plays);
     }
 
     #[test]
@@ -1392,13 +1426,31 @@ mod tests {
         assert!(v.get(QueueColumn::Album));
         assert!(v.get(QueueColumn::Duration));
         assert!(v.get(QueueColumn::Love));
+        assert!(!v.get(QueueColumn::Plays));
 
         v.set(QueueColumn::Album, false);
         v.set(QueueColumn::Duration, false);
         v.set(QueueColumn::Love, false);
+        v.set(QueueColumn::Plays, true);
         assert!(!v.get(QueueColumn::Album));
         assert!(!v.get(QueueColumn::Duration));
         assert!(!v.get(QueueColumn::Love));
+        assert!(v.get(QueueColumn::Plays));
+    }
+
+    #[test]
+    fn plays_column_visible_auto_shows_on_most_played() {
+        // Sort overrides the user toggle: MostPlayed always shows, regardless of toggle.
+        assert!(plays_column_visible(QueueSortMode::MostPlayed, false));
+        assert!(plays_column_visible(QueueSortMode::MostPlayed, true));
+    }
+
+    #[test]
+    fn plays_column_visible_follows_user_toggle_for_other_sorts() {
+        assert!(!plays_column_visible(QueueSortMode::Title, false));
+        assert!(plays_column_visible(QueueSortMode::Title, true));
+        assert!(!plays_column_visible(QueueSortMode::Rating, false));
+        assert!(plays_column_visible(QueueSortMode::Rating, true));
     }
 
     #[test]

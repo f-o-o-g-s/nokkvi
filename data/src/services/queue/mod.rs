@@ -286,6 +286,11 @@ impl QueueManager {
                         let b_rating = b.rating.unwrap_or(0);
                         b_rating.cmp(&a_rating)
                     }
+                    QueueSortMode::MostPlayed => {
+                        let a_count = a.play_count.unwrap_or(0);
+                        let b_count = b.play_count.unwrap_or(0);
+                        b_count.cmp(&a_count)
+                    }
                 },
                 _ => std::cmp::Ordering::Equal,
             };
@@ -977,6 +982,38 @@ pub(crate) mod tests {
         qm.sort_queue(QueueSortMode::Title, true).unwrap();
         assert!(qm.queue.song_ids.is_empty());
         assert_eq!(qm.queue.current_index, None);
+    }
+
+    #[test]
+    fn sort_queue_by_most_played_orders_highest_first() {
+        use crate::types::queue_sort_mode::QueueSortMode;
+
+        let mut songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+        ];
+        songs[0].play_count = Some(5);
+        songs[1].play_count = Some(20);
+        songs[2].play_count = Some(10);
+        let mut qm = make_test_manager(songs, Some(0));
+
+        // ascending=true mirrors Rating's pre-flip convention: highest first.
+        qm.sort_queue(QueueSortMode::MostPlayed, true).unwrap();
+        assert_eq!(qm.queue.song_ids, vec!["b", "c", "a"]);
+    }
+
+    #[test]
+    fn sort_queue_by_most_played_treats_none_as_zero() {
+        use crate::types::queue_sort_mode::QueueSortMode;
+
+        let mut songs = vec![make_test_song("a"), make_test_song("b")];
+        songs[0].play_count = None;
+        songs[1].play_count = Some(3);
+        let mut qm = make_test_manager(songs, None);
+
+        qm.sort_queue(QueueSortMode::MostPlayed, true).unwrap();
+        assert_eq!(qm.queue.song_ids, vec!["b", "a"]);
     }
 
     #[test]

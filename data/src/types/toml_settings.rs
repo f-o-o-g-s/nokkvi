@@ -35,6 +35,8 @@ pub struct TomlSettings {
     pub queue_show_album: bool,
     pub queue_show_duration: bool,
     pub queue_show_love: bool,
+    #[serde(default)]
+    pub queue_show_plays: bool,
 
     // -- Behavior --
     pub stable_viewport: bool,
@@ -120,6 +122,7 @@ impl Default for TomlSettings {
             queue_show_album: true,
             queue_show_duration: true,
             queue_show_love: true,
+            queue_show_plays: false,
             stable_viewport: true,
             auto_follow_playing: true,
             light_mode: false,
@@ -171,6 +174,7 @@ impl TomlSettings {
             queue_show_album: ps.queue_show_album,
             queue_show_duration: ps.queue_show_duration,
             queue_show_love: ps.queue_show_love,
+            queue_show_plays: ps.queue_show_plays,
             stable_viewport: ps.stable_viewport,
             auto_follow_playing: ps.auto_follow_playing,
             light_mode: false, // Will be read from theme.light_mode or fresh default
@@ -252,6 +256,7 @@ mod tests {
         settings.queue_show_album = true;
         settings.queue_show_duration = false;
         settings.queue_show_love = false;
+        settings.queue_show_plays = true;
 
         let toml_str = toml::to_string_pretty(&settings).expect("serialize");
         let parsed: TomlSettings = toml::from_str(&toml_str).expect("deserialize");
@@ -259,6 +264,13 @@ mod tests {
         assert!(parsed.queue_show_album);
         assert!(!parsed.queue_show_duration);
         assert!(!parsed.queue_show_love);
+        assert!(parsed.queue_show_plays);
+    }
+
+    #[test]
+    fn toml_queue_show_plays_default_is_off() {
+        let settings = TomlSettings::default();
+        assert!(!settings.queue_show_plays);
     }
 
     #[test]

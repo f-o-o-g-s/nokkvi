@@ -618,6 +618,9 @@ pub struct PlayerSettings {
     pub queue_show_duration: bool,
     /// Whether the queue's love (heart) column is visible.
     pub queue_show_love: bool,
+    /// Whether the queue's plays column is visible (default: false).
+    /// Auto-shown when sort = MostPlayed regardless of this toggle.
+    pub queue_show_plays: bool,
 }
 
 #[cfg(test)]

@@ -35,6 +35,7 @@ pub struct QueueSongUIViewData {
     pub genre: String,         // For sorting/display
     pub starred: bool,
     pub rating: Option<u32>,
+    pub play_count: Option<u32>, // For Most Played sort
 }
 
 impl crate::backend::Starable for QueueSongUIViewData {
@@ -222,6 +223,7 @@ impl QueueService {
                     genre,
                     starred: song.starred,
                     rating: song.rating,
+                    play_count: song.play_count,
                 })
             })
             .collect()

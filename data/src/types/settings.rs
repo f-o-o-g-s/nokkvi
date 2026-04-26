@@ -165,6 +165,10 @@ pub struct PlayerSettings {
     /// Whether the queue's love (heart) column is visible (default: true).
     #[serde(default = "default_true")]
     pub queue_show_love: bool,
+    /// Whether the queue's plays column is visible (default: false).
+    /// When sort = MostPlayed, the column auto-shows regardless of this toggle.
+    #[serde(default)]
+    pub queue_show_plays: bool,
 }
 
 fn default_eq_gains() -> [f32; 10] {
@@ -257,6 +261,7 @@ impl Default for PlayerSettings {
             queue_show_album: true,
             queue_show_duration: true,
             queue_show_love: true,
+            queue_show_plays: false,
         }
     }
 }

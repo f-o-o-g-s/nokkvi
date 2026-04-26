@@ -75,6 +75,7 @@ impl SortMode {
     pub const ARTIST_OPTIONS: &[SortMode] = &[
         SortMode::Name,
         SortMode::Favorited,
+        SortMode::MostPlayed,
         SortMode::AlbumCount,
         SortMode::SongCount,
         SortMode::Rating,
@@ -180,5 +181,15 @@ impl SortMode {
             (current_idx + options.len() - 1) % options.len()
         };
         options[new_idx]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn artist_options_includes_most_played() {
+        assert!(SortMode::ARTIST_OPTIONS.contains(&SortMode::MostPlayed));
     }
 }

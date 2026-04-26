@@ -10,6 +10,7 @@ pub enum QueueSortMode {
     Duration,
     Genre,
     Rating,
+    MostPlayed,
 }
 
 impl QueueSortMode {
@@ -21,6 +22,7 @@ impl QueueSortMode {
             QueueSortMode::Duration,
             QueueSortMode::Genre,
             QueueSortMode::Rating,
+            QueueSortMode::MostPlayed,
         ]
     }
 
@@ -33,6 +35,7 @@ impl QueueSortMode {
             QueueSortMode::Duration => "duration",
             QueueSortMode::Genre => "genre",
             QueueSortMode::Rating => "rating",
+            QueueSortMode::MostPlayed => "most_played",
         }
     }
 
@@ -45,6 +48,7 @@ impl QueueSortMode {
             "duration" => QueueSortMode::Duration,
             "genre" => QueueSortMode::Genre,
             "rating" => QueueSortMode::Rating,
+            "most_played" => QueueSortMode::MostPlayed,
             _ => QueueSortMode::Title,
         }
     }
@@ -59,6 +63,28 @@ impl std::fmt::Display for QueueSortMode {
             QueueSortMode::Duration => write!(f, "Duration"),
             QueueSortMode::Genre => write!(f, "Genre"),
             QueueSortMode::Rating => write!(f, "Rating"),
+            QueueSortMode::MostPlayed => write!(f, "Most Played"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn most_played_in_all_list() {
+        assert!(QueueSortMode::all().contains(&QueueSortMode::MostPlayed));
+    }
+
+    #[test]
+    fn most_played_display_label() {
+        assert_eq!(QueueSortMode::MostPlayed.to_string(), "Most Played");
+    }
+
+    #[test]
+    fn most_played_toml_key_roundtrips() {
+        let key = QueueSortMode::MostPlayed.to_toml_key();
+        assert_eq!(QueueSortMode::from_toml_key(key), QueueSortMode::MostPlayed);
     }
 }

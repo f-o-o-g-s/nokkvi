@@ -37,6 +37,7 @@ pub(crate) fn make_queue_song(
         genre: "Rock".to_string(),
         starred: false,
         rating: None,
+        play_count: None,
     }
 }
 
@@ -64,6 +65,7 @@ pub(crate) fn make_queue_song_full(
         genre: genre.to_string(),
         starred: false,
         rating: None,
+        play_count: None,
     }
 }
 

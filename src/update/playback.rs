@@ -1057,6 +1057,7 @@ impl Nokkvi {
         self.queue_page.column_visibility.album = settings.queue_show_album;
         self.queue_page.column_visibility.duration = settings.queue_show_duration;
         self.queue_page.column_visibility.love = settings.queue_show_love;
+        self.queue_page.column_visibility.plays = settings.queue_show_plays;
 
         // Restore active playlist context from persisted settings
         self.active_playlist_info =

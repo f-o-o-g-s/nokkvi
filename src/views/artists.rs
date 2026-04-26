@@ -176,6 +176,7 @@ impl ArtistsPage {
         match sort_mode {
             SortMode::Name => "name",
             SortMode::Favorited => "favorited",
+            SortMode::MostPlayed => "mostPlayed",
             SortMode::AlbumCount => "albumCount",
             SortMode::SongCount => "songCount",
             SortMode::Random => "random",
@@ -1015,6 +1016,7 @@ impl ArtistsPage {
         let song_count = artist.song_count;
         let is_starred = artist.is_starred;
         let rating = artist.rating.unwrap_or(0).min(5) as usize;
+        let play_count = artist.play_count.unwrap_or(0);
 
         // Check if this artist is the expanded one (gives it the group highlight)
         let is_expanded = self.expansion.is_expanded_parent(&artist.id);
@@ -1086,12 +1088,12 @@ impl ArtistsPage {
                 .into();
 
                 container(content)
-                    .width(Length::FillPortion(50))
+                    .width(Length::FillPortion(44))
                     .height(Length::Fill)
                     .clip(true)
                     .align_y(Alignment::Center)
             },
-            // 3. Album Count (22%)
+            // 3. Album Count (17%)
             {
                 use crate::widgets::slot_list::slot_list_metadata_column;
                 let album_text = if album_count == 1 {
@@ -1105,10 +1107,10 @@ impl ArtistsPage {
                     Some(ArtistsMessage::FocusAndExpand(idx)),
                     metadata_size,
                     style,
-                    22,
+                    17,
                 )
             },
-            // 4. Song Count (21%)
+            // 4. Song Count (17%)
             {
                 use crate::widgets::slot_list::slot_list_metadata_column;
                 slot_list_metadata_column(
@@ -1116,7 +1118,18 @@ impl ArtistsPage {
                     None,
                     metadata_size,
                     style,
-                    21,
+                    17,
+                )
+            },
+            // 5. Plays (17%)
+            {
+                use crate::widgets::slot_list::slot_list_metadata_column;
+                slot_list_metadata_column(
+                    format!("{play_count} plays"),
+                    None,
+                    metadata_size,
+                    style,
+                    17,
                 )
             },
             // 5. Star/Heart Icon (5%)

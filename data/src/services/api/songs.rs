@@ -232,3 +232,21 @@ impl SongsApiService {
         Ok((songs, total))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn most_played_maps_to_play_count() {
+        assert_eq!(
+            SongsApiService::map_sort_mode_to_sort_param("mostPlayed"),
+            "playCount"
+        );
+    }
+
+    #[test]
+    fn most_played_default_order_is_desc() {
+        assert_eq!(SongsApiService::get_default_order("mostPlayed"), "DESC");
+    }
+}

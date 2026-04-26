@@ -158,3 +158,21 @@ impl Clone for AlbumsApiService {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn most_played_maps_to_play_count() {
+        assert_eq!(
+            AlbumsApiService::map_sort_mode_to_sort_param("mostPlayed"),
+            "play_count"
+        );
+    }
+
+    #[test]
+    fn most_played_default_order_is_desc() {
+        assert_eq!(AlbumsApiService::get_default_order("mostPlayed"), "DESC");
+    }
+}
