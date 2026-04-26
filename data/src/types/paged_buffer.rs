@@ -21,6 +21,15 @@ pub const PAGE_SIZE: usize = 500;
 /// as the user scrolls. `total_count` tracks the server's full count
 /// (from X-Total-Count header) so the UI can display accurate totals
 /// and the slot list can report the correct list length.
+///
+/// The buffer also exposes a monotonically increasing `generation()`
+/// counter that bumps on every method that mutates `items` or
+/// `total_count`. Downstream caches (e.g. genres-view id→index map,
+/// future filter-result memoization) snapshot the generation alongside
+/// their derived data and rebuild only on mismatch. Every mutation site
+/// MUST go through these methods; touching `items` directly via the
+/// `DerefMut` slice impl will not bump the counter (only the items'
+/// fields can change that way, not the slice's identity).
 #[derive(Debug, Clone)]
 pub struct PagedBuffer<T> {
     /// Loaded items (contiguous from offset 0, expanded as pages arrive)
@@ -31,6 +40,8 @@ pub struct PagedBuffer<T> {
     loading: bool,
     /// When loading was set to true (for stale-load watchdog detection)
     loading_since: Option<Instant>,
+    /// Mutation counter — bumped by every method that mutates `items`.
+    generation: u64,
 }
 
 impl<T> PagedBuffer<T> {
@@ -41,7 +52,19 @@ impl<T> PagedBuffer<T> {
             total_count: 0,
             loading: false,
             loading_since: None,
+            generation: 0,
         }
+    }
+
+    /// Monotonically increasing mutation counter. Downstream caches keyed
+    /// on `(query, generation)` rebuild whenever the generation moves.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    #[inline]
+    fn bump_generation(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
     }
 
     /// Total items on the server (not just loaded items).
@@ -118,6 +141,7 @@ impl<T> PagedBuffer<T> {
         self.total_count = total_count;
         self.loading = false;
         self.loading_since = None;
+        self.bump_generation();
     }
 
     /// Append a page of items to the buffer.
@@ -127,6 +151,7 @@ impl<T> PagedBuffer<T> {
         self.items.extend(items);
         self.loading = false;
         self.loading_since = None;
+        self.bump_generation();
     }
 
     /// Clear all loaded data. Used when sort/search params change.
@@ -135,15 +160,22 @@ impl<T> PagedBuffer<T> {
         self.total_count = 0;
         self.loading = false;
         self.loading_since = None;
+        self.bump_generation();
     }
 
-    /// Get a mutable reference to an item by index.
+    /// Get a mutable reference to an item by index. Bumps the generation
+    /// counter — the assumption is that any caller asking for `&mut T` is
+    /// going to mutate it. Callers that only need read access should use
+    /// `Deref` (`&self.items[i]`) instead.
     pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+        self.bump_generation();
         self.items.get_mut(index)
     }
 
-    /// Get a mutable iterator over all loaded items.
+    /// Get a mutable iterator over all loaded items. Same generation-bump
+    /// rationale as `get_mut`.
     pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, T> {
+        self.bump_generation();
         self.items.iter_mut()
     }
 
@@ -160,6 +192,7 @@ impl<T> PagedBuffer<T> {
         self.total_count = count;
         self.loading = false;
         self.loading_since = None;
+        self.bump_generation();
     }
 }
 
@@ -370,5 +403,50 @@ mod tests {
         buf.set_first_page(vec![1, 2, 3], 3);
         assert!(!buf.is_loading());
         assert!(!buf.is_stale_loading(Duration::from_secs(0)));
+    }
+
+    /// Generation must bump on every mutation method. The genres view's
+    /// id→index map and any future filter-result cache trust this contract.
+    #[test]
+    fn generation_bumps_on_every_mutation() {
+        let mut buf: PagedBuffer<u32> = PagedBuffer::new();
+        let g0 = buf.generation();
+
+        buf.set_first_page(vec![1, 2, 3], 100);
+        let g1 = buf.generation();
+        assert!(g1 > g0, "set_first_page must bump generation");
+
+        buf.append_page(vec![4, 5], 100);
+        let g2 = buf.generation();
+        assert!(g2 > g1, "append_page must bump generation");
+
+        let _ = buf.get_mut(0);
+        let g3 = buf.generation();
+        assert!(g3 > g2, "get_mut must bump generation");
+
+        let _ = buf.iter_mut();
+        let g4 = buf.generation();
+        assert!(g4 > g3, "iter_mut must bump generation");
+
+        buf.set_from_vec(vec![10, 20]);
+        let g5 = buf.generation();
+        assert!(g5 > g4, "set_from_vec must bump generation");
+
+        buf.clear();
+        let g6 = buf.generation();
+        assert!(g6 > g5, "clear must bump generation");
+    }
+
+    /// `set_loading` is not a content mutation — it must NOT bump the
+    /// generation. A cache keyed on the generation should survive transient
+    /// loading state flips.
+    #[test]
+    fn generation_does_not_bump_on_set_loading() {
+        let mut buf: PagedBuffer<u32> = PagedBuffer::new();
+        buf.set_first_page(vec![1, 2, 3], 100);
+        let before = buf.generation();
+        buf.set_loading(true);
+        buf.set_loading(false);
+        assert_eq!(buf.generation(), before);
     }
 }
