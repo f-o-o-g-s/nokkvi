@@ -94,6 +94,29 @@ impl FontSubListState {
 // Sub-list Update Logic
 // ============================================================================
 
+/// Commit any in-progress hex edit and clear edit state.
+/// Returns `WriteColorEntry` if the buffer parsed cleanly, else `None`.
+fn commit_pending_hex_edit(sub: &mut SubListState) -> SettingsAction {
+    let Some(idx) = sub.editing_color_index else {
+        return SettingsAction::None;
+    };
+    let action = if let Some(normalized) = normalize_hex(&sub.hex_input) {
+        if let Some(color) = sub.colors.get_mut(idx) {
+            *color = normalized.clone();
+        }
+        SettingsAction::WriteColorEntry {
+            key: sub.key.clone(),
+            index: idx,
+            hex_color: normalized,
+        }
+    } else {
+        SettingsAction::None
+    };
+    sub.editing_color_index = None;
+    sub.hex_input.clear();
+    action
+}
+
 impl SettingsPage {
     /// Handle messages when in sub-list (color array editing) mode
     pub(super) fn update_sub_list(&mut self, message: SettingsMessage) -> SettingsAction {
@@ -105,60 +128,18 @@ impl SettingsPage {
 
         match message {
             SettingsMessage::SlotListUp => {
-                let mut action = SettingsAction::None;
-                if sub.editing_color_index.is_some() {
-                    if let Some(normalized) = normalize_hex(&sub.hex_input) {
-                        if let Some(color) = sub.colors.get_mut(sub.editing_color_index.unwrap()) {
-                            *color = normalized.clone();
-                        }
-                        action = SettingsAction::WriteColorEntry {
-                            key: sub.key.clone(),
-                            index: sub.editing_color_index.unwrap(),
-                            hex_color: normalized,
-                        };
-                    }
-                    sub.editing_color_index = None;
-                    sub.hex_input.clear();
-                }
+                let action = commit_pending_hex_edit(sub);
                 sub.slot_list.move_up(total);
                 action
             }
             SettingsMessage::SlotListDown => {
-                let mut action = SettingsAction::None;
-                if sub.editing_color_index.is_some() {
-                    if let Some(normalized) = normalize_hex(&sub.hex_input) {
-                        if let Some(color) = sub.colors.get_mut(sub.editing_color_index.unwrap()) {
-                            *color = normalized.clone();
-                        }
-                        action = SettingsAction::WriteColorEntry {
-                            key: sub.key.clone(),
-                            index: sub.editing_color_index.unwrap(),
-                            hex_color: normalized,
-                        };
-                    }
-                    sub.editing_color_index = None;
-                    sub.hex_input.clear();
-                }
+                let action = commit_pending_hex_edit(sub);
                 sub.slot_list.move_down(total);
                 action
             }
             SettingsMessage::SlotListSetOffset(offset, _)
             | SettingsMessage::SlotListClickItem(offset) => {
-                let mut action = SettingsAction::None;
-                if sub.editing_color_index.is_some() {
-                    if let Some(normalized) = normalize_hex(&sub.hex_input) {
-                        if let Some(color) = sub.colors.get_mut(sub.editing_color_index.unwrap()) {
-                            *color = normalized.clone();
-                        }
-                        action = SettingsAction::WriteColorEntry {
-                            key: sub.key.clone(),
-                            index: sub.editing_color_index.unwrap(),
-                            hex_color: normalized,
-                        };
-                    }
-                    sub.editing_color_index = None;
-                    sub.hex_input.clear();
-                }
+                let action = commit_pending_hex_edit(sub);
                 sub.slot_list.set_offset(offset, total);
                 action
             }

@@ -319,14 +319,14 @@ impl LoginPage {
                             border: iced::Border {
                                 color: theme::accent_border_light(),
                                 width: 1.0,
-                                radius: 8.0.into(),
+                                radius: theme::ui_border_radius(),
                             },
                             shadow: iced::Shadow::default(),
                             snap: false,
                         }
                     })
                 )
-                .border_radius(8.0.into())
+                .border_radius(theme::ui_border_radius())
             ),
         ]
         .spacing(16)

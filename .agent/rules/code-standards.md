@@ -35,7 +35,7 @@ trigger: always_on
 
 - **WHEN handling an audio track change, ALWAYS** create fresh decoders before locking. Release the audio engine lock during decoder operations.
 - **WHEN defining a view's render output, ALWAYS** maintain a consistent root widget type (e.g., keep it a `Column` or `Row`) across renders to ensure `text_input` focus is preserved.
-- **WHEN considering dependencies, ALWAYS** rely exclusively on the core deps: `reqwest`, `serde`, `bincode`, `redb`, `toml_edit`, `font-kit`, `lru`, `rodio`, `ringbuf`, `bytemuck`, `rustfft`, `pipewire`. You may use test-only `[dev-dependencies]` (e.g., `proptest`, `tempfile`).
+- **WHEN adding a new crate, ALWAYS** discuss it first; rely on the existing workspace dependencies for everyday work. Runtime: `iced`, `tokio`, `tracing` (+ `tracing-subscriber`), `parking_lot`, `futures`, `anyhow`, `image`, `notify`, `mpris-server`, `reqwest`, `serde` (+ `serde_json`), `toml` (+ `toml_edit`), `bincode-next`, `redb`, `chrono`, `directories`, `url`, `httpdate`, `rand`, `lru`, `bytemuck`, `font-kit`, `rodio`, `ringbuf`, `rustfft`, `num-complex`, `biquad`, `symphonia`, `icy-metadata`, `color-thief`, `thiserror`, `pipewire` (linux-only). Test-only `[dev-dependencies]`: `proptest`, `tempfile`.
 - **WHEN implementing search behavior, ALWAYS** fire queries immediately on text change rather than debouncing.
 - **WHEN working with the visualizer FFT thread, ALWAYS** use `try_lock()`. Only the main render thread may use `lock()`.
 - **WHEN handling play actions in update routines, ALWAYS** protect against split-view conflicts by calling `guard_play_action()` at the top of the handler.
