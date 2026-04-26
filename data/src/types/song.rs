@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// ReplayGain data from the Subsonic API.
 #[derive(
-    Debug, Clone, Default, Serialize, Deserialize, bincode_next::Encode, bincode_next::Decode,
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, bincode_next::Encode, bincode_next::Decode,
 )]
 pub struct ReplayGain {
     #[serde(rename = "albumGain")]

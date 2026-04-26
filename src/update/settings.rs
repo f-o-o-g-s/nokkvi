@@ -740,9 +740,10 @@ impl Nokkvi {
             }
             "general.volume_normalization" => {
                 if let crate::views::settings::items::SettingValue::Bool(enabled) = value {
-                    // PR 1: UI still emits bool (AGC on/off). Translate at the
-                    // dispatch boundary; ReplayGain modes are reachable only by
-                    // editing config.toml until PR 3 lands the four-mode picker.
+                    // PR 2: UI still emits bool (AGC on/off). Translate at the
+                    // dispatch boundary; ReplayGain modes remain reachable
+                    // only by editing config.toml until PR 3 lands the
+                    // four-mode picker.
                     use nokkvi_data::types::player_settings::VolumeNormalizationMode;
                     let mode = if enabled {
                         VolumeNormalizationMode::Agc
@@ -751,13 +752,24 @@ impl Nokkvi {
                     };
                     self.engine.volume_normalization = mode;
                     let target_level = self.engine.normalization_level.target_level();
+                    let preamp_db = self.engine.replay_gain_preamp_db;
+                    let fallback_db = self.engine.replay_gain_fallback_db;
+                    let fallback_to_agc = self.engine.replay_gain_fallback_to_agc;
+                    let prevent_clipping = self.engine.replay_gain_prevent_clipping;
                     self.shell_spawn(
                         "persist_volume_normalization",
                         move |shell| async move {
                             shell.settings().set_volume_normalization(mode).await?;
                             let engine = shell.audio_engine();
                             let mut guard = engine.lock().await;
-                            guard.set_volume_normalization(mode.is_agc(), target_level);
+                            guard.set_volume_normalization(
+                                mode,
+                                target_level,
+                                preamp_db,
+                                fallback_db,
+                                fallback_to_agc,
+                                prevent_clipping,
+                            );
                             Ok::<(), anyhow::Error>(())
                         },
                     );
@@ -769,15 +781,26 @@ impl Nokkvi {
                     let level =
                         nokkvi_data::types::player_settings::NormalizationLevel::from_label(&val);
                     self.engine.normalization_level = level;
-                    let agc_enabled = self.engine.volume_normalization.is_agc();
+                    let mode = self.engine.volume_normalization;
                     let target_level = level.target_level();
+                    let preamp_db = self.engine.replay_gain_preamp_db;
+                    let fallback_db = self.engine.replay_gain_fallback_db;
+                    let fallback_to_agc = self.engine.replay_gain_fallback_to_agc;
+                    let prevent_clipping = self.engine.replay_gain_prevent_clipping;
                     self.shell_spawn(
                         "persist_normalization_level",
                         move |shell| async move {
                             shell.settings().set_normalization_level(level).await?;
                             let engine = shell.audio_engine();
                             let mut guard = engine.lock().await;
-                            guard.set_volume_normalization(agc_enabled, target_level);
+                            guard.set_volume_normalization(
+                                mode,
+                                target_level,
+                                preamp_db,
+                                fallback_db,
+                                fallback_to_agc,
+                                prevent_clipping,
+                            );
                             Ok::<(), anyhow::Error>(())
                         },
                     );

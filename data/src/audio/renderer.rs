@@ -16,10 +16,16 @@ use anyhow::Result;
 use tokio::sync::Mutex;
 use tracing::{debug, trace, warn};
 
-use crate::audio::{
-    AudioFormat,
-    rodio_output::{ActiveStream, RodioOutput},
-    streaming_source::SharedVisualizerCallback,
+use crate::{
+    audio::{
+        AudioFormat, NormalizationConfig, NormalizationContext, resolve_normalization,
+        rodio_output::{ActiveStream, RodioOutput},
+        streaming_source::SharedVisualizerCallback,
+    },
+    types::{
+        player_settings::VolumeNormalizationMode,
+        song::ReplayGain,
+    },
 };
 
 /// Callback for emitting audio samples to visualizer.
@@ -79,10 +85,28 @@ pub struct AudioRenderer {
     /// Shared mixer from the app-wide MixerDeviceSink (set after login).
     shared_mixer: Option<rodio::mixer::Mixer>,
 
-    /// Whether volume normalization (AGC) is enabled for new streams.
-    volume_normalization: bool,
-    /// AGC target level for new streams.
+    /// Volume normalization mode applied to new streams.
+    volume_normalization_mode: VolumeNormalizationMode,
+    /// AGC target level — only used when mode == Agc (or RG fallback to AGC).
     normalization_target_level: f32,
+    /// ReplayGain pre-amp dB applied on top of resolved gain.
+    replay_gain_preamp_db: f32,
+    /// Fallback dB for tracks with no ReplayGain tags.
+    replay_gain_fallback_db: f32,
+    /// When true, untagged tracks fall through to AGC instead of fallback dB.
+    replay_gain_fallback_to_agc: bool,
+    /// When true, clamp gain so `peak * gain <= 1.0`.
+    replay_gain_prevent_clipping: bool,
+    /// ReplayGain tags to apply to the *next* primary-stream creation
+    /// (set by the engine immediately before `init()`/`seek()`).
+    pending_replay_gain: Option<ReplayGain>,
+    /// ReplayGain tags to apply to the *next* crossfade-stream creation
+    /// (set by the engine immediately before `start_crossfade`).
+    pending_crossfade_replay_gain: Option<ReplayGain>,
+    /// ReplayGain tags currently baked into the live primary stream.
+    /// Used by the gapless-reuse guard to detect when a track-mode
+    /// transition would leave the wrong gain applied to the new track.
+    current_replay_gain: Option<ReplayGain>,
     /// Shared EQ state — passed to each new StreamingSource.
     eq_state: Option<super::eq::EqState>,
     /// When `true`, PipeWire handles the user's volume via `channelVolumes`.
@@ -94,9 +118,74 @@ pub struct AudioRenderer {
 // ---- Volume normalization setters (outside the main impl for visibility) ----
 impl AudioRenderer {
     /// Update volume normalization settings. Takes effect on the next stream creation.
-    pub fn set_volume_normalization(&mut self, enabled: bool, target_level: f32) {
-        self.volume_normalization = enabled;
+    pub fn set_volume_normalization(
+        &mut self,
+        mode: VolumeNormalizationMode,
+        target_level: f32,
+        preamp_db: f32,
+        fallback_db: f32,
+        fallback_to_agc: bool,
+        prevent_clipping: bool,
+    ) {
+        self.volume_normalization_mode = mode;
         self.normalization_target_level = target_level;
+        self.replay_gain_preamp_db = preamp_db;
+        self.replay_gain_fallback_db = fallback_db;
+        self.replay_gain_fallback_to_agc = fallback_to_agc;
+        self.replay_gain_prevent_clipping = prevent_clipping;
+    }
+
+    /// Set the ReplayGain tags for the next primary-stream creation
+    /// (`init` or `seek`). Called by the engine immediately before the
+    /// stream is rebuilt; ignored otherwise.
+    pub fn set_pending_replay_gain(&mut self, rg: Option<ReplayGain>) {
+        self.pending_replay_gain = rg;
+    }
+
+    /// Set the ReplayGain tags for the next crossfade-stream creation.
+    pub fn set_pending_crossfade_replay_gain(&mut self, rg: Option<ReplayGain>) {
+        self.pending_crossfade_replay_gain = rg;
+    }
+
+    /// Move the staged crossfade RG into the current slot. Called after a
+    /// successful gapless decoder-swap that reuses the same rodio stream.
+    pub fn adopt_pending_crossfade_replay_gain(&mut self) {
+        self.current_replay_gain = self.pending_crossfade_replay_gain.take();
+    }
+
+    /// In ReplayGain-track mode, the rodio chain's `amplify` factor is
+    /// baked in at stream creation. The decode-loop's gapless swap reuses
+    /// the same primary stream, which would mis-level the next track.
+    ///
+    /// Returns `false` only when mode is `ReplayGainTrack` *and* the
+    /// staged next track has a different `track_gain` than the live
+    /// stream — denying the swap forces the engine to take the natural
+    /// EOF → reload path, which calls `init()` and creates a fresh
+    /// stream with the correct gain.
+    ///
+    /// Album mode is unaffected (same album → same album_gain).
+    pub fn gapless_swap_allowed(&self) -> bool {
+        if self.volume_normalization_mode != VolumeNormalizationMode::ReplayGainTrack {
+            return true;
+        }
+        !rg_track_gains_differ(
+            self.current_replay_gain.as_ref(),
+            self.pending_crossfade_replay_gain.as_ref(),
+        )
+    }
+
+    /// Resolve mode + settings + an optional `ReplayGain` into the final
+    /// per-stream config consumed by `RodioOutput::create_stream`.
+    fn resolve_norm_for(&self, rg: Option<&ReplayGain>) -> NormalizationConfig {
+        resolve_normalization(NormalizationContext {
+            mode: self.volume_normalization_mode,
+            agc_target_level: self.normalization_target_level,
+            replay_gain_preamp_db: self.replay_gain_preamp_db,
+            replay_gain_fallback_db: self.replay_gain_fallback_db,
+            replay_gain_fallback_to_agc: self.replay_gain_fallback_to_agc,
+            replay_gain_prevent_clipping: self.replay_gain_prevent_clipping,
+            replay_gain: rg,
+        })
     }
 
     /// Update shared EQ state. Replaces existing eq state, taking effect on new streams.
@@ -134,8 +223,15 @@ impl AudioRenderer {
             crossfade_armed_track_duration_ms: 0,
             viz_callback: std::sync::Arc::new(parking_lot::RwLock::new(None)),
             shared_mixer: None,
-            volume_normalization: false,
+            volume_normalization_mode: VolumeNormalizationMode::Off,
             normalization_target_level: 1.0,
+            replay_gain_preamp_db: 0.0,
+            replay_gain_fallback_db: 0.0,
+            replay_gain_fallback_to_agc: false,
+            replay_gain_prevent_clipping: true,
+            pending_replay_gain: None,
+            pending_crossfade_replay_gain: None,
+            current_replay_gain: None,
             eq_state: None,
             pw_volume_active: false,
         }
@@ -167,12 +263,27 @@ impl AudioRenderer {
         let old_format = self.format.clone();
         self.prev_format = prev_format.cloned().unwrap_or_else(|| old_format.clone());
 
-        // Check if gapless is possible (formats match and gapless enabled)
+        // Check if gapless is possible (formats match and gapless enabled).
+        // RG-track mode also requires the per-track gain to be unchanged —
+        // gapless reuse keeps the existing rodio chain (with the previous
+        // track's `amplify` factor), which would mis-level the new track.
+        // Album mode is unaffected: same album → same album_gain by definition.
+        let rg_blocks_gapless = self.volume_normalization_mode
+            == VolumeNormalizationMode::ReplayGainTrack
+            && rg_track_gains_differ(
+                self.current_replay_gain.as_ref(),
+                self.pending_replay_gain.as_ref(),
+            );
         let is_gapless = !force_reload
             && self.gapless_enabled
             && self.prev_format.is_valid()
             && *format == self.prev_format
-            && self.primary_stream.is_some();
+            && self.primary_stream.is_some()
+            && !rg_blocks_gapless;
+
+        if rg_blocks_gapless {
+            debug!("📡 Renderer::init() RG-track gain differs — forcing fresh stream");
+        }
 
         if is_gapless {
             // Formats match — reuse existing stream for gapless playback.
@@ -207,23 +318,25 @@ impl AudioRenderer {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Audio output not initialized"))?;
 
+        let norm = self.resolve_norm_for(self.pending_replay_gain.as_ref());
         let stream = output.create_stream(
             format.sample_rate(),
             format.channel_count() as u16,
             self.stream_volume(),
-            self.volume_normalization,
-            self.normalization_target_level,
+            norm,
             self.eq_state.clone(),
         );
 
         debug!(
-            "📡 Renderer::init() NEW STREAM created: {}ch, {}Hz, vol={:.2}",
+            "📡 Renderer::init() NEW STREAM created: {}ch, {}Hz, vol={:.2}, norm={:?}",
             format.channel_count(),
             format.sample_rate(),
-            self.volume
+            self.volume,
+            norm
         );
 
         self.primary_stream = Some(stream);
+        self.current_replay_gain = self.pending_replay_gain.clone();
         self.position_offset = 0;
 
         Ok(())
@@ -376,17 +489,26 @@ impl AudioRenderer {
             old_stream.silence_and_stop();
         }
 
-        // Recreate the primary stream (if output exists)
+        // Recreate the primary stream (if output exists). Seek reuses the
+        // current track's RG since we're not switching tracks — leave
+        // pending_replay_gain alone and resolve from current_replay_gain.
         if let Some(ref output) = self.output {
+            let rg_for_seek = self.pending_replay_gain
+                .as_ref()
+                .or(self.current_replay_gain.as_ref());
+            let norm = self.resolve_norm_for(rg_for_seek);
             let stream = output.create_stream(
                 self.format.sample_rate(),
                 self.format.channel_count() as u16,
                 self.stream_volume(),
-                self.volume_normalization,
-                self.normalization_target_level,
+                norm,
                 self.eq_state.clone(),
             );
             self.primary_stream = Some(stream);
+            // Keep current_replay_gain consistent — don't blow it away.
+            if let Some(rg) = rg_for_seek {
+                self.current_replay_gain = Some(rg.clone());
+            }
         }
     }
 
@@ -575,12 +697,12 @@ impl AudioRenderer {
             }
         };
 
+        let cf_norm = self.resolve_norm_for(self.pending_crossfade_replay_gain.as_ref());
         let cf_stream = output.create_stream(
             incoming_format.sample_rate(),
             incoming_format.channel_count() as u16,
             0.0, // Start silent, volume will ramp up
-            self.volume_normalization,
-            self.normalization_target_level,
+            cf_norm,
             self.eq_state.clone(),
         );
 
@@ -609,6 +731,8 @@ impl AudioRenderer {
         self.crossfade_duration_ms = 0;
         self.crossfade_start_time = None;
         self.crossfade_incoming_format = AudioFormat::invalid();
+        // Drop the staged RG since the incoming stream is being thrown away.
+        self.pending_crossfade_replay_gain = None;
 
         // Stop crossfade stream
         if let Some(stream) = self.crossfade_stream.take() {
@@ -720,6 +844,9 @@ impl AudioRenderer {
 
         // Update format to the incoming track's format
         self.format = self.crossfade_incoming_format.clone();
+        // Promote the crossfade RG to "current" — it's now baked into the
+        // new primary stream's `amplify` factor.
+        self.current_replay_gain = self.pending_crossfade_replay_gain.take();
 
         // Reset crossfade state
         self.crossfade_active = false;
@@ -877,5 +1004,17 @@ impl AudioRenderer {
 impl Default for AudioRenderer {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Compare track_gain values across two optional `ReplayGain` snapshots.
+/// Returns `true` when the new track would need a different `amplify`
+/// factor than the live stream is currently applying.
+fn rg_track_gains_differ(current: Option<&ReplayGain>, pending: Option<&ReplayGain>) -> bool {
+    match (current, pending) {
+        (None, None) => false,
+        (None, Some(p)) => p.track_gain.is_some(),
+        (Some(c), None) => c.track_gain.is_some(),
+        (Some(c), Some(p)) => c.track_gain != p.track_gain,
     }
 }

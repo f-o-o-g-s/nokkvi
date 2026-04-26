@@ -121,15 +121,14 @@ impl RodioOutput {
     /// - `sample_rate`: Sample rate of the decoded audio.
     /// - `channels`: Channel count of the decoded audio.
     /// - `initial_volume`: Starting volume (0.0–1.0).
-    /// - `volume_normalization`: Whether AGC is enabled.
-    /// - `normalization_target_level`: AGC target level (e.g. 0.6, 1.0, 1.4).
+    /// - `norm`: Resolved normalization decision for this stream
+    ///   (off, AGC at target level, or static linear gain).
     pub fn create_stream(
         &self,
         sample_rate: u32,
         channels: u16,
         initial_volume: f32,
-        volume_normalization: bool,
-        normalization_target_level: f32,
+        norm: super::NormalizationConfig,
         eq_state: Option<super::eq::EqState>,
     ) -> ActiveStream {
         // Create lock-free ring buffer
@@ -150,30 +149,48 @@ impl RodioOutput {
             eq_state,
         );
 
-        // Chain AGC (when enabled) then peak limiter before adding to mixer.
-        // AGC runs before the limiter so any gain boost is clamped, preventing clipping.
+        // Pre-mixer chain. The peak limiter sits at the end of every variant so
+        // any AGC overshoot or static-gain boost is clamped before mixing.
         use rodio::source::{AutomaticGainControlSettings, LimitSettings, Source};
-        if volume_normalization {
-            let agc_settings = AutomaticGainControlSettings {
-                target_level: normalization_target_level,
-                ..AutomaticGainControlSettings::default()
-            };
-            self.mixer.add(
-                source
-                    .automatic_gain_control(agc_settings)
-                    .limit(LimitSettings::dynamic_content()),
-            );
-            debug!(
-                "🔊 [RODIO] Created stream with AGC (target={:.1}): {}ch, {}Hz, vol={:.2}",
-                normalization_target_level, channels, sample_rate, initial_volume
-            );
-        } else {
-            self.mixer
-                .add(source.limit(LimitSettings::dynamic_content()));
-            debug!(
-                "🔊 [RODIO] Created stream: {}ch, {}Hz, vol={:.2}",
-                channels, sample_rate, initial_volume
-            );
+        match norm {
+            super::NormalizationConfig::Off => {
+                self.mixer
+                    .add(source.limit(LimitSettings::dynamic_content()));
+                debug!(
+                    "🔊 [RODIO] Created stream: {}ch, {}Hz, vol={:.2}",
+                    channels, sample_rate, initial_volume
+                );
+            }
+            super::NormalizationConfig::Agc { target_level } => {
+                let agc_settings = AutomaticGainControlSettings {
+                    target_level,
+                    ..AutomaticGainControlSettings::default()
+                };
+                self.mixer.add(
+                    source
+                        .automatic_gain_control(agc_settings)
+                        .limit(LimitSettings::dynamic_content()),
+                );
+                debug!(
+                    "🔊 [RODIO] Created stream with AGC (target={:.1}): {}ch, {}Hz, vol={:.2}",
+                    target_level, channels, sample_rate, initial_volume
+                );
+            }
+            super::NormalizationConfig::Static(gain) => {
+                self.mixer.add(
+                    source
+                        .amplify(gain)
+                        .limit(LimitSettings::dynamic_content()),
+                );
+                debug!(
+                    "🔊 [RODIO] Created stream with static gain ({:.3}× ≈ {:+.2} dB): {}ch, {}Hz, vol={:.2}",
+                    gain,
+                    20.0 * gain.max(f32::MIN_POSITIVE).log10(),
+                    channels,
+                    sample_rate,
+                    initial_volume
+                );
+            }
         }
 
         ActiveStream {

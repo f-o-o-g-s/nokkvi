@@ -10,6 +10,7 @@ pub mod decoder;
 pub mod engine;
 pub mod eq;
 pub mod format;
+pub mod normalization;
 
 #[cfg(target_os = "linux")]
 pub mod pipewire_output;
@@ -25,6 +26,7 @@ pub use buffer::AudioBuffer;
 pub use decoder::AudioDecoder;
 pub use eq::{EqProcessor, EqState};
 pub use format::{AudioFormat, SampleFormat};
+pub use normalization::{NormalizationConfig, NormalizationContext, resolve_normalization};
 pub use renderer::AudioRenderer;
 pub use rodio_output::{ActiveStream, RodioOutput};
 pub use sfx_engine::{SfxEngine, SfxType};

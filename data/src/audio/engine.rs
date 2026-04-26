@@ -768,8 +768,17 @@ impl CustomAudioEngine {
                                     && next_fmt.is_valid()
                                     && current_format.sample_rate() == next_fmt.sample_rate()
                                     && current_format.channel_count() == next_fmt.channel_count();
+                                // RG-track mode: the live stream's amplify
+                                // factor is baked at create time; deny gapless
+                                // when the next track needs a different gain.
+                                let rg_allows_swap = renderer.lock().gapless_swap_allowed();
+                                if !rg_allows_swap {
+                                    tracing::debug!(
+                                        "🔄 [DECODE LOOP] RG-track gain differs — denying gapless swap"
+                                    );
+                                }
 
-                                if formats_match {
+                                if formats_match && rg_allows_swap {
                                     // Take the next decoder and swap it into the primary slot
                                     if let Some(next_dec) = next_dec_guard.take() {
                                         let next_duration = next_dec.duration();
@@ -784,11 +793,16 @@ impl CustomAudioEngine {
                                         // Increment source generation for stale callback detection
                                         source_generation.fetch_add(1, Ordering::Release);
 
-                                        // Reset renderer position for the new track
+                                        // Reset renderer position for the new track and
+                                        // promote the staged crossfade RG to "current"
+                                        // (since we're keeping the same stream, the
+                                        // amplify factor is already correct — we just
+                                        // need our bookkeeping to reflect the new track).
                                         {
                                             let mut r = renderer.lock();
                                             r.reset_position();
                                             r.reset_finished_called();
+                                            r.adopt_pending_crossfade_replay_gain();
                                         }
 
                                         // Store transition info for the engine to pick up
@@ -1070,7 +1084,11 @@ impl CustomAudioEngine {
     /// Prepare next track for gapless playback
     /// NOTE: This method holds the engine lock during the HTTP download.
     /// For better visualizer performance, use store_prepared_decoder() instead.
-    pub async fn prepare_next_track(&mut self, url: &str) {
+    pub async fn prepare_next_track(
+        &mut self,
+        url: &str,
+        replay_gain: Option<crate::types::song::ReplayGain>,
+    ) {
         self.reset_next_track().await;
         *self.next_track_prepared.lock().await = false;
 
@@ -1093,6 +1111,12 @@ impl CustomAudioEngine {
             *self.next_source_shared.lock().await = url.to_string();
             *self.next_track_prepared.lock().await = true;
 
+            // Stash the incoming track's ReplayGain so the next crossfade
+            // (or gapless transition) applies the right amplify factor.
+            self.renderer
+                .lock()
+                .set_pending_crossfade_replay_gain(replay_gain);
+
             // Arm the renderer to trigger crossfade when the queue drains
             if self.crossfade_enabled && self.crossfade_duration_ms > 0 {
                 self.renderer.lock().arm_crossfade(
@@ -1112,7 +1136,12 @@ impl CustomAudioEngine {
     /// Caller should:
     /// 1. Create and init the decoder OUTSIDE of engine lock (do the download)
     /// 2. Call this method briefly to store the ready decoder
-    pub async fn store_prepared_decoder(&mut self, decoder: AudioDecoder, url: String) {
+    pub async fn store_prepared_decoder(
+        &mut self,
+        decoder: AudioDecoder,
+        url: String,
+        replay_gain: Option<crate::types::song::ReplayGain>,
+    ) {
         // Check if we should store this decoder
         if url.is_empty() || url == self.source {
             return;
@@ -1128,6 +1157,12 @@ impl CustomAudioEngine {
         self.next_source = url;
         *self.next_source_shared.lock().await = self.next_source.clone();
         *self.next_track_prepared.lock().await = true;
+
+        // Stash the incoming track's ReplayGain so the next crossfade
+        // (or gapless transition) applies the right amplify factor.
+        self.renderer
+            .lock()
+            .set_pending_crossfade_replay_gain(replay_gain);
 
         // Arm the renderer to trigger crossfade when the queue drains
         if self.crossfade_enabled && self.crossfade_duration_ms > 0 {
@@ -1204,9 +1239,41 @@ impl CustomAudioEngine {
     /// Update volume normalization settings on the renderer.
     ///
     /// Takes effect on the next stream creation (play, seek, crossfade).
-    pub fn set_volume_normalization(&mut self, enabled: bool, target_level: f32) {
+    pub fn set_volume_normalization(
+        &mut self,
+        mode: crate::types::player_settings::VolumeNormalizationMode,
+        target_level: f32,
+        preamp_db: f32,
+        fallback_db: f32,
+        fallback_to_agc: bool,
+        prevent_clipping: bool,
+    ) {
         let mut renderer = self.renderer.lock();
-        renderer.set_volume_normalization(enabled, target_level);
+        renderer.set_volume_normalization(
+            mode,
+            target_level,
+            preamp_db,
+            fallback_db,
+            fallback_to_agc,
+            prevent_clipping,
+        );
+    }
+
+    /// Stash ReplayGain tags for the next primary-stream creation
+    /// (next `load_track` / `set_source` / `seek_to`).
+    pub fn set_pending_replay_gain(&mut self, rg: Option<crate::types::song::ReplayGain>) {
+        self.renderer.lock().set_pending_replay_gain(rg);
+    }
+
+    /// Stash ReplayGain tags for the next crossfade-stream creation
+    /// (next `prepare_next_track` / `store_prepared_decoder`).
+    pub fn set_pending_crossfade_replay_gain(
+        &mut self,
+        rg: Option<crate::types::song::ReplayGain>,
+    ) {
+        self.renderer
+            .lock()
+            .set_pending_crossfade_replay_gain(rg);
     }
 
     /// Update shared EQ state. Replaces existing eq state, taking effect on new streams.

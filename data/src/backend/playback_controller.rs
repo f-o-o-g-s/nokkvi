@@ -219,7 +219,9 @@ impl PlaybackController {
                     );
 
                     // Load and play the track
+                    let rg = song.replay_gain.clone();
                     drop(queue_manager);
+                    audio.set_pending_replay_gain(rg);
                     audio.load_track(&stream_url).await;
                     audio.play().await?;
                     return Ok(());
@@ -276,6 +278,7 @@ impl PlaybackController {
                 self.queue_service.refresh_from_queue().await?;
 
                 // Load and play the track
+                audio.set_pending_replay_gain(song.replay_gain.clone());
                 audio.load_track(&stream_url).await;
                 audio.play().await?;
 
@@ -502,7 +505,11 @@ impl PlaybackController {
         }
 
         // Get the next track URL from queue manager WITHOUT holding the engine lock
-        let (stream_url, is_repeat_track): (Option<String>, bool) = {
+        let (stream_url, replay_gain, is_repeat_track): (
+            Option<String>,
+            Option<crate::types::song::ReplayGain>,
+            bool,
+        ) = {
             let queue_manager_arc = self.queue_service.queue_manager();
             let mut queue_manager = queue_manager_arc.lock().await;
             let repeat_track =
@@ -516,9 +523,9 @@ impl PlaybackController {
                     subsonic_credential,
                     chrono::Utc::now().timestamp_millis()
                 );
-                (Some(url), repeat_track)
+                (Some(url), next_result.song.replay_gain.clone(), repeat_track)
             } else {
-                (None, repeat_track)
+                (None, None, repeat_track)
             }
         };
 
@@ -553,6 +560,7 @@ impl PlaybackController {
         // This download happens WITHOUT holding the engine lock!
         let audio_engine = self.audio_engine.clone();
         let url_for_task = url.clone();
+        let rg_for_task = replay_gain;
 
         self.task_manager
             .spawn_result("gapless_prep", move || async move {
@@ -564,7 +572,7 @@ impl PlaybackController {
                 // BRIEF lock to store the already-downloaded decoder
                 let mut engine = audio_engine.lock().await;
                 engine
-                    .store_prepared_decoder(decoder, url_for_task.clone())
+                    .store_prepared_decoder(decoder, url_for_task.clone(), rg_for_task)
                     .await;
                 drop(engine);
                 debug!(" [GAPLESS] Prepared next track: {}", url_for_task);
@@ -614,6 +622,7 @@ impl PlaybackController {
 
         // 3. Load and play
         let mut engine = self.audio_engine.lock().await;
+        engine.set_pending_replay_gain(song.replay_gain.clone());
         engine.set_source(stream_url).await;
         engine.play().await?;
         drop(engine);
@@ -665,7 +674,13 @@ impl PlaybackController {
             return Err(anyhow::anyhow!("Failed to build stream URL"));
         }
 
+        let rg = {
+            let qm = queue_manager.lock().await;
+            qm.get_song(song_id).and_then(|s| s.replay_gain.clone())
+        };
+
         let mut engine = self.audio_engine.lock().await;
+        engine.set_pending_replay_gain(rg);
         engine.set_source(stream_url).await;
         engine.play().await?;
         drop(engine);
