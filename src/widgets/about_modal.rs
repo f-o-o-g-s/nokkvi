@@ -47,6 +47,8 @@ pub enum AboutModalMessage {
     Close,
     /// Copy all info to clipboard
     CopyAll,
+    /// Open the Ko-fi tip page in the user's browser
+    OpenKofi,
 }
 
 // =============================================================================
@@ -219,6 +221,47 @@ pub(crate) fn about_modal_overlay<'a>(
 
     let info_table = column(rows).width(Length::Fill);
 
+    // ── Ko-fi support link ──────────────────────────────────────
+    let kofi_row: Element<'_, AboutModalMessage> = mouse_area(
+        HoverOverlay::new(
+            container(
+                row![
+                    crate::embedded_svg::svg_widget("assets/icons/heart-filled.svg")
+                        .width(Length::Fixed(14.0))
+                        .height(Length::Fixed(14.0))
+                        .style(|_theme, _status| svg::Style {
+                            color: Some(theme::accent_bright()),
+                        }),
+                    text("Buy foogs a coffee on Ko-fi")
+                        .size(13.0)
+                        .font(theme::ui_font())
+                        .color(theme::fg2()),
+                ]
+                .spacing(8)
+                .align_y(Alignment::Center),
+            )
+            .padding(iced::Padding {
+                top: 6.0,
+                bottom: 6.0,
+                left: 10.0,
+                right: 10.0,
+            })
+            .style(|_theme| container::Style {
+                background: None,
+                border: iced::Border::default(),
+                ..Default::default()
+            }),
+        )
+        .border_radius(theme::ui_border_radius()),
+    )
+    .on_press(AboutModalMessage::OpenKofi)
+    .interaction(iced::mouse::Interaction::Pointer)
+    .into();
+
+    let kofi_container = container(kofi_row)
+        .width(Length::Fill)
+        .align_x(Alignment::Center);
+
     // ── Dialog content ───────────────────────────────────────────
     let content = column![
         header,
@@ -226,7 +269,8 @@ pub(crate) fn about_modal_overlay<'a>(
         boat_icon,
         tagline,
         description,
-        info_table
+        info_table,
+        kofi_container
     ]
     .spacing(10)
     .padding(20)

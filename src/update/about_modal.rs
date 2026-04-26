@@ -40,6 +40,13 @@ impl Nokkvi {
                 self.toast_info("Copied to clipboard");
                 return iced::clipboard::write(text).discard();
             }
+            AboutModalMessage::OpenKofi => {
+                let url = "https://ko-fi.com/foogsnokkvi";
+                if let Err(e) = std::process::Command::new("xdg-open").arg(url).spawn() {
+                    tracing::warn!("Failed to open Ko-fi URL: {}", e);
+                    self.toast_warn(format!("Could not open browser: {e}"));
+                }
+            }
         }
         Task::none()
     }
