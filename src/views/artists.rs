@@ -201,6 +201,15 @@ pub enum ArtistsAction {
     CenterOnPlaying,
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
     ColumnVisibilityChanged(ArtistsColumn, bool),
+    /// Refresh the artists viewport: prefetch mini artwork, fetch the 500px
+    /// artwork + dominant color for the new center artist, and chain a
+    /// page-fetch if the viewport is near the loaded edge.
+    ///
+    /// Emitted from settled-scroll and hotkey navigation paths only.
+    /// `SlotListScrollSeek` (mid-drag) deliberately does NOT emit this —
+    /// rapid scrollbar drag previously hung the app by spawning hundreds
+    /// of in-flight 500px fetches + dominant-color blocking tasks per drag.
+    LoadLargeArtwork,
     None,
 }
 
@@ -429,7 +438,7 @@ impl ArtistsPage {
                         self.sub_expansion.children.len(),
                     );
                     self.common.handle_navigate_up(len);
-                    (Task::none(), ArtistsAction::None)
+                    (Task::none(), ArtistsAction::LoadLargeArtwork)
                 }
                 ArtistsMessage::SlotListNavigateDown => {
                     let len = super::expansion::three_tier_flattened_len(
@@ -438,7 +447,7 @@ impl ArtistsPage {
                         self.sub_expansion.children.len(),
                     );
                     self.common.handle_navigate_down(len);
-                    (Task::none(), ArtistsAction::None)
+                    (Task::none(), ArtistsAction::LoadLargeArtwork)
                 }
                 ArtistsMessage::SlotListSetOffset(offset, modifiers) => {
                     let len = super::expansion::three_tier_flattened_len(
@@ -447,7 +456,7 @@ impl ArtistsPage {
                         self.sub_expansion.children.len(),
                     );
                     self.common.handle_slot_click(offset, len, modifiers);
-                    (Task::none(), ArtistsAction::None)
+                    (Task::none(), ArtistsAction::LoadLargeArtwork)
                 }
                 ArtistsMessage::SlotListScrollSeek(offset) => {
                     let len = super::expansion::three_tier_flattened_len(
@@ -456,6 +465,9 @@ impl ArtistsPage {
                         self.sub_expansion.children.len(),
                     );
                     self.common.handle_set_offset(offset, len);
+                    // Mid-drag: update viewport offset only. Artwork +
+                    // page-fetch deferred to the SeekSettled debounce, which
+                    // synthesises a SetOffset message that emits LoadLargeArtwork.
                     (Task::none(), ArtistsAction::None)
                 }
                 ArtistsMessage::SlotListClickPlay(offset) => {

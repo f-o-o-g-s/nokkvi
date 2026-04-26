@@ -600,73 +600,81 @@ impl Nokkvi {
             ArtistsAction::ColumnVisibilityChanged(col, value) => {
                 return self.persist_artists_column_visibility(col, value);
             }
+            ArtistsAction::LoadLargeArtwork => {
+                // Settled-scroll / hotkey navigation: refresh viewport mini
+                // artwork, fetch 500px artwork + dominant color for the new
+                // center artist, and chain a page-fetch if the viewport is
+                // near the loaded edge. Mid-drag scrolling does NOT enter
+                // here — `SlotListScrollSeek` returns `None` and lets the
+                // 150 ms `SeekSettled` debounce synthesise a `SetOffset`
+                // that lands in this arm exactly once per drag.
+                let mut batch: Vec<Task<Message>> = vec![
+                    cmd.map(Message::Artists),
+                    self.prefetch_artist_mini_artwork_tasks(),
+                ];
+
+                let total = self.library.artists.len();
+                if total > 0
+                    && let Some(center_idx) = self
+                        .artists_page
+                        .common
+                        .slot_list
+                        .get_center_item_index(total)
+                    && let Some(artist) = self.library.artists.get(center_idx)
+                    && self.artwork.large_artwork.peek(&artist.id).is_none()
+                    && let Some(shell) = &self.app_service
+                {
+                    let id = artist.id.clone();
+                    let external_url = artist.image_url.clone();
+                    let vm = shell.albums().clone();
+                    batch.push(Task::perform(
+                        async move {
+                            let art_id = external_url.unwrap_or_else(|| format!("ar-{id}"));
+                            match vm.fetch_album_artwork(&art_id, Some(500), None).await {
+                                Ok(bytes) if bytes.len() > 100 => {
+                                    let dominant = tokio::task::spawn_blocking({
+                                        let b = bytes.clone();
+                                        move || {
+                                            nokkvi_data::utils::dominant_color::extract_dominant_color(&b)
+                                        }
+                                    })
+                                    .await
+                                    .unwrap_or(None);
+                                    (id, Some(image::Handle::from_bytes(bytes)), dominant)
+                                }
+                                _ => (id, None, None),
+                            }
+                        },
+                        |(id, handle, color)| {
+                            if handle.is_none() && color.is_none() {
+                                Message::NoOp
+                            } else {
+                                Message::Artwork(ArtworkMessage::LargeArtistLoaded(
+                                    id,
+                                    handle,
+                                    color.map(|(r, g, b)| iced::Color::from_rgb8(r, g, b)),
+                                ))
+                            }
+                        },
+                    ));
+                }
+
+                let page_size = self.library_page_size.to_usize();
+                if !self.library.artists.is_empty()
+                    && let Some((offset, _)) = self.library.artists.needs_fetch(
+                        self.artists_page.common.slot_list.viewport_offset,
+                        page_size,
+                    )
+                {
+                    batch.push(self.handle_artists_load_page(offset));
+                }
+
+                return Task::batch(batch);
+            }
             _ => {} // None + already-handled common actions
         }
 
-        // Re-prefetch mini artwork for visible artist slots after any slot list change.
-        let mut batch: Vec<Task<Message>> = vec![
-            cmd.map(Message::Artists),
-            self.prefetch_artist_mini_artwork_tasks(),
-        ];
-
-        let total = self.library.artists.len();
-        if total > 0
-            && let Some(center_idx) = self
-                .artists_page
-                .common
-                .slot_list
-                .get_center_item_index(total)
-            && let Some(artist) = self.library.artists.get(center_idx)
-            && self.artwork.large_artwork.peek(&artist.id).is_none()
-            && let Some(shell) = &self.app_service
-        {
-            let id = artist.id.clone();
-            let external_url = artist.image_url.clone();
-            let vm = shell.albums().clone();
-            batch.push(Task::perform(
-                async move {
-                    let art_id = external_url.unwrap_or_else(|| format!("ar-{id}"));
-                    match vm.fetch_album_artwork(&art_id, Some(500), None).await {
-                        Ok(bytes) if bytes.len() > 100 => {
-                            let dominant = tokio::task::spawn_blocking({
-                                let b = bytes.clone();
-                                move || {
-                                    nokkvi_data::utils::dominant_color::extract_dominant_color(&b)
-                                }
-                            })
-                            .await
-                            .unwrap_or(None);
-                            (id, Some(image::Handle::from_bytes(bytes)), dominant)
-                        }
-                        _ => (id, None, None),
-                    }
-                },
-                |(id, handle, color)| {
-                    if handle.is_none() && color.is_none() {
-                        Message::NoOp
-                    } else {
-                        Message::Artwork(ArtworkMessage::LargeArtistLoaded(
-                            id,
-                            handle,
-                            color.map(|(r, g, b)| iced::Color::from_rgb8(r, g, b)),
-                        ))
-                    }
-                },
-            ));
-        }
-
-        // Check if we need to fetch more pages while scrolling
-        let page_size = self.library_page_size.to_usize();
-        if !self.library.artists.is_empty()
-            && let Some((offset, _)) = self.library.artists.needs_fetch(
-                self.artists_page.common.slot_list.viewport_offset,
-                page_size,
-            )
-        {
-            batch.push(self.handle_artists_load_page(offset));
-        }
-
-        Task::batch(batch)
+        cmd.map(Message::Artists)
     }
 
     /// Persist the user's artists column visibility toggle to config.toml +
