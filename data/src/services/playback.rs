@@ -6,6 +6,28 @@ use tracing::debug;
 
 use crate::{audio::engine::CustomAudioEngine, services::queue::QueueManager, types::song::Song};
 
+/// Plan describing what the audio engine still needs to do after the queue
+/// has been advanced to the next track.
+///
+/// Returned by [`QueueNavigator::decide_transition`] and consumed by
+/// [`QueueNavigator::execute_transition`]. Splitting the work this way
+/// lets the completion callback drop the outer `QueueNavigator` mutex
+/// before any network-bound engine ops run.
+#[derive(Debug, Clone)]
+pub enum TrackTransitionPlan {
+    /// Queue exhausted or no transition available — stop the engine.
+    Stop,
+    /// Engine already has the next track ready (gapless or prepared decoder).
+    /// Just ensure playback is running.
+    PlayPrepared { song: Song, reason: String },
+    /// Need to load a fresh stream URL (path 3).
+    LoadFresh {
+        stream_url: String,
+        song: Song,
+        reason: String,
+    },
+}
+
 /// QueueNavigator - Low-level queue navigation and track transition handling
 ///
 /// Handles:
@@ -120,12 +142,38 @@ impl QueueNavigator {
     /// 3. Normal → need to load a new track
     ///
     /// In ALL cases, the queue transition uses `transition_to_queued()`.
+    ///
+    /// This is a thin wrapper around [`decide_transition`] + [`execute_transition`].
+    /// The completion callback in `playback_controller.rs` calls those two halves
+    /// directly so the outer `nav` mutex is dropped before engine I/O.
     pub async fn on_track_finished(
         &self,
         engine: &mut CustomAudioEngine,
         server_url: &str,
         subsonic_credential: &str,
     ) -> Result<Option<(Song, String)>> {
+        let plan = self
+            .decide_transition(engine, server_url, subsonic_credential)
+            .await;
+        Self::execute_transition(plan, engine).await
+    }
+
+    /// Decide what should happen at the engine layer for the next track.
+    ///
+    /// Inspects engine state, mutates the queue + `current_song_id`, and
+    /// returns a [`TrackTransitionPlan`] describing the engine ops still
+    /// needed. Holds the `queue_manager` lock briefly. Does no network I/O.
+    ///
+    /// The two engine-state mutations called here
+    /// (`consume_gapless_transition`, `load_prepared_track`) are fast
+    /// metadata swaps over already-prepared decoders — they do not touch
+    /// the network.
+    pub async fn decide_transition(
+        &self,
+        engine: &mut CustomAudioEngine,
+        server_url: &str,
+        subsonic_credential: &str,
+    ) -> TrackTransitionPlan {
         // ── Determine engine state and handle audio layer ──
         let needs_load = if engine.immediate_playing() {
             // Path 1: Engine already playing (gapless/crossfade completed by engine)
@@ -166,29 +214,25 @@ impl QueueNavigator {
             if let Some(song) = song {
                 // Do NOT consume the track since we are repeating it
                 queue_manager.add_to_history(song.clone());
-
-                // For path 3: need to load and play the track
-                if needs_load {
-                    let stream_url =
-                        Self::build_stream_url(&song.id, server_url, subsonic_credential);
-                    drop(queue_manager);
-                    engine.load_track(&stream_url).await;
-                    engine.play().await?;
-                } else {
-                    // For paths 1 & 2: engine already has the track, just ensure playing
-                    drop(queue_manager);
-                    if !engine.immediate_playing() {
-                        engine.play().await?;
-                    }
-                }
+                drop(queue_manager);
 
                 debug!("▶️ Now Playing: {} - {} (repeat)", song.title, song.artist);
-                return Ok(Some((song, "repeat".to_string())));
+                let reason = "repeat".to_string();
+                return if needs_load {
+                    let stream_url =
+                        Self::build_stream_url(&song.id, server_url, subsonic_credential);
+                    TrackTransitionPlan::LoadFresh {
+                        stream_url,
+                        song,
+                        reason,
+                    }
+                } else {
+                    TrackTransitionPlan::PlayPrepared { song, reason }
+                };
             }
 
             drop(queue_manager);
-            engine.stop().await;
-            return Ok(None);
+            return TrackTransitionPlan::Stop;
         }
 
         // For path 3, ensure queued is set
@@ -205,8 +249,7 @@ impl QueueNavigator {
             queue_manager.save_all().ok();
             drop(queue_manager);
             debug!(" No next song available (queue empty or at end)");
-            engine.stop().await;
-            return Ok(None);
+            return TrackTransitionPlan::Stop;
         }
 
         // Transition: update current_index/current_order, consume queued.
@@ -221,8 +264,7 @@ impl QueueNavigator {
         let Some(transition) = queue_manager.transition_to_queued() else {
             drop(queue_manager);
             debug!(" No queued song to transition to");
-            engine.stop().await;
-            return Ok(None);
+            return TrackTransitionPlan::Stop;
         };
 
         let song = transition.song.clone();
@@ -244,26 +286,56 @@ impl QueueNavigator {
         }
 
         *self.current_song_id.lock().await = Some(song.id.clone());
-
-        // For path 3: need to load and play the track
-        if needs_load {
-            let stream_url = Self::build_stream_url(&song.id, server_url, subsonic_credential);
-            drop(queue_manager);
-            engine.load_track(&stream_url).await;
-            engine.play().await?;
-        } else {
-            // For paths 1 & 2: engine already has the track, just ensure playing
-            drop(queue_manager);
-            if !engine.immediate_playing() {
-                engine.play().await?;
-            }
-        }
+        drop(queue_manager);
 
         debug!(
             "▶️ Now Playing: {} - {} ({})",
             song.title, song.artist, reason
         );
-        Ok(Some((song, reason)))
+
+        if needs_load {
+            let stream_url = Self::build_stream_url(&song.id, server_url, subsonic_credential);
+            TrackTransitionPlan::LoadFresh {
+                stream_url,
+                song,
+                reason,
+            }
+        } else {
+            TrackTransitionPlan::PlayPrepared { song, reason }
+        }
+    }
+
+    /// Execute the engine ops described by `plan`.
+    ///
+    /// Takes no `&self` — safe to call without the outer `QueueNavigator`
+    /// mutex held. Concurrent `play_next` / `play_previous` calls can
+    /// proceed against the navigator while the engine is busy with
+    /// network-bound `play()` work.
+    pub async fn execute_transition(
+        plan: TrackTransitionPlan,
+        engine: &mut CustomAudioEngine,
+    ) -> Result<Option<(Song, String)>> {
+        match plan {
+            TrackTransitionPlan::Stop => {
+                engine.stop().await;
+                Ok(None)
+            }
+            TrackTransitionPlan::PlayPrepared { song, reason } => {
+                if !engine.immediate_playing() {
+                    engine.play().await?;
+                }
+                Ok(Some((song, reason)))
+            }
+            TrackTransitionPlan::LoadFresh {
+                stream_url,
+                song,
+                reason,
+            } => {
+                engine.load_track(&stream_url).await;
+                engine.play().await?;
+                Ok(Some((song, reason)))
+            }
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -494,6 +566,120 @@ mod tests {
         assert!(
             qm.lock().await.get_queue().current_index.is_none(),
             "current_index must reset to None"
+        );
+    }
+
+    // ── decide_transition unit tests (Phase 1 lock-discipline) ──
+    //
+    // These exercise the decide half in isolation so engine I/O is
+    // never triggered. The plan returned describes what `execute_transition`
+    // would do — assertions are pure value-equality on the plan + observable
+    // queue/navigator state.
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn decide_path3_empty_queue_returns_stop() {
+        let song = make_song("only");
+        let mut qm = manager_with_songs(vec![song], Some(0));
+        assert!(qm.peek_next_song().is_none());
+
+        let qm = Arc::new(Mutex::new(qm));
+        let nav = QueueNavigator::new(qm.clone()).await.expect("navigator");
+        nav.set_current_song_id(Some("only".to_string())).await;
+
+        let mut engine = CustomAudioEngine::new();
+        let plan = nav
+            .decide_transition(&mut engine, "http://example", "u=test&p=test")
+            .await;
+
+        assert!(
+            matches!(plan, TrackTransitionPlan::Stop),
+            "expected Stop, got {plan:?}"
+        );
+        assert!(nav.get_current_song_id().await.is_none());
+        assert!(qm.lock().await.get_queue().current_index.is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn decide_path3_normal_advance_returns_load_fresh() {
+        let songs = vec![make_song("a"), make_song("b")];
+        let qm = manager_with_songs(songs, Some(0));
+        let qm = Arc::new(Mutex::new(qm));
+        let nav = QueueNavigator::new(qm.clone()).await.expect("navigator");
+        nav.set_current_song_id(Some("a".to_string())).await;
+
+        let mut engine = CustomAudioEngine::new();
+        let plan = nav
+            .decide_transition(&mut engine, "http://server", "u=test&p=test")
+            .await;
+
+        match plan {
+            TrackTransitionPlan::LoadFresh {
+                stream_url,
+                song,
+                reason,
+            } => {
+                assert_eq!(song.id, "b");
+                assert_eq!(reason, "gapless");
+                assert!(stream_url.starts_with("http://server/rest/stream?id=b"));
+            }
+            other => panic!("expected LoadFresh, got {other:?}"),
+        }
+
+        // Navigator advanced current_song_id to the new track before returning.
+        assert_eq!(nav.get_current_song_id().await.as_deref(), Some("b"));
+        assert_eq!(qm.lock().await.get_queue().current_index, Some(1));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn decide_path3_repeat_track_returns_load_fresh_with_repeat_reason() {
+        let songs = vec![make_song("a")];
+        let mut qm = manager_with_songs(songs, Some(0));
+        qm.set_repeat(crate::types::queue::RepeatMode::Track)
+            .expect("set repeat");
+
+        let qm = Arc::new(Mutex::new(qm));
+        let nav = QueueNavigator::new(qm.clone()).await.expect("navigator");
+        nav.set_current_song_id(Some("a".to_string())).await;
+
+        let mut engine = CustomAudioEngine::new();
+        let plan = nav
+            .decide_transition(&mut engine, "http://server", "u=test&p=test")
+            .await;
+
+        match plan {
+            TrackTransitionPlan::LoadFresh {
+                stream_url,
+                song,
+                reason,
+            } => {
+                assert_eq!(song.id, "a", "repeat-track plays the same song again");
+                assert_eq!(reason, "repeat");
+                assert!(stream_url.starts_with("http://server/rest/stream?id=a"));
+            }
+            other => panic!("expected LoadFresh, got {other:?}"),
+        }
+
+        // Repeat-track preserves current_index.
+        assert_eq!(qm.lock().await.get_queue().current_index, Some(0));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn decide_path3_no_queued_returns_stop() {
+        // Single song at last index, no repeat → peek_next_song() returns
+        // None, decide_transition must yield Stop without erroring.
+        let songs = vec![make_song("only")];
+        let qm = manager_with_songs(songs, Some(0));
+        let qm = Arc::new(Mutex::new(qm));
+        let nav = QueueNavigator::new(qm.clone()).await.expect("navigator");
+
+        let mut engine = CustomAudioEngine::new();
+        let plan = nav
+            .decide_transition(&mut engine, "http://server", "u=test&p=test")
+            .await;
+
+        assert!(
+            matches!(plan, TrackTransitionPlan::Stop),
+            "expected Stop, got {plan:?}"
         );
     }
 }

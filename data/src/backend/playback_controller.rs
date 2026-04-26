@@ -96,15 +96,24 @@ impl PlaybackController {
                         return Ok::<_, anyhow::Error>(());
                     }
                     let mut engine = ea.lock().await;
-                    let nav_guard = nav.lock().await;
-                    match nav_guard.on_track_finished(&mut engine, &url, &cred).await {
+                    // Phase 1 lock-discipline: hold the outer `nav` mutex only
+                    // for the queue-mutation half of the work. Drop it before
+                    // running the engine ops so concurrent navigator calls
+                    // (e.g. hotkey-triggered `play_next`) aren't blocked
+                    // behind `engine.play()`'s network probe + prebuffer.
+                    let plan = {
+                        let nav_guard = nav.lock().await;
+                        nav_guard
+                            .decide_transition(&mut engine, &url, &cred)
+                            .await
+                    };
+                    match QueueNavigator::execute_transition(plan, &mut engine).await {
                         Ok(Some((song, reason))) => {
                             debug!(
                                 " [COMPLETION] Auto-advanced to: {} - {} ({})",
                                 song.title, song.artist, reason
                             );
                             let song_id = song.id.clone();
-                            drop(nav_guard);
                             drop(engine);
                             let _ = qvm.refresh_from_queue().await;
                             // Signal the UI that queue state has changed (post-consume)
@@ -121,7 +130,6 @@ impl PlaybackController {
                         }
                         Ok(None) => {
                             debug!(" [COMPLETION] No next track, playback stopped");
-                            drop(nav_guard);
                             drop(engine);
                             // Refresh queue view so UI shows the consumed state
                             let _ = qvm.refresh_from_queue().await;
