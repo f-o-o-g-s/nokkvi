@@ -27,6 +27,12 @@ pub struct QueuePage {
     /// Per-column visibility toggles surfaced via the columns-3-cog dropdown
     /// in the view header. Persisted to config.toml.
     pub column_visibility: QueueColumnVisibility,
+    /// Cache of the last `(mode, ascending, queue_len)` that was applied. The
+    /// queue sort short-circuits when this matches — covers the common
+    /// "user toggles same sort mode again" case and most "queue length
+    /// unchanged since last sort" cases. Same-length-different-content
+    /// requires the caller to manually re-trigger or invalidate.
+    pub last_sort_signature: Option<(QueueSortMode, bool, usize)>,
 }
 
 /// Toggleable queue columns. `Stars`, `Album`, `Duration`, `Love`, and `Plays`
@@ -256,6 +262,7 @@ impl Default for QueuePage {
             common: SlotListPageState::new_without_sort_mode(),
             queue_sort_mode: QueueSortMode::Album,
             column_visibility: QueueColumnVisibility::default(),
+            last_sort_signature: None,
         }
     }
 }

@@ -606,41 +606,76 @@ impl Nokkvi {
             .collect()
     }
 
-    /// Sort queue songs based on current sort mode and sort order (client-side)
+    /// Sort queue songs based on current sort mode and sort order (client-side).
+    ///
+    /// Short-circuits when `(mode, ascending, queue_len)` matches the last
+    /// applied signature — re-toggling the same sort with no length change is
+    /// a no-op. String sorts use `sort_by_cached_key` so each item's
+    /// lowercased key is built exactly once per sort instead of N×log(N) times.
     pub fn sort_queue_songs(&mut self) {
         use views::QueueSortMode;
 
         let sort_mode = self.queue_page.queue_sort_mode;
         let ascending = self.queue_page.common.sort_ascending;
+        let len = self.library.queue_songs.len();
+        let signature = (sort_mode, ascending, len);
+
+        if self.queue_page.last_sort_signature == Some(signature) {
+            return;
+        }
 
         debug!(
-            " Sorting queue by {:?} ({})",
+            " Sorting queue by {:?} ({}, {} items)",
             sort_mode,
-            if ascending { "ASC" } else { "DESC" }
+            if ascending { "ASC" } else { "DESC" },
+            len
         );
 
-        self.library.queue_songs.sort_by(|a, b| {
-            let cmp = match sort_mode {
-                QueueSortMode::Title => a.title.to_lowercase().cmp(&b.title.to_lowercase()),
-                QueueSortMode::Artist => a.artist.to_lowercase().cmp(&b.artist.to_lowercase()),
-                QueueSortMode::Album => a.album.to_lowercase().cmp(&b.album.to_lowercase()),
-                QueueSortMode::Duration => a.duration_seconds.cmp(&b.duration_seconds),
-                QueueSortMode::Genre => a.genre.to_lowercase().cmp(&b.genre.to_lowercase()),
-                QueueSortMode::Rating => {
-                    // Sort by rating: rated items first, then by rating value (higher first)
-                    let a_rating = a.rating.unwrap_or(0);
-                    let b_rating = b.rating.unwrap_or(0);
-                    b_rating.cmp(&a_rating)
+        match sort_mode {
+            QueueSortMode::Title
+            | QueueSortMode::Artist
+            | QueueSortMode::Album
+            | QueueSortMode::Genre => {
+                self.library.queue_songs.sort_by_cached_key(|s| {
+                    let field = match sort_mode {
+                        QueueSortMode::Title => &s.title,
+                        QueueSortMode::Artist => &s.artist,
+                        QueueSortMode::Album => &s.album,
+                        QueueSortMode::Genre => &s.genre,
+                        _ => unreachable!("string sort branch covers only string variants"),
+                    };
+                    field.to_lowercase()
+                });
+                if !ascending {
+                    self.library.queue_songs.reverse();
                 }
-                QueueSortMode::MostPlayed => {
-                    let a_count = a.play_count.unwrap_or(0);
-                    let b_count = b.play_count.unwrap_or(0);
-                    b_count.cmp(&a_count)
+            }
+            QueueSortMode::Duration => {
+                self.library.queue_songs.sort_by_key(|s| s.duration_seconds);
+                if !ascending {
+                    self.library.queue_songs.reverse();
                 }
-            };
+            }
+            QueueSortMode::Rating => {
+                // Highest rating first by default; descending toggle flips.
+                self.library
+                    .queue_songs
+                    .sort_by_key(|s| std::cmp::Reverse(s.rating.unwrap_or(0)));
+                if !ascending {
+                    self.library.queue_songs.reverse();
+                }
+            }
+            QueueSortMode::MostPlayed => {
+                self.library
+                    .queue_songs
+                    .sort_by_key(|s| std::cmp::Reverse(s.play_count.unwrap_or(0)));
+                if !ascending {
+                    self.library.queue_songs.reverse();
+                }
+            }
+        }
 
-            if ascending { cmp } else { cmp.reverse() }
-        });
+        self.queue_page.last_sort_signature = Some(signature);
 
         // Reset slot list to first item after resort
         self.queue_page
@@ -649,19 +684,31 @@ impl Nokkvi {
             .set_offset(0, self.library.queue_songs.len());
     }
 
-    /// Sort radio stations based on current sort order (client-side)
+    /// Sort radio stations based on current sort order (client-side). Same
+    /// short-circuit and `sort_by_cached_key` policy as `sort_queue_songs`.
     pub fn sort_radio_stations(&mut self) {
         let ascending = self.radios_page.common.sort_ascending;
+        let len = self.library.radio_stations.len();
+        let signature = (ascending, len);
+
+        if self.radios_page.last_sort_signature == Some(signature) {
+            return;
+        }
 
         debug!(
-            " Sorting radios by Name ({})",
-            if ascending { "ASC" } else { "DESC" }
+            " Sorting radios by Name ({}, {} items)",
+            if ascending { "ASC" } else { "DESC" },
+            len
         );
 
-        self.library.radio_stations.sort_by(|a, b| {
-            let cmp = a.name.to_lowercase().cmp(&b.name.to_lowercase());
-            if ascending { cmp } else { cmp.reverse() }
-        });
+        self.library
+            .radio_stations
+            .sort_by_cached_key(|s| s.name.to_lowercase());
+        if !ascending {
+            self.library.radio_stations.reverse();
+        }
+
+        self.radios_page.last_sort_signature = Some(signature);
 
         self.radios_page
             .common

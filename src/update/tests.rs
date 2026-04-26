@@ -964,6 +964,43 @@ fn sort_queue_stable_for_equal_values() {
     );
 }
 
+/// Phase 4B: re-sorting with the same `(mode, ascending, len)` signature
+/// must be a no-op — the cached signature short-circuits redundant work.
+/// We assert via a custom marker: shuffle the queue manually after the first
+/// sort, then call sort again; the cache should keep the marker order.
+#[test]
+fn sort_queue_short_circuits_when_signature_unchanged() {
+    let mut app = test_app();
+    app.library.queue_songs = make_sorting_queue();
+    app.queue_page.queue_sort_mode = nokkvi_data::types::queue_sort_mode::QueueSortMode::Title;
+    app.queue_page.common.sort_ascending = true;
+
+    app.sort_queue_songs();
+    let first: Vec<String> = app
+        .library
+        .queue_songs
+        .iter()
+        .map(|s| s.title.clone())
+        .collect();
+    assert_eq!(first, vec!["Alpha", "Mango", "Zebra"]);
+
+    // Manually permute. With the short-circuit in place, the next sort call
+    // (with identical mode + ascending + len) should NOT touch the order.
+    app.library.queue_songs.swap(0, 2);
+    app.sort_queue_songs();
+    let second: Vec<String> = app
+        .library
+        .queue_songs
+        .iter()
+        .map(|s| s.title.clone())
+        .collect();
+    assert_eq!(
+        second,
+        vec!["Zebra", "Mango", "Alpha"],
+        "sort signature unchanged → short-circuit must skip re-sorting"
+    );
+}
+
 #[test]
 fn sort_queue_ascending_then_descending_inverts() {
     let mut app = test_app();

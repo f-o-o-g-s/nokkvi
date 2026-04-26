@@ -23,6 +23,9 @@ use crate::{
 #[derive(Debug)]
 pub struct RadiosPage {
     pub common: SlotListPageState,
+    /// Cache of the last `(ascending, station_count)` that was sorted. Same
+    /// short-circuit policy as `QueuePage::last_sort_signature`.
+    pub last_sort_signature: Option<(bool, usize)>,
 }
 
 /// View data passed from root (borrows from app state)
@@ -112,6 +115,7 @@ impl Default for RadiosPage {
                 SortMode::Name,
                 true, // sort_ascending
             ),
+            last_sort_signature: None,
         }
     }
 }
