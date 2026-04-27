@@ -27,9 +27,9 @@ Read `README.md` and verify the feature list, dependencies, and build instructio
 
 ## 3. Bump version
 
-Determine the new version number:
-- **Bugfix only** → bump patch (e.g. `0.4.0` → `0.4.1`)
-- **New features** → bump minor (e.g. `0.4.1` → `0.5.0`)
+**Default to a patch bump** regardless of whether the changes are fixes or features (e.g. `0.3.7` → `0.3.8`). Patch numbers are allowed to grow arbitrarily — `0.3.99`, `0.3.128` are all fine. Early-iteration honesty over semver purity.
+
+Bump the **minor** (`0.3.x` → `0.4.0`) or **major** (`0.x.x` → `1.0.0`) **only when the user has explicitly authorized it in this conversation.** If you think the changeset warrants a minor bump, ask first — do not assume.
 
 Update `version = "X.Y.Z"` in `Cargo.toml` (root, first occurrence under `[package]`).
 
@@ -65,11 +65,30 @@ git push
 
 ## 6. Tag and trigger the release workflow
 
+**Patch bump (default):** lightweight tag is fine.
+
 ```bash
 git tag "vX.Y.Z" && git push origin "vX.Y.Z"
 ```
 
-The tag push fires `.github/workflows/release.yml`, which builds the x86_64 Linux binary, packages it into `nokkvi-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz` with a `.sha256` companion, and creates a **draft** GitHub Release with the matching CHANGELOG section as the body.
+**Minor or major bump (only with explicit user authorization):** the tag must be annotated and the body must contain `allow-minor-bump: <reason>` or `allow-major-bump: <reason>`. The release workflow has a hard gate that fails the build otherwise.
+
+```bash
+# minor
+git tag -a "vX.Y.Z" -m "allow-minor-bump: <reason from user>" && git push origin "vX.Y.Z"
+
+# major
+git tag -a "vX.Y.Z" -m "allow-major-bump: <reason from user>" && git push origin "vX.Y.Z"
+```
+
+If you pushed a non-conforming tag and the gate fails, recover with:
+
+```bash
+git push --delete origin "vX.Y.Z" && git tag -d "vX.Y.Z"
+# then re-tag annotated and push again
+```
+
+The tag push fires `.github/workflows/release.yml`, which validates the bump policy, builds the x86_64 Linux binary, packages it into `nokkvi-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz` with a `.sha256` companion, and creates a **draft** GitHub Release with the matching CHANGELOG section as the body.
 
 ## 7. Watch the workflow and publish the draft
 
