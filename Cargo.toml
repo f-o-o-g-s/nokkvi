@@ -3,7 +3,7 @@ members = [".", "data"]
 
 [workspace.package]
 repository = "https://github.com/f-o-o-g-s/nokkvi"
-license = "MIT"
+license = "GPL-3.0"
 
 [workspace.lints.clippy]
 # Code clarity
@@ -26,6 +26,8 @@ description = "A fast and beautiful Rust/Iced desktop client for Navidrome"
 readme = "README.md"
 keywords = ["navidrome", "audio", "music", "player"]
 categories = ["multimedia::audio", "gui"]
+license.workspace = true
+repository.workspace = true
 
 [lints]
 workspace = true
