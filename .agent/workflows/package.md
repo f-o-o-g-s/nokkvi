@@ -119,15 +119,22 @@ After the GitHub release is published, propagate the new version to both AUR pac
 ```bash
 if [ -d ~/aur/nokkvi-bin/.git ]; then
     cd ~/aur/nokkvi-bin
-    sed -i "s/^pkgver=.*/pkgver=X.Y.Z/" PKGBUILD
-    sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
-    updpkgsums                              # auto-fetches sha256 from the source URL
-    makepkg --printsrcinfo > .SRCINFO
-    git add PKGBUILD .SRCINFO
-    git commit -m "Update to vX.Y.Z"
-    git push
+    current=$(grep -oP '(?<=^pkgver=)\S+' PKGBUILD)
+    if [ "$current" = "X.Y.Z" ]; then
+        echo "nokkvi-bin already at vX.Y.Z; skipping (would otherwise regress pkgrel)"
+    else
+        sed -i "s/^pkgver=.*/pkgver=X.Y.Z/" PKGBUILD
+        sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+        updpkgsums                          # auto-fetches sha256 from the source URL
+        makepkg --printsrcinfo > .SRCINFO
+        git add PKGBUILD .SRCINFO
+        git commit -m "Update to vX.Y.Z"
+        git push
+    fi
 fi
 ```
+
+The same-version guard matters because `pkgrel` is reset to `1` on every fresh `pkgver`. If Step 8 ran twice for the same release, the second run would push `pkgrel=1` over an already-incremented `pkgrel=N>1` (e.g. a packaging-only fix between releases), regressing the AUR's view of that release. The guard makes the step idempotent.
 
 **`nokkvi-git`** — no `pkgver` bump needed (it's auto-derived from `git describe` at install time). Refresh `.SRCINFO` so the AUR's "Last Updated" timestamp reflects the new release:
 
