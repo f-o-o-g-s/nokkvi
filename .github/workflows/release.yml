@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Resolve release tag
         run: |
@@ -26,6 +28,55 @@ jobs:
           else
             echo "RELEASE_TAG=${GITHUB_REF#refs/tags/}" >> "$GITHUB_ENV"
           fi
+
+      - name: Verify version bump policy
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+
+          new="${RELEASE_TAG#v}"
+          IFS='.' read -r new_major new_minor new_patch <<<"$new"
+
+          if prev_full=$(git describe --tags --abbrev=0 "${RELEASE_TAG}^" 2>/dev/null); then
+            prev="${prev_full#v}"
+            IFS='.' read -r prev_major prev_minor prev_patch <<<"$prev"
+            echo "Previous tag: $prev_full"
+          else
+            echo "No previous tag — first release, skipping bump check."
+            exit 0
+          fi
+
+          echo "New tag:      $RELEASE_TAG"
+
+          if [ "$new_major" -gt "$prev_major" ]; then
+            kind=major
+          elif [ "$new_major" -eq "$prev_major" ] && [ "$new_minor" -gt "$prev_minor" ]; then
+            kind=minor
+          elif [ "$new_major" -eq "$prev_major" ] && [ "$new_minor" -eq "$prev_minor" ] && [ "$new_patch" -gt "$prev_patch" ]; then
+            kind=patch
+          else
+            echo "::error::Tag $RELEASE_TAG does not strictly succeed $prev_full"
+            exit 1
+          fi
+
+          echo "Bump kind:    $kind"
+
+          if [ "$kind" = "patch" ]; then
+            exit 0
+          fi
+
+          marker="allow-${kind}-bump"
+          body=$(git tag -l --format='%(contents)' "$RELEASE_TAG" || true)
+          if printf '%s\n' "$body" | grep -Fq "$marker"; then
+            echo "Authorization marker found: $marker"
+            exit 0
+          fi
+
+          echo "::error::$kind bump from $prev_full to $RELEASE_TAG requires '$marker' in the annotated tag message body."
+          echo "::error::Recover with:"
+          echo "::error::  git push --delete origin $RELEASE_TAG && git tag -d $RELEASE_TAG"
+          echo "::error::  git tag -a $RELEASE_TAG -m \"$marker: <reason>\" && git push origin $RELEASE_TAG"
+          exit 1
 
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libpipewire-0.3-dev libfontconfig1-dev pkg-config libasound2-dev
