@@ -135,3 +135,11 @@ jobs:
           allowUpdates: true
           bodyFile: release-notes.md
           artifacts: ${{ env.ASSET }},${{ env.CHECKSUM }}
+
+      - name: Trigger docs rebuild
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.DOCS_TRIGGER_TOKEN }}
+        run: |
+          gh api repos/f-o-o-g-s/nokkvi-docs/dispatches \
+            -f event_type=docs_update
