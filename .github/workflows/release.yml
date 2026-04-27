@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-release:
+    name: Build x86_64-unknown-linux-gnu
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve release tag
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "RELEASE_TAG=manual-$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_TAG=${GITHUB_REF#refs/tags/}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libpipewire-0.3-dev libfontconfig1-dev pkg-config libasound2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Stage tarball
+        run: |
+          STAGE="nokkvi-${RELEASE_TAG}-x86_64-unknown-linux-gnu"
+          mkdir -p "$STAGE"
+          cp target/release/nokkvi "$STAGE/"
+          cp -r assets themes "$STAGE/"
+          cp install.sh "$STAGE/"
+          cp README.md CHANGELOG.md LICENSE "$STAGE/"
+          tar czf "${STAGE}.tar.gz" "$STAGE"
+          sha256sum "${STAGE}.tar.gz" > "${STAGE}.tar.gz.sha256"
+          echo "ASSET=${STAGE}.tar.gz" >> "$GITHUB_ENV"
+          echo "CHECKSUM=${STAGE}.tar.gz.sha256" >> "$GITHUB_ENV"
+
+      - name: Extract release notes from CHANGELOG
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            HEADER="[Unreleased]"
+          else
+            HEADER="$RELEASE_TAG"
+          fi
+          awk -v header="$HEADER" '
+            BEGIN { prefix = "## " header }
+            !found && (index($0, prefix " ") == 1 || $0 == prefix) { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          echo "--- release-notes.md ---"
+          cat release-notes.md
+
+      - name: Upload workflow artifact (dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nokkvi-${{ env.RELEASE_TAG }}
+          path: |
+            ${{ env.ASSET }}
+            ${{ env.CHECKSUM }}
+
+      - name: Create draft release (tag push)
+        if: github.event_name == 'push'
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ env.RELEASE_TAG }}
+          draft: true
+          allowUpdates: true
+          bodyFile: release-notes.md
+          artifacts: ${{ env.ASSET }},${{ env.CHECKSUM }}
