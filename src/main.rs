@@ -765,21 +765,21 @@ impl Nokkvi {
 // ============================================================================
 
 pub fn main() -> iced::Result {
-    // Initialize tracing with RUST_LOG filtering
+    // Initialize tracing.
     //
-    // Default filter configuration:
-    //   - nokkvi crate: debug level (our application logs)
-    //   - Third-party crates: info/warn to suppress noise
+    // Defaults (overridable via RUST_LOG, which applies to both layers):
+    //   - stderr: warn+ only — quiet, signal-only output for terminal launches.
+    //   - file (~/.config/nokkvi/nokkvi.log): full debug context for bug reports.
     //
-    // Override with RUST_LOG env var:
-    //   RUST_LOG=warn ./nokkvi                    # Quiet mode
-    //   RUST_LOG=trace ./nokkvi                   # Full trace (very verbose)
-    //   RUST_LOG=nokkvi::audio=trace              # Trace audio only
-    //   RUST_LOG=debug,hyper=debug ./nokkvi       # Include HTTP debug
+    //   RUST_LOG=info ./nokkvi             # info+ on terminal and in file
+    //   RUST_LOG=debug ./nokkvi            # full debug on both
+    //   RUST_LOG=trace ./nokkvi            # very verbose
+    //   RUST_LOG=nokkvi::audio=trace       # narrow trace to one module
     use tracing_subscriber::{EnvFilter, Layer, layer::SubscriberExt, util::SubscriberInitExt};
 
-    // Build a sensible default filter that suppresses third-party noise
-    let default_filter = [
+    // Verbose filter used by the file layer when RUST_LOG isn't set. Suppresses
+    // third-party noise so the bug-report file stays focused on our own logs.
+    let file_default_filter = [
         // Our application: debug level for all diagnostic info
         "nokkvi=debug",
         "nokkvi_data=debug",
@@ -814,10 +814,14 @@ pub fn main() -> iced::Result {
     ]
     .join(",");
 
-    // File log layer: write warn+ to nokkvi.log in the config directory.
-    // Captures watchdog warnings, loading errors, and shell_task orphans even
-    // when launched from Hyprland keybinds with no visible terminal.
-    // File is truncated on each startup to avoid unbounded growth.
+    // stderr layer: warn+ by default. RUST_LOG overrides.
+    let stderr_layer = tracing_subscriber::fmt::layer()
+        .with_target(false)
+        .with_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")));
+
+    // File log layer: full debug context written to nokkvi.log in the config
+    // directory. Captures everything for bug reports, including launches from
+    // Hyprland keybinds with no visible terminal. Truncated on each startup.
     let file_layer = nokkvi_data::utils::paths::get_app_dir()
         .ok()
         .and_then(|dir| {
@@ -828,13 +832,15 @@ pub fn main() -> iced::Result {
                         .with_target(true)
                         .with_ansi(false)
                         .with_writer(std::sync::Mutex::new(file))
-                        .with_filter(EnvFilter::new("warn"))
+                        .with_filter(
+                            EnvFilter::try_from_default_env()
+                                .unwrap_or_else(|_| EnvFilter::new(&file_default_filter)),
+                        )
                 })
         });
 
     tracing_subscriber::registry()
-        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&default_filter)))
-        .with(tracing_subscriber::fmt::layer().with_target(false))
+        .with(stderr_layer)
         .with(file_layer)
         .init();
 
