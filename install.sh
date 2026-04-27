@@ -3,11 +3,17 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BINARY="$SCRIPT_DIR/target/release/nokkvi"
 
-# Binary
-if [ ! -f "$BINARY" ]; then
-    echo "❌ Binary not found at $BINARY"
+# Binary: prefer the prebuilt copy next to install.sh (release tarball layout);
+# fall back to a local source-tree build (target/release/nokkvi).
+if [ -f "$SCRIPT_DIR/nokkvi" ]; then
+    BINARY="$SCRIPT_DIR/nokkvi"
+elif [ -f "$SCRIPT_DIR/target/release/nokkvi" ]; then
+    BINARY="$SCRIPT_DIR/target/release/nokkvi"
+else
+    echo "❌ Binary not found"
+    echo "   Looked for: $SCRIPT_DIR/nokkvi"
+    echo "          and: $SCRIPT_DIR/target/release/nokkvi"
     echo "   Build first:  cargo build --release"
     exit 1
 fi

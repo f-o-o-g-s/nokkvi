@@ -50,7 +50,22 @@ Nokkvi is a fast, keyboard-driven music player, not a Navidrome admin panel. The
 - Offline download
 - Lyrics
 
-## Quickstart
+## Download
+
+**Prebuilt binary (x86_64 Linux):** grab the latest tarball from [Releases](https://github.com/f-o-o-g-s/nokkvi/releases). Each release ships `nokkvi-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz` plus a matching `.sha256`. Verify, extract, and install:
+
+```bash
+sha256sum -c nokkvi-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz.sha256
+tar xzf nokkvi-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz
+cd nokkvi-vX.Y.Z-x86_64-unknown-linux-gnu
+./install.sh
+```
+
+Runtime requirements: `pipewire` and `fontconfig` installed system-wide (Arch: `sudo pacman -S pipewire fontconfig`).
+
+**Arch (AUR):** planned — `nokkvi-bin` will pull these tarballs once a maintainer adopts it.
+
+## Quickstart (build from source)
 
 ```bash
 sudo pacman -S pipewire fontconfig pkg-config   # Arch system deps
