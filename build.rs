@@ -6,7 +6,12 @@ fn main() {
 }
 
 fn emit_git_hash() {
-    let mut hash = std::process::Command::new("git")
+    // Only emit GIT_HASH when we have one. When the build runs outside a git
+    // context (e.g. a user building from the GitHub-auto-generated source
+    // tarball), option_env!("GIT_HASH") returns None and the about modal
+    // hides the "Commit" row instead of showing a placeholder. Mirrors rmpc's
+    // pattern with vergen-gitcl.
+    let hash = std::process::Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .output()
         .ok()
@@ -14,22 +19,7 @@ fn emit_git_hash() {
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
 
-    #[allow(clippy::collapsible_if)]
-    if hash.is_empty() {
-        if let Ok(content) = std::fs::read_to_string("BUILD_INFO") {
-            for line in content.lines() {
-                if let Some(stripped) = line.strip_prefix("commit:") {
-                    let full_hash = stripped.trim();
-                    hash = full_hash.chars().take(7).collect();
-                    break;
-                }
-            }
-        }
-    }
-
-    if hash.is_empty() {
-        println!("cargo:rustc-env=GIT_HASH=unknown");
-    } else {
+    if !hash.is_empty() {
         println!("cargo:rustc-env=GIT_HASH={hash}");
     }
 }
