@@ -110,6 +110,44 @@ Confirm the tarball + sha256 are attached and the release notes match the CHANGE
 gh release edit "vX.Y.Z" --draft=false
 ```
 
-## 8. Report
+## 8. Sync AUR packages
 
-Print the release URL (`gh release view vX.Y.Z --json url -q .url`) and the published artifact filenames.
+After the GitHub release is published, propagate the new version to both AUR packages.
+
+**`nokkvi-bin`** — bump `pkgver`, refresh sha256 from the just-published `.sha256` artifact, regenerate `.SRCINFO`, push:
+
+```bash
+if [ -d ~/aur/nokkvi-bin/.git ]; then
+    cd ~/aur/nokkvi-bin
+    sed -i "s/^pkgver=.*/pkgver=X.Y.Z/" PKGBUILD
+    sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+    updpkgsums                              # auto-fetches sha256 from the source URL
+    makepkg --printsrcinfo > .SRCINFO
+    git add PKGBUILD .SRCINFO
+    git commit -m "Update to vX.Y.Z"
+    git push
+fi
+```
+
+**`nokkvi-git`** — no `pkgver` bump needed (it's auto-derived from `git describe` at install time). Refresh `.SRCINFO` so the AUR's "Last Updated" timestamp reflects the new release:
+
+```bash
+if [ -d ~/aur/nokkvi-git/.git ]; then
+    cd ~/aur/nokkvi-git
+    makepkg -od --noconfirm                 # download + extract + run pkgver() against new HEAD
+    makepkg --printsrcinfo > .SRCINFO
+    if ! git diff --quiet PKGBUILD .SRCINFO; then
+        git add PKGBUILD .SRCINFO
+        git commit -m "Sync with vX.Y.Z release"
+        git push
+    fi
+fi
+```
+
+Both blocks are guarded — they no-op cleanly if the AUR repos aren't cloned locally (e.g. for contributors running `/package` who don't maintain AUR packages).
+
+If either push fails due to remote-ahead (someone else pushed first), recover with `git pull --rebase && git push`.
+
+## 9. Report
+
+Print the GitHub release URL (`gh release view vX.Y.Z --json url -q .url`), the published artifact filenames, and the AUR package URLs (`https://aur.archlinux.org/packages/nokkvi-bin`, `https://aur.archlinux.org/packages/nokkvi-git`).
