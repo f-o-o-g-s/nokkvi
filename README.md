@@ -63,7 +63,7 @@ cd nokkvi-vX.Y.Z-x86_64-unknown-linux-gnu
 
 Runtime requirements: `pipewire` and `fontconfig` installed system-wide (Arch: `sudo pacman -S pipewire fontconfig`).
 
-**Arch (AUR):** planned — `nokkvi-bin` will pull these tarballs once a maintainer adopts it.
+**Arch (AUR):** [`nokkvi-bin`](https://aur.archlinux.org/packages/nokkvi-bin) tracks the released tarballs above; [`nokkvi-git`](https://aur.archlinux.org/packages/nokkvi-git) builds from `main`. Install with your AUR helper of choice (e.g. `yay -S nokkvi-bin` or `paru -S nokkvi-bin`).
 
 ## Quickstart (build from source)
 
