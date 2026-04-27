@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## v0.3.2 — 2026-04-27
+
+### Fixes
+- **About Modal "Commit: unknown"** — the About modal no longer shows a "Commit: unknown" placeholder when the binary is built outside a git context (e.g. from the GitHub-auto-generated source tarball). The Commit row is now hidden cleanly in that case. Git-clone builds and the prebuilt CI release tarball still display the real short commit hash. Mirrors rmpc's `vergen-gitcl` + `option_env!` pattern.
+
 ## v0.3.1 — 2026-04-27
 
 ### Features
