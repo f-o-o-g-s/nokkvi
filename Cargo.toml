@@ -3,7 +3,7 @@ members = [".", "data"]
 
 [workspace.package]
 repository = "https://github.com/f-o-o-g-s/nokkvi"
-license = "GPL-3.0"
+license = "GPL-3.0-only"
 
 [workspace.lints.clippy]
 # Code clarity
