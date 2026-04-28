@@ -31,6 +31,10 @@ sed -i "s|^Exec=nokkvi|Exec=$HOME/.local/bin/nokkvi|" \
 install -Dm644 "$SCRIPT_DIR/assets/org.nokkvi.nokkvi.svg" \
     ~/.local/share/icons/hicolor/scalable/apps/org.nokkvi.nokkvi.svg
 
+# 512×512 PNG raster fallback (covers launchers that don't render SVG cleanly)
+install -Dm644 "$SCRIPT_DIR/assets/org.nokkvi.nokkvi.png" \
+    ~/.local/share/icons/hicolor/512x512/apps/org.nokkvi.nokkvi.png
+
 # Refresh icon cache (harmless if gtk-update-icon-cache isn't installed)
 gtk-update-icon-cache -f ~/.local/share/icons/hicolor/ 2>/dev/null || true
 
@@ -41,3 +45,4 @@ echo "✅ Installed"
 echo "   Binary:  ~/.local/bin/nokkvi"
 echo "   Desktop: ~/.local/share/applications/org.nokkvi.nokkvi.desktop"
 echo "   Icon:    ~/.local/share/icons/hicolor/scalable/apps/org.nokkvi.nokkvi.svg"
+echo "            ~/.local/share/icons/hicolor/512x512/apps/org.nokkvi.nokkvi.png"

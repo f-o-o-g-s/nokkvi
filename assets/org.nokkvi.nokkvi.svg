@@ -1,3 +1,7 @@
+<!--
+  Squircle backdrop derived from Gruvbox Plus (https://github.com/SylEleuth/gruvbox-plus-icon-pack)
+  by SylEleuth, licensed under GPL-3.0. Foreground logo by the Nokkvi project.
+-->
 <svg width="256" height="256" version="1.1" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <!-- Gruvbox background gradient (from icon theme) -->
