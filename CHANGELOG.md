@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## v0.3.3 — 2026-04-27
+
+### Fixes
+- **Crash on Sub-Pixel Image Layouts** — pinned `iced` to a fork rev containing [PR #3292](https://github.com/iced-rs/iced/pull/3292), which fixes a `return`-instead-of-`continue` typo in `wgpu/src/image/State::prepare`. Without it, any image in a render batch with bounds rounding to less than one physical pixel desyncs the GPU instance buffer from recorded layer groups. This presented as missing slot artwork and player-bar SVGs at certain window sizes (most reliably triggered by the Songs view in Most Played sort) and then as a SIGABRT (`Instance N extends beyond limit M imposed by the buffer in slot 0`) on the next prepare cycle. Pinned to `f-o-o-g-s/iced` rev `8d69450c` (upstream `12a01265` plus the two-line fix); will revert to upstream once #3292 lands.
+- **Cargo License SPDX Identifier** — workspace `license` field updated to the current SPDX identifier `GPL-3.0-only`. The deprecated bare `GPL-3.0` form would eventually have tripped tooling that validates against the current registry.
+
+### Improvements
+- **Launcher Icon Rendering** — added a 512px PNG raster (`assets/nokkvi.png`) alongside the existing SVG. Some launchers fail to render the gradient SVG via older librsvg paths and fall back to a generic icon; the PNG ensures consistent icon display across desktop environments.
+
+### Internal
+- **Release CI → Docs Dispatch** — `.github/workflows/release.yml` now fires `repository_dispatch` at `f-o-o-g-s/nokkvi-docs` after a release publish so the documentation site regenerates automatically.
+- **/package Workflow** — Step 8 now syncs both `nokkvi-bin` and `nokkvi-git` AUR packages after release publish, with an idempotency guard on `nokkvi-bin` that prevents `pkgrel` regression if the workflow re-runs for the same version.
+- **README + CHANGELOG Cleanup** — Known Issues section removed from the README now that the iced sub-pixel bug is patched; AUR badge placeholders replaced with live package links; CHANGELOG pruned to public-release commits.
+- **Cargo.lock Sync** — committed stale lockfile sync to 0.3.2; gitignored `scheduled_tasks.lock`.
+
 ## v0.3.2 — 2026-04-27
 
 ### Fixes
