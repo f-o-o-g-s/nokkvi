@@ -101,6 +101,7 @@ impl Nokkvi {
             crossfade_enabled: self.engine.crossfade_enabled,
             visualization_mode: self.engine.visualization_mode,
             window_width: self.window.width,
+            layout: self.player_bar_layout,
             is_light_mode: crate::theme::is_light_mode(),
             track_title: icy_title.unwrap_or(&self.playback.title).to_string(),
             track_artist: icy_artist.unwrap_or(&self.playback.artist).to_string(),

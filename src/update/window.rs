@@ -13,6 +13,12 @@ impl Nokkvi {
         self.window.width = width;
         self.window.height = height;
 
+        // Recompute the player bar's responsive layout with per-mode
+        // hysteresis. Done here (not in view()) so view() stays pure — it
+        // just reads the already-computed layout off self.
+        self.player_bar_layout =
+            crate::widgets::player_bar::compute_layout(width, self.player_bar_layout);
+
         // Recompute dynamic slot count for the new window size and sync it
         // to every view's SlotListView. Without this, prefetch_indices() uses
         // a stale slot_count (default 9) and under-fetches artwork for tall windows.

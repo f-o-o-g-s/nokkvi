@@ -41,14 +41,133 @@ pub(crate) fn player_bar_height() -> f32 {
     }
 }
 
-// Responsive breakpoints for element culling (in pixels)
-// These are cumulative - at each narrower breakpoint, more elements are hidden
-const BREAKPOINT_HIDE_FORMAT_INFO: f32 = 1000.0; // Hide format info container (first to go)
-const BREAKPOINT_HIDE_VISUALIZER: f32 = 920.0; // Hide visualizer button
-const BREAKPOINT_HIDE_SFX_SLIDER: f32 = 840.0; // Hide SFX volume slider
-const BREAKPOINT_HIDE_CONSUME: f32 = 680.0; // Hide consume button
-const BREAKPOINT_HIDE_SHUFFLE: f32 = 600.0; // Hide shuffle button
-const BREAKPOINT_HIDE_REPEAT: f32 = 520.0; // Hide repeat button
+// Format-info container is text-only; hide it as a single threshold without
+// hysteresis since collapsing text doesn't shift button hit targets.
+const BREAKPOINT_HIDE_FORMAT_INFO: f32 = 1000.0;
+// SFX volume slider has its own breakpoint (independent of mode-toggle tier
+// because the slider is wider than a button).
+const BREAKPOINT_HIDE_SFX_SLIDER: f32 = 840.0;
+
+/// One of the seven mode toggles the player bar exposes. Used to tag a mode
+/// for cull-priority and in-kebab queries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ModeId {
+    Visualizer,
+    Crossfade,
+    Sfx,
+    Eq,
+    Consume,
+    Shuffle,
+    Repeat,
+}
+
+/// Cull priority — index `i` is the i-th mode to fold into the kebab as the
+/// window narrows. Ordered to match the inline row's right-to-left disappear
+/// (rightmost-first) so gaps close cleanly from the right edge.
+pub(crate) const CULL_ORDER: [ModeId; 7] = [
+    ModeId::Visualizer,
+    ModeId::Crossfade,
+    ModeId::Sfx,
+    ModeId::Eq,
+    ModeId::Consume,
+    ModeId::Shuffle,
+    ModeId::Repeat,
+];
+
+/// Width below which the mode at `CULL_ORDER[i]` folds into the kebab.
+/// Hysteresis on the way back out: a culled mode pops back inline only once
+/// width ≥ this threshold + `CULL_HYSTERESIS_PX`, preventing drag-resize
+/// flicker at the boundary.
+pub(crate) const CULL_ENTER_WIDTHS: [f32; 7] = [
+    1070.0, // Visualizer
+    1010.0, // Crossfade
+    950.0,  // SFX
+    890.0,  // EQ
+    830.0,  // Consume
+    750.0,  // Shuffle
+    670.0,  // Repeat
+];
+
+pub(crate) const CULL_HYSTERESIS_PX: f32 = 40.0;
+
+/// Width below which the transport row collapses from 5 buttons to 3 (prev /
+/// play-or-pause toggle / next). Independent of mode culling — tight bars
+/// benefit from collapsing transports even with a few modes still inline.
+pub(crate) const TRANSPORT_COLLAPSE_ENTER: f32 = 870.0;
+pub(crate) const TRANSPORT_COLLAPSE_EXIT: f32 = 910.0;
+
+/// Snapshot of how the player bar should currently lay out, derived from the
+/// window width with hysteresis applied per-mode. Replaces the previous
+/// 3-stage tier enum so that mode toggles cull one at a time as the window
+/// shrinks instead of in 2–3-mode batches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PlayerBarLayout {
+    /// Number of modes folded into the kebab menu. The first `kebab_mode_count`
+    /// entries of [`CULL_ORDER`] are inside the menu; the rest render inline.
+    /// `0` means the kebab itself is hidden.
+    pub kebab_mode_count: u8,
+    /// `true` when the bar is narrow enough that transports collapse to 3
+    /// (prev / play-or-pause / next).
+    pub transports_collapsed: bool,
+}
+
+impl PlayerBarLayout {
+    /// Whether the given mode is currently folded into the kebab menu.
+    pub(crate) fn is_in_kebab(self, mode: ModeId) -> bool {
+        let n = self.kebab_mode_count as usize;
+        CULL_ORDER.iter().take(n).any(|m| *m == mode)
+    }
+}
+
+/// Recompute the layout for a new window width given the previous layout
+/// (for hysteresis). Each mode has its own enter/exit threshold pair, and
+/// the transport collapse has its own threshold pair independent of mode
+/// culling.
+pub(crate) fn compute_layout(width: f32, prev: PlayerBarLayout) -> PlayerBarLayout {
+    PlayerBarLayout {
+        kebab_mode_count: update_kebab_count(width, prev.kebab_mode_count),
+        transports_collapsed: update_transport_collapse(width, prev.transports_collapsed),
+    }
+}
+
+fn update_kebab_count(width: f32, prev_count: u8) -> u8 {
+    let mut count = prev_count.min(CULL_ORDER.len() as u8);
+
+    // Pop modes back inline (width going up) — only when width clears the
+    // hysteresis-shifted exit threshold for the most recently culled mode.
+    while count > 0 {
+        let idx = (count - 1) as usize;
+        if width >= CULL_ENTER_WIDTHS[idx] + CULL_HYSTERESIS_PX {
+            count -= 1;
+        } else {
+            break;
+        }
+    }
+
+    // Push modes into kebab (width going down) — when width drops below the
+    // next-to-cull mode's enter threshold.
+    while (count as usize) < CULL_ENTER_WIDTHS.len() {
+        let idx = count as usize;
+        if width < CULL_ENTER_WIDTHS[idx] {
+            count += 1;
+        } else {
+            break;
+        }
+    }
+
+    count
+}
+
+fn update_transport_collapse(width: f32, prev: bool) -> bool {
+    if prev {
+        // Already collapsed — stay collapsed until width clears the exit
+        // threshold (hysteresis margin above the enter threshold).
+        width < TRANSPORT_COLLAPSE_EXIT
+    } else {
+        // Expanded — collapse when width drops below the enter threshold.
+        width < TRANSPORT_COLLAPSE_ENTER
+    }
+}
 
 /// Pure view data passed from root (no direct VM access)
 #[derive(Debug, Clone)]
@@ -71,6 +190,7 @@ pub(crate) struct PlayerBarViewData {
     pub crossfade_enabled: bool,
     pub visualization_mode: nokkvi_data::types::player_settings::VisualizationMode,
     pub window_width: f32,
+    pub layout: PlayerBarLayout,
     pub is_light_mode: bool,
     // Track metadata for progress bar overlay
     pub track_title: String,
@@ -183,77 +303,109 @@ pub(crate) fn player_bar<'a>(
     let playback_playing = data.playback_playing;
     let playback_paused = data.playback_paused;
 
-    let player_controls = row![
-        // Previous track
-        player_control_button(
-            "assets/icons/skip-back.svg",
-            PlayerBarMessage::PrevTrack,
-            theme::bg1(),
-            if controls_active {
-                theme::fg1()
-            } else {
-                theme::fg4()
-            },
-            false
-        ),
-        // Play
-        player_control_button(
-            "assets/icons/play.svg",
-            PlayerBarMessage::Play,
-            if playback_playing {
-                theme::accent_bright()
-            } else {
-                theme::bg1()
-            },
-            if playback_playing {
-                theme::bg0_hard()
-            } else {
-                theme::fg1()
-            },
-            playback_playing
-        ),
-        // Pause
-        player_control_button(
-            "assets/icons/pause.svg",
-            PlayerBarMessage::Pause,
-            if playback_paused {
-                theme::accent_bright()
-            } else {
-                theme::bg1()
-            },
-            if playback_paused {
-                theme::bg0_hard()
-            } else {
-                theme::fg1()
-            },
-            playback_paused
-        ),
-        // Stop
-        player_control_button(
-            "assets/icons/stop.svg",
-            PlayerBarMessage::Stop,
-            theme::bg1(),
-            if controls_active {
-                theme::fg1()
-            } else {
-                theme::fg4()
-            },
-            false
-        ),
-        // Next track
-        player_control_button(
-            "assets/icons/skip-forward.svg",
-            PlayerBarMessage::NextTrack,
-            theme::bg1(),
-            if controls_active {
-                theme::fg1()
-            } else {
-                theme::fg4()
-            },
-            false
-        ),
-    ]
-    .spacing(4);
+    let prev_button = player_control_button(
+        "assets/icons/skip-back.svg",
+        PlayerBarMessage::PrevTrack,
+        theme::bg1(),
+        if controls_active {
+            theme::fg1()
+        } else {
+            theme::fg4()
+        },
+        false,
+    );
+    let next_button = player_control_button(
+        "assets/icons/skip-forward.svg",
+        PlayerBarMessage::NextTrack,
+        theme::bg1(),
+        if controls_active {
+            theme::fg1()
+        } else {
+            theme::fg4()
+        },
+        false,
+    );
+
+    let player_controls: Element<'_, PlayerBarMessage> = if data.layout.transports_collapsed {
+        // Collapsed transports: prev / play-or-pause toggle / next.
+        // BUTTON_SIZE is fixed (44px) so the middle button's hit target stays
+        // in place when the glyph swaps between play and pause.
+        let middle_active = playback_playing || playback_paused;
+        let (middle_icon, middle_message) = if playback_playing {
+            ("assets/icons/pause.svg", PlayerBarMessage::Pause)
+        } else {
+            ("assets/icons/play.svg", PlayerBarMessage::Play)
+        };
+        row![
+            prev_button,
+            player_control_button(
+                middle_icon,
+                middle_message,
+                if middle_active {
+                    theme::accent_bright()
+                } else {
+                    theme::bg1()
+                },
+                if middle_active {
+                    theme::bg0_hard()
+                } else {
+                    theme::fg1()
+                },
+                middle_active,
+            ),
+            next_button,
+        ]
+        .spacing(4)
+        .into()
+    } else {
+        row![
+            prev_button,
+            player_control_button(
+                "assets/icons/play.svg",
+                PlayerBarMessage::Play,
+                if playback_playing {
+                    theme::accent_bright()
+                } else {
+                    theme::bg1()
+                },
+                if playback_playing {
+                    theme::bg0_hard()
+                } else {
+                    theme::fg1()
+                },
+                playback_playing,
+            ),
+            player_control_button(
+                "assets/icons/pause.svg",
+                PlayerBarMessage::Pause,
+                if playback_paused {
+                    theme::accent_bright()
+                } else {
+                    theme::bg1()
+                },
+                if playback_paused {
+                    theme::bg0_hard()
+                } else {
+                    theme::fg1()
+                },
+                playback_paused,
+            ),
+            player_control_button(
+                "assets/icons/stop.svg",
+                PlayerBarMessage::Stop,
+                theme::bg1(),
+                if controls_active {
+                    theme::fg1()
+                } else {
+                    theme::fg4()
+                },
+                false,
+            ),
+            next_button,
+        ]
+        .spacing(4)
+        .into()
+    };
 
     // Progress bar section
     let duration = data.playback_duration as f32;
@@ -445,75 +597,133 @@ pub(crate) fn player_bar<'a>(
     };
     let window_width = data.window_width;
 
-    // Responsive visibility flags based on window width
-    let show_visualizer = window_width >= BREAKPOINT_HIDE_VISUALIZER;
+    // SFX volume slider keeps its own width-based gate (independent of the
+    // mode-toggle tier — the slider is genuinely wider than a button so it
+    // deserves a separate threshold).
     let show_sfx_slider = window_width >= BREAKPOINT_HIDE_SFX_SLIDER;
-    let show_consume = window_width >= BREAKPOINT_HIDE_CONSUME;
-    let show_shuffle = window_width >= BREAKPOINT_HIDE_SHUFFLE;
-    let show_repeat = window_width >= BREAKPOINT_HIDE_REPEAT;
 
-    // Build mode toggles row dynamically based on visibility
+    // Tooltip strings for inline mode-toggle buttons (Wide / Medium tiers).
+    let repeat_icon = if is_repeat_queue_mode {
+        "assets/icons/repeat-2.svg"
+    } else {
+        "assets/icons/repeat-1.svg"
+    };
+    let repeat_tooltip: &'static str = if is_repeat_queue_mode {
+        "Repeat Queue: Restart queue when it ends"
+    } else if is_repeat_mode {
+        "Repeat Track: Loop the current track"
+    } else {
+        "Repeat: Off"
+    };
+    let shuffle_tooltip: &'static str = if is_random_mode {
+        "Shuffle: Playing in random order"
+    } else {
+        "Shuffle: Off"
+    };
+    let consume_tooltip: &'static str = if is_consume_mode {
+        "Consume: Tracks removed from queue after playing"
+    } else {
+        "Consume: Off"
+    };
+    let crossfade_tooltip: &'static str = if data.crossfade_enabled {
+        "Crossfade: Active"
+    } else {
+        "Crossfade: Off"
+    };
+    let visualizer_tooltip: &'static str = match visualization_mode {
+        VisualizationMode::Off => "Visualizer: Off",
+        VisualizationMode::Lines => "Visualizer: Waveform",
+        VisualizationMode::Bars => "Visualizer: Bars",
+    };
+    let eq_tooltip: &'static str = if eq_enabled {
+        "Equalizer: Active"
+    } else {
+        "Equalizer: Disabled"
+    };
+
+    // Shorter labels for kebab-menu rows (Medium / Narrow tiers). Reads
+    // tighter inside a 220px-wide menu than the full tooltip strings.
+    let shuffle_menu_label = if is_random_mode {
+        "Shuffle: On"
+    } else {
+        "Shuffle: Off"
+    };
+    let repeat_menu_label = if is_repeat_queue_mode {
+        "Repeat: Queue"
+    } else if is_repeat_mode {
+        "Repeat: Track"
+    } else {
+        "Repeat: Off"
+    };
+    let consume_menu_label = if is_consume_mode {
+        "Consume: On"
+    } else {
+        "Consume: Off"
+    };
+    let eq_menu_label = if eq_enabled {
+        "Equalizer: On"
+    } else {
+        "Equalizer: Off"
+    };
+    let crossfade_menu_label = if data.crossfade_enabled {
+        "Crossfade: On"
+    } else {
+        "Crossfade: Off"
+    };
+    let visualizer_menu_label: &'static str = match visualization_mode {
+        VisualizationMode::Off => "Visualizer: Off",
+        VisualizationMode::Lines => "Visualizer: Waveform",
+        VisualizationMode::Bars => "Visualizer: Bars",
+    };
+    let sfx_menu_label = if sound_effects_enabled {
+        "UI Sound Effects: On"
+    } else {
+        "UI Sound Effects: Off"
+    };
+
+    // Per-mode kebab membership — derived once from the layout snapshot so
+    // the inline row and kebab construction stay in sync.
+    let layout = data.layout;
+    let repeat_in_kebab = layout.is_in_kebab(ModeId::Repeat);
+    let shuffle_in_kebab = layout.is_in_kebab(ModeId::Shuffle);
+    let consume_in_kebab = layout.is_in_kebab(ModeId::Consume);
+    let eq_in_kebab = layout.is_in_kebab(ModeId::Eq);
+    let sfx_in_kebab = layout.is_in_kebab(ModeId::Sfx);
+    let crossfade_in_kebab = layout.is_in_kebab(ModeId::Crossfade);
+    let visualizer_in_kebab = layout.is_in_kebab(ModeId::Visualizer);
+
     let mut mode_toggles_row = iced::widget::Row::new().spacing(4);
 
-    // Repeat button
-    if show_repeat {
-        let repeat_icon = if is_repeat_queue_mode {
-            "assets/icons/repeat-2.svg"
-        } else {
-            "assets/icons/repeat-1.svg"
-        };
-        let repeat_label = if is_repeat_queue_mode {
-            "Repeat Queue: Restart queue when it ends"
-        } else if is_repeat_mode {
-            "Repeat Track: Loop the current track"
-        } else {
-            "Repeat: Off"
-        };
+    // Inline mode toggles, in the historical visual order. Each mode renders
+    // here only when it's NOT in the kebab. SFX has the additional gate of
+    // `sound_effects_enabled` (preserves the long-standing "no SFX button
+    // when SFX is off" behavior at wide widths).
+    if !repeat_in_kebab {
         mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
             repeat_icon,
             PlayerBarMessage::ToggleRepeat,
             repeat_active,
-            repeat_label,
+            repeat_tooltip,
         ));
     }
-
-    // Shuffle button
-    if show_shuffle {
-        let shuffle_label = if is_random_mode {
-            "Shuffle: Playing in random order"
-        } else {
-            "Shuffle: Off"
-        };
+    if !shuffle_in_kebab {
         mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
             "assets/icons/shuffle.svg",
             PlayerBarMessage::ToggleRandom,
             is_random_mode,
-            shuffle_label,
+            shuffle_tooltip,
         ));
     }
-
-    // Consume button
-    if show_consume {
-        let consume_label = if is_consume_mode {
-            "Consume: Tracks removed from queue after playing"
-        } else {
-            "Consume: Off"
-        };
+    if !consume_in_kebab {
         mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
             "assets/icons/cookie.svg",
             PlayerBarMessage::ToggleConsume,
             is_consume_mode,
-            consume_label,
+            consume_tooltip,
         ));
     }
-
-    // EQ button (text label instead of icon)
-    if show_consume {
-        let eq_tooltip = if eq_enabled {
-            "Equalizer: Active"
-        } else {
-            "Equalizer: Disabled"
-        };
+    if !eq_in_kebab {
+        // EQ inline button — text-styled 3D button (not icon-based).
         mode_toggles_row = mode_toggles_row.push(Element::from(HoverOverlay::new(
             tooltip(
                 three_d_button(
@@ -542,9 +752,9 @@ pub(crate) fn player_bar<'a>(
             .style(theme::container_tooltip),
         )));
     }
-
-    // SFX toggle button
-    if sound_effects_enabled {
+    if !sfx_in_kebab && sound_effects_enabled {
+        // SFX inline button — text-styled 3D button. Only renders when SFX
+        // is on AND not yet folded into the kebab.
         mode_toggles_row = mode_toggles_row.push(Element::from(HoverOverlay::new(
             tooltip(
                 three_d_button(
@@ -574,35 +784,94 @@ pub(crate) fn player_bar<'a>(
             .style(theme::container_tooltip),
         )));
     }
-
-    // Crossfade toggle button
-    if show_consume {
-        let crossfade_label = if data.crossfade_enabled {
-            "Crossfade: Active"
-        } else {
-            "Crossfade: Off"
-        };
+    if !crossfade_in_kebab {
         mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
             "assets/icons/blend.svg",
             PlayerBarMessage::ToggleCrossfade,
             data.crossfade_enabled,
-            crossfade_label,
+            crossfade_tooltip,
         ));
     }
-
-    // Visualizer button
-    if show_visualizer {
-        let vis_label = match visualization_mode {
-            VisualizationMode::Off => "Visualizer: Off",
-            VisualizationMode::Lines => "Visualizer: Waveform",
-            VisualizationMode::Bars => "Visualizer: Bars",
-        };
+    if !visualizer_in_kebab {
         mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
             vis_icon,
             PlayerBarMessage::CycleVisualization,
             vis_active,
-            vis_label,
+            visualizer_tooltip,
         ));
+    }
+
+    // Kebab menu — built only when at least one mode has folded in. Rows
+    // render in the user-specified display order: queue-flow group first
+    // [Shuffle, Repeat, Consume], then audio-output group [Crossfade, EQ,
+    // Visualizer, SFX]. The separator between groups appears only when both
+    // groups have at least one item (so it doesn't dangle as the kebab
+    // fills up gradually).
+    if layout.kebab_mode_count > 0 {
+        use crate::widgets::player_modes_menu::{
+            PlayerModesMenu, mode_menu_item, mode_menu_separator,
+        };
+        let queue_group_has_items = shuffle_in_kebab || repeat_in_kebab || consume_in_kebab;
+        let audio_group_has_items =
+            crossfade_in_kebab || eq_in_kebab || visualizer_in_kebab || sfx_in_kebab;
+
+        let mut kebab_rows = Vec::with_capacity(layout.kebab_mode_count as usize + 1);
+        if shuffle_in_kebab {
+            kebab_rows.push(mode_menu_item(
+                shuffle_menu_label,
+                is_random_mode,
+                PlayerBarMessage::ToggleRandom,
+            ));
+        }
+        if repeat_in_kebab {
+            kebab_rows.push(mode_menu_item(
+                repeat_menu_label,
+                repeat_active,
+                PlayerBarMessage::ToggleRepeat,
+            ));
+        }
+        if consume_in_kebab {
+            kebab_rows.push(mode_menu_item(
+                consume_menu_label,
+                is_consume_mode,
+                PlayerBarMessage::ToggleConsume,
+            ));
+        }
+        if queue_group_has_items && audio_group_has_items {
+            kebab_rows.push(mode_menu_separator());
+        }
+        if crossfade_in_kebab {
+            kebab_rows.push(mode_menu_item(
+                crossfade_menu_label,
+                data.crossfade_enabled,
+                PlayerBarMessage::ToggleCrossfade,
+            ));
+        }
+        if eq_in_kebab {
+            kebab_rows.push(mode_menu_item(
+                eq_menu_label,
+                eq_enabled,
+                PlayerBarMessage::ToggleEq,
+            ));
+        }
+        if visualizer_in_kebab {
+            kebab_rows.push(mode_menu_item(
+                visualizer_menu_label,
+                vis_active,
+                PlayerBarMessage::CycleVisualization,
+            ));
+        }
+        if sfx_in_kebab {
+            kebab_rows.push(mode_menu_item(
+                sfx_menu_label,
+                sound_effects_enabled,
+                PlayerBarMessage::ToggleSoundEffects,
+            ));
+        }
+
+        mode_toggles_row = mode_toggles_row.push(Element::from(HoverOverlay::new(
+            PlayerModesMenu::new(kebab_rows),
+        )));
     }
 
     // Application menu — always visible when there is no top nav bar
@@ -743,4 +1012,220 @@ pub(crate) fn player_bar<'a>(
             PlayerBarMessage::ScrollVolume(y)
         })
         .into()
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::{
+        CULL_ENTER_WIDTHS, CULL_HYSTERESIS_PX, ModeId, PlayerBarLayout, TRANSPORT_COLLAPSE_ENTER,
+        TRANSPORT_COLLAPSE_EXIT, compute_layout,
+    };
+
+    fn empty() -> PlayerBarLayout {
+        PlayerBarLayout::default()
+    }
+
+    fn layout(count: u8, transports: bool) -> PlayerBarLayout {
+        PlayerBarLayout {
+            kebab_mode_count: count,
+            transports_collapsed: transports,
+        }
+    }
+
+    // ---- mode culling ----
+
+    #[test]
+    fn wide_width_keeps_all_modes_inline() {
+        // Far above any threshold — no culling.
+        let result = compute_layout(1200.0, empty());
+        assert_eq!(result.kebab_mode_count, 0);
+        assert!(!result.transports_collapsed);
+    }
+
+    #[test]
+    fn at_exact_first_threshold_no_culling() {
+        // Visualizer enters when width *strictly* < threshold[0], so a width
+        // sitting exactly on the threshold leaves it inline.
+        let result = compute_layout(CULL_ENTER_WIDTHS[0], empty());
+        assert_eq!(result.kebab_mode_count, 0);
+    }
+
+    #[test]
+    fn one_pixel_below_first_threshold_culls_visualizer() {
+        let result = compute_layout(CULL_ENTER_WIDTHS[0] - 1.0, empty());
+        assert_eq!(result.kebab_mode_count, 1);
+    }
+
+    #[test]
+    fn each_threshold_culls_exactly_one_more_mode() {
+        // Walk down past every cull threshold; each step adds exactly one
+        // mode to the kebab — the bug the granular cull is fixing.
+        for (i, &threshold) in CULL_ENTER_WIDTHS.iter().enumerate() {
+            let just_below = threshold - 1.0;
+            let result = compute_layout(just_below, empty());
+            assert_eq!(
+                result.kebab_mode_count,
+                (i + 1) as u8,
+                "width {just_below} should cull exactly {} modes",
+                i + 1
+            );
+        }
+    }
+
+    #[test]
+    fn extremely_narrow_width_culls_all_seven_modes() {
+        let result = compute_layout(100.0, empty());
+        assert_eq!(result.kebab_mode_count, CULL_ENTER_WIDTHS.len() as u8);
+    }
+
+    // ---- mode hysteresis ----
+
+    #[test]
+    fn culled_mode_stays_culled_inside_hysteresis_band() {
+        // Visualizer was culled at < threshold[0]; pops out only once width
+        // reaches threshold[0] + hysteresis. One pixel inside the band, the
+        // count stays at 1.
+        let prev = layout(1, false);
+        let inside_band = CULL_ENTER_WIDTHS[0] + CULL_HYSTERESIS_PX - 1.0;
+        assert_eq!(compute_layout(inside_band, prev).kebab_mode_count, 1);
+    }
+
+    #[test]
+    fn culled_mode_pops_inline_at_exit_threshold() {
+        // Width hits threshold[0] + hysteresis exactly → visualizer pops back
+        // inline.
+        let prev = layout(1, false);
+        let exit = CULL_ENTER_WIDTHS[0] + CULL_HYSTERESIS_PX;
+        assert_eq!(compute_layout(exit, prev).kebab_mode_count, 0);
+    }
+
+    #[test]
+    fn hysteresis_applies_to_each_cull_index_independently() {
+        // For every cull index, verify the hysteresis band keeps it inside
+        // the kebab and clearing the band pops it out.
+        for (i, &threshold) in CULL_ENTER_WIDTHS.iter().enumerate() {
+            let count_before = (i + 1) as u8;
+            let exit = threshold + CULL_HYSTERESIS_PX;
+
+            // Inside the band — count stays.
+            let prev = layout(count_before, false);
+            assert_eq!(
+                compute_layout(exit - 1.0, prev).kebab_mode_count,
+                count_before,
+                "cull idx {i}: width {} should keep count at {count_before}",
+                exit - 1.0,
+            );
+
+            // At/above exit — count drops by one.
+            assert_eq!(
+                compute_layout(exit, prev).kebab_mode_count,
+                count_before - 1,
+                "cull idx {i}: width {exit} should drop count to {}",
+                count_before - 1,
+            );
+        }
+    }
+
+    // ---- multi-step jumps from rapid resize ----
+
+    #[test]
+    fn jump_from_wide_to_very_narrow_culls_all_modes_at_once() {
+        let result = compute_layout(100.0, empty());
+        assert_eq!(result.kebab_mode_count, CULL_ENTER_WIDTHS.len() as u8);
+        assert!(result.transports_collapsed);
+    }
+
+    #[test]
+    fn jump_from_narrow_to_wide_pops_all_modes_back_inline() {
+        let prev = layout(7, true);
+        let result = compute_layout(1200.0, prev);
+        assert_eq!(result.kebab_mode_count, 0);
+        assert!(!result.transports_collapsed);
+    }
+
+    // ---- transport collapse ----
+
+    #[test]
+    fn transport_collapses_just_below_enter_threshold() {
+        let result = compute_layout(TRANSPORT_COLLAPSE_ENTER - 1.0, empty());
+        assert!(result.transports_collapsed);
+    }
+
+    #[test]
+    fn transport_does_not_collapse_at_exact_enter_threshold() {
+        // Strictly less-than is the trigger; exactly-720 leaves transports
+        // expanded.
+        let result = compute_layout(TRANSPORT_COLLAPSE_ENTER, empty());
+        assert!(!result.transports_collapsed);
+    }
+
+    #[test]
+    fn transport_collapse_holds_inside_hysteresis_band() {
+        let prev = layout(0, true);
+        let result = compute_layout(TRANSPORT_COLLAPSE_EXIT - 1.0, prev);
+        assert!(result.transports_collapsed);
+    }
+
+    #[test]
+    fn transport_expands_at_exit_threshold() {
+        let prev = layout(0, true);
+        let result = compute_layout(TRANSPORT_COLLAPSE_EXIT, prev);
+        assert!(!result.transports_collapsed);
+    }
+
+    #[test]
+    fn transport_collapse_independent_of_mode_culling() {
+        // Pick a width that's below the transport-collapse enter threshold
+        // AND below the EQ threshold (so EQ is in the kebab) but above the
+        // Consume threshold (so Consume is still inline). That leaves the
+        // first 4 modes (Visualizer/Crossfade/SFX/EQ) folded — proving the
+        // two systems run independently of each other.
+        let width = (TRANSPORT_COLLAPSE_ENTER - 1.0).min(CULL_ENTER_WIDTHS[3] - 1.0);
+        debug_assert!(width >= CULL_ENTER_WIDTHS[4]);
+        let result = compute_layout(width, empty());
+        assert_eq!(result.kebab_mode_count, 4);
+        assert!(result.transports_collapsed);
+    }
+
+    // ---- is_in_kebab ----
+
+    #[test]
+    fn is_in_kebab_false_when_count_is_zero() {
+        let l = empty();
+        for mode in [
+            ModeId::Visualizer,
+            ModeId::Crossfade,
+            ModeId::Sfx,
+            ModeId::Eq,
+            ModeId::Consume,
+            ModeId::Shuffle,
+            ModeId::Repeat,
+        ] {
+            assert!(!l.is_in_kebab(mode));
+        }
+    }
+
+    #[test]
+    fn is_in_kebab_first_culled_is_visualizer() {
+        let l = layout(1, false);
+        assert!(l.is_in_kebab(ModeId::Visualizer));
+        assert!(!l.is_in_kebab(ModeId::Crossfade));
+        assert!(!l.is_in_kebab(ModeId::Repeat));
+    }
+
+    #[test]
+    fn is_in_kebab_all_modes_at_full_count() {
+        let l = layout(7, true);
+        for mode in [
+            ModeId::Visualizer,
+            ModeId::Crossfade,
+            ModeId::Sfx,
+            ModeId::Eq,
+            ModeId::Consume,
+            ModeId::Shuffle,
+            ModeId::Repeat,
+        ] {
+            assert!(l.is_in_kebab(mode));
+        }
+    }
 }

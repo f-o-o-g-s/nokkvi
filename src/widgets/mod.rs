@@ -16,6 +16,7 @@ pub(crate) mod marquee_text;
 pub(crate) mod metadata_pill;
 pub(crate) mod nav_bar;
 pub(crate) mod player_bar;
+pub(crate) mod player_modes_menu;
 pub(crate) mod scroll_indicator;
 pub(crate) mod search_bar;
 pub(crate) mod side_nav_bar;

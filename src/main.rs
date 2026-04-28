@@ -127,6 +127,12 @@ pub struct Nokkvi {
     pub engine: crate::state::EngineState,
     pub artwork: crate::state::ArtworkState,
     pub window: crate::state::WindowState,
+    /// Snapshot of the player bar's responsive layout (which modes have folded
+    /// into the kebab and whether the transport row has collapsed to 3 buttons).
+    /// Recomputed on `WindowResized` with per-mode hysteresis (see
+    /// `widgets::player_bar::compute_layout`) so a slow drag near a threshold
+    /// doesn't flicker the layout.
+    pub player_bar_layout: crate::widgets::player_bar::PlayerBarLayout,
     pub toast: crate::state::ToastState,
     pub text_input_dialog: crate::widgets::text_input_dialog::TextInputDialogState,
     pub info_modal: crate::widgets::info_modal::InfoModalState,
@@ -314,6 +320,7 @@ impl Default for Nokkvi {
             engine: crate::state::EngineState::default(),
             artwork: crate::state::ArtworkState::default(),
             window: crate::state::WindowState::default(),
+            player_bar_layout: crate::widgets::player_bar::PlayerBarLayout::default(),
             // Misc state
             last_queue_current_index: None,
             playlist_edit: None,
