@@ -84,14 +84,6 @@ More detail in the docs:
 
 Build setup and contributor workflow (including the **nightly** rustfmt requirement) are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Known Issues
-
-### Crash on narrow window resize
-
-Squishing the window very narrow will crash the app. `iced` (the UI framework) can't safely render images smaller than a pixel wide, and my pre-hide workaround doesn't fire in time to prevent it.
-
-I've filed a potential fix upstream ([PR #3292](https://github.com/iced-rs/iced/pull/3292)). Until it lands, just don't squish the window too tight.
-
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions, guidelines, and the AI disclosure.

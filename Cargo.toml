@@ -36,8 +36,10 @@ workspace = true
 nokkvi-data = { path = "data" }
 anyhow = "1.0.102"
 bytemuck = { version = "1.25", features = ["derive"] }
-# Pinned post-0.14.0: requires `Ellipsis` type support (added in PR #3254)
-iced = { git = "https://github.com/iced-rs/iced.git", rev = "12a01265", features = ["tokio", "image", "svg", "advanced", "canvas", "wgpu", "sipper"] }
+# Pinned to f-o-o-g-s/iced fork at PR #3292 (return→continue fix in wgpu image
+# State::prepare). Base is upstream 12a01265 (post-0.14.0 for Ellipsis #3254).
+# Drop fork and return to iced-rs/iced when #3292 lands upstream.
+iced = { git = "https://github.com/f-o-o-g-s/iced.git", rev = "8d69450c", features = ["tokio", "image", "svg", "advanced", "canvas", "wgpu", "sipper"] }
 lru = "0.16"
 image = "0.25.10"
 reqwest = { version = "0.13.2", features = ["json", "blocking", "stream"] }
