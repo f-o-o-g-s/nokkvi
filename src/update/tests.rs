@@ -1393,6 +1393,8 @@ fn make_settings_view_data() -> crate::views::SettingsViewData {
         library_page_size: "Default",
         show_album_artists_only: true,
         suppress_library_refresh_toasts: false,
+        show_tray_icon: false,
+        close_to_tray: false,
         rounded_mode: false,
         nav_layout: "Top",
         nav_display_mode: "IconsAndLabels",
@@ -3636,4 +3638,90 @@ fn artists_rating_sort_empty_is_noop() {
     let mut artists: Vec<ArtistUIViewData> = vec![];
     Nokkvi::artists_rating_sort(&mut artists);
     assert!(artists.is_empty());
+}
+
+// ============================================================================
+// System Tray (services/tray.rs + update/tray.rs)
+// ============================================================================
+
+#[test]
+fn tray_settings_default_off() {
+    let app = test_app();
+    assert!(!app.show_tray_icon);
+    assert!(!app.close_to_tray);
+    assert!(!app.tray_window_hidden);
+    assert!(app.tray_connection.is_none());
+    assert!(app.main_window_id.is_none());
+}
+
+#[test]
+fn window_opened_captures_main_window_id_once() {
+    let mut app = test_app();
+    let id1 = iced::window::Id::unique();
+    let id2 = iced::window::Id::unique();
+
+    let _ = app.handle_window_opened(id1);
+    assert_eq!(app.main_window_id, Some(id1));
+
+    // A subsequent window-open event must not overwrite the first id —
+    // the tray uses this as the canonical "main window" handle.
+    let _ = app.handle_window_opened(id2);
+    assert_eq!(app.main_window_id, Some(id1));
+}
+
+#[test]
+fn window_close_requested_with_close_to_tray_off_does_not_hide() {
+    let mut app = test_app();
+    app.show_tray_icon = true;
+    app.close_to_tray = false;
+    let id = iced::window::Id::unique();
+
+    let _ = app.handle_window_close_requested(id);
+
+    assert!(
+        !app.tray_window_hidden,
+        "close_to_tray off → window must not be marked hidden (X should quit)"
+    );
+}
+
+#[test]
+fn window_close_requested_with_close_to_tray_on_hides_window() {
+    let mut app = test_app();
+    app.show_tray_icon = true;
+    app.close_to_tray = true;
+    let id = iced::window::Id::unique();
+
+    let _ = app.handle_window_close_requested(id);
+
+    assert!(app.tray_window_hidden);
+    assert_eq!(app.main_window_id, Some(id));
+}
+
+#[test]
+fn tray_activate_toggles_window_hidden_flag() {
+    use crate::services::tray::TrayEvent;
+
+    let mut app = test_app();
+    app.main_window_id = Some(iced::window::Id::unique());
+    assert!(!app.tray_window_hidden);
+
+    let _ = app.handle_tray(TrayEvent::Activate);
+    assert!(app.tray_window_hidden, "first Activate hides");
+
+    let _ = app.handle_tray(TrayEvent::Activate);
+    assert!(!app.tray_window_hidden, "second Activate shows");
+}
+
+#[test]
+fn tray_activate_without_window_id_is_noop() {
+    use crate::services::tray::TrayEvent;
+
+    let mut app = test_app();
+    assert!(app.main_window_id.is_none());
+
+    let _ = app.handle_tray(TrayEvent::Activate);
+    assert!(
+        !app.tray_window_hidden,
+        "Activate before window id captured leaves state unchanged"
+    );
 }

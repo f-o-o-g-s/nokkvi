@@ -749,15 +749,17 @@ mod tests {
             artwork_resolution: "Default (1000px)",
             show_album_artists_only: true,
             suppress_library_refresh_toasts: false,
+            show_tray_icon: false,
+            close_to_tray: false,
         };
         let entries = build_general_items(&data);
 
         assert_eq!(
             count_headers(&entries),
-            3,
-            "Expected 3 sections: Application, Mouse Behavior, Account"
+            4,
+            "Expected 4 sections: Application, Mouse Behavior, System Tray, Account"
         );
-        assert_eq!(count_items(&entries), 13, "Expected 13 items");
+        assert_eq!(count_items(&entries), 15, "Expected 15 items");
     }
 
     #[test]
@@ -1014,6 +1016,8 @@ mod tests {
             artwork_resolution: "Default (1000px)",
             show_album_artists_only: true,
             suppress_library_refresh_toasts: false,
+            show_tray_icon: false,
+            close_to_tray: false,
         };
         let interface = crate::views::settings::items_interface::InterfaceSettingsData {
             nav_layout: "Top",

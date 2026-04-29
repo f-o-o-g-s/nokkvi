@@ -73,6 +73,8 @@ impl SettingsPage {
                     artwork_resolution: data.artwork_resolution,
                     show_album_artists_only: data.show_album_artists_only,
                     suppress_library_refresh_toasts: data.suppress_library_refresh_toasts,
+                    show_tray_icon: data.show_tray_icon,
+                    close_to_tray: data.close_to_tray,
                 };
                 items::build_general_items(&gdata)
             }

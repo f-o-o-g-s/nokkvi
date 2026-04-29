@@ -16,6 +16,8 @@ pub(crate) struct GeneralSettingsData<'a> {
     pub artwork_resolution: &'a str,
     pub show_album_artists_only: bool,
     pub suppress_library_refresh_toasts: bool,
+    pub show_tray_icon: bool,
+    pub close_to_tray: bool,
 }
 
 /// Build settings entries for the General tab
@@ -24,6 +26,7 @@ pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEnt
     const MOUSE: &str = "assets/icons/mouse-pointer.svg";
     const ACC: &str = "assets/icons/user-round.svg";
     const LOGOUT: &str = "assets/icons/log-out.svg";
+    const TRAY: &str = "assets/icons/panels-top-left.svg";
 
     vec![
         // --- Application ---
@@ -135,6 +138,29 @@ pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEnt
             ),
             data.auto_follow_playing,
             true,
+        ),
+        // --- System Tray ---
+        SettingsEntry::Header {
+            label: "System Tray",
+            icon: TRAY,
+        },
+        SettingItem::bool_val(
+            meta!(
+                "general.show_tray_icon",
+                "Show Tray Icon",
+                "Register a system tray icon · requires a status bar with tray support (e.g. waybar with the `tray` module on Hyprland)"
+            ),
+            data.show_tray_icon,
+            false,
+        ),
+        SettingItem::bool_val(
+            meta!(
+                "general.close_to_tray",
+                "Close to Tray",
+                "X button hides the window into the tray instead of quitting · requires Show Tray Icon"
+            ),
+            data.close_to_tray,
+            false,
         ),
         // --- Account ---
         SettingsEntry::Header {

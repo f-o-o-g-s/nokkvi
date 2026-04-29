@@ -179,6 +179,18 @@ impl SettingsService {
         sm.set_suppress_library_refresh_toasts(enabled)
     }
 
+    /// Set system tray icon visibility and persist
+    pub async fn set_show_tray_icon(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_show_tray_icon(enabled)
+    }
+
+    /// Set close-to-tray behavior and persist
+    pub async fn set_close_to_tray(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_close_to_tray(enabled)
+    }
+
     /// Set rounded corners mode and persist
     pub async fn set_rounded_mode(&self, enabled: bool) -> anyhow::Result<()> {
         let mut sm = self.settings_manager.lock().await;

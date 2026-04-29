@@ -273,6 +273,8 @@ pub(crate) struct SettingsViewData {
     pub library_page_size: &'static str,
     pub show_album_artists_only: bool,
     pub suppress_library_refresh_toasts: bool,
+    pub show_tray_icon: bool,
+    pub close_to_tray: bool,
     pub rounded_mode: bool,
     pub slot_text_links: bool,
     pub nav_layout: &'static str,

@@ -229,6 +229,16 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_show_tray_icon(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.show_tray_icon = enabled;
+        self.save()
+    }
+
+    pub fn set_close_to_tray(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.close_to_tray = enabled;
+        self.save()
+    }
+
     pub fn set_rounded_mode(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.rounded_mode = enabled;
         self.save()
@@ -733,6 +743,8 @@ impl SettingsManager {
             artwork_column_mode: p.artwork_column_mode,
             artwork_column_stretch_fit: p.artwork_column_stretch_fit,
             artwork_column_width_pct: p.artwork_column_width_pct,
+            show_tray_icon: p.show_tray_icon,
+            close_to_tray: p.close_to_tray,
         }
     }
 
@@ -831,6 +843,8 @@ fn apply_toml_settings_to_internal(
     p.artwork_column_mode = ts.artwork_column_mode;
     p.artwork_column_stretch_fit = ts.artwork_column_stretch_fit;
     p.artwork_column_width_pct = ts.artwork_column_width_pct;
+    p.show_tray_icon = ts.show_tray_icon;
+    p.close_to_tray = ts.close_to_tray;
 }
 
 /// Convert `AllViewPreferences` into the internal `ViewPreferences` for redb storage.

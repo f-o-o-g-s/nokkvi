@@ -137,6 +137,12 @@ pub struct TomlSettings {
     #[serde(serialize_with = "round_f32_array")]
     pub eq_gains: [f32; 10],
     pub custom_eq_presets: Vec<CustomEqPreset>,
+
+    // -- System tray --
+    #[serde(default)]
+    pub show_tray_icon: bool,
+    #[serde(default)]
+    pub close_to_tray: bool,
 }
 
 fn default_replay_gain_prevent_clipping() -> bool {
@@ -237,6 +243,8 @@ impl Default for TomlSettings {
             eq_enabled: false,
             eq_gains: [0.0; 10],
             custom_eq_presets: Vec::new(),
+            show_tray_icon: false,
+            close_to_tray: false,
         }
     }
 }
@@ -314,6 +322,8 @@ impl TomlSettings {
             eq_enabled: ps.eq_enabled,
             eq_gains: ps.eq_gains,
             custom_eq_presets: ps.custom_eq_presets.clone(),
+            show_tray_icon: ps.show_tray_icon,
+            close_to_tray: ps.close_to_tray,
         }
     }
 }

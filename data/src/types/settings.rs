@@ -258,6 +258,17 @@ pub struct PlayerSettings {
     /// Only consulted in always modes.
     #[serde(default = "default_artwork_column_width_pct")]
     pub artwork_column_width_pct: f32,
+
+    // -- System tray --
+    /// Whether to register a system tray (StatusNotifierItem) icon.
+    /// Requires the compositor to host an SNI tray (e.g. waybar with the
+    /// `tray` module on Hyprland; AppIndicator extension on GNOME).
+    #[serde(default)]
+    pub show_tray_icon: bool,
+    /// When true and `show_tray_icon` is on, pressing the window's close button
+    /// hides the window into the tray instead of quitting the app.
+    #[serde(default)]
+    pub close_to_tray: bool,
 }
 
 fn default_artwork_column_width_pct() -> f32 {
@@ -380,6 +391,8 @@ impl Default for PlayerSettings {
             artwork_column_mode: ArtworkColumnMode::default(),
             artwork_column_stretch_fit: ArtworkStretchFit::default(),
             artwork_column_width_pct: default_artwork_column_width_pct(),
+            show_tray_icon: false,
+            close_to_tray: false,
         }
     }
 }

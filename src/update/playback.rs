@@ -545,6 +545,18 @@ impl Nokkvi {
         if discontinuity && (u.playing || u.paused) {
             conn.seeked(position_us);
         }
+
+        // Mirror Play/Pause label + tooltip title to the system tray.
+        if let Some(ref tray) = self.tray_connection {
+            let title = if mpris_title.is_empty() {
+                "Nokkvi".to_string()
+            } else if mpris_artist.is_empty() {
+                mpris_title.to_string()
+            } else {
+                format!("{mpris_title} — {mpris_artist}")
+            };
+            tray.set_playing_state(u.playing && !u.paused, title);
+        }
     }
 
     pub(crate) fn handle_toggle_play(&mut self) -> Task<Message> {
@@ -1066,6 +1078,8 @@ impl Nokkvi {
         self.artwork_resolution = settings.artwork_resolution;
         self.show_album_artists_only = settings.show_album_artists_only;
         self.suppress_library_refresh_toasts = settings.suppress_library_refresh_toasts;
+        self.show_tray_icon = settings.show_tray_icon;
+        self.close_to_tray = settings.close_to_tray;
 
         // Restore queue column visibility from persisted settings.
         self.queue_page.column_visibility.stars = settings.queue_show_stars;

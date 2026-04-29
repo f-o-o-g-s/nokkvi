@@ -840,6 +840,13 @@ pub struct PlayerSettings {
     /// Artwork column width as a fraction of window width (0.05..=0.80).
     /// Only consulted in `AlwaysNative` / `AlwaysStretched` modes.
     pub artwork_column_width_pct: f32,
+
+    // -- System tray --
+    /// Whether to register a StatusNotifierItem tray icon on the session bus.
+    pub show_tray_icon: bool,
+    /// When true and `show_tray_icon` is on, the window's close button hides
+    /// the window into the tray instead of quitting the application.
+    pub close_to_tray: bool,
 }
 
 #[cfg(test)]

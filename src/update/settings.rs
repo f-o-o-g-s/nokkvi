@@ -36,6 +36,8 @@ impl Nokkvi {
             library_page_size: self.library_page_size.as_label(),
             show_album_artists_only: self.show_album_artists_only,
             suppress_library_refresh_toasts: self.suppress_library_refresh_toasts,
+            show_tray_icon: self.show_tray_icon,
+            close_to_tray: self.close_to_tray,
             rounded_mode: crate::theme::is_rounded_mode(),
             nav_layout: if crate::theme::is_side_nav() {
                 "Side"
@@ -656,6 +658,20 @@ impl Nokkvi {
                 |shell: AppService, v| async move {
                     shell.settings().set_suppress_library_refresh_toasts(v).await
                 },
+                false,
+            ),
+            "general.show_tray_icon" => self.persist_bool_setting(
+                &value,
+                "persist_show_tray_icon",
+                |s, v| s.show_tray_icon = v,
+                |shell: AppService, v| async move { shell.settings().set_show_tray_icon(v).await },
+                false,
+            ),
+            "general.close_to_tray" => self.persist_bool_setting(
+                &value,
+                "persist_close_to_tray",
+                |s, v| s.close_to_tray = v,
+                |shell: AppService, v| async move { shell.settings().set_close_to_tray(v).await },
                 false,
             ),
             "general.artwork_resolution" => {

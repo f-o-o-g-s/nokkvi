@@ -90,6 +90,7 @@ mod tests_queue_filter;
 mod tests_star_rating;
 mod text_input_dialog;
 mod toast;
+mod tray;
 mod window;
 
 use iced::Task;
@@ -831,6 +832,13 @@ impl Nokkvi {
             // MPRIS D-Bus Integration
             // -----------------------------------------------------------------
             Message::Mpris(event) => self.handle_mpris(event),
+
+            // -----------------------------------------------------------------
+            // System Tray (StatusNotifierItem)
+            // -----------------------------------------------------------------
+            Message::Tray(event) => self.handle_tray(event),
+            Message::WindowOpened(id) => self.handle_window_opened(id),
+            Message::WindowCloseRequested(id) => self.handle_window_close_requested(id),
 
             // -----------------------------------------------------------------
             // Visualizer Hot-Reload

@@ -51,6 +51,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 futures = "0.3.32"
 mpris-server = "0.9"
+ksni = "0.3"
 notify = "8"
 parking_lot = "0.12.5"
 arc-swap = "1.7"

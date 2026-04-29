@@ -190,6 +190,16 @@ pub struct Nokkvi {
     pub last_mpris_position_us: i64,
 
     // -------------------------------------------------------------------------
+    // System Tray (StatusNotifierItem)
+    // -------------------------------------------------------------------------
+    /// Handle to push state into the running tray (None when disabled).
+    pub tray_connection: Option<services::tray::TrayConnection>,
+    /// Whether the window is currently hidden into the tray.
+    pub tray_window_hidden: bool,
+    /// Captured id of the main window — needed to issue `window::set_mode`.
+    pub main_window_id: Option<iced::window::Id>,
+
+    // -------------------------------------------------------------------------
     // Hotkey Configuration (loaded from redb, used by subscription)
     // -------------------------------------------------------------------------
     pub hotkey_config: HotkeyConfig,
@@ -214,6 +224,10 @@ pub struct Nokkvi {
     /// Whether to suppress the toast shown on Navidrome library-refresh events
     /// (default: false = toasts shown).
     pub suppress_library_refresh_toasts: bool,
+    /// Whether the system tray icon (StatusNotifierItem) is registered.
+    pub show_tray_icon: bool,
+    /// Whether the window's close button hides into the tray instead of quitting.
+    pub close_to_tray: bool,
     /// What Enter does in the Songs view (default: PlayAll)
     pub enter_behavior: nokkvi_data::types::player_settings::EnterBehavior,
     /// Local filesystem prefix for opening files in the file manager (default: empty = not set)
@@ -305,6 +319,8 @@ impl Default for Nokkvi {
             auto_follow_playing: true,
             show_album_artists_only: false,
             suppress_library_refresh_toasts: false,
+            show_tray_icon: false,
+            close_to_tray: false,
             enter_behavior: nokkvi_data::types::player_settings::EnterBehavior::default(),
             local_music_path: String::new(),
             library_page_size: nokkvi_data::types::player_settings::LibraryPageSize::Default,
@@ -342,6 +358,9 @@ impl Default for Nokkvi {
             visualizer_config: crate::visualizer_config::create_shared_config(),
             mpris_connection: None,
             last_mpris_position_us: 0,
+            tray_connection: None,
+            tray_window_hidden: false,
+            main_window_id: None,
             hotkey_config: HotkeyConfig::default(),
             toast: crate::state::ToastState::default(),
             text_input_dialog: crate::widgets::text_input_dialog::TextInputDialogState::default(),
@@ -455,6 +474,22 @@ impl Nokkvi {
         // MPRIS D-Bus server for Linux desktop integration
         let mpris = iced::Subscription::run(services::mpris::run).map(Message::Mpris);
 
+        // System tray (StatusNotifierItem). Conditionally spawned: when the
+        // user toggles `show_tray_icon` off, the subscription disappears
+        // from the batch and iced cancels it, which closes the command
+        // channel and tears down the ksni service on its dedicated thread.
+        let tray = if self.show_tray_icon {
+            iced::Subscription::run(services::tray::run).map(Message::Tray)
+        } else {
+            iced::Subscription::none()
+        };
+
+        // Window lifecycle: capture the main window's id on first open and
+        // intercept close-button presses so we can branch on the
+        // close-to-tray setting.
+        let window_open_sub = iced::window::open_events().map(Message::WindowOpened);
+        let window_close_sub = iced::window::close_requests().map(Message::WindowCloseRequested);
+
         // Config file watcher for hot-reloading both visualizer AND theme settings
         let config_watcher = iced::Subscription::run(|| {
             futures::stream::StreamExt::flat_map(
@@ -505,6 +540,9 @@ impl Nokkvi {
             window_events,
             login_events,
             mpris,
+            tray,
+            window_open_sub,
+            window_close_sub,
             config_watcher,
             loop_sub,
             queue_changed_sub,
@@ -867,6 +905,9 @@ pub fn main() -> iced::Result {
                 application_id: "org.nokkvi.nokkvi".to_string(),
                 ..Default::default()
             },
+            // Routed via `Message::WindowCloseRequested` so close-to-tray can
+            // hide the window instead of exiting the runtime.
+            exit_on_close_request: false,
             ..Default::default()
         })
         .run()

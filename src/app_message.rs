@@ -437,6 +437,15 @@ pub enum Message {
     // --- MPRIS D-Bus Integration ---
     Mpris(services::mpris::MprisEvent),
 
+    // --- System Tray (StatusNotifierItem) ---
+    Tray(services::tray::TrayEvent),
+    /// First (or only) window opened — capture its id so the tray handler can
+    /// later issue `window::set_mode` against it.
+    WindowOpened(iced::window::Id),
+    /// Window close button (X) was pressed. Branches on close_to_tray + tray
+    /// availability to either hide the window or quit the app.
+    WindowCloseRequested(iced::window::Id),
+
     // --- Visualizer Hot-Reload ---
     /// Config file changed, apply new visualizer settings
     VisualizerConfigChanged(crate::visualizer_config::VisualizerConfig),
