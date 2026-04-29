@@ -26,6 +26,13 @@ struct MprisUpdate<'a> {
 
 impl Nokkvi {
     pub(crate) fn handle_tick(&mut self) -> Task<Message> {
+        // Pre-login: nothing to poll. Returning early avoids `shell_task`
+        // logging a "called before app_service initialized" warning every
+        // 100ms while session resume is in flight at boot.
+        if self.app_service.is_none() {
+            return Task::none();
+        }
+
         let radio_station = self.active_playback.radio_station().cloned();
         let icy_url = if let crate::state::ActivePlayback::Radio(ref state) = self.active_playback {
             state.icy_url.clone()

@@ -870,10 +870,15 @@ pub fn main() -> iced::Result {
     ]
     .join(",");
 
-    // stderr layer: warn+ by default. RUST_LOG overrides.
+    // stderr layer: warn+ by default, plus info-level auth lifecycle so
+    // terminal launchers see "Resuming session…" / "Login successful" /
+    // "Login failed: …" without needing RUST_LOG. RUST_LOG overrides.
     let stderr_layer = tracing_subscriber::fmt::layer()
         .with_target(false)
-        .with_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")));
+        .with_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("warn,nokkvi::auth=info")),
+        );
 
     // File log layer: full debug context written to nokkvi.log in the config
     // directory. Captures everything for bug reports, including launches from

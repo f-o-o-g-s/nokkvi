@@ -2,7 +2,7 @@
 
 use iced::Task;
 use nokkvi_data::{audio, backend::app_service::AppService};
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     Nokkvi, Screen, View,
@@ -165,7 +165,7 @@ impl Nokkvi {
             return Task::none();
         };
 
-        info!("Resuming session for {}@{}", username, server_url);
+        info!(target: "nokkvi::auth", "Resuming session for {username}@{server_url}");
 
         // Take cached storage from previous logout (if any)
         let cached = self.cached_storage.take();
@@ -208,7 +208,7 @@ impl Nokkvi {
     ) -> Task<Message> {
         match result {
             Ok(shell) => {
-                info!(" Login successful!");
+                info!(target: "nokkvi::auth", "Login successful");
 
                 // Save server_url + username to config.toml (no password)
                 if let Err(e) = nokkvi_data::credentials::save_credentials(
@@ -346,6 +346,7 @@ impl Nokkvi {
                 ]);
             }
             Err(e) => {
+                error!(target: "nokkvi::auth", "Login failed: {e}");
                 self.login_page.on_login_error(format!("Login failed: {e}"));
             }
         }
