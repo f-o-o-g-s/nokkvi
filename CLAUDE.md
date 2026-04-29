@@ -24,7 +24,7 @@ CI runs all four checks (fmt-check / clippy `-D warnings` / test / release build
 
 System dependencies (Arch): `pacman -S pipewire fontconfig pkg-config`. The audio engine links against `libpipewire-0.3` at build time.
 
-Per-user data lives in `~/.config/nokkvi/` (config.toml, app.redb, themes/, sfx/, nokkvi.log). The log file is truncated on every launch.
+Per-user data follows the XDG Base Directory Specification, split across two roots: `~/.config/nokkvi/` for editable configuration (`config.toml`, `themes/`, `sfx/`) and `~/.local/state/nokkvi/` for runtime state (`app.redb`, `nokkvi.log`). The log file is truncated on every launch. A one-time migration in `AppService::new()` moves the legacy in-config `app.redb` to the state dir on first run.
 
 ## Workspace layout
 

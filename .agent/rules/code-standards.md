@@ -14,7 +14,7 @@ trigger: always_on
 
 - **Production error handling**: use `?`, `unwrap_or_default()`, or explicit match — **no `.unwrap()`** in production paths.
 - **Cloning**: prefer references / `Cow<>` over explicit `.clone()`. Search-filter helpers return `Cow::Borrowed` when no query is active.
-- **Logging**: structured `tracing` macros — `error!` (failures), `warn!` (recoverable), `info!` (milestones), `debug!` (flow), `trace!` (per-frame / per-packet / startup enumeration). Stderr is quiet by default; the file log at `~/.config/nokkvi/nokkvi.log` stays verbose.
+- **Logging**: structured `tracing` macros — `error!` (failures), `warn!` (recoverable), `info!` (milestones), `debug!` (flow), `trace!` (per-frame / per-packet / startup enumeration). Stderr is quiet by default; the file log at `~/.local/state/nokkvi/nokkvi.log` stays verbose.
 - **Threading**: prefer `Arc` + atomics over `Mutex<T>` for simple shared state. Theme color reads use `ArcSwap` (lock-free).
 
 ## Error Handling

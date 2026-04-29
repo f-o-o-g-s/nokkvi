@@ -827,7 +827,7 @@ impl Nokkvi {
 
 pub fn main() -> iced::Result {
     // Handle --version / --help before tracing init so these short-lived
-    // invocations don't truncate ~/.config/nokkvi/nokkvi.log.
+    // invocations don't truncate ~/.local/state/nokkvi/nokkvi.log.
     for arg in std::env::args().skip(1) {
         match arg.as_str() {
             "-V" | "--version" => {
@@ -846,7 +846,7 @@ pub fn main() -> iced::Result {
     //
     // Defaults (overridable via RUST_LOG, which applies to both layers):
     //   - stderr: warn+ only — quiet, signal-only output for terminal launches.
-    //   - file (~/.config/nokkvi/nokkvi.log): full debug context for bug reports.
+    //   - file (~/.local/state/nokkvi/nokkvi.log): full debug context for bug reports.
     //
     //   RUST_LOG=info ./nokkvi             # info+ on terminal and in file
     //   RUST_LOG=debug ./nokkvi            # full debug on both
@@ -891,40 +891,44 @@ pub fn main() -> iced::Result {
     ]
     .join(",");
 
-    // stderr layer: warn+ by default, plus info-level auth lifecycle so
-    // terminal launchers see "Resuming session…" / "Login successful" /
-    // "Login failed: …" without needing RUST_LOG. RUST_LOG overrides.
-    let stderr_layer = tracing_subscriber::fmt::layer()
-        .with_target(false)
-        .with_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("warn,nokkvi::auth=info")),
-        );
+    // stderr layer: warn+ by default, plus info-level auth lifecycle and
+    // one-time data migrations so terminal launchers see "Resuming session…"
+    // / "Login successful" / "Login failed: …" / "moved app.redb …" without
+    // needing RUST_LOG. RUST_LOG overrides.
+    let stderr_layer =
+        tracing_subscriber::fmt::layer()
+            .with_target(false)
+            .with_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                EnvFilter::new("warn,nokkvi::auth=info,nokkvi::migration=info")
+            }));
 
-    // File log layer: full debug context written to nokkvi.log in the config
-    // directory. Captures everything for bug reports, including launches from
-    // Hyprland keybinds with no visible terminal. Truncated on each startup.
-    let file_layer = nokkvi_data::utils::paths::get_app_dir()
+    // File log layer: full debug context written to ~/.local/state/nokkvi/nokkvi.log.
+    // Captures everything for bug reports, including launches from Hyprland keybinds
+    // with no visible terminal. Truncated on each startup.
+    let file_layer = nokkvi_data::utils::paths::get_log_path()
         .ok()
-        .and_then(|dir| {
-            std::fs::File::create(dir.join("nokkvi.log"))
-                .ok()
-                .map(|file| {
-                    tracing_subscriber::fmt::layer()
-                        .with_target(true)
-                        .with_ansi(false)
-                        .with_writer(std::sync::Mutex::new(file))
-                        .with_filter(
-                            EnvFilter::try_from_default_env()
-                                .unwrap_or_else(|_| EnvFilter::new(&file_default_filter)),
-                        )
-                })
+        .and_then(|path| {
+            std::fs::File::create(path).ok().map(|file| {
+                tracing_subscriber::fmt::layer()
+                    .with_target(true)
+                    .with_ansi(false)
+                    .with_writer(std::sync::Mutex::new(file))
+                    .with_filter(
+                        EnvFilter::try_from_default_env()
+                            .unwrap_or_else(|_| EnvFilter::new(&file_default_filter)),
+                    )
+            })
         });
 
     tracing_subscriber::registry()
         .with(stderr_layer)
         .with(file_layer)
         .init();
+
+    // Run the legacy → XDG-state-dir migration now that tracing is up,
+    // and before iced::daemon spins up `Nokkvi::default()` (which loads
+    // the session from app.redb via `credentials::load_session`).
+    nokkvi_data::utils::paths::migrate_to_state_dir();
 
     iced::daemon(boot, Nokkvi::update, Nokkvi::view)
         .title(Nokkvi::title)
@@ -957,11 +961,11 @@ fn print_cli_help() {
     println!("                     RUST_LOG=nokkvi::audio=trace   # narrow to one module");
     println!();
     println!("Files:");
-    println!("  ~/.config/nokkvi/config.toml      User configuration (TOML)");
-    println!("  ~/.config/nokkvi/app.redb         Queue, session tokens, structured state");
-    println!("  ~/.config/nokkvi/themes/          Theme files (.toml)");
-    println!("  ~/.config/nokkvi/sfx/             Sound effect overrides");
-    println!("  ~/.config/nokkvi/nokkvi.log       Log file (truncated on launch)");
+    println!("  ~/.config/nokkvi/config.toml          User configuration (TOML)");
+    println!("  ~/.config/nokkvi/themes/              Theme files (.toml)");
+    println!("  ~/.config/nokkvi/sfx/                 Sound effect overrides");
+    println!("  ~/.local/state/nokkvi/app.redb        Queue, session tokens, structured state");
+    println!("  ~/.local/state/nokkvi/nokkvi.log      Log file (truncated on launch)");
     println!();
     println!("Documentation:");
     println!("  {repo}");

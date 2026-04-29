@@ -53,7 +53,9 @@ impl std::fmt::Debug for AppService {
 
 impl AppService {
     pub async fn new() -> Result<Self> {
-        // Create a single shared database for all persistence
+        // `get_app_db_path` runs the legacy → XDG-state-dir migration on
+        // first call (gated by an internal OnceLock in `paths`), so the
+        // open below always lands on the correct location.
         let db_path = crate::utils::paths::get_app_db_path()?;
         let storage = crate::services::state_storage::StateStorage::new(db_path)?;
         Self::new_with_storage(storage).await
