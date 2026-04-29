@@ -117,6 +117,9 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_genres(&mut self, msg: views::GenresMessage) -> Task<Message> {
+        if let GenresMessage::SetOpenMenu(next) = msg {
+            return Task::done(Message::SetOpenMenu(next));
+        }
         self.play_view_sfx(
             matches!(
                 msg,

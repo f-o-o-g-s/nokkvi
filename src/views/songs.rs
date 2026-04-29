@@ -98,6 +98,15 @@ pub struct SongsViewData<'a> {
     pub total_song_count: usize,
     pub loading: bool,
     pub stable_viewport: bool,
+    /// Whether the column-visibility checkbox dropdown is open (controlled
+    /// by `Nokkvi.open_menu`).
+    pub column_dropdown_open: bool,
+    /// Trigger bounds captured when the dropdown was opened.
+    pub column_dropdown_trigger_bounds: Option<iced::Rectangle>,
+    /// Borrowed reference to the root open-menu state, so per-row context
+    /// menus and the artwork-panel context menu can resolve their own
+    /// open/closed status.
+    pub open_menu: Option<&'a crate::app_message::OpenMenu>,
 }
 
 /// Messages for local song page interactions
@@ -140,6 +149,10 @@ pub enum SongsMessage {
     /// Navigate to a view and apply an ID filter
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
     ToggleColumnVisible(SongsColumn),
+    /// Column-dropdown open/close request — bubbled to root
+    /// `Message::SetOpenMenu`. Intercepted in `handle_songs` before the
+    /// page's `update` runs.
+    SetOpenMenu(Option<crate::app_message::OpenMenu>),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -421,6 +434,9 @@ impl SongsPage {
             SongsMessage::SongsLoaded { .. } | SongsMessage::SongsPageLoaded(_, _) => {
                 (Task::none(), SongsAction::None)
             }
+            // Routed up to root in `handle_songs` before this match runs;
+            // arm exists only for exhaustiveness.
+            SongsMessage::SetOpenMenu(_) => (Task::none(), SongsAction::None),
             SongsMessage::RefreshViewData => (Task::none(), SongsAction::RefreshViewData),
             SongsMessage::RefreshArtwork(album_id) => {
                 (Task::none(), SongsAction::RefreshArtwork(album_id))
@@ -470,6 +486,17 @@ impl SongsPage {
                     3 => SongsMessage::ToggleColumnVisible(SongsColumn::Plays),
                     _ => SongsMessage::ToggleColumnVisible(SongsColumn::Love),
                 },
+                |trigger_bounds| match trigger_bounds {
+                    Some(b) => SongsMessage::SetOpenMenu(Some(
+                        crate::app_message::OpenMenu::CheckboxDropdown {
+                            view: crate::View::Songs,
+                            trigger_bounds: b,
+                        },
+                    )),
+                    None => SongsMessage::SetOpenMenu(None),
+                },
+                data.column_dropdown_open,
+                data.column_dropdown_trigger_bounds,
             )
             .into()
         };
@@ -531,6 +558,7 @@ impl SongsPage {
         let song_artwork = data.album_art;
         let current_sort_mode = self.common.current_sort_mode;
         let center_index = self.common.slot_list.get_center_item_index(songs.len());
+        let open_menu_for_rows = data.open_menu;
 
         // Render slot list using generic component with item renderer closure
         let slot_list_content = slot_list_view_with_scroll(
@@ -802,9 +830,14 @@ impl SongsPage {
                     .width(Length::Fill);
 
                 use crate::widgets::context_menu::{
-                    context_menu, library_entry_view, song_entries_with_folder,
+                    context_menu, library_entry_view, open_state_for, song_entries_with_folder,
                 };
                 let item_idx = ctx.item_index;
+                let cm_id = crate::app_message::ContextMenuId::LibraryRow {
+                    view: crate::View::Songs,
+                    item_index: item_idx,
+                };
+                let (cm_open, cm_position) = open_state_for(open_menu_for_rows, &cm_id);
                 context_menu(
                     slot_button,
                     song_entries_with_folder(),
@@ -812,6 +845,17 @@ impl SongsPage {
                         library_entry_view(entry, length, |e| {
                             SongsMessage::ContextMenuAction(item_idx, e)
                         })
+                    },
+                    cm_open,
+                    cm_position,
+                    move |position| match position {
+                        Some(p) => {
+                            SongsMessage::SetOpenMenu(Some(crate::app_message::OpenMenu::Context {
+                                id: cm_id.clone(),
+                                position: p,
+                            }))
+                        }
+                        None => SongsMessage::SetOpenMenu(None),
                     },
                 )
                 .into()
@@ -907,11 +951,23 @@ impl SongsPage {
                 col.into()
             });
 
+        let artwork_menu_id = crate::app_message::ContextMenuId::ArtworkPanel(crate::View::Songs);
+        let (artwork_menu_open, artwork_menu_position) =
+            crate::widgets::context_menu::open_state_for(data.open_menu, &artwork_menu_id);
         let artwork_content = Some(single_artwork_panel_with_pill(
             artwork_handle,
             pill_content,
             active_dominant_color,
             on_refresh,
+            artwork_menu_open,
+            artwork_menu_position,
+            move |position| match position {
+                Some(p) => SongsMessage::SetOpenMenu(Some(crate::app_message::OpenMenu::Context {
+                    id: artwork_menu_id.clone(),
+                    position: p,
+                })),
+                None => SongsMessage::SetOpenMenu(None),
+            },
         ));
 
         base_slot_list_layout(&layout_config, header, slot_list_content, artwork_content)

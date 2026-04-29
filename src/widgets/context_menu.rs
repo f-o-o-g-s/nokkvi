@@ -306,24 +306,61 @@ pub(crate) fn radio_entry_view<'a, Message: Clone + 'a>(
 }
 
 // ============================================================================
+// Helper: Resolve per-instance open state from the root menu coordinator
+// ============================================================================
+
+/// Returns `(is_open, open_position)` for a `context_menu` instance keyed by
+/// `id`, derived from the root-level `Nokkvi.open_menu`. Use this at each call
+/// site to drive the controlled `is_open` / `open_position` props.
+pub(crate) fn open_state_for(
+    open_menu: Option<&crate::app_message::OpenMenu>,
+    id: &crate::app_message::ContextMenuId,
+) -> (bool, Option<Point>) {
+    match open_menu {
+        Some(crate::app_message::OpenMenu::Context {
+            id: open_id,
+            position,
+        }) if open_id == id => (true, Some(*position)),
+        _ => (false, None),
+    }
+}
+
+// ============================================================================
 // Public API
 // ============================================================================
 
 /// Create a context menu wrapping the given base element.
 ///
+/// Controlled component: `is_open` and `open_position` are passed in by the
+/// parent (derived from `Nokkvi.open_menu`), and the widget emits
+/// `on_open_change(Some(cursor_pos))` when the user right-clicks the base or
+/// `on_open_change(None)` when the menu should close. The parent stashes the
+/// position into `OpenMenu::Context { id, position }` so the next render
+/// passes it back here.
+///
 /// - `base` — the wrapped content (e.g., a slot list slot button)
 /// - `entries` — menu items to show when opened
 /// - `entry_view` — renders each entry into an `Element`; receives the entry
 ///   and a `Length` hint (use `Length::Fill` for full-width buttons)
+/// - `is_open` — whether this widget instance owns the currently open menu
+/// - `open_position` — anchor point for the overlay (passed in from parent)
+/// - `on_open_change` — emitted with `Some(cursor_pos)` to request open or
+///   `None` to request close
 pub(crate) fn context_menu<'a, T, Message>(
     base: impl Into<Element<'a, Message>>,
     entries: Vec<T>,
     entry_view: impl Fn(T, Length) -> Element<'a, Message> + 'a,
+    is_open: bool,
+    open_position: Option<Point>,
+    on_open_change: impl Fn(Option<Point>) -> Message + 'a,
 ) -> ContextMenu<'a, T, Message> {
     ContextMenu {
         base: base.into(),
         entries,
         entry_view: Box::new(entry_view),
+        on_open_change: Box::new(on_open_change),
+        is_open,
+        open_position,
         menu: None,
     }
 }
@@ -336,29 +373,32 @@ pub struct ContextMenu<'a, T, Message> {
     base: Element<'a, Message>,
     entries: Vec<T>,
     entry_view: Box<dyn Fn(T, Length) -> Element<'a, Message> + 'a>,
+    /// Emitted with `Some(cursor_pos)` to request open or `None` to request
+    /// close. Pure state-change request — the actual open/close happens after
+    /// the parent dispatches `Message::SetOpenMenu`.
+    on_open_change: Box<dyn Fn(Option<Point>) -> Message + 'a>,
+    /// Whether this widget instance owns the currently open menu (controlled
+    /// by parent via `Nokkvi.open_menu`).
+    is_open: bool,
+    /// Anchor point for the overlay when open (passed in from parent).
+    open_position: Option<Point>,
     /// Cached menu element, rebuilt when opening.
     menu: Option<Element<'a, Message>>,
 }
 
+/// Tree-state. Open/closed and position both live on the parent now; only the
+/// overlay's persistent widget tree (button hover/press state) stays here.
 #[derive(Debug)]
 struct State {
-    status: Status,
     menu_tree: widget::Tree,
 }
 
 impl State {
     fn new() -> Self {
         Self {
-            status: Status::Closed,
             menu_tree: widget::Tree::empty(),
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Status {
-    Closed,
-    Open { position: Point },
 }
 
 impl<'a, T, Message> Widget<Message, Theme, iced::Renderer> for ContextMenu<'a, T, Message>
@@ -428,32 +468,20 @@ where
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
-        // Intercept right-click on our bounds to toggle the menu.
-        let is_right_click = matches!(
+        // Intercept right-click on our bounds to request open at the cursor
+        // position. If a different context menu was already open elsewhere,
+        // the parent's `SetOpenMenu` handler replaces it atomically.
+        if matches!(
             event,
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right))
-        );
-
-        if is_right_click {
-            let state = tree.state.downcast_mut::<State>();
-            let prev = state.status;
-
-            if let Some(cursor_pos) = cursor.position_over(layout.bounds()) {
-                // Open at cursor position (with small offset)
-                state.status = Status::Open {
-                    position: Point::new(cursor_pos.x + 5.0, cursor_pos.y + 5.0),
-                };
-                if prev != state.status {
-                    shell.request_redraw();
-                }
-                // Capture the event so the child button doesn't also process it
-                shell.capture_event();
-                return;
-            } else if matches!(prev, Status::Open { .. }) {
-                // Click outside while open → close
-                state.status = Status::Closed;
-                shell.request_redraw();
-            }
+        ) && let Some(cursor_pos) = cursor.position_over(layout.bounds())
+        {
+            let position = Point::new(cursor_pos.x + 5.0, cursor_pos.y + 5.0);
+            shell.publish((self.on_open_change)(Some(position)));
+            shell.request_redraw();
+            // Capture so the child button doesn't also process the right-click.
+            shell.capture_event();
+            return;
         }
 
         // Forward to child
@@ -500,15 +528,26 @@ where
                 .as_widget_mut()
                 .overlay(base_state, layout, renderer, viewport, translation);
 
-        // Build our overlay if open
         let state = tree.state.downcast_mut::<State>();
-        let our_overlay = build_overlay(
-            state,
-            &mut self.menu,
-            &self.entries,
-            &self.entry_view,
-            translation,
-        );
+        let our_overlay = if self.is_open
+            && let Some(position) = self.open_position
+        {
+            build_overlay(
+                state,
+                &mut self.menu,
+                &self.entries,
+                &self.entry_view,
+                &*self.on_open_change,
+                position,
+                translation,
+            )
+        } else {
+            // Drop cached menu element + reset persisted tree so next open
+            // starts fresh.
+            self.menu = None;
+            state.menu_tree = widget::Tree::empty();
+            None
+        };
 
         if base_overlay.is_none() && our_overlay.is_none() {
             None
@@ -562,6 +601,8 @@ fn build_overlay<'a, 'b, T, Message>(
     menu: &'b mut Option<Element<'a, Message>>,
     entries: &[T],
     entry_view: &(dyn Fn(T, Length) -> Element<'a, Message> + 'a),
+    on_open_change: &'b dyn Fn(Option<Point>) -> Message,
+    position: Point,
     translation: Vector,
 ) -> Option<overlay::Element<'b, Message, Theme, iced::Renderer>>
 where
@@ -572,42 +613,24 @@ where
         return None;
     }
 
-    match state.status {
-        Status::Open { .. } => {
-            // Always (re)build the menu Element — it's cheap and ensures
-            // the view closure captures fresh data.
-            // BUT we must diff it against the *existing* menu_tree so that
-            // button widget state (e.g. is_pressed) survives view rebuilds.
-            let m = menu.get_or_insert_with(|| build_menu_element(entries, entry_view));
-            if state.menu_tree.children.is_empty() {
-                // First open: no existing tree, create one fresh
-                state.menu_tree = widget::Tree::new(&*m);
-            } else {
-                // View was rebuilt (menu field reset to None) but tree
-                // state persists from the previous frame. Diff preserves
-                // widget state like Button::is_pressed across frames.
-                state.menu_tree.diff(&*m as &Element<'a, Message>);
-            }
-        }
-        Status::Closed => {
-            *menu = None;
-            // Reset the tree so next open creates a fresh one
-            state.menu_tree = widget::Tree::empty();
-            return None;
-        }
+    // Always (re)build the menu Element — it's cheap and ensures the view
+    // closure captures fresh data. We diff against the persisted `menu_tree`
+    // so button widget state (is_pressed, hover) survives the view rebuild.
+    let m = menu.get_or_insert_with(|| build_menu_element(entries, entry_view));
+    if state.menu_tree.children.is_empty() {
+        state.menu_tree = widget::Tree::new(&*m);
+    } else {
+        state.menu_tree.diff(&*m as &Element<'a, Message>);
     }
 
-    if let Status::Open { position } = state.status {
-        menu.as_mut().map(|m| {
-            overlay::Element::new(Box::new(MenuOverlay {
-                menu: m,
-                state,
-                position: position + translation,
-            }))
-        })
-    } else {
-        None
-    }
+    menu.as_mut().map(|m| {
+        overlay::Element::new(Box::new(MenuOverlay {
+            menu: m,
+            state,
+            on_open_change,
+            position: position + translation,
+        }))
+    })
 }
 
 // ============================================================================
@@ -617,6 +640,7 @@ where
 struct MenuOverlay<'a, 'b, Message> {
     menu: &'b mut Element<'a, Message>,
     state: &'b mut State,
+    on_open_change: &'b dyn Fn(Option<Point>) -> Message,
     position: Point,
 }
 
@@ -672,21 +696,25 @@ impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'
                 ..
             })
         ) {
-            self.state.status = Status::Closed;
+            shell.publish((self.on_open_change)(None));
             shell.capture_event();
             shell.request_redraw();
             return;
         }
 
-        // Click outside menu → close
+        // Click outside menu → emit close. Do NOT capture: a different menu's
+        // trigger may be under the cursor, and iced dispatches overlays
+        // before the widget tree, so the trigger's open emit arrives later
+        // and wins (the parent's `SetOpenMenu` handler simply replaces the
+        // value). For a click in genuinely empty space, only the close
+        // emits, and the menu disappears next frame.
         if matches!(
             event,
             Event::Mouse(mouse::Event::ButtonPressed(_))
                 | Event::Touch(touch::Event::FingerPressed { .. })
         ) && cursor_over.is_none()
         {
-            self.state.status = Status::Closed;
-            shell.capture_event();
+            shell.publish((self.on_open_change)(None));
             shell.request_redraw();
             return;
         }
@@ -712,7 +740,7 @@ impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'
                 | Event::Touch(touch::Event::FingerLifted { .. })
         ) && cursor_over.is_some()
         {
-            self.state.status = Status::Closed;
+            shell.publish((self.on_open_change)(None));
             shell.request_redraw();
         }
     }

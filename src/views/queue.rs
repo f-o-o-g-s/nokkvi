@@ -152,6 +152,14 @@ pub struct QueueViewData<'a> {
     pub edit_mode_comment: Option<String>,
     /// When a playlist is loaded for playback (not editing)
     pub playlist_context_info: Option<crate::state::ActivePlaylistContext>,
+    /// Whether the column-visibility checkbox dropdown is open (controlled
+    /// by `Nokkvi.open_menu`).
+    pub column_dropdown_open: bool,
+    /// Trigger bounds captured when the dropdown was opened.
+    pub column_dropdown_trigger_bounds: Option<iced::Rectangle>,
+    /// Borrowed reference to the root open-menu state, so per-row context
+    /// menus can resolve their own open/closed status.
+    pub open_menu: Option<&'a crate::app_message::OpenMenu>,
 }
 
 /// Context menu entries for queue items
@@ -213,6 +221,10 @@ pub enum QueueMessage {
     RefreshArtwork(String),
     /// Navigate to a view and apply an ID filter
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
+    /// Column-dropdown open/close request — bubbled to root
+    /// `Message::SetOpenMenu`. Intercepted in `handle_queue` before the
+    /// page's `update` runs.
+    SetOpenMenu(Option<crate::app_message::OpenMenu>),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -353,6 +365,9 @@ impl QueuePage {
 
             // Data loading messages (handled at root level, no action needed here)
             QueueMessage::QueueLoaded(_) => (Task::none(), QueueAction::None),
+            // Routed up to root in `handle_queue` before this match runs;
+            // arm exists only for exhaustiveness.
+            QueueMessage::SetOpenMenu(_) => (Task::none(), QueueAction::None),
             QueueMessage::ClickSetRating(item_index, rating) => {
                 if let Some(song) = queue_songs.get(item_index) {
                     let current = song.rating.unwrap_or(0) as usize;
@@ -555,6 +570,17 @@ impl QueuePage {
                     3 => QueueMessage::ToggleColumnVisible(QueueColumn::Love),
                     _ => QueueMessage::ToggleColumnVisible(QueueColumn::Plays),
                 },
+                |trigger_bounds| match trigger_bounds {
+                    Some(b) => QueueMessage::SetOpenMenu(Some(
+                        crate::app_message::OpenMenu::CheckboxDropdown {
+                            view: crate::View::Queue,
+                            trigger_bounds: b,
+                        },
+                    )),
+                    None => QueueMessage::SetOpenMenu(None),
+                },
+                data.column_dropdown_open,
+                data.column_dropdown_trigger_bounds,
             )
             .into()
         };
@@ -1166,68 +1192,96 @@ impl QueuePage {
                     QueueContextEntry::TopSongs,
                 ];
 
-                context_menu(slot_button, entries, move |entry, _length| match entry {
-                    QueueContextEntry::Play => menu_button(
-                        Some("assets/icons/circle-play.svg"),
-                        "Play",
-                        QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::Play),
-                    ),
-                    QueueContextEntry::PlayNext => menu_button(
-                        Some("assets/icons/list-end.svg"),
-                        "Play Next",
-                        QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::PlayNext),
-                    ),
-                    QueueContextEntry::RemoveFromQueue => menu_button(
-                        Some("assets/icons/trash-2.svg"),
-                        "Remove from Queue",
-                        QueueMessage::ContextMenuAction(
-                            item_idx,
-                            QueueContextEntry::RemoveFromQueue,
+                let cm_id = crate::app_message::ContextMenuId::QueueRow(item_idx);
+                let (cm_open, cm_position) =
+                    crate::widgets::context_menu::open_state_for(data.open_menu, &cm_id);
+                let cm_id_for_msg = cm_id.clone();
+                context_menu(
+                    slot_button,
+                    entries,
+                    move |entry, _length| match entry {
+                        QueueContextEntry::Play => menu_button(
+                            Some("assets/icons/circle-play.svg"),
+                            "Play",
+                            QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::Play),
                         ),
-                    ),
-                    QueueContextEntry::Separator => menu_separator(),
-                    QueueContextEntry::AddToPlaylist => menu_button(
-                        Some("assets/icons/list-music.svg"),
-                        "Add to Playlist",
-                        QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::AddToPlaylist),
-                    ),
-                    QueueContextEntry::SaveAsPlaylist => menu_button(
-                        Some("assets/icons/list-music.svg"),
-                        "Save Queue as Playlist",
-                        QueueMessage::ContextMenuAction(
-                            item_idx,
-                            QueueContextEntry::SaveAsPlaylist,
+                        QueueContextEntry::PlayNext => menu_button(
+                            Some("assets/icons/list-end.svg"),
+                            "Play Next",
+                            QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::PlayNext),
                         ),
-                    ),
-                    QueueContextEntry::OpenBrowsingPanel => menu_button(
-                        Some("assets/icons/panel-right-open.svg"),
-                        "Library Browser",
-                        QueueMessage::ContextMenuAction(
-                            item_idx,
-                            QueueContextEntry::OpenBrowsingPanel,
+                        QueueContextEntry::RemoveFromQueue => menu_button(
+                            Some("assets/icons/trash-2.svg"),
+                            "Remove from Queue",
+                            QueueMessage::ContextMenuAction(
+                                item_idx,
+                                QueueContextEntry::RemoveFromQueue,
+                            ),
                         ),
-                    ),
-                    QueueContextEntry::GetInfo => menu_button(
-                        Some("assets/icons/info.svg"),
-                        "Get Info",
-                        QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::GetInfo),
-                    ),
-                    QueueContextEntry::ShowInFolder => menu_button(
-                        Some("assets/icons/folder-open.svg"),
-                        "Show in File Manager",
-                        QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::ShowInFolder),
-                    ),
-                    QueueContextEntry::FindSimilar => menu_button(
-                        Some("assets/icons/radar.svg"),
-                        "Find Similar",
-                        QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::FindSimilar),
-                    ),
-                    QueueContextEntry::TopSongs => menu_button(
-                        Some("assets/icons/star.svg"),
-                        "Top Songs",
-                        QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::TopSongs),
-                    ),
-                })
+                        QueueContextEntry::Separator => menu_separator(),
+                        QueueContextEntry::AddToPlaylist => menu_button(
+                            Some("assets/icons/list-music.svg"),
+                            "Add to Playlist",
+                            QueueMessage::ContextMenuAction(
+                                item_idx,
+                                QueueContextEntry::AddToPlaylist,
+                            ),
+                        ),
+                        QueueContextEntry::SaveAsPlaylist => menu_button(
+                            Some("assets/icons/list-music.svg"),
+                            "Save Queue as Playlist",
+                            QueueMessage::ContextMenuAction(
+                                item_idx,
+                                QueueContextEntry::SaveAsPlaylist,
+                            ),
+                        ),
+                        QueueContextEntry::OpenBrowsingPanel => menu_button(
+                            Some("assets/icons/panel-right-open.svg"),
+                            "Library Browser",
+                            QueueMessage::ContextMenuAction(
+                                item_idx,
+                                QueueContextEntry::OpenBrowsingPanel,
+                            ),
+                        ),
+                        QueueContextEntry::GetInfo => menu_button(
+                            Some("assets/icons/info.svg"),
+                            "Get Info",
+                            QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::GetInfo),
+                        ),
+                        QueueContextEntry::ShowInFolder => menu_button(
+                            Some("assets/icons/folder-open.svg"),
+                            "Show in File Manager",
+                            QueueMessage::ContextMenuAction(
+                                item_idx,
+                                QueueContextEntry::ShowInFolder,
+                            ),
+                        ),
+                        QueueContextEntry::FindSimilar => menu_button(
+                            Some("assets/icons/radar.svg"),
+                            "Find Similar",
+                            QueueMessage::ContextMenuAction(
+                                item_idx,
+                                QueueContextEntry::FindSimilar,
+                            ),
+                        ),
+                        QueueContextEntry::TopSongs => menu_button(
+                            Some("assets/icons/star.svg"),
+                            "Top Songs",
+                            QueueMessage::ContextMenuAction(item_idx, QueueContextEntry::TopSongs),
+                        ),
+                    },
+                    cm_open,
+                    cm_position,
+                    move |position| match position {
+                        Some(p) => {
+                            QueueMessage::SetOpenMenu(Some(crate::app_message::OpenMenu::Context {
+                                id: cm_id_for_msg.clone(),
+                                position: p,
+                            }))
+                        }
+                        None => QueueMessage::SetOpenMenu(None),
+                    },
+                )
                 .into()
             })
             .into()
@@ -1296,9 +1350,21 @@ impl QueuePage {
                 .map(|song| song.album_id.clone())
         });
         let on_refresh = center_album_id.map(QueueMessage::RefreshArtwork);
+        let artwork_menu_id = crate::app_message::ContextMenuId::ArtworkPanel(crate::View::Queue);
+        let (artwork_menu_open, artwork_menu_position) =
+            crate::widgets::context_menu::open_state_for(data.open_menu, &artwork_menu_id);
         let artwork_content = Some(single_artwork_panel_with_menu(
             center_artwork_handle,
             on_refresh,
+            artwork_menu_open,
+            artwork_menu_position,
+            move |position| match position {
+                Some(p) => QueueMessage::SetOpenMenu(Some(crate::app_message::OpenMenu::Context {
+                    id: artwork_menu_id.clone(),
+                    position: p,
+                })),
+                None => QueueMessage::SetOpenMenu(None),
+            },
         ));
 
         base_slot_list_layout(&layout_config, header, slot_list_content, artwork_content)

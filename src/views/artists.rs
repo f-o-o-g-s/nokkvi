@@ -110,6 +110,15 @@ pub struct ArtistsViewData<'a> {
     pub total_artist_count: usize,
     pub loading: bool,
     pub stable_viewport: bool,
+    /// Whether the column-visibility checkbox dropdown is open (controlled
+    /// by `Nokkvi.open_menu`).
+    pub column_dropdown_open: bool,
+    /// Trigger bounds captured when the dropdown was opened.
+    pub column_dropdown_trigger_bounds: Option<iced::Rectangle>,
+    /// Borrowed reference to the root open-menu state, so per-row context
+    /// menus and the artwork-panel context menu can resolve their own
+    /// open/closed status.
+    pub open_menu: Option<&'a crate::app_message::OpenMenu>,
 }
 
 /// Messages for local artist page interactions
@@ -167,6 +176,11 @@ pub enum ArtistsMessage {
 
     // Open external URL
     OpenExternalUrl(String),
+
+    /// Column-dropdown open/close request — bubbled to root
+    /// `Message::SetOpenMenu`. Intercepted in `handle_artists` before the
+    /// page's `update` runs.
+    SetOpenMenu(Option<crate::app_message::OpenMenu>),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -554,6 +568,9 @@ impl ArtistsPage {
                 // Data loading messages (handled at root level, no action needed here)
                 ArtistsMessage::ArtistsLoaded { .. } => (Task::none(), ArtistsAction::None),
                 ArtistsMessage::ArtistsPageLoaded(_, _) => (Task::none(), ArtistsAction::None),
+                // Routed up to root in `handle_artists` before this match runs;
+                // arm exists only for exhaustiveness.
+                ArtistsMessage::SetOpenMenu(_) => (Task::none(), ArtistsAction::None),
                 ArtistsMessage::RefreshViewData => (Task::none(), ArtistsAction::RefreshViewData),
                 ArtistsMessage::CenterOnPlaying => (Task::none(), ArtistsAction::CenterOnPlaying),
                 ArtistsMessage::NavigateAndFilter(view, filter) => {
@@ -836,6 +853,17 @@ impl ArtistsPage {
                     3 => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::Plays),
                     _ => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::Love),
                 },
+                |trigger_bounds| match trigger_bounds {
+                    Some(b) => ArtistsMessage::SetOpenMenu(Some(
+                        crate::app_message::OpenMenu::CheckboxDropdown {
+                            view: crate::View::Artists,
+                            trigger_bounds: b,
+                        },
+                    )),
+                    None => ArtistsMessage::SetOpenMenu(None),
+                },
+                data.column_dropdown_open,
+                data.column_dropdown_trigger_bounds,
             )
             .into()
         };
@@ -893,6 +921,7 @@ impl ArtistsPage {
                 .with_modifiers(data.modifiers);
         let artists = data.artists; // Borrow slice to extend lifetime
         let artist_art = data.artist_art;
+        let open_menu_for_rows = data.open_menu;
 
         // Build flattened list (artists + injected albums + injected tracks when expanded)
         let flattened = super::expansion::build_three_tier_list(
@@ -916,12 +945,19 @@ impl ArtistsPage {
                 move |f| ArtistsMessage::SlotListScrollSeek((f * total as f32) as usize)
             },
             |entry, ctx| match entry {
-                ThreeTierEntry::Parent(artist) => {
-                    self.render_artist_row(artist, &ctx, artist_art, data.stable_viewport)
-                }
-                ThreeTierEntry::Child(album, _parent_artist_id) => {
-                    self.render_album_child_row(album, &ctx, data.stable_viewport)
-                }
+                ThreeTierEntry::Parent(artist) => self.render_artist_row(
+                    artist,
+                    &ctx,
+                    artist_art,
+                    data.stable_viewport,
+                    open_menu_for_rows,
+                ),
+                ThreeTierEntry::Child(album, _parent_artist_id) => self.render_album_child_row(
+                    album,
+                    &ctx,
+                    data.stable_viewport,
+                    open_menu_for_rows,
+                ),
                 ThreeTierEntry::Grandchild(song, _album_id) => {
                     let track_el = super::expansion::render_child_track_row(
                         song,
@@ -937,9 +973,14 @@ impl ArtistsPage {
                         2,    // depth 2: grandchild tracks (artist → album → track)
                     );
                     use crate::widgets::context_menu::{
-                        context_menu, library_entry_view, song_entries_with_folder,
+                        context_menu, library_entry_view, open_state_for, song_entries_with_folder,
                     };
                     let item_idx = ctx.item_index;
+                    let cm_id = crate::app_message::ContextMenuId::LibraryRow {
+                        view: crate::View::Artists,
+                        item_index: item_idx,
+                    };
+                    let (cm_open, cm_position) = open_state_for(open_menu_for_rows, &cm_id);
                     context_menu(
                         track_el,
                         song_entries_with_folder(),
@@ -947,6 +988,17 @@ impl ArtistsPage {
                             library_entry_view(entry, length, |e| {
                                 ArtistsMessage::ContextMenuAction(item_idx, e)
                             })
+                        },
+                        cm_open,
+                        cm_position,
+                        move |position| match position {
+                            Some(p) => ArtistsMessage::SetOpenMenu(Some(
+                                crate::app_message::OpenMenu::Context {
+                                    id: cm_id.clone(),
+                                    position: p,
+                                },
+                            )),
+                            None => ArtistsMessage::SetOpenMenu(None),
                         },
                     )
                     .into()
@@ -1102,11 +1154,17 @@ impl ArtistsPage {
                 col.into()
             });
 
-        let artwork_content = Some(single_artwork_panel_with_pill(
+        // Artists artwork panel has no refresh action wired up, but still
+        // needs the controlled-component plumbing arguments. They're inert
+        // when `on_refresh` is None — the helper short-circuits.
+        let artwork_content = Some(single_artwork_panel_with_pill::<ArtistsMessage>(
             artwork_handle,
             pill_content,
             active_dominant_color,
             None,
+            false,
+            None,
+            |_| ArtistsMessage::SetOpenMenu(None),
         ));
 
         base_slot_list_layout(&layout_config, header, slot_list_content, artwork_content)
@@ -1119,6 +1177,7 @@ impl ArtistsPage {
         ctx: &crate::widgets::slot_list::SlotListRowContext,
         artist_art: &'a HashMap<String, image::Handle>,
         stable_viewport: bool,
+        open_menu: Option<&'a crate::app_message::OpenMenu>,
     ) -> Element<'a, ArtistsMessage> {
         use crate::widgets::slot_list::{
             SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column,
@@ -1338,9 +1397,14 @@ impl ArtistsPage {
             .width(Length::Fill);
 
         use crate::widgets::context_menu::{
-            artist_entries_with_folder, context_menu, library_entry_view,
+            artist_entries_with_folder, context_menu, library_entry_view, open_state_for,
         };
         let item_idx = ctx.item_index;
+        let cm_id = crate::app_message::ContextMenuId::LibraryRow {
+            view: crate::View::Artists,
+            item_index: item_idx,
+        };
+        let (cm_open, cm_position) = open_state_for(open_menu, &cm_id);
         context_menu(
             slot_button,
             artist_entries_with_folder(),
@@ -1348,6 +1412,17 @@ impl ArtistsPage {
                 library_entry_view(entry, length, |e| {
                     ArtistsMessage::ContextMenuAction(item_idx, e)
                 })
+            },
+            cm_open,
+            cm_position,
+            move |position| match position {
+                Some(p) => {
+                    ArtistsMessage::SetOpenMenu(Some(crate::app_message::OpenMenu::Context {
+                        id: cm_id.clone(),
+                        position: p,
+                    }))
+                }
+                None => ArtistsMessage::SetOpenMenu(None),
             },
         )
         .into()
@@ -1359,6 +1434,7 @@ impl ArtistsPage {
         album: &AlbumUIViewData,
         ctx: &crate::widgets::slot_list::SlotListRowContext,
         stable_viewport: bool,
+        open_menu: Option<&'a crate::app_message::OpenMenu>,
     ) -> Element<'a, ArtistsMessage> {
         let album_el = super::expansion::render_child_album_row(
             album,
@@ -1384,9 +1460,14 @@ impl ArtistsPage {
         );
 
         use crate::widgets::context_menu::{
-            context_menu, library_entries_with_folder, library_entry_view,
+            context_menu, library_entries_with_folder, library_entry_view, open_state_for,
         };
         let item_idx = ctx.item_index;
+        let cm_id = crate::app_message::ContextMenuId::LibraryRow {
+            view: crate::View::Artists,
+            item_index: item_idx,
+        };
+        let (cm_open, cm_position) = open_state_for(open_menu, &cm_id);
         context_menu(
             album_el,
             library_entries_with_folder(),
@@ -1394,6 +1475,17 @@ impl ArtistsPage {
                 library_entry_view(entry, length, |e| {
                     ArtistsMessage::ContextMenuAction(item_idx, e)
                 })
+            },
+            cm_open,
+            cm_position,
+            move |position| match position {
+                Some(p) => {
+                    ArtistsMessage::SetOpenMenu(Some(crate::app_message::OpenMenu::Context {
+                        id: cm_id.clone(),
+                        position: p,
+                    }))
+                }
+                None => ArtistsMessage::SetOpenMenu(None),
             },
         )
         .into()

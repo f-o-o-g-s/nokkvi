@@ -117,6 +117,9 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_playlists(&mut self, msg: views::PlaylistsMessage) -> Task<Message> {
+        if let PlaylistsMessage::SetOpenMenu(next) = msg {
+            return Task::done(Message::SetOpenMenu(next));
+        }
         self.play_view_sfx(
             matches!(
                 msg,

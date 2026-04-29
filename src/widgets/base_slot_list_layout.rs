@@ -155,6 +155,9 @@ pub(crate) fn single_artwork_panel<'a, Message: 'a>(
 pub(crate) fn single_artwork_panel_with_menu<'a, Message: Clone + 'a>(
     artwork_handle: Option<&'a iced::widget::image::Handle>,
     on_refresh: Option<Message>,
+    is_open: bool,
+    open_position: Option<iced::Point>,
+    on_open_change: impl Fn(Option<iced::Point>) -> Message + 'a,
 ) -> Element<'a, Message> {
     let panel = single_artwork_panel(artwork_handle);
 
@@ -162,13 +165,20 @@ pub(crate) fn single_artwork_panel_with_menu<'a, Message: Clone + 'a>(
         // Wrap in context menu with a single "Refresh Artwork" entry
         use crate::widgets::context_menu::{context_menu, menu_button};
 
-        context_menu(panel, vec![()], move |_entry, _length| {
-            menu_button(
-                Some("assets/icons/refresh-cw.svg"),
-                "Refresh Artwork",
-                refresh_msg.clone(),
-            )
-        })
+        context_menu(
+            panel,
+            vec![()],
+            move |_entry, _length| {
+                menu_button(
+                    Some("assets/icons/refresh-cw.svg"),
+                    "Refresh Artwork",
+                    refresh_msg.clone(),
+                )
+            },
+            is_open,
+            open_position,
+            on_open_change,
+        )
         .into()
     } else {
         panel
@@ -218,6 +228,9 @@ pub(crate) fn single_artwork_panel_with_pill<'a, Message: Clone + 'a>(
     pill_content: Option<Element<'a, Message>>,
     dominant_color: Option<iced::Color>,
     on_refresh: Option<Message>,
+    is_open: bool,
+    open_position: Option<iced::Point>,
+    on_open_change: impl Fn(Option<iced::Point>) -> Message + 'a,
 ) -> Element<'a, Message> {
     let base_panel = single_artwork_panel(artwork_handle);
 
@@ -237,13 +250,20 @@ pub(crate) fn single_artwork_panel_with_pill<'a, Message: Clone + 'a>(
 
     if let Some(refresh_msg) = on_refresh {
         use crate::widgets::context_menu::{context_menu, menu_button};
-        context_menu(panel, vec![()], move |_entry, _length| {
-            menu_button(
-                Some("assets/icons/refresh-cw.svg"),
-                "Refresh Artwork",
-                refresh_msg.clone(),
-            )
-        })
+        context_menu(
+            panel,
+            vec![()],
+            move |_entry, _length| {
+                menu_button(
+                    Some("assets/icons/refresh-cw.svg"),
+                    "Refresh Artwork",
+                    refresh_msg.clone(),
+                )
+            },
+            is_open,
+            open_position,
+            on_open_change,
+        )
         .into()
     } else {
         panel

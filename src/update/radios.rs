@@ -57,6 +57,9 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_radios(&mut self, msg: views::RadiosMessage) -> Task<Message> {
+        if let RadiosMessage::SetOpenMenu(next) = msg {
+            return Task::done(Message::SetOpenMenu(next));
+        }
         self.play_view_sfx(
             matches!(
                 msg,

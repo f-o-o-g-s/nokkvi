@@ -68,6 +68,7 @@ mod genres;
 mod hotkeys;
 mod info_modal;
 mod library_refresh;
+mod menus;
 mod mpris;
 mod navigation;
 mod playback;
@@ -206,6 +207,7 @@ impl Nokkvi {
                     self.handle_switch_view(crate::View::Settings)
                 }
             }
+            Message::SetOpenMenu(next) => self.handle_set_open_menu(next),
             Message::Login(msg) => self.handle_login(msg),
             Message::LoginResult(res) => self.handle_login_result(res),
             Message::ResumeSession => self.handle_resume_session(),

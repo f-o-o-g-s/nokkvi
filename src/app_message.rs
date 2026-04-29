@@ -262,6 +262,58 @@ pub enum ToastMessage {
     DismissKey(String),
 }
 
+/// Identifies the single overlay menu that may be open across the app.
+///
+/// Only one of these can be active at a time; opening any new menu replaces the
+/// previous value via `Message::SetOpenMenu`. This is what enforces mutual
+/// exclusion between the hamburger menu, the player-bar kebab, view-header
+/// checkbox dropdowns, and right-click context menus.
+#[derive(Debug, Clone, PartialEq)]
+pub enum OpenMenu {
+    /// Application hamburger menu. Only one is rendered per layout (top nav vs
+    /// player bar), so no disambiguator is needed.
+    Hamburger,
+    /// Player-bar kebab "modes" menu.
+    PlayerModes,
+    /// View-header checkbox dropdown (column visibility toggles). The
+    /// `trigger_bounds` are captured at click time so the overlay can anchor
+    /// below the trigger without re-reading layout each frame.
+    CheckboxDropdown {
+        view: View,
+        trigger_bounds: iced::Rectangle,
+    },
+    /// Right-click context menu, anchored to the screen-space cursor position
+    /// captured at click time. `id` disambiguates between widget instances
+    /// (slot rows, browsing-panel rows, the now-playing strip), which matters
+    /// when split-view shows two slot lists at once.
+    Context {
+        id: ContextMenuId,
+        position: iced::Point,
+    },
+}
+
+/// Identifies a specific `context_menu` widget instance for `OpenMenu::Context`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ContextMenuId {
+    /// Now-playing track info strip (player bar / top bar — only one visible
+    /// at a time, so no further disambiguation required).
+    Strip,
+    /// A row in the main library slot list.
+    LibraryRow { view: View, item_index: usize },
+    /// A row in the browsing-panel slot list (split-view).
+    BrowsingRow { view: View, item_index: usize },
+    /// A row in the queue view.
+    QueueRow(usize),
+    /// A row in the radios view.
+    RadioRow(usize),
+    /// A row in the Similar/Top Songs results (Similar lives only in the
+    /// browsing panel, so a single discriminator is enough).
+    SimilarRow(usize),
+    /// The single "Refresh Artwork" right-click menu on a view's main artwork
+    /// panel (one per view at most).
+    ArtworkPanel(View),
+}
+
 ///
 /// Messages are organized by domain:
 /// - Navigation & Login
@@ -284,6 +336,11 @@ pub enum Message {
     StripContextAction(crate::widgets::context_menu::StripContextEntry),
     /// Toggle settings view: open if not in settings, return to Queue if already there
     ToggleSettings,
+    /// Set the currently open overlay menu (or `None` to close any open menu).
+    /// Sole entry point for menu state changes — guarantees mutual exclusion
+    /// between the hamburger menu, player-bar kebab, checkbox dropdowns, and
+    /// context menus.
+    SetOpenMenu(Option<OpenMenu>),
 
     // --- Login Result (handled at app level since it transitions screens) ---
     LoginResult(Result<AppService, String>),

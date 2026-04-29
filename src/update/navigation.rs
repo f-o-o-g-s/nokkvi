@@ -37,6 +37,7 @@ impl Nokkvi {
         self.stored_session = None;
         self.should_auto_login = false;
         self.screen = crate::Screen::Login;
+        self.open_menu = None;
 
         // Reset library state to clear any stale data from the previous session
         self.library = crate::state::LibraryData::default();
@@ -47,6 +48,9 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_switch_view(&mut self, view: View) -> Task<Message> {
+        // Close any open overlay menu — its anchor (cursor position, trigger
+        // bounds) is tied to the previous view's layout.
+        self.open_menu = None;
         // Save current view before entering Settings so we can restore it on close
         if view == View::Settings && self.current_view != View::Settings {
             self.pre_settings_view = self.current_view;

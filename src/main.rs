@@ -138,6 +138,11 @@ pub struct Nokkvi {
     pub info_modal: crate::widgets::info_modal::InfoModalState,
     pub about_modal: crate::widgets::about_modal::AboutModalState,
 
+    /// The single overlay menu currently open, if any. Mutated only by
+    /// `Message::SetOpenMenu` so opening a new menu implicitly closes any
+    /// previously open one. See `app_message::OpenMenu` for the variants.
+    pub open_menu: Option<crate::app_message::OpenMenu>,
+
     // -------------------------------------------------------------------------
     // Misc State
     // -------------------------------------------------------------------------
@@ -342,6 +347,7 @@ impl Default for Nokkvi {
             text_input_dialog: crate::widgets::text_input_dialog::TextInputDialogState::default(),
             info_modal: crate::widgets::info_modal::InfoModalState::default(),
             about_modal: crate::widgets::about_modal::AboutModalState::default(),
+            open_menu: None,
             active_progress: Vec::new(),
         }
     }

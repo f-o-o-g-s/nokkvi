@@ -233,6 +233,9 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_songs(&mut self, msg: views::SongsMessage) -> Task<Message> {
+        if let SongsMessage::SetOpenMenu(next) = msg {
+            return Task::done(Message::SetOpenMenu(next));
+        }
         self.play_view_sfx(
             matches!(
                 msg,

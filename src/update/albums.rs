@@ -446,6 +446,11 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_albums(&mut self, msg: views::AlbumsMessage) -> Task<Message> {
+        // Bubble menu open/close requests to the root before the page sees
+        // them — page state has nothing to do with overlay-menu coordination.
+        if let AlbumsMessage::SetOpenMenu(next) = msg {
+            return Task::done(Message::SetOpenMenu(next));
+        }
         self.play_view_sfx(
             matches!(
                 msg,

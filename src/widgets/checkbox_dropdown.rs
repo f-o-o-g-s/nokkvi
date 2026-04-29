@@ -35,16 +35,29 @@ use iced::{
 use crate::theme;
 
 /// Build a checkbox dropdown anchored to a trigger icon button.
+///
+/// `is_open` and `on_open_change` make this a controlled component — open
+/// state lives on the parent (so a single root-level menu coordinator can
+/// enforce mutual exclusion with other overlay menus). When opening, the
+/// callback receives the trigger's screen-space bounds so the parent can
+/// stash them in `OpenMenu::CheckboxDropdown`. The bounds come back via
+/// `trigger_bounds` so the overlay can anchor below the trigger.
 pub(crate) fn checkbox_dropdown<'a, Message: Clone + 'a>(
     trigger_icon: &'static str,
     tooltip: &'static str,
     items: Vec<(String, bool)>,
     on_item_toggle: impl Fn(usize) -> Message + 'a,
+    on_open_change: impl Fn(Option<Rectangle>) -> Message + 'a,
+    is_open: bool,
+    trigger_bounds: Option<Rectangle>,
 ) -> CheckboxDropdown<'a, Message> {
     CheckboxDropdown {
         trigger: trigger_button(trigger_icon, tooltip),
         items,
         on_item_toggle: Box::new(on_item_toggle),
+        on_open_change: Box::new(on_open_change),
+        is_open,
+        trigger_bounds,
         menu: None,
     }
 }
@@ -188,33 +201,35 @@ pub struct CheckboxDropdown<'a, Message> {
     trigger: Element<'a, Message>,
     items: Vec<(String, bool)>,
     on_item_toggle: Box<dyn Fn(usize) -> Message + 'a>,
+    /// Emitted with `Some(trigger_bounds)` to request open at those bounds, or
+    /// `None` to request close.
+    on_open_change: Box<dyn Fn(Option<Rectangle>) -> Message + 'a>,
+    /// Whether the dropdown should currently render. Mirrors the parent's
+    /// `Nokkvi.open_menu == Some(OpenMenu::CheckboxDropdown { .. })` for this
+    /// widget's view.
+    is_open: bool,
+    /// Trigger bounds captured by the parent at open time (lives in
+    /// `OpenMenu::CheckboxDropdown { trigger_bounds }`). The overlay anchors
+    /// below this rectangle.
+    trigger_bounds: Option<Rectangle>,
     /// Cached menu element, rebuilt each frame the dropdown is open.
     menu: Option<Element<'a, Message>>,
 }
 
+/// Tree-state. We still keep `menu_tree` because the overlay's button widgets
+/// need their hover/press state to persist across frames; only `Status` is
+/// lifted out (now controlled by the parent via `is_open`).
 #[derive(Debug)]
 struct State {
-    status: Status,
     menu_tree: widget::Tree,
 }
 
 impl State {
     fn new() -> Self {
         Self {
-            status: Status::Closed,
             menu_tree: widget::Tree::empty(),
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Status {
-    Closed,
-    /// Open with the trigger's screen-space bounds captured at click time, so
-    /// the overlay can anchor below it.
-    Open {
-        trigger_bounds: Rectangle,
-    },
 }
 
 impl<'a, Message> Widget<Message, Theme, iced::Renderer> for CheckboxDropdown<'a, Message>
@@ -284,19 +299,18 @@ where
         viewport: &Rectangle,
     ) {
         // Intercept left-click on the trigger bounds to toggle open/closed.
-        if let Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) = event {
-            let state = tree.state.downcast_mut::<State>();
-            if cursor.position_over(layout.bounds()).is_some() {
-                state.status = match state.status {
-                    Status::Closed => Status::Open {
-                        trigger_bounds: layout.bounds(),
-                    },
-                    Status::Open { .. } => Status::Closed,
-                };
-                shell.capture_event();
-                shell.request_redraw();
-                return;
-            }
+        if let Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) = event
+            && cursor.position_over(layout.bounds()).is_some()
+        {
+            let intent = if self.is_open {
+                None
+            } else {
+                Some(layout.bounds())
+            };
+            shell.publish((self.on_open_change)(intent));
+            shell.capture_event();
+            shell.request_redraw();
+            return;
         }
 
         // Forward all other events to the trigger child (e.g. for cursor
@@ -351,13 +365,23 @@ where
         );
 
         let state = tree.state.downcast_mut::<State>();
-        let our_overlay = build_overlay(
-            state,
-            &mut self.menu,
-            &self.items,
-            &*self.on_item_toggle,
-            translation,
-        );
+        let our_overlay = if self.is_open {
+            build_overlay(
+                state,
+                &mut self.menu,
+                &self.items,
+                &*self.on_item_toggle,
+                &*self.on_open_change,
+                self.trigger_bounds,
+                translation,
+            )
+        } else {
+            // Drop any cached menu element + reset the persisted tree so the
+            // next open starts fresh.
+            self.menu = None;
+            state.menu_tree = widget::Tree::empty();
+            None
+        };
 
         if trigger_overlay.is_none() && our_overlay.is_none() {
             None
@@ -387,6 +411,8 @@ fn build_overlay<'a, 'b, Message>(
     menu: &'b mut Option<Element<'a, Message>>,
     items: &[(String, bool)],
     on_item_toggle: &dyn Fn(usize) -> Message,
+    on_open_change: &'b dyn Fn(Option<Rectangle>) -> Message,
+    trigger_bounds: Option<Rectangle>,
     translation: Vector,
 ) -> Option<overlay::Element<'b, Message, Theme, iced::Renderer>>
 where
@@ -395,34 +421,25 @@ where
     if items.is_empty() {
         return None;
     }
+    // Without trigger bounds we can't anchor the overlay; bail out (this is a
+    // transient state — the parent will dispatch the bounds in the same frame).
+    let trigger_bounds = trigger_bounds?;
 
-    match state.status {
-        Status::Open { .. } => {
-            let m = menu.get_or_insert_with(|| build_menu_element(items, on_item_toggle));
-            if state.menu_tree.children.is_empty() {
-                state.menu_tree = widget::Tree::new(&*m);
-            } else {
-                state.menu_tree.diff(&*m as &Element<'a, Message>);
-            }
-        }
-        Status::Closed => {
-            *menu = None;
-            state.menu_tree = widget::Tree::empty();
-            return None;
-        }
-    }
-
-    if let Status::Open { trigger_bounds } = state.status {
-        menu.as_mut().map(|m| {
-            overlay::Element::new(Box::new(MenuOverlay {
-                menu: m,
-                state,
-                trigger_bounds: trigger_bounds + translation,
-            }))
-        })
+    let m = menu.get_or_insert_with(|| build_menu_element(items, on_item_toggle));
+    if state.menu_tree.children.is_empty() {
+        state.menu_tree = widget::Tree::new(&*m);
     } else {
-        None
+        state.menu_tree.diff(&*m as &Element<'a, Message>);
     }
+
+    menu.as_mut().map(|m| {
+        overlay::Element::new(Box::new(MenuOverlay {
+            menu: m,
+            state,
+            on_open_change,
+            trigger_bounds: trigger_bounds + translation,
+        }))
+    })
 }
 
 // ============================================================================
@@ -432,6 +449,7 @@ where
 struct MenuOverlay<'a, 'b, Message> {
     menu: &'b mut Element<'a, Message>,
     state: &'b mut State,
+    on_open_change: &'b dyn Fn(Option<Rectangle>) -> Message,
     trigger_bounds: Rectangle,
 }
 
@@ -488,7 +506,7 @@ impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'
                 ..
             })
         ) {
-            self.state.status = Status::Closed;
+            shell.publish((self.on_open_change)(None));
             shell.capture_event();
             shell.request_redraw();
             return;
@@ -498,15 +516,16 @@ impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'
         let cursor_over_menu = cursor.position_over(menu_bounds).is_some();
         let cursor_over_trigger = cursor.position_over(self.trigger_bounds).is_some();
 
-        // Click outside the menu AND outside the trigger → close. (Click on
-        // the trigger is handled by the underlying Widget::update, which
-        // toggles back to Closed.)
+        // Click outside the menu AND outside the trigger → emit close. The
+        // trigger's own Widget::update toggles when clicked, so we leave that
+        // case alone. Do NOT capture: if the click is also on a different
+        // menu's trigger, iced dispatches overlays before the widget tree, so
+        // that trigger's open emit arrives later and wins.
         if matches!(event, Event::Mouse(mouse::Event::ButtonPressed(_)))
             && !cursor_over_menu
             && !cursor_over_trigger
         {
-            self.state.status = Status::Closed;
-            shell.capture_event();
+            shell.publish((self.on_open_change)(None));
             shell.request_redraw();
             return;
         }
@@ -578,6 +597,12 @@ mod tests {
             "Show/hide columns",
             items,
             |idx| format!("toggle-{idx}"),
+            |bounds| match bounds {
+                Some(_) => "open".to_string(),
+                None => "close".to_string(),
+            },
+            false,
+            None,
         )
         .into();
     }
@@ -591,6 +616,9 @@ mod tests {
             "Show/hide columns",
             Vec::new(),
             |idx| format!("toggle-{idx}"),
+            |_| "noop".to_string(),
+            false,
+            None,
         )
         .into();
     }

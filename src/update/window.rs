@@ -12,6 +12,10 @@ impl Nokkvi {
     pub(crate) fn handle_window_resized(&mut self, width: f32, height: f32) -> Task<Message> {
         self.window.width = width;
         self.window.height = height;
+        // Anchored overlays (context menus, checkbox dropdowns) point at
+        // pixel positions captured pre-resize; close them so they don't end
+        // up in the wrong spot.
+        self.open_menu = None;
 
         // Recompute the player bar's responsive layout with per-mode
         // hysteresis. Done here (not in view()) so view() stays pure — it

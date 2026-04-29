@@ -38,6 +38,9 @@ pub struct RadiosViewData<'a> {
     pub total_station_count: usize,
     pub stable_viewport: bool,
     pub modifiers: iced::keyboard::Modifiers,
+    /// Borrowed reference to the root open-menu state, so per-row context
+    /// menus can resolve their own open/closed status.
+    pub open_menu: Option<&'a crate::app_message::OpenMenu>,
 }
 
 // ============================================================================
@@ -73,6 +76,11 @@ pub enum RadiosMessage {
 
     AddRadioStation,
     NoOp,
+
+    /// Context-menu open/close request — bubbled to root
+    /// `Message::SetOpenMenu`. Intercepted in `handle_radios` before the
+    /// page's `update` runs.
+    SetOpenMenu(Option<crate::app_message::OpenMenu>),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -225,6 +233,10 @@ impl RadiosPage {
 
             // Data loading — handled at root level
             RadiosMessage::RadioStationsLoaded(_) => (Task::none(), RadiosAction::None),
+
+            // Routed up to root in `handle_radios` before this match runs;
+            // arm exists only for exhaustiveness.
+            RadiosMessage::SetOpenMenu(_) => (Task::none(), RadiosAction::None),
         }
     }
 
@@ -284,6 +296,7 @@ impl RadiosPage {
                 .with_modifiers(Default::default());
 
         let stations = data.stations.as_ref();
+        let open_menu_for_rows = data.open_menu;
 
         // Render slot list — flat list, each row is a radio station
         let slot_list_content = slot_list_view_with_scroll(
@@ -362,6 +375,10 @@ impl RadiosPage {
                 let slot_button: Element<'a, RadiosMessage> =
                     iced::widget::mouse_area(slot).on_press(click_msg).into();
 
+                let cm_id = crate::app_message::ContextMenuId::RadioRow(ctx.item_index);
+                let (cm_open, cm_position) =
+                    crate::widgets::context_menu::open_state_for(open_menu_for_rows, &cm_id);
+                let cm_id_for_msg = cm_id.clone();
                 crate::widgets::context_menu::context_menu(
                     slot_button,
                     crate::widgets::context_menu::radio_entries(),
@@ -381,6 +398,17 @@ impl RadiosPage {
                                  }
                              })
                         }
+                    },
+                    cm_open,
+                    cm_position,
+                    move |position| match position {
+                        Some(p) => RadiosMessage::SetOpenMenu(Some(
+                            crate::app_message::OpenMenu::Context {
+                                id: cm_id_for_msg.clone(),
+                                position: p,
+                            },
+                        )),
+                        None => RadiosMessage::SetOpenMenu(None),
                     },
                 )
                 .into()

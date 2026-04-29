@@ -39,6 +39,9 @@ pub struct GenresViewData<'a> {
     pub total_genre_count: usize,
     pub loading: bool,
     pub stable_viewport: bool,
+    /// Borrowed reference to the root open-menu state, so per-row context
+    /// menus can resolve their own open/closed status.
+    pub open_menu: Option<&'a crate::app_message::OpenMenu>,
 }
 
 /// Messages for local genre page interactions
@@ -85,6 +88,11 @@ pub enum GenresMessage {
     GenresLoaded(Result<Vec<GenreUIViewData>, String>, usize), // result, total_count
 
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
+
+    /// Context-menu open/close request — bubbled to root
+    /// `Message::SetOpenMenu`. Intercepted in `handle_genres` before the
+    /// page's `update` runs.
+    SetOpenMenu(Option<crate::app_message::OpenMenu>),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -509,6 +517,9 @@ impl GenresPage {
                 }
                 // Data loading messages (handled at root level, no action needed here)
                 GenresMessage::GenresLoaded(_, _) => (Task::none(), GenresAction::None),
+                // Routed up to root in `handle_genres` before this match runs;
+                // arm exists only for exhaustiveness.
+                GenresMessage::SetOpenMenu(_) => (Task::none(), GenresAction::None),
                 GenresMessage::RefreshViewData => (Task::none(), GenresAction::RefreshViewData),
                 GenresMessage::CenterOnPlaying => (Task::none(), GenresAction::CenterOnPlaying),
                 GenresMessage::NavigateAndFilter(view, filter) => {
@@ -715,6 +726,7 @@ impl GenresPage {
         let genres = data.genres; // Borrow slice to extend lifetime
         let genre_artwork = data.genre_artwork;
         let genre_collage_artwork = data.genre_collage_artwork;
+        let open_menu_for_rows = data.open_menu;
 
         // Build flattened list (genres + injected albums + injected tracks when expanded)
         let flattened = super::expansion::build_three_tier_list(
@@ -738,11 +750,15 @@ impl GenresPage {
                 move |f| GenresMessage::SlotListScrollSeek((f * total as f32) as usize)
             },
             |entry, ctx| match entry {
-                ThreeTierEntry::Parent(genre) => {
-                    self.render_genre_row(genre, &ctx, genre_artwork, data.stable_viewport)
-                }
+                ThreeTierEntry::Parent(genre) => self.render_genre_row(
+                    genre,
+                    &ctx,
+                    genre_artwork,
+                    data.stable_viewport,
+                    open_menu_for_rows,
+                ),
                 ThreeTierEntry::Child(album, _parent_genre_id) => {
-                    self.render_album_row(album, &ctx, data.stable_viewport)
+                    self.render_album_row(album, &ctx, data.stable_viewport, open_menu_for_rows)
                 }
                 ThreeTierEntry::Grandchild(song, _album_id) => {
                     let track_el = super::expansion::render_child_track_row(
@@ -767,9 +783,14 @@ impl GenresPage {
                         2, // depth 2: grandchild tracks (genre → album → track)
                     );
                     use crate::widgets::context_menu::{
-                        context_menu, library_entry_view, song_entries_with_folder,
+                        context_menu, library_entry_view, open_state_for, song_entries_with_folder,
                     };
                     let item_idx = ctx.item_index;
+                    let cm_id = crate::app_message::ContextMenuId::LibraryRow {
+                        view: crate::View::Genres,
+                        item_index: item_idx,
+                    };
+                    let (cm_open, cm_position) = open_state_for(open_menu_for_rows, &cm_id);
                     context_menu(
                         track_el,
                         song_entries_with_folder(),
@@ -777,6 +798,17 @@ impl GenresPage {
                             library_entry_view(entry, length, |e| {
                                 GenresMessage::ContextMenuAction(item_idx, e)
                             })
+                        },
+                        cm_open,
+                        cm_position,
+                        move |position| match position {
+                            Some(p) => GenresMessage::SetOpenMenu(Some(
+                                crate::app_message::OpenMenu::Context {
+                                    id: cm_id.clone(),
+                                    position: p,
+                                },
+                            )),
+                            None => GenresMessage::SetOpenMenu(None),
                         },
                     )
                     .into()
@@ -835,6 +867,7 @@ impl GenresPage {
         ctx: &crate::widgets::slot_list::SlotListRowContext,
         genre_artwork: &'a HashMap<String, image::Handle>,
         stable_viewport: bool,
+        open_menu: Option<&'a crate::app_message::OpenMenu>,
     ) -> Element<'a, GenresMessage> {
         use crate::widgets::slot_list::{
             SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column, slot_list_text,
@@ -937,13 +970,35 @@ impl GenresPage {
             .padding(0)
             .width(Length::Fill);
 
-        use crate::widgets::context_menu::{context_menu, library_entries, library_entry_view};
+        use crate::widgets::context_menu::{
+            context_menu, library_entries, library_entry_view, open_state_for,
+        };
         let item_idx = ctx.item_index;
-        context_menu(slot_button, library_entries(), move |entry, length| {
-            library_entry_view(entry, length, |e| {
-                GenresMessage::ContextMenuAction(item_idx, e)
-            })
-        })
+        let cm_id = crate::app_message::ContextMenuId::LibraryRow {
+            view: crate::View::Genres,
+            item_index: item_idx,
+        };
+        let (cm_open, cm_position) = open_state_for(open_menu, &cm_id);
+        context_menu(
+            slot_button,
+            library_entries(),
+            move |entry, length| {
+                library_entry_view(entry, length, |e| {
+                    GenresMessage::ContextMenuAction(item_idx, e)
+                })
+            },
+            cm_open,
+            cm_position,
+            move |position| match position {
+                Some(p) => {
+                    GenresMessage::SetOpenMenu(Some(crate::app_message::OpenMenu::Context {
+                        id: cm_id.clone(),
+                        position: p,
+                    }))
+                }
+                None => GenresMessage::SetOpenMenu(None),
+            },
+        )
         .into()
     }
 
@@ -953,6 +1008,7 @@ impl GenresPage {
         album: &AlbumUIViewData,
         ctx: &crate::widgets::slot_list::SlotListRowContext,
         stable_viewport: bool,
+        open_menu: Option<&'a crate::app_message::OpenMenu>,
     ) -> Element<'a, GenresMessage> {
         let album_el = super::expansion::render_child_album_row(
             album,
@@ -984,9 +1040,14 @@ impl GenresPage {
         );
 
         use crate::widgets::context_menu::{
-            context_menu, library_entries_with_folder, library_entry_view,
+            context_menu, library_entries_with_folder, library_entry_view, open_state_for,
         };
         let item_idx = ctx.item_index;
+        let cm_id = crate::app_message::ContextMenuId::LibraryRow {
+            view: crate::View::Genres,
+            item_index: item_idx,
+        };
+        let (cm_open, cm_position) = open_state_for(open_menu, &cm_id);
         context_menu(
             album_el,
             library_entries_with_folder(),
@@ -994,6 +1055,17 @@ impl GenresPage {
                 library_entry_view(entry, length, |e| {
                     GenresMessage::ContextMenuAction(item_idx, e)
                 })
+            },
+            cm_open,
+            cm_position,
+            move |position| match position {
+                Some(p) => {
+                    GenresMessage::SetOpenMenu(Some(crate::app_message::OpenMenu::Context {
+                        id: cm_id.clone(),
+                        position: p,
+                    }))
+                }
+                None => GenresMessage::SetOpenMenu(None),
             },
         )
         .into()

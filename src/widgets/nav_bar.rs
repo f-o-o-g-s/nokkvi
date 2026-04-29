@@ -69,6 +69,13 @@ pub(crate) struct NavBarViewData {
     pub radio_url: Option<String>,
     pub icy_artist: Option<String>,
     pub icy_title: Option<String>,
+    /// Whether the hamburger menu is currently open (controlled state).
+    pub hamburger_open: bool,
+    /// Whether the now-playing strip's right-click context menu is open
+    /// (controlled state).
+    pub strip_context_open: bool,
+    /// Anchor position for the strip context menu when open.
+    pub strip_context_position: Option<iced::Point>,
 }
 
 /// Messages emitted by nav bar interactions
@@ -81,6 +88,8 @@ pub enum NavBarMessage {
     /// Track info strip was clicked — dispatch depends on strip_click_action setting
     StripClicked,
     StripContextAction(super::context_menu::StripContextEntry),
+    /// Hamburger menu open/close request — bubbled to root `Message::SetOpenMenu`.
+    SetOpenMenu(Option<crate::app_message::OpenMenu>),
     About,
     Quit,
 }
@@ -553,6 +562,8 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         } else {
             let has_local_path = !data.local_music_path.is_empty();
             let is_starred = data.is_current_starred;
+            let strip_context_open = data.strip_context_open;
+            let strip_context_position = data.strip_context_position;
             super::context_menu::context_menu(
                 clickable,
                 super::context_menu::strip_entries(has_local_path),
@@ -563,6 +574,17 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                         is_starred,
                         NavBarMessage::StripContextAction,
                     )
+                },
+                strip_context_open,
+                strip_context_position,
+                |position| match position {
+                    Some(p) => {
+                        NavBarMessage::SetOpenMenu(Some(crate::app_message::OpenMenu::Context {
+                            id: crate::app_message::ContextMenuId::Strip,
+                            position: p,
+                        }))
+                    }
+                    None => NavBarMessage::SetOpenMenu(None),
                 },
             )
             .into()
@@ -626,6 +648,10 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                 MenuAction::About => NavBarMessage::About,
                 MenuAction::Quit => NavBarMessage::Quit,
             },
+            |open| {
+                NavBarMessage::SetOpenMenu(open.then_some(crate::app_message::OpenMenu::Hamburger))
+            },
+            data.hamburger_open,
             data.is_light_mode,
             data.sound_effects_enabled,
         ))

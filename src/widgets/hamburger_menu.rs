@@ -2,7 +2,10 @@
 //!
 //! A custom widget that renders a hamburger (☰) icon button in the nav bar.
 //! When clicked, it opens a dropdown menu overlay with settings toggles.
-//! Click-outside-close is handled natively via the iced overlay system.
+//!
+//! Controlled by the parent: `is_open` and `on_open_change` are passed in, so
+//! a single root-level `Option<OpenMenu>` enforces mutual exclusion with the
+//! other overlay menus (player-bar kebab, checkbox dropdowns, context menus).
 
 use iced::{
     Element, Event, Length, Point, Radians, Rectangle, Size, Theme, Vector,
@@ -17,15 +20,6 @@ use iced::{
 };
 
 use crate::theme;
-
-// ============================================================================
-// Widget State
-// ============================================================================
-
-#[derive(Debug, Clone, Copy, Default)]
-struct State {
-    is_open: bool,
-}
 
 // ============================================================================
 // Menu Item Definitions
@@ -45,11 +39,20 @@ pub enum MenuAction {
 // HamburgerMenu Widget
 // ============================================================================
 
-/// Custom hamburger menu widget with overlay dropdown
+/// Custom hamburger menu widget with overlay dropdown.
+///
+/// Open/closed is owned by the parent (controlled component): the parent
+/// passes `is_open` derived from `Nokkvi.open_menu`, and receives open/close
+/// requests through `on_open_change(bool)`.
 pub struct HamburgerMenu<Message> {
     icon_handle: Handle,
     /// Called with the selected menu action
     on_action: Box<dyn Fn(MenuAction) -> Message>,
+    /// Emitted with `true` to request open, `false` to request close.
+    on_open_change: Box<dyn Fn(bool) -> Message>,
+    /// Whether the dropdown should currently render. Mirrors the parent's
+    /// `Nokkvi.open_menu == Some(OpenMenu::Hamburger)`.
+    is_open: bool,
     /// Current light mode state (for label text)
     is_light_mode: bool,
     /// Current SFX enabled state (for label text)
@@ -65,6 +68,8 @@ pub struct HamburgerMenu<Message> {
 impl<Message: Clone> HamburgerMenu<Message> {
     pub fn new(
         on_action: impl Fn(MenuAction) -> Message + 'static,
+        on_open_change: impl Fn(bool) -> Message + 'static,
+        is_open: bool,
         is_light_mode: bool,
         sfx_enabled: bool,
     ) -> Self {
@@ -74,6 +79,8 @@ impl<Message: Clone> HamburgerMenu<Message> {
         Self {
             icon_handle,
             on_action: Box::new(on_action),
+            on_open_change: Box::new(on_open_change),
+            is_open,
             is_light_mode,
             sfx_enabled,
             button_size: 28.0,
@@ -92,14 +99,6 @@ impl<Message: Clone> HamburgerMenu<Message> {
 }
 
 impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for HamburgerMenu<Message> {
-    fn tag(&self) -> widget::tree::Tag {
-        widget::tree::Tag::of::<State>()
-    }
-
-    fn state(&self) -> widget::tree::State {
-        widget::tree::State::new(State::default())
-    }
-
     fn size(&self) -> Size<Length> {
         Size {
             width: Length::Fixed(self.button_size),
@@ -118,7 +117,7 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Hambur
 
     fn update(
         &mut self,
-        tree: &mut widget::Tree,
+        _tree: &mut widget::Tree,
         event: &Event,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
@@ -126,7 +125,6 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Hambur
         shell: &mut Shell<'_, Message>,
         _viewport: &Rectangle,
     ) {
-        let state = tree.state.downcast_mut::<State>();
         let bounds = layout.bounds();
 
         match event {
@@ -134,7 +132,7 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Hambur
             | Event::Touch(touch::Event::FingerPressed { .. })
                 if cursor.is_over(bounds) =>
             {
-                state.is_open = !state.is_open;
+                shell.publish((self.on_open_change)(!self.is_open));
                 shell.capture_event();
                 shell.request_redraw();
             }
@@ -144,7 +142,7 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Hambur
 
     fn draw(
         &self,
-        tree: &widget::Tree,
+        _tree: &widget::Tree,
         renderer: &mut iced::Renderer,
         _theme: &Theme,
         _style: &renderer::Style,
@@ -154,26 +152,25 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Hambur
     ) {
         use iced::advanced::{Renderer, svg::Renderer as SvgRenderer};
 
-        let state = tree.state.downcast_ref::<State>();
         let bounds = layout.bounds();
 
         let icon_color = if self.player_bar_style {
             // 3D player bar button styling (matches ThreeDIconButton)
             let border_width = 2.0;
             let (raised_top_left, raised_bottom_right) = theme::border_3d_raised();
-            let (top_left_color, bottom_right_color) = if state.is_open {
+            let (top_left_color, bottom_right_color) = if self.is_open {
                 (raised_bottom_right, raised_top_left)
             } else {
                 (raised_top_left, raised_bottom_right)
             };
 
-            let bg_color = if state.is_open {
+            let bg_color = if self.is_open {
                 theme::accent_bright()
             } else {
                 theme::bg1()
             };
 
-            let icon_color = if state.is_open {
+            let icon_color = if self.is_open {
                 theme::bg0_hard()
             } else {
                 theme::fg1()
@@ -194,13 +191,13 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Hambur
             // Original flat nav bar styling
             // Hover feedback is handled by HoverOverlay at the call site —
             // this widget only needs to distinguish open (accent) vs idle (bg0_hard).
-            let bg_color = if state.is_open {
+            let bg_color = if self.is_open {
                 theme::accent_bright()
             } else {
                 theme::bg0_hard()
             };
 
-            let icon_color = if state.is_open {
+            let icon_color = if self.is_open {
                 theme::bg0()
             } else {
                 theme::fg1()
@@ -261,15 +258,13 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Hambur
 
     fn overlay<'b>(
         &'b mut self,
-        tree: &'b mut widget::Tree,
+        _tree: &'b mut widget::Tree,
         layout: Layout<'_>,
         _renderer: &iced::Renderer,
         _viewport: &Rectangle,
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, Theme, iced::Renderer>> {
-        let state = tree.state.downcast_mut::<State>();
-
-        if !state.is_open {
+        if !self.is_open {
             return None;
         }
 
@@ -281,9 +276,9 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Hambur
         );
 
         Some(overlay::Element::new(Box::new(MenuOverlay {
-            state,
             position,
             on_action: &self.on_action,
+            on_open_change: &self.on_open_change,
             is_light_mode: self.is_light_mode,
             sfx_enabled: self.sfx_enabled,
         })))
@@ -302,9 +297,9 @@ impl<'a, Message: Clone + 'a + 'static> From<HamburgerMenu<Message>> for Element
 
 /// Menu overlay that appears below the hamburger icon
 struct MenuOverlay<'a, Message> {
-    state: &'a mut State,
     position: Point,
     on_action: &'a dyn Fn(MenuAction) -> Message,
+    on_open_change: &'a dyn Fn(bool) -> Message,
     is_light_mode: bool,
     sfx_enabled: bool,
 }
@@ -362,22 +357,35 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
                 key: keyboard::Key::Named(keyboard::key::Named::Escape),
                 ..
             }) => {
-                self.state.is_open = false;
+                shell.publish((self.on_open_change)(false));
                 shell.capture_event();
                 shell.request_redraw();
             }
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+            Event::Mouse(mouse::Event::ButtonPressed(_))
             | Event::Touch(touch::Event::FingerPressed { .. }) => {
                 if let Some(cursor_pos) = cursor.position() {
                     if !bounds.contains(cursor_pos) {
-                        // Click outside menu -> close
-                        self.state.is_open = false;
-                        shell.capture_event();
+                        // Click outside menu -> emit close. Do NOT capture so
+                        // the click can also reach a different menu's trigger
+                        // (the trigger's emit will arrive AFTER this close in
+                        // iced's dispatch order — overlays update before the
+                        // widget tree — and therefore wins, achieving the
+                        // "click another menu's trigger to switch" UX.
+                        shell.publish((self.on_open_change)(false));
                         shell.request_redraw();
                         return;
                     }
 
-                    // Determine which menu item was clicked
+                    // Determine which menu item was clicked. Item-clicks fire
+                    // on left/touch press; ignore right/middle inside the menu
+                    // so they don't act like selections.
+                    if !matches!(
+                        event,
+                        Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+                            | Event::Touch(touch::Event::FingerPressed { .. })
+                    ) {
+                        return;
+                    }
                     // Account for 1px separator before SEPARATOR_INDEX
                     let mut relative_y = cursor_pos.y - bounds.y - MENU_PADDING;
                     if relative_y < 0.0 {
@@ -401,7 +409,7 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
 
                     if let Some(action) = action {
                         shell.publish((self.on_action)(action));
-                        self.state.is_open = false;
+                        shell.publish((self.on_open_change)(false));
                         shell.capture_event();
                         shell.request_redraw();
                     }

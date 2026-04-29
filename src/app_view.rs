@@ -13,6 +13,39 @@ use crate::{
     views, widgets,
 };
 
+/// Extract `(is_open, trigger_bounds)` for a view's column-visibility
+/// `checkbox_dropdown` from the root-level open-menu state. Returns the open
+/// flag plus the captured trigger bounds, or `(false, None)` if a different
+/// menu (or none) is open.
+fn column_dropdown_state(
+    open_menu: &Option<crate::app_message::OpenMenu>,
+    view: View,
+) -> (bool, Option<iced::Rectangle>) {
+    use crate::app_message::OpenMenu;
+    match open_menu {
+        Some(OpenMenu::CheckboxDropdown {
+            view: v,
+            trigger_bounds,
+        }) if *v == view => (true, Some(*trigger_bounds)),
+        _ => (false, None),
+    }
+}
+
+/// Extract `(is_open, position)` for the now-playing strip context menu (only
+/// one strip is on-screen at a time, so the `Strip` id is unambiguous).
+fn strip_context_state(
+    open_menu: &Option<crate::app_message::OpenMenu>,
+) -> (bool, Option<iced::Point>) {
+    use crate::app_message::{ContextMenuId, OpenMenu};
+    match open_menu {
+        Some(OpenMenu::Context {
+            id: ContextMenuId::Strip,
+            position,
+        }) => (true, Some(*position)),
+        _ => (false, None),
+    }
+}
+
 /// Convert a `NavBarMessage` into the root `Message` type.
 ///
 /// Shared between the horizontal nav bar (top mode) and the vertical
@@ -38,6 +71,7 @@ fn map_nav_bar_message(msg: widgets::NavBarMessage) -> Message {
         widgets::NavBarMessage::OpenSettings => Message::SwitchView(View::Settings),
         widgets::NavBarMessage::StripClicked => Message::StripClicked,
         widgets::NavBarMessage::StripContextAction(entry) => Message::StripContextAction(entry),
+        widgets::NavBarMessage::SetOpenMenu(next) => Message::SetOpenMenu(next),
         widgets::NavBarMessage::About => {
             Message::AboutModal(crate::widgets::about_modal::AboutModalMessage::Open)
         }
@@ -114,6 +148,14 @@ impl Nokkvi {
             sample_rate: self.playback.sample_rate,
             bitrate: self.playback.bitrate,
             radio_name: radio_name.map(|s| s.to_string()),
+            hamburger_open: matches!(
+                self.open_menu,
+                Some(crate::app_message::OpenMenu::Hamburger)
+            ),
+            player_modes_open: matches!(
+                self.open_menu,
+                Some(crate::app_message::OpenMenu::PlayerModes)
+            ),
         };
 
         // Shared strip data — borrows playback state, no clones needed.
@@ -149,6 +191,7 @@ impl Nokkvi {
                 } else {
                     let has_local_path = !self.local_music_path.is_empty();
                     let is_starred = self.is_current_track_starred();
+                    let (strip_open, strip_position) = strip_context_state(&self.open_menu);
                     widgets::context_menu::context_menu(
                         strip,
                         widgets::context_menu::strip_entries(has_local_path),
@@ -159,6 +202,17 @@ impl Nokkvi {
                                 is_starred,
                                 widgets::PlayerBarMessage::StripContextAction,
                             )
+                        },
+                        strip_open,
+                        strip_position,
+                        |position| match position {
+                            Some(p) => widgets::PlayerBarMessage::SetOpenMenu(Some(
+                                crate::app_message::OpenMenu::Context {
+                                    id: crate::app_message::ContextMenuId::Strip,
+                                    position: p,
+                                },
+                            )),
+                            None => widgets::PlayerBarMessage::SetOpenMenu(None),
                         },
                     )
                     .into()
@@ -187,6 +241,7 @@ impl Nokkvi {
                 } else {
                     let has_local_path = !self.local_music_path.is_empty();
                     let is_starred = self.is_current_track_starred();
+                    let (strip_open, strip_position) = strip_context_state(&self.open_menu);
                     widgets::context_menu::context_menu(
                         strip,
                         widgets::context_menu::strip_entries(has_local_path),
@@ -197,6 +252,17 @@ impl Nokkvi {
                                 is_starred,
                                 Message::StripContextAction,
                             )
+                        },
+                        strip_open,
+                        strip_position,
+                        |position| match position {
+                            Some(p) => {
+                                Message::SetOpenMenu(Some(crate::app_message::OpenMenu::Context {
+                                    id: crate::app_message::ContextMenuId::Strip,
+                                    position: p,
+                                }))
+                            }
+                            None => Message::SetOpenMenu(None),
                         },
                     )
                     .into()
@@ -571,6 +637,18 @@ impl Nokkvi {
             radio_url,
             icy_artist,
             icy_title,
+            hamburger_open: matches!(
+                self.open_menu,
+                Some(crate::app_message::OpenMenu::Hamburger)
+            ),
+            strip_context_open: {
+                let (open, _) = strip_context_state(&self.open_menu);
+                open
+            },
+            strip_context_position: {
+                let (_, pos) = strip_context_state(&self.open_menu);
+                pos
+            },
         };
 
         // Use the nav_bar component, mapping NavBarMessage to app Message
@@ -607,6 +685,8 @@ impl Nokkvi {
                 .as_ref()
                 .map(|edit_state| edit_state.playlist_comment.clone());
 
+            let (column_dropdown_open, column_dropdown_trigger_bounds) =
+                column_dropdown_state(&self.open_menu, View::Queue);
             let queue_view_data = views::QueueViewData {
                 queue_songs: filtered_queue_songs,
                 album_art: &self.artwork.album_art_snapshot,
@@ -626,6 +706,9 @@ impl Nokkvi {
                 edit_mode_info,
                 edit_mode_comment,
                 playlist_context_info: self.active_playlist_info.clone(),
+                column_dropdown_open,
+                column_dropdown_trigger_bounds,
+                open_menu: self.open_menu.as_ref(),
             };
 
             let queue_pane = self.queue_page.view(queue_view_data).map(Message::Queue);
@@ -700,6 +783,12 @@ impl Nokkvi {
                             total_album_count: self.library.counts.albums,
                             loading: self.library.albums.is_loading(),
                             stable_viewport: true, // Browser pane: click to highlight, not play
+                            // Column dropdown is suppressed in browsing-panel
+                            // renders; the same dropdown rendered in the main
+                            // view owns the open state.
+                            column_dropdown_open: false,
+                            column_dropdown_trigger_bounds: None,
+                            open_menu: self.open_menu.as_ref(),
                         };
                         self.albums_page.view(view_data).map(Message::Albums)
                     }
@@ -716,6 +805,9 @@ impl Nokkvi {
                             total_song_count: self.library.counts.songs,
                             loading: self.library.songs.is_loading(),
                             stable_viewport: true, // Browser pane: click to highlight, not play
+                            column_dropdown_open: false,
+                            column_dropdown_trigger_bounds: None,
+                            open_menu: self.open_menu.as_ref(),
                         };
                         self.songs_page.view(view_data).map(Message::Songs)
                     }
@@ -732,6 +824,9 @@ impl Nokkvi {
                             total_artist_count: self.library.counts.artists,
                             loading: self.library.artists.is_loading(),
                             stable_viewport: true, // Browser pane: click to highlight, not play
+                            column_dropdown_open: false,
+                            column_dropdown_trigger_bounds: None,
+                            open_menu: self.open_menu.as_ref(),
                         };
                         self.artists_page.view(view_data).map(Message::Artists)
                     }
@@ -747,6 +842,7 @@ impl Nokkvi {
                             total_genre_count: self.library.counts.genres,
                             loading: self.library.genres.is_loading(),
                             stable_viewport: true, // Browser pane: click to highlight, not play
+                            open_menu: self.open_menu.as_ref(),
                         };
                         self.genres_page.view(view_data).map(Message::Genres)
                     }
@@ -765,6 +861,7 @@ impl Nokkvi {
                             modifiers: self.window.keyboard_modifiers,
                             label,
                             loading,
+                            open_menu: self.open_menu.as_ref(),
                         };
                         self.similar_page.view(view_data).map(Message::Similar)
                     }
@@ -792,6 +889,8 @@ impl Nokkvi {
         // =====================================================================
         match self.current_view {
             View::Albums => {
+                let (column_dropdown_open, column_dropdown_trigger_bounds) =
+                    column_dropdown_state(&self.open_menu, View::Albums);
                 let view_data = views::AlbumsViewData {
                     albums: &self.library.albums,
                     album_art: &self.artwork.album_art_snapshot,
@@ -804,12 +903,17 @@ impl Nokkvi {
                     total_album_count: self.library.counts.albums,
                     loading: self.library.albums.is_loading(),
                     stable_viewport: self.stable_viewport,
+                    column_dropdown_open,
+                    column_dropdown_trigger_bounds,
+                    open_menu: self.open_menu.as_ref(),
                 };
                 self.albums_page.view(view_data).map(Message::Albums)
             }
             View::Queue => {
                 let filtered_queue_songs = self.filter_queue_songs();
                 let current_playing_song_id = self.scrobble.current_song_id.clone();
+                let (column_dropdown_open, column_dropdown_trigger_bounds) =
+                    column_dropdown_state(&self.open_menu, View::Queue);
                 let view_data = views::QueueViewData {
                     queue_songs: filtered_queue_songs,
                     album_art: &self.artwork.album_art_snapshot,
@@ -829,10 +933,15 @@ impl Nokkvi {
                     edit_mode_info: None,
                     edit_mode_comment: None,
                     playlist_context_info: self.active_playlist_info.clone(),
+                    column_dropdown_open,
+                    column_dropdown_trigger_bounds,
+                    open_menu: self.open_menu.as_ref(),
                 };
                 self.queue_page.view(view_data).map(Message::Queue)
             }
             View::Artists => {
+                let (column_dropdown_open, column_dropdown_trigger_bounds) =
+                    column_dropdown_state(&self.open_menu, View::Artists);
                 let view_data = views::ArtistsViewData {
                     artists: &self.library.artists,
                     artist_art: &self.artwork.album_art_snapshot, // Reuse album art cache for artist images
@@ -845,10 +954,15 @@ impl Nokkvi {
                     total_artist_count: self.library.counts.artists,
                     loading: self.library.artists.is_loading(),
                     stable_viewport: self.stable_viewport,
+                    column_dropdown_open,
+                    column_dropdown_trigger_bounds,
+                    open_menu: self.open_menu.as_ref(),
                 };
                 self.artists_page.view(view_data).map(Message::Artists)
             }
             View::Songs => {
+                let (column_dropdown_open, column_dropdown_trigger_bounds) =
+                    column_dropdown_state(&self.open_menu, View::Songs);
                 let view_data = views::SongsViewData {
                     songs: &self.library.songs,
                     album_art: &self.artwork.album_art_snapshot,
@@ -861,6 +975,9 @@ impl Nokkvi {
                     total_song_count: self.library.counts.songs,
                     loading: self.library.songs.is_loading(),
                     stable_viewport: self.stable_viewport,
+                    column_dropdown_open,
+                    column_dropdown_trigger_bounds,
+                    open_menu: self.open_menu.as_ref(),
                 };
                 self.songs_page.view(view_data).map(Message::Songs)
             }
@@ -876,6 +993,7 @@ impl Nokkvi {
                     total_genre_count: self.library.counts.genres,
                     loading: self.library.genres.is_loading(),
                     stable_viewport: self.stable_viewport,
+                    open_menu: self.open_menu.as_ref(),
                 };
                 self.genres_page.view(view_data).map(Message::Genres)
             }
@@ -891,6 +1009,7 @@ impl Nokkvi {
                     total_playlist_count: self.library.counts.playlists,
                     loading: self.library.playlists.is_loading(),
                     stable_viewport: self.stable_viewport,
+                    open_menu: self.open_menu.as_ref(),
                 };
                 self.playlists_page.view(view_data).map(Message::Playlists)
             }
@@ -912,6 +1031,7 @@ impl Nokkvi {
                     total_station_count: self.library.radio_stations.len(),
                     stable_viewport: self.stable_viewport,
                     modifiers: self.window.keyboard_modifiers,
+                    open_menu: self.open_menu.as_ref(),
                 };
                 self.radios_page.view(view_data).map(Message::Radios)
             }

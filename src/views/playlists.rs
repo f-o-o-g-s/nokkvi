@@ -39,6 +39,10 @@ pub struct PlaylistsViewData<'a> {
     pub total_playlist_count: usize,
     pub loading: bool,
     pub stable_viewport: bool,
+    /// Borrowed reference to the root open-menu state, so per-row context
+    /// menus and the artwork-panel context menu can resolve their own
+    /// open/closed status.
+    pub open_menu: Option<&'a crate::app_message::OpenMenu>,
 }
 
 /// Context menu entries for playlist parent items.
@@ -148,6 +152,11 @@ pub enum PlaylistsMessage {
     PlaylistsLoaded(Result<Vec<PlaylistUIViewData>, String>, usize), // result, total_count
 
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
+
+    /// Context-menu open/close request — bubbled to root
+    /// `Message::SetOpenMenu`. Intercepted in `handle_playlists` before the
+    /// page's `update` runs.
+    SetOpenMenu(Option<crate::app_message::OpenMenu>),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -379,6 +388,9 @@ impl PlaylistsPage {
                 }
                 // Data loading messages (handled at root level, no action needed here)
                 PlaylistsMessage::PlaylistsLoaded(_, _) => (Task::none(), PlaylistsAction::None),
+                // Routed up to root in `handle_playlists` before this match
+                // runs; arm exists only for exhaustiveness.
+                PlaylistsMessage::SetOpenMenu(_) => (Task::none(), PlaylistsAction::None),
                 PlaylistsMessage::RefreshViewData => {
                     (Task::none(), PlaylistsAction::RefreshViewData)
                 }
@@ -589,6 +601,7 @@ impl PlaylistsPage {
         let playlists = data.playlists; // Borrow slice to extend lifetime
         let playlist_artwork = data.playlist_artwork;
         let playlist_collage_artwork = data.playlist_collage_artwork;
+        let open_menu_for_rows = data.open_menu;
 
         // Build flattened list (playlists + injected tracks when expanded)
         let flattened = self.expansion.build_flattened_list(playlists, |p| &p.id);
@@ -606,9 +619,13 @@ impl PlaylistsPage {
                 move |f| PlaylistsMessage::SlotListScrollSeek((f * total as f32) as usize)
             },
             |entry, ctx| match entry {
-                SlotListEntry::Parent(playlist) => {
-                    self.render_playlist_row(playlist, &ctx, playlist_artwork, data.stable_viewport)
-                }
+                SlotListEntry::Parent(playlist) => self.render_playlist_row(
+                    playlist,
+                    &ctx,
+                    playlist_artwork,
+                    data.stable_viewport,
+                    open_menu_for_rows,
+                ),
                 SlotListEntry::Child(song, _parent_playlist_id) => {
                     self.render_track_row(song, &ctx, data.stable_viewport)
                 }
@@ -697,6 +714,9 @@ impl PlaylistsPage {
             collage_artwork_panel_with_pill, single_artwork_panel_with_pill,
         };
 
+        // Playlist artwork panels currently have no refresh action wired up,
+        // but the helper still requires the controlled-component plumbing.
+        // Pass inert defaults — no menu opens because `on_refresh` is None.
         let artwork_content = if album_count <= 1 {
             // Show single artwork full-size (use collage[0] if available, else mini)
             let handle = collage_handles
@@ -707,6 +727,9 @@ impl PlaylistsPage {
                 pill_content,
                 None, // Use standard dark backdrop
                 None,
+                false,
+                None,
+                |_| PlaylistsMessage::SetOpenMenu(None),
             ))
         } else if let Some(handles) = collage_handles.filter(|v| !v.is_empty()) {
             // Render 3x3 collage grid (2+ albums)
@@ -721,6 +744,9 @@ impl PlaylistsPage {
                 pill_content,
                 None,
                 None,
+                false,
+                None,
+                |_| PlaylistsMessage::SetOpenMenu(None),
             ))
         };
 
@@ -734,6 +760,7 @@ impl PlaylistsPage {
         ctx: &crate::widgets::slot_list::SlotListRowContext,
         playlist_artwork: &'a HashMap<String, image::Handle>,
         stable_viewport: bool,
+        open_menu: Option<&'a crate::app_message::OpenMenu>,
     ) -> Element<'a, PlaylistsMessage> {
         use crate::widgets::slot_list::{
             SLOT_LIST_SLOT_PADDING, SlotListSlotStyle, slot_list_index_column,
@@ -887,8 +914,13 @@ impl PlaylistsPage {
             .padding(0)
             .width(Length::Fill);
 
-        use crate::widgets::context_menu::context_menu;
+        use crate::widgets::context_menu::{context_menu, open_state_for};
         let item_idx = ctx.item_index;
+        let cm_id = crate::app_message::ContextMenuId::LibraryRow {
+            view: crate::View::Playlists,
+            item_index: item_idx,
+        };
+        let (cm_open, cm_position) = open_state_for(open_menu, &cm_id);
         context_menu(
             slot_button,
             playlist_context_entries(),
@@ -896,6 +928,17 @@ impl PlaylistsPage {
                 playlist_entry_view(entry, length, |e| {
                     PlaylistsMessage::PlaylistContextAction(item_idx, e)
                 })
+            },
+            cm_open,
+            cm_position,
+            move |position| match position {
+                Some(p) => {
+                    PlaylistsMessage::SetOpenMenu(Some(crate::app_message::OpenMenu::Context {
+                        id: cm_id.clone(),
+                        position: p,
+                    }))
+                }
+                None => PlaylistsMessage::SetOpenMenu(None),
             },
         )
         .into()

@@ -200,6 +200,11 @@ pub(crate) struct PlayerBarViewData {
     pub sample_rate: u32,
     pub bitrate: u32,
     pub radio_name: Option<String>,
+    /// Whether the player-bar hamburger menu is currently open (controlled state).
+    pub hamburger_open: bool,
+    /// Whether the player-bar kebab "modes" menu is currently open
+    /// (controlled state).
+    pub player_modes_open: bool,
 }
 
 /// Messages emitted by player bar interactions
@@ -227,6 +232,9 @@ pub enum PlayerBarMessage {
     /// Track info strip was clicked — dispatch depends on strip_click_action setting
     StripClicked,
     StripContextAction(super::context_menu::StripContextEntry),
+    /// Hamburger / kebab menu open/close request — bubbled to root
+    /// `Message::SetOpenMenu`.
+    SetOpenMenu(Option<crate::app_message::OpenMenu>),
     About,
     Quit,
 }
@@ -869,9 +877,16 @@ pub(crate) fn player_bar<'a>(
             ));
         }
 
-        mode_toggles_row = mode_toggles_row.push(Element::from(HoverOverlay::new(
-            PlayerModesMenu::new(kebab_rows),
-        )));
+        mode_toggles_row =
+            mode_toggles_row.push(Element::from(HoverOverlay::new(PlayerModesMenu::new(
+                kebab_rows,
+                |open| {
+                    PlayerBarMessage::SetOpenMenu(
+                        open.then_some(crate::app_message::OpenMenu::PlayerModes),
+                    )
+                },
+                data.player_modes_open,
+            ))));
     }
 
     // Application menu — always visible when there is no top nav bar
@@ -881,6 +896,7 @@ pub(crate) fn player_bar<'a>(
         use crate::widgets::hamburger_menu::{HamburgerMenu, MenuAction};
         let is_light = data.is_light_mode;
         let sfx_on = sound_effects_enabled;
+        let hamburger_open = data.hamburger_open;
         mode_toggles_row = mode_toggles_row.push(Element::from(HoverOverlay::new(
             HamburgerMenu::new(
                 |action| match action {
@@ -890,6 +906,12 @@ pub(crate) fn player_bar<'a>(
                     MenuAction::About => PlayerBarMessage::About,
                     MenuAction::Quit => PlayerBarMessage::Quit,
                 },
+                |open| {
+                    PlayerBarMessage::SetOpenMenu(
+                        open.then_some(crate::app_message::OpenMenu::Hamburger),
+                    )
+                },
+                hamburger_open,
                 is_light,
                 sfx_on,
             )

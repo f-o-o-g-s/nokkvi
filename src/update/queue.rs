@@ -102,6 +102,9 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_queue(&mut self, msg: views::QueueMessage) -> Task<Message> {
+        if let QueueMessage::SetOpenMenu(next) = msg {
+            return Task::done(Message::SetOpenMenu(next));
+        }
         // ── Fast path for scrollbar seek ──
         // During a scrollbar drag, CursorMoved fires on_seek hundreds of times
         // per second. The normal path clones the entire queue (O(n)) for

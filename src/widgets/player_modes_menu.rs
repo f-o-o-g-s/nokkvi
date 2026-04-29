@@ -98,15 +98,6 @@ pub(crate) fn mode_menu_separator<Message>() -> ModeMenuRow<Message> {
 }
 
 // ============================================================================
-// Widget State
-// ============================================================================
-
-#[derive(Debug, Clone, Copy, Default)]
-struct State {
-    is_open: bool,
-}
-
-// ============================================================================
 // Widget
 // ============================================================================
 
@@ -114,16 +105,27 @@ pub struct PlayerModesMenu<Message> {
     icon_handle: Handle,
     check_handle: Handle,
     rows: Vec<ModeMenuRow<Message>>,
+    /// Whether the dropdown should currently render. Mirrors the parent's
+    /// `Nokkvi.open_menu == Some(OpenMenu::PlayerModes)`.
+    is_open: bool,
+    /// Emitted with `true` to request open, `false` to request close.
+    on_open_change: Box<dyn Fn(bool) -> Message>,
 }
 
 impl<Message: Clone + 'static> PlayerModesMenu<Message> {
-    pub fn new(rows: Vec<ModeMenuRow<Message>>) -> Self {
+    pub fn new(
+        rows: Vec<ModeMenuRow<Message>>,
+        on_open_change: impl Fn(bool) -> Message + 'static,
+        is_open: bool,
+    ) -> Self {
         let icon_svg = crate::embedded_svg::get_svg("assets/icons/ellipsis-vertical.svg");
         let check_svg = crate::embedded_svg::get_svg("assets/icons/check.svg");
         Self {
             icon_handle: Handle::from_memory(icon_svg.as_bytes()),
             check_handle: Handle::from_memory(check_svg.as_bytes()),
             rows,
+            is_open,
+            on_open_change: Box::new(on_open_change),
         }
     }
 
@@ -147,14 +149,6 @@ impl<Message: Clone + 'static> PlayerModesMenu<Message> {
 }
 
 impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for PlayerModesMenu<Message> {
-    fn tag(&self) -> widget::tree::Tag {
-        widget::tree::Tag::of::<State>()
-    }
-
-    fn state(&self) -> widget::tree::State {
-        widget::tree::State::new(State::default())
-    }
-
     fn size(&self) -> Size<Length> {
         Size {
             width: Length::Fixed(TRIGGER_BUTTON_SIZE),
@@ -173,7 +167,7 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Player
 
     fn update(
         &mut self,
-        tree: &mut widget::Tree,
+        _tree: &mut widget::Tree,
         event: &Event,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
@@ -181,7 +175,6 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Player
         shell: &mut Shell<'_, Message>,
         _viewport: &Rectangle,
     ) {
-        let state = tree.state.downcast_mut::<State>();
         let bounds = layout.bounds();
 
         match event {
@@ -189,7 +182,7 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Player
             | Event::Touch(touch::Event::FingerPressed { .. })
                 if cursor.is_over(bounds) =>
             {
-                state.is_open = !state.is_open;
+                shell.publish((self.on_open_change)(!self.is_open));
                 shell.capture_event();
                 shell.request_redraw();
             }
@@ -199,7 +192,7 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Player
 
     fn draw(
         &self,
-        tree: &widget::Tree,
+        _tree: &widget::Tree,
         renderer: &mut iced::Renderer,
         _theme: &Theme,
         _style: &renderer::Style,
@@ -209,22 +202,21 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Player
     ) {
         use iced::advanced::{Renderer, svg::Renderer as SvgRenderer};
 
-        let state = tree.state.downcast_ref::<State>();
         let bounds = layout.bounds();
 
         // 3D bevel chrome — pressed appearance when open, raised when closed.
         let (raised_top_left, raised_bottom_right) = theme::border_3d_raised();
-        let (top_left_color, bottom_right_color) = if state.is_open {
+        let (top_left_color, bottom_right_color) = if self.is_open {
             (raised_bottom_right, raised_top_left)
         } else {
             (raised_top_left, raised_bottom_right)
         };
-        let bg_color = if state.is_open {
+        let bg_color = if self.is_open {
             theme::accent_bright()
         } else {
             theme::bg1()
         };
-        let icon_color = if state.is_open {
+        let icon_color = if self.is_open {
             theme::bg0_hard()
         } else {
             theme::fg1()
@@ -261,7 +253,7 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Player
 
         // Active-state badge dot — only when closed (open state shows the
         // checkmarks directly so the badge would be redundant).
-        if !state.is_open && self.any_active() {
+        if !self.is_open && self.any_active() {
             let badge_x = bounds.x + bounds.width - BADGE_INSET - BADGE_DIAMETER;
             let badge_y = bounds.y + BADGE_INSET;
             let badge_bounds = Rectangle {
@@ -302,15 +294,13 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Player
 
     fn overlay<'b>(
         &'b mut self,
-        tree: &'b mut widget::Tree,
+        _tree: &'b mut widget::Tree,
         layout: Layout<'_>,
         _renderer: &iced::Renderer,
         _viewport: &Rectangle,
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, Theme, iced::Renderer>> {
-        let state = tree.state.downcast_mut::<State>();
-
-        if !state.is_open {
+        if !self.is_open {
             return None;
         }
 
@@ -323,7 +313,7 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Player
         );
 
         Some(overlay::Element::new(Box::new(MenuOverlay {
-            state,
+            on_open_change: &self.on_open_change,
             check_handle: &self.check_handle,
             rows: &self.rows,
             menu_inner_height: self.menu_inner_height(),
@@ -343,7 +333,7 @@ impl<'a, Message: Clone + 'a + 'static> From<PlayerModesMenu<Message>> for Eleme
 // ============================================================================
 
 struct MenuOverlay<'a, Message> {
-    state: &'a mut State,
+    on_open_change: &'a dyn Fn(bool) -> Message,
     check_handle: &'a Handle,
     rows: &'a [ModeMenuRow<Message>],
     menu_inner_height: f32,
@@ -413,22 +403,32 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
                 key: keyboard::Key::Named(keyboard::key::Named::Escape),
                 ..
             }) => {
-                self.state.is_open = false;
+                shell.publish((self.on_open_change)(false));
                 shell.capture_event();
                 shell.request_redraw();
             }
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+            Event::Mouse(mouse::Event::ButtonPressed(_))
             | Event::Touch(touch::Event::FingerPressed { .. }) => {
                 let Some(cursor_pos) = cursor.position() else {
                     return;
                 };
 
                 if !bounds.contains(cursor_pos) {
-                    // Click outside menu → close. The trigger handles its own
-                    // toggle if the click landed on it.
-                    self.state.is_open = false;
-                    shell.capture_event();
+                    // Click outside menu → emit close. Do NOT capture so the
+                    // click can also reach a different menu's trigger; iced
+                    // dispatches overlays before the widget tree, so the
+                    // trigger's open emit arrives later and wins.
+                    shell.publish((self.on_open_change)(false));
                     shell.request_redraw();
+                    return;
+                }
+
+                // Item-clicks fire on left/touch press only.
+                if !matches!(
+                    event,
+                    Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+                        | Event::Touch(touch::Event::FingerPressed { .. })
+                ) {
                     return;
                 }
 
@@ -452,7 +452,7 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
                     && let ModeMenuRow::Item(item) = &self.rows[idx]
                 {
                     shell.publish(item.on_action.clone());
-                    self.state.is_open = false;
+                    shell.publish((self.on_open_change)(false));
                     shell.capture_event();
                     shell.request_redraw();
                 }
@@ -622,16 +622,19 @@ mod tests {
         mode_menu_item(label, active, label.to_string())
     }
 
+    fn make_menu(rows: Vec<ModeMenuRow<TestMessage>>) -> PlayerModesMenu<TestMessage> {
+        PlayerModesMenu::new(rows, |_| String::new(), false)
+    }
+
     #[test]
     fn any_active_returns_false_for_all_inactive() {
-        let menu: PlayerModesMenu<TestMessage> =
-            PlayerModesMenu::new(vec![make_item("a", false), make_item("b", false)]);
+        let menu = make_menu(vec![make_item("a", false), make_item("b", false)]);
         assert!(!menu.any_active());
     }
 
     #[test]
     fn any_active_returns_true_when_at_least_one_is_active() {
-        let menu: PlayerModesMenu<TestMessage> = PlayerModesMenu::new(vec![
+        let menu = make_menu(vec![
             make_item("a", false),
             make_item("b", true),
             make_item("c", false),
@@ -641,7 +644,7 @@ mod tests {
 
     #[test]
     fn any_active_ignores_separators() {
-        let menu: PlayerModesMenu<TestMessage> = PlayerModesMenu::new(vec![
+        let menu = make_menu(vec![
             make_item("a", false),
             mode_menu_separator(),
             make_item("b", false),
@@ -651,7 +654,7 @@ mod tests {
 
     #[test]
     fn menu_inner_height_sums_rows_correctly() {
-        let menu: PlayerModesMenu<TestMessage> = PlayerModesMenu::new(vec![
+        let menu = make_menu(vec![
             make_item("a", false),
             make_item("b", true),
             mode_menu_separator(),
@@ -663,7 +666,7 @@ mod tests {
 
     #[test]
     fn empty_rows_produce_zero_inner_height() {
-        let menu: PlayerModesMenu<TestMessage> = PlayerModesMenu::new(Vec::new());
+        let menu = make_menu(Vec::new());
         assert_eq!(menu.menu_inner_height(), 0.0);
         assert!(!menu.any_active());
     }

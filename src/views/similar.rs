@@ -33,6 +33,9 @@ pub struct SimilarViewData<'a> {
     pub label: &'a str,
     /// Whether an API call is in flight
     pub loading: bool,
+    /// Borrowed reference to the root open-menu state, so per-row context
+    /// menus can resolve their own open/closed status.
+    pub open_menu: Option<&'a crate::app_message::OpenMenu>,
 }
 
 /// Messages for local similar page interactions
@@ -52,6 +55,11 @@ pub enum SimilarMessage {
 
     // Context menu
     ContextMenuAction(usize, crate::widgets::context_menu::LibraryContextEntry),
+
+    /// Context-menu open/close request — bubbled to root
+    /// `Message::SetOpenMenu`. Intercepted in `handle_similar` before the
+    /// page's `update` runs.
+    SetOpenMenu(Option<crate::app_message::OpenMenu>),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -97,6 +105,9 @@ impl SimilarPage {
 
         match message {
             SimilarMessage::NoOp => (Task::none(), SimilarAction::None),
+            // Routed up to root in `handle_similar` before this match runs;
+            // arm exists only for exhaustiveness.
+            SimilarMessage::SetOpenMenu(_) => (Task::none(), SimilarAction::None),
             SimilarMessage::SlotListNavigateUp => {
                 self.common.handle_navigate_up(total_items);
                 if let Some(center_idx) = self.common.get_center_item_index(total_items)
@@ -309,6 +320,7 @@ impl SimilarPage {
         let songs = data.songs;
         let song_artwork = data.album_art;
         let center_index = self.common.slot_list.get_center_item_index(songs.len());
+        let open_menu_for_rows = data.open_menu;
 
         // Render slot list
         let slot_list_content = slot_list_view_with_scroll(
@@ -443,14 +455,31 @@ impl SimilarPage {
                     .width(Length::Fill);
 
                 use crate::widgets::context_menu::{
-                    context_menu, library_entry_view, similar_entries,
+                    context_menu, library_entry_view, open_state_for, similar_entries,
                 };
                 let item_idx = ctx.item_index;
-                context_menu(slot_button, similar_entries(), move |entry, length| {
-                    library_entry_view(entry, length, |e| {
-                        SimilarMessage::ContextMenuAction(item_idx, e)
-                    })
-                })
+                let cm_id = crate::app_message::ContextMenuId::SimilarRow(item_idx);
+                let (cm_open, cm_position) = open_state_for(open_menu_for_rows, &cm_id);
+                context_menu(
+                    slot_button,
+                    similar_entries(),
+                    move |entry, length| {
+                        library_entry_view(entry, length, |e| {
+                            SimilarMessage::ContextMenuAction(item_idx, e)
+                        })
+                    },
+                    cm_open,
+                    cm_position,
+                    move |position| match position {
+                        Some(p) => SimilarMessage::SetOpenMenu(Some(
+                            crate::app_message::OpenMenu::Context {
+                                id: cm_id.clone(),
+                                position: p,
+                            },
+                        )),
+                        None => SimilarMessage::SetOpenMenu(None),
+                    },
+                )
                 .into()
             },
         );
@@ -466,9 +495,15 @@ impl SimilarPage {
         let artwork_handle = centered_song
             .and_then(|song| song.album_id.as_ref())
             .and_then(|album_id| data.large_artwork.get(album_id));
+        // No refresh action wired up for Similar artwork — pass inert
+        // controlled-component arguments. The helper short-circuits because
+        // `on_refresh` is None.
         let artwork_content = Some(single_artwork_panel_with_menu::<SimilarMessage>(
             artwork_handle,
             None,
+            false,
+            None,
+            |_| SimilarMessage::SetOpenMenu(None),
         ));
 
         base_slot_list_layout(&layout_config, header, slot_list_content, artwork_content)
