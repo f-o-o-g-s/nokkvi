@@ -34,7 +34,7 @@ Things that shaped this project:
 - Browse albums, artists, songs, genres, playlists, internet radios, and similar artists; inline expansion and split-view browsing included
 - 21 built-in themes (Gruvbox, Catppuccin, Dracula, Nord, Tokyo Night, Kanagawa, Everforest, ...) with instant hot-reload; drop a `.toml` in `~/.config/nokkvi/themes/` to add your own
 - Persistent queue, multi-selection, drag-and-drop, star ratings, and scrobbling (Last.fm / ListenBrainz)
-- Fully keyboard-driven with configurable shortcuts, MPRIS, and right-click menus everywhere
+- Fully keyboard-driven with configurable shortcuts, MPRIS, optional system tray icon, and right-click menus everywhere
 
 Full feature tour and `config.toml` reference: [docs](https://f-o-o-g-s.github.io/nokkvi-docs/).
 

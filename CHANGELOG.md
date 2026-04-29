@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## v0.3.4 — 2026-04-28
+
+### Features
+- **System Tray Integration** — opt-in StatusNotifierItem icon (via `ksni`, pure-Rust SNI over zbus — no GTK, no libappindicator) keeps nokkvi playing in the background. Two general-tab toggles: **Show Tray Icon** registers/tears down the tray live, **Close to Tray** redirects window-manager close (Alt+F4, `wmctrl -c`) into `window::set_mode(Hidden)` instead of quitting the runtime. Tray menu offers Show/Hide, Play/Pause (label flips with state), Next, Previous, Quit; left-click toggles window visibility. Linux desktops without a tray host (Hyprland without waybar's `tray` module, bare wlroots) are unaffected since the feature is opt-in. Tooltip and Play/Pause label are kept current via the same push that drives MPRIS metadata.
+- **Artwork Column Display Mode + Draggable Width** — the large artwork column gains four modes (Auto / Always Native / Always Stretched / Never) with a Cover/Fill sub-toggle for the stretched variant, plus a between-column drag handle as the sole resize affordance in always modes (live atomic preview during drag, TOML write on release). Auto preserves bit-identical layout to the previous behavior. Width fraction is clamped to `[0.05, 0.80]` at the service boundary and persists across mode switches.
+- **Granular Player-Bar Mode Cull + Narrow-Tier Transports** — each of the seven player-bar modes (random/repeat/repeat-queue/consume/EQ/crossfade/SFX) now has its own enter threshold with 40px hysteresis, so a slow drag-resize moves exactly one element per crossing instead of culling 2–3 at once. Folded modes appear in a new `PlayerModesMenu` kebab (vertical-ellipsis glyph to disambiguate from the app hamburger) with leading checkmarks per row and an accent-dot badge on the trigger when any folded mode is active. The transport row collapses from 5 to 3 buttons (prev / play-or-pause / next) at narrow widths on its own threshold; the middle button keeps a fixed hit target across the play/pause glyph swap.
+
+### Fixes
+- **Mutually Exclusive Overlay Menus** — the hamburger, player-bar kebab, view-header checkbox dropdowns, and right-click context menus could all be open simultaneously because each widget owned its own `is_open` state. Open/closed is now lifted to a single `Nokkvi.open_menu` coordinator and each widget is controlled — opening any new menu replaces whatever was open before. Iced's overlay-first dispatch order makes "click another menu's trigger to switch directly" work without ordering hacks. Anchored overlays auto-close on view switch and window resize so they don't strand themselves at stale screen positions.
+
 ## v0.3.3 — 2026-04-27
 
 ### Fixes
