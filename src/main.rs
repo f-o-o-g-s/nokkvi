@@ -826,6 +826,22 @@ impl Nokkvi {
 // ============================================================================
 
 pub fn main() -> iced::Result {
+    // Handle --version / --help before tracing init so these short-lived
+    // invocations don't truncate ~/.config/nokkvi/nokkvi.log.
+    for arg in std::env::args().skip(1) {
+        match arg.as_str() {
+            "-V" | "--version" => {
+                println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+                return Ok(());
+            }
+            "-h" | "--help" => {
+                print_cli_help();
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
+
     // Initialize tracing.
     //
     // Defaults (overridable via RUST_LOG, which applies to both layers):
@@ -916,6 +932,39 @@ pub fn main() -> iced::Result {
         .subscription(Nokkvi::subscription)
         .antialiasing(true)
         .run()
+}
+
+/// Print `--help` to stdout. Format follows GNU conventions: usage line,
+/// option table, environment vars, file paths, then a docs URL.
+fn print_cli_help() {
+    let name = env!("CARGO_PKG_NAME");
+    let version = env!("CARGO_PKG_VERSION");
+    let description = env!("CARGO_PKG_DESCRIPTION");
+    let repo = env!("CARGO_PKG_REPOSITORY");
+    println!("{name} {version} — {description}");
+    println!();
+    println!("Usage: {name} [OPTIONS]");
+    println!();
+    println!("Options:");
+    println!("  -h, --help       Print this help and exit");
+    println!("  -V, --version    Print version and exit");
+    println!();
+    println!("Environment:");
+    println!("  RUST_LOG         Override log filter. Examples:");
+    println!("                     RUST_LOG=info                  # info+ on terminal and file");
+    println!("                     RUST_LOG=debug                 # full debug on both");
+    println!("                     RUST_LOG=trace                 # very verbose");
+    println!("                     RUST_LOG=nokkvi::audio=trace   # narrow to one module");
+    println!();
+    println!("Files:");
+    println!("  ~/.config/nokkvi/config.toml      User configuration (TOML)");
+    println!("  ~/.config/nokkvi/app.redb         Queue, session tokens, structured state");
+    println!("  ~/.config/nokkvi/themes/          Theme files (.toml)");
+    println!("  ~/.config/nokkvi/sfx/             Sound effect overrides");
+    println!("  ~/.config/nokkvi/nokkvi.log       Log file (truncated on launch)");
+    println!();
+    println!("Documentation:");
+    println!("  {repo}");
 }
 
 /// Daemon boot: build the initial state and queue a task to open the main
