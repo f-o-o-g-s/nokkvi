@@ -17,9 +17,17 @@ last_version_commit=$(git log --oneline --all --grep='bump version' -1 --format=
 git log --oneline "${last_version_commit}..HEAD" --no-merges
 ```
 
-Categorize changes into: **Features**, **Fixes**, **Improvements**, **Internal**. Promote the existing `## [Unreleased]` section in `CHANGELOG.md` to `## vX.Y.Z — YYYY-MM-DD` and seed a fresh empty `## [Unreleased]` block above it.
+Promote the existing `## [Unreleased]` section in `CHANGELOG.md` to `## vX.Y.Z — YYYY-MM-DD` and seed a fresh empty `## [Unreleased]` block above it (with empty `### Added` / `### Changed` / `### Fixed` / `### Removed` sub-headings ready to fill in).
 
-The release workflow extracts the section matching the pushed tag verbatim into the GitHub Release body, so write it for that audience.
+**Style rubric** (matches the rmpc-style format the repo settled on):
+
+- Categories: **Added** (new features), **Changed** (visible behavior changes that aren't fixes), **Fixed** (bug fixes), **Removed** (removed features). Omit any category with no entries.
+- One bullet per change, one line if at all possible.
+- Frame by user-visible effect, not internal mechanism. No internal type names, file paths, or PR numbers — those live in the commit body / git log.
+- Drop CI, workflow, lockfile, and other internal-only churn entirely. If a CI change matters to users, it belongs under **Changed** phrased as user effect; otherwise let the commit message carry it.
+- Keep the version-header format exactly `## vX.Y.Z — YYYY-MM-DD` — the release workflow's awk extractor matches on it.
+
+The release workflow extracts the section matching the pushed tag verbatim into the GitHub Release body, so write it for end users.
 
 ## 2. Update README.md
 
