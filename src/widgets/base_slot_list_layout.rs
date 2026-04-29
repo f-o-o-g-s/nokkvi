@@ -171,6 +171,7 @@ pub(crate) fn base_slot_list_empty_artwork<'a, Message: 'a>(
                 .into()
         })
         .width(Length::Shrink)
+        .height(Length::Shrink)
         .into(),
     )
 }
@@ -261,6 +262,7 @@ pub(crate) fn single_artwork_panel<'a, Message: 'a>(
             .into()
     })
     .width(Length::Shrink)
+    .height(Length::Shrink)
     .into()
 }
 
@@ -472,6 +474,7 @@ pub(crate) fn collage_artwork_panel<'a, Message: 'a>(
             .into()
     })
     .width(Length::Shrink)
+    .height(Length::Shrink)
     .into()
 }
 
@@ -521,6 +524,12 @@ where
             container(artwork)
                 .width(Length::Fixed(layout.column_width))
                 .height(Length::Fill)
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center)
+                .style(|_| container::Style {
+                    background: Some(artwork_outer_bg().into()),
+                    ..Default::default()
+                })
                 .into()
         } else {
             artwork
