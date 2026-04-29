@@ -9,46 +9,51 @@ globs: src/views/settings/**,src/update/settings.rs
 
 ```
 views/settings/
-├── mod.rs             — State, Message, Action, update, view
-├── entries.rs         — Entry building/filtering, cross-tab search
-├── items.rs           — SettingValue types, SettingMeta + meta! macro
-├── items_general.rs   — Application (library_page_size), Mouse, Account, Cache
-├── items_interface.rs — Layout, Metadata Strip
-├── items_playback.rs  — Playback, Scrobbling, Playlists
-├── items_hotkeys.rs   — Per-category hotkey entries
-├── items_theme.rs     — Font, colors, presets, opacity gradient
-├── items_visualizer.rs — Bars, peaks, LED, 3D, gradient, lines
-├── sub_lists.rs       — Font picker, color gradient editor sub-slot-lists
-├── presets.rs         — Theme discovery/application
-├── rendering.rs       — Slot rendering: headers, items, colors, hotkey badges, toggle sets
-└── view.rs            — Layout: breadcrumb/search bar, footer, exit button
+├── mod.rs              — State, Message, Action, update, view
+├── entries.rs          — Entry building / filtering / cross-tab search
+├── items.rs            — SettingValue + SettingMeta + meta! macro
+├── items_general.rs    — Application, Mouse Behavior, System Tray, Account
+├── items_interface.rs  — Layout, Views, Font, Metadata Strip, Artwork Column
+├── items_playback.rs   — Playback, Scrobbling, Playlists
+├── items_hotkeys.rs    — Per-category hotkey entries
+├── items_theme.rs      — Select Theme, Appearance, Background / Foreground / Accent / Semantic colors
+├── items_visualizer.rs — General, Bars, Bar Colors (Dark/Light), Lines
+├── sub_lists.rs        — Font picker + color gradient editor (sub-slot-list overlays)
+├── presets.rs          — Theme discovery + apply
+├── rendering.rs        — Slot rendering: headers, items, colors, hotkey badges, toggle sets
+└── view.rs             — Layout: breadcrumb / search bar / footer / exit button
 ```
 
 ## Architecture
 
-- 6 tabs: **General, Interface, Playback, Hotkeys, Theme, Visualizer**
-- Two-level drill-down: Level 1 (CategoryPicker) → Level 2 (Category items with auto-expanded section headers)
-- `NavLevel` enum, `nav_stack` with cursor memory, `snap_to_non_header` skips non-selectable headers
-- Cross-tab search: active query combines entries from all tabs; tab-name matching includes all of a tab's entries
+- 6 tabs in display order: **General, Interface, Playback, Hotkeys, Theme, Visualizer**
+- Two-level drill-down: Level 1 (CategoryPicker) → Level 2 (category items, headers auto-expanded)
+- `NavLevel` enum, `nav_stack` with cursor memory; `snap_to_non_header` skips non-selectable headers
+- Cross-tab search combines entries from every tab; matching a tab name pulls the whole tab in
 
 ## SettingValue Types
 
 | Type | Interaction |
 |------|-------------|
-| `Float` / `Int` | ←/→ increment/decrement with clickable arrow buttons |
-| `Bool` | Toggle with clickable On/Off badges |
-| `Enum` | Cycle with clickable option badges (`EditSetValue`) |
-| `ToggleSet` | Multi-select badges. ←/→ cursor, Enter toggles, ↑/↓ sets on/off. `toggle_set_cursor_index` tracks cursor. |
-| `HexColor` | Direct hex input. `HEX_EDITOR_INPUT_ID` + `FocusHexInput` action for auto-focus on edit activation. |
-| `ColorArray` | Opens sub-slot-list for gradient editing |
-| `Hotkey` | Badge display + key capture mode (Escape cancels, Delete resets, steal-on-conflict) |
+| `Float` / `Int` | ←/→ adjust with clickable arrow buttons |
+| `Bool` | Toggle via clickable On/Off badges |
+| `Enum` | Cycle via clickable option badges (`EditSetValue`) |
+| `ToggleSet` | Multi-select badges. ←/→ moves cursor, Enter toggles, ↑/↓ sets on/off |
+| `HexColor` | Direct hex input. `HEX_EDITOR_INPUT_ID` + `FocusHexInput` action for auto-focus |
+| `ColorArray` | Opens a sub-slot-list for gradient editing |
+| `Hotkey` | Badge display + key capture mode (Esc cancels, Delete resets, steal-on-conflict) |
 
 ## Key Patterns
 
-- **Config write routing**: Application/Playback/Interface settings → `WriteGeneralSetting` action → `config.toml`. Theme settings → `update_theme_value()` → active theme file. ALWAYS route settings correctly to avoid overwriting files.
-- **`verbose_config` toggle**: combined persist + TOML write in single async task to avoid races.
-- **Strip visibility toggles**: affect both metadata strip AND progress track overlay. `ToggleSetToggle` flips cached entry + emits `WriteGeneralSetting`.
-- **Font picker**: modal overlay sub-slot-list (not drill-down). System fonts via `font-kit`, `LazyLock`-cached.
-- **Theme picker**: modal sub-slot-list. Switching rewrites `theme = "name"` in config.toml, triggers hot-reload.
-- **Search pitfall**: `SlotListDown` must not rebuild entries — navigate within `cached_entries`; only `SearchChanged` rebuilds.
-- **Icons**: `SettingItem` + `SettingsEntry::Header` carry `icon` path. Must be registered in `src/embedded_svg.rs` or silently falls back to play icon.
+- **Typed config write routing** (`src/config_writer.rs`):
+  - `ConfigKey::AppScalar` / `AppArrayEntry` → `config.toml`
+  - `ConfigKey::Theme` / `ThemeArrayEntry` → active theme file
+  - The dispatch handler matches on the variant — never sniff key prefixes
+- **`verbose_config` toggle**: combined persist + TOML rewrite in a single async task to avoid races
+- **Strip visibility toggles** (Metadata Strip section): mirror to the progress-track overlay; `ToggleSetToggle` flips cached entry then emits `WriteGeneralSetting`
+- **Artwork Column** (Interface tab): mode (`Off` / `OnSplit` / `AlwaysStretched`) + stretch fit + draggable width pct. Width drag persists via `WriteGeneralSetting`
+- **System Tray** (General tab): `show_tray_icon` + `close_to_tray`. Live-toggle starts/stops the StatusNotifierItem subscription without restart
+- **Font picker**: modal overlay sub-slot-list (not drill-down). System fonts via `font-kit`, `LazyLock`-cached
+- **Theme picker**: modal sub-slot-list. Switching rewrites `theme = "name"` in `config.toml` and triggers hot-reload
+- **Search pitfall**: `SlotListDown` must navigate within `cached_entries` — only `SearchChanged` rebuilds entries
+- **Icons**: `SettingItem` and `SettingsEntry::Header` carry an icon path. SVGs in `assets/icons/` are auto-registered by `build.rs`; unknown paths fall back to `play.svg` with a warn log

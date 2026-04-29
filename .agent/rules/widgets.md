@@ -5,66 +5,76 @@ globs: src/widgets/**
 
 # Widgets
 
-## Global Atomics (in `src/theme.rs`)
+## Global Theme State (`src/theme.rs`)
 
-- `ROUNDED_MODE` (AtomicBool): `is_rounded_mode()` / `set_rounded_mode()`. `ui_border_radius()` → 6.0 or 0.0. **ALWAYS use `ui_border_radius()` instead of hardcoded border radii.**
-- `opacity_gradient` (AtomicBool): non-center slot opacity fade. Settings → Theme → Appearance.
-- `slot_row_height` (AtomicU8): `SlotRowHeight` enum (Compact 50px, Default 70px, Comfortable 90px, Spacious 110px). Settings → Interface → Layout.
-- **Transparent-border clipping**: Iced clips background to border radius even when border is transparent/0px. ALWAYS leave border radius unset on flush-to-edge bars.
+- **`DUAL_THEME` (`ArcSwap<ResolvedDualTheme>`)**: lock-free color reads (~12 ns/call). Color accessors do an atomic Arc clone — safe from any thread, including the visualizer.
+- **`ROUNDED_MODE` (AtomicBool)**: `is_rounded_mode()` / `set_rounded_mode()`. `ui_border_radius()` → 6.0 or 0.0. ALWAYS use `ui_border_radius()` instead of hardcoded radii.
+- **`opacity_gradient` (AtomicBool)**: non-center slot opacity fade.
+- **`slot_row_height` (AtomicU8)** → `SlotRowHeight` enum: Compact 50, Default 70, Comfortable 90, Spacious 110.
+- **Transparent-border clipping**: Iced clips background to border radius even with a 0px transparent border. Leave radius unset on flush-to-edge bars.
+
+## Single-Active Overlay Menu (`Nokkvi.open_menu`)
+
+Hamburger, player-bar kebab, view-header `checkbox_dropdown`, and right-click context menus are all **controlled** widgets — no local `is_open` state. Each widget bubbles `Message::SetOpenMenu(Option<OpenMenu>)` to root, which atomically replaces the current menu (so opening one closes any other). `OpenMenu` variants: `Hamburger`, `PlayerModes`, `CheckboxDropdown { view, trigger_bounds }`, `Context { id, position }`. Auto-closes on `SwitchView` and `WindowResized`.
 
 ## Player Bar (`player_bar.rs`)
 
-Responsive culling at breakpoints: format info (1000px) → visualizer (920px) → SFX (840px) → consume (680px) → shuffle (600px) → repeat (520px). Scroll-to-volume on wheel. Horizontal volume mode stacks sliders. Progress Track metadata mode builds scrolling overlay + format info container.
+Adaptive layout via `PlayerBarLayout { kebab_mode_count, transports_collapsed }`. `compute_layout(width, prev)` applies per-mode hysteresis so modes fold into the kebab one at a time as the window narrows. `CULL_ORDER` (right-to-left): Visualizer, Crossfade, SFX, EQ, Consume, Shuffle, Repeat. `CULL_ENTER_WIDTHS` 1070→670 px, `CULL_HYSTERESIS_PX = 40`. Transport row collapses 5→3 buttons (prev / play-pause / next) at narrow widths.
+
+Scroll-to-volume on wheel. Horizontal volume mode stacks sliders. Progress-track metadata mode builds the scrolling overlay + format-info container.
 
 ## Progress Bar (`progress_bar.rs`)
 
-Custom `iced::advanced` seekable widget. `Vec<OverlaySegment>` for scrolling colored metadata (2s pause, 30px/s, 80px loop gap). Handle rendered in separate `with_layer()` with expanded clip rect. Stale segments persist if not rebuilt after metadata toggle changes.
+Custom `iced::advanced` seekable widget. `Vec<OverlaySegment>` for scrolling colored metadata (2 s pause, 30 px/s, 80 px loop gap). Handle rendered in a separate `with_layer()` with an expanded clip rect. Stale segments persist if not rebuilt after a metadata-toggle change.
 
 ## Key Widgets
 
 | Widget | File | Purpose |
 |--------|------|---------|
-| Volume Slider | `volume_slider.rs` | Vertical/horizontal volume, `SliderVariant` |
-| View Header | `view_header.rs` | Sort mode selector, search bar, shuffle button, center-on-playing button, tooltips |
+| Volume Slider | `volume_slider.rs` | Vertical/horizontal, `SliderVariant` |
+| View Header | `view_header.rs` | Sort selector, search bar, shuffle, center-on-playing, columns dropdown |
 | Base Slot List | `base_slot_list_layout.rs` | Shared layout scaffolding, `base_slot_list_empty_state()` |
 | Scroll Indicator | `scroll_indicator.rs` | Transient scrollbar overlay, `wrap_with_scroll_indicator()`, drag-to-seek |
-| Hover Overlay | `hover_overlay.rs` | Per-slot hover darkening + press scale animation + external `flash_at()`. Default border radius = `ui_border_radius()` (theme-aware). |
-| Track Info Strip | `track_info_strip.rs` | Now-playing metadata, used by player bar and top bar, `info_field_widget()` shared helper |
+| Hover Overlay | `hover_overlay.rs` | Per-slot hover darkening + press scale + external `flash_at()`. Default radius = `ui_border_radius()` |
+| Track Info Strip | `track_info_strip.rs` | Now-playing metadata (player bar + top bar). `info_field_widget()` shared helper |
 | Marquee Text | `marquee_text.rs` | Scrolling overflow text, generic over message type |
-| Hover Indicator | `hover_indicator.rs` | Canvas-based hover underline, `HoverExpand` for hot zone expansion |
+| Hover Indicator | `hover_indicator.rs` | Canvas hover underline, `HoverExpand` for hot-zone expansion |
 | Context Menu | `context_menu.rs` | Right-click menu. `LibraryContextEntry` / `QueueContextEntry` / `StripContextEntry` |
-| Info Modal | `info_modal.rs` | Two-column property table for Get Info. `InfoModalItem` enum per type. |
-| Text Input Dialog | `text_input_dialog.rs` | Modal with text input or confirmation mode. Save Queue uses `combo_box`. |
+| Checkbox Dropdown | `checkbox_dropdown.rs` | Multi-checkbox column-visibility dropdown (controlled via `OpenMenu::CheckboxDropdown`) |
+| Info Modal | `info_modal.rs` | Two-column property table for Get Info. `InfoModalItem` enum |
+| Text Input Dialog | `text_input_dialog.rs` | Modal text input or confirmation. Save Queue uses `combo_box` |
 | EQ Slider | `eq_slider.rs` | Vertical ±15 dB slider for 10-band EQ |
-| Drag Column | `drag_column.rs` | In-queue drag-and-drop reordering (supports multi-selection batch) |
-| Format Info | `format_info.rs` | Audio format split-string helper (codec/bitrate sides) |
+| Drag Column | `drag_column.rs` | In-queue drag-and-drop reorder (multi-selection batch aware) |
+| Format Info | `format_info.rs` | Codec / bitrate split-string helper |
 | Hamburger Menu | `hamburger_menu.rs` | App menu (quit, light/dark toggle, about) |
-| Search Bar | `search_bar.rs` | Centralized search input with integrated clear button — used by every view header |
-| Link Text | `link_text.rs` | Hover-underlined clickable text widget (tight hitbox, accent on hover) — powers inline album/artist routing |
-| Metadata Pill | `metadata_pill.rs` | Composable artwork-panel metadata row builders (return `Option<Element>` for chainable display) |
+| Player Modes Menu | `player_modes_menu.rs` | Kebab-menu dropdown for culled mode toggles |
+| Search Bar | `search_bar.rs` | Centralized search input with integrated clear |
+| Link Text | `link_text.rs` | Hover-underlined clickable text (tight hitbox, accent on hover) |
+| Metadata Pill | `metadata_pill.rs` | Composable artwork-panel metadata row builders |
+| Artwork Split Handle | `artwork_split_handle.rs` | Draggable separator for artwork-column width |
 
 ## 3D Buttons
 
-`three_d_button.rs` / `three_d_icon_button.rs`: single bordered quad when rounded, 5-quad 3D bevel when squared. `AnimatedPress` (`three_d_helpers.rs`) for press scale animation.
+`three_d_button.rs` / `three_d_icon_button.rs`: single bordered quad in rounded mode, 5-quad bevel in squared mode. `AnimatedPress` (`three_d_helpers.rs`) for press scale animation.
 
 ## Nav Bars
 
-- **Top** (`nav_bar.rs`): tabs + format stats + hamburger menu. Metadata only shown for `TrackInfoDisplay::TopBar` mode. Progressive metadata collapsing (album <900, artist <750, title <600). Hover underlines via `HoverIndicator`.
-- **Side** (`side_nav_bar.rs`): `NavLayout::Side`, `NavDisplayMode` (TextOnly/TextAndIcons/IconsOnly).
+- **Top** (`nav_bar.rs`): tabs + format stats + hamburger. Metadata only when `TrackInfoDisplay::TopBar`. Progressive collapsing (album <900, artist <750, title <600). `HoverIndicator` underlines.
+- **Side** (`side_nav_bar.rs`): vertical sidebar. `NavDisplayMode` { TextOnly, TextAndIcons, IconsOnly }.
+- **None** layout: no nav chrome — only the active page + player bar render (minimalist mode).
 
 ## Layout Constants (`slot_list.rs`)
 
-Single source of truth: `chrome_height_with_header()`, `queue_slot_list_start_y()`, `NAV_BAR_HEIGHT` (32), `VIEW_HEADER_HEIGHT` (48), `TAB_BAR_HEIGHT` (36), `SLOT_SPACING` (3).
+Single source of truth: `chrome_height_with_header()`, `queue_slot_list_start_y()`, `NAV_BAR_HEIGHT = 32`, `VIEW_HEADER_HEIGHT = 48`, `TAB_BAR_HEIGHT = 36`, `SLOT_SPACING = 3`.
 
 ## Slot Rendering
 
-`SlotListRowContext` bundles per-slot args. Center slot gets `flash_at`. Clickable stars via `slot_list_star_rating()`, clickable hearts via `slot_list_favorite_icon()`. Top-packing when items < slot_count. Multi-selection highlight: `selected_indices` set renders selected slots with center-highlight styling; suppressed during active Ctrl/Shift modifier hold.
-**Aesthetics**: Uses `SlotListRowMetrics` to compute sizing offsets dynamically based on the active structural layout (e.g., `slot_row_height()`).
+`SlotListRowContext` bundles per-slot args. `SlotListRowMetrics` derives sizes from active `slot_row_height()`. Center slot gets `flash_at`. Clickable stars (`slot_list_star_rating()`) and hearts (`slot_list_favorite_icon()`). Top-packing when items < slot_count. Multi-selection highlight via `selected_indices`; suppressed during active Ctrl/Shift modifier hold.
 
 ## SVG Icons (`embedded_svg.rs`)
 
-**Top-level module** in `src/embedded_svg.rs` (not in `widgets/`). Compile-time embedded via `include_str!`. `get_svg(path)` maps paths → content. Unknown paths fall back to play icon with `warn!` log. `themed_logo_svg()` returns the Nokkvi logo with fills remapped to active theme colors (fg1, success, accent). To add: copy SVG → `assets/icons/`, add `const` + `include_str!`, add match arm in `get_svg()`, add to `KNOWN` list + test assertions.
+Top-level module. The lookup table is **generated by `build.rs`** from the contents of `assets/icons/` — adding/removing an icon is a one-step change (drop or remove the file, rebuild). Unknown paths return `play.svg` with a warn log. `themed_logo_svg()` rewrites the Nokkvi logo's hex fills to the active theme (fg1, success, accent).
 
 ## Critical Pattern
 
-**HoverOverlay Wraps Containers.** WHEN using HoverOverlay, ALWAYS wrap a container (`mouse_area(HoverOverlay::new(container(...)))`) rather than building over a native button. See gotchas.
+**HoverOverlay wraps containers, not native buttons.** Buttons capture `ButtonPressed` early. Pattern: `mouse_area(HoverOverlay::new(container(...))).on_press(msg)`.

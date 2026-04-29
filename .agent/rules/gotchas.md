@@ -6,61 +6,75 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 # Common Gotchas
 
 ## Queue & Indices
-- **Filtered indices**: WHEN search is active, ALWAYS map through `filtered_songs` for queue operations, as slot list indices are relative to the filtered queue.
-- **Queue peek/transition pattern**: WHEN handling track transitions, ALWAYS use `peek_next_song()` → `transition_to_queued()`. Use `set_current_index()` ONLY for non-transition updates (like play-from-here).
-- **Progressive queue generation**: `ProgressiveQueueAppendPage` chains must check `progressive_queue_generation` before appending — stale chains silently stop.
-- **Play button cold-start**: Uses `get_effective_center_index` (selected track), not `queue_songs.first()`.
-- **Gapless re-peek on mutation**: If a queue mutation (add/remove) calls `clear_queued()` between gapless prep and `on_track_finished`, `transition_to_queued()` would return `None` → playback stalls. The navigator now re-peeks when `queued.is_none() && !needs_load` before transitioning.
+
+- **Filtered indices**: when search is active, slot-list indices are relative to `filtered_songs` — always map through the filtered view before queue mutations.
+- **Queue peek/transition**: track transitions go `peek_next_song()` → `transition_to_queued()`. Use `set_current_index()` ONLY for non-transition updates (play-from-here).
+- **Progressive queue generation**: `ProgressiveQueueAppendPage` chains check `progressive_queue_generation` before appending — stale chains silently stop.
+- **Play button cold-start**: uses `get_effective_center_index` (selected track), not `queue_songs.first()`.
+- **Gapless re-peek on mutation**: a queue mutation between gapless prep and `on_track_finished` calls `clear_queued()`, so `transition_to_queued()` would return `None`. The navigator re-peeks when `queued.is_none() && !needs_load` before transitioning.
 
 ## Multi-Selection & Batch
-- **Ctrl+click toggle**: Deselecting the last item must clear `selected_offset` to remove the center-highlight from the deselected slot.
-- **Shift+click range**: Clears existing selection first, then adds the range from `anchor_index` to clicked offset.
-- **Context menu batch**: `evaluate_context_menu()` checks if clicked index is in the selection; if not, resets selection to just that item.
-- **Clear after batch ops**: Always call `clear_multi_selection()` after completing batch actions (queue add, playlist add, remove) to prevent stale selections.
-- **Cross-pane drag batch**: `cross_pane_drag_selection_count` is snapshotted at press time — decoupled from subsequent selection changes.
-- **Keyboard scroll clears selection**: `handle_navigate_up/down` clears single-item selection state (`selected_offset`) to prevent stale highlights during keyboard scrolling.
+
+- **Ctrl+click toggle**: deselecting the last item must clear `selected_offset` to remove the center-highlight from the deselected slot.
+- **Shift+click range**: clears existing selection first, then adds the range from `anchor_index` to clicked offset.
+- **Context menu batch**: `evaluate_context_menu()` checks if the clicked index is in the selection; if not, resets selection to just that item.
+- **Always `clear_multi_selection()` after batch ops** — prevents stale selections.
+- **Cross-pane drag batch**: `cross_pane_drag_selection_count` is snapshotted at press time; decoupled from subsequent selection changes.
+- **Keyboard scroll clears selection**: `handle_navigate_up/down` clears `selected_offset` to prevent stale highlights.
 
 ## Optimistic UI & Race Conditions
-- **Tick handler race**: The 10Hz tick can overwrite optimistic state with stale backend state. Use pending flags to prevent reversion before API response.
-- **Source generation counter**: Renderer snapshots `source_generation` (AtomicU64) before releasing the engine lock; discards callback if it changed. Prevents consume+shuffle replaying the just-consumed track.
-- **PagedBuffer pagination guard**: Call `set_loading(true)` before dispatching a page fetch — prevents duplicate fetches on rapid scroll.
-- **LRU artwork snapshot staleness**: Call `refresh_large_artwork_snapshot()` after every `put()` or `get()` on the LRU cache.
+
+- **Tick handler race**: 10 Hz tick can overwrite optimistic state with stale backend state — use pending flags to prevent reversion before API response.
+- **Source generation counter**: renderer snapshots `source_generation` (AtomicU64) before releasing the engine lock and discards the callback if it changed. Prevents consume+shuffle replaying the just-consumed track.
+- **PagedBuffer pagination guard**: call `set_loading(true)` before dispatching a page fetch — prevents duplicate fetches on rapid scroll. `PaginatedFetch::from_common()` handles this in update handlers.
+- **PagedBuffer generation**: `generation()` bumps on every mutation. Use `(query, generation)` keys when memoizing filtered results.
+- **LRU artwork snapshot staleness**: call `refresh_album_art_snapshot()` after every `put()` / `get()` on `album_art`, and `refresh_large_artwork_snapshot()` for `large_artwork`. Forget either and the next render shows stale thumbnails.
 
 ## Widget Tree & Focus
-- **Widget tree stability**: Changing root widget type (Row→Column) destroys `text_input` focus. Use `base_slot_list_empty_state` for consistent structure.
-- **Search input ID collisions**: Each view needs a unique search input ID constant.
-- **HoverOverlay Wraps Containers**: WHEN using HoverOverlay, ALWAYS wrap a `Container` instead of a native `Button`, since native buttons capture `ButtonPressed` early. Pattern: `mouse_area(HoverOverlay::new(container(content)...)).on_press(msg)`.
-- **Length::Fill stripe in unconstrained Row**: `container(Space).height(Fill)` in a row without explicit height expands to fill all column space. Set `height(Shrink)` on the wrapper row.
+
+- **Widget tree stability**: changing the root widget type (Row→Column) destroys `text_input` focus. Use `base_slot_list_empty_state` for consistent structure.
+- **Search input ID collisions**: each view needs a unique search input ID constant.
+- **HoverOverlay wraps containers, not native buttons** — buttons capture `ButtonPressed` early. Pattern: `mouse_area(HoverOverlay::new(container(content))).on_press(msg)`.
+- **`Length::Fill` stripe in unconstrained Row**: `container(Space).height(Fill)` in a row without explicit height expands to fill column space. Set `height(Shrink)` on the wrapper row.
+- **Single-active overlay menu**: hamburger / kebab / checkbox-dropdown / context menus must NOT own local `is_open` state. Bubble `Message::SetOpenMenu(Some(OpenMenu::…))` to root — opening a new one atomically replaces the previous one.
 
 ## Audio Engine
-- **Decoder operations**: WHEN handling track changes, ALWAYS create fresh decoders and release the audio engine lock beforehand.
-- **Crossfade trigger must be synchronous**: `render_tick`'s crossfade trigger must set `crossfade_active = true` synchronously before signaling the engine async. Otherwise EOF fires first → hard-cut.
-- **Crossfade duration clamping**: `arm_crossfade()` clamps to `min(xfade, shorter_track / 2)` and skips for songs < 10s.
-- **Stale gapless prep on mode toggles**: Mode toggle handlers must call `reset_next_track()` to clear prepared decoder and disarm crossfade trigger.
-- **Pre-volume visualizer samples**: Visualizer receives raw samples before volume multiplication, scaled to S16 range. FFT input is volume-independent.
-- **Visualizer buffer lifetime**: WHEN handling audio track changes, ALWAYS rely exclusively on the `pending_clear` atomic to manage stale audio, rather than adding custom clearing logic.
-- **Repeat track replay**: `on_track_finished` handler natively supports repeat-track mode by seeking to start. Manual skip (next/prev) bypasses repeat-track to allow navigation.
+
+- **Decoder operations**: create fresh decoders and release the engine lock beforehand on track changes.
+- **Crossfade trigger must be synchronous**: `render_tick`'s crossfade trigger sets `crossfade_active = true` synchronously before signaling the engine async — otherwise EOF fires first → hard cut.
+- **Crossfade duration clamping**: `arm_crossfade()` clamps to `min(xfade, shorter / 2)` and skips for songs < 10 s.
+- **Stale gapless prep on mode toggles**: mode toggle handlers call `reset_next_track()` to clear the prepared decoder and disarm the crossfade trigger.
+- **Pre-volume visualizer samples**: visualizer receives raw samples before volume multiplication, scaled to S16 range. FFT input is volume-independent.
+- **Track-completion lock**: the navigator releases its lock across engine I/O during track completion — do not re-introduce a held lock.
+- **ReplayGain stash**: incoming-track ReplayGain must be stashed via `set_pending_replay_gain()` / `set_pending_crossfade_replay_gain()` before stream creation; the engine pulls the right factor at primary or crossfade-stream creation time.
+- **Repeat track replay**: `on_track_finished` natively supports repeat-track via seek-to-start. Manual skip (next/prev) bypasses repeat-track.
 
 ## Config & Persistence
-- **Config writer routing**: `update_config_value()` → `config.toml`; `update_theme_value()` / `update_theme_color_array_entry()` → active theme file. Misrouting writes to the wrong file.
-- **Config reload suppression**: `suppress_config_reload()` prevents file watcher feedback loops, but GUI-initiated theme/visualizer changes need manual `ThemeConfigReloaded` trigger after write.
-- **Font propagation**: `font_family` is a global setting in `PlayerSettings`/`TomlSettings`, not tied to `ThemeFile`. Font changes are routed to `config.toml`. EQ modal `pick_list` must explicitly receive the active app font.
+
+- **Typed config writer routing**: `ConfigKey::AppScalar` / `AppArrayEntry` → `config.toml`; `ConfigKey::Theme` / `ThemeArrayEntry` → active theme file. Match on the variant — never sniff key prefixes.
+- **Config reload suppression**: `suppress_config_reload()` blocks the file watcher, but GUI-initiated theme/visualizer writes need a manual `ThemeConfigReloaded` trigger after the write.
+- **Font is global, not per-theme**: `font_family` lives in `PlayerSettings` / `TomlSettings` and routes to `config.toml`. EQ modal `pick_list` must explicitly receive the active app font.
+- **Database lock on re-login**: redb holds an exclusive lock; cache `StateStorage` on `Nokkvi.cached_storage` and reuse via `AppService::new_with_storage()`. Stop the engine + `TaskManager` on logout.
 
 ## Assets & Icons
-- **Silent SVG fallbacks**: All UI SVG icons must be explicitly registered via macro in `src/embedded_svg.rs` (in the const list, the match table, and the `KNOWN` test array). Because the macro has a smooth fallback to `play.svg` to prevent render-loop crashes for unregistered paths, the compiler **will not warn you** if you forget to register an icon or typo the path. You must run `cargo test --bin nokkvi -- embedded_svg` to reliably catch unbound icons.
+
+- **Auto-generated SVG lookup**: `assets/icons/*.svg` is enumerated at build time by `build.rs`, generating `OUT_DIR/embedded_svg_generated.rs`. Adding/removing an icon is just dropping the file. Unknown paths still silently fall back to `play.svg` with a warn log — the test `all_svg_paths_in_source_are_registered` (`cargo test --bin nokkvi -- embedded_svg`) catches typos in path strings.
 
 ## Artwork
+
 - **No client-side persistent cache**: every artwork fetch goes straight to Navidrome via `AlbumsService::fetch_album_artwork(...)`. Session-scoped Handle reuse comes from the UI's `album_art` (LRU 512) and `large_artwork` (LRU 200) maps in `ArtworkState`.
-- **Always `Handle::from_bytes`**: `from_bytes` allocates a fresh `Id::Unique` per call, so safe **only** because Handles are stored in the LRUs and reused across renders. Never re-create Handles from bytes per frame — that bypasses Iced's GPU texture cache entirely (`reference-iced/wgpu/src/image/raster.rs:55`).
-- **`album_art` snapshot mirror**: `view()` borrows `album_art_snapshot` (a `HashMap` mirror), not `album_art` directly, because LRU `get` is `&mut`. Every `put` on `album_art` MUST be followed by `refresh_album_art_snapshot()` — same pattern as `large_artwork_snapshot`. Forget the refresh and the next render shows stale thumbnails.
-- **Queue song mini vs large artwork**: Queue songs must request 80px thumbnails using the `album_id` so `fetch_album_artwork` builds a consistent URL across consumers. Large artwork must construct the full-size URL (`size=artwork_resolution`) rather than reusing the 80px thumbnail URL.
-- **Wildcard SSE skips artwork**: `Message::LibraryChanged { is_wildcard: true }` (full-library scan) MUST NOT trigger silent re-fetch — it would re-download every cached cover. Slot-list reloads still run.
+- **Always `Handle::from_bytes`**: `from_bytes` allocates a fresh `Id::Unique` per call — safe **only** because Handles are stored in the LRUs and reused across renders. Never re-create from bytes per frame; that bypasses Iced's GPU texture cache (`reference-iced/wgpu/src/image/raster.rs:55`).
+- **Snapshot mirrors**: `view()` borrows `album_art_snapshot` and `large_artwork_snapshot` (HashMap mirrors), not the LRUs directly, because LRU `get` is `&mut`. Every `put` MUST be followed by the matching `refresh_*_snapshot()`.
+- **Queue mini vs large artwork**: queue songs request 80 px thumbs using `album_id` so `fetch_album_artwork` builds a consistent URL across consumers. Large artwork constructs the full-size URL (`size=artwork_resolution`) — never reuse the 80 px URL.
+- **Wildcard SSE skips artwork**: `LibraryChanged { is_wildcard: true }` (full-library scan) MUST NOT trigger silent re-fetch — it would re-download every cached cover. Slot-list reloads still run.
+- **Random-sort SSE protection**: background SSE reload mustn't corrupt the artwork ref when the active sort is Random — guarded in `library_refresh.rs`.
+- **Albums viewport clamp**: clamp `viewport_offset` against the new total count on background refresh — otherwise the viewport can land past the end after a remove.
 
 ## Misc
-- **CenterOnPlaying (Shift+C)**: WHEN handling CenterOnPlaying, ALWAYS directly call `handle_set_offset()` rather than dispatching `SlotListMessage::SetOffset` (which routes through click-to-highlight path).
-- **Expansion sort state**: When expansion is active, sort/search may target the expansion. Check `expansion.is_expanded()`.
-- **Playlist edit guard**: Use `guard_play_action()` at the top of every play handler.
-- **Chrome height**: Must account for all visible header bars. Update constants in `widgets/slot_list.rs` when chrome changes.
-- **Cross-pane drag center index**: Snapshotted on drag activation (5px threshold) — decoupled from subsequent state changes.
-- **Database lock on re-login**: Cache `StateStorage` via `AppService::new_with_storage()`, stop engine + `TaskManager` on logout.
-- **Stale progress track segments**: When metadata toggle changes, overlay_segments must be rebuilt and a `Tick` dispatched to force re-render.
+
+- **CenterOnPlaying (Shift+C)**: call `handle_set_offset()` directly. Dispatching `SlotListMessage::SetOffset` routes through the click-to-highlight path.
+- **Expansion sort state**: when expansion is active, sort/search may target the expansion. Check `expansion.is_expanded()`. Shift+Enter on Artists/Genres collapses the outer expansion.
+- **Playlist edit guard**: `guard_play_action()` at the top of every play handler.
+- **Chrome height**: must account for every visible header bar. Update constants in `widgets/slot_list.rs` when chrome changes.
+- **Cross-pane drag center index**: snapshotted on drag activation (5 px threshold) — decoupled from subsequent state changes.
+- **Stale progress-track segments**: when a metadata toggle changes, `overlay_segments` must be rebuilt and a `Tick` dispatched to force re-render.

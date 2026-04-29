@@ -4,13 +4,11 @@ description: Audit and update .agent/rules/ and .agent/workflows/ to match the c
 
 # Sync Agent Rules
 
-Audit all `.agent/rules/` and `.agent/workflows/` files against the current codebase and update any that are stale.
+Audit every `.agent/rules/` and `.agent/workflows/` `.md` file against the live codebase and rewrite the stale ones.
 
 ## 1. Enumerate files and check staleness
 
 // turbo
-For each `.md` file in `.agent/rules/` and `.agent/workflows/`, run:
-
 ```bash
 for f in $(find .agent -type f -name '*.md' | sort); do
   last_commit=$(git log -1 --format='%H %ai %s' -- "$f")
@@ -23,34 +21,32 @@ for f in $(find .agent -type f -name '*.md' | sort); do
 done
 ```
 
-## 2. Get commit history since each stale file
+## 2. Pull commit summaries scoped to each stale file
 
 // turbo
-For files with significant commits since their last update, get the commit summaries:
+For files with meaningful drift, scope `git log` to the paths each rule documents:
 
 ```bash
-git --no-pager log --oneline <last_hash>..HEAD
+git --no-pager log --oneline <last_hash>..HEAD -- <path1> <path2>
 ```
 
-Focus on commits that touch areas each file documents (use `-- <path>` filters as needed).
+## 3. Verify claims against the codebase
 
-## 3. Read each stale file and research the codebase
+For each stale file:
+- Read the current contents
+- Check the structures it documents (`ls` directories, `grep` for enums/structs/fields/constants)
+- Note concrete discrepancies — wrong counts, missing modules, renamed types, dropped features
 
-For each file that needs updating:
-- Read the current file contents
-- Check the actual codebase structures it documents (list directories, grep for enums/structs/patterns)
-- Identify concrete discrepancies: wrong counts, missing files/modules, outdated field lists, missing features
+## 4. Rewrite stale files
 
-## 4. Update stale files
-
-Rewrite each stale file with accurate content. Follow these principles:
-- **Accuracy over completeness** — every claim must match the code
-- **Conciseness** — these files populate LLM context; trim verbose explanations, keep actionable information
-- **No redundancy** — don't duplicate information already in other rule files; cross-reference instead
-- Skip files that are still accurate (e.g., simple workflow steps that haven't changed)
+- **Accuracy** — every claim must match current code
+- **Brevity** — these files populate LLM context; trim filler, keep cross-references over duplication
+- **Skip** files that are still accurate
 
 ## 5. Commit
 
 ```bash
 git add .agent/ && git commit -m "chore(rules): sync agent rules and workflows with current codebase"
 ```
+
+End the commit message at the subject — no `Co-Authored-By` trailer. Stage only `.agent/` paths so unrelated working-tree changes are left alone. If nothing changed, skip the commit.

@@ -4,7 +4,7 @@ trigger: always_on
 
 # Project Context — Nokkvi
 
-A Rust/Iced desktop client for [Navidrome](https://www.navidrome.org/) music servers.
+A Rust/Iced desktop client for [Navidrome](https://www.navidrome.org/) music servers. Linux-only.
 
 ## Crate Structure
 
@@ -13,42 +13,42 @@ A Rust/Iced desktop client for [Navidrome](https://www.navidrome.org/) music ser
 | **UI** | `src/` | Iced frontend: views, widgets, update handlers, subscriptions, theme |
 | **Data** | `data/` | Iced-free backend: domain types, services, audio engine, API client, persistence |
 
-**Entry points:** `src/main.rs`, `src/app_message.rs` (root Message enum), `src/update/mod.rs` (central dispatcher), `data/src/backend/app_service.rs` (backend orchestrator).
+**Entry points:** `src/main.rs`, `src/app_message.rs` (root `Message` enum + `OpenMenu` enum), `src/update/mod.rs` (central dispatcher), `data/src/backend/app_service.rs` (backend orchestrator).
 
-**Key data structure:** `PagedBuffer<T>` (`data/src/types/paged_buffer.rs`) — replaces `Vec<T>` for all library data. `Deref<Target = [T]>` makes it a drop-in replacement. Load state tracked via `set_loading()` / `needs_fetch()`.
+**Key data structure:** `PagedBuffer<T>` (`data/src/types/paged_buffer.rs`) replaces `Vec<T>` for library data. `Deref<Target=[T]>` makes it a drop-in. Tracks load state via `set_loading()` / `needs_fetch()`. Exposes a monotonic `generation()` counter that bumps on every mutation — pair with `(query, generation)` keys when memoizing.
 
-**Consolidated state:** `src/state.rs` groups app state into domain structs (`PlaybackState`, `ActivePlayback` (Queue/Radio), `RadioPlaybackState`, `ScrobbleState`, `PlaybackModes`, `LibraryData`, `LibraryCounts`, `WindowState`, `ToastState`, `SimilarSongsState`, `ArtworkState`, `CollageArtworkCache`, `EngineState`, `SfxState`, `CrossPaneDragState`, `PaneFocus`, `StoredSession`, `ActivePlaylistContext`).
+**Consolidated state** in `src/state.rs`: `PaneFocus`, `CrossPaneDragState`, `StoredSession`, `ActivePlaylistContext`, `ActivePlayback` (Queue/Radio), `RadioPlaybackState`, `PlaybackState`, `ScrobbleState`, `PlaybackModes`, `SfxState`, `EngineState`, `CollageArtworkCache`, `ArtworkState`, `WindowState`, `LibraryData`, `LibraryCounts`, `ToastState`, `SimilarSongsState`. Plus `Nokkvi.open_menu: Option<OpenMenu>` as the single-active overlay-menu coordinator (Hamburger / PlayerModes / CheckboxDropdown / Context).
 
 ## Core Pattern: TEA (The Elm Architecture)
 
-Every view follows this structure — do not deviate:
+Every view follows this — do not deviate:
 
 ```rust
-// 1. State struct
-pub struct AlbumsPage { common: SlotListPageState, ... }
-
-// 2. Local message enum
-pub enum AlbumsMessage { SlotListNavigateUp, SlotListNavigateDown, ... }
-
-// 3. Action enum (bubbles to root for side effects)
+pub struct AlbumsPage { common: SlotListPageState, /* ... */ }
+pub enum AlbumsMessage { SlotListNavigateUp, /* ... */ }
 pub enum AlbumsAction { PlayAlbum(String), None }
-
-// 4. update() returns (Task, Action)
-fn update(&mut self, msg: AlbumsMessage) -> (Task<AlbumsMessage>, AlbumsAction)
-
-// 5. view() is pure, receives borrowed ViewData from app state
-fn view<'a>(&'a self, data: AlbumsViewData<'a>) -> Element<'a, AlbumsMessage>
+fn update(&mut self, msg: AlbumsMessage) -> (Task<AlbumsMessage>, AlbumsAction);
+fn view<'a>(&'a self, data: AlbumsViewData<'a>) -> Element<'a, AlbumsMessage>;  // pure
 ```
 
-**ViewData structs borrow app state** (`&'a` references, not clones). The `large_artwork` field borrows a pre-computed `HashMap` snapshot refreshed after each LRU mutation.
+**ViewData borrows app state** (`&'a` references, not clones). The artwork fields borrow pre-computed `HashMap` snapshots refreshed after every LRU mutation.
 
-**Shared traits:** `ViewPage` trait (explicit `impl` per view, no macro). `CommonViewAction` + `HasCommonAction` trait for generic SearchChanged/SortModeChanged/SortOrderChanged handling. `impl_expansion_update!` macro for expansion view deduplication.
+**Shared infrastructure:**
+- `ViewPage` trait (`views/mod.rs`) — explicit `impl` per view, no macro. Hotkey dispatch + pane-aware routing.
+- `CommonViewAction` + `HasCommonAction` — generic SearchChanged / SortModeChanged / SortOrderChanged dispatch.
+- `impl_expansion_update!` macro — deduplicates inline expansion handling.
+- `SlotListPageState` — shared state for every slot-list view (search, scroll, focus, multi-selection set).
+- `PaginatedFetch::from_common()` (`update/components.rs`) — needs_fetch-gated paginated load helper used by Albums / Artists / Songs.
 
-**Root routing** in `update/mod.rs` dispatches `Message::Albums(msg)` to the page, then handles the returned Action.
+Root routing in `update/mod.rs` dispatches `Message::Albums(msg)` → `albums_page.update(msg)`, then handles the returned Action.
 
 ## Message Architecture
 
-The root `Message` enum uses **namespaced sub-enums**: `PlaybackMessage`, `ScrobbleMessage`, `HotkeyMessage`, `ArtworkMessage`, `SlotListMessage` (carries `View`), `ToastMessage`. Flat variants remain for cross-cutting concerns. See `src/app_message.rs`.
+Root `Message` is namespaced: `PlaybackMessage`, `ScrobbleMessage`, `HotkeyMessage`, `ArtworkMessage`, `SlotListMessage` (carries `View`), `ToastMessage`. Cross-cutting variants stay flat. See `src/app_message.rs`.
+
+## Pages on `Nokkvi`
+
+`login_page`, `albums_page`, `artists_page`, `genres_page`, `playlists_page`, `queue_page`, `songs_page`, `radios_page`, `settings_page`, `similar_page`. The browsing panel (`views/browsing_panel.rs`) reuses `AlbumsPage` / `SongsPage` / `ArtistsPage` / `GenresPage` / `SimilarPage` via `BrowsingView`.
 
 ## Naming Conventions
 
@@ -59,14 +59,12 @@ The root `Message` enum uses **namespaced sub-enums**: `PlaybackMessage`, `Scrob
 | Backend services | `data/src/backend/{name}.rs` |
 | API endpoints | `data/src/services/api/{name}.rs` |
 | Domain types | `data/src/types/{name}.rs` |
-| Slot list widgets | `widgets/slot_list.rs` (rendering via `SlotListRowMetrics`), `widgets/slot_list_view.rs` (scroll state), `widgets/slot_list_page.rs` (page state) |
+| Slot list widgets | `widgets/slot_list.rs` (rendering + `SlotListRowMetrics`), `slot_list_view.rs` (scroll), `slot_list_page.rs` (page state) |
 
 ## Directories to Skip
 
-`target/`, `dist/`, `docs/`, `tmp/`, `local/` — not project code.
+`target/`, `dist/`, `tmp/`, `local/`, `.venv/` — not project code.
 
 ## Reference Codebases
 
-External repos cloned locally for reference (not part of this project). Browse `reference-{name}/` when needed:
-
-`iced`, `iced-apps`, `iced-book`, `iced-docs`, `symphonia`, `feishin`, `lucide` (icons), `navidrome`, `rmpc`, `rmpc-docs`, `rodio`.
+External repos cloned locally for read-only reference (not part of this project). `reference-{name}/`: `iced`, `iced-apps`, `iced-book`, `iced-docs`, `symphonia`, `feishin`, `lucide` (icons), `navidrome`, `rmpc`, `rmpc-docs`, `rodio`.
