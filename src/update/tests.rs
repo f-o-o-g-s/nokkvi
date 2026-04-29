@@ -1422,6 +1422,8 @@ fn make_settings_view_data() -> crate::views::SettingsViewData {
         artists_artwork_overlay: true,
         songs_artwork_overlay: true,
         playlists_artwork_overlay: true,
+        artwork_column_mode: "Auto",
+        artwork_column_stretch_fit: "Cover",
         verbose_config: false,
         artwork_resolution: "Default",
     }

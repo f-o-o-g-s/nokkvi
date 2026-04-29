@@ -400,6 +400,30 @@ impl SettingsService {
         sm.set_playlists_artwork_overlay(enabled)
     }
 
+    /// Set the artwork column display mode and persist.
+    pub async fn set_artwork_column_mode(
+        &self,
+        mode: crate::types::player_settings::ArtworkColumnMode,
+    ) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_artwork_column_mode(mode)
+    }
+
+    /// Set the artwork column stretch fit and persist.
+    pub async fn set_artwork_column_stretch_fit(
+        &self,
+        fit: crate::types::player_settings::ArtworkStretchFit,
+    ) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_artwork_column_stretch_fit(fit)
+    }
+
+    /// Set the artwork column width fraction (0.05..=0.80) and persist.
+    pub async fn set_artwork_column_width_pct(&self, pct: f32) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_artwork_column_width_pct(pct)
+    }
+
     /// Set queue's stars column visibility and persist
     pub async fn set_queue_show_stars(&self, enabled: bool) -> anyhow::Result<()> {
         let mut sm = self.settings_manager.lock().await;

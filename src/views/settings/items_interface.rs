@@ -21,6 +21,10 @@ pub(crate) struct InterfaceSettingsData<'a> {
     pub artists_artwork_overlay: bool,
     pub songs_artwork_overlay: bool,
     pub playlists_artwork_overlay: bool,
+    /// Artwork column display mode label (Auto / Always (Native) / Always (Stretched) / Never)
+    pub artwork_column_mode: &'a str,
+    /// Artwork column stretch fit label (Cover / Fill) — only consumed when mode is stretched.
+    pub artwork_column_stretch_fit: &'a str,
 }
 
 /// Build settings entries for the Interface tab
@@ -29,6 +33,7 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
     const VIEWS: &str = "assets/icons/layout-grid.svg";
     const FONT: &str = "assets/icons/type.svg";
     const STRIP: &str = "assets/icons/radio-tower.svg";
+    const ARTWORK_COL: &str = "assets/icons/panel-right-open.svg";
 
     let font_display = if data.font_family.is_empty() {
         "(system default)"
@@ -36,7 +41,7 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
         data.font_family
     };
 
-    vec![
+    let mut items: Vec<SettingsEntry> = vec![
         // --- Layout ---
         SettingsEntry::Header {
             label: "Layout",
@@ -208,5 +213,36 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
                 "Do Nothing",
             ],
         ),
-    ]
+        // --- Artwork Column ---
+        SettingsEntry::Header {
+            label: "Artwork Column",
+            icon: ARTWORK_COL,
+        },
+        SettingItem::enum_val(
+            meta!(
+                "general.artwork_column_mode",
+                "Display Mode",
+                "Auto: hides on narrow windows · Always: drag the handle to resize · Never: hidden everywhere"
+            ),
+            data.artwork_column_mode,
+            "Auto",
+            vec!["Auto", "Always (Native)", "Always (Stretched)", "Never"],
+        ),
+    ];
+
+    // Stretched-only knob: image fit applies only when the column is stretched.
+    if data.artwork_column_mode == "Always (Stretched)" {
+        items.push(SettingItem::enum_val(
+            meta!(
+                "general.artwork_column_stretch_fit",
+                "Stretch Fit",
+                "Cover: crop to fill, preserve aspect · Fill: true stretch, distorts album art"
+            ),
+            data.artwork_column_stretch_fit,
+            "Cover",
+            vec!["Cover", "Fill"],
+        ));
+    }
+
+    items
 }

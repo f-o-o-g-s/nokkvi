@@ -180,6 +180,8 @@ pub enum AlbumsMessage {
     /// `Message::SetOpenMenu`. Intercepted in `handle_albums` before the
     /// page's `update` runs.
     SetOpenMenu(Option<crate::app_message::OpenMenu>),
+    /// Artwork column drag handle event — intercepted at root, page never sees it.
+    ArtworkColumnDrag(crate::widgets::artwork_split_handle::DragEvent),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -749,9 +751,7 @@ impl AlbumsPage {
         let slot_list_content = slot_list_background_container(slot_list_content);
 
         // Use base slot list layout with artwork column
-        use crate::widgets::base_slot_list_layout::{
-            base_slot_list_layout, single_artwork_panel_with_pill,
-        };
+        use crate::widgets::base_slot_list_layout::single_artwork_panel_with_pill;
 
         // Build artwork column component — show parent album art even when on a child track
         let centered_album = center_index.and_then(|idx| match flattened.get(idx) {
@@ -873,7 +873,13 @@ impl AlbumsPage {
             },
         ));
 
-        base_slot_list_layout(&layout_config, header, slot_list_content, artwork_content)
+        crate::widgets::base_slot_list_layout::base_slot_list_layout_with_handle(
+            &layout_config,
+            header,
+            slot_list_content,
+            artwork_content,
+            Some(AlbumsMessage::ArtworkColumnDrag),
+        )
     }
 
     /// Render an album row in the slot list (existing album layout)

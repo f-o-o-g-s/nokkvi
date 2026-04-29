@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize, Serializer};
 use crate::{
     audio::eq::CustomEqPreset,
     types::player_settings::{
-        ArtworkResolution, EnterBehavior, LibraryPageSize, NavDisplayMode, NavLayout,
-        NormalizationLevel, SlotRowHeight, StripClickAction, TrackInfoDisplay, VisualizationMode,
-        VolumeNormalizationMode,
+        ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, EnterBehavior, LibraryPageSize,
+        NavDisplayMode, NavLayout, NormalizationLevel, SlotRowHeight, StripClickAction,
+        TrackInfoDisplay, VisualizationMode, VolumeNormalizationMode,
     },
 };
 
@@ -61,6 +61,17 @@ pub struct TomlSettings {
     pub artists_artwork_overlay: bool,
     pub songs_artwork_overlay: bool,
     pub playlists_artwork_overlay: bool,
+
+    // -- Artwork column layout --
+    #[serde(default)]
+    pub artwork_column_mode: ArtworkColumnMode,
+    #[serde(default)]
+    pub artwork_column_stretch_fit: ArtworkStretchFit,
+    #[serde(
+        default = "default_artwork_column_width_pct",
+        serialize_with = "round_f32"
+    )]
+    pub artwork_column_width_pct: f32,
 
     // -- Behavior --
     pub stable_viewport: bool,
@@ -132,6 +143,10 @@ fn default_replay_gain_prevent_clipping() -> bool {
     true
 }
 
+fn default_artwork_column_width_pct() -> f32 {
+    0.40
+}
+
 /// Serialize an f32 rounded to 4 decimal places to avoid f32→f64 representation noise
 /// (e.g. 0.8999999761581421 → 0.9).
 fn round_f32<S: Serializer>(val: &f32, s: S) -> Result<S::Ok, S::Error> {
@@ -184,6 +199,9 @@ impl Default for TomlSettings {
             artists_artwork_overlay: true,
             songs_artwork_overlay: true,
             playlists_artwork_overlay: true,
+            artwork_column_mode: ArtworkColumnMode::default(),
+            artwork_column_stretch_fit: ArtworkStretchFit::default(),
+            artwork_column_width_pct: default_artwork_column_width_pct(),
             stable_viewport: true,
             auto_follow_playing: true,
             light_mode: false,
@@ -258,6 +276,9 @@ impl TomlSettings {
             artists_artwork_overlay: ps.artists_artwork_overlay,
             songs_artwork_overlay: ps.songs_artwork_overlay,
             playlists_artwork_overlay: ps.playlists_artwork_overlay,
+            artwork_column_mode: ps.artwork_column_mode,
+            artwork_column_stretch_fit: ps.artwork_column_stretch_fit,
+            artwork_column_width_pct: ps.artwork_column_width_pct,
             stable_viewport: ps.stable_viewport,
             auto_follow_playing: ps.auto_follow_playing,
             light_mode: false, // Will be read from theme.light_mode or fresh default

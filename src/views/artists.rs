@@ -181,6 +181,8 @@ pub enum ArtistsMessage {
     /// `Message::SetOpenMenu`. Intercepted in `handle_artists` before the
     /// page's `update` runs.
     SetOpenMenu(Option<crate::app_message::OpenMenu>),
+    /// Artwork column drag handle event — intercepted at root, page never sees it.
+    ArtworkColumnDrag(crate::widgets::artwork_split_handle::DragEvent),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -1010,9 +1012,7 @@ impl ArtistsPage {
         use crate::widgets::slot_list::slot_list_background_container;
         let slot_list_content = slot_list_background_container(slot_list_content);
 
-        use crate::widgets::base_slot_list_layout::{
-            base_slot_list_layout, single_artwork_panel_with_pill,
-        };
+        use crate::widgets::base_slot_list_layout::single_artwork_panel_with_pill;
 
         // Build artwork column — show parent artist art even when on a child or grandchild
         let centered_artist = center_index.and_then(|idx| match flattened.get(idx) {
@@ -1167,7 +1167,13 @@ impl ArtistsPage {
             |_| ArtistsMessage::SetOpenMenu(None),
         ));
 
-        base_slot_list_layout(&layout_config, header, slot_list_content, artwork_content)
+        crate::widgets::base_slot_list_layout::base_slot_list_layout_with_handle(
+            &layout_config,
+            header,
+            slot_list_content,
+            artwork_content,
+            Some(ArtistsMessage::ArtworkColumnDrag),
+        )
     }
 
     /// Render an artist row in the slot list (standard layout)

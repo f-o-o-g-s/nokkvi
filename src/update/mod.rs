@@ -752,6 +752,9 @@ impl Nokkvi {
                 // Force UI refresh
                 Task::done(Message::Playback(PlaybackMessage::Tick))
             }
+            Message::Albums(crate::views::AlbumsMessage::ArtworkColumnDrag(ev)) => {
+                self.handle_artwork_column_drag(ev)
+            }
             Message::Albums(msg) => {
                 dispatch_view_with_seek!(
                     self,
@@ -761,7 +764,13 @@ impl Nokkvi {
                     View::Albums
                 )
             }
+            Message::Queue(crate::views::QueueMessage::ArtworkColumnDrag(ev)) => {
+                self.handle_artwork_column_drag(ev)
+            }
             Message::Queue(msg) => self.handle_queue(msg),
+            Message::Artists(crate::views::ArtistsMessage::ArtworkColumnDrag(ev)) => {
+                self.handle_artwork_column_drag(ev)
+            }
             Message::Artists(msg) => {
                 dispatch_view_with_seek!(
                     self,
@@ -770,6 +779,9 @@ impl Nokkvi {
                     crate::views::ArtistsMessage::SlotListScrollSeek(_),
                     View::Artists
                 )
+            }
+            Message::Songs(crate::views::SongsMessage::ArtworkColumnDrag(ev)) => {
+                self.handle_artwork_column_drag(ev)
             }
             Message::Songs(msg) => {
                 dispatch_view_with_seek!(
@@ -780,6 +792,9 @@ impl Nokkvi {
                     View::Songs
                 )
             }
+            Message::Genres(crate::views::GenresMessage::ArtworkColumnDrag(ev)) => {
+                self.handle_artwork_column_drag(ev)
+            }
             Message::Genres(msg) => {
                 dispatch_view_with_seek!(
                     self,
@@ -788,6 +803,9 @@ impl Nokkvi {
                     crate::views::GenresMessage::SlotListScrollSeek(_),
                     View::Genres
                 )
+            }
+            Message::Playlists(crate::views::PlaylistsMessage::ArtworkColumnDrag(ev)) => {
+                self.handle_artwork_column_drag(ev)
             }
             Message::Playlists(msg) => {
                 dispatch_view_with_seek!(
@@ -1027,6 +1045,9 @@ impl Nokkvi {
             // -----------------------------------------------------------------
             // Similar Songs
             // -----------------------------------------------------------------
+            Message::Similar(crate::views::SimilarMessage::ArtworkColumnDrag(ev)) => {
+                self.handle_artwork_column_drag(ev)
+            }
             Message::Similar(msg) => self.handle_similar_message(msg),
             Message::FindSimilar { id, label } => self.handle_find_similar(id, label),
             Message::FindTopSongs { artist_name, label } => {
@@ -1035,6 +1056,38 @@ impl Nokkvi {
             Message::SimilarSongsLoaded(generation, result, label) => {
                 self.handle_similar_songs_loaded(generation, result, label)
             }
+            Message::ArtworkColumnDragChange(pct) => self.handle_artwork_column_drag(
+                crate::widgets::artwork_split_handle::DragEvent::Change(pct),
+            ),
+            Message::ArtworkColumnDragCommit(pct) => self.handle_artwork_column_drag(
+                crate::widgets::artwork_split_handle::DragEvent::Commit(pct),
+            ),
         }
+    }
+
+    /// Shared handler for artwork-column drag events emitted by every view's
+    /// drag handle. `Change` only updates the live atomic; `Commit` also
+    /// persists to TOML via the settings backend.
+    fn handle_artwork_column_drag(
+        &mut self,
+        ev: crate::widgets::artwork_split_handle::DragEvent,
+    ) -> Task<Message> {
+        use crate::widgets::artwork_split_handle::DragEvent;
+        match ev {
+            DragEvent::Change(pct) => {
+                crate::theme::set_artwork_column_width_pct(pct);
+            }
+            DragEvent::Commit(pct) => {
+                crate::theme::set_artwork_column_width_pct(pct);
+                let final_pct = crate::theme::artwork_column_width_pct();
+                self.shell_spawn("persist_artwork_column_width", move |shell| async move {
+                    shell
+                        .settings()
+                        .set_artwork_column_width_pct(final_pct)
+                        .await
+                });
+            }
+        }
+        Task::none()
     }
 }

@@ -303,6 +303,8 @@ pub(crate) struct SettingsViewData {
     pub artists_artwork_overlay: bool,
     pub songs_artwork_overlay: bool,
     pub playlists_artwork_overlay: bool,
+    pub artwork_column_mode: &'static str,
+    pub artwork_column_stretch_fit: &'static str,
     pub verbose_config: bool,
     pub artwork_resolution: &'static str,
 }

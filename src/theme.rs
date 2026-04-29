@@ -7,7 +7,7 @@
 
 use std::sync::{
     Arc, LazyLock,
-    atomic::{AtomicBool, AtomicU8, Ordering},
+    atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering},
 };
 
 use arc_swap::ArcSwap;
@@ -88,6 +88,12 @@ struct UiModeFlags {
     songs_artwork_overlay: AtomicBool,
     /// Whether the metadata text overlay is rendered on the large artwork in Playlists view
     playlists_artwork_overlay: AtomicBool,
+    /// Artwork column display mode: 0=Auto, 1=AlwaysNative, 2=AlwaysStretched, 3=Never
+    artwork_column_mode: AtomicU8,
+    /// Artwork stretch fit when column mode is AlwaysStretched: 0=Cover, 1=Fill
+    artwork_column_stretch_fit: AtomicU8,
+    /// Artwork column width as fraction of window width (f32 bits, 0.05..=0.80)
+    artwork_column_width_pct: AtomicU32,
 }
 
 static UI_MODE: UiModeFlags = UiModeFlags {
@@ -110,6 +116,10 @@ static UI_MODE: UiModeFlags = UiModeFlags {
     artists_artwork_overlay: AtomicBool::new(true),
     songs_artwork_overlay: AtomicBool::new(true),
     playlists_artwork_overlay: AtomicBool::new(true),
+    artwork_column_mode: AtomicU8::new(0),        // Auto
+    artwork_column_stretch_fit: AtomicU8::new(0), // Cover
+    // f32::to_bits(0.40) = 0x3ECCCCCD
+    artwork_column_width_pct: AtomicU32::new(0x3ECC_CCCD),
 };
 
 /// Reload theme from theme file (hot-reload support).
@@ -628,6 +638,71 @@ pub(crate) fn set_playlists_artwork_overlay(enabled: bool) {
     UI_MODE
         .playlists_artwork_overlay
         .store(enabled, Ordering::Relaxed);
+}
+
+// ============================================================================
+// Artwork Column Layout
+// ============================================================================
+
+use nokkvi_data::types::player_settings::{ArtworkColumnMode, ArtworkStretchFit};
+
+/// Returns the active artwork column display mode.
+#[inline]
+pub(crate) fn artwork_column_mode() -> ArtworkColumnMode {
+    match UI_MODE.artwork_column_mode.load(Ordering::Relaxed) {
+        1 => ArtworkColumnMode::AlwaysNative,
+        2 => ArtworkColumnMode::AlwaysStretched,
+        3 => ArtworkColumnMode::Never,
+        _ => ArtworkColumnMode::Auto,
+    }
+}
+
+/// Set the artwork column display mode (call when user changes the setting).
+#[inline]
+pub(crate) fn set_artwork_column_mode(mode: ArtworkColumnMode) {
+    let val = match mode {
+        ArtworkColumnMode::Auto => 0,
+        ArtworkColumnMode::AlwaysNative => 1,
+        ArtworkColumnMode::AlwaysStretched => 2,
+        ArtworkColumnMode::Never => 3,
+    };
+    UI_MODE.artwork_column_mode.store(val, Ordering::Relaxed);
+}
+
+/// Returns the active artwork stretch fit (only meaningful in AlwaysStretched mode).
+#[inline]
+pub(crate) fn artwork_column_stretch_fit() -> ArtworkStretchFit {
+    match UI_MODE.artwork_column_stretch_fit.load(Ordering::Relaxed) {
+        1 => ArtworkStretchFit::Fill,
+        _ => ArtworkStretchFit::Cover,
+    }
+}
+
+/// Set the artwork stretch fit.
+#[inline]
+pub(crate) fn set_artwork_column_stretch_fit(fit: ArtworkStretchFit) {
+    let val = match fit {
+        ArtworkStretchFit::Cover => 0,
+        ArtworkStretchFit::Fill => 1,
+    };
+    UI_MODE
+        .artwork_column_stretch_fit
+        .store(val, Ordering::Relaxed);
+}
+
+/// Returns the artwork column width fraction (0.05..=0.80).
+#[inline]
+pub(crate) fn artwork_column_width_pct() -> f32 {
+    f32::from_bits(UI_MODE.artwork_column_width_pct.load(Ordering::Relaxed))
+}
+
+/// Set the artwork column width fraction. Clamps into [0.05, 0.80].
+#[inline]
+pub(crate) fn set_artwork_column_width_pct(pct: f32) {
+    let clamped = pct.clamp(0.05, 0.80);
+    UI_MODE
+        .artwork_column_width_pct
+        .store(clamped.to_bits(), Ordering::Relaxed);
 }
 
 // ============================================================================

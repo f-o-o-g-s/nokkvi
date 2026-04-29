@@ -95,6 +95,8 @@ impl SettingsPage {
                     artists_artwork_overlay: data.artists_artwork_overlay,
                     songs_artwork_overlay: data.songs_artwork_overlay,
                     playlists_artwork_overlay: data.playlists_artwork_overlay,
+                    artwork_column_mode: data.artwork_column_mode,
+                    artwork_column_stretch_fit: data.artwork_column_stretch_fit,
                 };
                 items::build_interface_items(&idata)
             }

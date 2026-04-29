@@ -11,8 +11,9 @@ use crate::{
     types::{
         hotkey_config::{HotkeyAction, HotkeyConfig, KeyCombo},
         player_settings::{
-            ArtworkResolution, EnterBehavior, NavDisplayMode, NavLayout, NormalizationLevel,
-            SlotRowHeight, StripClickAction, TrackInfoDisplay, VolumeNormalizationMode,
+            ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, EnterBehavior, NavDisplayMode,
+            NavLayout, NormalizationLevel, SlotRowHeight, StripClickAction, TrackInfoDisplay,
+            VolumeNormalizationMode,
         },
         queue::{QueueSortPreferences, SortPreferences},
         queue_sort_mode::QueueSortMode,
@@ -384,6 +385,21 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_artwork_column_mode(&mut self, mode: ArtworkColumnMode) -> Result<()> {
+        self.settings.player.artwork_column_mode = mode;
+        self.save()
+    }
+
+    pub fn set_artwork_column_stretch_fit(&mut self, fit: ArtworkStretchFit) -> Result<()> {
+        self.settings.player.artwork_column_stretch_fit = fit;
+        self.save()
+    }
+
+    pub fn set_artwork_column_width_pct(&mut self, pct: f32) -> Result<()> {
+        self.settings.player.artwork_column_width_pct = pct.clamp(0.05, 0.80);
+        self.save()
+    }
+
     pub fn set_strip_click_action(&mut self, action: StripClickAction) -> Result<()> {
         self.settings.player.strip_click_action = action;
         self.save()
@@ -714,6 +730,9 @@ impl SettingsManager {
             artists_artwork_overlay: p.artists_artwork_overlay,
             songs_artwork_overlay: p.songs_artwork_overlay,
             playlists_artwork_overlay: p.playlists_artwork_overlay,
+            artwork_column_mode: p.artwork_column_mode,
+            artwork_column_stretch_fit: p.artwork_column_stretch_fit,
+            artwork_column_width_pct: p.artwork_column_width_pct,
         }
     }
 
@@ -809,6 +828,9 @@ fn apply_toml_settings_to_internal(
     p.artists_artwork_overlay = ts.artists_artwork_overlay;
     p.songs_artwork_overlay = ts.songs_artwork_overlay;
     p.playlists_artwork_overlay = ts.playlists_artwork_overlay;
+    p.artwork_column_mode = ts.artwork_column_mode;
+    p.artwork_column_stretch_fit = ts.artwork_column_stretch_fit;
+    p.artwork_column_width_pct = ts.artwork_column_width_pct;
 }
 
 /// Convert `AllViewPreferences` into the internal `ViewPreferences` for redb storage.

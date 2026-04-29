@@ -71,6 +71,8 @@ impl Nokkvi {
             artists_artwork_overlay: crate::theme::artists_artwork_overlay(),
             songs_artwork_overlay: crate::theme::songs_artwork_overlay(),
             playlists_artwork_overlay: crate::theme::playlists_artwork_overlay(),
+            artwork_column_mode: crate::theme::artwork_column_mode().as_label(),
+            artwork_column_stretch_fit: crate::theme::artwork_column_stretch_fit().as_label(),
             verbose_config: self.verbose_config,
             artwork_resolution: self.artwork_resolution.as_label(),
         }
@@ -1028,6 +1030,31 @@ impl Nokkvi {
                 },
                 true,
             ),
+            "general.artwork_column_mode" => {
+                if let crate::views::settings::items::SettingValue::Enum { val, .. } = value {
+                    let mode =
+                        nokkvi_data::types::player_settings::ArtworkColumnMode::from_label(&val);
+                    crate::theme::set_artwork_column_mode(mode);
+                    self.shell_spawn("persist_artwork_column_mode", move |shell| async move {
+                        shell.settings().set_artwork_column_mode(mode).await
+                    });
+                }
+                Task::none()
+            }
+            "general.artwork_column_stretch_fit" => {
+                if let crate::views::settings::items::SettingValue::Enum { val, .. } = value {
+                    let fit =
+                        nokkvi_data::types::player_settings::ArtworkStretchFit::from_label(&val);
+                    crate::theme::set_artwork_column_stretch_fit(fit);
+                    self.shell_spawn(
+                        "persist_artwork_column_stretch_fit",
+                        move |shell| async move {
+                            shell.settings().set_artwork_column_stretch_fit(fit).await
+                        },
+                    );
+                }
+                Task::none()
+            }
             "general.strip_click_action" => {
                 if let crate::views::settings::items::SettingValue::Enum { val, .. } = value {
                     let action =

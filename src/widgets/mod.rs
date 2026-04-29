@@ -5,6 +5,7 @@
 //! breakpoint culling, and 3D Gruvbox-styled buttons/sliders.
 
 // Components
+pub(crate) mod artwork_split_handle;
 pub(crate) mod base_slot_list_layout;
 pub(crate) mod drag_column;
 pub(crate) mod eq_slider;

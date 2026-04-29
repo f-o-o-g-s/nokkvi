@@ -781,19 +781,49 @@ mod tests {
             artists_artwork_overlay: true,
             songs_artwork_overlay: true,
             playlists_artwork_overlay: true,
+            artwork_column_mode: "Auto",
+            artwork_column_stretch_fit: "Cover",
         };
         let entries = build_interface_items(&data);
 
         assert_eq!(
             count_headers(&entries),
-            4,
-            "Expected 4 sections: Layout, Views, Font, Metadata Strip"
+            5,
+            "Expected 5 sections: Layout, Views, Font, Metadata Strip, Artwork Column"
         );
         assert_eq!(
             count_items(&entries),
-            11,
-            "Expected 11 items (nav_layout, nav_display_mode, track_info_display, slot_row_height, horizontal_volume, artwork_overlays_toggle_set, slot_text_links, font_family, visible_fields, merged_mode, click_action)"
+            12,
+            "Expected 12 items (... + artwork_column_mode); stretched mode adds the fit knob"
         );
+    }
+
+    #[test]
+    fn interface_items_artwork_column_stretched_adds_fit_knob() {
+        use super::super::items_interface::{InterfaceSettingsData, build_interface_items};
+        let data = InterfaceSettingsData {
+            nav_layout: "Top",
+            nav_display_mode: "Text Only",
+            track_info_display: "Off",
+            slot_row_height: "Default",
+            horizontal_volume: false,
+            slot_text_links: true,
+            font_family: "",
+            strip_show_title: true,
+            strip_show_artist: true,
+            strip_show_album: true,
+            strip_show_format_info: true,
+            strip_merged_mode: false,
+            strip_click_action: "Go to Queue",
+            albums_artwork_overlay: true,
+            artists_artwork_overlay: true,
+            songs_artwork_overlay: true,
+            playlists_artwork_overlay: true,
+            artwork_column_mode: "Always (Stretched)",
+            artwork_column_stretch_fit: "Cover",
+        };
+        let entries = build_interface_items(&data);
+        assert_eq!(count_items(&entries), 13);
     }
 
     #[test]
@@ -1003,6 +1033,8 @@ mod tests {
             artists_artwork_overlay: true,
             songs_artwork_overlay: true,
             playlists_artwork_overlay: true,
+            artwork_column_mode: "Auto",
+            artwork_column_stretch_fit: "Cover",
         };
         let playback = crate::views::settings::items_playback::PlaybackSettingsData {
             crossfade_enabled: false,

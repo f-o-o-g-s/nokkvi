@@ -225,6 +225,8 @@ pub enum QueueMessage {
     /// `Message::SetOpenMenu`. Intercepted in `handle_queue` before the
     /// page's `update` runs.
     SetOpenMenu(Option<crate::app_message::OpenMenu>),
+    /// Artwork column drag handle event — intercepted at root, page never sees it.
+    ArtworkColumnDrag(crate::widgets::artwork_split_handle::DragEvent),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -368,6 +370,10 @@ impl QueuePage {
             // Routed up to root in `handle_queue` before this match runs;
             // arm exists only for exhaustiveness.
             QueueMessage::SetOpenMenu(_) => (Task::none(), QueueAction::None),
+            QueueMessage::ArtworkColumnDrag(_) => {
+                // Intercepted at root before reaching this update; never reached.
+                (Task::none(), QueueAction::None)
+            }
             QueueMessage::ClickSetRating(item_index, rating) => {
                 if let Some(song) = queue_songs.get(item_index) {
                     let current = song.rating.unwrap_or(0) as usize;
@@ -1329,9 +1335,7 @@ impl QueuePage {
                 .and_then(|song| large_artwork.get(&song.album_id))
         });
 
-        use crate::widgets::base_slot_list_layout::{
-            base_slot_list_layout, single_artwork_panel_with_menu,
-        };
+        use crate::widgets::base_slot_list_layout::single_artwork_panel_with_menu;
 
         // Build artwork column component — determine album_id for refresh action
         let center_album_id: Option<String> = if data.is_playing {
@@ -1367,7 +1371,13 @@ impl QueuePage {
             },
         ));
 
-        base_slot_list_layout(&layout_config, header, slot_list_content, artwork_content)
+        crate::widgets::base_slot_list_layout::base_slot_list_layout_with_handle(
+            &layout_config,
+            header,
+            slot_list_content,
+            artwork_content,
+            Some(QueueMessage::ArtworkColumnDrag),
+        )
     }
 }
 

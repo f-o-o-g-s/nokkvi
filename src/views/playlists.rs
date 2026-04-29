@@ -157,6 +157,8 @@ pub enum PlaylistsMessage {
     /// `Message::SetOpenMenu`. Intercepted in `handle_playlists` before the
     /// page's `update` runs.
     SetOpenMenu(Option<crate::app_message::OpenMenu>),
+    /// Artwork column drag handle event — intercepted at root, page never sees it.
+    ArtworkColumnDrag(crate::widgets::artwork_split_handle::DragEvent),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -636,8 +638,6 @@ impl PlaylistsPage {
         use crate::widgets::slot_list::slot_list_background_container;
         let slot_list_content = slot_list_background_container(slot_list_content);
 
-        use crate::widgets::base_slot_list_layout::base_slot_list_layout;
-
         // Build artwork column — show parent playlist art even when on a child track
         let centered_playlist = center_index.and_then(|idx| match flattened.get(idx) {
             Some(SlotListEntry::Parent(playlist)) => Some(playlist),
@@ -750,7 +750,13 @@ impl PlaylistsPage {
             ))
         };
 
-        base_slot_list_layout(&layout_config, header, slot_list_content, artwork_content)
+        crate::widgets::base_slot_list_layout::base_slot_list_layout_with_handle(
+            &layout_config,
+            header,
+            slot_list_content,
+            artwork_content,
+            Some(PlaylistsMessage::ArtworkColumnDrag),
+        )
     }
 
     /// Render a parent playlist row in the slot list

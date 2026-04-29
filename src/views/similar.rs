@@ -60,6 +60,8 @@ pub enum SimilarMessage {
     /// `Message::SetOpenMenu`. Intercepted in `handle_similar` before the
     /// page's `update` runs.
     SetOpenMenu(Option<crate::app_message::OpenMenu>),
+    /// Artwork column drag handle event — intercepted at root, page never sees it.
+    ArtworkColumnDrag(crate::widgets::artwork_split_handle::DragEvent),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -108,6 +110,10 @@ impl SimilarPage {
             // Routed up to root in `handle_similar` before this match runs;
             // arm exists only for exhaustiveness.
             SimilarMessage::SetOpenMenu(_) => (Task::none(), SimilarAction::None),
+            SimilarMessage::ArtworkColumnDrag(_) => {
+                // Intercepted at root before reaching this update; never reached.
+                (Task::none(), SimilarAction::None)
+            }
             SimilarMessage::SlotListNavigateUp => {
                 self.common.handle_navigate_up(total_items);
                 if let Some(center_idx) = self.common.get_center_item_index(total_items)
@@ -487,9 +493,7 @@ impl SimilarPage {
         use crate::widgets::slot_list::slot_list_background_container;
         let slot_list_content = slot_list_background_container(slot_list_content);
 
-        use crate::widgets::base_slot_list_layout::{
-            base_slot_list_layout, single_artwork_panel_with_menu,
-        };
+        use crate::widgets::base_slot_list_layout::single_artwork_panel_with_menu;
 
         let centered_song = center_index.and_then(|idx| songs.get(idx));
         let artwork_handle = centered_song
@@ -506,7 +510,13 @@ impl SimilarPage {
             |_| SimilarMessage::SetOpenMenu(None),
         ));
 
-        base_slot_list_layout(&layout_config, header, slot_list_content, artwork_content)
+        crate::widgets::base_slot_list_layout::base_slot_list_layout_with_handle(
+            &layout_config,
+            header,
+            slot_list_content,
+            artwork_content,
+            Some(SimilarMessage::ArtworkColumnDrag),
+        )
     }
 }
 

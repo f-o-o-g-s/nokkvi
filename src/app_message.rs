@@ -534,4 +534,11 @@ pub enum Message {
         Result<Vec<nokkvi_data::types::song::Song>, String>,
         String,
     ),
+
+    // --- Artwork Column Resize ---
+    /// Live drag preview — updates the theme atomic so the column re-renders at
+    /// the new width. Does NOT persist to TOML.
+    ArtworkColumnDragChange(f32),
+    /// Drag released — persists the final pct via the settings backend.
+    ArtworkColumnDragCommit(f32),
 }

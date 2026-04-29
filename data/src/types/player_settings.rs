@@ -588,6 +588,102 @@ impl std::fmt::Display for ArtworkResolution {
     }
 }
 
+/// Artwork column display mode — controls visibility and sizing of the
+/// large artwork column rendered alongside slot lists in albums/songs/queue/
+/// artists/genres/playlists/similar views.
+///
+/// Serializes to snake_case strings for redb storage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtworkColumnMode {
+    /// Width derived from window size; column auto-hides when leftover slot
+    /// list width drops below 800px. Panel always square. (Default.)
+    #[default]
+    Auto,
+    /// Column has a user-defined width; image stays square inside it,
+    /// letterboxed vertically when the column is taller than wide.
+    AlwaysNative,
+    /// Column has a user-defined width; image fills the column non-square
+    /// using the configured fit mode (Cover or Fill).
+    AlwaysStretched,
+    /// Column hidden everywhere.
+    Never,
+}
+
+impl ArtworkColumnMode {
+    /// Convert from settings GUI label to enum variant.
+    pub fn from_label(label: &str) -> Self {
+        match label {
+            "Always (Native)" => Self::AlwaysNative,
+            "Always (Stretched)" => Self::AlwaysStretched,
+            "Never" => Self::Never,
+            _ => Self::Auto,
+        }
+    }
+
+    /// Convert to settings GUI label.
+    pub fn as_label(self) -> &'static str {
+        match self {
+            Self::Auto => "Auto",
+            Self::AlwaysNative => "Always (Native)",
+            Self::AlwaysStretched => "Always (Stretched)",
+            Self::Never => "Never",
+        }
+    }
+}
+
+impl std::fmt::Display for ArtworkColumnMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Auto => write!(f, "auto"),
+            Self::AlwaysNative => write!(f, "always_native"),
+            Self::AlwaysStretched => write!(f, "always_stretched"),
+            Self::Never => write!(f, "never"),
+        }
+    }
+}
+
+/// Fit mode for `ArtworkColumnMode::AlwaysStretched` — picks how the image
+/// fills the non-square column. Other modes ignore this value.
+///
+/// Serializes to lowercase strings for redb storage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ArtworkStretchFit {
+    /// `iced::ContentFit::Cover` — preserves aspect ratio, crops to fill.
+    #[default]
+    Cover,
+    /// `iced::ContentFit::Fill` — true stretch, distorts album art.
+    Fill,
+}
+
+impl ArtworkStretchFit {
+    /// Convert from settings GUI label to enum variant.
+    pub fn from_label(label: &str) -> Self {
+        match label {
+            "Fill" => Self::Fill,
+            _ => Self::Cover,
+        }
+    }
+
+    /// Convert to settings GUI label.
+    pub fn as_label(self) -> &'static str {
+        match self {
+            Self::Cover => "Cover",
+            Self::Fill => "Fill",
+        }
+    }
+}
+
+impl std::fmt::Display for ArtworkStretchFit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Cover => write!(f, "cover"),
+            Self::Fill => write!(f, "fill"),
+        }
+    }
+}
+
 /// Player settings loaded from persistence (redb).
 ///
 /// Note: `light_mode` is stored in config.toml, not redb.
@@ -735,6 +831,15 @@ pub struct PlayerSettings {
     pub songs_artwork_overlay: bool,
     /// Whether the metadata text overlay is rendered on the large artwork in Playlists view.
     pub playlists_artwork_overlay: bool,
+
+    // -- Artwork column layout --
+    /// Display mode for the large artwork column (auto-hide / always / never).
+    pub artwork_column_mode: ArtworkColumnMode,
+    /// Fit mode used when `artwork_column_mode == AlwaysStretched`.
+    pub artwork_column_stretch_fit: ArtworkStretchFit,
+    /// Artwork column width as a fraction of window width (0.05..=0.80).
+    /// Only consulted in `AlwaysNative` / `AlwaysStretched` modes.
+    pub artwork_column_width_pct: f32,
 }
 
 #[cfg(test)]

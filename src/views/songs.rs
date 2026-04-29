@@ -153,6 +153,8 @@ pub enum SongsMessage {
     /// `Message::SetOpenMenu`. Intercepted in `handle_songs` before the
     /// page's `update` runs.
     SetOpenMenu(Option<crate::app_message::OpenMenu>),
+    /// Artwork column drag handle event — intercepted at root, page never sees it.
+    ArtworkColumnDrag(crate::widgets::artwork_split_handle::DragEvent),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -437,6 +439,10 @@ impl SongsPage {
             // Routed up to root in `handle_songs` before this match runs;
             // arm exists only for exhaustiveness.
             SongsMessage::SetOpenMenu(_) => (Task::none(), SongsAction::None),
+            SongsMessage::ArtworkColumnDrag(_) => {
+                // Intercepted at root before reaching this update; never reached.
+                (Task::none(), SongsAction::None)
+            }
             SongsMessage::RefreshViewData => (Task::none(), SongsAction::RefreshViewData),
             SongsMessage::RefreshArtwork(album_id) => {
                 (Task::none(), SongsAction::RefreshArtwork(album_id))
@@ -866,9 +872,7 @@ impl SongsPage {
         use crate::widgets::slot_list::slot_list_background_container;
         let slot_list_content = slot_list_background_container(slot_list_content);
 
-        use crate::widgets::base_slot_list_layout::{
-            base_slot_list_layout, single_artwork_panel_with_pill,
-        };
+        use crate::widgets::base_slot_list_layout::single_artwork_panel_with_pill;
 
         // Build artwork column component - use album artwork of centered song
         let centered_song = center_index.and_then(|idx| songs.get(idx));
@@ -970,7 +974,13 @@ impl SongsPage {
             },
         ));
 
-        base_slot_list_layout(&layout_config, header, slot_list_content, artwork_content)
+        crate::widgets::base_slot_list_layout::base_slot_list_layout_with_handle(
+            &layout_config,
+            header,
+            slot_list_content,
+            artwork_content,
+            Some(SongsMessage::ArtworkColumnDrag),
+        )
     }
 }
 

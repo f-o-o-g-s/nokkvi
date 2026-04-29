@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 use crate::types::{
     hotkey_config::HotkeyConfig,
     player_settings::{
-        ArtworkResolution, EnterBehavior, LibraryPageSize, NavDisplayMode, NavLayout,
-        NormalizationLevel, SlotRowHeight, StripClickAction, TrackInfoDisplay, VisualizationMode,
-        VolumeNormalizationMode,
+        ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, EnterBehavior, LibraryPageSize,
+        NavDisplayMode, NavLayout, NormalizationLevel, SlotRowHeight, StripClickAction,
+        TrackInfoDisplay, VisualizationMode, VolumeNormalizationMode,
     },
     queue::{QueueSortPreferences, SortPreferences},
     queue_sort_mode::QueueSortMode,
@@ -246,6 +246,22 @@ pub struct PlayerSettings {
     /// Whether the metadata text overlay is rendered on the large artwork in Playlists view.
     #[serde(default = "default_true")]
     pub playlists_artwork_overlay: bool,
+
+    // -- Artwork column layout --
+    /// Display mode for the large artwork column (auto / always-native / always-stretched / never).
+    #[serde(default)]
+    pub artwork_column_mode: ArtworkColumnMode,
+    /// Fit mode used when `artwork_column_mode == AlwaysStretched`.
+    #[serde(default)]
+    pub artwork_column_stretch_fit: ArtworkStretchFit,
+    /// Artwork column width as a fraction of window width (0.05..=0.80).
+    /// Only consulted in always modes.
+    #[serde(default = "default_artwork_column_width_pct")]
+    pub artwork_column_width_pct: f32,
+}
+
+fn default_artwork_column_width_pct() -> f32 {
+    0.40
 }
 
 fn default_eq_gains() -> [f32; 10] {
@@ -361,6 +377,9 @@ impl Default for PlayerSettings {
             artists_artwork_overlay: true,
             songs_artwork_overlay: true,
             playlists_artwork_overlay: true,
+            artwork_column_mode: ArtworkColumnMode::default(),
+            artwork_column_stretch_fit: ArtworkStretchFit::default(),
+            artwork_column_width_pct: default_artwork_column_width_pct(),
         }
     }
 }
