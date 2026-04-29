@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## v0.3.5 — 2026-04-28
+
+### Fixes
+- **Close to Tray on Wayland** — close-to-tray (introduced in 0.3.4) now actually hides the window on Hyprland / KDE / GNOME / sway. The previous implementation issued `iced::window::set_mode(Hidden)`, which winit's Wayland backend treats as a documented no-op because compositors own surface visibility — the close handler ran and the state flipped, but the window stayed on screen. Switched the iced runtime from `iced::application` to `iced::daemon` so the runtime stays alive when the last window closes, then close-to-tray dispatches `iced::window::close(id)` and the tray "Show" path opens a fresh window via `iced::window::open(...)`. App state, audio, MPRIS, scrobbling, and the tray subscription all survive the close/reopen cycle unchanged.
+
 ## v0.3.4 — 2026-04-28
 
 ### Features

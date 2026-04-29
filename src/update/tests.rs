@@ -3655,18 +3655,22 @@ fn tray_settings_default_off() {
 }
 
 #[test]
-fn window_opened_captures_main_window_id_once() {
+fn window_opened_replaces_main_window_id() {
     let mut app = test_app();
     let id1 = iced::window::Id::unique();
     let id2 = iced::window::Id::unique();
 
     let _ = app.handle_window_opened(id1);
     assert_eq!(app.main_window_id, Some(id1));
+    assert!(!app.tray_window_hidden);
 
-    // A subsequent window-open event must not overwrite the first id —
-    // the tray uses this as the canonical "main window" handle.
+    // Daemon mode: close-to-tray destroys the surface; tray Activate opens
+    // a fresh window with a different id. handle_window_opened must adopt
+    // the new id (the old one was destroyed) and mark the app as visible.
+    app.tray_window_hidden = true;
     let _ = app.handle_window_opened(id2);
-    assert_eq!(app.main_window_id, Some(id1));
+    assert_eq!(app.main_window_id, Some(id2));
+    assert!(!app.tray_window_hidden);
 }
 
 #[test]
@@ -3685,16 +3689,19 @@ fn window_close_requested_with_close_to_tray_off_does_not_hide() {
 }
 
 #[test]
-fn window_close_requested_with_close_to_tray_on_hides_window() {
+fn window_close_requested_with_close_to_tray_on_destroys_window() {
     let mut app = test_app();
     app.show_tray_icon = true;
     app.close_to_tray = true;
+    app.main_window_id = Some(iced::window::Id::unique());
     let id = iced::window::Id::unique();
 
     let _ = app.handle_window_close_requested(id);
 
     assert!(app.tray_window_hidden);
-    assert_eq!(app.main_window_id, Some(id));
+    // The window is being destroyed — its id is no longer addressable.
+    // Cleared so the next tray Activate goes through the "open" branch.
+    assert_eq!(app.main_window_id, None);
 }
 
 #[test]
@@ -3705,11 +3712,25 @@ fn tray_activate_toggles_window_hidden_flag() {
     app.main_window_id = Some(iced::window::Id::unique());
     assert!(!app.tray_window_hidden);
 
+    // First Activate: visible → hidden. Closes the window, clears the id.
     let _ = app.handle_tray(TrayEvent::Activate);
-    assert!(app.tray_window_hidden, "first Activate hides");
+    assert!(
+        app.tray_window_hidden,
+        "first Activate hides (closes window)"
+    );
+    assert_eq!(
+        app.main_window_id, None,
+        "closed window's id is not re-usable"
+    );
 
+    // Second Activate: hidden → visible. Dispatches window::open; the new
+    // id arrives via WindowOpened later. We flip the flag synchronously
+    // so a third rapid Activate reads the right intent.
     let _ = app.handle_tray(TrayEvent::Activate);
-    assert!(!app.tray_window_hidden, "second Activate shows");
+    assert!(
+        !app.tray_window_hidden,
+        "second Activate shows (opens new window)"
+    );
 }
 
 #[test]

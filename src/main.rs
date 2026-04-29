@@ -377,8 +377,11 @@ impl Default for Nokkvi {
 // ============================================================================
 
 impl Nokkvi {
-    /// Window title — dynamic based on playback state
-    pub fn title(&self) -> String {
+    /// Window title — dynamic based on playback state.
+    ///
+    /// Daemon-mode signature: the `_window` id is unused because nokkvi only
+    /// ever has a single main window.
+    pub fn title(&self, _window: iced::window::Id) -> String {
         if self.active_playback.is_radio() {
             let status = if self.playback.playing {
                 ""
@@ -409,8 +412,10 @@ impl Nokkvi {
         }
     }
 
-    /// Application theme — custom Gruvbox palette for default widget styles
-    pub fn theme(&self) -> Theme {
+    /// Application theme — custom Gruvbox palette for default widget styles.
+    ///
+    /// Daemon-mode signature: `_window` is unused (single window only).
+    pub fn theme(&self, _window: iced::window::Id) -> Theme {
         theme::iced_theme()
     }
 
@@ -895,20 +900,39 @@ pub fn main() -> iced::Result {
         .with(file_layer)
         .init();
 
-    iced::application(Nokkvi::default, Nokkvi::update, Nokkvi::view)
+    iced::daemon(boot, Nokkvi::update, Nokkvi::view)
         .title(Nokkvi::title)
         .default_font(theme::ui_font())
         .subscription(Nokkvi::subscription)
         .antialiasing(true)
-        .window(iced::window::Settings {
-            platform_specific: PlatformSpecific {
-                application_id: "org.nokkvi.nokkvi".to_string(),
-                ..Default::default()
-            },
-            // Routed via `Message::WindowCloseRequested` so close-to-tray can
-            // hide the window instead of exiting the runtime.
-            exit_on_close_request: false,
-            ..Default::default()
-        })
         .run()
+}
+
+/// Daemon boot: build the initial state and queue a task to open the main
+/// window. The resulting window id is delivered through the
+/// `iced::window::open_events()` subscription (already wired up), so we
+/// `.discard()` the open task's payload here to avoid a double-fire of
+/// `Message::WindowOpened`.
+fn boot() -> (Nokkvi, Task<Message>) {
+    let state = Nokkvi::default();
+    let (_id, open_task) = iced::window::open(main_window_settings());
+    (state, open_task.discard())
+}
+
+/// Settings for the main window. Reused by `boot()` and by the tray's
+/// "show window" path (`set_window_hidden(false)`), which has to recreate
+/// the window because Wayland makes `set_visible(false)` a no-op — true
+/// hide-to-tray on Wayland requires destroying the surface and opening a
+/// fresh one.
+pub(crate) fn main_window_settings() -> iced::window::Settings {
+    iced::window::Settings {
+        platform_specific: PlatformSpecific {
+            application_id: "org.nokkvi.nokkvi".to_string(),
+            ..Default::default()
+        },
+        // Routed via `Message::WindowCloseRequested` so close-to-tray can
+        // close + reopen the window instead of exiting the runtime.
+        exit_on_close_request: false,
+        ..Default::default()
+    }
 }

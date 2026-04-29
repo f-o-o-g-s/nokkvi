@@ -2,7 +2,19 @@
 //!
 //! Translates `TrayEvent`s emitted by the ksni service into application
 //! messages, and bridges window-close interception (`WindowCloseRequested`)
-//! into either a window-hide or a quit, depending on user settings.
+//! into either a window-destroy or a quit, depending on user settings.
+//!
+//! ## Why we destroy + reopen instead of hiding
+//!
+//! Wayland intentionally does not let an application hide its own surface —
+//! the compositor controls visibility. `winit::Window::set_visible(false)`
+//! is a documented no-op on Wayland, so `iced::window::set_mode(id, Hidden)`
+//! does nothing on Hyprland / KDE / GNOME / sway. The only portable Wayland
+//! pattern is to `iced::window::close(id)` on hide and
+//! `iced::window::open(settings)` on show — the runtime stays alive across
+//! the gap because `iced::daemon` (see `main.rs`) doesn't treat
+//! "no windows" as an exit condition. Audio / MPRIS / tray subscriptions
+//! all keep running while the window is gone.
 
 use iced::{Task, window};
 use tracing::debug;
@@ -32,14 +44,17 @@ impl Nokkvi {
         }
     }
 
-    /// Window close (X button) interception. Hides into the tray when
-    /// `show_tray_icon && close_to_tray`, otherwise quits.
+    /// Window close (X button) interception. Destroys the window into the
+    /// tray when `show_tray_icon && close_to_tray`, otherwise quits.
+    ///
+    /// Destroying (vs. hiding) is required for Wayland — see the module
+    /// docs above.
     pub fn handle_window_close_requested(&mut self, id: window::Id) -> Task<Message> {
-        self.main_window_id = Some(id);
         if self.show_tray_icon && self.close_to_tray {
-            debug!(" Close requested → hiding window into tray");
+            debug!(" Close requested → destroying window (will reopen via tray)");
             self.tray_window_hidden = true;
-            window::set_mode(id, window::Mode::Hidden)
+            self.main_window_id = None;
+            window::close(id)
         } else {
             debug!(" Close requested → quitting app");
             Task::done(Message::QuitApp)
@@ -47,9 +62,10 @@ impl Nokkvi {
     }
 
     pub fn handle_window_opened(&mut self, id: window::Id) -> Task<Message> {
-        if self.main_window_id.is_none() {
-            self.main_window_id = Some(id);
-        }
+        // Daemon mode: a fresh open after close-to-tray creates a window with
+        // a new id. Always replace, then mark the app as visible again.
+        self.main_window_id = Some(id);
+        self.tray_window_hidden = false;
         Task::none()
     }
 
@@ -59,16 +75,25 @@ impl Nokkvi {
     }
 
     fn set_window_hidden(&mut self, hidden: bool) -> Task<Message> {
-        let Some(id) = self.main_window_id else {
-            debug!(" Tray show/hide requested before window id captured");
-            return Task::none();
-        };
-        self.tray_window_hidden = hidden;
-        let mode = if hidden {
-            window::Mode::Hidden
+        if hidden {
+            // Destroy the window. main_window_id is consumed; the next show
+            // path opens a fresh window with a new id (delivered via the
+            // open_events subscription → handle_window_opened).
+            let Some(id) = self.main_window_id.take() else {
+                debug!(" Tray hide requested but no main window — nothing to close");
+                return Task::none();
+            };
+            self.tray_window_hidden = true;
+            window::close(id)
         } else {
-            window::Mode::Windowed
-        };
-        window::set_mode(id, mode)
+            // Open a fresh window. handle_window_opened will set
+            // main_window_id and clear tray_window_hidden once it arrives,
+            // but we flip the flag here too so a rapid second Activate
+            // (before WindowOpened arrives) reads the right intent.
+            debug!(" Tray show requested — opening new window");
+            self.tray_window_hidden = false;
+            let (_id, open_task) = window::open(crate::main_window_settings());
+            open_task.discard()
+        }
     }
 }

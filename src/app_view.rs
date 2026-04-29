@@ -84,8 +84,10 @@ impl Nokkvi {
     // SECTION: View Functions
     // =========================================================================
 
-    /// Root view dispatcher
-    pub fn view(&self) -> Element<'_, Message> {
+    /// Root view dispatcher.
+    ///
+    /// Daemon-mode signature: `_window` is unused (single window only).
+    pub fn view(&self, _window: iced::window::Id) -> Element<'_, Message> {
         let screen_view = match self.screen {
             Screen::Login => self.login_view(),
             Screen::Home => self.home_view(),
