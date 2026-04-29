@@ -587,7 +587,12 @@ impl Nokkvi {
             let shell = shell.clone();
             Task::perform(async move { f(shell).await }, map)
         } else {
-            tracing::warn!(
+            // Logged at debug, not warn: this fires during expected transition
+            // windows (boot before session resume completes, logout while
+            // subscription-driven messages are still in flight) — not just
+            // when a caller invokes us in a context they shouldn't. The file
+            // log still captures it for diagnosis; stderr stays clean.
+            tracing::debug!(
                 "shell_task called before app_service initialized (pre-login?) — task dropped"
             );
             Task::none()
