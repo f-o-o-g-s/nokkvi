@@ -24,7 +24,7 @@ CI runs all four checks (fmt-check / clippy `-D warnings` / test / release build
 
 System dependencies (Arch): `pacman -S pipewire fontconfig pkg-config`. The audio engine links against `libpipewire-0.3` at build time.
 
-Per-user data lives in `~/.config/nokkvi/` (config.toml, app.redb, themes/, cache/, sfx/, nokkvi.log). The log file is truncated on every launch.
+Per-user data lives in `~/.config/nokkvi/` (config.toml, app.redb, themes/, sfx/, nokkvi.log). The log file is truncated on every launch.
 
 ## Workspace layout
 

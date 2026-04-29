@@ -59,55 +59,6 @@ impl AppService {
         Self::new_with_storage(storage).await
     }
 
-    /// Remove the pre-B legacy artwork disk cache subdirectories on first launch
-    /// after the migration. Best-effort; failures are logged and ignored. The
-    /// artwork pipeline is now server-only, so the entire `cache/` directory is
-    /// removed once its known legacy subdirs are gone.
-    fn cleanup_pre_b_artwork_cache() {
-        let Ok(app_dir) = crate::utils::paths::get_app_dir() else {
-            return;
-        };
-        let cache_dir = app_dir.join("cache");
-        if !cache_dir.exists() {
-            return;
-        }
-        for legacy in [
-            "artwork",
-            "artist_artwork",
-            "genre_artwork",
-            "playlist_artwork",
-            "http",
-        ] {
-            let path = cache_dir.join(legacy);
-            if path.exists() {
-                match std::fs::remove_dir_all(&path) {
-                    Ok(()) => {
-                        tracing::info!(
-                            " [migration] removed legacy artwork cache: {}",
-                            path.display()
-                        );
-                    }
-                    Err(e) => {
-                        tracing::warn!(" [migration] failed to remove {}: {e}", path.display());
-                    }
-                }
-            }
-        }
-        // Remove the now-unused cache parent. `remove_dir` is non-recursive,
-        // so unknown user files (if any) are preserved and the directory stays.
-        match std::fs::remove_dir(&cache_dir) {
-            Ok(()) => tracing::info!(
-                " [migration] removed empty cache directory: {}",
-                cache_dir.display()
-            ),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => tracing::debug!(
-                " [migration] cache directory not removed ({}): {e}",
-                cache_dir.display()
-            ),
-        }
-    }
-
     /// Create an AppService re-using an existing StateStorage handle.
     ///
     /// This avoids the redb exclusive-lock conflict when re-logging in
@@ -116,12 +67,6 @@ impl AppService {
     pub async fn new_with_storage(
         storage: crate::services::state_storage::StateStorage,
     ) -> Result<Self> {
-        // One-time migration: drop legacy artwork cache subdirs so the new
-        // server-only pipeline doesn't carry orphaned files forward. Removes
-        // both the pre-B custom DiskCache subdirs (`artwork/`, `artist_artwork/`,
-        // etc.) and the brief Plan B Hygiene cacache dir (`http/`).
-        Self::cleanup_pre_b_artwork_cache();
-
         let auth_gateway = AuthGateway::new()?;
         let queue_service = QueueService::new(auth_gateway.clone(), storage.clone())?;
         let settings_service = SettingsService::new(storage.clone())?;
