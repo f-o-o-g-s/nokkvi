@@ -310,6 +310,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_queue_show_default_playlist(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.queue_show_default_playlist = enabled;
+        self.save()
+    }
+
     pub fn set_horizontal_volume(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.horizontal_volume = enabled;
         self.save()
@@ -693,6 +698,7 @@ impl SettingsManager {
             default_playlist_id: p.default_playlist_id.clone(),
             default_playlist_name: p.default_playlist_name.clone(),
             quick_add_to_playlist: p.quick_add_to_playlist,
+            queue_show_default_playlist: p.queue_show_default_playlist,
             horizontal_volume: p.horizontal_volume,
             font_family: p.font_family.clone(),
             volume_normalization: p.volume_normalization,
@@ -809,6 +815,7 @@ fn apply_toml_settings_to_internal(
     p.scrobbling_enabled = ts.scrobbling_enabled;
     p.scrobble_threshold = ts.scrobble_threshold as f64;
     p.quick_add_to_playlist = ts.quick_add_to_playlist;
+    p.queue_show_default_playlist = ts.queue_show_default_playlist;
     p.eq_enabled = ts.eq_enabled;
     p.eq_gains = ts.eq_gains;
     p.custom_eq_presets = ts.custom_eq_presets.clone();

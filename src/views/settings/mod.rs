@@ -293,6 +293,7 @@ pub(crate) struct SettingsViewData {
     pub replay_gain_prevent_clipping: bool,
     pub default_playlist_name: String,
     pub quick_add_to_playlist: bool,
+    pub queue_show_default_playlist: bool,
     pub horizontal_volume: bool,
     pub font_family: String,
     pub strip_show_title: bool,

@@ -160,6 +160,11 @@ pub struct QueueViewData<'a> {
     /// Borrowed reference to the root open-menu state, so per-row context
     /// menus can resolve their own open/closed status.
     pub open_menu: Option<&'a crate::app_message::OpenMenu>,
+    /// Whether the queue's view-header chip should render. Gated by the
+    /// `queue_show_default_playlist` user setting.
+    pub show_default_playlist_chip: bool,
+    /// Current default-playlist display name (empty when no default set).
+    pub default_playlist_name: &'a str,
 }
 
 /// Context menu entries for queue items
@@ -227,6 +232,8 @@ pub enum QueueMessage {
     SetOpenMenu(Option<crate::app_message::OpenMenu>),
     /// Artwork column drag handle event — intercepted at root, page never sees it.
     ArtworkColumnDrag(crate::widgets::artwork_split_handle::DragEvent),
+    /// Header chip clicked — bubble to root, opens the default-playlist picker.
+    OpenDefaultPlaylistPicker,
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -267,6 +274,8 @@ pub enum QueueAction {
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     /// User toggled a queue column's visibility — persist to config.toml.
     ColumnVisibilityChanged(QueueColumn, bool),
+    /// Bubble to root: open the default-playlist picker overlay.
+    OpenDefaultPlaylistPicker,
     None,
 }
 
@@ -373,6 +382,9 @@ impl QueuePage {
             QueueMessage::ArtworkColumnDrag(_) => {
                 // Intercepted at root before reaching this update; never reached.
                 (Task::none(), QueueAction::None)
+            }
+            QueueMessage::OpenDefaultPlaylistPicker => {
+                (Task::none(), QueueAction::OpenDefaultPlaylistPicker)
             }
             QueueMessage::ClickSetRating(item_index, rating) => {
                 if let Some(song) = queue_songs.get(item_index) {
@@ -591,6 +603,23 @@ impl QueuePage {
             .into()
         };
 
+        // When the user has enabled the default-playlist chip, render it
+        // alongside the column-visibility dropdown in the trailing slot.
+        // Order: chip first, then column dropdown — chip claims the more
+        // prominent left-of-trailing position.
+        let trailing: Element<'a, QueueMessage> = if data.show_default_playlist_chip {
+            let chip = crate::widgets::default_playlist_chip::default_playlist_chip(
+                data.default_playlist_name,
+                QueueMessage::OpenDefaultPlaylistPicker,
+            );
+            iced::widget::row![chip, column_dropdown]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .into()
+        } else {
+            column_dropdown
+        };
+
         let header = widgets::view_header::view_header(
             self.queue_sort_mode,
             QUEUE_VIEW_OPTIONS,
@@ -606,9 +635,9 @@ impl QueuePage {
             None,                             // No refresh button for queue
             data.current_playing_queue_index
                 .map(|idx| QueueMessage::FocusCurrentPlaying(idx, true)),
-            None,                  // on_add
-            Some(column_dropdown), // trailing_button
-            true,                  // show_search
+            None,           // on_add
+            Some(trailing), // trailing_button
+            true,           // show_search
             QueueMessage::SearchQueryChanged,
         );
 

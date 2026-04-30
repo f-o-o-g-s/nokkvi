@@ -493,6 +493,8 @@ pub enum Message {
     InfoModal(crate::widgets::info_modal::InfoModalMessage),
     AboutModal(crate::widgets::about_modal::AboutModalMessage),
     EqModal(crate::widgets::EqModalMessage),
+    /// Default-playlist picker (modal overlay opened from the header chip)
+    DefaultPlaylistPicker(crate::widgets::default_playlist_picker::DefaultPlaylistPickerMessage),
 
     // --- Playlist Edit Mode (split-view) ---
     BrowsingPanel(views::BrowsingPanelMessage),

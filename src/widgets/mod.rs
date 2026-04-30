@@ -31,6 +31,8 @@ pub(crate) mod visualizer;
 pub(crate) mod about_modal;
 pub(crate) mod checkbox_dropdown;
 pub(crate) mod context_menu;
+pub(crate) mod default_playlist_chip;
+pub(crate) mod default_playlist_picker;
 pub(crate) mod eq_modal;
 pub(crate) mod hamburger_menu;
 pub(crate) mod info_modal;

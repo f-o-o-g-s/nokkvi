@@ -13,6 +13,22 @@ use crate::{
 impl Nokkvi {
     /// Top-level slot list message dispatcher
     pub(crate) fn handle_slot_list_message(&mut self, msg: SlotListMessage) -> Task<Message> {
+        // Default-playlist picker takes priority — when its modal is open,
+        // arrow keys / Tab / Enter steer the picker, not the underlying view.
+        if self.default_playlist_picker.is_some() {
+            use crate::widgets::default_playlist_picker::DefaultPlaylistPickerMessage;
+            return match msg {
+                SlotListMessage::NavigateUp => {
+                    self.handle_default_playlist_picker(DefaultPlaylistPickerMessage::SlotListUp)
+                }
+                SlotListMessage::NavigateDown => {
+                    self.handle_default_playlist_picker(DefaultPlaylistPickerMessage::SlotListDown)
+                }
+                SlotListMessage::ActivateCenter => self
+                    .handle_default_playlist_picker(DefaultPlaylistPickerMessage::ActivateCenter),
+                _ => Task::none(),
+            };
+        }
         match msg {
             SlotListMessage::NavigateUp => {
                 let task = self.handle_slot_list_navigate_up();

@@ -844,6 +844,7 @@ mod tests {
             scrobble_threshold: 0.50,
             quick_add_to_playlist: false,
             default_playlist_name: "",
+            queue_show_default_playlist: false,
         };
         let entries = build_playback_items(&data);
 
@@ -855,8 +856,8 @@ mod tests {
         // Off mode hides AGC level + RG knobs.
         assert_eq!(
             count_items(&entries),
-            7,
-            "Off mode: crossfade_enabled, crossfade_duration, volume_normalization, scrobbling_enabled, scrobble_threshold, quick_add_to_playlist, default_playlist_name"
+            8,
+            "Off mode: crossfade_enabled, crossfade_duration, volume_normalization, scrobbling_enabled, scrobble_threshold, quick_add_to_playlist, default_playlist_name, queue_show_default_playlist"
         );
     }
 
@@ -876,10 +877,11 @@ mod tests {
             scrobble_threshold: 0.50,
             quick_add_to_playlist: false,
             default_playlist_name: "",
+            queue_show_default_playlist: false,
         };
         let entries = build_playback_items(&data);
         // AGC mode adds the target-level dropdown.
-        assert_eq!(count_items(&entries), 8);
+        assert_eq!(count_items(&entries), 9);
     }
 
     #[test]
@@ -898,10 +900,11 @@ mod tests {
             scrobble_threshold: 0.50,
             quick_add_to_playlist: false,
             default_playlist_name: "",
+            queue_show_default_playlist: false,
         };
         let entries = build_playback_items(&data);
         // RG modes add 4 knobs: preamp, fallback_db, fallback_to_agc, prevent_clipping.
-        assert_eq!(count_items(&entries), 11);
+        assert_eq!(count_items(&entries), 12);
     }
 
     #[test]
@@ -1053,6 +1056,7 @@ mod tests {
             scrobble_threshold: 0.50,
             quick_add_to_playlist: false,
             default_playlist_name: "",
+            queue_show_default_playlist: false,
         };
         let hotkeys = nokkvi_data::types::hotkey_config::HotkeyConfig::default();
         let theme = nokkvi_data::types::theme_file::ThemeFile::default();

@@ -429,6 +429,11 @@ impl Nokkvi {
             views::PlaylistsAction::NavigateAndFilter(view, filter) => {
                 return Task::done(Message::NavigateAndFilter(view, filter));
             }
+            views::PlaylistsAction::OpenDefaultPlaylistPicker => {
+                return Task::done(Message::DefaultPlaylistPicker(
+                    crate::widgets::default_playlist_picker::DefaultPlaylistPickerMessage::Open,
+                ));
+            }
             _ => {} // None + already-handled common actions
         }
 

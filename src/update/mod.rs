@@ -63,6 +63,7 @@ mod browsing_panel;
 mod collage;
 mod components;
 mod cross_pane_drag;
+mod default_playlist_picker;
 mod eq_modal;
 mod genres;
 mod hotkeys;
@@ -1036,6 +1037,11 @@ impl Nokkvi {
             // EQ Modal
             // -----------------------------------------------------------------
             Message::EqModal(msg) => self.handle_eq_modal(msg),
+
+            // -----------------------------------------------------------------
+            // Default Playlist Picker (header chip → modal overlay)
+            // -----------------------------------------------------------------
+            Message::DefaultPlaylistPicker(msg) => self.handle_default_playlist_picker(msg),
 
             // -----------------------------------------------------------------
             // Cross-Pane Drag (browsing panel → queue)

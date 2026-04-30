@@ -346,6 +346,12 @@ impl SettingsService {
         sm.set_quick_add_to_playlist(enabled)
     }
 
+    /// Set whether the queue header shows the default-playlist chip and persist
+    pub async fn set_queue_show_default_playlist(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_queue_show_default_playlist(enabled)
+    }
+
     /// Set horizontal volume controls and persist
     pub async fn set_horizontal_volume(&self, enabled: bool) -> anyhow::Result<()> {
         let mut sm = self.settings_manager.lock().await;

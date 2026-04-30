@@ -116,6 +116,7 @@ impl SettingsPage {
                     scrobble_threshold: f64::from(data.scrobble_threshold),
                     quick_add_to_playlist: data.quick_add_to_playlist,
                     default_playlist_name: &data.default_playlist_name,
+                    queue_show_default_playlist: data.queue_show_default_playlist,
                 };
                 items::build_playback_items(&pdata)
             }

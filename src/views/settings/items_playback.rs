@@ -25,6 +25,7 @@ pub(crate) struct PlaybackSettingsData<'a> {
     pub scrobble_threshold: f64,
     pub quick_add_to_playlist: bool,
     pub default_playlist_name: &'a str,
+    pub queue_show_default_playlist: bool,
 }
 
 /// Build settings entries for the Playback tab
@@ -188,7 +189,7 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             meta!(
                 "general.default_playlist_name",
                 "Default Playlist",
-                "Set via right-click → 'Set as Default Playlist' on any playlist"
+                "Set via right-click → 'Set as Default Playlist' on any playlist · or click the chip in the Playlists view header"
             ),
             if data.default_playlist_name.is_empty() {
                 "Not set"
@@ -196,6 +197,15 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
                 data.default_playlist_name
             },
             "Not set",
+        ),
+        SettingItem::bool_val(
+            meta!(
+                "general.queue_show_default_playlist",
+                "Default Playlist Chip in Queue",
+                "Display the default playlist chip in the queue view's header"
+            ),
+            data.queue_show_default_playlist,
+            false,
         ),
     ]);
 

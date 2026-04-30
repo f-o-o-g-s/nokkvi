@@ -88,6 +88,9 @@ pub struct PlayerSettings {
     /// Whether to skip the Add to Playlist dialog and use the default playlist directly
     #[serde(default)]
     pub quick_add_to_playlist: bool,
+    /// Whether the queue view's header shows the default playlist chip (default: false)
+    #[serde(default)]
+    pub queue_show_default_playlist: bool,
     /// Whether volume sliders in the player bar are horizontal (default: false = vertical)
     #[serde(default)]
     pub horizontal_volume: bool,
@@ -340,6 +343,7 @@ impl Default for PlayerSettings {
             default_playlist_id: None,
             default_playlist_name: String::new(),
             quick_add_to_playlist: false,
+            queue_show_default_playlist: false,
             horizontal_volume: false,
             font_family: String::new(),
             volume_normalization: VolumeNormalizationMode::default(),

@@ -732,6 +732,8 @@ pub struct PlayerSettings {
     pub default_playlist_name: String,
     /// Whether to skip the Add to Playlist dialog and use the default playlist directly
     pub quick_add_to_playlist: bool,
+    /// Whether the queue view's header shows the default playlist chip
+    pub queue_show_default_playlist: bool,
     /// Whether volume sliders in the player bar are horizontal (default: false = vertical)
     pub horizontal_volume: bool,
     /// Font family override. Empty = system default sans-serif.

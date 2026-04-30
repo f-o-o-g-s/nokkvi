@@ -1081,6 +1081,7 @@ impl Nokkvi {
         self.default_playlist_id = settings.default_playlist_id.clone();
         self.default_playlist_name = settings.default_playlist_name.clone();
         self.quick_add_to_playlist = settings.quick_add_to_playlist;
+        self.queue_show_default_playlist = settings.queue_show_default_playlist;
         self.verbose_config = settings.verbose_config;
         self.artwork_resolution = settings.artwork_resolution;
         self.show_album_artists_only = settings.show_album_artists_only;

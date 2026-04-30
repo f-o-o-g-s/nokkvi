@@ -137,6 +137,9 @@ pub struct Nokkvi {
     pub text_input_dialog: crate::widgets::text_input_dialog::TextInputDialogState,
     pub info_modal: crate::widgets::info_modal::InfoModalState,
     pub about_modal: crate::widgets::about_modal::AboutModalState,
+    /// Default-playlist picker overlay state. `Some` = picker is open.
+    pub default_playlist_picker:
+        Option<crate::widgets::default_playlist_picker::DefaultPlaylistPickerState>,
 
     /// The single overlay menu currently open, if any. Mutated only by
     /// `Message::SetOpenMenu` so opening a new menu implicitly closes any
@@ -247,6 +250,8 @@ pub struct Nokkvi {
     pub default_playlist_name: String,
     /// Whether to skip the Add to Playlist dialog and use the default playlist directly
     pub quick_add_to_playlist: bool,
+    /// Whether the queue view's header shows the default playlist chip
+    pub queue_show_default_playlist: bool,
     /// Whether all settings (including defaults) are written to config.toml
     pub verbose_config: bool,
     /// Artwork resolution for the large artwork panel (configurable in Settings)
@@ -329,6 +334,7 @@ impl Default for Nokkvi {
             default_playlist_id: None,
             default_playlist_name: String::new(),
             quick_add_to_playlist: false,
+            queue_show_default_playlist: false,
             verbose_config: false,
             artwork_resolution: nokkvi_data::types::player_settings::ArtworkResolution::Default,
             server_version: None,
@@ -366,6 +372,7 @@ impl Default for Nokkvi {
             text_input_dialog: crate::widgets::text_input_dialog::TextInputDialogState::default(),
             info_modal: crate::widgets::info_modal::InfoModalState::default(),
             about_modal: crate::widgets::about_modal::AboutModalState::default(),
+            default_playlist_picker: None,
             open_menu: None,
             active_progress: Vec::new(),
         }

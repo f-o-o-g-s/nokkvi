@@ -577,6 +577,11 @@ impl Nokkvi {
             QueueAction::ColumnVisibilityChanged(col, value) => {
                 return self.persist_queue_column_visibility(col, value);
             }
+            QueueAction::OpenDefaultPlaylistPicker => {
+                return Task::done(Message::DefaultPlaylistPicker(
+                    crate::widgets::default_playlist_picker::DefaultPlaylistPickerMessage::Open,
+                ));
+            }
             QueueAction::None => {}
         }
 

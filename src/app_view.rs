@@ -416,6 +416,16 @@ impl Nokkvi {
             stack = stack.push(eq_overlay.map(Message::EqModal));
         }
 
+        // Add default-playlist picker overlay (if open)
+        if let Some(picker_state) = &self.default_playlist_picker {
+            let picker_overlay =
+                crate::widgets::default_playlist_picker::default_playlist_picker_overlay(
+                    picker_state,
+                    self.window.height,
+                );
+            stack = stack.push(picker_overlay.map(Message::DefaultPlaylistPicker));
+        }
+
         // Add toast status bar overlay (if any active toast)
         if let Some(toast) = self.toast.current() {
             // Toast icon prefix based on level
@@ -711,6 +721,8 @@ impl Nokkvi {
                 column_dropdown_open,
                 column_dropdown_trigger_bounds,
                 open_menu: self.open_menu.as_ref(),
+                show_default_playlist_chip: self.queue_show_default_playlist,
+                default_playlist_name: &self.default_playlist_name,
             };
 
             let queue_pane = self.queue_page.view(queue_view_data).map(Message::Queue);
@@ -938,6 +950,8 @@ impl Nokkvi {
                     column_dropdown_open,
                     column_dropdown_trigger_bounds,
                     open_menu: self.open_menu.as_ref(),
+                    show_default_playlist_chip: self.queue_show_default_playlist,
+                    default_playlist_name: &self.default_playlist_name,
                 };
                 self.queue_page.view(view_data).map(Message::Queue)
             }
@@ -1011,6 +1025,7 @@ impl Nokkvi {
                     total_playlist_count: self.library.counts.playlists,
                     loading: self.library.playlists.is_loading(),
                     stable_viewport: self.stable_viewport,
+                    default_playlist_name: &self.default_playlist_name,
                     open_menu: self.open_menu.as_ref(),
                 };
                 self.playlists_page.view(view_data).map(Message::Playlists)

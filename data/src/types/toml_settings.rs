@@ -131,6 +131,8 @@ pub struct TomlSettings {
 
     // -- Playlists --
     pub quick_add_to_playlist: bool,
+    #[serde(default)]
+    pub queue_show_default_playlist: bool,
 
     // -- Equalizer --
     pub eq_enabled: bool,
@@ -240,6 +242,7 @@ impl Default for TomlSettings {
             scrobbling_enabled: true,
             scrobble_threshold: 0.50,
             quick_add_to_playlist: false,
+            queue_show_default_playlist: false,
             eq_enabled: false,
             eq_gains: [0.0; 10],
             custom_eq_presets: Vec::new(),
@@ -319,6 +322,7 @@ impl TomlSettings {
             scrobbling_enabled: ps.scrobbling_enabled,
             scrobble_threshold: ps.scrobble_threshold,
             quick_add_to_playlist: ps.quick_add_to_playlist,
+            queue_show_default_playlist: ps.queue_show_default_playlist,
             eq_enabled: ps.eq_enabled,
             eq_gains: ps.eq_gains,
             custom_eq_presets: ps.custom_eq_presets.clone(),

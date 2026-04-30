@@ -61,6 +61,7 @@ impl Nokkvi {
             replay_gain_prevent_clipping: self.engine.replay_gain_prevent_clipping,
             default_playlist_name: self.default_playlist_name.clone(),
             quick_add_to_playlist: self.quick_add_to_playlist,
+            queue_show_default_playlist: self.queue_show_default_playlist,
             horizontal_volume: crate::theme::is_horizontal_volume(),
             font_family: crate::theme::font_family(),
             strip_show_title: crate::theme::strip_show_title(),
@@ -944,6 +945,15 @@ impl Nokkvi {
                 |s, v| s.quick_add_to_playlist = v,
                 |shell: AppService, v| async move {
                     shell.settings().set_quick_add_to_playlist(v).await
+                },
+                false,
+            ),
+            "general.queue_show_default_playlist" => self.persist_bool_setting(
+                &value,
+                "persist_queue_show_default_playlist",
+                |s, v| s.queue_show_default_playlist = v,
+                |shell: AppService, v| async move {
+                    shell.settings().set_queue_show_default_playlist(v).await
                 },
                 false,
             ),

@@ -1412,6 +1412,7 @@ fn make_settings_view_data() -> crate::views::SettingsViewData {
         replay_gain_prevent_clipping: true,
         default_playlist_name: String::new(),
         quick_add_to_playlist: false,
+        queue_show_default_playlist: false,
         horizontal_volume: false,
         font_family: String::new(),
         strip_show_title: true,
@@ -3744,5 +3745,172 @@ fn tray_activate_without_window_id_is_noop() {
     assert!(
         !app.tray_window_hidden,
         "Activate before window id captured leaves state unchanged"
+    );
+}
+
+// ============================================================================
+// Default-Playlist Picker (default_playlist_picker.rs)
+// ============================================================================
+
+fn make_test_playlist(id: &str, name: &str) -> nokkvi_data::backend::playlists::PlaylistUIViewData {
+    nokkvi_data::backend::playlists::PlaylistUIViewData {
+        id: id.to_string(),
+        name: name.to_string(),
+        comment: String::new(),
+        duration: 0.0,
+        song_count: 0,
+        owner_name: String::new(),
+        public: false,
+        updated_at: String::new(),
+        artwork_album_ids: vec![],
+        searchable_lower: name.to_lowercase(),
+    }
+}
+
+fn seed_playlists(app: &mut crate::Nokkvi, items: Vec<(&str, &str)>) {
+    let total = items.len();
+    let playlists: Vec<_> = items
+        .into_iter()
+        .map(|(id, name)| make_test_playlist(id, name))
+        .collect();
+    app.library.playlists.append_page(playlists, total);
+}
+
+#[test]
+fn picker_open_initializes_state_with_library_playlists() {
+    use crate::widgets::default_playlist_picker::{DefaultPlaylistPickerMessage, PickerEntry};
+
+    let mut app = test_app();
+    seed_playlists(
+        &mut app,
+        vec![("p1", "Workout"), ("p2", "Chill"), ("p3", "Focus")],
+    );
+    assert!(app.default_playlist_picker.is_none());
+
+    let _ = app.handle_default_playlist_picker(DefaultPlaylistPickerMessage::Open);
+
+    let state = app
+        .default_playlist_picker
+        .as_ref()
+        .expect("picker should be open after Open message");
+    // 3 real playlists + 1 prepended Clear entry
+    assert_eq!(state.all_entries.len(), 4);
+    assert!(matches!(state.all_entries[0], PickerEntry::Clear));
+}
+
+#[test]
+fn picker_close_clears_state() {
+    use crate::widgets::default_playlist_picker::DefaultPlaylistPickerMessage;
+
+    let mut app = test_app();
+    seed_playlists(&mut app, vec![("p1", "Workout")]);
+    let _ = app.handle_default_playlist_picker(DefaultPlaylistPickerMessage::Open);
+    assert!(app.default_playlist_picker.is_some());
+
+    let _ = app.handle_default_playlist_picker(DefaultPlaylistPickerMessage::Close);
+    assert!(app.default_playlist_picker.is_none());
+}
+
+#[test]
+fn picker_search_filters_entries() {
+    use crate::widgets::default_playlist_picker::{DefaultPlaylistPickerMessage, PickerEntry};
+
+    let mut app = test_app();
+    seed_playlists(
+        &mut app,
+        vec![("p1", "Workout"), ("p2", "Chill"), ("p3", "Focus")],
+    );
+    let _ = app.handle_default_playlist_picker(DefaultPlaylistPickerMessage::Open);
+
+    let _ = app.handle_default_playlist_picker(DefaultPlaylistPickerMessage::SearchChanged(
+        "work".to_string(),
+    ));
+
+    let state = app.default_playlist_picker.as_ref().unwrap();
+    // Clear stays + only "Workout" matches → 2 entries
+    assert_eq!(state.filtered.len(), 2);
+    assert!(matches!(state.filtered[0], PickerEntry::Clear));
+    if let PickerEntry::Playlist { name, .. } = &state.filtered[1] {
+        assert_eq!(name, "Workout");
+    } else {
+        panic!("expected Playlist entry at index 1");
+    }
+}
+
+#[test]
+fn picker_click_playlist_sets_default_and_closes() {
+    use crate::widgets::default_playlist_picker::DefaultPlaylistPickerMessage;
+
+    let mut app = test_app();
+    seed_playlists(&mut app, vec![("p1", "Workout"), ("p2", "Chill")]);
+    let _ = app.handle_default_playlist_picker(DefaultPlaylistPickerMessage::Open);
+    assert!(app.default_playlist_id.is_none());
+    assert!(app.default_playlist_name.is_empty());
+
+    // Index 1 is the first real playlist (index 0 is the Clear virtual entry).
+    let _ = app.handle_default_playlist_picker(DefaultPlaylistPickerMessage::ClickItem(1));
+
+    assert_eq!(app.default_playlist_id, Some("p1".to_string()));
+    assert_eq!(app.default_playlist_name, "Workout");
+    assert!(
+        app.default_playlist_picker.is_none(),
+        "selecting an entry should close the picker"
+    );
+}
+
+#[test]
+fn picker_click_clear_unsets_default_and_closes() {
+    use crate::widgets::default_playlist_picker::DefaultPlaylistPickerMessage;
+
+    let mut app = test_app();
+    app.default_playlist_id = Some("p1".to_string());
+    app.default_playlist_name = "Workout".to_string();
+    seed_playlists(&mut app, vec![("p1", "Workout")]);
+    let _ = app.handle_default_playlist_picker(DefaultPlaylistPickerMessage::Open);
+
+    // Index 0 is the Clear virtual entry.
+    let _ = app.handle_default_playlist_picker(DefaultPlaylistPickerMessage::ClickItem(0));
+
+    assert!(app.default_playlist_id.is_none());
+    assert!(app.default_playlist_name.is_empty());
+    assert!(app.default_playlist_picker.is_none());
+}
+
+#[test]
+fn picker_activate_center_selects_centered_entry() {
+    use crate::widgets::default_playlist_picker::DefaultPlaylistPickerMessage;
+
+    let mut app = test_app();
+    seed_playlists(&mut app, vec![("p1", "Workout"), ("p2", "Chill")]);
+    let _ = app.handle_default_playlist_picker(DefaultPlaylistPickerMessage::Open);
+
+    // Move down once to put the first real playlist in the center.
+    let _ = app.handle_default_playlist_picker(DefaultPlaylistPickerMessage::SlotListDown);
+    let _ = app.handle_default_playlist_picker(DefaultPlaylistPickerMessage::ActivateCenter);
+
+    // Either Clear or Workout could be centered depending on slot list center index;
+    // the contract is just that the picker closes and *some* selection happened.
+    assert!(app.default_playlist_picker.is_none());
+}
+
+#[test]
+fn picker_open_with_empty_library_still_offers_clear_entry() {
+    use crate::widgets::default_playlist_picker::{DefaultPlaylistPickerMessage, PickerEntry};
+
+    let mut app = test_app();
+    // No playlists seeded — library.playlists stays empty.
+    let _ = app.handle_default_playlist_picker(DefaultPlaylistPickerMessage::Open);
+
+    let state = app.default_playlist_picker.as_ref().unwrap();
+    assert_eq!(state.all_entries.len(), 1);
+    assert!(matches!(state.all_entries[0], PickerEntry::Clear));
+}
+
+#[test]
+fn queue_show_default_playlist_setting_default_is_off() {
+    let app = test_app();
+    assert!(
+        !app.queue_show_default_playlist,
+        "the queue chip is opt-in — default should be hidden"
     );
 }

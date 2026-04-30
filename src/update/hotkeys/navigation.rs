@@ -12,6 +12,15 @@ impl Nokkvi {
         // Play escape sound
         self.sfx_engine.play(audio::SfxType::Escape);
 
+        // Default-playlist picker has top priority — closes before any other
+        // Escape-handling logic runs, so a stray Esc never bleeds through to
+        // the underlying view.
+        if self.default_playlist_picker.is_some() {
+            return Task::done(Message::DefaultPlaylistPicker(
+                crate::widgets::default_playlist_picker::DefaultPlaylistPickerMessage::Close,
+            ));
+        }
+
         // Cancel active cross-pane drag first
         if self.cross_pane_drag.is_some() || self.cross_pane_drag_press_origin.is_some() {
             return self.handle_cross_pane_drag_cancel();

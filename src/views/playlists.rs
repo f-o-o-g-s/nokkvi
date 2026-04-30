@@ -39,6 +39,9 @@ pub struct PlaylistsViewData<'a> {
     pub total_playlist_count: usize,
     pub loading: bool,
     pub stable_viewport: bool,
+    /// Current default playlist's display name (empty when no default set).
+    /// Surfaced in the view-header chip.
+    pub default_playlist_name: &'a str,
     /// Borrowed reference to the root open-menu state, so per-row context
     /// menus and the artwork-panel context menu can resolve their own
     /// open/closed status.
@@ -159,6 +162,8 @@ pub enum PlaylistsMessage {
     SetOpenMenu(Option<crate::app_message::OpenMenu>),
     /// Artwork column drag handle event — intercepted at root, page never sees it.
     ArtworkColumnDrag(crate::widgets::artwork_split_handle::DragEvent),
+    /// Header chip clicked — bubble to root, opens the default-playlist picker.
+    OpenDefaultPlaylistPicker,
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -182,6 +187,8 @@ pub enum PlaylistsAction {
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
     SetAsDefaultPlaylist(String, String), // (playlist_id, playlist_name) — set as quick-add default
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
+    /// Bubble to root: open the default-playlist picker overlay.
+    OpenDefaultPlaylistPicker,
 
     None,
 }
@@ -401,6 +408,10 @@ impl PlaylistsPage {
                     PlaylistsAction::NavigateAndFilter(view, filter),
                 ),
 
+                PlaylistsMessage::OpenDefaultPlaylistPicker => {
+                    (Task::none(), PlaylistsAction::OpenDefaultPlaylistPicker)
+                }
+
                 PlaylistsMessage::ContextMenuAction(clicked_idx, entry) => {
                     // Context menu for child tracks (uses shared LibraryContextEntry)
                     use nokkvi_data::types::batch::BatchItem;
@@ -547,6 +558,11 @@ impl PlaylistsPage {
     pub fn view<'a>(&'a self, data: PlaylistsViewData<'a>) -> Element<'a, PlaylistsMessage> {
         use crate::widgets::view_header::SortMode;
 
+        let chip = crate::widgets::default_playlist_chip::default_playlist_chip(
+            data.default_playlist_name,
+            PlaylistsMessage::OpenDefaultPlaylistPicker,
+        );
+
         let header = widgets::view_header::view_header(
             self.common.current_sort_mode,
             SortMode::PLAYLIST_OPTIONS,
@@ -560,10 +576,10 @@ impl PlaylistsPage {
             Some(PlaylistsMessage::ToggleSortOrder),
             None, // No shuffle button for playlists
             Some(PlaylistsMessage::RefreshViewData),
-            None, // Playlists view doesn't need center on playing button
-            None, // Optional add button
-            None, // trailing_button
-            true, // show_search
+            None,       // Playlists view doesn't need center on playing button
+            None,       // Optional add button
+            Some(chip), // trailing_button — default-playlist chip
+            true,       // show_search
             PlaylistsMessage::SearchQueryChanged,
         );
 
