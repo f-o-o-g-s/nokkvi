@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 /// Complete theme file — the root struct for `{name}.toml`.
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(default)]
+#[serde(default = "theme_file_partial_fallback")]
 pub struct ThemeFile {
     /// Human-readable theme name (shown in the UI picker)
     pub name: String,
@@ -25,13 +25,23 @@ pub struct ThemeFile {
     pub light: ThemePalette,
 }
 
+/// Fallback used by serde when a theme file is missing fields.
+///
+/// Cannot route through `ThemeFile::default()` — that parses the bundled
+/// Everforest TOML, and `#[serde(default = ...)]` re-enters during the
+/// parse, which would recurse forever.
+fn theme_file_partial_fallback() -> ThemeFile {
+    ThemeFile {
+        name: "Everforest".to_string(),
+        dark: ThemePalette::default(),
+        light: ThemePalette::light_default(),
+    }
+}
+
 impl Default for ThemeFile {
     fn default() -> Self {
-        Self {
-            name: "Adwaita".to_string(),
-            dark: ThemePalette::default(),
-            light: ThemePalette::light_default(),
-        }
+        const EVERFOREST_TOML: &str = include_str!("../../../themes/everforest.toml");
+        toml::from_str(EVERFOREST_TOML).unwrap_or_else(|_| theme_file_partial_fallback())
     }
 }
 
@@ -358,11 +368,11 @@ mod tests {
         let theme = ThemeFile::default();
         let toml_str = theme.save().expect("serialize");
         let parsed = ThemeFile::load(&toml_str).expect("deserialize");
-        assert_eq!(parsed.name, "Adwaita");
-        assert_eq!(parsed.dark.background.hard, "#1d1d20");
-        assert_eq!(parsed.light.background.hard, "#ffffff");
-        assert_eq!(parsed.dark.visualizer.bar_gradient_colors.len(), 3);
-        assert_eq!(parsed.light.visualizer.border_opacity, 0.0);
+        assert_eq!(parsed.name, "Everforest");
+        assert_eq!(parsed.dark.background.hard, "#232A2E");
+        assert_eq!(parsed.light.background.hard, "#EFEBD4");
+        assert_eq!(parsed.dark.visualizer.bar_gradient_colors.len(), 6);
+        assert_eq!(parsed.light.visualizer.border_opacity, 0.50);
     }
 
     #[test]
@@ -375,7 +385,8 @@ mod tests {
         let theme = ThemeFile::load(partial).expect("parse partial");
         assert_eq!(theme.name, "Minimal");
         assert_eq!(theme.dark.background.hard, "#000000");
-        // Everything else falls back to Adwaita defaults
+        // Missing fields fall back to ThemePalette::default() (GNOME-blue palette,
+        // independent of which theme is the conceptual default at the ThemeFile level)
         assert_eq!(theme.dark.background.default, "#222226");
         assert_eq!(theme.dark.foreground.bright, "#ffffff");
         assert_eq!(theme.dark.accent.primary, "#3584e4");

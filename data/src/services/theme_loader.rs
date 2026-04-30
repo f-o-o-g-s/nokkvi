@@ -229,7 +229,7 @@ pub fn discover_themes() -> Result<Vec<ThemeInfo>> {
 
 /// Load a theme by stem name from `~/.config/nokkvi/themes/{name}.toml`.
 ///
-/// Falls back to the Adwaita default if the file is missing or corrupt.
+/// Falls back to the Everforest default if the file is missing or corrupt.
 pub fn load_theme(name: &str) -> ThemeFile {
     match try_load_theme(name) {
         Ok(theme) => theme,
@@ -237,7 +237,7 @@ pub fn load_theme(name: &str) -> ThemeFile {
             warn!(
                 theme = name,
                 error = %e,
-                "Failed to load theme, falling back to Adwaita default"
+                "Failed to load theme, falling back to Everforest default"
             );
             ThemeFile::default()
         }
@@ -515,8 +515,8 @@ mod tests {
         let garbage = "name = \"MyTheme\"\n[dark\nbackground = { hard = \"#fff\" }";
         let result = ThemeFile::load(garbage);
         assert!(result.is_err(), "Corrupted theme TOML should return Err()");
-        // Verify that the fallback mechanism would trigger Adwaita (which it does in load_theme)
+        // Verify that the fallback mechanism would trigger Everforest (which it does in load_theme)
         let default_theme = ThemeFile::default();
-        assert_eq!(default_theme.name, "Adwaita");
+        assert_eq!(default_theme.name, "Everforest");
     }
 }
