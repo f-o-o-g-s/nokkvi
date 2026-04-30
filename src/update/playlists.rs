@@ -79,6 +79,11 @@ impl Nokkvi {
                     .set_first_page(new_playlists, total_count);
                 self.playlists_page.common.slot_list.viewport_offset = 0;
 
+                // If the default-playlist picker is open (opened before the
+                // library was loaded), repopulate it from the new data while
+                // preserving the user's search query + scroll position.
+                self.refresh_default_playlist_picker_after_load();
+
                 let mut tasks: Vec<Task<Message>> = Vec::new();
 
                 // NOTE: Don't re-focus search field here - text_input maintains its own focus state.

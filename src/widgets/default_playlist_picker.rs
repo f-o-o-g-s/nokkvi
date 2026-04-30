@@ -10,10 +10,15 @@
 //! State lives on `Nokkvi` root (cross-cutting between Playlists and Queue
 //! views), opened via `Message::DefaultPlaylistPicker(Open(...))`.
 
+use std::collections::HashMap;
+
 use iced::{
     Alignment, Border, Color, Element, Length, Padding,
     font::{Font, Weight},
-    widget::{Space, button, column, container, mouse_area, row, svg, text},
+    widget::{Space, button, column, container, image, mouse_area, row, svg, text},
+};
+use nokkvi_data::{
+    backend::playlists::PlaylistUIViewData, utils::formatters::format_duration_short,
 };
 
 use crate::{
@@ -21,9 +26,8 @@ use crate::{
     widgets::{SlotListView, slot_list},
 };
 
-/// Width threshold below which the picker label collapses on the chip.
-/// (Kept here even though the chip widget owns its threshold, so a search
-/// looking for "default playlist" finds both spots.)
+/// `text_input` ID for the picker's search field. Used by the open handler
+/// to focus the input as soon as the modal opens.
 pub(crate) const PICKER_SEARCH_INPUT_ID: &str = "default_playlist_picker_search";
 
 const TITLE_BAR_HEIGHT: f32 = 38.0;
@@ -33,8 +37,15 @@ const SEARCH_BAR_HEIGHT: f32 = 40.0;
 pub enum PickerEntry {
     /// Virtual top entry — selecting it clears the default (id = None).
     Clear,
-    /// A real playlist option.
-    Playlist { id: String, name: String },
+    /// A real playlist option, projected from `PlaylistUIViewData` so the
+    /// picker can render artwork + stats without re-borrowing the library
+    /// at slot-render time.
+    Playlist {
+        id: String,
+        name: String,
+        song_count: u32,
+        duration_seconds: u32,
+    },
 }
 
 impl PickerEntry {
@@ -58,10 +69,15 @@ pub struct DefaultPlaylistPickerState {
 impl DefaultPlaylistPickerState {
     /// Build a new picker state from the current playlists list.
     /// Prepends the "Clear default" virtual entry.
-    pub(crate) fn new(playlists: impl IntoIterator<Item = (String, String)>) -> Self {
+    pub(crate) fn new(playlists: &[PlaylistUIViewData]) -> Self {
         let mut all_entries = vec![PickerEntry::Clear];
-        for (id, name) in playlists {
-            all_entries.push(PickerEntry::Playlist { id, name });
+        for p in playlists {
+            all_entries.push(PickerEntry::Playlist {
+                id: p.id.clone(),
+                name: p.name.clone(),
+                song_count: p.song_count,
+                duration_seconds: p.duration as u32,
+            });
         }
         Self {
             filtered: all_entries.clone(),
@@ -113,9 +129,14 @@ pub enum DefaultPlaylistPickerMessage {
 
 /// Render the picker overlay. Returns an Element that fills the available
 /// area; intended to be stacked on top of the main app via `iced::widget::stack`.
+///
+/// `playlist_art` is the same `HashMap<playlist_id, Handle>` snapshot the
+/// Playlists view renders from — populated by the collage-prefetch pipeline
+/// once the playlists list has been loaded.
 pub(crate) fn default_playlist_picker_overlay<'a>(
     state: &'a DefaultPlaylistPickerState,
     window_height: f32,
+    playlist_art: &'a HashMap<String, image::Handle>,
 ) -> Element<'a, DefaultPlaylistPickerMessage> {
     // ── Modal dimensions ──
     let modal_height = (window_height * 0.70).max(320.0);
@@ -199,7 +220,13 @@ pub(crate) fn default_playlist_picker_overlay<'a>(
                 }
             },
             move |entry, ctx| {
-                render_picker_slot(entry, ctx.item_index, ctx.is_center, ctx.row_height)
+                render_picker_slot(
+                    entry,
+                    ctx.item_index,
+                    ctx.is_center,
+                    ctx.row_height,
+                    playlist_art,
+                )
             },
         )
     };
@@ -272,11 +299,17 @@ fn render_picker_slot<'a>(
     item_index: usize,
     is_center: bool,
     row_height: f32,
+    playlist_art: &HashMap<String, image::Handle>,
 ) -> Element<'a, DefaultPlaylistPickerMessage> {
     let label_color = if is_center {
         theme::fg0()
     } else {
         theme::fg2()
+    };
+    let subtitle_color = if is_center {
+        theme::fg2()
+    } else {
+        theme::fg3()
     };
     let weight = if is_center {
         Weight::Bold
@@ -284,18 +317,76 @@ fn render_picker_slot<'a>(
         Weight::Medium
     };
 
-    let icon_path = match entry {
-        PickerEntry::Clear => "assets/icons/x.svg",
-        PickerEntry::Playlist { .. } => "assets/icons/list-music.svg",
-    };
-    let icon = embedded_svg::svg_widget(icon_path)
-        .width(Length::Fixed(16.0))
-        .height(Length::Fixed(16.0))
-        .style(move |_theme, _status| svg::Style {
-            color: Some(label_color),
-        });
+    // Square thumbnail box sized off the row height (with 8px vertical padding).
+    let art_size = (row_height - 16.0).max(32.0);
 
-    let label = text(entry.label().to_string())
+    let thumbnail: Element<'a, DefaultPlaylistPickerMessage> = match entry {
+        PickerEntry::Clear => container(
+            embedded_svg::svg_widget("assets/icons/x.svg")
+                .width(Length::Fixed(art_size * 0.5))
+                .height(Length::Fixed(art_size * 0.5))
+                .style(move |_theme, _status| svg::Style {
+                    color: Some(subtitle_color),
+                }),
+        )
+        .width(Length::Fixed(art_size))
+        .height(Length::Fixed(art_size))
+        .center(Length::Fixed(art_size))
+        .style(move |_theme: &iced::Theme| container::Style {
+            background: Some(theme::bg2().into()),
+            border: Border {
+                radius: theme::ui_border_radius(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .into(),
+        PickerEntry::Playlist { id, .. } => {
+            let handle = playlist_art.get(id).cloned();
+            if let Some(h) = handle {
+                container(
+                    image(h)
+                        .width(Length::Fixed(art_size))
+                        .height(Length::Fixed(art_size))
+                        .content_fit(iced::ContentFit::Cover),
+                )
+                .width(Length::Fixed(art_size))
+                .height(Length::Fixed(art_size))
+                .style(|_theme| container::Style {
+                    border: Border {
+                        radius: theme::ui_border_radius(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+                .clip(true)
+                .into()
+            } else {
+                container(
+                    embedded_svg::svg_widget("assets/icons/list-music.svg")
+                        .width(Length::Fixed(art_size * 0.5))
+                        .height(Length::Fixed(art_size * 0.5))
+                        .style(move |_theme, _status| svg::Style {
+                            color: Some(subtitle_color),
+                        }),
+                )
+                .width(Length::Fixed(art_size))
+                .height(Length::Fixed(art_size))
+                .center(Length::Fixed(art_size))
+                .style(move |_theme: &iced::Theme| container::Style {
+                    background: Some(theme::bg2().into()),
+                    border: Border {
+                        radius: theme::ui_border_radius(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+                .into()
+            }
+        }
+    };
+
+    let title = text(entry.label().to_string())
         .size(14.0)
         .font(Font {
             weight,
@@ -304,15 +395,36 @@ fn render_picker_slot<'a>(
         .color(label_color)
         .wrapping(iced::widget::text::Wrapping::None);
 
+    let subtitle_str = match entry {
+        PickerEntry::Clear => "Remove the current default".to_string(),
+        PickerEntry::Playlist {
+            song_count,
+            duration_seconds,
+            ..
+        } => {
+            let song_word = if *song_count == 1 { "song" } else { "songs" };
+            let duration = format_duration_short(f64::from(*duration_seconds));
+            format!("{song_count} {song_word} · {duration}")
+        }
+    };
+    let subtitle = text(subtitle_str)
+        .size(11.0)
+        .font(theme::ui_font())
+        .color(subtitle_color)
+        .wrapping(iced::widget::text::Wrapping::None);
+
+    let text_col = column![title, subtitle].spacing(2);
+
     let body = container(
         row![
             Space::new().width(Length::Fixed(12.0)),
-            icon,
-            Space::new().width(Length::Fixed(10.0)),
-            label,
+            thumbnail,
+            Space::new().width(Length::Fixed(12.0)),
+            text_col,
             Space::new().width(Length::Fill),
         ]
-        .align_y(Alignment::Center),
+        .align_y(Alignment::Center)
+        .height(Length::Fill),
     )
     .height(Length::Fixed(row_height))
     .width(Length::Fill)
@@ -354,24 +466,61 @@ fn transparent_button_style(_theme: &iced::Theme, status: button::Status) -> but
 mod tests {
     use super::*;
 
-    fn sample_playlists() -> Vec<(String, String)> {
+    fn make_playlist(id: &str, name: &str) -> PlaylistUIViewData {
+        PlaylistUIViewData {
+            id: id.to_string(),
+            name: name.to_string(),
+            comment: String::new(),
+            duration: 0.0,
+            song_count: 0,
+            owner_name: String::new(),
+            public: false,
+            updated_at: String::new(),
+            artwork_album_ids: vec![],
+            searchable_lower: name.to_lowercase(),
+        }
+    }
+
+    fn sample_playlists() -> Vec<PlaylistUIViewData> {
         vec![
-            ("p1".to_string(), "Workout".to_string()),
-            ("p2".to_string(), "Chill".to_string()),
-            ("p3".to_string(), "Focus".to_string()),
+            make_playlist("p1", "Workout"),
+            make_playlist("p2", "Chill"),
+            make_playlist("p3", "Focus"),
         ]
     }
 
     #[test]
     fn new_prepends_clear_entry() {
-        let state = DefaultPlaylistPickerState::new(sample_playlists());
+        let state = DefaultPlaylistPickerState::new(&sample_playlists());
         assert!(matches!(state.all_entries[0], PickerEntry::Clear));
         assert_eq!(state.all_entries.len(), 4);
     }
 
     #[test]
+    fn new_projects_song_count_and_duration() {
+        let mut p = make_playlist("p1", "Workout");
+        p.song_count = 32;
+        p.duration = 6862.0;
+
+        let state = DefaultPlaylistPickerState::new(&[p]);
+        match &state.all_entries[1] {
+            PickerEntry::Playlist {
+                id,
+                song_count,
+                duration_seconds,
+                ..
+            } => {
+                assert_eq!(id, "p1");
+                assert_eq!(*song_count, 32);
+                assert_eq!(*duration_seconds, 6862);
+            }
+            _ => panic!("expected Playlist entry at index 1"),
+        }
+    }
+
+    #[test]
     fn refilter_keeps_clear_entry_visible() {
-        let mut state = DefaultPlaylistPickerState::new(sample_playlists());
+        let mut state = DefaultPlaylistPickerState::new(&sample_playlists());
         state.search_query = "zzz_no_match".to_string();
         state.refilter();
         assert_eq!(state.filtered.len(), 1);
@@ -380,7 +529,7 @@ mod tests {
 
     #[test]
     fn refilter_matches_substring_case_insensitive() {
-        let mut state = DefaultPlaylistPickerState::new(sample_playlists());
+        let mut state = DefaultPlaylistPickerState::new(&sample_playlists());
         state.search_query = "WORK".to_string();
         state.refilter();
         // Clear + Workout
@@ -394,7 +543,7 @@ mod tests {
 
     #[test]
     fn empty_query_returns_all_entries() {
-        let mut state = DefaultPlaylistPickerState::new(sample_playlists());
+        let mut state = DefaultPlaylistPickerState::new(&sample_playlists());
         state.search_query = String::new();
         state.refilter();
         assert_eq!(state.filtered.len(), 4);

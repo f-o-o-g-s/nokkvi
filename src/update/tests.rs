@@ -3907,6 +3907,47 @@ fn picker_open_with_empty_library_still_offers_clear_entry() {
 }
 
 #[test]
+fn picker_repopulates_when_playlists_load_after_open() {
+    use crate::widgets::default_playlist_picker::{DefaultPlaylistPickerMessage, PickerEntry};
+
+    let mut app = test_app();
+
+    // Open picker with empty library — only the Clear entry is shown.
+    let _ = app.handle_default_playlist_picker(DefaultPlaylistPickerMessage::Open);
+    let _ = app.handle_default_playlist_picker(DefaultPlaylistPickerMessage::SearchChanged(
+        "foo".to_string(),
+    ));
+    assert_eq!(
+        app.default_playlist_picker
+            .as_ref()
+            .unwrap()
+            .all_entries
+            .len(),
+        1
+    );
+
+    // Library load arrives after the picker was opened — refresh hook
+    // should repopulate the picker while preserving the user's search query.
+    seed_playlists(&mut app, vec![("p1", "Workout"), ("p2", "Foo")]);
+    app.refresh_default_playlist_picker_after_load();
+
+    let state = app.default_playlist_picker.as_ref().unwrap();
+    assert_eq!(state.all_entries.len(), 3, "Clear + 2 playlists");
+    assert_eq!(
+        state.search_query, "foo",
+        "the user's in-flight search query is preserved across the rebuild"
+    );
+    // "foo" matches "Foo", and Clear is always visible
+    assert_eq!(state.filtered.len(), 2);
+    assert!(matches!(state.filtered[0], PickerEntry::Clear));
+    if let PickerEntry::Playlist { name, .. } = &state.filtered[1] {
+        assert_eq!(name, "Foo");
+    } else {
+        panic!("expected Playlist entry at index 1");
+    }
+}
+
+#[test]
 fn queue_show_default_playlist_setting_default_is_off() {
     let app = test_app();
     assert!(

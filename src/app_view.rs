@@ -422,6 +422,7 @@ impl Nokkvi {
                 crate::widgets::default_playlist_picker::default_playlist_picker_overlay(
                     picker_state,
                     self.window.height,
+                    &self.artwork.playlist.mini,
                 );
             stack = stack.push(picker_overlay.map(Message::DefaultPlaylistPicker));
         }
