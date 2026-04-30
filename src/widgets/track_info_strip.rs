@@ -290,9 +290,18 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
         .into()
 }
 
-/// Merged-mode layout: three columns with equal-portion edges so the merged
-/// metadata is centered at the container's geometric horizontal midpoint
-/// regardless of asymmetric codec/kbps text widths.
+/// Reserved horizontal space (px) on each side of the centered metadata
+/// overlay. Matches typical codec ("FLAC 44.1kHz") and bitrate ("1411kbps")
+/// widths at 9pt with a small buffer; the centered text never crosses into
+/// the edge text's area on narrow windows.
+const MERGED_EDGE_RESERVE: u16 = 100;
+
+/// Merged-mode layout: a stack with shrink-sized codec/bitrate at the edges
+/// and a centered metadata overlay on top. The overlay is centered via
+/// `marquee_text`'s `align_x: Center`, which anchors at the strip's true
+/// horizontal midpoint regardless of asymmetric edge widths. Using `Shrink`
+/// sizing (rather than FillPortion) for the edges prevents them from being
+/// squeezed below their content width when the window narrows.
 fn build_merged_centered_strip<'a, M: Clone + 'static>(
     merged: String,
     format_split: Option<(String, Option<String>)>,
@@ -311,39 +320,26 @@ fn build_merged_centered_strip<'a, M: Clone + 'static>(
             .wrapping(text::Wrapping::None)
     };
 
-    let left_col: Element<'a, M> = if let Some((ref left, _)) = format_split {
-        container(
-            iced::widget::row![format_text(left.clone()), info_sep()]
-                .spacing(6)
-                .align_y(Alignment::Center),
-        )
-        .width(Length::FillPortion(1))
-        .align_x(Alignment::Start)
+    // Background layer: codec on the left edge, bitrate on the right edge,
+    // separated by a Length::Fill spacer. Each text element is sized by its
+    // own content (Shrink), so they never clip on resize.
+    let mut edges_row = iced::widget::Row::new()
+        .spacing(6)
         .align_y(Alignment::Center)
-        .into()
-    } else {
-        container(space().width(Length::Shrink))
-            .width(Length::FillPortion(1))
-            .into()
-    };
+        .padding([0, 8]);
+    if let Some((ref left, _)) = format_split {
+        edges_row = edges_row.push(format_text(left.clone()));
+        edges_row = edges_row.push(info_sep());
+    }
+    edges_row = edges_row.push(space().width(Length::Fill));
+    if let Some((_, Some(ref right))) = format_split {
+        edges_row = edges_row.push(info_sep());
+        edges_row = edges_row.push(format_text(right.clone()));
+    }
 
-    let right_col: Element<'a, M> = if let Some((_, Some(ref right))) = format_split {
-        container(
-            iced::widget::row![info_sep(), format_text(right.clone())]
-                .spacing(6)
-                .align_y(Alignment::Center),
-        )
-        .width(Length::FillPortion(1))
-        .align_x(Alignment::End)
-        .align_y(Alignment::Center)
-        .into()
-    } else {
-        container(space().width(Length::Shrink))
-            .width(Length::FillPortion(1))
-            .into()
-    };
-
-    let center_inner = iced::widget::row![
+    // Foreground layer: the merged marquee, centered at the container's
+    // geometric midpoint via `marquee_text`'s align_x.
+    let metadata_inner = iced::widget::row![
         info_sep(),
         super::marquee_text::marquee_text(merged)
             .size(9.0)
@@ -355,21 +351,24 @@ fn build_merged_centered_strip<'a, M: Clone + 'static>(
     .spacing(6)
     .align_y(Alignment::Center);
 
-    let center_element: Element<'a, M> = if let Some(msg) = on_press {
-        mouse_area(center_inner).on_press(msg).into()
+    let metadata_clickable: Element<'a, M> = if let Some(msg) = on_press {
+        mouse_area(metadata_inner).on_press(msg).into()
     } else {
-        center_inner.into()
+        metadata_inner.into()
     };
 
-    let center_col = container(center_element)
-        .width(Length::FillPortion(8))
-        .align_y(Alignment::Center);
+    // Horizontal padding bounds the clickable region and the marquee's
+    // scroll lane away from the codec/bitrate corners, so an overflowing
+    // marquee never visually collides with the edge text.
+    let metadata_overlay = container(metadata_clickable)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_y(Alignment::Center)
+        .padding([0, MERGED_EDGE_RESERVE]);
 
-    let info_row = iced::widget::row![left_col, center_col, right_col]
-        .spacing(6)
-        .align_y(Alignment::Center);
+    let stacked = iced::widget::stack![edges_row, metadata_overlay];
 
-    container(info_row.padding([0, 8]))
+    container(stacked)
         .width(Length::Fill)
         .height(Length::Fixed(STRIP_HEIGHT))
         .center_y(STRIP_HEIGHT)
