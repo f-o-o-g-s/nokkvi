@@ -5,7 +5,7 @@ use crate::types::{
     player_settings::{
         ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, EnterBehavior, LibraryPageSize,
         NavDisplayMode, NavLayout, NormalizationLevel, SlotRowHeight, StripClickAction,
-        TrackInfoDisplay, VisualizationMode, VolumeNormalizationMode,
+        StripSeparator, TrackInfoDisplay, VisualizationMode, VolumeNormalizationMode,
     },
     queue::{QueueSortPreferences, SortPreferences},
     queue_sort_mode::QueueSortMode,
@@ -136,6 +136,14 @@ pub struct PlayerSettings {
     /// What happens when clicking the track info strip (default: GoToQueue)
     #[serde(default)]
     pub strip_click_action: StripClickAction,
+    /// Whether `title:` / `artist:` / `album:` labels are prepended to each
+    /// field in the metadata strip (default: true).
+    #[serde(default = "default_true")]
+    pub strip_show_labels: bool,
+    /// Visual character used to join visible fields in merged-mode rendering
+    /// (default: Dot · — matches the historical hardcoded join).
+    #[serde(default)]
+    pub strip_separator: StripSeparator,
     /// Active playlist ID loaded in the queue (None = no playlist context)
     #[serde(default)]
     pub active_playlist_id: Option<String>,
@@ -358,6 +366,8 @@ impl Default for PlayerSettings {
             strip_show_format_info: true,
             strip_merged_mode: false,
             strip_click_action: StripClickAction::default(),
+            strip_show_labels: true,
+            strip_separator: StripSeparator::default(),
             active_playlist_id: None,
             active_playlist_name: String::new(),
             active_playlist_comment: String::new(),

@@ -16,6 +16,8 @@ pub(crate) struct InterfaceSettingsData<'a> {
     pub strip_show_album: bool,
     pub strip_show_format_info: bool,
     pub strip_merged_mode: bool,
+    pub strip_show_labels: bool,
+    pub strip_separator: &'a str,
     pub strip_click_action: &'a str,
     pub albums_artwork_overlay: bool,
     pub artists_artwork_overlay: bool,
@@ -196,6 +198,32 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
             ),
             data.strip_merged_mode,
             false,
+        ),
+        SettingItem::bool_val(
+            meta!(
+                "general.strip_show_labels",
+                "Show Labels",
+                "Prefix each field with its name (title:, artist:, album:)"
+            ),
+            data.strip_show_labels,
+            true,
+        ),
+        SettingItem::enum_val(
+            meta!(
+                "general.strip_separator",
+                "Field Separator",
+                "Character used to join fields in merged mode"
+            ),
+            data.strip_separator,
+            "Dot ·",
+            vec![
+                "Dot ·",
+                "Bullet •",
+                "Pipe |",
+                "Em dash —",
+                "Slash /",
+                "Bar │",
+            ],
         ),
         SettingItem::enum_val(
             meta!(

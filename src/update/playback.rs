@@ -1200,6 +1200,8 @@ impl Nokkvi {
         crate::theme::set_strip_show_format_info(settings.strip_show_format_info);
         crate::theme::set_strip_merged_mode(settings.strip_merged_mode);
         crate::theme::set_strip_click_action(settings.strip_click_action);
+        crate::theme::set_strip_show_labels(settings.strip_show_labels);
+        crate::theme::set_strip_separator(settings.strip_separator);
 
         // Apply per-view artwork text overlay visibility from persisted settings
         crate::theme::set_albums_artwork_overlay(settings.albums_artwork_overlay);

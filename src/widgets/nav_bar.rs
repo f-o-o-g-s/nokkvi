@@ -394,6 +394,10 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     let show_album = show_nav_metadata
         && data.window_width >= BREAKPOINT_SHOW_ALBUM
         && theme::strip_show_album();
+    let show_labels = theme::strip_show_labels();
+    let title_label = if show_labels { "title:" } else { "" };
+    let artist_label = if show_labels { "artist:" } else { "" };
+    let album_label = if show_labels { "album:" } else { "" };
 
     // Helper: labeled field (dimmed label: + scrolling value) — delegates to shared helper
     let info_field = |label: &'static str,
@@ -409,188 +413,190 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // Layout: │ title: xxx │ artist: xxx │ album: xxx │ [fill] │ FLAC 44.1kHz · 1411kbps │
     let is_playing = data.is_playing;
 
-    let center_section: Element<'static, NavBarMessage> = if !show_title
-        && !show_artist
-        && !show_album
-    {
-        // All metadata hidden (narrow window OR all user toggles off)
-        Space::new().width(Length::Fill).into()
-    } else if !is_playing {
-        // Stopped state - no track loaded
-        container(
-            text("No track loaded")
-                .size(12.0)
-                .font(Font {
-                    weight: Weight::Semibold,
-                    ..theme::ui_font()
-                })
-                .color(theme::fg4())
-                .wrapping(Wrapping::None),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .center_x(Length::Fill)
-        .center_y(Length::Fill)
-        .into()
-    } else {
-        // Playing or paused - build nav-bar-specific track info
-        let title = data.track_title.clone();
-        let artist = data.track_artist.clone();
-        let album = data.track_album.clone();
-
-        let info_sep = info_separator;
-
-        let mut info_row = iced::widget::Row::new()
-            .spacing(6)
-            .align_y(Alignment::Center)
-            .height(Length::Fill);
-
-        // Fill spacer → center the metadata fields
-        info_row = info_row.push(Space::new().width(Length::Fill));
-
-        // Progressive metadata: each field independently toggleable
-        let mut has_prev_field = false;
-
-        if let Some(radio_name) = &data.radio_name {
-            info_row = info_row.push(info_sep());
-
-            let icon_widget = crate::embedded_svg::svg_widget("assets/icons/radio-tower.svg")
-                .width(Length::Fixed(12.0))
-                .height(Length::Fixed(12.0))
-                .style(|_theme, _status| iced::widget::svg::Style {
-                    color: Some(theme::fg4()),
-                });
-
-            info_row = info_row.push(icon_widget);
-
-            info_row = info_row.push(
-                text(radio_name.clone())
-                    .size(11.0)
+    let center_section: Element<'static, NavBarMessage> =
+        if !show_title && !show_artist && !show_album {
+            // All metadata hidden (narrow window OR all user toggles off)
+            Space::new().width(Length::Fill).into()
+        } else if !is_playing {
+            // Stopped state - no track loaded
+            container(
+                text("No track loaded")
+                    .size(12.0)
                     .font(Font {
-                        weight: Weight::Bold,
+                        weight: Weight::Semibold,
                         ..theme::ui_font()
                     })
-                    .color(theme::now_playing_color()),
-            );
-
-            let icy_title = data.icy_title.as_deref().unwrap_or("");
-            let icy_artist = data.icy_artist.as_deref().unwrap_or("");
-
-            if !icy_title.is_empty() {
-                info_row = info_row.push(info_sep());
-                info_row = info_row.push(info_field(
-                    "title:",
-                    icy_title.to_string(),
-                    theme::accent_bright(),
-                ));
-            }
-
-            if !icy_artist.is_empty() {
-                info_row = info_row.push(info_sep());
-                info_row = info_row.push(info_field(
-                    "artist:",
-                    icy_artist.to_string(),
-                    theme::selected_color(),
-                ));
-            }
-
-            if icy_title.is_empty()
-                && icy_artist.is_empty()
-                && let Some(url) = &data.radio_url
-            {
-                info_row = info_row.push(info_sep());
-                info_row = info_row.push(info_field("url:", url.clone(), theme::fg2()));
-            }
-            info_row = info_row.push(info_sep());
-        } else if theme::strip_merged_mode() {
-            let merged = super::track_info_strip::merged_strip_string(
-                show_title,
-                show_artist,
-                show_album,
-                &title,
-                &artist,
-                &album,
-            );
-            if !merged.is_empty() {
-                info_row = info_row.push(info_sep());
-                info_row = info_row.push(
-                    iced::widget::row![
-                        super::marquee_text::marquee_text(merged)
-                            .size(9.0)
-                            .font(theme::ui_font())
-                            .color(theme::selected_color()),
-                    ]
-                    .align_y(Alignment::Center)
-                    .width(Length::FillPortion(9)),
-                );
-                info_row = info_row.push(info_sep());
-            }
-        } else {
-            if show_title {
-                info_row = info_row.push(info_sep());
-                info_row = info_row.push(info_field("title:", title, theme::now_playing_color()));
-                has_prev_field = true;
-            }
-
-            if show_artist {
-                info_row = info_row.push(info_sep());
-                info_row = info_row.push(info_field("artist:", artist, theme::selected_color()));
-                has_prev_field = true;
-            }
-
-            if show_album {
-                info_row = info_row.push(info_sep());
-                info_row = info_row.push(info_field("album:", album, theme::fg2()));
-                has_prev_field = true;
-            }
-
-            if has_prev_field {
-                info_row = info_row.push(info_sep());
-            }
-        }
-
-        // Fill spacer → push format info away
-        info_row = info_row.push(Space::new().width(Length::Fill));
-
-        let clickable = container(mouse_area(info_row).on_press(NavBarMessage::StripClicked))
+                    .color(theme::fg4())
+                    .wrapping(Wrapping::None),
+            )
             .width(Length::Fill)
             .height(Length::Fill)
-            .center_y(Length::Fill);
-
-        let wrapped: Element<'static, NavBarMessage> = if data.radio_name.is_some() {
-            clickable.into()
-        } else {
-            let has_local_path = !data.local_music_path.is_empty();
-            let is_starred = data.is_current_starred;
-            let strip_context_open = data.strip_context_open;
-            let strip_context_position = data.strip_context_position;
-            super::context_menu::context_menu(
-                clickable,
-                super::context_menu::strip_entries(has_local_path),
-                move |entry, length| {
-                    super::context_menu::strip_entry_view(
-                        entry,
-                        length,
-                        is_starred,
-                        NavBarMessage::StripContextAction,
-                    )
-                },
-                strip_context_open,
-                strip_context_position,
-                |position| match position {
-                    Some(p) => {
-                        NavBarMessage::SetOpenMenu(Some(crate::app_message::OpenMenu::Context {
-                            id: crate::app_message::ContextMenuId::Strip,
-                            position: p,
-                        }))
-                    }
-                    None => NavBarMessage::SetOpenMenu(None),
-                },
-            )
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
             .into()
+        } else {
+            // Playing or paused - build nav-bar-specific track info
+            let title = data.track_title.clone();
+            let artist = data.track_artist.clone();
+            let album = data.track_album.clone();
+
+            let info_sep = info_separator;
+
+            let mut info_row = iced::widget::Row::new()
+                .spacing(6)
+                .align_y(Alignment::Center)
+                .height(Length::Fill);
+
+            // Fill spacer → center the metadata fields
+            info_row = info_row.push(Space::new().width(Length::Fill));
+
+            // Progressive metadata: each field independently toggleable
+            let mut has_prev_field = false;
+
+            if let Some(radio_name) = &data.radio_name {
+                info_row = info_row.push(info_sep());
+
+                let icon_widget = crate::embedded_svg::svg_widget("assets/icons/radio-tower.svg")
+                    .width(Length::Fixed(12.0))
+                    .height(Length::Fixed(12.0))
+                    .style(|_theme, _status| iced::widget::svg::Style {
+                        color: Some(theme::fg4()),
+                    });
+
+                info_row = info_row.push(icon_widget);
+
+                info_row = info_row.push(
+                    text(radio_name.clone())
+                        .size(11.0)
+                        .font(Font {
+                            weight: Weight::Bold,
+                            ..theme::ui_font()
+                        })
+                        .color(theme::now_playing_color()),
+                );
+
+                let icy_title = data.icy_title.as_deref().unwrap_or("");
+                let icy_artist = data.icy_artist.as_deref().unwrap_or("");
+
+                if !icy_title.is_empty() {
+                    info_row = info_row.push(info_sep());
+                    info_row = info_row.push(info_field(
+                        "title:",
+                        icy_title.to_string(),
+                        theme::accent_bright(),
+                    ));
+                }
+
+                if !icy_artist.is_empty() {
+                    info_row = info_row.push(info_sep());
+                    info_row = info_row.push(info_field(
+                        "artist:",
+                        icy_artist.to_string(),
+                        theme::selected_color(),
+                    ));
+                }
+
+                if icy_title.is_empty()
+                    && icy_artist.is_empty()
+                    && let Some(url) = &data.radio_url
+                {
+                    info_row = info_row.push(info_sep());
+                    info_row = info_row.push(info_field("url:", url.clone(), theme::fg2()));
+                }
+                info_row = info_row.push(info_sep());
+            } else if theme::strip_merged_mode() {
+                let merged = super::track_info_strip::merged_strip_string(
+                    show_title,
+                    show_artist,
+                    show_album,
+                    show_labels,
+                    theme::strip_separator().as_join_str(),
+                    &title,
+                    &artist,
+                    &album,
+                );
+                if !merged.is_empty() {
+                    info_row = info_row.push(info_sep());
+                    info_row = info_row.push(
+                        iced::widget::row![
+                            super::marquee_text::marquee_text(merged)
+                                .size(9.0)
+                                .font(theme::ui_font())
+                                .color(theme::selected_color()),
+                        ]
+                        .align_y(Alignment::Center)
+                        .width(Length::FillPortion(9)),
+                    );
+                    info_row = info_row.push(info_sep());
+                }
+            } else {
+                if show_title {
+                    info_row = info_row.push(info_sep());
+                    info_row =
+                        info_row.push(info_field(title_label, title, theme::now_playing_color()));
+                    has_prev_field = true;
+                }
+
+                if show_artist {
+                    info_row = info_row.push(info_sep());
+                    info_row =
+                        info_row.push(info_field(artist_label, artist, theme::selected_color()));
+                    has_prev_field = true;
+                }
+
+                if show_album {
+                    info_row = info_row.push(info_sep());
+                    info_row = info_row.push(info_field(album_label, album, theme::fg2()));
+                    has_prev_field = true;
+                }
+
+                if has_prev_field {
+                    info_row = info_row.push(info_sep());
+                }
+            }
+
+            // Fill spacer → push format info away
+            info_row = info_row.push(Space::new().width(Length::Fill));
+
+            let clickable = container(mouse_area(info_row).on_press(NavBarMessage::StripClicked))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center_y(Length::Fill);
+
+            let wrapped: Element<'static, NavBarMessage> = if data.radio_name.is_some() {
+                clickable.into()
+            } else {
+                let has_local_path = !data.local_music_path.is_empty();
+                let is_starred = data.is_current_starred;
+                let strip_context_open = data.strip_context_open;
+                let strip_context_position = data.strip_context_position;
+                super::context_menu::context_menu(
+                    clickable,
+                    super::context_menu::strip_entries(has_local_path),
+                    move |entry, length| {
+                        super::context_menu::strip_entry_view(
+                            entry,
+                            length,
+                            is_starred,
+                            NavBarMessage::StripContextAction,
+                        )
+                    },
+                    strip_context_open,
+                    strip_context_position,
+                    |position| match position {
+                        Some(p) => NavBarMessage::SetOpenMenu(Some(
+                            crate::app_message::OpenMenu::Context {
+                                id: crate::app_message::ContextMenuId::Strip,
+                                position: p,
+                            },
+                        )),
+                        None => NavBarMessage::SetOpenMenu(None),
+                    },
+                )
+                .into()
+            };
+            wrapped
         };
-        wrapped
-    };
 
     // -------------------------------------------------------------------------
     // Format Info (independent of metadata — stays visible at narrow widths)

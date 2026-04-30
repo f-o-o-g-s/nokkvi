@@ -37,26 +37,37 @@ pub(crate) struct TrackInfoStripData<'a> {
 ///
 /// Shared by `track_info_strip` (player bar / top bar strip) and `nav_bar`
 /// (top nav mode) — single source of truth for the scrolling info field pattern.
+///
+/// When `label` is empty, the prefix collapses to a zero-width text node so
+/// the row structure stays stable across the `show_labels` toggle (Iced keys
+/// widget-tree state by position; structural changes can leave stale layout
+/// cached until the surrounding tree is rebuilt).
 pub(crate) fn info_field_widget<'a, M: 'static>(
     label: &'static str,
     value: String,
     value_color: iced::Color,
 ) -> Element<'a, M> {
+    let label_widget = text(label)
+        .size(9.0)
+        .font(Font {
+            weight: Weight::Medium,
+            ..theme::ui_font()
+        })
+        .color(theme::fg4())
+        .wrapping(text::Wrapping::None);
+
+    // Drop the row's spacing when the label is hidden so the marquee doesn't
+    // get a phantom 3px indent from the (now empty) label slot.
+    let spacing = if label.is_empty() { 0 } else { 3 };
+
     row![
-        text(label)
-            .size(9.0)
-            .font(Font {
-                weight: Weight::Medium,
-                ..theme::ui_font()
-            })
-            .color(theme::fg4())
-            .wrapping(text::Wrapping::None),
+        label_widget,
         super::marquee_text::marquee_text(value)
             .size(9.0)
             .font(theme::ui_font())
             .color(value_color),
     ]
-    .spacing(3)
+    .spacing(spacing)
     .align_y(Alignment::Center)
     .width(Length::FillPortion(3))
     .into()
@@ -92,8 +103,16 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
     let show_title = theme::strip_show_title();
     let show_artist = theme::strip_show_artist();
     let show_album = theme::strip_show_album();
+    let show_labels = theme::strip_show_labels();
+    let separator = theme::strip_separator();
     let merged_mode = theme::strip_merged_mode();
     let is_radio = data.radio_name.is_some();
+
+    // Per-field label: empty string drops the dimmed `title:` / `artist:` /
+    // `album:` prefix when the user has turned labels off.
+    let title_label = if show_labels { "title:" } else { "" };
+    let artist_label = if show_labels { "artist:" } else { "" };
+    let album_label = if show_labels { "album:" } else { "" };
 
     // Helper: 1px vertical separator
     let info_sep = || -> Element<'a, M> { theme::vertical_separator(STRIP_HEIGHT - 2.0) };
@@ -108,8 +127,16 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
     // columns so the metadata sits at the container's true horizontal center,
     // independent of asymmetric codec/kbps text widths.
     if merged_mode && !is_radio {
-        let merged =
-            merged_strip_string(show_title, show_artist, show_album, &title, &artist, &album);
+        let merged = merged_strip_string(
+            show_title,
+            show_artist,
+            show_album,
+            show_labels,
+            separator.as_join_str(),
+            &title,
+            &artist,
+            &album,
+        );
         if !merged.is_empty() {
             return build_merged_centered_strip(merged, format_split, on_press);
         }
@@ -148,8 +175,16 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
     if merged_mode {
         // Merged mode: one bookend pair around a single marquee that scrolls
         // all visible fields together as one unit.
-        let merged =
-            merged_strip_string(show_title, show_artist, show_album, &title, &artist, &album);
+        let merged = merged_strip_string(
+            show_title,
+            show_artist,
+            show_album,
+            show_labels,
+            separator.as_join_str(),
+            &title,
+            &artist,
+            &album,
+        );
         if !merged.is_empty() {
             center_row = center_row.push(info_sep());
             center_row = center_row.push(
@@ -173,21 +208,22 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
         }
 
         if show_title {
-            center_row = center_row.push(info_field("title:", title, theme::now_playing_color()));
+            center_row =
+                center_row.push(info_field(title_label, title, theme::now_playing_color()));
             has_prev_field = true;
         }
         if show_artist {
             if has_prev_field {
                 center_row = center_row.push(info_sep());
             }
-            center_row = center_row.push(info_field("artist:", artist, theme::selected_color()));
+            center_row = center_row.push(info_field(artist_label, artist, theme::selected_color()));
             has_prev_field = true;
         }
         if show_album {
             if has_prev_field {
                 center_row = center_row.push(info_sep());
             }
-            center_row = center_row.push(info_field("album:", album, theme::fg2()));
+            center_row = center_row.push(info_field(album_label, album, theme::fg2()));
             has_prev_field = true;
         }
 
@@ -366,59 +402,87 @@ pub(crate) fn track_info_strip_with_separator<'a, M: Clone + 'static>(
 
 /// Build the merged-mode metadata string for the center row.
 ///
-/// Joins the visible fields with `  ·  ` and prefixes each with its label,
-/// matching the labels used in the default per-field rendering. Hidden
-/// fields are dropped; the resulting string contains no orphan separators.
+/// Joins the visible fields with `join` and (when `show_labels`) prefixes each
+/// with its label, matching the per-field rendering. Hidden fields are
+/// dropped; the resulting string contains no orphan separators.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn merged_strip_string(
     show_title: bool,
     show_artist: bool,
     show_album: bool,
+    show_labels: bool,
+    join: &str,
     title: &str,
     artist: &str,
     album: &str,
 ) -> String {
-    const JOIN: &str = "  ·  ";
+    let format_part = |label: &str, value: &str| -> String {
+        if show_labels {
+            format!("{label}: {value}")
+        } else {
+            value.to_string()
+        }
+    };
+
     let mut parts: Vec<String> = Vec::with_capacity(3);
     if show_title {
-        parts.push(format!("title: {title}"));
+        parts.push(format_part("title", title));
     }
     if show_artist {
-        parts.push(format!("artist: {artist}"));
+        parts.push(format_part("artist", artist));
     }
     if show_album {
-        parts.push(format!("album: {album}"));
+        parts.push(format_part("album", album));
     }
-    parts.join(JOIN)
+    parts.join(join)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const DOT: &str = "  ·  ";
+    const PIPE: &str = "  |  ";
+
     #[test]
     fn merged_string_all_three_visible() {
-        let s = merged_strip_string(true, true, true, "T", "A", "L");
+        let s = merged_strip_string(true, true, true, true, DOT, "T", "A", "L");
         assert_eq!(s, "title: T  ·  artist: A  ·  album: L");
     }
 
     #[test]
     fn merged_string_drops_hidden_fields_without_orphan_separators() {
-        let s = merged_strip_string(true, false, true, "T", "_", "L");
+        let s = merged_strip_string(true, false, true, true, DOT, "T", "_", "L");
         assert_eq!(s, "title: T  ·  album: L");
 
-        let s = merged_strip_string(false, true, false, "_", "A", "_");
+        let s = merged_strip_string(false, true, false, true, DOT, "_", "A", "_");
         assert_eq!(s, "artist: A");
     }
 
     #[test]
     fn merged_string_all_hidden_is_empty() {
-        let s = merged_strip_string(false, false, false, "T", "A", "L");
+        let s = merged_strip_string(false, false, false, true, DOT, "T", "A", "L");
         assert_eq!(s, "");
     }
 
     #[test]
     fn merged_string_only_title() {
-        let s = merged_strip_string(true, false, false, "Only Title", "_", "_");
+        let s = merged_strip_string(true, false, false, true, DOT, "Only Title", "_", "_");
         assert_eq!(s, "title: Only Title");
+    }
+
+    #[test]
+    fn merged_string_drops_labels_when_disabled() {
+        let s = merged_strip_string(true, true, true, false, DOT, "T", "A", "L");
+        assert_eq!(s, "T  ·  A  ·  L");
+    }
+
+    #[test]
+    fn merged_string_uses_supplied_separator() {
+        let s = merged_strip_string(true, true, true, true, PIPE, "T", "A", "L");
+        assert_eq!(s, "title: T  |  artist: A  |  album: L");
+
+        let s = merged_strip_string(true, true, true, false, PIPE, "T", "A", "L");
+        assert_eq!(s, "T  |  A  |  L");
     }
 }

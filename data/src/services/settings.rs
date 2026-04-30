@@ -420,6 +420,19 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_strip_show_labels(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.strip_show_labels = enabled;
+        self.save()
+    }
+
+    pub fn set_strip_separator(
+        &mut self,
+        sep: crate::types::player_settings::StripSeparator,
+    ) -> Result<()> {
+        self.settings.player.strip_separator = sep;
+        self.save()
+    }
+
     pub fn set_queue_show_stars(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.queue_show_stars = enabled;
         self.save()
@@ -713,6 +726,8 @@ impl SettingsManager {
             strip_show_format_info: p.strip_show_format_info,
             strip_merged_mode: p.strip_merged_mode,
             strip_click_action: p.strip_click_action,
+            strip_show_labels: p.strip_show_labels,
+            strip_separator: p.strip_separator,
             active_playlist_id: p.active_playlist_id.clone(),
             active_playlist_name: p.active_playlist_name.clone(),
             active_playlist_comment: p.active_playlist_comment.clone(),
@@ -801,6 +816,8 @@ fn apply_toml_settings_to_internal(
     p.strip_show_format_info = ts.strip_show_format_info;
     p.strip_merged_mode = ts.strip_merged_mode;
     p.strip_click_action = ts.strip_click_action;
+    p.strip_show_labels = ts.strip_show_labels;
+    p.strip_separator = ts.strip_separator;
     p.crossfade_enabled = ts.crossfade_enabled;
     p.crossfade_duration_secs = ts.crossfade_duration_secs;
     p.volume_normalization = ts.volume_normalization;

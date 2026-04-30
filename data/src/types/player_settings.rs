@@ -331,6 +331,80 @@ impl std::fmt::Display for StripClickAction {
     }
 }
 
+/// Visual character used to separate fields in the metadata strip's merged
+/// scrolling unit (`title:` / `artist:` / `album:` joined into one marquee).
+///
+/// Serializes to snake_case strings for TOML storage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StripSeparator {
+    /// Middle dot · (default — matches historical hardcoded join)
+    #[default]
+    Dot,
+    /// Bullet •
+    Bullet,
+    /// Pipe |
+    Pipe,
+    /// Em dash —
+    EmDash,
+    /// Slash /
+    Slash,
+    /// Box-drawing vertical bar │ (matches the strip's bookend dividers)
+    Bar,
+}
+
+impl StripSeparator {
+    /// Returns the rendered string used to join visible fields. Includes the
+    /// surrounding spaces so the join is visually balanced.
+    pub fn as_join_str(self) -> &'static str {
+        match self {
+            Self::Dot => "  ·  ",
+            Self::Bullet => "  •  ",
+            Self::Pipe => "  |  ",
+            Self::EmDash => "  —  ",
+            Self::Slash => "  /  ",
+            Self::Bar => "  │  ",
+        }
+    }
+
+    /// Convert from settings GUI label to enum variant.
+    pub fn from_label(label: &str) -> Self {
+        match label {
+            "Bullet •" => Self::Bullet,
+            "Pipe |" => Self::Pipe,
+            "Em dash —" => Self::EmDash,
+            "Slash /" => Self::Slash,
+            "Bar │" => Self::Bar,
+            _ => Self::Dot,
+        }
+    }
+
+    /// Convert to settings GUI label.
+    pub fn as_label(self) -> &'static str {
+        match self {
+            Self::Dot => "Dot ·",
+            Self::Bullet => "Bullet •",
+            Self::Pipe => "Pipe |",
+            Self::EmDash => "Em dash —",
+            Self::Slash => "Slash /",
+            Self::Bar => "Bar │",
+        }
+    }
+}
+
+impl std::fmt::Display for StripSeparator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Dot => write!(f, "dot"),
+            Self::Bullet => write!(f, "bullet"),
+            Self::Pipe => write!(f, "pipe"),
+            Self::EmDash => write!(f, "em_dash"),
+            Self::Slash => write!(f, "slash"),
+            Self::Bar => write!(f, "bar"),
+        }
+    }
+}
+
 /// Slot list row density — controls the target row height for all slot lists.
 ///
 /// Each variant is spaced far enough apart (~20px) to guarantee a different
@@ -768,6 +842,11 @@ pub struct PlayerSettings {
     pub strip_merged_mode: bool,
     /// What happens when clicking the track info strip (default: GoToQueue)
     pub strip_click_action: StripClickAction,
+    /// Whether `title:` / `artist:` / `album:` labels are prepended to each
+    /// field in the metadata strip (default: true).
+    pub strip_show_labels: bool,
+    /// Visual character used to join visible fields in merged-mode rendering.
+    pub strip_separator: StripSeparator,
     /// Active playlist ID loaded in the queue (None = no playlist context)
     pub active_playlist_id: Option<String>,
     /// Active playlist display name

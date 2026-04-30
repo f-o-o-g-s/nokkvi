@@ -92,6 +92,8 @@ impl SettingsPage {
                     strip_show_album: data.strip_show_album,
                     strip_show_format_info: data.strip_show_format_info,
                     strip_merged_mode: data.strip_merged_mode,
+                    strip_show_labels: data.strip_show_labels,
+                    strip_separator: data.strip_separator,
                     strip_click_action: data.strip_click_action,
                     albums_artwork_overlay: data.albums_artwork_overlay,
                     artists_artwork_overlay: data.artists_artwork_overlay,

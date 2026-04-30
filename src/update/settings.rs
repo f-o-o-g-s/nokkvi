@@ -69,6 +69,8 @@ impl Nokkvi {
             strip_show_album: crate::theme::strip_show_album(),
             strip_show_format_info: crate::theme::strip_show_format_info(),
             strip_merged_mode: crate::theme::strip_merged_mode(),
+            strip_show_labels: crate::theme::strip_show_labels(),
+            strip_separator: crate::theme::strip_separator().as_label(),
             strip_click_action: crate::theme::strip_click_action().as_label(),
             albums_artwork_overlay: crate::theme::albums_artwork_overlay(),
             artists_artwork_overlay: crate::theme::artists_artwork_overlay(),
@@ -1034,6 +1036,28 @@ impl Nokkvi {
                 },
                 true,
             ),
+            "general.strip_show_labels" => self.persist_bool_setting(
+                &value,
+                "persist_strip_show_labels",
+                |_s, v| crate::theme::set_strip_show_labels(v),
+                |shell: AppService, v| async move {
+                    shell.settings().set_strip_show_labels(v).await
+                },
+                true,
+            ),
+            "general.strip_separator" => {
+                if let crate::views::settings::items::SettingValue::Enum { val, .. } = value {
+                    let sep =
+                        nokkvi_data::types::player_settings::StripSeparator::from_label(&val);
+                    crate::theme::set_strip_separator(sep);
+                    self.shell_spawn("persist_strip_separator", move |shell| async move {
+                        shell.settings().set_strip_separator(sep).await
+                    });
+                }
+                Task::done(Message::Playback(
+                    crate::app_message::PlaybackMessage::Tick,
+                ))
+            }
             "general.albums_artwork_overlay" => self.persist_bool_setting(
                 &value,
                 "persist_albums_artwork_overlay",

@@ -551,6 +551,21 @@ impl SettingsService {
         sm.set_strip_click_action(action)
     }
 
+    /// Set strip label visibility (`title:` / `artist:` / `album:` prefixes) and persist
+    pub async fn set_strip_show_labels(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_strip_show_labels(enabled)
+    }
+
+    /// Set strip merged-mode field separator and persist
+    pub async fn set_strip_separator(
+        &self,
+        sep: crate::types::player_settings::StripSeparator,
+    ) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_strip_separator(sep)
+    }
+
     /// Set volume normalization mode and persist
     pub async fn set_volume_normalization(
         &self,

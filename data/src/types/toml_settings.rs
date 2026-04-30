@@ -98,6 +98,10 @@ pub struct TomlSettings {
     pub strip_show_format_info: bool,
     pub strip_merged_mode: bool,
     pub strip_click_action: StripClickAction,
+    #[serde(default = "default_true")]
+    pub strip_show_labels: bool,
+    #[serde(default)]
+    pub strip_separator: crate::types::player_settings::StripSeparator,
 
     // -- Playback --
     pub crossfade_enabled: bool,
@@ -148,6 +152,10 @@ pub struct TomlSettings {
 }
 
 fn default_replay_gain_prevent_clipping() -> bool {
+    true
+}
+
+fn default_true() -> bool {
     true
 }
 
@@ -228,6 +236,8 @@ impl Default for TomlSettings {
             strip_show_format_info: true,
             strip_merged_mode: false,
             strip_click_action: StripClickAction::default(),
+            strip_show_labels: true,
+            strip_separator: crate::types::player_settings::StripSeparator::default(),
             crossfade_enabled: false,
             crossfade_duration_secs: 5,
             volume_normalization: VolumeNormalizationMode::default(),
@@ -308,6 +318,8 @@ impl TomlSettings {
             strip_show_format_info: ps.strip_show_format_info,
             strip_merged_mode: ps.strip_merged_mode,
             strip_click_action: ps.strip_click_action,
+            strip_show_labels: ps.strip_show_labels,
+            strip_separator: ps.strip_separator,
             crossfade_enabled: ps.crossfade_enabled,
             crossfade_duration_secs: ps.crossfade_duration_secs,
             volume_normalization: ps.volume_normalization,

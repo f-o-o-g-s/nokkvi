@@ -778,6 +778,8 @@ mod tests {
             strip_show_album: true,
             strip_show_format_info: true,
             strip_merged_mode: false,
+            strip_show_labels: true,
+            strip_separator: "Dot ·",
             strip_click_action: "Go to Queue",
             albums_artwork_overlay: true,
             artists_artwork_overlay: true,
@@ -795,8 +797,8 @@ mod tests {
         );
         assert_eq!(
             count_items(&entries),
-            12,
-            "Expected 12 items (... + artwork_column_mode); stretched mode adds the fit knob"
+            14,
+            "Expected 14 items (... + show_labels, field_separator, artwork_column_mode); stretched mode adds the fit knob"
         );
     }
 
@@ -816,6 +818,8 @@ mod tests {
             strip_show_album: true,
             strip_show_format_info: true,
             strip_merged_mode: false,
+            strip_show_labels: true,
+            strip_separator: "Dot ·",
             strip_click_action: "Go to Queue",
             albums_artwork_overlay: true,
             artists_artwork_overlay: true,
@@ -825,7 +829,7 @@ mod tests {
             artwork_column_stretch_fit: "Cover",
         };
         let entries = build_interface_items(&data);
-        assert_eq!(count_items(&entries), 13);
+        assert_eq!(count_items(&entries), 15);
     }
 
     #[test]
@@ -1035,6 +1039,8 @@ mod tests {
             strip_show_album: true,
             strip_show_format_info: true,
             strip_merged_mode: false,
+            strip_show_labels: true,
+            strip_separator: "Dot ·",
             strip_click_action: "Go to Queue",
             albums_artwork_overlay: true,
             artists_artwork_overlay: true,

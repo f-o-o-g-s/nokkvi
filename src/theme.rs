@@ -80,6 +80,10 @@ struct UiModeFlags {
     strip_merged_mode: AtomicBool,
     /// Strip click action: 0=GoToQueue, 1=GoToAlbum, 2=GoToArtist, 3=CopyTrackInfo, 4=DoNothing
     strip_click_action: AtomicU8,
+    /// Whether `title:` / `artist:` / `album:` labels are prepended to fields
+    strip_show_labels: AtomicBool,
+    /// Strip merged-mode separator: 0=Dot, 1=Bullet, 2=Pipe, 3=EmDash, 4=Slash, 5=Bar
+    strip_separator: AtomicU8,
     /// Whether the metadata text overlay is rendered on the large artwork in Albums view
     albums_artwork_overlay: AtomicBool,
     /// Whether the metadata text overlay is rendered on the large artwork in Artists view
@@ -112,6 +116,8 @@ static UI_MODE: UiModeFlags = UiModeFlags {
     strip_show_format_info: AtomicBool::new(true),
     strip_merged_mode: AtomicBool::new(false),
     strip_click_action: AtomicU8::new(0), // GoToQueue
+    strip_show_labels: AtomicBool::new(true),
+    strip_separator: AtomicU8::new(0), // Dot
     albums_artwork_overlay: AtomicBool::new(true),
     artists_artwork_overlay: AtomicBool::new(true),
     songs_artwork_overlay: AtomicBool::new(true),
@@ -490,7 +496,7 @@ pub(crate) fn set_horizontal_volume(enabled: bool) {
 // Strip Field Visibility Controls
 // ============================================================================
 
-use nokkvi_data::types::player_settings::StripClickAction;
+use nokkvi_data::types::player_settings::{StripClickAction, StripSeparator};
 
 /// Returns true if the title field is visible in the track info strip
 #[inline]
@@ -578,6 +584,45 @@ pub(crate) fn set_strip_click_action(action: StripClickAction) {
         StripClickAction::DoNothing => 4,
     };
     UI_MODE.strip_click_action.store(val, Ordering::Relaxed);
+}
+
+/// Returns true if `title:` / `artist:` / `album:` labels are shown in the strip
+#[inline]
+pub(crate) fn strip_show_labels() -> bool {
+    UI_MODE.strip_show_labels.load(Ordering::Relaxed)
+}
+
+/// Set strip label visibility
+#[inline]
+pub(crate) fn set_strip_show_labels(enabled: bool) {
+    UI_MODE.strip_show_labels.store(enabled, Ordering::Relaxed);
+}
+
+/// Returns the active strip merged-mode field separator
+#[inline]
+pub(crate) fn strip_separator() -> StripSeparator {
+    match UI_MODE.strip_separator.load(Ordering::Relaxed) {
+        1 => StripSeparator::Bullet,
+        2 => StripSeparator::Pipe,
+        3 => StripSeparator::EmDash,
+        4 => StripSeparator::Slash,
+        5 => StripSeparator::Bar,
+        _ => StripSeparator::Dot,
+    }
+}
+
+/// Set strip merged-mode field separator
+#[inline]
+pub(crate) fn set_strip_separator(sep: StripSeparator) {
+    let val = match sep {
+        StripSeparator::Dot => 0,
+        StripSeparator::Bullet => 1,
+        StripSeparator::Pipe => 2,
+        StripSeparator::EmDash => 3,
+        StripSeparator::Slash => 4,
+        StripSeparator::Bar => 5,
+    };
+    UI_MODE.strip_separator.store(val, Ordering::Relaxed);
 }
 
 // ============================================================================
