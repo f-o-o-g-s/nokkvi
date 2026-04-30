@@ -42,11 +42,11 @@ bright = "#DBBC7F"
 base = "#DBBC7F"
 
 [dark.visualizer]
-bar_gradient_colors = ["#A7C080", "#A7C080", "#A7C080", "#83C092", "#7FBBB3", "#DBBC7F"]
+bar_gradient_colors = ["#A7C080", "#A7C080", "#A7C080", "#DBBC7F", "#E69875", "#E67E80"]
 border_color = "#232A2E"
 border_opacity = 1.0
 led_border_opacity = 1.0
-peak_gradient_colors = ["#E67E80", "#E69875", "#DBBC7F", "#D699B6", "#E67E80", "#E69875"]
+peak_gradient_colors = ["#D3C6AA", "#DBBC7F", "#D3C6AA", "#DBBC7F", "#D3C6AA", "#DBBC7F"]
 
 [light.background]
 default = "#FDF6E3"
@@ -90,8 +90,8 @@ bright = "#DFA000"
 base = "#DFA000"
 
 [light.visualizer]
-bar_gradient_colors = ["#93B259", "#8DA101", "#8DA101", "#35A77C", "#35A77C", "#3A94C5"]
-border_color = "#EFEBD4"
-border_opacity = 0.0
-led_border_opacity = 0.0
-peak_gradient_colors = ["#F57D26", "#DFA000", "#F57D26", "#DFA000", "#F57D26", "#DFA000"]
+bar_gradient_colors = ["#A7C080", "#A7C080", "#A7C080", "#DBBC7F", "#E69875", "#E67E80"]
+border_color = "#232A2E"
+border_opacity = 0.50
+led_border_opacity = 1.0
+peak_gradient_colors = ["#D3C6AA", "#DBBC7F", "#D3C6AA", "#DBBC7F", "#D3C6AA", "#DBBC7F"]
