@@ -27,6 +27,14 @@ use anyhow::{Context, Result};
 
 const APP_NAME: &str = "nokkvi";
 
+/// Config filename. Debug builds use a separate file so `cargo run` against a
+/// dev build doesn't clobber the user's real `config.toml` (server creds,
+/// theme, hotkeys, etc.).
+#[cfg(debug_assertions)]
+const CONFIG_FILENAME: &str = "config.debug.toml";
+#[cfg(not(debug_assertions))]
+const CONFIG_FILENAME: &str = "config.toml";
+
 /// Guards the legacy `~/.config/nokkvi/` → `~/.local/state/nokkvi/` migration
 /// so it runs at most once per process. The migration is invoked explicitly
 /// from `main` after tracing is initialised — earlier callers (notably the
@@ -92,9 +100,10 @@ pub fn get_state_dir() -> Result<PathBuf> {
     Ok(state_dir)
 }
 
-/// Get the credentials config file path (`~/.config/nokkvi/config.toml`).
+/// Get the credentials config file path (`~/.config/nokkvi/config.toml`,
+/// or `config.debug.toml` in debug builds — see `CONFIG_FILENAME`).
 pub fn get_config_path() -> Result<PathBuf> {
-    Ok(get_app_dir()?.join("config.toml"))
+    Ok(get_app_dir()?.join(CONFIG_FILENAME))
 }
 
 /// Get the unified app database path (`~/.local/state/nokkvi/app.redb`).

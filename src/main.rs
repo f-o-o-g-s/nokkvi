@@ -961,6 +961,9 @@ fn print_cli_help() {
     println!("                     RUST_LOG=nokkvi::audio=trace   # narrow to one module");
     println!();
     println!("Files:");
+    #[cfg(debug_assertions)]
+    println!("  ~/.config/nokkvi/config.debug.toml    User configuration (TOML, debug build)");
+    #[cfg(not(debug_assertions))]
     println!("  ~/.config/nokkvi/config.toml          User configuration (TOML)");
     println!("  ~/.config/nokkvi/themes/              Theme files (.toml)");
     println!("  ~/.config/nokkvi/sfx/                 Sound effect overrides");
