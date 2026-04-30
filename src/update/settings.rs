@@ -309,17 +309,31 @@ impl Nokkvi {
                 self.text_input_dialog.open_reset_hotkeys_confirmation();
                 Task::none()
             }
+            crate::views::SettingsAction::OpenDefaultPlaylistPicker => {
+                Task::done(Message::DefaultPlaylistPicker(
+                    crate::widgets::default_playlist_picker::DefaultPlaylistPickerMessage::Open,
+                ))
+            }
         };
 
-        // If a settings action dirtied the config (like applying a theme), refresh the entries
-        // immediately so the view uses the freshest data without waiting for the next interaction
+        self.refresh_settings_entries_if_dirty();
+
+        task
+    }
+
+    /// Rebuild the settings page's cached entries when `config_dirty` is set.
+    ///
+    /// The settings view caches its entry list for navigation; mutations
+    /// outside the `SettingsAction` flow (e.g. the default-playlist picker
+    /// committing a new value via `Message::DefaultPlaylistPicker`) need an
+    /// explicit nudge so the badge text reflects the new state without
+    /// waiting for the next settings interaction.
+    pub(crate) fn refresh_settings_entries_if_dirty(&mut self) {
         if self.settings_page.config_dirty {
             let new_data = self.build_settings_view_data();
             self.settings_page.refresh_entries(&new_data);
             self.settings_page.config_dirty = false;
         }
-
-        task
     }
 
     // =========================================================================

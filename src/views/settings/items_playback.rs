@@ -189,7 +189,7 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             meta!(
                 "general.default_playlist_name",
                 "Default Playlist",
-                "Set via right-click → 'Set as Default Playlist' on any playlist · or click the chip in the Playlists view header"
+                "Click to choose a playlist · also settable from the Playlists header chip or right-click menu"
             ),
             if data.default_playlist_name.is_empty() {
                 "Not set"

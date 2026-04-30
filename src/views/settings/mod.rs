@@ -246,6 +246,8 @@ pub(crate) enum SettingsAction {
     OpenResetVisualizerDialog,
     /// Open the confirmation dialog for resetting all hotkey bindings
     OpenResetHotkeysDialog,
+    /// Open the default-playlist picker modal (root-level overlay).
+    OpenDefaultPlaylistPicker,
 }
 
 // ============================================================================
@@ -733,6 +735,13 @@ impl SettingsPage {
                                                 current_value: current.clone(),
                                                 label: item.label.clone(),
                                             };
+                                        }
+                                        // Default playlist: open the root-level picker modal
+                                        SettingValue::Text(_)
+                                            if item.key.as_ref()
+                                                == "general.default_playlist_name" =>
+                                        {
+                                            return SettingsAction::OpenDefaultPlaylistPicker;
                                         }
                                         _ => {}
                                     }

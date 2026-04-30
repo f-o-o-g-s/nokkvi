@@ -146,6 +146,13 @@ impl Nokkvi {
                 });
             }
         }
+
+        // Picker commits don't flow through `handle_settings`, so the
+        // settings page's cached entry list (which carries the visible
+        // "Default Playlist" badge text) won't pick up the new value
+        // unless we nudge the refresh ourselves.
+        self.refresh_settings_entries_if_dirty();
+
         Task::none()
     }
 }
