@@ -447,8 +447,15 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                 .align_y(Alignment::Center)
                 .height(Length::Fill);
 
-            // Fill spacer → center the metadata fields
-            info_row = info_row.push(Space::new().width(Length::Fill));
+            // Merged mode wants the marquee to span the full lane (matching
+            // `track_info_strip::build_merged_centered_strip`); flanking Fill
+            // spacers would compete with it and shrink the scroll lane.
+            let is_merged_layout = data.radio_name.is_none() && theme::strip_merged_mode();
+
+            if !is_merged_layout {
+                // Fill spacer → center the metadata fields
+                info_row = info_row.push(Space::new().width(Length::Fill));
+            }
 
             // Progressive metadata: each field independently toggleable
             let mut has_prev_field = false;
@@ -516,18 +523,17 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                     &album,
                 );
                 if !merged.is_empty() {
-                    info_row = info_row.push(info_sep());
                     info_row = info_row.push(
                         iced::widget::row![
                             super::marquee_text::marquee_text(merged)
                                 .size(9.0)
                                 .font(theme::ui_font())
-                                .color(theme::selected_color()),
+                                .color(theme::selected_color())
+                                .align_x(iced::alignment::Horizontal::Center),
                         ]
                         .align_y(Alignment::Center)
-                        .width(Length::FillPortion(9)),
+                        .width(Length::Fill),
                     );
-                    info_row = info_row.push(info_sep());
                 }
             } else {
                 if show_title {
@@ -555,8 +561,10 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                 }
             }
 
-            // Fill spacer → push format info away
-            info_row = info_row.push(Space::new().width(Length::Fill));
+            if !is_merged_layout {
+                // Fill spacer → push format info away
+                info_row = info_row.push(Space::new().width(Length::Fill));
+            }
 
             let clickable = container(mouse_area(info_row).on_press(NavBarMessage::StripClicked))
                 .width(Length::Fill)

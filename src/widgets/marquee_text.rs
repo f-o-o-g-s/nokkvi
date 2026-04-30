@@ -52,6 +52,12 @@ struct State {
     cycle_start: Instant,
     /// Hash of the content string — used to detect track changes.
     content_hash: u64,
+    /// Whether the previous layout pass had overflowing text. Used to reset
+    /// `cycle_start` cleanly on a fits→overflows transition (e.g. user
+    /// narrows the window after the lane was wide enough to fit), so the
+    /// animation restarts from offset 0 with the initial pause instead of
+    /// resuming mid-scroll from a stale elapsed time.
+    was_overflowing: bool,
 }
 
 impl Default for State {
@@ -61,6 +67,7 @@ impl Default for State {
             full_width: 0.0,
             cycle_start: Instant::now(),
             content_hash: 0,
+            was_overflowing: false,
         }
     }
 }
@@ -186,6 +193,16 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for MarqueeText {
             let full_para =
                 <iced::Renderer as TextRenderer>::Paragraph::with_text(unconstrained_text);
             state.full_width = full_para.min_bounds().width;
+
+            // Reset the cycle on a fits→overflows transition so the animation
+            // restarts from offset 0 with the initial pause, instead of
+            // resuming mid-scroll from a stale elapsed time accumulated while
+            // the text was fitting.
+            let now_overflowing = state.full_width > bounds.width;
+            if now_overflowing && !state.was_overflowing {
+                state.cycle_start = Instant::now();
+            }
+            state.was_overflowing = now_overflowing;
 
             state.constrained.min_bounds()
         })
