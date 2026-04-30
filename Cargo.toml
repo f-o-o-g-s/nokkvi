@@ -4,6 +4,7 @@ members = [".", "data"]
 [workspace.package]
 repository = "https://github.com/f-o-o-g-s/nokkvi"
 license = "GPL-3.0-only"
+rust-version = "1.87"
 
 [workspace.lints.clippy]
 # Code clarity
@@ -28,6 +29,7 @@ keywords = ["navidrome", "audio", "music", "player"]
 categories = ["multimedia::audio", "gui"]
 license.workspace = true
 repository.workspace = true
+rust-version.workspace = true
 
 [lints]
 workspace = true
