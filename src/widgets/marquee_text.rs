@@ -17,6 +17,7 @@ use iced::{
         },
         widget::{self, Widget},
     },
+    alignment::Horizontal,
     font::{Font, Weight},
     mouse,
     widget::text::Wrapping,
@@ -84,6 +85,7 @@ pub(crate) struct MarqueeText {
     size: Pixels,
     color: Color,
     font: Font,
+    align_x: Horizontal,
 }
 
 impl MarqueeText {
@@ -96,6 +98,7 @@ impl MarqueeText {
                 weight: Weight::Normal,
                 ..crate::theme::ui_font()
             },
+            align_x: Horizontal::Left,
         }
     }
 
@@ -111,6 +114,14 @@ impl MarqueeText {
 
     pub(crate) fn font(mut self, font: Font) -> Self {
         self.font = font;
+        self
+    }
+
+    /// Horizontal alignment used when the text fits inside its bounds.
+    /// When the text overflows, scrolling always starts from the left edge
+    /// regardless of this setting.
+    pub(crate) fn align_x(mut self, align_x: Horizontal) -> Self {
+        self.align_x = align_x;
         self
     }
 }
@@ -201,11 +212,20 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for MarqueeText {
         let overflow = (content_width - container_width).max(0.0);
 
         if overflow <= 0.0 {
-            // Text fits — render normally, no animation
+            // Text fits — render normally, no animation. Honor align_x by
+            // shifting the draw position within the bounds; the paragraph
+            // itself stays Left-aligned so scrolling stays correct above.
+            let slack = (container_width - content_width).max(0.0);
+            let offset_x = match self.align_x {
+                Horizontal::Left => 0.0,
+                Horizontal::Center => slack / 2.0,
+                Horizontal::Right => slack,
+            };
+            let pos = bounds.position() + Vector::new(offset_x, 0.0);
             renderer.with_layer(bounds, |renderer| {
                 renderer.fill_paragraph(
                     state.constrained.raw(),
-                    bounds.position(),
+                    pos,
                     self.color,
                     Rectangle::with_size(Size::INFINITE),
                 );

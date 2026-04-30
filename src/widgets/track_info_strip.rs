@@ -89,6 +89,12 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
     let artist = data.artist.to_string();
     let album = data.album.to_string();
 
+    let show_title = theme::strip_show_title();
+    let show_artist = theme::strip_show_artist();
+    let show_album = theme::strip_show_album();
+    let merged_mode = theme::strip_merged_mode();
+    let is_radio = data.radio_name.is_some();
+
     // Helper: 1px vertical separator
     let info_sep = || -> Element<'a, M> { theme::vertical_separator(STRIP_HEIGHT - 2.0) };
 
@@ -97,6 +103,17 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
                       value: String,
                       value_color: iced::Color|
      -> Element<'a, M> { info_field_widget(label, value, value_color) };
+
+    // Merged mode (non-radio): use a 3-column layout with equal-portion edge
+    // columns so the metadata sits at the container's true horizontal center,
+    // independent of asymmetric codec/kbps text widths.
+    if merged_mode && !is_radio {
+        let merged =
+            merged_strip_string(show_title, show_artist, show_album, &title, &artist, &album);
+        if !merged.is_empty() {
+            return build_merged_centered_strip(merged, format_split, on_press);
+        }
+    }
 
     // Build the 3-column layout:
     // [codec+kHz │] [fill] [│ title │ artist │ album │] [fill] [│ kbps]
@@ -124,11 +141,6 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
 
     // CENTER: │ title: │ artist: │ album: │
     // Each field is independently toggleable. Separators only between visible fields.
-    let show_title = theme::strip_show_title();
-    let show_artist = theme::strip_show_artist();
-    let show_album = theme::strip_show_album();
-    let merged_mode = theme::strip_merged_mode();
-
     let mut center_row = iced::widget::Row::new()
         .spacing(6)
         .align_y(Alignment::Center);
@@ -266,6 +278,96 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
                 .wrapping(text::Wrapping::None),
         );
     }
+
+    container(info_row.padding([0, 8]))
+        .width(Length::Fill)
+        .height(Length::Fixed(STRIP_HEIGHT))
+        .center_y(STRIP_HEIGHT)
+        .style(move |_| container::Style {
+            background: Some(theme::bg0_hard().into()),
+            ..Default::default()
+        })
+        .into()
+}
+
+/// Merged-mode layout: three columns with equal-portion edges so the merged
+/// metadata is centered at the container's geometric horizontal midpoint
+/// regardless of asymmetric codec/kbps text widths.
+fn build_merged_centered_strip<'a, M: Clone + 'static>(
+    merged: String,
+    format_split: Option<(String, Option<String>)>,
+    on_press: Option<M>,
+) -> Element<'a, M> {
+    let info_sep = || -> Element<'a, M> { theme::vertical_separator(STRIP_HEIGHT - 2.0) };
+
+    let format_text = |s: String| {
+        text(s)
+            .size(9.0)
+            .font(Font {
+                weight: Weight::Medium,
+                ..theme::ui_font()
+            })
+            .color(theme::fg3())
+            .wrapping(text::Wrapping::None)
+    };
+
+    let left_col: Element<'a, M> = if let Some((ref left, _)) = format_split {
+        container(
+            iced::widget::row![format_text(left.clone()), info_sep()]
+                .spacing(6)
+                .align_y(Alignment::Center),
+        )
+        .width(Length::FillPortion(1))
+        .align_x(Alignment::Start)
+        .align_y(Alignment::Center)
+        .into()
+    } else {
+        container(space().width(Length::Shrink))
+            .width(Length::FillPortion(1))
+            .into()
+    };
+
+    let right_col: Element<'a, M> = if let Some((_, Some(ref right))) = format_split {
+        container(
+            iced::widget::row![info_sep(), format_text(right.clone())]
+                .spacing(6)
+                .align_y(Alignment::Center),
+        )
+        .width(Length::FillPortion(1))
+        .align_x(Alignment::End)
+        .align_y(Alignment::Center)
+        .into()
+    } else {
+        container(space().width(Length::Shrink))
+            .width(Length::FillPortion(1))
+            .into()
+    };
+
+    let center_inner = iced::widget::row![
+        info_sep(),
+        super::marquee_text::marquee_text(merged)
+            .size(9.0)
+            .font(theme::ui_font())
+            .color(theme::selected_color())
+            .align_x(iced::alignment::Horizontal::Center),
+        info_sep(),
+    ]
+    .spacing(6)
+    .align_y(Alignment::Center);
+
+    let center_element: Element<'a, M> = if let Some(msg) = on_press {
+        mouse_area(center_inner).on_press(msg).into()
+    } else {
+        center_inner.into()
+    };
+
+    let center_col = container(center_element)
+        .width(Length::FillPortion(8))
+        .align_y(Alignment::Center);
+
+    let info_row = iced::widget::row![left_col, center_col, right_col]
+        .spacing(6)
+        .align_y(Alignment::Center);
 
     container(info_row.padding([0, 8]))
         .width(Length::Fill)
