@@ -338,17 +338,15 @@ fn build_merged_centered_strip<'a, M: Clone + 'static>(
     }
 
     // Foreground layer: the merged marquee, centered at the container's
-    // geometric midpoint via `marquee_text`'s align_x.
+    // geometric midpoint via `marquee_text`'s align_x. No bookend
+    // separators here — the codec/bitrate edges already provide them.
     let metadata_inner = iced::widget::row![
-        info_sep(),
         super::marquee_text::marquee_text(merged)
             .size(9.0)
             .font(theme::ui_font())
             .color(theme::selected_color())
             .align_x(iced::alignment::Horizontal::Center),
-        info_sep(),
     ]
-    .spacing(6)
     .align_y(Alignment::Center);
 
     let metadata_clickable: Element<'a, M> = if let Some(msg) = on_press {
