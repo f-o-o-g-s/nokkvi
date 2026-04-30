@@ -24,6 +24,10 @@ struct BuiltinTheme {
 /// All built-in themes. Order matters — first is the default.
 const BUILTIN_THEMES: &[BuiltinTheme] = &[
     BuiltinTheme {
+        stem: "everforest",
+        content: include_str!("../../../themes/everforest.toml"),
+    },
+    BuiltinTheme {
         stem: "adwaita",
         content: include_str!("../../../themes/adwaita.toml"),
     },
@@ -54,10 +58,6 @@ const BUILTIN_THEMES: &[BuiltinTheme] = &[
     BuiltinTheme {
         stem: "ember",
         content: include_str!("../../../themes/ember.toml"),
-    },
-    BuiltinTheme {
-        stem: "everforest",
-        content: include_str!("../../../themes/everforest.toml"),
     },
     BuiltinTheme {
         stem: "ferra",
@@ -302,7 +302,7 @@ pub fn restore_builtin(name: &str) -> Result<()> {
 // ============================================================================
 
 /// Default theme name when none is configured.
-pub const DEFAULT_THEME: &str = "adwaita";
+pub const DEFAULT_THEME: &str = "everforest";
 
 /// Read the `theme = "..."` key from config.toml.
 ///
