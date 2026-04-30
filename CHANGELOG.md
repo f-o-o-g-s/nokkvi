@@ -6,15 +6,28 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.3.6 — 2026-04-29
+
+### Added
+
 - `nokkvi --version` and `nokkvi --help`
 
 ### Changed
 
 - Per-user data layout now follows XDG: `app.redb` and `nokkvi.log` move from `~/.config/nokkvi/` to `~/.local/state/nokkvi/` (one-time migration on first launch). `config.toml`, `themes/`, and `sfx/` stay in `~/.config/nokkvi/`.
+- Debug builds now read and write `config.debug.toml` so a debug binary can run alongside a release install without overwriting each other's settings.
+- Minimum supported Rust version is now 1.87 (only relevant when building from source).
 
 ### Fixed
 
 - Auto-login no longer floods stderr with pre-login `shell_task` warnings; auth lifecycle (resume / success / failure) is now visible at default verbosity.
+- Artwork panel is now properly centered in the always-mode artwork column.
 
 ## v0.3.5 — 2026-04-28
 
