@@ -12,6 +12,18 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 
+## v0.3.7 — 2026-04-29
+
+### Added
+
+- Default-playlist chip in the view header: always visible in the Playlists view; opt-in in the Queue view via a new `queue_show_default_playlist` setting (default off).
+- Searchable picker overlay for choosing the default playlist, with thumbnail, song count, and total duration on each row, plus a "Clear default" entry that survives filtering. Also reachable from Settings → Playback → Playlists → Default Playlist.
+
+### Fixed
+
+- Merged player-bar metadata strip stays centered on narrow windows; codec/bitrate edge text no longer clips into the marquee.
+- Dropped the redundant pair of separators flanking the merged metadata strip — the codec/bitrate sections already provide them.
+
 ## v0.3.6 — 2026-04-29
 
 ### Added
