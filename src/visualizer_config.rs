@@ -132,31 +132,31 @@ impl ThemeBarColors {
 pub struct BarsConfig {
     /// Minimum bar width for small windows (used in dynamic scaling).
     /// When window is at 400px or smaller, bars will be this width.
-    /// Default: 2.0 (thin bars for small windows)
+    /// Default: 10.0
     pub bar_width_min: f32,
 
     /// Maximum bar width for large windows (used in dynamic scaling).
     /// When window is at 2560px or larger, bars will be this width.
-    /// Default: 14.0 (thick bars for large windows)
+    /// Default: 20.0
     pub bar_width_max: f32,
 
     /// Spacing between bars in pixels.
-    /// Default: 2.0
+    /// Default: 0.0
     pub bar_spacing: f32,
 
     /// Border width around each bar in pixels.
     /// In LED mode, this also controls the gap between segments.
-    /// Default: 1.0
+    /// Default: 2.0
     pub border_width: f32,
 
     /// Enable LED-style segmented bars (like VU meters).
     /// When enabled, bars are rendered as stacked LED segments with gaps.
-    /// Default: true
+    /// Default: false
     pub led_bars: bool,
 
     /// Height of each LED segment in pixels.
     /// Only used when led_bars is true.
-    /// Default: 2.0
+    /// Default: 5.0
     pub led_segment_height: f32,
 
     /// Bar gradient color mode:
@@ -181,7 +181,7 @@ pub struct BarsConfig {
     /// - "cycle": Time-based animation cycling through all peak colors
     /// - "height": Color based on peak height (taller peaks show higher gradient colors)
     /// - "match": Uses same color as bar gradient at that height position
-    ///   Default: "cycle"
+    ///   Default: "static"
     pub peak_gradient_mode: String,
 
     /// Peak behavior mode (inspired by audioMotion-analyzer):
@@ -190,11 +190,11 @@ pub struct BarsConfig {
     /// - "fall": Hold, then fall at constant speed
     /// - "fall_accel": Hold, then fall with gravity acceleration
     /// - "fall_fade": Hold, then fall at constant speed while simultaneously fading out
-    ///   Default: "fall"
+    ///   Default: "fall_fade"
     pub peak_mode: String,
 
     /// Time in milliseconds for peaks to hold before falling/fading
-    /// Default: 500
+    /// Default: 1950
     pub peak_hold_time: u32,
 
     /// Time in milliseconds for peaks to completely fade out (only for "fade" mode)
@@ -203,7 +203,7 @@ pub struct BarsConfig {
 
     /// Peak bar height as percentage of bar_width (non-LED mode only).
     /// In LED mode, peak height always equals led_segment_height.
-    /// Default: 66 (66%), range 10-100
+    /// Default: 35 (35%), range 10-100
     pub peak_height_ratio: u32,
 
     /// Peak fall speed (1-20). Controls how fast peaks drop in fall/fall_accel modes.
@@ -214,34 +214,34 @@ pub struct BarsConfig {
 
     /// Isometric 3D depth in pixels.
     /// When > 0, bars are rendered with a top face and right side face for a 3D look.
-    /// Default: 0.0 (flat / disabled)
+    /// Default: 1.0
     pub bar_depth_3d: f32,
 
     /// Maximum number of bars to display.
     /// The dynamic layout algorithm will try to fit up to this many bars in the window.
-    /// Default: 256, range 16–2048
+    /// Default: 512, range 16–2048
     pub max_bars: usize,
 }
 
 impl Default for BarsConfig {
     fn default() -> Self {
         Self {
-            bar_width_min: 4.0, // Bar width at small windows
-            bar_width_max: 4.0, // Bar width at large windows (uniform)
-            bar_spacing: 1.0,
+            bar_width_min: 10.0,
+            bar_width_max: 20.0,
+            bar_spacing: 0.0,
             border_width: 2.0,
             led_bars: false,
-            led_segment_height: 2.0,
+            led_segment_height: 5.0,
             gradient_mode: "wave".to_string(),
             gradient_orientation: "vertical".to_string(),
             peak_gradient_mode: "static".to_string(),
-            peak_mode: "fade".to_string(), // Default: fade out in place
-            peak_hold_time: 1000,          // 1000ms hold before fading
-            peak_fade_time: 750,           // 750ms fade duration
-            peak_height_ratio: 50,         // 50% of bar_width
-            peak_fall_speed: 5,            // Medium speed (1=slow, 10=fast)
-            bar_depth_3d: 0.0,             // Flat by default (no 3D effect)
-            max_bars: 2048,                // Maximum bars to try fitting
+            peak_mode: "fall_fade".to_string(),
+            peak_hold_time: 1950,
+            peak_fade_time: 750,
+            peak_height_ratio: 35,
+            peak_fall_speed: 5,
+            bar_depth_3d: 1.0,
+            max_bars: 512,
         }
     }
 }
@@ -297,28 +297,28 @@ impl BarsConfig {
 pub struct LinesConfig {
     /// Number of points to render (default: 24)
     pub point_count: usize,
-    /// Line thickness as fraction of visualizer height (0.01-0.10, default: 0.05 = 5%)
+    /// Line thickness as fraction of visualizer height (0.01-0.10, default: 0.01 = 1%)
     pub line_thickness: f32,
     /// Outline thickness in pixels (0.0 = disabled, up to 5.0).
     /// The outline is a darker border drawn behind the main line.
-    /// Default: 2.0
+    /// Default: 1.0
     pub outline_thickness: f32,
     /// Outline opacity (0.0 = invisible, 1.0 = fully opaque).
     /// Default: 1.0
     pub outline_opacity: f32,
     /// Color animation cycle speed (0.05 = very slow, 1.0 = very fast).
     /// Controls how quickly the line color cycles through the gradient palette.
-    /// Default: 0.25
+    /// Default: 0.1
     pub animation_speed: f32,
     /// Gradient color mode:
-    /// - "breathing": Time-based cycling through all gradient colors (default)
+    /// - "breathing": Time-based cycling through all gradient colors
     /// - "static": Uses first gradient color only (no animation)
     /// - "position": Color based on horizontal position (bass=left → treble=right)
     /// - "height": Color based on amplitude (quiet=bottom colors, loud=top colors)
-    ///   Default: "breathing"
+    ///   Default: "static"
     pub gradient_mode: String,
     /// Fill opacity under the curve (0.0 = disabled, 1.0 = fully opaque).
-    /// Default: 0.0
+    /// Default: 0.5
     pub fill_opacity: f32,
     /// Mirror mode: render waveform symmetrically from center.
     /// Default: false
@@ -334,12 +334,12 @@ impl Default for LinesConfig {
     fn default() -> Self {
         Self {
             point_count: 24,
-            line_thickness: 0.05,
-            outline_thickness: 2.0,
+            line_thickness: 0.01,
+            outline_thickness: 1.0,
             outline_opacity: 1.0,
-            animation_speed: 0.25,
-            gradient_mode: "breathing".to_string(),
-            fill_opacity: 0.0,
+            animation_speed: 0.1,
+            gradient_mode: "static".to_string(),
+            fill_opacity: 0.5,
             mirror: false,
             style: "smooth".to_string(),
         }
@@ -396,7 +396,7 @@ pub struct VisualizerConfig {
     /// Waves smoothing intensity (2-16).
     /// Controls subsampling step for Catmull-Rom spline control points.
     /// Higher values = smoother (fewer control points, more interpolation).
-    /// Default: 4
+    /// Default: 5
     pub waves_smoothing: u32,
 
     /// Monstercat smoothing (0.0 = disabled, >= MONSTERCAT_MIN_EFFECTIVE = enabled).
@@ -405,12 +405,12 @@ pub struct VisualizerConfig {
     /// because the math (`pow(monstercat * 1.5, distance)`) requires a base >= 1.0
     /// to attenuate neighbors — below that threshold it amplifies instead.
     /// Mutually exclusive with waves.
-    /// Default: 0.0
+    /// Default: 1.0
     pub monstercat: f64,
 
     /// Lower cutoff frequency in Hz (bass floor).
     /// Frequencies below this are not visualized.
-    /// Default: 50 Hz
+    /// Default: 20 Hz
     pub lower_cutoff_freq: u32,
 
     /// Higher cutoff frequency in Hz (treble ceiling).
@@ -420,7 +420,7 @@ pub struct VisualizerConfig {
     pub higher_cutoff_freq: u32,
 
     /// Visualizer height as percentage of window height (0.1-1.0).
-    /// Default: 0.30 (30%)
+    /// Default: 0.25 (25%)
     pub height_percent: f32,
 
     /// Overall visualizer opacity (0.0 = invisible, 1.0 = fully opaque).
@@ -448,11 +448,11 @@ impl Default for VisualizerConfig {
             auto_sensitivity: default_auto_sensitivity(),
             noise_reduction: 0.77,
             waves: false,
-            waves_smoothing: 4,
-            monstercat: 0.0,
-            lower_cutoff_freq: 50,
+            waves_smoothing: 5,
+            monstercat: 1.0,
+            lower_cutoff_freq: 20,
             higher_cutoff_freq: 10000,
-            height_percent: 0.20,
+            height_percent: 0.25,
             opacity: 1.0,
             bars: BarsConfig::default(),
             lines: LinesConfig::default(),
