@@ -690,6 +690,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         ]
         .align_y(Alignment::Center)
         .padding(0)
+        .width(Length::Fill)
         .height(Length::Fill),
     )
     .width(Length::Fill)
@@ -715,4 +716,115 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     ])
     .height(Length::Fixed(NAV_BAR_HEIGHT + 4.0))
     .into()
+}
+
+#[cfg(test)]
+mod layout_invariants {
+    //! Verifies the layout pattern used by `nav_content`'s outer row. The
+    //! merged-mode marquee depends on `center_section` being given a max width
+    //! equal to the *visible* center area (window − tabs − format − hamburger).
+    //!
+    //! iced's flex layout caches a `compression.width` flag in `Limits`. A row
+    //! with default `Length::Shrink` width forces `compression.width = true`
+    //! through `limits.width(Shrink)`, which makes pass 1 lay out *all*
+    //! children (Fill or otherwise) sequentially with `available` shrinking
+    //! after each. Children declared earlier claim space first; later children
+    //! get whatever's left, possibly squeezed to 0.
+    //!
+    //! Setting the outer row to `Length::Fill` keeps `compression.width = false`
+    //! (inherited from the parent `nav_content` Container, which sits inside a
+    //! Vertical column that hardcodes `compression.width = false` on its
+    //! children — see flex.rs `axis.pack(main_compress, false)`). That flips
+    //! `main_compress` to false and routes Fill children through pass 3, which
+    //! gives them `remaining = max - sum_of_non_fill_children` as their max.
+    //!
+    //! These tests pin that contract by running iced's actual layout against
+    //! the null renderer (`()`) on a structure that mirrors the nav bar.
+    use iced::advanced::layout::{Limits, Node};
+    use iced::advanced::widget::{Tree, Widget};
+    use iced::widget::{Container, Row, Space};
+    use iced::{Element, Length, Size};
+
+    type NullRenderer = ();
+    type TestMessage = ();
+
+    /// Build a 3-child row [Fixed(left_w), Fill, Fixed(right_w)] mimicking the
+    /// nav bar's [tabs, center_section, format+hamburger] layout. `outer_width`
+    /// is the row's own `.width(...)` setting — the variable under test.
+    fn build_three_child_row(
+        outer_width: Length,
+        left_w: f32,
+        right_w: f32,
+    ) -> Row<'static, TestMessage, iced::Theme, NullRenderer> {
+        let left: Element<'static, TestMessage, iced::Theme, NullRenderer> =
+            Space::new().width(Length::Fixed(left_w)).height(Length::Fill).into();
+        let center: Element<'static, TestMessage, iced::Theme, NullRenderer> =
+            Container::new(Space::new().width(Length::Fill).height(Length::Fill))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into();
+        let right: Element<'static, TestMessage, iced::Theme, NullRenderer> =
+            Space::new().width(Length::Fixed(right_w)).height(Length::Fill).into();
+        Row::with_children([left, center, right])
+            .spacing(0)
+            .width(outer_width)
+            .height(Length::Fill)
+    }
+
+    /// Run `Widget::layout` against the null renderer and return the node.
+    fn layout_row(row: Row<'static, TestMessage, iced::Theme, NullRenderer>, max_w: f32) -> Node {
+        let mut tree = Tree::new(&row as &dyn Widget<TestMessage, iced::Theme, NullRenderer>);
+        let renderer: NullRenderer = ();
+        let limits = Limits::new(Size::ZERO, Size::new(max_w, 100.0));
+        let mut row_owned = row;
+        row_owned.layout(&mut tree, &renderer, &limits)
+    }
+
+    #[test]
+    fn shrink_outer_row_collapses_fill_center_to_zero() {
+        // With the row at default Shrink width, compression.width cascades
+        // true. The Fill center container resolves to its content's intrinsic,
+        // which for a Space::Fill is 0 — exactly the bug the fix addresses.
+        let row = build_three_child_row(Length::Shrink, 100.0, 50.0);
+        let node = layout_row(row, 1000.0);
+        let center = &node.children()[1];
+        assert_eq!(
+            center.bounds().width,
+            0.0,
+            "Shrink outer row leaves Fill center at 0 (intrinsic of Space::Fill)"
+        );
+    }
+
+    #[test]
+    fn fill_outer_row_gives_center_the_remaining_lane() {
+        // With the row explicitly Length::Fill, compression.width stays false
+        // (inherited). main_compress=false routes the Fill center through
+        // pass 3, which awards it remaining = max - non_fill_widths.
+        let row = build_three_child_row(Length::Fill, 100.0, 50.0);
+        let node = layout_row(row, 1000.0);
+        let center = &node.children()[1];
+        assert!(
+            (center.bounds().width - 850.0).abs() < 0.5,
+            "Fill outer row gives Fill center the visible lane (1000 - 100 - 50 = 850), got {}",
+            center.bounds().width
+        );
+    }
+
+    #[test]
+    fn fill_outer_row_lane_tracks_window_resize() {
+        // Verifies the lane width follows the window width — the resize behavior
+        // the user observed as broken in Top Bar mode. With the fix the lane
+        // recomputes correctly at every width.
+        for window_w in [600.0_f32, 800.0, 1200.0, 1600.0] {
+            let row = build_three_child_row(Length::Fill, 100.0, 50.0);
+            let node = layout_row(row, window_w);
+            let center = &node.children()[1];
+            let expected = window_w - 100.0 - 50.0;
+            assert!(
+                (center.bounds().width - expected).abs() < 0.5,
+                "window={window_w} expected lane={expected}, got {}",
+                center.bounds().width,
+            );
+        }
+    }
 }
