@@ -111,6 +111,10 @@ pub(crate) fn artists_plays_visible(sort: SortMode, user_visible: bool) -> bool 
 pub struct ArtistsViewData<'a> {
     pub artists: &'a [ArtistUIViewData],
     pub artist_art: &'a HashMap<String, image::Handle>,
+    /// Album artwork cache, keyed by album_id. Used by nested child album
+    /// rows in the artist→album expansion when `column_visibility.thumbnail`
+    /// is enabled.
+    pub album_art: &'a HashMap<String, image::Handle>,
     pub large_artwork: &'a HashMap<String, image::Handle>,
     pub dominant_colors: &'a HashMap<String, iced::Color>,
     pub window_width: f32,
@@ -975,6 +979,7 @@ impl ArtistsPage {
                 ThreeTierEntry::Child(album, _parent_artist_id) => self.render_album_child_row(
                     album,
                     &ctx,
+                    data.album_art,
                     data.stable_viewport,
                     open_menu_for_rows,
                 ),
@@ -1461,12 +1466,15 @@ impl ArtistsPage {
         &self,
         album: &AlbumUIViewData,
         ctx: &crate::widgets::slot_list::SlotListRowContext,
+        album_art: &'a HashMap<String, image::Handle>,
         stable_viewport: bool,
         open_menu: Option<&'a crate::app_message::OpenMenu>,
     ) -> Element<'a, ArtistsMessage> {
         let album_el = super::expansion::render_child_album_row(
             album,
             ctx,
+            album_art.get(&album.id),
+            self.column_visibility.thumbnail,
             ArtistsMessage::SlotListActivateCenter,
             if stable_viewport {
                 ArtistsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)

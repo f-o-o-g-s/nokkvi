@@ -174,6 +174,32 @@ where
         .collect()
 }
 
+/// Fan-out 80px album artwork fetches for albums newly delivered into a
+/// view's expansion children (Artists→Album, Genres→Album). Skips ids
+/// already in the cache; each surviving id dispatches an
+/// `ArtworkMessage::Loaded` so the centralized `handle_artwork_loaded`
+/// arm puts the handle into `album_art` exactly the way Albums view does.
+pub(super) fn expansion_album_artwork_tasks(
+    cached_ids: &HashSet<&String>,
+    albums_vm: AlbumsService,
+    album_ids: Vec<String>,
+) -> Vec<Task<Message>> {
+    album_ids
+        .into_iter()
+        .filter(|id| !cached_ids.contains(id))
+        .map(|id| {
+            let vm = albums_vm.clone();
+            Task::perform(
+                async move {
+                    let bytes = vm.fetch_album_artwork(&id, Some(80), None).await.ok();
+                    (id, bytes.map(image::Handle::from_bytes))
+                },
+                |(id, handle)| Message::Artwork(ArtworkMessage::Loaded(id, handle)),
+            )
+        })
+        .collect()
+}
+
 impl Nokkvi {
     // ── Helper methods for deduplicating component handler patterns ──
 

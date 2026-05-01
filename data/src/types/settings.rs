@@ -268,6 +268,12 @@ pub struct PlayerSettings {
     #[serde(default = "default_true")]
     pub artists_show_thumbnail: bool,
 
+    // -- Genres view column toggles --
+    /// Thumbnail column on parent genre rows; also drives whether nested
+    /// child album rows in the genre→album expansion render their artwork.
+    #[serde(default = "default_true")]
+    pub genres_show_thumbnail: bool,
+
     // -- Per-view artwork text overlay toggles --
     /// Whether the metadata text overlay is rendered on the large artwork in Albums view.
     #[serde(default = "default_true")]
@@ -430,6 +436,7 @@ impl Default for PlayerSettings {
             artists_show_love: true,
             artists_show_index: true,
             artists_show_thumbnail: true,
+            genres_show_thumbnail: true,
             albums_artwork_overlay: true,
             artists_artwork_overlay: true,
             songs_artwork_overlay: true,

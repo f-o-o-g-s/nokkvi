@@ -913,6 +913,9 @@ pub struct PlayerSettings {
     pub artists_show_index: bool,
     pub artists_show_thumbnail: bool,
 
+    // -- Genres view column toggles --
+    pub genres_show_thumbnail: bool,
+
     // -- Per-view artwork text overlay toggles --
     /// Whether the metadata text overlay is rendered on the large artwork in Albums view.
     pub albums_artwork_overlay: bool,

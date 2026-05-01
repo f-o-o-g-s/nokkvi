@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use iced::{
     Alignment, Element, Length, Task,
-    widget::{button, container, image, row},
+    widget::{button, container, image},
 };
 use nokkvi_data::backend::{albums::AlbumUIViewData, genres::GenreUIViewData};
 
@@ -25,6 +25,43 @@ pub struct GenresPage {
     pub expansion: ExpansionState<AlbumUIViewData>,
     /// Sub-expansion state (album → tracks)
     pub sub_expansion: ExpansionState<nokkvi_data::backend::songs::SongUIViewData>,
+    /// Per-column visibility toggles surfaced via the columns-cog dropdown.
+    pub column_visibility: GenresColumnVisibility,
+}
+
+/// Toggleable genres columns. The genre name is always shown; everything else
+/// is user-toggleable through the columns-cog dropdown. Currently only the
+/// thumbnail toggle exists — the same flag also drives whether nested child
+/// album rows in the genre→album expansion render their artwork column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GenresColumn {
+    Thumbnail,
+}
+
+/// User-toggle state for each toggleable genres column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GenresColumnVisibility {
+    pub thumbnail: bool,
+}
+
+impl Default for GenresColumnVisibility {
+    fn default() -> Self {
+        Self { thumbnail: true }
+    }
+}
+
+impl GenresColumnVisibility {
+    pub fn get(&self, col: GenresColumn) -> bool {
+        match col {
+            GenresColumn::Thumbnail => self.thumbnail,
+        }
+    }
+
+    pub fn set(&mut self, col: GenresColumn, value: bool) {
+        match col {
+            GenresColumn::Thumbnail => self.thumbnail = value,
+        }
+    }
 }
 
 /// View data passed from root (read-only, borrows from app state to avoid allocations)
@@ -32,6 +69,10 @@ pub struct GenresViewData<'a> {
     pub genres: &'a [GenreUIViewData],
     pub genre_artwork: &'a HashMap<String, image::Handle>,
     pub genre_collage_artwork: &'a HashMap<String, Vec<image::Handle>>,
+    /// Album artwork cache, keyed by album_id. Used by nested child album
+    /// rows in the genre→album expansion when `column_visibility.thumbnail`
+    /// is enabled.
+    pub album_art: &'a HashMap<String, image::Handle>,
     pub window_width: f32,
     pub window_height: f32,
     pub scale_factor: f32,
@@ -39,6 +80,11 @@ pub struct GenresViewData<'a> {
     pub total_genre_count: usize,
     pub loading: bool,
     pub stable_viewport: bool,
+    /// Whether the column-visibility checkbox dropdown is open (controlled
+    /// by `Nokkvi.open_menu`).
+    pub column_dropdown_open: bool,
+    /// Trigger bounds captured when the dropdown was opened.
+    pub column_dropdown_trigger_bounds: Option<iced::Rectangle>,
     /// Borrowed reference to the root open-menu state, so per-row context
     /// menus can resolve their own open/closed status.
     pub open_menu: Option<&'a crate::app_message::OpenMenu>,
@@ -95,6 +141,8 @@ pub enum GenresMessage {
     SetOpenMenu(Option<crate::app_message::OpenMenu>),
     /// Artwork column drag handle event — intercepted at root, page never sees it.
     ArtworkColumnDrag(crate::widgets::artwork_split_handle::DragEvent),
+    /// Toggle a genres column's visibility (currently only Thumbnail).
+    ToggleColumnVisible(GenresColumn),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -123,6 +171,9 @@ pub enum GenresAction {
     ShowSongInFolder(String),    // song path - open containing folder directly
     CenterOnPlaying,
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
+    /// Persist a column-visibility toggle change. Root forwards to the
+    /// settings service so the new value survives across launches.
+    ColumnVisibilityChanged(GenresColumn, bool),
     None,
 }
 
@@ -152,6 +203,7 @@ impl Default for GenresPage {
             ),
             expansion: ExpansionState::default(),
             sub_expansion: ExpansionState::default(),
+            column_visibility: GenresColumnVisibility::default(),
         }
     }
 }
@@ -527,6 +579,14 @@ impl GenresPage {
                 GenresMessage::NavigateAndFilter(view, filter) => {
                     (Task::none(), GenresAction::NavigateAndFilter(view, filter))
                 }
+                GenresMessage::ToggleColumnVisible(col) => {
+                    let new_value = !self.column_visibility.get(col);
+                    self.column_visibility.set(col, new_value);
+                    (
+                        Task::none(),
+                        GenresAction::ColumnVisibilityChanged(col, new_value),
+                    )
+                }
                 GenresMessage::ContextMenuAction(clicked_idx, entry) => {
                     use nokkvi_data::types::batch::BatchItem;
 
@@ -672,6 +732,33 @@ impl GenresPage {
     pub fn view<'a>(&'a self, data: GenresViewData<'a>) -> Element<'a, GenresMessage> {
         use crate::widgets::view_header::SortMode;
 
+        let column_dropdown: Element<'a, GenresMessage> = {
+            use crate::widgets::checkbox_dropdown::checkbox_dropdown;
+            let items: Vec<(GenresColumn, &'static str, bool)> = vec![(
+                GenresColumn::Thumbnail,
+                "Thumbnail",
+                self.column_visibility.thumbnail,
+            )];
+            checkbox_dropdown(
+                "assets/icons/columns-3-cog.svg",
+                "Show/hide columns",
+                items,
+                GenresMessage::ToggleColumnVisible,
+                |trigger_bounds| match trigger_bounds {
+                    Some(b) => GenresMessage::SetOpenMenu(Some(
+                        crate::app_message::OpenMenu::CheckboxDropdown {
+                            view: crate::View::Genres,
+                            trigger_bounds: b,
+                        },
+                    )),
+                    None => GenresMessage::SetOpenMenu(None),
+                },
+                data.column_dropdown_open,
+                data.column_dropdown_trigger_bounds,
+            )
+            .into()
+        };
+
         let header = widgets::view_header::view_header(
             self.common.current_sort_mode,
             SortMode::GENRE_OPTIONS,
@@ -686,9 +773,9 @@ impl GenresPage {
             None, // No shuffle button for genres
             Some(GenresMessage::RefreshViewData),
             Some(GenresMessage::CenterOnPlaying),
-            None, // on_add
-            None, // trailing_button
-            true, // show_search
+            None,                  // on_add
+            Some(column_dropdown), // trailing_button
+            true,                  // show_search
             GenresMessage::SearchQueryChanged,
         );
 
@@ -759,9 +846,13 @@ impl GenresPage {
                     data.stable_viewport,
                     open_menu_for_rows,
                 ),
-                ThreeTierEntry::Child(album, _parent_genre_id) => {
-                    self.render_album_row(album, &ctx, data.stable_viewport, open_menu_for_rows)
-                }
+                ThreeTierEntry::Child(album, _parent_genre_id) => self.render_album_row(
+                    album,
+                    &ctx,
+                    data.album_art,
+                    data.stable_viewport,
+                    open_menu_for_rows,
+                ),
                 ThreeTierEntry::Grandchild(song, _album_id) => {
                     let track_el = super::expansion::render_child_track_row(
                         song,
@@ -895,29 +986,36 @@ impl GenresPage {
         let metadata_size = m.metadata_size;
         let index_size = m.metadata_size;
 
-        // Layout: [Index (5%)] [Artwork] [Genre Name (45%)] [Album Count (20%)] [Song Count (20%)]
-        let content = row![
-            slot_list_index_column(ctx.item_index, index_size, style, ctx.opacity),
-            {
-                use crate::widgets::slot_list::slot_list_artwork_column;
-                slot_list_artwork_column(
-                    genre_artwork.get(&genre.id),
-                    artwork_size,
-                    ctx.is_center,
-                    false,
-                    ctx.opacity,
-                )
-            },
-            container(slot_list_text(
-                genre.name.clone(),
-                title_size,
-                style.text_color,
-            ))
-            .width(Length::FillPortion(45))
-            .height(Length::Fill)
-            .clip(true)
-            .align_y(Alignment::Center),
-            {
+        // Layout: [Index (5%)] [Artwork?] [Genre Name (45%)] [Album Count (20%)] [Song Count (20%)]
+        let mut content = iced::widget::Row::new().push(slot_list_index_column(
+            ctx.item_index,
+            index_size,
+            style,
+            ctx.opacity,
+        ));
+        if self.column_visibility.thumbnail {
+            use crate::widgets::slot_list::slot_list_artwork_column;
+            content = content.push(slot_list_artwork_column(
+                genre_artwork.get(&genre.id),
+                artwork_size,
+                ctx.is_center,
+                false,
+                ctx.opacity,
+            ));
+        }
+        let content = content
+            .push(
+                container(slot_list_text(
+                    genre.name.clone(),
+                    title_size,
+                    style.text_color,
+                ))
+                .width(Length::FillPortion(45))
+                .height(Length::Fill)
+                .clip(true)
+                .align_y(Alignment::Center),
+            )
+            .push({
                 use crate::widgets::slot_list::slot_list_metadata_column;
                 let album_text = if genre.album_count == 1 {
                     "1 album".to_string()
@@ -932,8 +1030,8 @@ impl GenresPage {
                     style,
                     20,
                 )
-            },
-            {
+            })
+            .push({
                 use crate::widgets::slot_list::slot_list_metadata_column;
                 slot_list_metadata_column(
                     format!("{} songs", genre.song_count),
@@ -942,17 +1040,16 @@ impl GenresPage {
                     style,
                     20,
                 )
-            },
-        ]
-        .spacing(6.0)
-        .padding(iced::Padding {
-            left: SLOT_LIST_SLOT_PADDING,
-            right: 4.0,
-            top: 4.0,
-            bottom: 4.0,
-        })
-        .align_y(Alignment::Center)
-        .height(Length::Fill);
+            })
+            .spacing(6.0)
+            .padding(iced::Padding {
+                left: SLOT_LIST_SLOT_PADDING,
+                right: 4.0,
+                top: 4.0,
+                bottom: 4.0,
+            })
+            .align_y(Alignment::Center)
+            .height(Length::Fill);
 
         let clickable = container(content)
             .style(move |_theme| style.to_container_style())
@@ -1013,12 +1110,15 @@ impl GenresPage {
         &self,
         album: &AlbumUIViewData,
         ctx: &crate::widgets::slot_list::SlotListRowContext,
+        album_art: &'a HashMap<String, image::Handle>,
         stable_viewport: bool,
         open_menu: Option<&'a crate::app_message::OpenMenu>,
     ) -> Element<'a, GenresMessage> {
         let album_el = super::expansion::render_child_album_row(
             album,
             ctx,
+            album_art.get(&album.id),
+            self.column_visibility.thumbnail,
             GenresMessage::SlotListActivateCenter,
             if stable_viewport {
                 GenresMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
@@ -1127,5 +1227,54 @@ impl super::ViewPage for GenresPage {
     }
     fn reload_message(&self) -> Option<Message> {
         Some(Message::LoadGenres)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn genres_column_visibility_default_thumbnail_on() {
+        let v = GenresColumnVisibility::default();
+        assert!(v.thumbnail);
+    }
+
+    #[test]
+    fn genres_column_visibility_get_set_round_trip() {
+        let mut v = GenresColumnVisibility::default();
+        assert!(v.get(GenresColumn::Thumbnail));
+        v.set(GenresColumn::Thumbnail, false);
+        assert!(!v.get(GenresColumn::Thumbnail));
+        v.set(GenresColumn::Thumbnail, true);
+        assert!(v.get(GenresColumn::Thumbnail));
+    }
+
+    #[test]
+    fn toggle_column_visible_flips_thumbnail_and_emits_action() {
+        let mut page = GenresPage::default();
+        let genres: Vec<GenreUIViewData> = Vec::new();
+
+        let (_t, action) = page.update(
+            GenresMessage::ToggleColumnVisible(GenresColumn::Thumbnail),
+            0,
+            &genres,
+        );
+        assert!(!page.column_visibility.thumbnail);
+        assert!(matches!(
+            action,
+            GenresAction::ColumnVisibilityChanged(GenresColumn::Thumbnail, false)
+        ));
+
+        let (_t2, action2) = page.update(
+            GenresMessage::ToggleColumnVisible(GenresColumn::Thumbnail),
+            0,
+            &genres,
+        );
+        assert!(page.column_visibility.thumbnail);
+        assert!(matches!(
+            action2,
+            GenresAction::ColumnVisibilityChanged(GenresColumn::Thumbnail, true)
+        ));
     }
 }

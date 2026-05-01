@@ -130,6 +130,12 @@ impl Nokkvi {
                 GenresMessage::CollapseExpansion | GenresMessage::ExpandCenter
             ),
         );
+        // Capture child album ids before consuming `msg` so we can fan out
+        // mini-artwork fetches for the newly-loaded expansion children.
+        let expansion_album_ids: Vec<String> = match &msg {
+            GenresMessage::AlbumsLoaded(_, albums) => albums.iter().map(|a| a.id.clone()).collect(),
+            _ => Vec::new(),
+        };
         let (cmd, action) =
             self.genres_page
                 .update(msg, self.library.genres.len(), &self.library.genres);
@@ -444,9 +450,50 @@ impl Nokkvi {
             GenresAction::ShowSongInFolder(path) => {
                 return self.handle_show_in_folder(path);
             }
+            GenresAction::ColumnVisibilityChanged(col, value) => {
+                return self.persist_genres_column_visibility(col, value);
+            }
             _ => {} // None + already-handled common actions
         }
 
-        cmd.map(Message::Genres)
+        let cmd_task = cmd.map(Message::Genres);
+        if expansion_album_ids.is_empty() {
+            return cmd_task;
+        }
+        let Some(shell) = &self.app_service else {
+            return cmd_task;
+        };
+        let cached: std::collections::HashSet<&String> =
+            self.artwork.album_art.iter().map(|(k, _)| k).collect();
+        let prefetch = super::components::expansion_album_artwork_tasks(
+            &cached,
+            shell.albums().clone(),
+            expansion_album_ids,
+        );
+        if prefetch.is_empty() {
+            cmd_task
+        } else {
+            let mut tasks = vec![cmd_task];
+            tasks.extend(prefetch);
+            Task::batch(tasks)
+        }
+    }
+
+    /// Persist the user's genres column visibility toggle to config.toml +
+    /// redb via `AppService::settings()`. The page's in-memory state was
+    /// already mutated in `GenresPage::update`.
+    pub(crate) fn persist_genres_column_visibility(
+        &self,
+        col: views::GenresColumn,
+        value: bool,
+    ) -> Task<Message> {
+        match col {
+            views::GenresColumn::Thumbnail => {
+                self.shell_spawn("persist_genres_show_thumbnail", move |shell| async move {
+                    shell.settings().set_genres_show_thumbnail(value).await
+                });
+            }
+        }
+        Task::none()
     }
 }

@@ -640,11 +640,15 @@ pub(crate) fn render_child_track_row<'a, M: Clone + 'a + 'static>(
 /// Render a child **album** row (used by Artists → Albums and Genres → Albums).
 ///
 /// When `show_artist` is true (Genres view), includes an artist column.
-/// Layout: `[indent] [album name] [artist?] [year 12%] [songs 15%] [duration 12%] [star 5%]`
+/// When `show_artwork` is true, prepends a thumbnail column sourced from
+/// `artwork_handle` (typically `view_data.album_art.get(&album.id)`).
+/// Layout: `[indent] [artwork?] [album name] [artist?] [year 12%] [songs 15%] [duration 12%] [star 5%]`
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
     album: &nokkvi_data::backend::albums::AlbumUIViewData,
     ctx: &SlotListRowContext,
+    artwork_handle: Option<&'a iced::widget::image::Handle>,
+    show_artwork: bool,
     center_msg: M,
     offset_msg: M,
     show_artist: bool,
@@ -666,6 +670,7 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
     let title_size = ctx.metrics.title_size;
     let meta_size = ctx.metrics.metadata_size;
     let star_size = ctx.metrics.star_size_child;
+    let artwork_size = ctx.metrics.artwork_size;
 
     let year_str = album.year.map_or("-".to_string(), |y| y.to_string());
     let songs_str = format!("{} songs", album.song_count);
@@ -678,8 +683,21 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
 
     let indent_width = if depth > 0 { 30.0 * depth as f32 } else { 50.0 };
 
-    let content = row![
-        container(text("")).width(Length::Fixed(indent_width)),
+    let mut content =
+        iced::widget::Row::new().push(container(text("")).width(Length::Fixed(indent_width)));
+
+    if show_artwork {
+        use crate::widgets::slot_list::slot_list_artwork_column;
+        content = content.push(slot_list_artwork_column(
+            artwork_handle,
+            artwork_size,
+            ctx.is_center,
+            false,
+            ctx.opacity,
+        ));
+    }
+
+    content = content.push(
         container(crate::widgets::slot_list::slot_list_text_column(
             album.name.clone(),
             on_album_click.clone(),
@@ -694,14 +712,14 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
             style,
             true,
             name_portion + if show_artist { 20 } else { 0 },
-        ),)
+        ))
         .width(Length::FillPortion(
-            name_portion + if show_artist { 20 } else { 0 }
+            name_portion + if show_artist { 20 } else { 0 },
         ))
         .height(Length::Fill)
         .clip(true)
         .align_y(Alignment::Center),
-    ];
+    );
 
     let content = content
         .push(

@@ -278,6 +278,14 @@ impl Nokkvi {
                 ArtistsMessage::CollapseExpansion | ArtistsMessage::ExpandCenter
             ),
         );
+        // Capture child album ids before consuming `msg` so we can fan out
+        // mini-artwork fetches for the newly-loaded expansion children.
+        let expansion_album_ids: Vec<String> = match &msg {
+            ArtistsMessage::AlbumsLoaded(_, albums) => {
+                albums.iter().map(|a| a.id.clone()).collect()
+            }
+            _ => Vec::new(),
+        };
         let (cmd, action) =
             self.artists_page
                 .update(msg, self.library.artists.len(), &self.library.artists);
@@ -640,7 +648,27 @@ impl Nokkvi {
             _ => {} // None + already-handled common actions
         }
 
-        cmd.map(Message::Artists)
+        let cmd_task = cmd.map(Message::Artists);
+        if expansion_album_ids.is_empty() {
+            return cmd_task;
+        }
+        let Some(shell) = &self.app_service else {
+            return cmd_task;
+        };
+        let cached: std::collections::HashSet<&String> =
+            self.artwork.album_art.iter().map(|(k, _)| k).collect();
+        let prefetch = super::components::expansion_album_artwork_tasks(
+            &cached,
+            shell.albums().clone(),
+            expansion_album_ids,
+        );
+        if prefetch.is_empty() {
+            cmd_task
+        } else {
+            let mut tasks = vec![cmd_task];
+            tasks.extend(prefetch);
+            Task::batch(tasks)
+        }
     }
 
     /// Persist the user's artists column visibility toggle to config.toml +

@@ -830,6 +830,7 @@ impl Nokkvi {
                         let view_data = views::ArtistsViewData {
                             artists: &self.library.artists,
                             artist_art: &self.artwork.album_art_snapshot,
+                            album_art: &self.artwork.album_art_snapshot,
                             large_artwork,
                             dominant_colors: &self.artwork.album_dominant_colors_snapshot,
                             window_width: self.window.width * 0.45,
@@ -850,6 +851,7 @@ impl Nokkvi {
                             genres: &self.library.genres,
                             genre_artwork: &self.artwork.genre.mini,
                             genre_collage_artwork: &self.artwork.genre.collage,
+                            album_art: &self.artwork.album_art_snapshot,
                             window_width: self.window.width * 0.45,
                             window_height: browser_height,
                             scale_factor: self.window.scale_factor,
@@ -857,6 +859,8 @@ impl Nokkvi {
                             total_genre_count: self.library.counts.genres,
                             loading: self.library.genres.is_loading(),
                             stable_viewport: true, // Browser pane: click to highlight, not play
+                            column_dropdown_open: false,
+                            column_dropdown_trigger_bounds: None,
                             open_menu: self.open_menu.as_ref(),
                         };
                         self.genres_page.view(view_data).map(Message::Genres)
@@ -962,6 +966,7 @@ impl Nokkvi {
                 let view_data = views::ArtistsViewData {
                     artists: &self.library.artists,
                     artist_art: &self.artwork.album_art_snapshot, // Reuse album art cache for artist images
+                    album_art: &self.artwork.album_art_snapshot,
                     large_artwork,
                     dominant_colors: &self.artwork.album_dominant_colors_snapshot,
                     window_width: self.window.width,
@@ -999,10 +1004,13 @@ impl Nokkvi {
                 self.songs_page.view(view_data).map(Message::Songs)
             }
             View::Genres => {
+                let (column_dropdown_open, column_dropdown_trigger_bounds) =
+                    column_dropdown_state(&self.open_menu, View::Genres);
                 let view_data = views::GenresViewData {
                     genres: &self.library.genres,
                     genre_artwork: &self.artwork.genre.mini,
                     genre_collage_artwork: &self.artwork.genre.collage,
+                    album_art: &self.artwork.album_art_snapshot,
                     window_width: self.window.width,
                     window_height: self.window.height,
                     scale_factor: self.window.scale_factor,
@@ -1010,6 +1018,8 @@ impl Nokkvi {
                     total_genre_count: self.library.counts.genres,
                     loading: self.library.genres.is_loading(),
                     stable_viewport: self.stable_viewport,
+                    column_dropdown_open,
+                    column_dropdown_trigger_bounds,
                     open_menu: self.open_menu.as_ref(),
                 };
                 self.genres_page.view(view_data).map(Message::Genres)

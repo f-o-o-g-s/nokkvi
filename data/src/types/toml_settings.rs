@@ -72,6 +72,10 @@ pub struct TomlSettings {
     #[serde(default = "default_true")]
     pub artists_show_thumbnail: bool,
 
+    // -- Genres view column toggles --
+    #[serde(default = "default_true")]
+    pub genres_show_thumbnail: bool,
+
     // -- Per-view artwork text overlay toggles --
     pub albums_artwork_overlay: bool,
     pub artists_artwork_overlay: bool,
@@ -235,6 +239,7 @@ impl Default for TomlSettings {
             artists_show_love: true,
             artists_show_index: true,
             artists_show_thumbnail: true,
+            genres_show_thumbnail: true,
             albums_artwork_overlay: true,
             artists_artwork_overlay: true,
             songs_artwork_overlay: true,
@@ -325,6 +330,7 @@ impl TomlSettings {
             artists_show_love: ps.artists_show_love,
             artists_show_index: ps.artists_show_index,
             artists_show_thumbnail: ps.artists_show_thumbnail,
+            genres_show_thumbnail: ps.genres_show_thumbnail,
             albums_artwork_overlay: ps.albums_artwork_overlay,
             artists_artwork_overlay: ps.artists_artwork_overlay,
             songs_artwork_overlay: ps.songs_artwork_overlay,
