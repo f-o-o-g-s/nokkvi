@@ -882,12 +882,18 @@ pub struct PlayerSettings {
     /// Whether the queue's plays column is visible (default: false).
     /// Auto-shown when sort = MostPlayed regardless of this toggle.
     pub queue_show_plays: bool,
+    /// Whether the queue's leading row-index column is visible.
+    pub queue_show_index: bool,
+    /// Whether the queue's leading thumbnail column is visible.
+    pub queue_show_thumbnail: bool,
 
     // -- Albums view column toggles --
     pub albums_show_stars: bool,
     pub albums_show_songcount: bool,
     pub albums_show_plays: bool,
     pub albums_show_love: bool,
+    pub albums_show_index: bool,
+    pub albums_show_thumbnail: bool,
 
     // -- Songs view column toggles --
     pub songs_show_stars: bool,
@@ -895,6 +901,8 @@ pub struct PlayerSettings {
     pub songs_show_duration: bool,
     pub songs_show_plays: bool,
     pub songs_show_love: bool,
+    pub songs_show_index: bool,
+    pub songs_show_thumbnail: bool,
 
     // -- Artists view column toggles --
     pub artists_show_stars: bool,
@@ -902,6 +910,8 @@ pub struct PlayerSettings {
     pub artists_show_songcount: bool,
     pub artists_show_plays: bool,
     pub artists_show_love: bool,
+    pub artists_show_index: bool,
+    pub artists_show_thumbnail: bool,
 
     // -- Per-view artwork text overlay toggles --
     /// Whether the metadata text overlay is rendered on the large artwork in Albums view.

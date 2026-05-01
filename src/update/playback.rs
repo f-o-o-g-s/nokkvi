@@ -1095,6 +1095,8 @@ impl Nokkvi {
         self.queue_page.column_visibility.duration = settings.queue_show_duration;
         self.queue_page.column_visibility.love = settings.queue_show_love;
         self.queue_page.column_visibility.plays = settings.queue_show_plays;
+        self.queue_page.column_visibility.index = settings.queue_show_index;
+        self.queue_page.column_visibility.thumbnail = settings.queue_show_thumbnail;
 
         // Restore Artists view column visibility.
         self.artists_page.column_visibility.stars = settings.artists_show_stars;
@@ -1102,12 +1104,16 @@ impl Nokkvi {
         self.artists_page.column_visibility.songcount = settings.artists_show_songcount;
         self.artists_page.column_visibility.plays = settings.artists_show_plays;
         self.artists_page.column_visibility.love = settings.artists_show_love;
+        self.artists_page.column_visibility.index = settings.artists_show_index;
+        self.artists_page.column_visibility.thumbnail = settings.artists_show_thumbnail;
 
         // Restore Albums view column visibility.
         self.albums_page.column_visibility.stars = settings.albums_show_stars;
         self.albums_page.column_visibility.songcount = settings.albums_show_songcount;
         self.albums_page.column_visibility.plays = settings.albums_show_plays;
         self.albums_page.column_visibility.love = settings.albums_show_love;
+        self.albums_page.column_visibility.index = settings.albums_show_index;
+        self.albums_page.column_visibility.thumbnail = settings.albums_show_thumbnail;
 
         // Restore Songs view column visibility.
         self.songs_page.column_visibility.stars = settings.songs_show_stars;
@@ -1115,6 +1121,8 @@ impl Nokkvi {
         self.songs_page.column_visibility.duration = settings.songs_show_duration;
         self.songs_page.column_visibility.plays = settings.songs_show_plays;
         self.songs_page.column_visibility.love = settings.songs_show_love;
+        self.songs_page.column_visibility.index = settings.songs_show_index;
+        self.songs_page.column_visibility.thumbnail = settings.songs_show_thumbnail;
 
         // Restore active playlist context from persisted settings
         self.active_playlist_info =

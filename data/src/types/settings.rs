@@ -195,6 +195,12 @@ pub struct PlayerSettings {
     /// When sort = MostPlayed, the column auto-shows regardless of this toggle.
     #[serde(default)]
     pub queue_show_plays: bool,
+    /// Whether the queue's leading row-index column is visible (default: true).
+    #[serde(default = "default_true")]
+    pub queue_show_index: bool,
+    /// Whether the queue's leading thumbnail column is visible (default: true).
+    #[serde(default = "default_true")]
+    pub queue_show_thumbnail: bool,
 
     // -- Albums view column toggles --
     /// Stars column. Auto-shows when sort = Rating regardless of toggle.
@@ -209,6 +215,12 @@ pub struct PlayerSettings {
     /// Heart (favorite) column.
     #[serde(default = "default_true")]
     pub albums_show_love: bool,
+    /// Leading row-index column.
+    #[serde(default = "default_true")]
+    pub albums_show_index: bool,
+    /// Leading thumbnail column.
+    #[serde(default = "default_true")]
+    pub albums_show_thumbnail: bool,
 
     // -- Songs view column toggles --
     /// Stars column. Auto-shows when sort = Rating regardless of toggle.
@@ -226,6 +238,12 @@ pub struct PlayerSettings {
     /// Heart (favorite) column.
     #[serde(default = "default_true")]
     pub songs_show_love: bool,
+    /// Leading row-index column.
+    #[serde(default = "default_true")]
+    pub songs_show_index: bool,
+    /// Leading thumbnail column.
+    #[serde(default = "default_true")]
+    pub songs_show_thumbnail: bool,
 
     // -- Artists view column toggles --
     /// Stars column. Auto-shows when sort = Rating regardless of toggle.
@@ -243,6 +261,12 @@ pub struct PlayerSettings {
     /// Heart (favorite) column.
     #[serde(default = "default_true")]
     pub artists_show_love: bool,
+    /// Leading row-index column.
+    #[serde(default = "default_true")]
+    pub artists_show_index: bool,
+    /// Leading thumbnail column.
+    #[serde(default = "default_true")]
+    pub artists_show_thumbnail: bool,
 
     // -- Per-view artwork text overlay toggles --
     /// Whether the metadata text overlay is rendered on the large artwork in Albums view.
@@ -384,20 +408,28 @@ impl Default for PlayerSettings {
             queue_show_duration: true,
             queue_show_love: true,
             queue_show_plays: false,
+            queue_show_index: true,
+            queue_show_thumbnail: true,
             albums_show_stars: false,
             albums_show_songcount: true,
             albums_show_plays: false,
             albums_show_love: true,
+            albums_show_index: true,
+            albums_show_thumbnail: true,
             songs_show_stars: false,
             songs_show_album: true,
             songs_show_duration: true,
             songs_show_plays: false,
             songs_show_love: true,
+            songs_show_index: true,
+            songs_show_thumbnail: true,
             artists_show_stars: true,
             artists_show_albumcount: true,
             artists_show_songcount: true,
             artists_show_plays: true,
             artists_show_love: true,
+            artists_show_index: true,
+            artists_show_thumbnail: true,
             albums_artwork_overlay: true,
             artists_artwork_overlay: true,
             songs_artwork_overlay: true,

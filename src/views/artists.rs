@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use iced::{
     Alignment, Element, Length, Task,
-    widget::{button, container, image, row},
+    widget::{Row, button, container, image},
 };
 use nokkvi_data::backend::{albums::AlbumUIViewData, artists::ArtistUIViewData};
 
@@ -34,6 +34,8 @@ pub struct ArtistsPage {
 /// else is user-toggleable through the columns-cog dropdown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArtistsColumn {
+    Index,
+    Thumbnail,
     Stars,
     AlbumCount,
     SongCount,
@@ -44,6 +46,8 @@ pub enum ArtistsColumn {
 /// User-toggle state for each toggleable artists column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ArtistsColumnVisibility {
+    pub index: bool,
+    pub thumbnail: bool,
     pub stars: bool,
     pub albumcount: bool,
     pub songcount: bool,
@@ -56,6 +60,8 @@ impl Default for ArtistsColumnVisibility {
         // All-on matches today's permanent layout (after the Plays-column
         // commit) — no surprise visual change on first launch.
         Self {
+            index: true,
+            thumbnail: true,
             stars: true,
             albumcount: true,
             songcount: true,
@@ -68,6 +74,8 @@ impl Default for ArtistsColumnVisibility {
 impl ArtistsColumnVisibility {
     pub fn get(&self, col: ArtistsColumn) -> bool {
         match col {
+            ArtistsColumn::Index => self.index,
+            ArtistsColumn::Thumbnail => self.thumbnail,
             ArtistsColumn::Stars => self.stars,
             ArtistsColumn::AlbumCount => self.albumcount,
             ArtistsColumn::SongCount => self.songcount,
@@ -78,6 +86,8 @@ impl ArtistsColumnVisibility {
 
     pub fn set(&mut self, col: ArtistsColumn, value: bool) {
         match col {
+            ArtistsColumn::Index => self.index = value,
+            ArtistsColumn::Thumbnail => self.thumbnail = value,
             ArtistsColumn::Stars => self.stars = value,
             ArtistsColumn::AlbumCount => self.albumcount = value,
             ArtistsColumn::SongCount => self.songcount = value,
@@ -838,6 +848,8 @@ impl ArtistsPage {
         let column_dropdown: Element<'a, ArtistsMessage> = {
             use crate::widgets::checkbox_dropdown::checkbox_dropdown;
             let items = vec![
+                ("Index".to_string(), self.column_visibility.index),
+                ("Thumbnail".to_string(), self.column_visibility.thumbnail),
                 ("Stars".to_string(), self.column_visibility.stars),
                 ("Album Count".to_string(), self.column_visibility.albumcount),
                 ("Song Count".to_string(), self.column_visibility.songcount),
@@ -849,10 +861,12 @@ impl ArtistsPage {
                 "Show/hide columns",
                 items,
                 |idx| match idx {
-                    0 => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::Stars),
-                    1 => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::AlbumCount),
-                    2 => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::SongCount),
-                    3 => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::Plays),
+                    0 => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::Index),
+                    1 => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::Thumbnail),
+                    2 => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::Stars),
+                    3 => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::AlbumCount),
+                    4 => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::SongCount),
+                    5 => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::Plays),
                     _ => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::Love),
                 },
                 |trigger_bounds| match trigger_bounds {
@@ -1249,44 +1263,48 @@ impl ArtistsPage {
         }
         let name_portion = 100u16.saturating_sub(consumed).max(20);
 
-        // Always-on columns: Index, Art, Name.
-        let mut content_row = row![
-            slot_list_index_column(ctx.item_index, index_size, style, ctx.opacity),
-            {
-                use crate::widgets::slot_list::slot_list_artwork_column;
-                slot_list_artwork_column(
-                    artist_art.get(&artist_id),
-                    artwork_size,
-                    ctx.is_center,
-                    false,
-                    ctx.opacity,
-                )
-            },
-            {
-                let title_click = Some(ArtistsMessage::ContextMenuAction(
-                    ctx.item_index,
-                    crate::widgets::context_menu::LibraryContextEntry::GetInfo,
-                ));
-                let link_color = if ctx.is_center {
-                    style.text_color
-                } else {
-                    crate::theme::accent_bright()
-                };
-                container(
-                    crate::widgets::link_text::LinkText::new(artist_name)
-                        .size(title_size)
-                        .color(style.text_color)
-                        .hover_color(link_color)
-                        .on_press(title_click),
-                )
-                .width(Length::FillPortion(name_portion))
-                .height(Length::Fill)
-                .clip(true)
-                .align_y(Alignment::Center)
-            },
-        ]
-        .spacing(6.0)
-        .align_y(Alignment::Center);
+        // Leading columns (Index, Thumbnail) are now user-toggleable; Name is always-on.
+        let mut content_row = Row::new().spacing(6.0).align_y(Alignment::Center);
+        if vis.index {
+            content_row = content_row.push(slot_list_index_column(
+                ctx.item_index,
+                index_size,
+                style,
+                ctx.opacity,
+            ));
+        }
+        if vis.thumbnail {
+            use crate::widgets::slot_list::slot_list_artwork_column;
+            content_row = content_row.push(slot_list_artwork_column(
+                artist_art.get(&artist_id),
+                artwork_size,
+                ctx.is_center,
+                false,
+                ctx.opacity,
+            ));
+        }
+        content_row = content_row.push({
+            let title_click = Some(ArtistsMessage::ContextMenuAction(
+                ctx.item_index,
+                crate::widgets::context_menu::LibraryContextEntry::GetInfo,
+            ));
+            let link_color = if ctx.is_center {
+                style.text_color
+            } else {
+                crate::theme::accent_bright()
+            };
+            container(
+                crate::widgets::link_text::LinkText::new(artist_name)
+                    .size(title_size)
+                    .color(style.text_color)
+                    .hover_color(link_color)
+                    .on_press(title_click),
+            )
+            .width(Length::FillPortion(name_portion))
+            .height(Length::Fill)
+            .clip(true)
+            .align_y(Alignment::Center)
+        });
 
         // Stars column (auto-show on sort=Rating). Replaces the old inline
         // star widget under the artist name.

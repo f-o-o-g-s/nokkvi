@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use iced::{
     Alignment, Element, Length, Task,
-    widget::{button, container, image, row},
+    widget::{Row, button, container, image},
 };
 use nokkvi_data::{backend::songs::SongUIViewData, utils::formatters};
 
@@ -26,6 +26,8 @@ pub struct SongsPage {
 /// modes. Stars and Plays are now dedicated columns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SongsColumn {
+    Index,
+    Thumbnail,
     Stars,
     Album,
     Duration,
@@ -35,6 +37,8 @@ pub enum SongsColumn {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SongsColumnVisibility {
+    pub index: bool,
+    pub thumbnail: bool,
     pub stars: bool,
     pub album: bool,
     pub duration: bool,
@@ -45,7 +49,10 @@ pub struct SongsColumnVisibility {
 impl Default for SongsColumnVisibility {
     fn default() -> Self {
         // Stars and Plays opt-in; Album/Duration/Love always-on today.
+        // Index/Thumbnail default on to match historical always-on rendering.
         Self {
+            index: true,
+            thumbnail: true,
             stars: false,
             album: true,
             duration: true,
@@ -58,6 +65,8 @@ impl Default for SongsColumnVisibility {
 impl SongsColumnVisibility {
     pub fn get(&self, col: SongsColumn) -> bool {
         match col {
+            SongsColumn::Index => self.index,
+            SongsColumn::Thumbnail => self.thumbnail,
             SongsColumn::Stars => self.stars,
             SongsColumn::Album => self.album,
             SongsColumn::Duration => self.duration,
@@ -68,6 +77,8 @@ impl SongsColumnVisibility {
 
     pub fn set(&mut self, col: SongsColumn, value: bool) {
         match col {
+            SongsColumn::Index => self.index = value,
+            SongsColumn::Thumbnail => self.thumbnail = value,
             SongsColumn::Stars => self.stars = value,
             SongsColumn::Album => self.album = value,
             SongsColumn::Duration => self.duration = value,
@@ -475,6 +486,8 @@ impl SongsPage {
         let column_dropdown: Element<'a, SongsMessage> = {
             use crate::widgets::checkbox_dropdown::checkbox_dropdown;
             let items = vec![
+                ("Index".to_string(), self.column_visibility.index),
+                ("Thumbnail".to_string(), self.column_visibility.thumbnail),
                 ("Stars".to_string(), self.column_visibility.stars),
                 ("Album".to_string(), self.column_visibility.album),
                 ("Duration".to_string(), self.column_visibility.duration),
@@ -486,10 +499,12 @@ impl SongsPage {
                 "Show/hide columns",
                 items,
                 |idx| match idx {
-                    0 => SongsMessage::ToggleColumnVisible(SongsColumn::Stars),
-                    1 => SongsMessage::ToggleColumnVisible(SongsColumn::Album),
-                    2 => SongsMessage::ToggleColumnVisible(SongsColumn::Duration),
-                    3 => SongsMessage::ToggleColumnVisible(SongsColumn::Plays),
+                    0 => SongsMessage::ToggleColumnVisible(SongsColumn::Index),
+                    1 => SongsMessage::ToggleColumnVisible(SongsColumn::Thumbnail),
+                    2 => SongsMessage::ToggleColumnVisible(SongsColumn::Stars),
+                    3 => SongsMessage::ToggleColumnVisible(SongsColumn::Album),
+                    4 => SongsMessage::ToggleColumnVisible(SongsColumn::Duration),
+                    5 => SongsMessage::ToggleColumnVisible(SongsColumn::Plays),
                     _ => SongsMessage::ToggleColumnVisible(SongsColumn::Love),
                 },
                 |trigger_bounds| match trigger_bounds {
@@ -654,49 +669,53 @@ impl SongsPage {
                 }
                 let title_portion = 100u16.saturating_sub(consumed).max(20);
 
-                let mut content_row = row![
-                    slot_list_index_column(ctx.item_index, index_size, style, ctx.opacity),
-                    {
-                        use crate::widgets::slot_list::slot_list_artwork_column;
-                        let artwork_handle = album_id.as_ref().and_then(|id| song_artwork.get(id));
-                        slot_list_artwork_column(
-                            artwork_handle,
-                            artwork_size,
-                            ctx.is_center,
-                            false,
-                            ctx.opacity,
+                let mut content_row = Row::new().spacing(6.0).align_y(Alignment::Center);
+                if vis.index {
+                    content_row = content_row.push(slot_list_index_column(
+                        ctx.item_index,
+                        index_size,
+                        style,
+                        ctx.opacity,
+                    ));
+                }
+                if vis.thumbnail {
+                    use crate::widgets::slot_list::slot_list_artwork_column;
+                    let artwork_handle = album_id.as_ref().and_then(|id| song_artwork.get(id));
+                    content_row = content_row.push(slot_list_artwork_column(
+                        artwork_handle,
+                        artwork_size,
+                        ctx.is_center,
+                        false,
+                        ctx.opacity,
+                    ));
+                }
+                content_row = content_row.push({
+                    use crate::widgets::slot_list::slot_list_text_column;
+                    let artist_click = song.artist_id.as_ref().map(|id| {
+                        SongsMessage::NavigateAndFilter(
+                            crate::View::Artists,
+                            nokkvi_data::types::filter::LibraryFilter::ArtistId {
+                                id: id.clone(),
+                                name: song_artist.clone(),
+                            },
                         )
-                    },
-                    {
-                        use crate::widgets::slot_list::slot_list_text_column;
-                        let artist_click = song.artist_id.as_ref().map(|id| {
-                            SongsMessage::NavigateAndFilter(
-                                crate::View::Artists,
-                                nokkvi_data::types::filter::LibraryFilter::ArtistId {
-                                    id: id.clone(),
-                                    name: song_artist.clone(),
-                                },
-                            )
-                        });
-                        let title_click = Some(SongsMessage::ContextMenuAction(
-                            ctx.item_index,
-                            crate::widgets::context_menu::LibraryContextEntry::GetInfo,
-                        ));
-                        slot_list_text_column(
-                            song_title,
-                            title_click,
-                            song_artist,
-                            artist_click,
-                            title_size,
-                            subtitle_size,
-                            style,
-                            ctx.is_center,
-                            title_portion,
-                        )
-                    },
-                ]
-                .spacing(6.0)
-                .align_y(Alignment::Center);
+                    });
+                    let title_click = Some(SongsMessage::ContextMenuAction(
+                        ctx.item_index,
+                        crate::widgets::context_menu::LibraryContextEntry::GetInfo,
+                    ));
+                    slot_list_text_column(
+                        song_title,
+                        title_click,
+                        song_artist,
+                        artist_click,
+                        title_size,
+                        subtitle_size,
+                        style,
+                        ctx.is_center,
+                        title_portion,
+                    )
+                });
 
                 if show_album {
                     use crate::widgets::slot_list::slot_list_metadata_column;

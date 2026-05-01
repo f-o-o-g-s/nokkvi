@@ -677,6 +677,16 @@ impl Nokkvi {
                     shell.settings().set_artists_show_love(value).await
                 });
             }
+            views::ArtistsColumn::Index => {
+                self.shell_spawn("persist_artists_show_index", move |shell| async move {
+                    shell.settings().set_artists_show_index(value).await
+                });
+            }
+            views::ArtistsColumn::Thumbnail => {
+                self.shell_spawn("persist_artists_show_thumbnail", move |shell| async move {
+                    shell.settings().set_artists_show_thumbnail(value).await
+                });
+            }
         }
         Task::none()
     }

@@ -784,6 +784,16 @@ impl Nokkvi {
                     shell.settings().set_queue_show_plays(value).await
                 });
             }
+            views::QueueColumn::Index => {
+                self.shell_spawn("persist_queue_show_index", move |shell| async move {
+                    shell.settings().set_queue_show_index(value).await
+                });
+            }
+            views::QueueColumn::Thumbnail => {
+                self.shell_spawn("persist_queue_show_thumbnail", move |shell| async move {
+                    shell.settings().set_queue_show_thumbnail(value).await
+                });
+            }
         }
         Task::none()
     }

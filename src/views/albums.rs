@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use iced::{
     Alignment, Element, Length, Task,
-    widget::{button, container, image, row},
+    widget::{Row, button, container, image},
 };
 use nokkvi_data::{
     backend::{albums::AlbumUIViewData, songs::SongUIViewData},
@@ -36,6 +36,8 @@ pub struct AlbumsPage {
 /// sorted by those modes — Stars and Plays are now dedicated columns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlbumsColumn {
+    Index,
+    Thumbnail,
     Stars,
     SongCount,
     Plays,
@@ -45,6 +47,8 @@ pub enum AlbumsColumn {
 /// User-toggle state for each toggleable albums column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AlbumsColumnVisibility {
+    pub index: bool,
+    pub thumbnail: bool,
     pub stars: bool,
     pub songcount: bool,
     pub plays: bool,
@@ -55,8 +59,11 @@ impl Default for AlbumsColumnVisibility {
     fn default() -> Self {
         // Stars and Plays default off — today they only appear when their
         // sort mode is active. SongCount and Love default on (always-shown
-        // today).
+        // today). Index/Thumbnail default on to match historical always-on
+        // rendering of those leading columns.
         Self {
+            index: true,
+            thumbnail: true,
             stars: false,
             songcount: true,
             plays: false,
@@ -68,6 +75,8 @@ impl Default for AlbumsColumnVisibility {
 impl AlbumsColumnVisibility {
     pub fn get(&self, col: AlbumsColumn) -> bool {
         match col {
+            AlbumsColumn::Index => self.index,
+            AlbumsColumn::Thumbnail => self.thumbnail,
             AlbumsColumn::Stars => self.stars,
             AlbumsColumn::SongCount => self.songcount,
             AlbumsColumn::Plays => self.plays,
@@ -77,6 +86,8 @@ impl AlbumsColumnVisibility {
 
     pub fn set(&mut self, col: AlbumsColumn, value: bool) {
         match col {
+            AlbumsColumn::Index => self.index = value,
+            AlbumsColumn::Thumbnail => self.thumbnail = value,
             AlbumsColumn::Stars => self.stars = value,
             AlbumsColumn::SongCount => self.songcount = value,
             AlbumsColumn::Plays => self.plays = value,
@@ -628,6 +639,8 @@ impl AlbumsPage {
         let column_dropdown: Element<'a, AlbumsMessage> = {
             use crate::widgets::checkbox_dropdown::checkbox_dropdown;
             let items = vec![
+                ("Index".to_string(), self.column_visibility.index),
+                ("Thumbnail".to_string(), self.column_visibility.thumbnail),
                 ("Stars".to_string(), self.column_visibility.stars),
                 ("Song Count".to_string(), self.column_visibility.songcount),
                 ("Plays".to_string(), self.column_visibility.plays),
@@ -638,9 +651,11 @@ impl AlbumsPage {
                 "Show/hide columns",
                 items,
                 |idx| match idx {
-                    0 => AlbumsMessage::ToggleColumnVisible(AlbumsColumn::Stars),
-                    1 => AlbumsMessage::ToggleColumnVisible(AlbumsColumn::SongCount),
-                    2 => AlbumsMessage::ToggleColumnVisible(AlbumsColumn::Plays),
+                    0 => AlbumsMessage::ToggleColumnVisible(AlbumsColumn::Index),
+                    1 => AlbumsMessage::ToggleColumnVisible(AlbumsColumn::Thumbnail),
+                    2 => AlbumsMessage::ToggleColumnVisible(AlbumsColumn::Stars),
+                    3 => AlbumsMessage::ToggleColumnVisible(AlbumsColumn::SongCount),
+                    4 => AlbumsMessage::ToggleColumnVisible(AlbumsColumn::Plays),
                     _ => AlbumsMessage::ToggleColumnVisible(AlbumsColumn::Love),
                 },
                 |trigger_bounds| match trigger_bounds {
@@ -957,46 +972,50 @@ impl AlbumsPage {
         }
         let title_portion = 100u16.saturating_sub(consumed).max(20);
 
-        let mut content_row = row![
-            slot_list_index_column(ctx.item_index, index_size, style, ctx.opacity),
-            {
-                use crate::widgets::slot_list::slot_list_artwork_column;
-                slot_list_artwork_column(
-                    album_art.get(&album_id),
-                    artwork_size,
-                    ctx.is_center,
-                    false,
-                    ctx.opacity,
-                )
-            },
-            {
-                use crate::widgets::slot_list::slot_list_text_column;
-                let artist_click = Some(AlbumsMessage::NavigateAndFilter(
-                    crate::View::Artists,
-                    nokkvi_data::types::filter::LibraryFilter::ArtistId {
-                        id: album.artist_id.clone(),
-                        name: album_artist.clone(),
-                    },
-                ));
-                let title_click = Some(AlbumsMessage::ContextMenuAction(
-                    ctx.item_index,
-                    crate::widgets::context_menu::LibraryContextEntry::GetInfo,
-                ));
-                slot_list_text_column(
-                    album_name,
-                    title_click,
-                    album_artist,
-                    artist_click,
-                    title_size,
-                    subtitle_size,
-                    style,
-                    ctx.is_center,
-                    title_portion,
-                )
-            },
-        ]
-        .spacing(6.0)
-        .align_y(Alignment::Center);
+        let mut content_row = Row::new().spacing(6.0).align_y(Alignment::Center);
+        if vis.index {
+            content_row = content_row.push(slot_list_index_column(
+                ctx.item_index,
+                index_size,
+                style,
+                ctx.opacity,
+            ));
+        }
+        if vis.thumbnail {
+            use crate::widgets::slot_list::slot_list_artwork_column;
+            content_row = content_row.push(slot_list_artwork_column(
+                album_art.get(&album_id),
+                artwork_size,
+                ctx.is_center,
+                false,
+                ctx.opacity,
+            ));
+        }
+        content_row = content_row.push({
+            use crate::widgets::slot_list::slot_list_text_column;
+            let artist_click = Some(AlbumsMessage::NavigateAndFilter(
+                crate::View::Artists,
+                nokkvi_data::types::filter::LibraryFilter::ArtistId {
+                    id: album.artist_id.clone(),
+                    name: album_artist.clone(),
+                },
+            ));
+            let title_click = Some(AlbumsMessage::ContextMenuAction(
+                ctx.item_index,
+                crate::widgets::context_menu::LibraryContextEntry::GetInfo,
+            ));
+            slot_list_text_column(
+                album_name,
+                title_click,
+                album_artist,
+                artist_click,
+                title_size,
+                subtitle_size,
+                style,
+                ctx.is_center,
+                title_portion,
+            )
+        });
 
         if show_songcount {
             let idx = ctx.item_index;

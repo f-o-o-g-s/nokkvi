@@ -458,6 +458,16 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_queue_show_index(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.queue_show_index = enabled;
+        self.save()
+    }
+
+    pub fn set_queue_show_thumbnail(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.queue_show_thumbnail = enabled;
+        self.save()
+    }
+
     pub fn set_albums_show_stars(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.albums_show_stars = enabled;
         self.save()
@@ -475,6 +485,16 @@ impl SettingsManager {
 
     pub fn set_albums_show_love(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.albums_show_love = enabled;
+        self.save()
+    }
+
+    pub fn set_albums_show_index(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.albums_show_index = enabled;
+        self.save()
+    }
+
+    pub fn set_albums_show_thumbnail(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.albums_show_thumbnail = enabled;
         self.save()
     }
 
@@ -503,6 +523,16 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_songs_show_index(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.songs_show_index = enabled;
+        self.save()
+    }
+
+    pub fn set_songs_show_thumbnail(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.songs_show_thumbnail = enabled;
+        self.save()
+    }
+
     pub fn set_artists_show_stars(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.artists_show_stars = enabled;
         self.save()
@@ -525,6 +555,16 @@ impl SettingsManager {
 
     pub fn set_artists_show_love(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.artists_show_love = enabled;
+        self.save()
+    }
+
+    pub fn set_artists_show_index(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.artists_show_index = enabled;
+        self.save()
+    }
+
+    pub fn set_artists_show_thumbnail(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.artists_show_thumbnail = enabled;
         self.save()
     }
 
@@ -743,20 +783,28 @@ impl SettingsManager {
             queue_show_duration: p.queue_show_duration,
             queue_show_love: p.queue_show_love,
             queue_show_plays: p.queue_show_plays,
+            queue_show_index: p.queue_show_index,
+            queue_show_thumbnail: p.queue_show_thumbnail,
             albums_show_stars: p.albums_show_stars,
             albums_show_songcount: p.albums_show_songcount,
             albums_show_plays: p.albums_show_plays,
             albums_show_love: p.albums_show_love,
+            albums_show_index: p.albums_show_index,
+            albums_show_thumbnail: p.albums_show_thumbnail,
             songs_show_stars: p.songs_show_stars,
             songs_show_album: p.songs_show_album,
             songs_show_duration: p.songs_show_duration,
             songs_show_plays: p.songs_show_plays,
             songs_show_love: p.songs_show_love,
+            songs_show_index: p.songs_show_index,
+            songs_show_thumbnail: p.songs_show_thumbnail,
             artists_show_stars: p.artists_show_stars,
             artists_show_albumcount: p.artists_show_albumcount,
             artists_show_songcount: p.artists_show_songcount,
             artists_show_plays: p.artists_show_plays,
             artists_show_love: p.artists_show_love,
+            artists_show_index: p.artists_show_index,
+            artists_show_thumbnail: p.artists_show_thumbnail,
             albums_artwork_overlay: p.albums_artwork_overlay,
             artists_artwork_overlay: p.artists_artwork_overlay,
             songs_artwork_overlay: p.songs_artwork_overlay,
@@ -846,20 +894,28 @@ fn apply_toml_settings_to_internal(
     p.queue_show_duration = ts.queue_show_duration;
     p.queue_show_love = ts.queue_show_love;
     p.queue_show_plays = ts.queue_show_plays;
+    p.queue_show_index = ts.queue_show_index;
+    p.queue_show_thumbnail = ts.queue_show_thumbnail;
     p.albums_show_stars = ts.albums_show_stars;
     p.albums_show_songcount = ts.albums_show_songcount;
     p.albums_show_plays = ts.albums_show_plays;
     p.albums_show_love = ts.albums_show_love;
+    p.albums_show_index = ts.albums_show_index;
+    p.albums_show_thumbnail = ts.albums_show_thumbnail;
     p.songs_show_stars = ts.songs_show_stars;
     p.songs_show_album = ts.songs_show_album;
     p.songs_show_duration = ts.songs_show_duration;
     p.songs_show_plays = ts.songs_show_plays;
     p.songs_show_love = ts.songs_show_love;
+    p.songs_show_index = ts.songs_show_index;
+    p.songs_show_thumbnail = ts.songs_show_thumbnail;
     p.artists_show_stars = ts.artists_show_stars;
     p.artists_show_albumcount = ts.artists_show_albumcount;
     p.artists_show_songcount = ts.artists_show_songcount;
     p.artists_show_plays = ts.artists_show_plays;
     p.artists_show_love = ts.artists_show_love;
+    p.artists_show_index = ts.artists_show_index;
+    p.artists_show_thumbnail = ts.artists_show_thumbnail;
     p.albums_artwork_overlay = ts.albums_artwork_overlay;
     p.artists_artwork_overlay = ts.artists_artwork_overlay;
     p.songs_artwork_overlay = ts.songs_artwork_overlay;

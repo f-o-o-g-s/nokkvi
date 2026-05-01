@@ -472,6 +472,18 @@ impl SettingsService {
         sm.set_queue_show_plays(enabled)
     }
 
+    /// Set queue's leading index column visibility and persist
+    pub async fn set_queue_show_index(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_queue_show_index(enabled)
+    }
+
+    /// Set queue's leading thumbnail column visibility and persist
+    pub async fn set_queue_show_thumbnail(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_queue_show_thumbnail(enabled)
+    }
+
     pub async fn set_albums_show_stars(&self, enabled: bool) -> anyhow::Result<()> {
         let mut sm = self.settings_manager.lock().await;
         sm.set_albums_show_stars(enabled)
@@ -490,6 +502,16 @@ impl SettingsService {
     pub async fn set_albums_show_love(&self, enabled: bool) -> anyhow::Result<()> {
         let mut sm = self.settings_manager.lock().await;
         sm.set_albums_show_love(enabled)
+    }
+
+    pub async fn set_albums_show_index(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_albums_show_index(enabled)
+    }
+
+    pub async fn set_albums_show_thumbnail(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_albums_show_thumbnail(enabled)
     }
 
     pub async fn set_songs_show_stars(&self, enabled: bool) -> anyhow::Result<()> {
@@ -517,6 +539,16 @@ impl SettingsService {
         sm.set_songs_show_love(enabled)
     }
 
+    pub async fn set_songs_show_index(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_songs_show_index(enabled)
+    }
+
+    pub async fn set_songs_show_thumbnail(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_songs_show_thumbnail(enabled)
+    }
+
     pub async fn set_artists_show_stars(&self, enabled: bool) -> anyhow::Result<()> {
         let mut sm = self.settings_manager.lock().await;
         sm.set_artists_show_stars(enabled)
@@ -540,6 +572,16 @@ impl SettingsService {
     pub async fn set_artists_show_love(&self, enabled: bool) -> anyhow::Result<()> {
         let mut sm = self.settings_manager.lock().await;
         sm.set_artists_show_love(enabled)
+    }
+
+    pub async fn set_artists_show_index(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_artists_show_index(enabled)
+    }
+
+    pub async fn set_artists_show_thumbnail(&self, enabled: bool) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        sm.set_artists_show_thumbnail(enabled)
     }
 
     /// Set strip click action and persist

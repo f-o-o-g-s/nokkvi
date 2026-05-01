@@ -5,7 +5,7 @@
 
 use iced::{
     Alignment, Element, Length, Task,
-    widget::{button, column, container, mouse_area, row},
+    widget::{Row, button, column, container, mouse_area, row},
 };
 // Re-export QueueSortMode from data crate (canonical definition)
 use nokkvi_data::backend::queue::QueueSongUIViewData;
@@ -40,6 +40,8 @@ pub struct QueuePage {
 /// columns stay always-on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueColumn {
+    Index,
+    Thumbnail,
     Stars,
     Album,
     Duration,
@@ -50,6 +52,8 @@ pub enum QueueColumn {
 /// User-toggle state for each toggleable queue column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct QueueColumnVisibility {
+    pub index: bool,
+    pub thumbnail: bool,
     pub stars: bool,
     pub album: bool,
     pub duration: bool,
@@ -60,6 +64,8 @@ pub struct QueueColumnVisibility {
 impl Default for QueueColumnVisibility {
     fn default() -> Self {
         Self {
+            index: true,
+            thumbnail: true,
             stars: true,
             album: true,
             duration: true,
@@ -72,6 +78,8 @@ impl Default for QueueColumnVisibility {
 impl QueueColumnVisibility {
     pub fn get(&self, col: QueueColumn) -> bool {
         match col {
+            QueueColumn::Index => self.index,
+            QueueColumn::Thumbnail => self.thumbnail,
             QueueColumn::Stars => self.stars,
             QueueColumn::Album => self.album,
             QueueColumn::Duration => self.duration,
@@ -82,6 +90,8 @@ impl QueueColumnVisibility {
 
     pub fn set(&mut self, col: QueueColumn, value: bool) {
         match col {
+            QueueColumn::Index => self.index = value,
+            QueueColumn::Thumbnail => self.thumbnail = value,
             QueueColumn::Stars => self.stars = value,
             QueueColumn::Album => self.album = value,
             QueueColumn::Duration => self.duration = value,
@@ -571,6 +581,8 @@ impl QueuePage {
         let column_dropdown: Element<'a, QueueMessage> = {
             use crate::widgets::checkbox_dropdown::checkbox_dropdown;
             let items = vec![
+                ("Index".to_string(), self.column_visibility.index),
+                ("Thumbnail".to_string(), self.column_visibility.thumbnail),
                 ("Stars".to_string(), self.column_visibility.stars),
                 ("Album".to_string(), self.column_visibility.album),
                 ("Duration".to_string(), self.column_visibility.duration),
@@ -582,10 +594,12 @@ impl QueuePage {
                 "Show/hide columns",
                 items,
                 |idx| match idx {
-                    0 => QueueMessage::ToggleColumnVisible(QueueColumn::Stars),
-                    1 => QueueMessage::ToggleColumnVisible(QueueColumn::Album),
-                    2 => QueueMessage::ToggleColumnVisible(QueueColumn::Duration),
-                    3 => QueueMessage::ToggleColumnVisible(QueueColumn::Love),
+                    0 => QueueMessage::ToggleColumnVisible(QueueColumn::Index),
+                    1 => QueueMessage::ToggleColumnVisible(QueueColumn::Thumbnail),
+                    2 => QueueMessage::ToggleColumnVisible(QueueColumn::Stars),
+                    3 => QueueMessage::ToggleColumnVisible(QueueColumn::Album),
+                    4 => QueueMessage::ToggleColumnVisible(QueueColumn::Duration),
+                    5 => QueueMessage::ToggleColumnVisible(QueueColumn::Love),
                     _ => QueueMessage::ToggleColumnVisible(QueueColumn::Plays),
                 },
                 |trigger_bounds| match trigger_bounds {
@@ -990,49 +1004,50 @@ impl QueuePage {
                     rating_column_visible(current_sort_mode, panel_width, column_visibility.stars);
                 let title_portion: u16 = if show_rating_column { 35 } else { 40 };
 
-                // Layout: [Index] [Art] [Title/Artist] [Album?] [Rating?] [Duration] [Heart]
-                let mut content_row = row![
-                    // 0. Index number (fixed width)
-                    slot_list_index_column(ctx.item_index, index_size, style, ctx.opacity),
-                    // 1. Album Art (fixed width) - match albums pattern
-                    {
-                        use crate::widgets::slot_list::slot_list_artwork_column;
-                        slot_list_artwork_column(
-                            album_art.get(&album_id),
-                            artwork_size,
-                            ctx.is_center,
-                            is_current,
-                            ctx.opacity,
-                        )
-                    },
-                    // 2. Title + Artist (always simple text column)
-                    {
-                        use crate::widgets::slot_list::slot_list_text_column;
-                        let title_click = Some(QueueMessage::ContextMenuAction(
-                            ctx.item_index,
-                            QueueContextEntry::GetInfo,
-                        ));
-                        slot_list_text_column(
-                            title,
-                            title_click,
-                            artist.clone(),
-                            Some(QueueMessage::NavigateAndFilter(
-                                crate::View::Artists,
-                                nokkvi_data::types::filter::LibraryFilter::ArtistId {
-                                    id: artist_id.clone(),
-                                    name: artist.clone(),
-                                },
-                            )),
-                            title_size,
-                            subtitle_size,
-                            style,
-                            ctx.is_center || is_current,
-                            title_portion,
-                        )
-                    },
-                ]
-                .spacing(6.0)
-                .align_y(Alignment::Center);
+                // Layout: [Index?] [Thumbnail?] [Title/Artist] [Album?] [Rating?] [Duration] [Heart]
+                let mut content_row = Row::new().spacing(6.0).align_y(Alignment::Center);
+                if column_visibility.index {
+                    content_row = content_row.push(slot_list_index_column(
+                        ctx.item_index,
+                        index_size,
+                        style,
+                        ctx.opacity,
+                    ));
+                }
+                if column_visibility.thumbnail {
+                    use crate::widgets::slot_list::slot_list_artwork_column;
+                    content_row = content_row.push(slot_list_artwork_column(
+                        album_art.get(&album_id),
+                        artwork_size,
+                        ctx.is_center,
+                        is_current,
+                        ctx.opacity,
+                    ));
+                }
+                content_row = content_row.push({
+                    use crate::widgets::slot_list::slot_list_text_column;
+                    let title_click = Some(QueueMessage::ContextMenuAction(
+                        ctx.item_index,
+                        QueueContextEntry::GetInfo,
+                    ));
+                    slot_list_text_column(
+                        title,
+                        title_click,
+                        artist.clone(),
+                        Some(QueueMessage::NavigateAndFilter(
+                            crate::View::Artists,
+                            nokkvi_data::types::filter::LibraryFilter::ArtistId {
+                                id: artist_id.clone(),
+                                name: artist.clone(),
+                            },
+                        )),
+                        title_size,
+                        subtitle_size,
+                        style,
+                        ctx.is_center || is_current,
+                        title_portion,
+                    )
+                });
 
                 // 3. Album column — always shown
                 if show_album_column {
