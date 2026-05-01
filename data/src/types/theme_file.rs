@@ -91,16 +91,16 @@ impl Default for ThemePalette {
             accent: AccentConfig::default(),
             danger: SemanticColorConfig::default(),
             success: SemanticColorConfig {
-                base: "#26a269".to_string(),
-                bright: "#33d17a".to_string(),
+                base: "#33d17a".to_string(),
+                bright: "#8ff0a4".to_string(),
             },
             warning: SemanticColorConfig {
-                base: "#e5a50a".to_string(),
-                bright: "#f6d32d".to_string(),
+                base: "#f6d32d".to_string(),
+                bright: "#f9f06b".to_string(),
             },
             star: SemanticColorConfig {
-                base: "#e5a50a".to_string(),
-                bright: "#f6d32d".to_string(),
+                base: "#f6d32d".to_string(),
+                bright: "#f9f06b".to_string(),
             },
             visualizer: VisualizerColors::default(),
         }
@@ -349,13 +349,6 @@ impl VisualizerColors {
 }
 
 // ============================================================================
-// Semantic color defaults (used by ThemePalette::default)
-// ============================================================================
-
-// The `Default` impl on `ThemePalette` uses Adwaita dark values
-// for all semantic colors.
-
-// ============================================================================
 // Tests
 // ============================================================================
 
@@ -409,9 +402,9 @@ mod tests {
     fn test_semantic_color_default() {
         let palette = ThemePalette::default();
         assert_eq!(palette.danger.base, "#e01b24");
-        assert_eq!(palette.success.base, "#26a269");
-        assert_eq!(palette.warning.base, "#e5a50a");
-        assert_eq!(palette.star.base, "#e5a50a");
-        assert_eq!(palette.star.bright, "#f6d32d");
+        assert_eq!(palette.success.base, "#33d17a");
+        assert_eq!(palette.warning.base, "#f6d32d");
+        assert_eq!(palette.star.base, "#f6d32d");
+        assert_eq!(palette.star.bright, "#f9f06b");
     }
 }
