@@ -65,6 +65,7 @@ pub enum RadiosMessage {
     SearchQueryChanged(String),
     SearchFocused(bool),
     RefreshViewData,
+    CenterOnPlaying,
 
     // Data loading
     RadioStationsLoaded(Result<Vec<RadioStation>, String>),
@@ -96,6 +97,7 @@ pub enum RadiosAction {
     SortModeChanged(SortMode),
     SortOrderChanged(bool),
     RefreshViewData,
+    CenterOnPlaying,
     None,
 }
 
@@ -106,6 +108,7 @@ impl super::HasCommonAction for RadiosAction {
             Self::SortModeChanged(m) => super::CommonViewAction::SortModeChanged(*m),
             Self::SortOrderChanged(a) => super::CommonViewAction::SortOrderChanged(*a),
             Self::RefreshViewData => super::CommonViewAction::RefreshViewData,
+            Self::CenterOnPlaying => super::CommonViewAction::CenterOnPlaying,
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
         }
@@ -215,6 +218,7 @@ impl RadiosPage {
                 (Task::none(), RadiosAction::None)
             }
             RadiosMessage::RefreshViewData => (Task::none(), RadiosAction::RefreshViewData),
+            RadiosMessage::CenterOnPlaying => (Task::none(), RadiosAction::CenterOnPlaying),
 
             RadiosMessage::AddRadioStation => (Task::none(), RadiosAction::AddRadioStation),
 
@@ -259,10 +263,10 @@ impl RadiosPage {
             Some(RadiosMessage::ToggleSortOrder),
             None, // No shuffle button
             Some(RadiosMessage::RefreshViewData),
-            None, // No "center on playing" — radio has no queue position
+            Some(RadiosMessage::CenterOnPlaying),
             Some(("Add Station", RadiosMessage::AddRadioStation)), // on_add
-            None, // trailing_button
-            true, // show_search
+            None,                                                  // trailing_button
+            true,                                                  // show_search
             RadiosMessage::SearchQueryChanged,
         );
 

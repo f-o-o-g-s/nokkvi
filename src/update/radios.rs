@@ -101,6 +101,11 @@ impl Nokkvi {
             RadiosAction::RefreshViewData => {
                 return self.handle_load_radio_stations();
             }
+            RadiosAction::CenterOnPlaying => {
+                return Task::done(Message::Hotkey(
+                    crate::app_message::HotkeyMessage::CenterOnPlaying,
+                ));
+            }
             RadiosAction::AddRadioStation => {
                 self.text_input_dialog.open_two_fields(
                     "Add Radio Station",
