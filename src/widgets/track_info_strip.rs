@@ -48,7 +48,7 @@ pub(crate) fn info_field_widget<'a, M: 'static>(
     value_color: iced::Color,
 ) -> Element<'a, M> {
     let label_widget = text(label)
-        .size(9.0)
+        .size(10.0)
         .font(Font {
             weight: Weight::Medium,
             ..theme::ui_font()
@@ -63,7 +63,7 @@ pub(crate) fn info_field_widget<'a, M: 'static>(
     row![
         label_widget,
         super::marquee_text::marquee_text(value)
-            .size(9.0)
+            .size(10.0)
             .font(theme::ui_font())
             .color(value_color),
     ]
@@ -152,7 +152,7 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
     if let Some((ref left, _)) = format_split {
         info_row = info_row.push(
             text(left.clone())
-                .size(9.0)
+                .size(10.0)
                 .font(Font {
                     weight: Weight::Medium,
                     ..theme::ui_font()
@@ -190,7 +190,7 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
             center_row = center_row.push(
                 iced::widget::row![
                     super::marquee_text::marquee_text(merged)
-                        .size(9.0)
+                        .size(10.0)
                         .font(theme::ui_font())
                         .color(theme::selected_color()),
                 ]
@@ -251,7 +251,7 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
 
         center_row = center_row.push(
             text(radio_name.to_string())
-                .size(11.0)
+                .size(12.0)
                 .font(Font {
                     weight: Weight::Bold,
                     ..theme::ui_font()
@@ -305,7 +305,7 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
         info_row = info_row.push(info_sep());
         info_row = info_row.push(
             text(right.clone())
-                .size(9.0)
+                .size(10.0)
                 .font(Font {
                     weight: Weight::Medium,
                     ..theme::ui_font()
@@ -340,7 +340,7 @@ fn build_merged_centered_strip<'a, M: Clone + 'static>(
 
     let format_text = |s: String| {
         text(s)
-            .size(9.0)
+            .size(10.0)
             .font(Font {
                 weight: Weight::Medium,
                 ..theme::ui_font()
@@ -351,7 +351,7 @@ fn build_merged_centered_strip<'a, M: Clone + 'static>(
 
     let marquee = iced::widget::row![
         super::marquee_text::marquee_text(merged)
-            .size(9.0)
+            .size(10.0)
             .font(theme::ui_font())
             .color(theme::selected_color())
             .align_x(iced::alignment::Horizontal::Center),

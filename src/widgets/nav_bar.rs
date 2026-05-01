@@ -421,7 +421,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             // Stopped state - no track loaded
             container(
                 text("No track loaded")
-                    .size(12.0)
+                    .size(13.0)
                     .font(Font {
                         weight: Weight::Semibold,
                         ..theme::ui_font()
@@ -474,7 +474,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
 
                 info_row = info_row.push(
                     text(radio_name.clone())
-                        .size(11.0)
+                        .size(12.0)
                         .font(Font {
                             weight: Weight::Bold,
                             ..theme::ui_font()
@@ -526,7 +526,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                     info_row = info_row.push(
                         iced::widget::row![
                             super::marquee_text::marquee_text(merged)
-                                .size(9.0)
+                                .size(10.0)
                                 .font(theme::ui_font())
                                 .color(theme::selected_color())
                                 .align_x(iced::alignment::Horizontal::Center),
@@ -625,7 +625,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                 row![
                     fmt_sep(),
                     text(combined)
-                        .size(9.0)
+                        .size(10.0)
                         .font(Font {
                             weight: Weight::Medium,
                             ..theme::ui_font()
