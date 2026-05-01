@@ -35,7 +35,7 @@ Things that shaped this project:
 - 21 built-in themes (Gruvbox, Catppuccin, Dracula, Nord, Tokyo Night, Kanagawa, Everforest, ...) with instant hot-reload; drop a `.toml` in `~/.config/nokkvi/themes/` to add your own
 - Persistent queue, multi-selection, drag-and-drop, star ratings, and scrobbling (Last.fm / ListenBrainz)
 - Fully keyboard-driven with configurable shortcuts, MPRIS, optional system tray icon, and right-click menus everywhere
-- Designed on a tiling WM — player bar folds controls into a kebab menu as width shrinks; list views fit more items as the window grows taller
+- Designed on a tiling WM — player bar folds controls into a kebab menu as width shrinks; library views use a **slot-paginated list** (the viewport is a fixed odd number of whole-row slots — 3, 5, 7, 9, 11, 13, or 15 — never partials) where the slot count adapts to window height and text, album artwork, and star icons scale with each slot
 
 Full feature tour and `config.toml` reference: [docs](https://f-o-o-g-s.github.io/nokkvi-docs/).
 
