@@ -12,6 +12,25 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 
+## v0.3.8 — 2026-04-30
+
+### Added
+
+- Settings → toggle the `title:` / `artist:` / `album:` prefixes on the metadata strip and pick the field separator (·, •, |, —, /, │).
+
+### Changed
+
+- First-run default theme is now Everforest, matching the docs site styling.
+- Retuned Everforest visualizer gradients: bars ramp green → tan → orange → red and peaks soften to cream/yellow; light mode picks up the same colors plus a visible dark border for readability on the cream background.
+- Visualizer first-run defaults now match the shipped reference config — fresh installs get the intended look without editing `config.toml`.
+- Metadata strip text bumped one point for readability.
+
+### Fixed
+
+- ProgressTrack metadata mode now honors the show-labels and field-separator settings instead of silently ignoring them.
+- Top-bar merged marquee centers properly and the scroll lane spans the full center section on narrow windows; narrowing the window mid-track restarts the scroll cleanly instead of resuming mid-stride.
+- Merged marquee scroll lane now stretches all the way between the codec/bitrate bookends — no more visible gaps inside each edge.
+
 ## v0.3.7 — 2026-04-29
 
 ### Added

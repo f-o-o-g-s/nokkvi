@@ -740,10 +740,14 @@ mod layout_invariants {
     //!
     //! These tests pin that contract by running iced's actual layout against
     //! the null renderer (`()`) on a structure that mirrors the nav bar.
-    use iced::advanced::layout::{Limits, Node};
-    use iced::advanced::widget::{Tree, Widget};
-    use iced::widget::{Container, Row, Space};
-    use iced::{Element, Length, Size};
+    use iced::{
+        Element, Length, Size,
+        advanced::{
+            layout::{Limits, Node},
+            widget::{Tree, Widget},
+        },
+        widget::{Container, Row, Space},
+    };
 
     type NullRenderer = ();
     type TestMessage = ();
@@ -756,15 +760,19 @@ mod layout_invariants {
         left_w: f32,
         right_w: f32,
     ) -> Row<'static, TestMessage, iced::Theme, NullRenderer> {
-        let left: Element<'static, TestMessage, iced::Theme, NullRenderer> =
-            Space::new().width(Length::Fixed(left_w)).height(Length::Fill).into();
+        let left: Element<'static, TestMessage, iced::Theme, NullRenderer> = Space::new()
+            .width(Length::Fixed(left_w))
+            .height(Length::Fill)
+            .into();
         let center: Element<'static, TestMessage, iced::Theme, NullRenderer> =
             Container::new(Space::new().width(Length::Fill).height(Length::Fill))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into();
-        let right: Element<'static, TestMessage, iced::Theme, NullRenderer> =
-            Space::new().width(Length::Fixed(right_w)).height(Length::Fill).into();
+        let right: Element<'static, TestMessage, iced::Theme, NullRenderer> = Space::new()
+            .width(Length::Fixed(right_w))
+            .height(Length::Fill)
+            .into();
         Row::with_children([left, center, right])
             .spacing(0)
             .width(outer_width)
