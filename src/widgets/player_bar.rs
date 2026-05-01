@@ -446,51 +446,29 @@ pub(crate) fn player_bar<'a>(
         && crate::theme::track_info_display()
             == nokkvi_data::types::player_settings::TrackInfoDisplay::ProgressTrack
     {
-        let label_color = theme::fg4();
-        let show_labels = crate::theme::strip_show_labels();
         let separator = crate::theme::strip_separator().as_join_str();
-        let push_label = |segments: &mut Vec<OverlaySegment>, label: &str| {
-            if show_labels {
-                segments.push(OverlaySegment {
-                    text: label.to_string(),
-                    color: label_color,
-                });
-            }
-        };
-        let push_separator = |segments: &mut Vec<OverlaySegment>| {
-            if !segments.is_empty() {
-                segments.push(OverlaySegment {
-                    text: separator.to_string(),
-                    color: label_color,
-                });
-            }
-        };
-        if crate::theme::strip_show_title() {
-            push_label(&mut meta_segments, "title: ");
-            meta_segments.push(OverlaySegment {
-                text: data.track_title.clone(),
-                color: theme::now_playing_color(),
-            });
-        }
-        if !data.track_artist.is_empty() && crate::theme::strip_show_artist() {
-            push_separator(&mut meta_segments);
-            push_label(&mut meta_segments, "artist: ");
-            meta_segments.push(OverlaySegment {
-                text: data.track_artist.clone(),
-                color: theme::selected_color(),
-            });
-        }
-        if !data.track_album.is_empty() && crate::theme::strip_show_album() {
-            push_separator(&mut meta_segments);
-            push_label(&mut meta_segments, "album: ");
-            meta_segments.push(OverlaySegment {
-                text: data.track_album.clone(),
-                color: theme::fg2(),
-            });
-        }
+        let segments = super::track_info_strip::build_now_playing_segments(
+            &data.track_title,
+            &data.track_artist,
+            &data.track_album,
+            crate::theme::strip_show_title(),
+            crate::theme::strip_show_artist(),
+            crate::theme::strip_show_album(),
+            crate::theme::strip_show_labels(),
+            separator,
+        );
+        meta_segments.extend(segments.into_iter().map(|s| OverlaySegment {
+            text: s.text,
+            color: s.color,
+        }));
 
         if let Some(rname) = &data.radio_name {
-            push_separator(&mut meta_segments);
+            if !meta_segments.is_empty() {
+                meta_segments.push(OverlaySegment {
+                    text: separator.to_string(),
+                    color: theme::fg4(),
+                });
+            }
             meta_segments.push(OverlaySegment {
                 text: format!("{rname} (LIVE)"),
                 color: theme::accent_bright(),

@@ -400,11 +400,99 @@ pub(crate) fn track_info_strip_with_separator<'a, M: Clone + 'static>(
     iced::widget::column![separator, strip].into()
 }
 
+/// Kind of fragment in a [`MetadataSegment`] list — used by renderers that
+/// want different visual treatment for labels vs values vs separators.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum MetadataSegmentKind {
+    Label,
+    Value,
+    Separator,
+}
+
+/// One ordered fragment of the now-playing metadata display: a dimmed label
+/// (e.g. `"title: "`), a colored value (the title text itself), or a separator
+/// joining two visible fields. Single source of truth for the merged-mode
+/// strip marquee and the progress-track overlay — both consume the same list.
+///
+/// `kind` is currently only inspected by tests; production renderers route on
+/// `text` + `color`. It is kept on the struct so a future per-field renderer
+/// (which needs to distinguish labels from values to build labeled rows) can
+/// adopt the same builder without changing the data shape.
+#[derive(Clone, Debug)]
+pub(crate) struct MetadataSegment {
+    #[allow(dead_code)]
+    pub kind: MetadataSegmentKind,
+    pub text: String,
+    pub color: iced::Color,
+}
+
+/// Build the ordered fragment list for now-playing metadata.
+///
+/// Renderers can either flatten `.text` into a single string (merged-mode
+/// marquee) or map each segment 1:1 to their native visual primitive
+/// (progress-track `OverlaySegment`).
+///
+/// Field order is fixed: title → artist → album. Empty values are skipped
+/// even if their `show_*` toggle is true — this prevents orphan
+/// `"title:    ·  album:"` when a tag is missing. The list never starts or
+/// ends with a [`MetadataSegmentKind::Separator`].
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_now_playing_segments(
+    title: &str,
+    artist: &str,
+    album: &str,
+    show_title: bool,
+    show_artist: bool,
+    show_album: bool,
+    show_labels: bool,
+    separator: &str,
+) -> Vec<MetadataSegment> {
+    let label_color = theme::fg4();
+    let mut segments: Vec<MetadataSegment> = Vec::new();
+
+    let mut push_field = |label: &'static str, value: &str, color: iced::Color| {
+        if value.is_empty() {
+            return;
+        }
+        if !segments.is_empty() {
+            segments.push(MetadataSegment {
+                kind: MetadataSegmentKind::Separator,
+                text: separator.to_string(),
+                color: label_color,
+            });
+        }
+        if show_labels {
+            segments.push(MetadataSegment {
+                kind: MetadataSegmentKind::Label,
+                text: format!("{label}: "),
+                color: label_color,
+            });
+        }
+        segments.push(MetadataSegment {
+            kind: MetadataSegmentKind::Value,
+            text: value.to_string(),
+            color,
+        });
+    };
+
+    if show_title {
+        push_field("title", title, theme::now_playing_color());
+    }
+    if show_artist {
+        push_field("artist", artist, theme::selected_color());
+    }
+    if show_album {
+        push_field("album", album, theme::fg2());
+    }
+
+    segments
+}
+
 /// Build the merged-mode metadata string for the center row.
 ///
-/// Joins the visible fields with `join` and (when `show_labels`) prefixes each
-/// with its label, matching the per-field rendering. Hidden fields are
-/// dropped; the resulting string contains no orphan separators.
+/// Thin wrapper over [`build_now_playing_segments`] — concatenates segment
+/// texts in order. Hidden or empty fields are dropped; the resulting string
+/// contains no orphan separators.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn merged_strip_string(
     show_title: bool,
@@ -416,25 +504,19 @@ pub(crate) fn merged_strip_string(
     artist: &str,
     album: &str,
 ) -> String {
-    let format_part = |label: &str, value: &str| -> String {
-        if show_labels {
-            format!("{label}: {value}")
-        } else {
-            value.to_string()
-        }
-    };
-
-    let mut parts: Vec<String> = Vec::with_capacity(3);
-    if show_title {
-        parts.push(format_part("title", title));
-    }
-    if show_artist {
-        parts.push(format_part("artist", artist));
-    }
-    if show_album {
-        parts.push(format_part("album", album));
-    }
-    parts.join(join)
+    build_now_playing_segments(
+        title,
+        artist,
+        album,
+        show_title,
+        show_artist,
+        show_album,
+        show_labels,
+        join,
+    )
+    .into_iter()
+    .map(|s| s.text)
+    .collect()
 }
 
 #[cfg(test)]
@@ -484,5 +566,46 @@ mod tests {
 
         let s = merged_strip_string(true, true, true, false, PIPE, "T", "A", "L");
         assert_eq!(s, "T  |  A  |  L");
+    }
+
+    #[test]
+    fn build_segments_with_labels_joins_to_merged_strip_string() {
+        // Joining the segment texts in order is byte-for-byte equivalent to
+        // merged_strip_string — keeps overlay and merged-marquee in lockstep.
+        let segments = build_now_playing_segments("T", "A", "L", true, true, true, true, DOT);
+        let joined: String = segments.iter().map(|s| s.text.as_str()).collect();
+        let merged = merged_strip_string(true, true, true, true, DOT, "T", "A", "L");
+        assert_eq!(joined, merged);
+        assert_eq!(joined, "title: T  ·  artist: A  ·  album: L");
+    }
+
+    #[test]
+    fn build_segments_drops_empty_values_to_avoid_orphan_separators() {
+        // Even with show_artist=true, an empty artist shouldn't render as
+        // "title: T  ·    ·  album: L" with a phantom dot.
+        let segments = build_now_playing_segments("T", "", "L", true, true, true, true, DOT);
+        let joined: String = segments.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(joined, "title: T  ·  album: L");
+    }
+
+    #[test]
+    fn build_segments_skips_separator_at_head_and_tail() {
+        let segments = build_now_playing_segments("T", "A", "L", true, true, true, true, DOT);
+        assert_ne!(
+            segments.first().unwrap().kind,
+            MetadataSegmentKind::Separator
+        );
+        assert_ne!(
+            segments.last().unwrap().kind,
+            MetadataSegmentKind::Separator
+        );
+    }
+
+    #[test]
+    fn build_segments_returns_empty_when_all_hidden_or_empty() {
+        let segments = build_now_playing_segments("T", "A", "L", false, false, false, true, DOT);
+        assert!(segments.is_empty());
+        let segments = build_now_playing_segments("", "", "", true, true, true, true, DOT);
+        assert!(segments.is_empty());
     }
 }
