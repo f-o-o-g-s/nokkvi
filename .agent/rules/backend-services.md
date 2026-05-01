@@ -13,19 +13,30 @@ AppService (orchestrator)
 │   ├── Transport, volume, modes, gapless transitions
 │   ├── Playback history (Vec<Song>, capped, dedup-on-push)
 │   └── reset_next_track() on mode toggles
-├── Domain Services (Albums, Artists, Songs, Genres, Playlists, Queue, Settings, Auth)
-│   └── Lazy-initialized via `tokio::sync::OnceCell`
+├── Backend services composed on AppService:
+│   AuthGateway, AlbumsService, ArtistsService, SongsService,
+│   QueueService, SettingsService
+├── On-demand API services (no backend wrapper) — built by
+│   `AppService::genres_api()` / `playlists_api()` / `radios_api()` /
+│   `similar_api()` / `songs_api()` from the auth gateway
 ├── Artwork — server-only, no client-side persistent cache
 │   ├── `AlbumsService::artwork_client: Arc<reqwest::Client>` (bare reqwest)
 │   ├── `AlbumsService::fetch_album_artwork(art_id, size, updated_at)` — single fetch path; every call hits Navidrome
 │   └── Session-scoped Handle reuse via UI's `album_art` (LRU 512) + `large_artwork` (LRU 200) maps
-├── NavidromeEvents — SSE subscription (`services/navidrome_events.rs`) → `RefreshResource { resources, is_wildcard }` → ID-anchored slot-list reload; non-wildcard events trigger silent re-fetch for any affected album in `album_art` / `large_artwork`
+├── SSE — `data/src/services/navidrome_events.rs` parses events; the
+│   subscription itself runs in the UI crate (`src/services/navidrome_sse.rs`)
+│   and dispatches `RefreshResource { resources, is_wildcard }` → ID-anchored
+│   slot-list reload. Non-wildcard events trigger silent re-fetch for any
+│   affected album in `album_art` / `large_artwork`.
 └── TaskManager — centralized spawn tracking + status channel for UI notifications, cancellation via `tokio_util::CancellationToken`
 ```
 
-`backend/` modules: `app_service.rs`, `playback_controller.rs`, `albums.rs`, `artists.rs`, `songs.rs`, `genres.rs`, `playlists.rs`, `queue.rs`, `settings.rs`, `auth.rs`.
+`backend/` modules:
+- Service structs: `app_service.rs`, `playback_controller.rs`, `albums.rs`, `artists.rs`, `songs.rs`, `queue.rs`, `settings.rs`, `auth.rs`.
+- UI-projected view-data only (no service): `genres.rs` (`GenreUIViewData`), `playlists.rs` (`PlaylistUIViewData`).
+- Cross-entity helpers in `mod.rs`: `Starable` / `Ratable` / `PlayCountable` traits with shared list-mutation helpers (`update_starred_in_list`, `update_rating_in_list`, `increment_play_count_in_list`) and `flatten_participants()`.
 
-`services/api/` per-domain modules: `albums.rs`, `artists.rs`, `songs.rs`, `genres.rs`, `playlists.rs`, `radios.rs`, `similar.rs`, `rating.rs`, `star.rs`, `subsonic.rs`, `client.rs`. Radios and Similar live in API only — no separate backend service.
+`services/api/` per-domain modules: `albums.rs`, `artists.rs`, `songs.rs`, `genres.rs`, `playlists.rs`, `radios.rs`, `similar.rs`, `rating.rs`, `star.rs`, `subsonic.rs`, `client.rs`.
 
 ## Queue System
 
@@ -45,18 +56,20 @@ AppService (orchestrator)
 
 | Store | Location | Pattern |
 |-------|----------|---------|
-| **redb** | `services/state_storage.rs` | Queue ordering, encrypted password |
-| **TOML config** | `services/toml_settings_io.rs` | Hot-reloadable via `toml_edit`. `verbose_config` writes all defaults |
-| **Theme files** | `services/theme_loader.rs` | Named `.toml` in `~/.config/nokkvi/themes/`. **21 built-in** (compiled via `include_str!`, seeded on first run). Discovery, load/save, restore-builtin |
+| **redb** (`~/.local/state/nokkvi/app.redb`) | `services/state_storage.rs` | Generic key/value (`save` / `load` JSON, `save_binary` / `load_binary` bincode). Stores queue order + song pool, `user_settings`, JWT, Subsonic credential |
+| **TOML config** (`~/.config/nokkvi/config.toml`, `config.debug.toml` in debug builds) | `services/toml_settings_io.rs` | Hot-reloadable via `toml_edit`. `verbose_config` writes all defaults |
+| **Theme files** (`~/.config/nokkvi/themes/`) | `services/theme_loader.rs` | Named `.toml`. **22 built-in** (compiled via `include_str!`, seeded on first run; `everforest` is the first-run default). Discovery, load/save, restore-builtin |
 | **Artwork** | (no disk cache) | Server-only. Session-scoped Handle reuse in UI maps |
 | **Config writer** | `src/config_writer.rs` (UI crate) | Typed `ConfigKey { AppScalar, AppArrayEntry, Theme, ThemeArrayEntry }`. Per-key TOML updates, atomic via temp + rename |
-| **Credentials** | `data/src/credentials.rs` | AES-256-GCM + PBKDF2; password lives in redb |
+| **Credentials** | `data/src/credentials.rs` | `server_url` / `username` in `config.toml`; JWT + Subsonic credential in redb. **No password on disk** — JWT auto-refreshes via `X-ND-Authorization`; expired JWT (48h default) drops to the login screen |
 
-## SettingsManager (`services/settings.rs`)
+## SettingsService & SettingsManager
 
-Owns `PlayerSettings`, `TomlSettings`, `TomlViewPreferences`, `HotkeyConfig`, `StateStorage`. Loads `config.toml` → merges with redb → `PlayerSettings`. Per-field setters persist atomically. `reload_from_toml()` for hot-reload.
+`SettingsService` (`backend/settings.rs`) is a thin async wrapper around `SettingsManager` (`services/settings.rs`). The wrapper's pure pass-throughs are generated by file-private `delegate_setter!` / `delegate_getter!` macros — only methods that need a cast, multi-arg signature, or two-call-under-one-lock sequence stay inline.
 
-`PlayerSettings` includes: `font_family`, `library_page_size`, `artwork_resolution`, `volume_normalization` (+ ReplayGain knobs), per-view column-visibility flags (`queue_show_*`, `albums_show_*`, `songs_show_*`, `artists_show_*`), `artwork_column_mode` / `artwork_column_stretch_fit` / `artwork_column_width_pct`, `show_tray_icon` / `close_to_tray`, `nav_layout` (`Top` / `Side` / `None`), `slot_row_height`, `track_info_display`. Read the struct for the full set.
+`SettingsManager` owns `PlayerSettings`, `TomlSettings`, `TomlViewPreferences`, `HotkeyConfig`, `StateStorage`. Loads `config.toml` → merges with redb → `PlayerSettings`. Per-field setters persist atomically. `reload_from_toml()` for hot-reload.
+
+`PlayerSettings` is the live in-memory union of every user-tunable knob; `TomlSettings` is the on-disk shape of `[settings]`. Notable groupings: `font_family`, `library_page_size`, `artwork_resolution`, `volume_normalization` + ReplayGain knobs, per-view column flags (`queue_show_*`, `albums_show_*`, `songs_show_*`, `artists_show_*` — `*_index`, `*_thumbnail`, `*_stars`, etc.), artwork column (`artwork_column_mode` / `_stretch_fit` / `_width_pct`), tray (`show_tray_icon` / `close_to_tray`), nav (`nav_layout`, `nav_display_mode`), `slot_row_height`, `track_info_display`, default-playlist (`default_playlist_id` / `_name`, `quick_add_to_playlist`, `queue_show_default_playlist`), strip (`strip_show_*`, `strip_merged_mode`, `strip_separator`, `strip_click_action`). Read the structs for the full set.
 
 ## Theme System
 

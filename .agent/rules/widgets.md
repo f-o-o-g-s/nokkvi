@@ -36,11 +36,11 @@ Custom `iced::advanced` seekable widget. `Vec<OverlaySegment>` for scrolling col
 | Base Slot List | `base_slot_list_layout.rs` | Shared layout scaffolding, `base_slot_list_empty_state()` |
 | Scroll Indicator | `scroll_indicator.rs` | Transient scrollbar overlay, `wrap_with_scroll_indicator()`, drag-to-seek |
 | Hover Overlay | `hover_overlay.rs` | Per-slot hover darkening + press scale + external `flash_at()`. Default radius = `ui_border_radius()` |
-| Track Info Strip | `track_info_strip.rs` | Now-playing metadata (player bar + top bar). `info_field_widget()` shared helper |
+| Track Info Strip | `track_info_strip.rs` | Now-playing metadata (player bar + top bar + progress-track overlay). All three renderers share the `MetadataSegment` builder + `MetadataSegmentKind` enum |
 | Marquee Text | `marquee_text.rs` | Scrolling overflow text, generic over message type |
 | Hover Indicator | `hover_indicator.rs` | Canvas hover underline, `HoverExpand` for hot-zone expansion |
 | Context Menu | `context_menu.rs` | Right-click menu. `LibraryContextEntry` / `QueueContextEntry` / `StripContextEntry` |
-| Checkbox Dropdown | `checkbox_dropdown.rs` | Multi-checkbox column-visibility dropdown (controlled via `OpenMenu::CheckboxDropdown`) |
+| Checkbox Dropdown | `checkbox_dropdown.rs` | Multi-checkbox column-visibility dropdown, generic over `Key` (controlled via `OpenMenu::CheckboxDropdown`) |
 | Info Modal | `info_modal.rs` | Two-column property table for Get Info. `InfoModalItem` enum |
 | Text Input Dialog | `text_input_dialog.rs` | Modal text input or confirmation. Save Queue uses `combo_box` |
 | EQ Slider | `eq_slider.rs` | Vertical ±15 dB slider for 10-band EQ |
@@ -52,6 +52,8 @@ Custom `iced::advanced` seekable widget. `Vec<OverlaySegment>` for scrolling col
 | Link Text | `link_text.rs` | Hover-underlined clickable text (tight hitbox, accent on hover) |
 | Metadata Pill | `metadata_pill.rs` | Composable artwork-panel metadata row builders |
 | Artwork Split Handle | `artwork_split_handle.rs` | Draggable separator for artwork-column width |
+| Default Playlist Chip | `default_playlist_chip.rs` | Pin-icon button in the Playlists/Queue header — opens the picker |
+| Default Playlist Picker | `default_playlist_picker.rs` | Modal overlay (font-picker pattern) to pick the default playlist; state lives on `Nokkvi.default_playlist_picker` |
 
 ## 3D Buttons
 
@@ -65,7 +67,7 @@ Custom `iced::advanced` seekable widget. `Vec<OverlaySegment>` for scrolling col
 
 ## Layout Constants (`slot_list.rs`)
 
-Single source of truth: `chrome_height_with_header()`, `queue_slot_list_start_y()`, `NAV_BAR_HEIGHT = 32`, `VIEW_HEADER_HEIGHT = 48`, `TAB_BAR_HEIGHT = 36`, `SLOT_SPACING = 3`.
+Single source of truth: `chrome_height_with_header()`, `queue_slot_list_start_y()`, `NAV_BAR_HEIGHT = 32`, `VIEW_HEADER_HEIGHT = 48`, `TAB_BAR_HEIGHT = 32`, `SLOT_SPACING = 3`. Slot count is computed dynamically: always odd, capped at `MAX_SLOT_COUNT = 29`.
 
 ## Slot Rendering
 

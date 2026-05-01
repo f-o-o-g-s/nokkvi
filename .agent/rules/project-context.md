@@ -17,7 +17,7 @@ A Rust/Iced desktop client for [Navidrome](https://www.navidrome.org/) music ser
 
 **Key data structure:** `PagedBuffer<T>` (`data/src/types/paged_buffer.rs`) replaces `Vec<T>` for library data. `Deref<Target=[T]>` makes it a drop-in. Tracks load state via `set_loading()` / `needs_fetch()`. Exposes a monotonic `generation()` counter that bumps on every mutation — pair with `(query, generation)` keys when memoizing.
 
-**Consolidated state** in `src/state.rs`: `PaneFocus`, `CrossPaneDragState`, `StoredSession`, `ActivePlaylistContext`, `ActivePlayback` (Queue/Radio), `RadioPlaybackState`, `PlaybackState`, `ScrobbleState`, `PlaybackModes`, `SfxState`, `EngineState`, `CollageArtworkCache`, `ArtworkState`, `WindowState`, `LibraryData`, `LibraryCounts`, `ToastState`, `SimilarSongsState`. Plus `Nokkvi.open_menu: Option<OpenMenu>` as the single-active overlay-menu coordinator (Hamburger / PlayerModes / CheckboxDropdown / Context).
+**Consolidated state** in `src/state.rs`: `PaneFocus`, `CrossPaneDragState`, `StoredSession`, `ActivePlaylistContext`, `ActivePlayback` (Queue/Radio), `RadioPlaybackState`, `PlaybackState`, `ScrobbleState`, `PlaybackModes`, `SfxState`, `EngineState`, `CollageArtworkCache`, `ArtworkState`, `WindowState`, `LibraryData`, `LibraryCounts`, `ToastState`, `SimilarSongsState`. Plus `Nokkvi.open_menu: Option<OpenMenu>` as the single-active overlay-menu coordinator (Hamburger / PlayerModes / CheckboxDropdown { view, trigger_bounds } / Context { id: ContextMenuId, position }) and `Nokkvi.default_playlist_picker` for the modal picker overlay shared between Playlists and Queue views.
 
 ## Core Pattern: TEA (The Elm Architecture)
 

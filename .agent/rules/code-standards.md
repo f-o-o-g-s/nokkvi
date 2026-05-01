@@ -29,7 +29,8 @@ trigger: always_on
 - One view per file, one service per file.
 - Complex views/services/handlers use directory modules (e.g., `views/settings/mod.rs`, `services/queue/mod.rs`, `update/hotkeys/mod.rs`).
 - Handler files in `update/` correspond 1:1 to views, plus specialized handlers for cross-cutting concerns. `ls src/update/` to see them.
-- Shared helpers live in `update/components.rs` — `shell_task`, `shell_spawn`, `guard_play_action`, `set_item_rating_task`, `radio_mutation_task`, `handle_common_view_action`, `PaginatedFetch`, `prefetch_album_artwork_tasks`, `prefetch_song_artwork_tasks`.
+- `shell_task` / `shell_spawn` are methods on `Nokkvi` (`src/main.rs`) — they bridge UI handlers to async `AppService` work.
+- Shared helpers in `update/components.rs` — `PaginatedFetch::from_common`, `guard_play_action`, `set_item_rating_task`, `radio_mutation_task`, `handle_common_view_action`, `shell_action_task`, `shell_fire_and_forget_task`, `prefetch_album_artwork_tasks`, `prefetch_song_artwork_tasks`, plus the entity-action helpers (`play_entity_task`, `add_entity_to_queue_task`, `insert_entity_to_queue_at_position_task`, `star_item_task`).
 
 ## Core Requirements
 

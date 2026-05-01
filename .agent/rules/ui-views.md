@@ -17,7 +17,7 @@ Pages on `Nokkvi`: Login, Albums, Artists, Genres, Playlists, Queue, Songs, Radi
 
 ## SlotListPageState
 
-Shared by every slot-list view: search query, scroll position, focus index. Visible slots: 9 → 7 → 5 → 3 → 1 based on window height. Prefetch radius = `slot_count + MIN_PREFETCH_BUFFER` (3 by default).
+Shared by every slot-list view: search query, scroll position, focus index. Visible slot count is computed dynamically from window height (always odd, capped at `MAX_SLOT_COUNT = 29`); window resizes propagate via `update/window.rs`. Prefetch radius = `slot_count + MIN_PREFETCH_BUFFER` (3 by default).
 
 **Multi-selection** (Ctrl+click / Shift+click): `selected_indices: HashSet`, `anchor_index` for range. `handle_slot_click()` handles modifier-aware selection. `clear_multi_selection()` resets. `evaluate_context_menu()` resolves batch targets for right-click menus.
 
@@ -66,13 +66,13 @@ Re-shuffles the order array when a shuffled queue with repeat-playlist wraps bac
 
 ## Update Handler Pattern
 
-Root dispatch in `update/mod.rs`. `ls src/update/` for handler files. Common helpers in `update/components.rs`:
-- `shell_task` / `shell_spawn` — run async work against `AppService`
+Root dispatch in `update/mod.rs`. `ls src/update/` for handler files. The async-bridge helpers `shell_task` / `shell_spawn` are methods on `Nokkvi` (`src/main.rs`). Cross-cutting helpers in `update/components.rs`:
 - `guard_play_action` — split-view + playlist-edit conflict guard
-- `set_item_rating_task`, `radio_mutation_task`
-- `handle_common_view_action` — applies generic Search/Sort actions to all 7 non-Queue library views
+- `set_item_rating_task`, `star_item_task`, `radio_mutation_task`
+- `handle_common_view_action` — applies generic Search/Sort actions to non-Queue library views
 - `PaginatedFetch::from_common()` — needs_fetch-gated paginated load (Albums / Artists / Songs)
 - `prefetch_album_artwork_tasks` / `prefetch_song_artwork_tasks` — viewport-window artwork prefetch
+- `play_entity_task` / `add_entity_to_queue_task` / `insert_entity_to_queue_at_position_task` — generic entity-action builders
 - Boilerplate extraction helpers in `widgets/slot_list_page.rs` (`get_queue_target_indices`, `get_batch_target_indices`) and `views/expansion.rs` (`build_batch_payload`)
 
 ## View Data Refresh
@@ -86,6 +86,7 @@ Root dispatch in `update/mod.rs`. `ls src/update/` for handler files. Common hel
 - **About**: metadata/diagnostics, theme-adaptive logo (`widgets/about_modal.rs`, `update/about_modal.rs`). Includes a Ko-fi tip link. The Commit row hides gracefully when built outside a git context.
 - **Info**: Get Info two-column property table (`widgets/info_modal.rs`, `update/info_modal.rs`). `InfoModalItem` variants per type.
 - **Text Input**: name/comment edits + confirmations (`widgets/text_input_dialog.rs`).
+- **Default Playlist Picker**: modal sub-slot-list to choose the default playlist (`widgets/default_playlist_picker.rs`, `update/default_playlist_picker.rs`). State on `Nokkvi.default_playlist_picker`; opened from the chip in the Playlists/Queue header or the Playback → Playlists settings entry.
 
 All wrapped in an overlay container with `mouse_area` for correct SVG rendering.
 

@@ -15,6 +15,7 @@ description: End-to-end checklist when building new features. Covers cross-view 
 ## UI Layer
 - [ ] State / Message / Action enums (TEA pattern)
 - [ ] Update handler in `update/{name}.rs`, dispatch wired in `update/mod.rs`
+- [ ] Async work bridged through `Nokkvi::shell_task` / `shell_spawn` (defined on the root impl in `src/main.rs`)
 - [ ] Paginated loads use `PaginatedFetch::from_common()` (needs_fetch gating built in)
 - [ ] Artwork prefetch dispatched from `update/window.rs` if the view shows art
 - [ ] Slot list wrapped in `wrap_with_scroll_indicator()`
