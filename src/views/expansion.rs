@@ -561,11 +561,11 @@ pub(crate) fn render_child_track_row<'a, M: Clone + 'a + 'static>(
     on_artist_click: Option<M>,
     depth: u8,
 ) -> Element<'a, M> {
-    // Center slot gets bright center style; non-center children get highlighted group look
-    // with depth-based darkening for visual hierarchy
+    // Visual hierarchy comes from the per-depth `bg0/bg1/bg2` ramp inside
+    // `for_slot`'s unfocused branch — not from forcing the now-playing branch.
     let style = SlotListSlotStyle::for_slot(
         ctx.is_center,
-        !ctx.is_center,
+        false,
         ctx.is_selected,
         ctx.has_multi_selection,
         ctx.opacity,
@@ -656,7 +656,7 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
 ) -> Element<'a, M> {
     let style = SlotListSlotStyle::for_slot(
         ctx.is_center,
-        !ctx.is_center,
+        false,
         ctx.is_selected,
         ctx.has_multi_selection,
         ctx.opacity,

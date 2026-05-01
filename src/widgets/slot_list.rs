@@ -130,12 +130,17 @@ impl SlotListSlotStyle {
             }
         // Removed redundant else if is_center branch as it matches the default fallback exactly
         } else {
-            // Regular slot with opacity fade (both background and text)
+            // Regular slot with opacity fade (both background and text).
+            // Per-depth background steps along the theme's elevation ramp so
+            // nested expansion rows stay distinguishable from each other and
+            // from the focused row's `selected_color()` fill.
+            let base = match depth {
+                0 => theme::bg0(),
+                1 => theme::bg1(),
+                _ => theme::bg2(),
+            };
             Self {
-                bg_color: Color {
-                    a: opacity,
-                    ..theme::bg0()
-                },
+                bg_color: Color { a: opacity, ..base },
                 border_color: Color {
                     a: opacity,
                     ..theme::bg3()
@@ -1281,5 +1286,87 @@ mod tests {
         // Selected slot (light selected bg) -> hover is dark text
         let sel_style = SlotListSlotStyle::for_slot(false, false, true, false, 1.0, 0);
         assert_eq!(sel_style.hover_text_color, crate::theme::bg0_hard());
+    }
+
+    fn unfocused_bg(depth: u8) -> iced::Color {
+        SlotListSlotStyle::for_slot(false, false, false, false, 1.0, depth).bg_color
+    }
+
+    fn focused_bg(depth: u8) -> iced::Color {
+        SlotListSlotStyle::for_slot(true, false, false, false, 1.0, depth).bg_color
+    }
+
+    #[test]
+    fn unfocused_bg_at_depth_zero_uses_bg0() {
+        let style_bg = unfocused_bg(0);
+        let expected = crate::theme::bg0();
+        assert!(
+            (style_bg.r - expected.r).abs() < f32::EPSILON
+                && (style_bg.g - expected.g).abs() < f32::EPSILON
+                && (style_bg.b - expected.b).abs() < f32::EPSILON,
+            "depth 0 unfocused bg should match bg0(); got {style_bg:?}, expected {expected:?}"
+        );
+    }
+
+    #[test]
+    fn unfocused_bg_at_depth_one_uses_bg1() {
+        let style_bg = unfocused_bg(1);
+        let expected = crate::theme::bg1();
+        assert!(
+            (style_bg.r - expected.r).abs() < f32::EPSILON
+                && (style_bg.g - expected.g).abs() < f32::EPSILON
+                && (style_bg.b - expected.b).abs() < f32::EPSILON,
+            "depth 1 unfocused bg should match bg1(); got {style_bg:?}, expected {expected:?}"
+        );
+    }
+
+    #[test]
+    fn unfocused_bg_at_depth_two_uses_bg2() {
+        let style_bg = unfocused_bg(2);
+        let expected = crate::theme::bg2();
+        assert!(
+            (style_bg.r - expected.r).abs() < f32::EPSILON
+                && (style_bg.g - expected.g).abs() < f32::EPSILON
+                && (style_bg.b - expected.b).abs() < f32::EPSILON,
+            "depth 2 unfocused bg should match bg2(); got {style_bg:?}, expected {expected:?}"
+        );
+    }
+
+    /// In themes whose elevated palette differs from the base (e.g. Everforest:
+    /// bg0=#2D353B, bg1=#343F44, bg2=#3D484D), the per-depth unfocused background
+    /// must change with depth — otherwise nested expansion rows are visually flat.
+    /// Themes that intentionally collapse the elevation ramp (bg0==bg1==bg2) are
+    /// exempt; the assertion only fires when the active theme provides a ramp.
+    #[test]
+    fn unfocused_bg_changes_with_depth_when_theme_has_ramp() {
+        let bg0 = crate::theme::bg0();
+        let bg1 = crate::theme::bg1();
+        let bg2 = crate::theme::bg2();
+
+        let ramp_present = (bg0.r, bg0.g, bg0.b) != (bg1.r, bg1.g, bg1.b)
+            || (bg1.r, bg1.g, bg1.b) != (bg2.r, bg2.g, bg2.b);
+        if !ramp_present {
+            return;
+        }
+
+        let d0 = unfocused_bg(0);
+        let d1 = unfocused_bg(1);
+        let d2 = unfocused_bg(2);
+        assert!(
+            (d0.r, d0.g, d0.b) != (d1.r, d1.g, d1.b) || (d1.r, d1.g, d1.b) != (d2.r, d2.g, d2.b),
+            "expected at least one depth transition to change bg color when theme has an elevation ramp; \
+             got d0={d0:?}, d1={d1:?}, d2={d2:?}"
+        );
+    }
+
+    /// The keyboard-focused row must keep a constant fill across depths so the
+    /// focus highlight is identifiable regardless of how deep the user navigates.
+    #[test]
+    fn focused_bg_constant_across_depths() {
+        let d0 = focused_bg(0);
+        let d1 = focused_bg(1);
+        let d2 = focused_bg(2);
+        assert_eq!((d0.r, d0.g, d0.b), (d1.r, d1.g, d1.b));
+        assert_eq!((d1.r, d1.g, d1.b), (d2.r, d2.g, d2.b));
     }
 }
