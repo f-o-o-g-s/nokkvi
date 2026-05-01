@@ -484,7 +484,7 @@ mod tests {
 
     #[test]
     fn test_default_theme_name() {
-        assert_eq!(DEFAULT_THEME, "adwaita");
+        assert_eq!(DEFAULT_THEME, "everforest");
     }
 
     #[test]

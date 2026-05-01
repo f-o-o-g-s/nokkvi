@@ -108,7 +108,7 @@ impl Default for ThemePalette {
 }
 
 impl ThemePalette {
-    /// Gruvbox light mode defaults.
+    /// Adwaita light mode defaults.
     pub fn light_default() -> Self {
         Self {
             background: BackgroundConfig {
@@ -284,7 +284,9 @@ impl Default for SemanticColorConfig {
 // Visualizer colors (per mode)
 // ============================================================================
 
-/// Default border opacity for dark mode (used by serde).
+/// Default border opacity for serde fallback. Used by both `[dark.visualizer]`
+/// and `[light.visualizer]` — partial light themes inherit 1.0 even though
+/// shipped light palettes typically use 0.0 / 0.50.
 fn default_border_opacity() -> f32 {
     1.0
 }
@@ -328,7 +330,7 @@ impl Default for VisualizerColors {
 }
 
 impl VisualizerColors {
-    /// Gruvbox light mode default colors.
+    /// Adwaita light mode default colors.
     pub fn light_default() -> Self {
         Self {
             border_color: "#ffffff".to_string(),
