@@ -15,10 +15,10 @@
 //!     "assets/icons/columns-3-cog.svg",
 //!     "Show/hide columns",
 //!     vec![
-//!         ("Stars".into(), state.stars),
-//!         ("Album".into(), state.album),
+//!         (Col::Stars, "Stars", state.stars),
+//!         (Col::Album, "Album", state.album),
 //!     ],
-//!     |idx| Message::ToggleColumn(idx),
+//!     Message::ToggleColumn,  // bare tuple-variant constructor
 //! )
 //! ```
 
@@ -42,15 +42,19 @@ use crate::theme;
 /// callback receives the trigger's screen-space bounds so the parent can
 /// stash them in `OpenMenu::CheckboxDropdown`. The bounds come back via
 /// `trigger_bounds` so the overlay can anchor below the trigger.
-pub(crate) fn checkbox_dropdown<'a, Message: Clone + 'a>(
+pub(crate) fn checkbox_dropdown<'a, Key, Message>(
     trigger_icon: &'static str,
     tooltip: &'static str,
-    items: Vec<(String, bool)>,
-    on_item_toggle: impl Fn(usize) -> Message + 'a,
+    items: Vec<(Key, &'static str, bool)>,
+    on_item_toggle: impl Fn(Key) -> Message + 'a,
     on_open_change: impl Fn(Option<Rectangle>) -> Message + 'a,
     is_open: bool,
     trigger_bounds: Option<Rectangle>,
-) -> CheckboxDropdown<'a, Message> {
+) -> CheckboxDropdown<'a, Key, Message>
+where
+    Key: Copy + 'a,
+    Message: Clone + 'a,
+{
     CheckboxDropdown {
         trigger: trigger_button(trigger_icon, tooltip),
         items,
@@ -168,14 +172,17 @@ fn dropdown_item<'a, Message: Clone + 'a>(
 }
 
 /// Build the menu element that floats below the trigger when open.
-fn build_menu_element<'a, Message: Clone + 'a>(
-    items: &[(String, bool)],
-    on_item_toggle: &dyn Fn(usize) -> Message,
-) -> Element<'a, Message> {
+fn build_menu_element<'a, Key, Message>(
+    items: &[(Key, &'static str, bool)],
+    on_item_toggle: &dyn Fn(Key) -> Message,
+) -> Element<'a, Message>
+where
+    Key: Copy,
+    Message: Clone + 'a,
+{
     let rows: Vec<Element<'a, Message>> = items
         .iter()
-        .enumerate()
-        .map(|(idx, (label, checked))| dropdown_item(label, *checked, on_item_toggle(idx)))
+        .map(|(key, label, checked)| dropdown_item(label, *checked, on_item_toggle(*key)))
         .collect();
 
     container(column(rows).spacing(0))
@@ -197,10 +204,10 @@ fn build_menu_element<'a, Message: Clone + 'a>(
 // Widget
 // ============================================================================
 
-pub struct CheckboxDropdown<'a, Message> {
+pub struct CheckboxDropdown<'a, Key, Message> {
     trigger: Element<'a, Message>,
-    items: Vec<(String, bool)>,
-    on_item_toggle: Box<dyn Fn(usize) -> Message + 'a>,
+    items: Vec<(Key, &'static str, bool)>,
+    on_item_toggle: Box<dyn Fn(Key) -> Message + 'a>,
     /// Emitted with `Some(trigger_bounds)` to request open at those bounds, or
     /// `None` to request close.
     on_open_change: Box<dyn Fn(Option<Rectangle>) -> Message + 'a>,
@@ -232,8 +239,9 @@ impl State {
     }
 }
 
-impl<'a, Message> Widget<Message, Theme, iced::Renderer> for CheckboxDropdown<'a, Message>
+impl<'a, Key, Message> Widget<Message, Theme, iced::Renderer> for CheckboxDropdown<'a, Key, Message>
 where
+    Key: Copy + 'a,
     Message: Clone + 'a,
 {
     fn tag(&self) -> tree::Tag {
@@ -396,8 +404,12 @@ where
     }
 }
 
-impl<'a, Message: Clone + 'a> From<CheckboxDropdown<'a, Message>> for Element<'a, Message> {
-    fn from(dropdown: CheckboxDropdown<'a, Message>) -> Self {
+impl<'a, Key, Message> From<CheckboxDropdown<'a, Key, Message>> for Element<'a, Message>
+where
+    Key: Copy + 'a,
+    Message: Clone + 'a,
+{
+    fn from(dropdown: CheckboxDropdown<'a, Key, Message>) -> Self {
         Element::new(dropdown)
     }
 }
@@ -406,16 +418,17 @@ impl<'a, Message: Clone + 'a> From<CheckboxDropdown<'a, Message>> for Element<'a
 // Overlay Builder
 // ============================================================================
 
-fn build_overlay<'a, 'b, Message>(
+fn build_overlay<'a, 'b, Key, Message>(
     state: &'b mut State,
     menu: &'b mut Option<Element<'a, Message>>,
-    items: &[(String, bool)],
-    on_item_toggle: &dyn Fn(usize) -> Message,
+    items: &[(Key, &'static str, bool)],
+    on_item_toggle: &dyn Fn(Key) -> Message,
     on_open_change: &'b dyn Fn(Option<Rectangle>) -> Message,
     trigger_bounds: Option<Rectangle>,
     translation: Vector,
 ) -> Option<overlay::Element<'b, Message, Theme, iced::Renderer>>
 where
+    Key: Copy,
     Message: Clone + 'a,
 {
     if items.is_empty() {
@@ -586,17 +599,17 @@ mod tests {
     #[test]
     fn checkbox_dropdown_compiles_with_typical_inputs() {
         // Smoke test: the public API accepts the expected shape and produces
-        // a valid Element.
-        let items = vec![
-            ("Stars".to_string(), true),
-            ("Album".to_string(), false),
-            ("Duration".to_string(), true),
+        // a valid Element. Uses usize as the key type for compactness.
+        let items: Vec<(usize, &'static str, bool)> = vec![
+            (0, "Stars", true),
+            (1, "Album", false),
+            (2, "Duration", true),
         ];
         let _el: Element<'_, String> = checkbox_dropdown(
             "assets/icons/columns-3-cog.svg",
             "Show/hide columns",
             items,
-            |idx| format!("toggle-{idx}"),
+            |key: usize| format!("toggle-{key}"),
             |bounds| match bounds {
                 Some(_) => "open".to_string(),
                 None => "close".to_string(),
@@ -614,8 +627,8 @@ mod tests {
         let _el: Element<'_, String> = checkbox_dropdown(
             "assets/icons/columns-3-cog.svg",
             "Show/hide columns",
-            Vec::new(),
-            |idx| format!("toggle-{idx}"),
+            Vec::<(usize, &'static str, bool)>::new(),
+            |key: usize| format!("toggle-{key}"),
             |_| "noop".to_string(),
             false,
             None,

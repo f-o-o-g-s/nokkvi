@@ -580,28 +580,28 @@ impl QueuePage {
         // them back to `QueueColumn` variants for the toggle message.
         let column_dropdown: Element<'a, QueueMessage> = {
             use crate::widgets::checkbox_dropdown::checkbox_dropdown;
-            let items = vec![
-                ("Index".to_string(), self.column_visibility.index),
-                ("Thumbnail".to_string(), self.column_visibility.thumbnail),
-                ("Stars".to_string(), self.column_visibility.stars),
-                ("Album".to_string(), self.column_visibility.album),
-                ("Duration".to_string(), self.column_visibility.duration),
-                ("Love".to_string(), self.column_visibility.love),
-                ("Plays".to_string(), self.column_visibility.plays),
+            let items: Vec<(QueueColumn, &'static str, bool)> = vec![
+                (QueueColumn::Index, "Index", self.column_visibility.index),
+                (
+                    QueueColumn::Thumbnail,
+                    "Thumbnail",
+                    self.column_visibility.thumbnail,
+                ),
+                (QueueColumn::Stars, "Stars", self.column_visibility.stars),
+                (QueueColumn::Album, "Album", self.column_visibility.album),
+                (
+                    QueueColumn::Duration,
+                    "Duration",
+                    self.column_visibility.duration,
+                ),
+                (QueueColumn::Love, "Love", self.column_visibility.love),
+                (QueueColumn::Plays, "Plays", self.column_visibility.plays),
             ];
             checkbox_dropdown(
                 "assets/icons/columns-3-cog.svg",
                 "Show/hide columns",
                 items,
-                |idx| match idx {
-                    0 => QueueMessage::ToggleColumnVisible(QueueColumn::Index),
-                    1 => QueueMessage::ToggleColumnVisible(QueueColumn::Thumbnail),
-                    2 => QueueMessage::ToggleColumnVisible(QueueColumn::Stars),
-                    3 => QueueMessage::ToggleColumnVisible(QueueColumn::Album),
-                    4 => QueueMessage::ToggleColumnVisible(QueueColumn::Duration),
-                    5 => QueueMessage::ToggleColumnVisible(QueueColumn::Love),
-                    _ => QueueMessage::ToggleColumnVisible(QueueColumn::Plays),
-                },
+                QueueMessage::ToggleColumnVisible,
                 |trigger_bounds| match trigger_bounds {
                     Some(b) => QueueMessage::SetOpenMenu(Some(
                         crate::app_message::OpenMenu::CheckboxDropdown {

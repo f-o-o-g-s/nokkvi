@@ -847,28 +847,32 @@ impl ArtistsPage {
         // Build the columns-visibility dropdown for the artists view header.
         let column_dropdown: Element<'a, ArtistsMessage> = {
             use crate::widgets::checkbox_dropdown::checkbox_dropdown;
-            let items = vec![
-                ("Index".to_string(), self.column_visibility.index),
-                ("Thumbnail".to_string(), self.column_visibility.thumbnail),
-                ("Stars".to_string(), self.column_visibility.stars),
-                ("Album Count".to_string(), self.column_visibility.albumcount),
-                ("Song Count".to_string(), self.column_visibility.songcount),
-                ("Plays".to_string(), self.column_visibility.plays),
-                ("Love".to_string(), self.column_visibility.love),
+            let items: Vec<(ArtistsColumn, &'static str, bool)> = vec![
+                (ArtistsColumn::Index, "Index", self.column_visibility.index),
+                (
+                    ArtistsColumn::Thumbnail,
+                    "Thumbnail",
+                    self.column_visibility.thumbnail,
+                ),
+                (ArtistsColumn::Stars, "Stars", self.column_visibility.stars),
+                (
+                    ArtistsColumn::AlbumCount,
+                    "Album Count",
+                    self.column_visibility.albumcount,
+                ),
+                (
+                    ArtistsColumn::SongCount,
+                    "Song Count",
+                    self.column_visibility.songcount,
+                ),
+                (ArtistsColumn::Plays, "Plays", self.column_visibility.plays),
+                (ArtistsColumn::Love, "Love", self.column_visibility.love),
             ];
             checkbox_dropdown(
                 "assets/icons/columns-3-cog.svg",
                 "Show/hide columns",
                 items,
-                |idx| match idx {
-                    0 => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::Index),
-                    1 => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::Thumbnail),
-                    2 => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::Stars),
-                    3 => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::AlbumCount),
-                    4 => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::SongCount),
-                    5 => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::Plays),
-                    _ => ArtistsMessage::ToggleColumnVisible(ArtistsColumn::Love),
-                },
+                ArtistsMessage::ToggleColumnVisible,
                 |trigger_bounds| match trigger_bounds {
                     Some(b) => ArtistsMessage::SetOpenMenu(Some(
                         crate::app_message::OpenMenu::CheckboxDropdown {

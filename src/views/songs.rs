@@ -485,28 +485,28 @@ impl SongsPage {
 
         let column_dropdown: Element<'a, SongsMessage> = {
             use crate::widgets::checkbox_dropdown::checkbox_dropdown;
-            let items = vec![
-                ("Index".to_string(), self.column_visibility.index),
-                ("Thumbnail".to_string(), self.column_visibility.thumbnail),
-                ("Stars".to_string(), self.column_visibility.stars),
-                ("Album".to_string(), self.column_visibility.album),
-                ("Duration".to_string(), self.column_visibility.duration),
-                ("Plays".to_string(), self.column_visibility.plays),
-                ("Love".to_string(), self.column_visibility.love),
+            let items: Vec<(SongsColumn, &'static str, bool)> = vec![
+                (SongsColumn::Index, "Index", self.column_visibility.index),
+                (
+                    SongsColumn::Thumbnail,
+                    "Thumbnail",
+                    self.column_visibility.thumbnail,
+                ),
+                (SongsColumn::Stars, "Stars", self.column_visibility.stars),
+                (SongsColumn::Album, "Album", self.column_visibility.album),
+                (
+                    SongsColumn::Duration,
+                    "Duration",
+                    self.column_visibility.duration,
+                ),
+                (SongsColumn::Plays, "Plays", self.column_visibility.plays),
+                (SongsColumn::Love, "Love", self.column_visibility.love),
             ];
             checkbox_dropdown(
                 "assets/icons/columns-3-cog.svg",
                 "Show/hide columns",
                 items,
-                |idx| match idx {
-                    0 => SongsMessage::ToggleColumnVisible(SongsColumn::Index),
-                    1 => SongsMessage::ToggleColumnVisible(SongsColumn::Thumbnail),
-                    2 => SongsMessage::ToggleColumnVisible(SongsColumn::Stars),
-                    3 => SongsMessage::ToggleColumnVisible(SongsColumn::Album),
-                    4 => SongsMessage::ToggleColumnVisible(SongsColumn::Duration),
-                    5 => SongsMessage::ToggleColumnVisible(SongsColumn::Plays),
-                    _ => SongsMessage::ToggleColumnVisible(SongsColumn::Love),
-                },
+                SongsMessage::ToggleColumnVisible,
                 |trigger_bounds| match trigger_bounds {
                     Some(b) => SongsMessage::SetOpenMenu(Some(
                         crate::app_message::OpenMenu::CheckboxDropdown {
