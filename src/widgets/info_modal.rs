@@ -339,7 +339,31 @@ pub(crate) fn info_modal_overlay<'a>(
             .get(idx)
             .map_or("", |(_, v)| v.as_str());
 
-        let value_cell: Element<'_, InfoModalMessage> = if is_url(value) {
+        let value_cell: Element<'_, InfoModalMessage> = if matches!(value, "✓" | "✗") {
+            // Boolean indicator — colored bold glyph using theme sentiment.
+            // ✓ = success (typically green), ✗ = warning (typically red/orange).
+            let (glyph_color, glyph_text) = if value == "✓" {
+                (theme::success(), "✓")
+            } else {
+                (theme::warning(), "✗")
+            };
+            container(
+                text(glyph_text)
+                    .size(VALUE_SIZE + 2.0)
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Bold,
+                        ..theme::ui_font()
+                    })
+                    .color(glyph_color),
+            )
+            .padding(iced::Padding {
+                top: 4.0,
+                bottom: 4.0,
+                left: 0.0,
+                right: 0.0,
+            })
+            .into()
+        } else if is_url(value) {
             let url = value.trim().to_string();
             let url_copy = url.clone();
             button(
