@@ -389,7 +389,24 @@ pub(crate) fn text_input_dialog_overlay<'a>(
             .font(theme::ui_font())
             .width(Length::Fill)
             .style(dialog_input_style);
-        content = content.push(input);
+        // In save-as-playlist mode, prefix the input with a pencil glyph so its
+        // left edge aligns with the combo_box's content (which has its own
+        // leading icon). Other dialog flows render the input naked.
+        if state.save_playlist_mode {
+            let input_icon = crate::embedded_svg::svg_widget("assets/icons/pencil-line.svg")
+                .width(Length::Fixed(16.0))
+                .height(Length::Fixed(16.0))
+                .style(|_theme, _status| iced::widget::svg::Style {
+                    color: Some(theme::accent()),
+                });
+            content = content.push(
+                row![input_icon, input]
+                    .spacing(8)
+                    .align_y(Alignment::Center),
+            );
+        } else {
+            content = content.push(input);
+        }
 
         if let Some(sec_val) = &state.secondary_value {
             let input2 = text_input(&state.secondary_placeholder, sec_val)
@@ -439,7 +456,11 @@ pub(crate) fn text_input_dialog_overlay<'a>(
                     text_color: Some(theme::fg2()),
                 }
             });
-        content = content.push(public_check);
+        // Indent to align with the input content (16px icon + 8px spacing).
+        content = content.push(container(public_check).padding(iced::Padding {
+            left: 24.0,
+            ..Default::default()
+        }));
     }
 
     // Overwrite/append confirmation message
