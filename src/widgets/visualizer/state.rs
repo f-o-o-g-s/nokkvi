@@ -1043,7 +1043,7 @@ fn monstercat_filter(bars: &mut [f64], monstercat: f64) {
 ///
 /// Given four control values p0..p3 and parameter t in [0, 1],
 /// returns the interpolated value at t between p1 and p2.
-fn catmull_rom_1d(p0: f64, p1: f64, p2: f64, p3: f64, t: f64) -> f64 {
+pub(crate) fn catmull_rom_1d(p0: f64, p1: f64, p2: f64, p3: f64, t: f64) -> f64 {
     let t2 = t * t;
     let t3 = t2 * t;
     0.5 * ((2.0 * p1)

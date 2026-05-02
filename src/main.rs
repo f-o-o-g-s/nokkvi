@@ -184,6 +184,11 @@ pub struct Nokkvi {
     // -------------------------------------------------------------------------
     pub visualizer: Option<widgets::visualizer::Visualizer>,
     pub visualizer_config: crate::visualizer_config::SharedVisualizerConfig,
+    /// Surfing-boat overlay state (lines-mode only). Phase + last sampled
+    /// (x_ratio, y_ratio) + cached themed-logo SVG handle. Driven by per-frame
+    /// `Message::BoatTick`; visibility derived from
+    /// `engine.visualization_mode == Lines && config.enabled && config.lines.boat`.
+    pub boat: crate::widgets::boat::BoatState,
 
     // -------------------------------------------------------------------------
     // MPRIS D-Bus Integration
@@ -362,6 +367,7 @@ impl Default for Nokkvi {
             pending_queue_insert_position: None,
             visualizer: None,
             visualizer_config: crate::visualizer_config::create_shared_config(),
+            boat: crate::widgets::boat::BoatState::default(),
             mpris_connection: None,
             last_mpris_position_us: 0,
             tray_connection: None,
@@ -546,6 +552,12 @@ impl Nokkvi {
         let task_status_sub = iced::Subscription::run(services::task_subscription::run)
             .map(|(handle, status)| Message::TaskStatusChanged(handle, status));
 
+        // Per-frame redraw events drive the surfing-boat overlay's eased
+        // motion. Always-on (cost = one closure call per frame) — the boat
+        // handler bails fast when not in lines mode, so the work is trivial
+        // when the feature is off.
+        let boat_frames = iced::window::frames().map(Message::BoatTick);
+
         iced::Subscription::batch(vec![
             tick,
             keyboard,
@@ -560,6 +572,7 @@ impl Nokkvi {
             queue_changed_sub,
             sse_sub,
             task_status_sub,
+            boat_frames,
         ])
     }
 }

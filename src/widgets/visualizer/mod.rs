@@ -4,7 +4,7 @@
 
 mod pipeline;
 pub(crate) mod shader;
-mod state;
+pub(crate) mod state;
 
 use iced::{Color, Element, Length};
 pub(crate) use shader::{ShaderParams, ShaderVisualizer};
@@ -340,6 +340,13 @@ impl Visualizer {
     /// Returns a closure accepting `&[f32]` samples directly from the streaming source.
     pub fn audio_callback(&self) -> impl Fn(&[f32], u32) + Send + Sync + use<> {
         self.state.audio_callback()
+    }
+
+    /// Snapshot the current bar buffer (the same data the lines shader
+    /// consumes). Used by the boat overlay to sample the live waveform
+    /// height. Locks the display mutex briefly and clones — fine at 60 Hz.
+    pub(crate) fn current_bars(&self) -> Vec<f64> {
+        self.state.get_bars()
     }
 
     /// Reset the visualizer state for a new track

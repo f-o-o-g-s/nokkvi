@@ -7,6 +7,7 @@
 // Components
 pub(crate) mod artwork_split_handle;
 pub(crate) mod base_slot_list_layout;
+pub(crate) mod boat;
 pub(crate) mod drag_column;
 pub(crate) mod eq_slider;
 pub(crate) mod format_info;

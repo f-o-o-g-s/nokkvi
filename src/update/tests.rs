@@ -4321,3 +4321,154 @@ fn playlist_edit_public_only_change_is_metadata_dirty() {
          uses to decide whether to call update_playlist (R6 fix)"
     );
 }
+
+// ============================================================================
+// Surfing-Boat Overlay Handler (boat.rs)
+// ============================================================================
+
+mod boat_tests {
+    use std::time::{Duration, Instant};
+
+    use nokkvi_data::types::player_settings::VisualizationMode;
+
+    use crate::{app_message::Message, test_helpers::*};
+
+    /// Enable the boat toggle in the shared visualizer config.
+    fn enable_boat_in_config(app: &crate::Nokkvi, on: bool) {
+        let mut cfg = app.visualizer_config.write();
+        cfg.lines.boat = on;
+    }
+
+    #[test]
+    fn boat_visible_only_in_lines_mode() {
+        let mut app = test_app();
+        enable_boat_in_config(&app, true);
+
+        // Default mode is Bars — boat should stay hidden even with toggle on.
+        app.engine.visualization_mode = VisualizationMode::Bars;
+        let _ = app.update(Message::BoatTick(Instant::now()));
+        assert!(
+            !app.boat.visible,
+            "boat must be hidden in Bars mode regardless of the boat toggle"
+        );
+
+        // Switch to Lines — boat should now be visible.
+        app.engine.visualization_mode = VisualizationMode::Lines;
+        let _ = app.update(Message::BoatTick(Instant::now()));
+        assert!(
+            app.boat.visible,
+            "boat must be visible in Lines mode when the toggle is on"
+        );
+    }
+
+    #[test]
+    fn boat_hidden_when_visualizer_disabled() {
+        let mut app = test_app();
+        enable_boat_in_config(&app, true);
+        // VisualizationMode::Off is what mounts the visualizer at all (see
+        // app_view.rs). When Off, the boat must also be hidden.
+        app.engine.visualization_mode = VisualizationMode::Off;
+        let _ = app.update(Message::BoatTick(Instant::now()));
+        assert!(
+            !app.boat.visible,
+            "boat must be hidden when the visualizer is fully off"
+        );
+    }
+
+    #[test]
+    fn boat_hidden_when_settings_toggle_off() {
+        let mut app = test_app();
+        // Lines mode active, but the user's boat toggle is off (the default).
+        app.engine.visualization_mode = VisualizationMode::Lines;
+        let _ = app.update(Message::BoatTick(Instant::now()));
+        assert!(
+            !app.boat.visible,
+            "boat must respect the user's `lines.boat` toggle"
+        );
+    }
+
+    #[test]
+    fn boat_advances_x_ratio_on_tick() {
+        let mut app = test_app();
+        enable_boat_in_config(&app, true);
+        app.engine.visualization_mode = VisualizationMode::Lines;
+
+        // Seed phase at peak drive (sin(2π·0.25) = 1) and start with a
+        // non-zero velocity so the boat moves on the first integrating tick.
+        app.boat.phase = 0.25;
+        app.boat.x_velocity = 0.05;
+
+        let t0 = Instant::now();
+        let _ = app.update(Message::BoatTick(t0));
+        let x0 = app.boat.x_ratio;
+
+        // Second tick 100 ms later — x_ratio must change under the integrated
+        // physics (small dt + a non-zero velocity → measurable position delta).
+        let t1 = t0 + Duration::from_millis(100);
+        let _ = app.update(Message::BoatTick(t1));
+        let x1 = app.boat.x_ratio;
+
+        assert_ne!(
+            x0, x1,
+            "two ticks 100 ms apart in lines mode must move the boat (got x0={x0}, x1={x1})"
+        );
+    }
+
+    #[test]
+    fn boat_phase_resumes_after_mode_round_trip() {
+        let mut app = test_app();
+        enable_boat_in_config(&app, true);
+        app.engine.visualization_mode = VisualizationMode::Lines;
+
+        // Tick once to seat last_tick + advance phase a touch.
+        let t0 = Instant::now();
+        let _ = app.update(Message::BoatTick(t0));
+        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(50)));
+        let saved_phase = app.boat.phase;
+        assert!(
+            saved_phase > 0.0,
+            "phase must have advanced (got {saved_phase})"
+        );
+
+        // Switch to Bars — boat hides, phase preserved.
+        app.engine.visualization_mode = VisualizationMode::Bars;
+        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
+        assert!(!app.boat.visible);
+        assert_eq!(
+            app.boat.phase,
+            saved_phase,
+            "phase must NOT advance while hidden (saved={saved_phase}, now={now})",
+            now = app.boat.phase
+        );
+
+        // Back to Lines — phase resumes from where it left off.
+        app.engine.visualization_mode = VisualizationMode::Lines;
+        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(150)));
+        assert!(app.boat.visible);
+        assert_eq!(
+            app.boat.phase, saved_phase,
+            "first tick after re-show must have dt=0 (last_tick was cleared) — \
+             phase preserved across the round trip"
+        );
+    }
+
+    #[test]
+    fn boat_clears_last_tick_when_hidden() {
+        // Regression: when hidden the handler must drop `last_tick` so the
+        // first frame back doesn't see a stale multi-second gap.
+        let mut app = test_app();
+        enable_boat_in_config(&app, true);
+        app.engine.visualization_mode = VisualizationMode::Lines;
+
+        let t0 = Instant::now();
+        let _ = app.update(Message::BoatTick(t0));
+        assert!(app.boat.last_tick.is_some());
+
+        app.engine.visualization_mode = VisualizationMode::Off;
+        let _ = app.update(Message::BoatTick(t0 + Duration::from_secs(5)));
+        assert!(
+            app.boat.last_tick.is_none(),
+            "last_tick must be cleared while hidden so re-show starts with dt=0"
+        );
+    }
+}

@@ -564,8 +564,8 @@ mod tests {
         // Verify total item count (catches drift when settings are added/removed)
         let item_count = count_items(&entries);
         assert_eq!(
-            item_count, 45,
-            "Expected 45 visualizer settings items (update this if adding settings)"
+            item_count, 46,
+            "Expected 46 visualizer settings items (update this if adding settings)"
         );
 
         // Spot-check the border_opacity setting (now per-theme under dark/light)

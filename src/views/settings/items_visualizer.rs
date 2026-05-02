@@ -590,6 +590,16 @@ pub(crate) fn build_visualizer_items(
         &d.lines.style,
         vec!["smooth", "angular"],
     ));
+    e.push(SettingItem::bool_val(
+        meta!(
+            "visualizer.lines.boat",
+            "Surfing boat",
+            "Lines",
+            "Show a small boat that rides the waveform"
+        ),
+        config.lines.boat,
+        d.lines.boat,
+    ));
 
     e
 }

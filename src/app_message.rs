@@ -450,6 +450,12 @@ pub enum Message {
     /// Config file changed, apply new visualizer settings
     VisualizerConfigChanged(crate::visualizer_config::VisualizerConfig),
 
+    // --- Surfing-Boat Overlay (lines mode) ---
+    /// Per-frame tick from `iced::window::frames()` driving the boat overlay's
+    /// eased horizontal motion + waveform-height sampling. Cheap when not in
+    /// lines mode — handler bails after the visibility check.
+    BoatTick(std::time::Instant),
+
     // --- Settings Hot-Reload ---
     SettingsConfigReloaded,
     SettingsReloadDataLoaded(

@@ -59,6 +59,7 @@ macro_rules! dispatch_view_with_seek {
 mod about_modal;
 mod albums;
 mod artists;
+mod boat;
 mod browsing_panel;
 mod collage;
 mod components;
@@ -1082,6 +1083,11 @@ impl Nokkvi {
             Message::ArtworkColumnDragCommit(pct) => self.handle_artwork_column_drag(
                 crate::widgets::artwork_split_handle::DragEvent::Commit(pct),
             ),
+
+            // -----------------------------------------------------------------
+            // Surfing-Boat Overlay (lines mode)
+            // -----------------------------------------------------------------
+            Message::BoatTick(now) => boat::handle_boat_tick(self, now),
         }
     }
 

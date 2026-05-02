@@ -358,6 +358,28 @@ impl Nokkvi {
             .height(Length::Fill);
 
             stack = stack.push(visualizer_overlay);
+
+            // Surfing-boat overlay (lines mode only). Mirrors the spacer +
+            // container shape above so the Float's content_bounds — which
+            // its `.translate(...)` closure receives, NOT the viewport — line
+            // up with the visualizer area. Without this mirroring the boat
+            // would land in the wrong band.
+            if self.boat.visible && self.engine.visualization_mode == VisualizationMode::Lines {
+                let boat_overlay_col = column![
+                    container(iced::widget::Space::new()).height(Length::Fixed(spacer_height)),
+                    container(crate::widgets::boat::boat_overlay::<Message>(
+                        &self.boat,
+                        self.window.width,
+                        visualizer_height,
+                    ))
+                    .width(Length::Fill)
+                    .height(Length::Fixed(visualizer_height)),
+                ]
+                .width(Length::Fill)
+                .height(Length::Fill);
+
+                stack = stack.push(boat_overlay_col);
+            }
         }
 
         stack.into()

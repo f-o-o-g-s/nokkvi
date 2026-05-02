@@ -328,6 +328,9 @@ pub struct LinesConfig {
     /// - "angular": Straight line segments between points
     ///   Default: "smooth"
     pub style: String,
+    /// Surfing boat: render a small boat that rides the waveform.
+    /// Default: false
+    pub boat: bool,
 }
 
 impl Default for LinesConfig {
@@ -342,6 +345,7 @@ impl Default for LinesConfig {
             fill_opacity: 0.5,
             mirror: false,
             style: "smooth".to_string(),
+            boat: false,
         }
     }
 }
