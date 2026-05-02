@@ -1033,6 +1033,24 @@ impl PlaylistsPage {
             )
         });
 
+        // Visibility glyph slot — always pushed so the row's widget tree
+        // shape stays identical between public/private states. Public renders
+        // a zero-width Space; private renders a lock SVG in muted fg3.
+        columns.push(if playlist.public {
+            iced::widget::Space::new()
+                .width(Length::Fixed(0.0))
+                .height(Length::Fixed(14.0))
+                .into()
+        } else {
+            crate::embedded_svg::svg_widget("assets/icons/lock.svg")
+                .width(Length::Fixed(14.0))
+                .height(Length::Fixed(14.0))
+                .style(|_theme, _status| iced::widget::svg::Style {
+                    color: Some(crate::theme::fg3()),
+                })
+                .into()
+        });
+
         if show_song_count_col {
             columns.push(slot_list_metadata_column(
                 count_text.clone(),
