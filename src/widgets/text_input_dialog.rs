@@ -8,7 +8,7 @@
 
 use iced::{
     Alignment, Element, Length,
-    widget::{button, column, combo_box, container, row, text, text_input},
+    widget::{button, checkbox, column, combo_box, container, row, text, text_input},
 };
 
 use crate::theme;
@@ -74,6 +74,9 @@ pub struct TextInputDialogState {
     pub selected_playlist: Option<PlaylistOption>,
     /// Whether the dialog is in "save as playlist" mode (shows combo_box)
     pub save_playlist_mode: bool,
+    /// Whether a newly created playlist is public. Visible in save-playlist mode
+    /// when creating (not overwriting). Defaults to `true` per project policy.
+    pub public: bool,
     /// Whether the dialog is in confirmation-only mode (no text input, just message + buttons)
     pub confirmation_only: bool,
     /// Warning/description message shown in confirmation-only mode
@@ -95,6 +98,7 @@ impl Default for TextInputDialogState {
             playlist_combo_state: combo_box::State::new(Vec::new()),
             selected_playlist: None,
             save_playlist_mode: false,
+            public: true,
             confirmation_only: false,
             confirmation_message: String::new(),
             secondary_value: None,
@@ -115,6 +119,7 @@ impl TextInputDialogState {
         self.playlist_combo_state = combo_box::State::new(Vec::new());
         self.selected_playlist = None;
         self.save_playlist_mode = false;
+        self.public = true;
         self.confirmation_only = false;
         self.confirmation_message.clear();
         self.secondary_value = None;
@@ -267,6 +272,8 @@ pub enum TextInputDialogMessage {
     Cancel,
     /// User selected a playlist option from the combo_box
     PlaylistSelected(PlaylistOption),
+    /// User toggled the "Public" checkbox in save-as-playlist mode
+    PublicToggled(bool),
 }
 
 /// Unique text_input ID for the dialog (for focus management)
@@ -395,6 +402,44 @@ pub(crate) fn text_input_dialog_overlay<'a>(
                 .style(dialog_input_style);
             content = content.push(input2);
         }
+    }
+
+    // Public/Private toggle — shown when creating a new playlist via the
+    // save-as-playlist flow (not overwrite, not confirmation). Default-public.
+    if state.save_playlist_mode && !is_overwrite && !state.confirmation_only {
+        let public_check = checkbox(state.public)
+            .label("Public")
+            .on_toggle(TextInputDialogMessage::PublicToggled)
+            .size(14)
+            .text_size(13)
+            .font(theme::ui_font())
+            .style(|_theme, status| {
+                let is_checked = matches!(
+                    status,
+                    checkbox::Status::Active { is_checked: true }
+                        | checkbox::Status::Hovered { is_checked: true }
+                        | checkbox::Status::Disabled { is_checked: true }
+                );
+                checkbox::Style {
+                    background: if is_checked {
+                        theme::accent().into()
+                    } else {
+                        theme::bg0_soft().into()
+                    },
+                    icon_color: theme::fg0(),
+                    border: iced::Border {
+                        color: if is_checked {
+                            theme::accent_bright()
+                        } else {
+                            theme::bg3()
+                        },
+                        width: 1.0,
+                        radius: theme::ui_border_radius(),
+                    },
+                    text_color: Some(theme::fg2()),
+                }
+            });
+        content = content.push(public_check);
     }
 
     // Overwrite/append confirmation message

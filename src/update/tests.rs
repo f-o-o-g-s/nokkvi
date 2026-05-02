@@ -4016,3 +4016,68 @@ fn queue_show_default_playlist_setting_default_is_off() {
         "the queue chip is opt-in — default should be hidden"
     );
 }
+
+// ============================================================================
+// Text Input Dialog — Public/Private Playlist Toggle (F1, T5–T7)
+// ============================================================================
+
+#[test]
+fn text_input_dialog_save_playlist_defaults_to_public() {
+    let mut app = test_app();
+    app.text_input_dialog.open_save_playlist(&[]);
+    assert!(
+        app.text_input_dialog.public,
+        "newly opened save-playlist dialog must default the toggle to public"
+    );
+}
+
+#[test]
+fn text_input_dialog_public_toggled_message_flips_state() {
+    use crate::{app_message::Message, widgets::text_input_dialog::TextInputDialogMessage};
+
+    let mut app = test_app();
+    app.text_input_dialog.open_save_playlist(&[]);
+    assert!(app.text_input_dialog.public);
+
+    let _ = app.update(Message::TextInputDialog(
+        TextInputDialogMessage::PublicToggled(false),
+    ));
+    assert!(
+        !app.text_input_dialog.public,
+        "PublicToggled(false) must flip the dialog's public field to false"
+    );
+}
+
+#[test]
+fn text_input_dialog_combo_round_trip_preserves_public_off() {
+    use crate::{
+        app_message::Message,
+        widgets::text_input_dialog::{PlaylistOption, TextInputDialogMessage},
+    };
+
+    let mut app = test_app();
+    app.text_input_dialog
+        .open_save_playlist(&[("p1".into(), "Existing".into())]);
+
+    // User unchecks Public.
+    let _ = app.update(Message::TextInputDialog(
+        TextInputDialogMessage::PublicToggled(false),
+    ));
+    assert!(!app.text_input_dialog.public);
+
+    // User flips combo to Existing playlist, then back to NewPlaylist.
+    let _ = app.update(Message::TextInputDialog(
+        TextInputDialogMessage::PlaylistSelected(PlaylistOption::Existing {
+            id: "p1".into(),
+            name: "Existing".into(),
+        }),
+    ));
+    let _ = app.update(Message::TextInputDialog(
+        TextInputDialogMessage::PlaylistSelected(PlaylistOption::NewPlaylist),
+    ));
+
+    assert!(
+        !app.text_input_dialog.public,
+        "combo round-trip must not silently reset the public toggle"
+    );
+}

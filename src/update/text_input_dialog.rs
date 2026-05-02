@@ -32,6 +32,10 @@ impl Nokkvi {
             TextInputDialogMessage::PlaylistSelected(option) => {
                 self.handle_playlist_selected(option)
             }
+            TextInputDialogMessage::PublicToggled(value) => {
+                self.text_input_dialog.public = value;
+                Task::none()
+            }
             TextInputDialogMessage::Submit => self.handle_text_input_submit(),
         }
     }
@@ -106,11 +110,10 @@ impl Nokkvi {
                     self.toast_warn("Name cannot be empty");
                     return Task::none();
                 }
+                let public = self.text_input_dialog.public;
                 self.text_input_dialog.close();
                 let song_ids = self.queue_song_ids();
                 let name = value.clone();
-                // F1 (commit 2) wires this from the dialog's public toggle.
-                let public = true;
                 self.shell_task(
                     move |shell| async move {
                         let service = shell.playlists_api().await?;
@@ -179,10 +182,9 @@ impl Nokkvi {
                     self.toast_warn("Name cannot be empty");
                     return Task::none();
                 }
+                let public = self.text_input_dialog.public;
                 self.text_input_dialog.close();
                 let name = value.clone();
-                // F1 (commit 2) wires this from the dialog's public toggle.
-                let public = true;
                 self.shell_task(
                     move |shell| async move {
                         let service = shell.playlists_api().await?;
