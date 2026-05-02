@@ -7,7 +7,7 @@
 
 use std::sync::{
     Arc, LazyLock,
-    atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering},
+    atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering},
 };
 
 use arc_swap::ArcSwap;
@@ -41,6 +41,21 @@ static DUAL_THEME: LazyLock<ArcSwap<ResolvedDualTheme>> = LazyLock::new(|| {
 /// needs the original color values (not parsed `iced::Color`).
 static THEME_FILE: LazyLock<RwLock<ThemeFile>> =
     LazyLock::new(|| RwLock::new(load_active_theme_file()));
+
+/// Monotonic counter bumped every time the active palette changes — either
+/// by `reload_theme()` (theme file edit, preset switch, color picker) or
+/// `set_light_mode()` (light/dark toggle). Widgets that cache theme-derived
+/// content (e.g. the boat's substituted SVG handle) snapshot this on build
+/// and rebuild when it advances. Without this counter, every new code path
+/// that mutates the active theme is a fresh chance to leave a stale cache.
+static THEME_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Read the current theme generation. Pair with a stored snapshot to detect
+/// "active palette changed since I last built my cache."
+#[inline]
+pub(crate) fn theme_generation() -> u64 {
+    THEME_GENERATION.load(Ordering::Relaxed)
+}
 
 // ============================================================================
 // UI Mode Flags (grouped to avoid scattered statics)
@@ -139,6 +154,7 @@ pub(crate) fn reload_theme() {
         let mut file = THEME_FILE.write();
         *file = new_file;
     }
+    THEME_GENERATION.fetch_add(1, Ordering::Relaxed);
 
     debug!(" Theme hot-reloaded from theme file");
 }
@@ -237,6 +253,7 @@ pub(crate) fn is_light_mode() -> bool {
 #[inline]
 pub(crate) fn set_light_mode(enabled: bool) {
     UI_MODE.light_mode.store(enabled, Ordering::Relaxed);
+    THEME_GENERATION.fetch_add(1, Ordering::Relaxed);
     debug!(" Theme mode changed: light_mode={}", enabled);
 }
 

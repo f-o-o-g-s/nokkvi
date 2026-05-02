@@ -183,6 +183,12 @@ const Y_DAMPING: f32 = 12.0;
 ///   stays clean and the schedule starts on first activation, not on
 ///   construction.
 /// - `handle` caches the themed logo SVG so we don't rebuild it every frame.
+/// - `handle_generation` is the `theme::theme_generation()` snapshot taken at
+///   the time `handle` was last built. When the global counter advances —
+///   any path that runs `theme::reload_theme()` or `theme::set_light_mode()`
+///   — the cache is recognized as stale and rebuilt on the next render. This
+///   replaces the previous explicit-invalidation approach, which had to be
+///   wired up at every theme-change call site and missed preset switches.
 #[derive(Debug, Clone, Default)]
 pub struct BoatState {
     pub phase: f32,
@@ -197,27 +203,29 @@ pub struct BoatState {
     pub charge_direction: f32,
     pub rng_state: u32,
     pub handle: Option<svg::Handle>,
+    pub handle_generation: u64,
 }
 
 impl BoatState {
-    /// Lazily build (and cache) the themed boat SVG handle. Call once per
-    /// render — the handle is reused thereafter.
+    /// Lazily build (and cache) the themed boat SVG handle, rebuilding when
+    /// the active theme has changed since the cache was populated.
+    ///
+    /// The cache key is `theme::theme_generation()` — bumped by
+    /// `reload_theme()` and `set_light_mode()`. Snapshotting it here means
+    /// we don't need to remember to invalidate at every theme-change call
+    /// site (preset switch, color picker edit, restore-defaults, etc.).
     pub(crate) fn ensure_handle(&mut self) -> svg::Handle {
-        if let Some(h) = &self.handle {
+        let current_gen = crate::theme::theme_generation();
+        if let Some(h) = &self.handle
+            && self.handle_generation == current_gen
+        {
             return h.clone();
         }
         let bytes = crate::embedded_svg::themed_logo_svg().into_bytes();
         let h = svg::Handle::from_memory(bytes);
         self.handle = Some(h.clone());
+        self.handle_generation = current_gen;
         h
-    }
-
-    /// Drop the cached handle so the next render rebuilds it from the
-    /// freshly-themed SVG. Used when the active theme changes — out of v1
-    /// scope but cheap to expose.
-    #[allow(dead_code)]
-    pub(crate) fn invalidate_handle(&mut self) {
-        self.handle = None;
     }
 }
 
@@ -459,9 +467,18 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
     area_height: f32,
 ) -> Element<'a, M> {
     // The handler is responsible for calling `ensure_handle()` on the first
-    // visible tick, so by the time we render the handle is cached. The fallback
-    // here keeps the contract robust if a render somehow precedes the tick.
-    let handle = state.handle.clone().unwrap_or_else(|| {
+    // visible tick, so by the time we render the handle is cached. The
+    // fallback here keeps the contract robust if a render somehow precedes
+    // the tick OR if the theme just changed and the next BoatTick hasn't
+    // refreshed the cache yet — in that case the cached handle's generation
+    // won't match `theme::theme_generation()` and we rebuild inline rather
+    // than ship a stale-color frame.
+    let current_gen = crate::theme::theme_generation();
+    let cached = state
+        .handle
+        .clone()
+        .filter(|_| state.handle_generation == current_gen);
+    let handle = cached.unwrap_or_else(|| {
         svg::Handle::from_memory(crate::embedded_svg::themed_logo_svg().into_bytes())
     });
     let boat_h = (area_height * BOAT_HEIGHT_FRACTION).max(8.0);
@@ -495,6 +512,65 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- handle caching --------------------------------------------------------
+
+    /// Sequential guard. The handle-cache tests poke `theme::set_light_mode`
+    /// (a global atomic), so they must not run interleaved with each other.
+    /// `cargo test` is multi-threaded by default — this mutex serializes the
+    /// whole group without forcing the entire suite to single-threaded mode.
+    /// `parking_lot::Mutex` is used because a test panic in one test would
+    /// otherwise poison the std lock and cascade-fail the rest of the group.
+    static THEME_MUTATION_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+    /// Theme-change behavior: when the active palette changes, the next
+    /// `ensure_handle()` must return a handle whose bytes (and therefore
+    /// `id()`) reflect the new colors. Without a generation check this is a
+    /// stale-cache bug — the user changes themes and the boat keeps showing
+    /// the old palette until restart.
+    #[test]
+    fn ensure_handle_rebuilds_when_active_theme_changes() {
+        let _guard = THEME_MUTATION_LOCK.lock();
+
+        let mut state = BoatState::default();
+        let initial_mode = crate::theme::is_light_mode();
+
+        let id_before = state.ensure_handle().id();
+
+        // Flip light/dark — `themed_logo_svg()` now substitutes different
+        // colors, so a freshly-built handle has different bytes (and id).
+        crate::theme::set_light_mode(!initial_mode);
+
+        let id_after = state.ensure_handle().id();
+
+        // Restore before any assertion fires so a panic still leaves global
+        // state clean for other tests in this group.
+        crate::theme::set_light_mode(initial_mode);
+
+        assert_ne!(
+            id_before, id_after,
+            "ensure_handle must rebuild after a theme/mode change \
+             (got id_before = id_after = {id_before}, meaning stale cache)"
+        );
+    }
+
+    /// No theme change: the cache should be reused. Guards the optimization
+    /// the whole point of the cache exists for — without it we'd churn
+    /// GPU cache keys on every frame (the gotcha called out in this module's
+    /// doc comment).
+    #[test]
+    fn ensure_handle_returns_cached_when_theme_unchanged() {
+        let _guard = THEME_MUTATION_LOCK.lock();
+
+        let mut state = BoatState::default();
+        let id1 = state.ensure_handle().id();
+        let id2 = state.ensure_handle().id();
+        assert_eq!(
+            id1, id2,
+            "two consecutive ensure_handle calls without a theme change \
+             must return the same cached handle"
+        );
+    }
 
     // --- step physics ----------------------------------------------------------
 
