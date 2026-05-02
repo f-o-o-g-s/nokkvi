@@ -8,7 +8,11 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Surfing boat now makes periodic rowing charges toward the louder side of the waveform instead of camping on the calm side, and sits slightly into the wave line instead of hovering above it.
+
 ### Fixed
+
+- Surfing boat no longer gets stuck against the far left or right of the window — a soft wall bumper pushes it back inward — and the boat is now clipped to the visualizer area so it doesn't draw on top of the player bar.
 
 ### Removed
 
