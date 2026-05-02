@@ -1113,6 +1113,13 @@ impl Nokkvi {
         self.genres_page.column_visibility.albumcount = settings.genres_show_albumcount;
         self.genres_page.column_visibility.songcount = settings.genres_show_songcount;
 
+        // Restore Playlists view column visibility.
+        self.playlists_page.column_visibility.index = settings.playlists_show_index;
+        self.playlists_page.column_visibility.thumbnail = settings.playlists_show_thumbnail;
+        self.playlists_page.column_visibility.songcount = settings.playlists_show_songcount;
+        self.playlists_page.column_visibility.duration = settings.playlists_show_duration;
+        self.playlists_page.column_visibility.updatedat = settings.playlists_show_updatedat;
+
         // Restore Albums view column visibility.
         self.albums_page.column_visibility.stars = settings.albums_show_stars;
         self.albums_page.column_visibility.songcount = settings.albums_show_songcount;

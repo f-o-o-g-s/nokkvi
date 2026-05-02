@@ -439,9 +439,59 @@ impl Nokkvi {
                     crate::widgets::default_playlist_picker::DefaultPlaylistPickerMessage::Open,
                 ));
             }
+            views::PlaylistsAction::ColumnVisibilityChanged(col, value) => {
+                return self.persist_playlists_column_visibility(col, value);
+            }
             _ => {} // None + already-handled common actions
         }
 
         cmd.map(Message::Playlists)
+    }
+
+    /// Persist the user's playlists column visibility toggle to config.toml +
+    /// redb via `AppService::settings()`. The page's in-memory state was
+    /// already mutated in `PlaylistsPage::update`.
+    pub(crate) fn persist_playlists_column_visibility(
+        &self,
+        col: views::PlaylistsColumn,
+        value: bool,
+    ) -> Task<Message> {
+        match col {
+            views::PlaylistsColumn::Index => {
+                self.shell_spawn("persist_playlists_show_index", move |shell| async move {
+                    shell.settings().set_playlists_show_index(value).await
+                });
+            }
+            views::PlaylistsColumn::Thumbnail => {
+                self.shell_spawn(
+                    "persist_playlists_show_thumbnail",
+                    move |shell| async move {
+                        shell.settings().set_playlists_show_thumbnail(value).await
+                    },
+                );
+            }
+            views::PlaylistsColumn::SongCount => {
+                self.shell_spawn(
+                    "persist_playlists_show_songcount",
+                    move |shell| async move {
+                        shell.settings().set_playlists_show_songcount(value).await
+                    },
+                );
+            }
+            views::PlaylistsColumn::Duration => {
+                self.shell_spawn("persist_playlists_show_duration", move |shell| async move {
+                    shell.settings().set_playlists_show_duration(value).await
+                });
+            }
+            views::PlaylistsColumn::UpdatedAt => {
+                self.shell_spawn(
+                    "persist_playlists_show_updatedat",
+                    move |shell| async move {
+                        shell.settings().set_playlists_show_updatedat(value).await
+                    },
+                );
+            }
+        }
+        Task::none()
     }
 }

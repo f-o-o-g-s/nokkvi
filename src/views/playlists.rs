@@ -25,6 +25,83 @@ use crate::{
 pub struct PlaylistsPage {
     pub common: SlotListPageState,
     pub expansion: ExpansionState<SongUIViewData>,
+    /// Per-column visibility toggles surfaced via the columns-cog dropdown.
+    pub column_visibility: PlaylistsColumnVisibility,
+}
+
+/// Toggleable playlists columns. The playlist name (title) is always shown;
+/// SongCount/Duration/UpdatedAt also auto-show when their matching sort
+/// mode is active regardless of the user toggle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaylistsColumn {
+    Index,
+    Thumbnail,
+    SongCount,
+    Duration,
+    UpdatedAt,
+}
+
+/// User-toggle state for each toggleable playlists column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlaylistsColumnVisibility {
+    pub index: bool,
+    pub thumbnail: bool,
+    pub songcount: bool,
+    pub duration: bool,
+    pub updatedat: bool,
+}
+
+impl Default for PlaylistsColumnVisibility {
+    fn default() -> Self {
+        // Index/Thumbnail historically always render. SongCount/Duration/
+        // UpdatedAt historically only render when sorting by the matching
+        // mode — keep that as the default to avoid surprising layout
+        // changes on first launch.
+        Self {
+            index: true,
+            thumbnail: true,
+            songcount: false,
+            duration: false,
+            updatedat: false,
+        }
+    }
+}
+
+impl PlaylistsColumnVisibility {
+    pub fn get(&self, col: PlaylistsColumn) -> bool {
+        match col {
+            PlaylistsColumn::Index => self.index,
+            PlaylistsColumn::Thumbnail => self.thumbnail,
+            PlaylistsColumn::SongCount => self.songcount,
+            PlaylistsColumn::Duration => self.duration,
+            PlaylistsColumn::UpdatedAt => self.updatedat,
+        }
+    }
+
+    pub fn set(&mut self, col: PlaylistsColumn, value: bool) {
+        match col {
+            PlaylistsColumn::Index => self.index = value,
+            PlaylistsColumn::Thumbnail => self.thumbnail = value,
+            PlaylistsColumn::SongCount => self.songcount = value,
+            PlaylistsColumn::Duration => self.duration = value,
+            PlaylistsColumn::UpdatedAt => self.updatedat = value,
+        }
+    }
+}
+
+/// SongCount column auto-shows when sort = SongCount regardless of toggle.
+pub(crate) fn playlists_song_count_visible(sort: SortMode, user_visible: bool) -> bool {
+    user_visible || matches!(sort, SortMode::SongCount)
+}
+
+/// Duration column auto-shows when sort = Duration regardless of toggle.
+pub(crate) fn playlists_duration_visible(sort: SortMode, user_visible: bool) -> bool {
+    user_visible || matches!(sort, SortMode::Duration)
+}
+
+/// UpdatedAt column auto-shows when sort = UpdatedAt regardless of toggle.
+pub(crate) fn playlists_updated_at_visible(sort: SortMode, user_visible: bool) -> bool {
+    user_visible || matches!(sort, SortMode::UpdatedAt)
 }
 
 /// View data passed from root (read-only, borrows from app state to avoid allocations)
@@ -42,6 +119,11 @@ pub struct PlaylistsViewData<'a> {
     /// Current default playlist's display name (empty when no default set).
     /// Surfaced in the view-header chip.
     pub default_playlist_name: &'a str,
+    /// Whether the column-visibility checkbox dropdown is open (controlled
+    /// by `Nokkvi.open_menu`).
+    pub column_dropdown_open: bool,
+    /// Trigger bounds captured when the dropdown was opened.
+    pub column_dropdown_trigger_bounds: Option<iced::Rectangle>,
     /// Borrowed reference to the root open-menu state, so per-row context
     /// menus and the artwork-panel context menu can resolve their own
     /// open/closed status.
@@ -164,6 +246,8 @@ pub enum PlaylistsMessage {
     ArtworkColumnDrag(crate::widgets::artwork_split_handle::DragEvent),
     /// Header chip clicked — bubble to root, opens the default-playlist picker.
     OpenDefaultPlaylistPicker,
+    /// Toggle a playlists column's visibility.
+    ToggleColumnVisible(PlaylistsColumn),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -189,6 +273,8 @@ pub enum PlaylistsAction {
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     /// Bubble to root: open the default-playlist picker overlay.
     OpenDefaultPlaylistPicker,
+    /// Persist a column-visibility toggle change (col, new_value).
+    ColumnVisibilityChanged(PlaylistsColumn, bool),
 
     None,
 }
@@ -218,6 +304,7 @@ impl Default for PlaylistsPage {
                 true, // sort_ascending
             ),
             expansion: ExpansionState::default(),
+            column_visibility: PlaylistsColumnVisibility::default(),
         }
     }
 }
@@ -411,6 +498,14 @@ impl PlaylistsPage {
                 PlaylistsMessage::OpenDefaultPlaylistPicker => {
                     (Task::none(), PlaylistsAction::OpenDefaultPlaylistPicker)
                 }
+                PlaylistsMessage::ToggleColumnVisible(col) => {
+                    let new_value = !self.column_visibility.get(col);
+                    self.column_visibility.set(col, new_value);
+                    (
+                        Task::none(),
+                        PlaylistsAction::ColumnVisibilityChanged(col, new_value),
+                    )
+                }
 
                 PlaylistsMessage::ContextMenuAction(clicked_idx, entry) => {
                     // Context menu for child tracks (uses shared LibraryContextEntry)
@@ -558,10 +653,68 @@ impl PlaylistsPage {
     pub fn view<'a>(&'a self, data: PlaylistsViewData<'a>) -> Element<'a, PlaylistsMessage> {
         use crate::widgets::view_header::SortMode;
 
-        let chip = crate::widgets::default_playlist_chip::default_playlist_chip(
-            data.default_playlist_name,
-            PlaylistsMessage::OpenDefaultPlaylistPicker,
-        );
+        let chip: Element<'a, PlaylistsMessage> =
+            crate::widgets::default_playlist_chip::default_playlist_chip(
+                data.default_playlist_name,
+                PlaylistsMessage::OpenDefaultPlaylistPicker,
+            );
+
+        let column_dropdown: Element<'a, PlaylistsMessage> = {
+            use crate::widgets::checkbox_dropdown::checkbox_dropdown;
+            let items: Vec<(PlaylistsColumn, &'static str, bool)> = vec![
+                (
+                    PlaylistsColumn::Index,
+                    "Index",
+                    self.column_visibility.index,
+                ),
+                (
+                    PlaylistsColumn::Thumbnail,
+                    "Thumbnail",
+                    self.column_visibility.thumbnail,
+                ),
+                (
+                    PlaylistsColumn::SongCount,
+                    "Song count",
+                    self.column_visibility.songcount,
+                ),
+                (
+                    PlaylistsColumn::Duration,
+                    "Duration",
+                    self.column_visibility.duration,
+                ),
+                (
+                    PlaylistsColumn::UpdatedAt,
+                    "Updated at",
+                    self.column_visibility.updatedat,
+                ),
+            ];
+            checkbox_dropdown(
+                "assets/icons/columns-3-cog.svg",
+                "Show/hide columns",
+                items,
+                PlaylistsMessage::ToggleColumnVisible,
+                |trigger_bounds| match trigger_bounds {
+                    Some(b) => PlaylistsMessage::SetOpenMenu(Some(
+                        crate::app_message::OpenMenu::CheckboxDropdown {
+                            view: crate::View::Playlists,
+                            trigger_bounds: b,
+                        },
+                    )),
+                    None => PlaylistsMessage::SetOpenMenu(None),
+                },
+                data.column_dropdown_open,
+                data.column_dropdown_trigger_bounds,
+            )
+            .into()
+        };
+
+        // Header's trailing slot only takes one element — bundle the
+        // existing default-playlist chip with the new columns-cog into a
+        // small Row so both render side-by-side.
+        let trailing: Element<'a, PlaylistsMessage> = iced::widget::row![chip, column_dropdown]
+            .spacing(6)
+            .align_y(Alignment::Center)
+            .into();
 
         let header = widgets::view_header::view_header(
             self.common.current_sort_mode,
@@ -576,10 +729,10 @@ impl PlaylistsPage {
             Some(PlaylistsMessage::ToggleSortOrder),
             None, // No shuffle button for playlists
             Some(PlaylistsMessage::RefreshViewData),
-            None,       // Playlists view doesn't need center on playing button
-            None,       // Optional add button
-            Some(chip), // trailing_button — default-playlist chip
-            true,       // show_search
+            None,           // Playlists view doesn't need center on playing button
+            None,           // Optional add button
+            Some(trailing), // chip + columns-cog dropdown
+            true,           // show_search
             PlaylistsMessage::SearchQueryChanged,
         );
 
@@ -815,64 +968,69 @@ impl PlaylistsPage {
         };
 
         let sort_mode = self.common.current_sort_mode;
-        let show_song_count_col = sort_mode == SortMode::SongCount;
-        let show_duration_col = sort_mode == SortMode::Duration;
-        let show_updated_at = sort_mode == SortMode::UpdatedAt;
+        let show_song_count_col =
+            playlists_song_count_visible(sort_mode, self.column_visibility.songcount);
+        let show_duration_col =
+            playlists_duration_visible(sort_mode, self.column_visibility.duration);
+        let show_updated_at =
+            playlists_updated_at_visible(sort_mode, self.column_visibility.updatedat);
 
-        // Build subtitle: owner + song count/duration (unless they have their own column)
+        // Song-count text is only consumed by the dedicated column below
+        // (when toggled on or auto-shown by sort). The subtitle no longer
+        // falls back to it — toggling a column off means hide, full stop.
         let count_text = if playlist.song_count == 1 {
             "1 song".to_string()
         } else {
             format!("{} songs", playlist.song_count)
         };
-
-        let mut subtitle_parts: Vec<&str> = Vec::new();
-        if !show_song_count_col {
-            subtitle_parts.push(&count_text);
-        }
-        if !show_duration_col {
-            subtitle_parts.push(&duration_str);
-        }
-        let subtitle = subtitle_parts.join(" · ");
+        let subtitle = String::new();
 
         // Extra columns reduce the name portion to make room
         let extra_cols =
             show_song_count_col as u16 + show_duration_col as u16 + show_updated_at as u16;
         let name_portion = 55 - extra_cols * 10;
 
-        // Layout: [Index] [Artwork] [Name+subtitle] [SongCount?] [Duration?] [UpdatedAt?]
+        // Layout: [Index?] [Artwork?] [Name+subtitle] [SongCount?] [Duration?] [UpdatedAt?]
         use crate::widgets::slot_list::{slot_list_artwork_column, slot_list_metadata_column};
 
-        let mut columns: Vec<Element<'a, PlaylistsMessage>> = vec![
-            slot_list_index_column(ctx.item_index, index_size, style, ctx.opacity),
-            slot_list_artwork_column(
+        let mut columns: Vec<Element<'a, PlaylistsMessage>> = Vec::new();
+        if self.column_visibility.index {
+            columns.push(slot_list_index_column(
+                ctx.item_index,
+                index_size,
+                style,
+                ctx.opacity,
+            ));
+        }
+        if self.column_visibility.thumbnail {
+            columns.push(slot_list_artwork_column(
                 playlist_artwork.get(&playlist.id),
                 artwork_size,
                 ctx.is_center,
                 false,
                 ctx.opacity,
-            ),
-            {
-                let click_title = Some(PlaylistsMessage::PlaylistContextAction(
-                    ctx.item_index,
-                    PlaylistContextEntry::Library(
-                        crate::widgets::context_menu::LibraryContextEntry::GetInfo,
-                    ),
-                ));
-                use crate::widgets::slot_list::slot_list_text_column;
-                slot_list_text_column(
-                    playlist.name.clone(),
-                    click_title,
-                    subtitle,
-                    Some(PlaylistsMessage::FocusAndExpand(ctx.item_index)),
-                    title_size,
-                    metadata_size,
-                    style,
-                    ctx.is_center,
-                    name_portion,
-                )
-            },
-        ];
+            ));
+        }
+        columns.push({
+            let click_title = Some(PlaylistsMessage::PlaylistContextAction(
+                ctx.item_index,
+                PlaylistContextEntry::Library(
+                    crate::widgets::context_menu::LibraryContextEntry::GetInfo,
+                ),
+            ));
+            use crate::widgets::slot_list::slot_list_text_column;
+            slot_list_text_column(
+                playlist.name.clone(),
+                click_title,
+                subtitle,
+                Some(PlaylistsMessage::FocusAndExpand(ctx.item_index)),
+                title_size,
+                metadata_size,
+                style,
+                ctx.is_center,
+                name_portion,
+            )
+        });
 
         if show_song_count_col {
             columns.push(slot_list_metadata_column(

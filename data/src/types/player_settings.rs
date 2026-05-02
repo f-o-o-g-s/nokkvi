@@ -919,6 +919,13 @@ pub struct PlayerSettings {
     pub genres_show_albumcount: bool,
     pub genres_show_songcount: bool,
 
+    // -- Playlists view column toggles --
+    pub playlists_show_index: bool,
+    pub playlists_show_thumbnail: bool,
+    pub playlists_show_songcount: bool,
+    pub playlists_show_duration: bool,
+    pub playlists_show_updatedat: bool,
+
     // -- Per-view artwork text overlay toggles --
     /// Whether the metadata text overlay is rendered on the large artwork in Albums view.
     pub albums_artwork_overlay: bool,

@@ -1025,6 +1025,8 @@ impl Nokkvi {
                 self.genres_page.view(view_data).map(Message::Genres)
             }
             View::Playlists => {
+                let (column_dropdown_open, column_dropdown_trigger_bounds) =
+                    column_dropdown_state(&self.open_menu, View::Playlists);
                 let view_data = views::PlaylistsViewData {
                     playlists: &self.library.playlists,
                     playlist_artwork: &self.artwork.playlist.mini,
@@ -1037,6 +1039,8 @@ impl Nokkvi {
                     loading: self.library.playlists.is_loading(),
                     stable_viewport: self.stable_viewport,
                     default_playlist_name: &self.default_playlist_name,
+                    column_dropdown_open,
+                    column_dropdown_trigger_bounds,
                     open_menu: self.open_menu.as_ref(),
                 };
                 self.playlists_page.view(view_data).map(Message::Playlists)

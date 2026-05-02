@@ -815,6 +815,18 @@ pub(crate) fn slot_list_text_column<'a, Message: Clone + 'a + 'static>(
             .into()
     };
 
+    // Empty subtitle → render title-only so the row doesn't reserve a
+    // blank line beneath the title (relevant when callers want a clean
+    // single-line layout, e.g. playlists with all metadata columns off).
+    if subtitle.is_empty() {
+        return container(title_widget)
+            .width(Length::FillPortion(portion))
+            .height(Length::Fill)
+            .clip(true)
+            .align_y(Alignment::Center)
+            .into();
+    }
+
     let subtitle_widget: Element<'a, Message> = if let Some(msg) = subtitle_on_press {
         crate::widgets::link_text::LinkText::new(subtitle)
             .size(subtitle_size)

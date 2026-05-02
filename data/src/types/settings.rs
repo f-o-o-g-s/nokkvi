@@ -283,6 +283,23 @@ pub struct PlayerSettings {
     #[serde(default = "default_true")]
     pub genres_show_songcount: bool,
 
+    // -- Playlists view column toggles --
+    /// Leading row-index column.
+    #[serde(default = "default_true")]
+    pub playlists_show_index: bool,
+    /// Leading thumbnail column.
+    #[serde(default = "default_true")]
+    pub playlists_show_thumbnail: bool,
+    /// Song-count column. Auto-shows when sort = SongCount regardless of toggle.
+    #[serde(default)]
+    pub playlists_show_songcount: bool,
+    /// Duration column. Auto-shows when sort = Duration regardless of toggle.
+    #[serde(default)]
+    pub playlists_show_duration: bool,
+    /// Updated-at column. Auto-shows when sort = UpdatedAt regardless of toggle.
+    #[serde(default)]
+    pub playlists_show_updatedat: bool,
+
     // -- Per-view artwork text overlay toggles --
     /// Whether the metadata text overlay is rendered on the large artwork in Albums view.
     #[serde(default = "default_true")]
@@ -449,6 +466,11 @@ impl Default for PlayerSettings {
             genres_show_thumbnail: true,
             genres_show_albumcount: true,
             genres_show_songcount: true,
+            playlists_show_index: true,
+            playlists_show_thumbnail: true,
+            playlists_show_songcount: false,
+            playlists_show_duration: false,
+            playlists_show_updatedat: false,
             albums_artwork_overlay: true,
             artists_artwork_overlay: true,
             songs_artwork_overlay: true,

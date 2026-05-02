@@ -26,7 +26,9 @@ pub(crate) use artists::{
 pub(crate) use browsing_panel::{BrowsingPanel, BrowsingPanelMessage, BrowsingView};
 pub(crate) use genres::{GenresAction, GenresColumn, GenresMessage, GenresPage, GenresViewData};
 pub(crate) use login::{LoginAction, LoginMessage, LoginPage};
-pub(crate) use playlists::{PlaylistsAction, PlaylistsMessage, PlaylistsPage, PlaylistsViewData};
+pub(crate) use playlists::{
+    PlaylistsAction, PlaylistsColumn, PlaylistsMessage, PlaylistsPage, PlaylistsViewData,
+};
 pub(crate) use queue::{
     QueueAction, QueueColumn, QueueMessage, QueuePage, QueueSortMode, QueueViewData,
 };

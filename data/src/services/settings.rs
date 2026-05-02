@@ -588,6 +588,31 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_playlists_show_index(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.playlists_show_index = enabled;
+        self.save()
+    }
+
+    pub fn set_playlists_show_thumbnail(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.playlists_show_thumbnail = enabled;
+        self.save()
+    }
+
+    pub fn set_playlists_show_songcount(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.playlists_show_songcount = enabled;
+        self.save()
+    }
+
+    pub fn set_playlists_show_duration(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.playlists_show_duration = enabled;
+        self.save()
+    }
+
+    pub fn set_playlists_show_updatedat(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.playlists_show_updatedat = enabled;
+        self.save()
+    }
+
     pub fn set_active_playlist(
         &mut self,
         id: Option<String>,
@@ -829,6 +854,11 @@ impl SettingsManager {
             genres_show_thumbnail: p.genres_show_thumbnail,
             genres_show_albumcount: p.genres_show_albumcount,
             genres_show_songcount: p.genres_show_songcount,
+            playlists_show_index: p.playlists_show_index,
+            playlists_show_thumbnail: p.playlists_show_thumbnail,
+            playlists_show_songcount: p.playlists_show_songcount,
+            playlists_show_duration: p.playlists_show_duration,
+            playlists_show_updatedat: p.playlists_show_updatedat,
             albums_artwork_overlay: p.albums_artwork_overlay,
             artists_artwork_overlay: p.artists_artwork_overlay,
             songs_artwork_overlay: p.songs_artwork_overlay,
@@ -944,6 +974,11 @@ fn apply_toml_settings_to_internal(
     p.genres_show_thumbnail = ts.genres_show_thumbnail;
     p.genres_show_albumcount = ts.genres_show_albumcount;
     p.genres_show_songcount = ts.genres_show_songcount;
+    p.playlists_show_index = ts.playlists_show_index;
+    p.playlists_show_thumbnail = ts.playlists_show_thumbnail;
+    p.playlists_show_songcount = ts.playlists_show_songcount;
+    p.playlists_show_duration = ts.playlists_show_duration;
+    p.playlists_show_updatedat = ts.playlists_show_updatedat;
     p.albums_artwork_overlay = ts.albums_artwork_overlay;
     p.artists_artwork_overlay = ts.artists_artwork_overlay;
     p.songs_artwork_overlay = ts.songs_artwork_overlay;

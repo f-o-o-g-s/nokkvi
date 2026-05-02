@@ -267,6 +267,11 @@ impl SettingsService {
     delegate_setter!(set_genres_show_thumbnail, bool);
     delegate_setter!(set_genres_show_albumcount, bool);
     delegate_setter!(set_genres_show_songcount, bool);
+    delegate_setter!(set_playlists_show_index, bool);
+    delegate_setter!(set_playlists_show_thumbnail, bool);
+    delegate_setter!(set_playlists_show_songcount, bool);
+    delegate_setter!(set_playlists_show_duration, bool);
+    delegate_setter!(set_playlists_show_updatedat, bool);
 
     // -- Volume normalization / ReplayGain --
     delegate_setter!(set_volume_normalization, VolumeNormalizationMode);

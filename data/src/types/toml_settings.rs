@@ -82,6 +82,18 @@ pub struct TomlSettings {
     #[serde(default = "default_true")]
     pub genres_show_songcount: bool,
 
+    // -- Playlists view column toggles --
+    #[serde(default = "default_true")]
+    pub playlists_show_index: bool,
+    #[serde(default = "default_true")]
+    pub playlists_show_thumbnail: bool,
+    #[serde(default)]
+    pub playlists_show_songcount: bool,
+    #[serde(default)]
+    pub playlists_show_duration: bool,
+    #[serde(default)]
+    pub playlists_show_updatedat: bool,
+
     // -- Per-view artwork text overlay toggles --
     pub albums_artwork_overlay: bool,
     pub artists_artwork_overlay: bool,
@@ -249,6 +261,11 @@ impl Default for TomlSettings {
             genres_show_thumbnail: true,
             genres_show_albumcount: true,
             genres_show_songcount: true,
+            playlists_show_index: true,
+            playlists_show_thumbnail: true,
+            playlists_show_songcount: false,
+            playlists_show_duration: false,
+            playlists_show_updatedat: false,
             albums_artwork_overlay: true,
             artists_artwork_overlay: true,
             songs_artwork_overlay: true,
@@ -343,6 +360,11 @@ impl TomlSettings {
             genres_show_thumbnail: ps.genres_show_thumbnail,
             genres_show_albumcount: ps.genres_show_albumcount,
             genres_show_songcount: ps.genres_show_songcount,
+            playlists_show_index: ps.playlists_show_index,
+            playlists_show_thumbnail: ps.playlists_show_thumbnail,
+            playlists_show_songcount: ps.playlists_show_songcount,
+            playlists_show_duration: ps.playlists_show_duration,
+            playlists_show_updatedat: ps.playlists_show_updatedat,
             albums_artwork_overlay: ps.albums_artwork_overlay,
             artists_artwork_overlay: ps.artists_artwork_overlay,
             songs_artwork_overlay: ps.songs_artwork_overlay,
