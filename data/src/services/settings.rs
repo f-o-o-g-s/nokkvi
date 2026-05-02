@@ -568,8 +568,23 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_genres_show_index(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.genres_show_index = enabled;
+        self.save()
+    }
+
     pub fn set_genres_show_thumbnail(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.genres_show_thumbnail = enabled;
+        self.save()
+    }
+
+    pub fn set_genres_show_albumcount(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.genres_show_albumcount = enabled;
+        self.save()
+    }
+
+    pub fn set_genres_show_songcount(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.genres_show_songcount = enabled;
         self.save()
     }
 
@@ -810,7 +825,10 @@ impl SettingsManager {
             artists_show_love: p.artists_show_love,
             artists_show_index: p.artists_show_index,
             artists_show_thumbnail: p.artists_show_thumbnail,
+            genres_show_index: p.genres_show_index,
             genres_show_thumbnail: p.genres_show_thumbnail,
+            genres_show_albumcount: p.genres_show_albumcount,
+            genres_show_songcount: p.genres_show_songcount,
             albums_artwork_overlay: p.albums_artwork_overlay,
             artists_artwork_overlay: p.artists_artwork_overlay,
             songs_artwork_overlay: p.songs_artwork_overlay,
@@ -922,7 +940,10 @@ fn apply_toml_settings_to_internal(
     p.artists_show_love = ts.artists_show_love;
     p.artists_show_index = ts.artists_show_index;
     p.artists_show_thumbnail = ts.artists_show_thumbnail;
+    p.genres_show_index = ts.genres_show_index;
     p.genres_show_thumbnail = ts.genres_show_thumbnail;
+    p.genres_show_albumcount = ts.genres_show_albumcount;
+    p.genres_show_songcount = ts.genres_show_songcount;
     p.albums_artwork_overlay = ts.albums_artwork_overlay;
     p.artists_artwork_overlay = ts.artists_artwork_overlay;
     p.songs_artwork_overlay = ts.songs_artwork_overlay;

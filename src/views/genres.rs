@@ -29,37 +29,54 @@ pub struct GenresPage {
     pub column_visibility: GenresColumnVisibility,
 }
 
-/// Toggleable genres columns. The genre name is always shown; everything else
-/// is user-toggleable through the columns-cog dropdown. Currently only the
-/// thumbnail toggle exists — the same flag also drives whether nested child
-/// album rows in the genre→album expansion render their artwork column.
+/// Toggleable genres columns. The genre name (title) is always shown;
+/// everything else is user-toggleable through the columns-cog dropdown.
+/// The thumbnail flag also drives whether nested child album rows in the
+/// genre→album expansion render their artwork column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GenresColumn {
+    Index,
     Thumbnail,
+    AlbumCount,
+    SongCount,
 }
 
 /// User-toggle state for each toggleable genres column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GenresColumnVisibility {
+    pub index: bool,
     pub thumbnail: bool,
+    pub albumcount: bool,
+    pub songcount: bool,
 }
 
 impl Default for GenresColumnVisibility {
     fn default() -> Self {
-        Self { thumbnail: true }
+        Self {
+            index: true,
+            thumbnail: true,
+            albumcount: true,
+            songcount: true,
+        }
     }
 }
 
 impl GenresColumnVisibility {
     pub fn get(&self, col: GenresColumn) -> bool {
         match col {
+            GenresColumn::Index => self.index,
             GenresColumn::Thumbnail => self.thumbnail,
+            GenresColumn::AlbumCount => self.albumcount,
+            GenresColumn::SongCount => self.songcount,
         }
     }
 
     pub fn set(&mut self, col: GenresColumn, value: bool) {
         match col {
+            GenresColumn::Index => self.index = value,
             GenresColumn::Thumbnail => self.thumbnail = value,
+            GenresColumn::AlbumCount => self.albumcount = value,
+            GenresColumn::SongCount => self.songcount = value,
         }
     }
 }
@@ -734,11 +751,24 @@ impl GenresPage {
 
         let column_dropdown: Element<'a, GenresMessage> = {
             use crate::widgets::checkbox_dropdown::checkbox_dropdown;
-            let items: Vec<(GenresColumn, &'static str, bool)> = vec![(
-                GenresColumn::Thumbnail,
-                "Thumbnail",
-                self.column_visibility.thumbnail,
-            )];
+            let items: Vec<(GenresColumn, &'static str, bool)> = vec![
+                (GenresColumn::Index, "Index", self.column_visibility.index),
+                (
+                    GenresColumn::Thumbnail,
+                    "Thumbnail",
+                    self.column_visibility.thumbnail,
+                ),
+                (
+                    GenresColumn::AlbumCount,
+                    "Album count",
+                    self.column_visibility.albumcount,
+                ),
+                (
+                    GenresColumn::SongCount,
+                    "Song count",
+                    self.column_visibility.songcount,
+                ),
+            ];
             checkbox_dropdown(
                 "assets/icons/columns-3-cog.svg",
                 "Show/hide columns",
@@ -986,13 +1016,16 @@ impl GenresPage {
         let metadata_size = m.metadata_size;
         let index_size = m.metadata_size;
 
-        // Layout: [Index (5%)] [Artwork?] [Genre Name (45%)] [Album Count (20%)] [Song Count (20%)]
-        let mut content = iced::widget::Row::new().push(slot_list_index_column(
-            ctx.item_index,
-            index_size,
-            style,
-            ctx.opacity,
-        ));
+        // Layout: [Index? (5%)] [Artwork?] [Genre Name (45%)] [Album Count? (20%)] [Song Count? (20%)]
+        let mut content = iced::widget::Row::new();
+        if self.column_visibility.index {
+            content = content.push(slot_list_index_column(
+                ctx.item_index,
+                index_size,
+                style,
+                ctx.opacity,
+            ));
+        }
         if self.column_visibility.thumbnail {
             use crate::widgets::slot_list::slot_list_artwork_column;
             content = content.push(slot_list_artwork_column(
@@ -1003,44 +1036,44 @@ impl GenresPage {
                 ctx.opacity,
             ));
         }
+        content = content.push(
+            container(slot_list_text(
+                genre.name.clone(),
+                title_size,
+                style.text_color,
+            ))
+            .width(Length::FillPortion(45))
+            .height(Length::Fill)
+            .clip(true)
+            .align_y(Alignment::Center),
+        );
+        if self.column_visibility.albumcount {
+            use crate::widgets::slot_list::slot_list_metadata_column;
+            let album_text = if genre.album_count == 1 {
+                "1 album".to_string()
+            } else {
+                format!("{} albums", genre.album_count)
+            };
+            let idx = ctx.item_index;
+            content = content.push(slot_list_metadata_column(
+                album_text,
+                Some(GenresMessage::FocusAndExpand(idx)),
+                metadata_size,
+                style,
+                20,
+            ));
+        }
+        if self.column_visibility.songcount {
+            use crate::widgets::slot_list::slot_list_metadata_column;
+            content = content.push(slot_list_metadata_column(
+                format!("{} songs", genre.song_count),
+                None,
+                metadata_size,
+                style,
+                20,
+            ));
+        }
         let content = content
-            .push(
-                container(slot_list_text(
-                    genre.name.clone(),
-                    title_size,
-                    style.text_color,
-                ))
-                .width(Length::FillPortion(45))
-                .height(Length::Fill)
-                .clip(true)
-                .align_y(Alignment::Center),
-            )
-            .push({
-                use crate::widgets::slot_list::slot_list_metadata_column;
-                let album_text = if genre.album_count == 1 {
-                    "1 album".to_string()
-                } else {
-                    format!("{} albums", genre.album_count)
-                };
-                let idx = ctx.item_index;
-                slot_list_metadata_column(
-                    album_text,
-                    Some(GenresMessage::FocusAndExpand(idx)),
-                    metadata_size,
-                    style,
-                    20,
-                )
-            })
-            .push({
-                use crate::widgets::slot_list::slot_list_metadata_column;
-                slot_list_metadata_column(
-                    format!("{} songs", genre.song_count),
-                    None,
-                    metadata_size,
-                    style,
-                    20,
-                )
-            })
             .spacing(6.0)
             .padding(iced::Padding {
                 left: SLOT_LIST_SLOT_PADDING,

@@ -1108,7 +1108,10 @@ impl Nokkvi {
         self.artists_page.column_visibility.thumbnail = settings.artists_show_thumbnail;
 
         // Restore Genres view column visibility.
+        self.genres_page.column_visibility.index = settings.genres_show_index;
         self.genres_page.column_visibility.thumbnail = settings.genres_show_thumbnail;
+        self.genres_page.column_visibility.albumcount = settings.genres_show_albumcount;
+        self.genres_page.column_visibility.songcount = settings.genres_show_songcount;
 
         // Restore Albums view column visibility.
         self.albums_page.column_visibility.stars = settings.albums_show_stars;

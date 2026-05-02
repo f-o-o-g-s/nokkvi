@@ -263,7 +263,10 @@ impl SettingsService {
     delegate_setter!(set_artists_show_love, bool);
     delegate_setter!(set_artists_show_index, bool);
     delegate_setter!(set_artists_show_thumbnail, bool);
+    delegate_setter!(set_genres_show_index, bool);
     delegate_setter!(set_genres_show_thumbnail, bool);
+    delegate_setter!(set_genres_show_albumcount, bool);
+    delegate_setter!(set_genres_show_songcount, bool);
 
     // -- Volume normalization / ReplayGain --
     delegate_setter!(set_volume_normalization, VolumeNormalizationMode);

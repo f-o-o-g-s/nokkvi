@@ -488,9 +488,24 @@ impl Nokkvi {
         value: bool,
     ) -> Task<Message> {
         match col {
+            views::GenresColumn::Index => {
+                self.shell_spawn("persist_genres_show_index", move |shell| async move {
+                    shell.settings().set_genres_show_index(value).await
+                });
+            }
             views::GenresColumn::Thumbnail => {
                 self.shell_spawn("persist_genres_show_thumbnail", move |shell| async move {
                     shell.settings().set_genres_show_thumbnail(value).await
+                });
+            }
+            views::GenresColumn::AlbumCount => {
+                self.shell_spawn("persist_genres_show_albumcount", move |shell| async move {
+                    shell.settings().set_genres_show_albumcount(value).await
+                });
+            }
+            views::GenresColumn::SongCount => {
+                self.shell_spawn("persist_genres_show_songcount", move |shell| async move {
+                    shell.settings().set_genres_show_songcount(value).await
                 });
             }
         }
