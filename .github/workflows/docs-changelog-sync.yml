@@ -1,0 +1,19 @@
+name: Trigger docs rebuild on CHANGELOG changes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - CHANGELOG.md
+  workflow_dispatch:
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch docs_update to nokkvi-docs
+        env:
+          GH_TOKEN: ${{ secrets.DOCS_TRIGGER_TOKEN }}
+        run: |
+          gh api repos/f-o-o-g-s/nokkvi-docs/dispatches \
+            -f event_type=docs_update
