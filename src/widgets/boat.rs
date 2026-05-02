@@ -31,6 +31,11 @@
 //!   Force size is tuned so terminal velocity during a charge is only
 //!   modestly above normal cruise — feels like determined effort, not a
 //!   speed boost.
+//! - **Wall bumper** — within `WALL_ZONE` of either edge a quadratic spring
+//!   pushes the boat inward, sized so equilibrium sits a few percent inside
+//!   the zone. Boat gets visibly bounced off the edge instead of pinning
+//!   there when the slope force, charge force, or drive happens to align
+//!   outward.
 //! - **Y dynamics** — `y_ratio` follows the sampled wave height through a
 //!   spring-damper rather than tracking it exactly, so the boat bobs with
 //!   buoyancy rather than glued to the curve.
@@ -118,6 +123,16 @@ const CHARGE_FORCE: f32 = 0.06;
 /// to bias the charge direction toward the "storm" side. Below this the
 /// captain just flips a coin so symmetric waveforms still produce variety.
 const IMBALANCE_THRESHOLD: f32 = 0.05;
+
+/// Width (in ratio space) of the soft "bumper" zone at each edge. Inside
+/// this zone the wall-repulsion spring is active.
+const WALL_ZONE: f32 = 0.10;
+
+/// Peak strength of the wall-repulsion spring (force at the wall itself).
+/// Sized to dominate the worst-case outward sum of `MAX_SLOPE_FORCE`,
+/// `DRIVE_FORCE`, and `CHARGE_FORCE`, so the boat physically cannot park
+/// against an edge regardless of what other forces are doing.
+const WALL_REPULSION: f32 = 0.45;
 
 /// Friction on `x_velocity`. The dominant source of the "floating" feel —
 /// without this, the boat would build up arbitrary speed.
@@ -211,6 +226,9 @@ impl BoatState {
 /// - charge: `charge_direction · CHARGE_FORCE` while a charge is active,
 ///   else 0. Captain charges fire on a randomized timer and prefer the
 ///   side of the visualizer with taller bars.
+/// - wall: quadratic spring active inside `WALL_ZONE` of either edge,
+///   peaking at `WALL_REPULSION` at the wall itself. Stops the boat from
+///   parking against an edge when other forces happen to align outward.
 ///
 /// Y is a spring-damper tracking `target_y = sample_line_height(...)`:
 /// `ay = (target_y - y) · Y_SPRING_K - y_velocity · Y_DAMPING`. Y dynamics
@@ -271,7 +289,21 @@ pub(crate) fn step(state: &mut BoatState, dt: Duration, bars: &[f64], angular: b
     let restoring_force = (0.5 - state.x_ratio) * RESTORING_K;
     let damping_force = -state.x_velocity * X_DAMPING;
 
-    let ax = drive + slope_force + restoring_force + damping_force + charge_force;
+    // Wall bumper: quadratic spring active only inside `WALL_ZONE`. `depth`
+    // is 0 at the zone boundary and 1 at the wall, so force ramps from 0 up
+    // to `WALL_REPULSION`. Quadratic (`depth²`) gives a soft cushion entering
+    // the zone, then bites hard near the wall — the user-facing "bounce".
+    let wall_force = if state.x_ratio < WALL_ZONE {
+        let depth = 1.0 - state.x_ratio / WALL_ZONE;
+        WALL_REPULSION * depth * depth
+    } else if state.x_ratio > 1.0 - WALL_ZONE {
+        let depth = (state.x_ratio - (1.0 - WALL_ZONE)) / WALL_ZONE;
+        -WALL_REPULSION * depth * depth
+    } else {
+        0.0
+    };
+
+    let ax = drive + slope_force + restoring_force + damping_force + charge_force + wall_force;
     state.x_velocity = (state.x_velocity + ax * dt_secs).clamp(-MAX_X_V, MAX_X_V);
     state.x_ratio += state.x_velocity * dt_secs;
     if state.x_ratio <= 0.0 {
@@ -527,6 +559,39 @@ mod tests {
             state.x_velocity < 0.0,
             "upward-ramp bars should push boat left (got x_velocity = {v})",
             v = state.x_velocity
+        );
+    }
+
+    #[test]
+    fn step_wall_bumper_prevents_edge_pinning() {
+        // Waveform that would normally pin the boat at the right wall: bars
+        // are tall everywhere except the last few slots, so slope sampling
+        // near x = 1.0 sees a steep negative slope → strong rightward force.
+        // Suppress the captain charge so this test isolates the bumper.
+        let bars: Vec<f64> = (0..32).map(|i| if i >= 30 { 0.05 } else { 0.95 }).collect();
+        let mut state = BoatState {
+            x_ratio: 1.0,
+            x_velocity: 0.0,
+            // Pre-seed rng + push next charge way out so the lazy-init branch
+            // doesn't reschedule mid-test.
+            rng_state: 0x12345,
+            secs_until_next_charge: 1e6,
+            ..Default::default()
+        };
+
+        // Settle for 30 s. The bumper should evict the boat from the wall
+        // and keep it outside the wall zone.
+        let dt = Duration::from_millis(16);
+        for _ in 0..(30 * 60) {
+            step(&mut state, dt, &bars, false);
+        }
+
+        let zone_inner = 1.0 - WALL_ZONE * 0.5;
+        assert!(
+            state.x_ratio < zone_inner,
+            "wall bumper should keep boat off right wall (got x_ratio = {}, expected < {})",
+            state.x_ratio,
+            zone_inner
         );
     }
 
