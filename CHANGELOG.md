@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.3.9 — 2026-05-01
+
+### Added
+
 - Column visibility toggles for Index and Thumbnail on Queue, Albums, Songs, and Artists views.
 - Album thumbnails in nested album expansion rows (Artists→Album and Genres→Album), and a full column-visibility menu on Genres view (Index, Thumbnail, Album count, Song count).
 - Center-on-playing button in the Radios view header (previously only available via keyboard shortcut).
@@ -26,8 +36,6 @@ All notable changes to this project will be documented in this file.
 - Merged metadata strip no longer renders orphan `title:` / `artist:` / `album:` labels when the field is empty but its show-label toggle is on.
 - Keyboard-focus contrast restored in nested expansion rows — focused vs. unfocused stays clearly distinct at every depth across all built-in themes.
 - Playlist context header no longer points at the wrong playlist after exiting edit mode on a playlist different from the one currently playing.
-
-### Removed
 
 ## v0.3.8 — 2026-04-30
 
