@@ -10,16 +10,21 @@ All notable changes to this project will be documented in this file.
 - Album thumbnails in nested album expansion rows (Artists→Album and Genres→Album), and a full column-visibility menu on Genres view (Index, Thumbnail, Album count, Song count).
 - Center-on-playing button in the Radios view header (previously only available via keyboard shortcut).
 - Full column-visibility menu on Playlists view (Index, Thumbnail, Song count, Duration, Updated at).
+- Public/private playlist support. New playlists default to public; toggle visibility in the create dialog or via a lock/unlock button in the split-view edit bar. Private playlists show a lock glyph in the list view, with hover tooltips on every control.
+- Create-new-playlist button in the Playlists view header — opens a name + public dialog and drops you into split-view edit mode for the new empty playlist.
 
 ### Changed
 
 - Hiding the Song count or Duration column in Playlists now hides those values entirely — they no longer fall back to a subtitle line under the playlist name.
+- Save Queue / Add to Playlist modal: pencil icon prefix on the playlist-name input aligns it with the combo-box, and the Public checkbox indents under the input.
+- Public row in the playlist info modal now renders ✓ in green and ✗ in red/orange (theme-aware) instead of plain glyphs.
 
 ### Fixed
 
 - Partial dark themes that omit `[dark.success]` / `[dark.warning]` / `[dark.star]` now inherit the correct dark-mode greens/yellows instead of silently falling back to light-mode hexes.
 - Merged metadata strip no longer renders orphan `title:` / `artist:` / `album:` labels when the field is empty but its show-label toggle is on.
 - Keyboard-focus contrast restored in nested expansion rows — focused vs. unfocused stays clearly distinct at every depth across all built-in themes.
+- Playlist context header no longer points at the wrong playlist after exiting edit mode on a playlist different from the one currently playing.
 
 ### Removed
 
