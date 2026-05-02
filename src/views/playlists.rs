@@ -246,6 +246,9 @@ pub enum PlaylistsMessage {
     ArtworkColumnDrag(crate::widgets::artwork_split_handle::DragEvent),
     /// Header chip clicked — bubble to root, opens the default-playlist picker.
     OpenDefaultPlaylistPicker,
+    /// View-header `+` button clicked — bubble to root to open the
+    /// Create-New-Playlist dialog.
+    OpenCreatePlaylistDialog,
     /// Toggle a playlists column's visibility.
     ToggleColumnVisible(PlaylistsColumn),
 }
@@ -273,6 +276,8 @@ pub enum PlaylistsAction {
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     /// Bubble to root: open the default-playlist picker overlay.
     OpenDefaultPlaylistPicker,
+    /// Bubble to root: open the Create-New-Playlist dialog.
+    OpenCreatePlaylistDialog,
     /// Persist a column-visibility toggle change (col, new_value).
     ColumnVisibilityChanged(PlaylistsColumn, bool),
 
@@ -497,6 +502,9 @@ impl PlaylistsPage {
 
                 PlaylistsMessage::OpenDefaultPlaylistPicker => {
                     (Task::none(), PlaylistsAction::OpenDefaultPlaylistPicker)
+                }
+                PlaylistsMessage::OpenCreatePlaylistDialog => {
+                    (Task::none(), PlaylistsAction::OpenCreatePlaylistDialog)
                 }
                 PlaylistsMessage::ToggleColumnVisible(col) => {
                     let new_value = !self.column_visibility.get(col);
@@ -730,8 +738,8 @@ impl PlaylistsPage {
             Some(PlaylistsMessage::ToggleSortOrder),
             None, // No shuffle button for playlists
             Some(PlaylistsMessage::RefreshViewData),
-            None,           // Playlists view doesn't need center on playing button
-            None,           // Optional add button
+            None, // Playlists view doesn't need center on playing button
+            Some(("New Playlist", PlaylistsMessage::OpenCreatePlaylistDialog)),
             Some(trailing), // chip + columns-cog dropdown
             true,           // show_search
             PlaylistsMessage::SearchQueryChanged,

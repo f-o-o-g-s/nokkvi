@@ -137,6 +137,49 @@ impl Nokkvi {
                     },
                 )
             }
+            Some(TextInputDialogAction::CreatePlaylistAndEdit) => {
+                let value = self.text_input_dialog.value.trim().to_string();
+                if value.is_empty() {
+                    self.toast_warn("Name cannot be empty");
+                    return Task::none();
+                }
+                let public = self.text_input_dialog.public;
+                self.text_input_dialog.close();
+                let name = value.clone();
+                self.shell_task(
+                    move |shell| async move {
+                        let service = shell.playlists_api().await?;
+                        // Empty song_ids — the server-created playlist starts blank;
+                        // the user populates it from the browsing panel after entering
+                        // edit mode.
+                        let id = service.create_playlist(&name, &[], public).await?;
+                        Ok((id, name, public))
+                    },
+                    move |result: Result<(String, String, bool), anyhow::Error>| match result {
+                        Ok((playlist_id, playlist_name, playlist_public)) => {
+                            // Chain into edit mode for the newly created playlist.
+                            // `LoadPlaylists` is fired by the EnterPlaylistEditMode
+                            // handler's downstream save flow once edits land; we don't
+                            // need to dispatch PlaylistMutated::Created separately.
+                            Message::EnterPlaylistEditMode {
+                                playlist_id,
+                                playlist_name,
+                                playlist_comment: String::new(),
+                                playlist_public,
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!(" Failed to create new playlist: {e}");
+                            Message::Toast(crate::app_message::ToastMessage::Push(
+                                nokkvi_data::types::toast::Toast::new(
+                                    format!("Failed to create playlist: {e}"),
+                                    nokkvi_data::types::toast::ToastLevel::Error,
+                                ),
+                            ))
+                        }
+                    },
+                )
+            }
             Some(TextInputDialogAction::OverwritePlaylistFromQueue(playlist_id)) => {
                 // Get the playlist name for the toast
                 let playlist_name = self

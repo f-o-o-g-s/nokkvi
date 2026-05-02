@@ -4082,6 +4082,79 @@ fn text_input_dialog_combo_round_trip_preserves_public_off() {
     );
 }
 
+#[test]
+fn open_create_playlist_dialog_defaults_to_public_and_no_combo() {
+    use crate::widgets::text_input_dialog::TextInputDialogAction;
+
+    let mut app = test_app();
+    app.text_input_dialog.open_create_playlist();
+
+    assert!(app.text_input_dialog.visible);
+    assert!(
+        app.text_input_dialog.public,
+        "Create-New-Playlist dialog must default the toggle to public"
+    );
+    assert!(
+        !app.text_input_dialog.save_playlist_mode,
+        "Create-New-Playlist must not show the existing-playlists combo"
+    );
+    assert!(matches!(
+        app.text_input_dialog.action,
+        Some(TextInputDialogAction::CreatePlaylistAndEdit)
+    ));
+}
+
+#[test]
+fn create_playlist_dialog_refused_when_already_editing() {
+    use crate::{app_message::Message, views::PlaylistsMessage};
+
+    let mut app = test_app();
+    // Enter split-view edit mode first.
+    let _ = app.update(Message::EnterPlaylistEditMode {
+        playlist_id: "p1".into(),
+        playlist_name: "Existing".into(),
+        playlist_comment: String::new(),
+        playlist_public: true,
+    });
+    assert!(app.playlist_edit.is_some());
+
+    // User clicks the view-header `+` — message bubbles to root, guard fires.
+    let _ = app.update(Message::Playlists(
+        PlaylistsMessage::OpenCreatePlaylistDialog,
+    ));
+
+    assert!(
+        !app.text_input_dialog.visible,
+        "guard must keep the dialog closed when already editing"
+    );
+    assert!(
+        app.playlist_edit.is_some(),
+        "guard must not disturb the in-progress edit"
+    );
+}
+
+#[test]
+fn create_playlist_dialog_opens_when_not_editing() {
+    use crate::{
+        app_message::Message, views::PlaylistsMessage,
+        widgets::text_input_dialog::TextInputDialogAction,
+    };
+
+    let mut app = test_app();
+    assert!(app.playlist_edit.is_none());
+
+    let _ = app.update(Message::Playlists(
+        PlaylistsMessage::OpenCreatePlaylistDialog,
+    ));
+
+    assert!(app.text_input_dialog.visible);
+    assert!(matches!(
+        app.text_input_dialog.action,
+        Some(TextInputDialogAction::CreatePlaylistAndEdit)
+    ));
+    assert!(app.text_input_dialog.public);
+}
+
 // ============================================================================
 // Playlist Edit Mode — Public Toggle (F2, T8–T11)
 // ============================================================================

@@ -20,6 +20,8 @@ pub enum TextInputDialogAction {
     RenamePlaylist(String),
     /// Create a new playlist from the current queue
     CreatePlaylistFromQueue,
+    /// Create a new empty playlist and immediately enter split-view edit mode
+    CreatePlaylistAndEdit,
     /// Overwrite an existing playlist with the current queue (holds playlist_id)
     OverwritePlaylistFromQueue(String),
     /// Delete a playlist (holds playlist_id, playlist_name)
@@ -181,6 +183,22 @@ impl TextInputDialogState {
         self.playlist_combo_state = combo_box::State::new(options);
         self.selected_playlist = Some(PlaylistOption::NewPlaylist);
         self.save_playlist_mode = true;
+    }
+
+    /// Open the "Create New Playlist" dialog.
+    ///
+    /// Used by the playlists view-header `+` button. The submitted playlist
+    /// is created server-side with no songs, then the user is dropped into
+    /// split-view edit mode for it. No combo box (we never overwrite from
+    /// this entry point) — just name + public toggle + Create.
+    pub fn open_create_playlist(&mut self) {
+        self.reset_fields();
+        self.title = "Create New Playlist".to_string();
+        self.placeholder = "Playlist name...".to_string();
+        self.action = Some(TextInputDialogAction::CreatePlaylistAndEdit);
+        // No `save_playlist_mode = true` — that controls combo + overwrite UI
+        // we don't want here. The public toggle + pencil-line icon are
+        // gated separately (see `text_input_dialog_overlay`).
     }
 
     /// Open the "Add to Playlist" dialog with existing playlist choices.
@@ -389,10 +407,16 @@ pub(crate) fn text_input_dialog_overlay<'a>(
             .font(theme::ui_font())
             .width(Length::Fill)
             .style(dialog_input_style);
-        // In save-as-playlist mode, prefix the input with a pencil glyph so its
-        // left edge aligns with the combo_box's content (which has its own
-        // leading icon). Other dialog flows render the input naked.
-        if state.save_playlist_mode {
+        // In any playlist-creation flow, prefix the input with a pencil glyph.
+        // For save-as-playlist this aligns with the combo_box's leading icon;
+        // for the standalone Create-New-Playlist flow it just signals intent.
+        // Other dialog flows (radio station, settings) render the input naked.
+        let is_playlist_naming_flow = state.save_playlist_mode
+            || matches!(
+                state.action,
+                Some(TextInputDialogAction::CreatePlaylistAndEdit)
+            );
+        if is_playlist_naming_flow {
             let input_icon = crate::embedded_svg::svg_widget("assets/icons/pencil-line.svg")
                 .width(Length::Fixed(16.0))
                 .height(Length::Fixed(16.0))
@@ -421,9 +445,16 @@ pub(crate) fn text_input_dialog_overlay<'a>(
         }
     }
 
-    // Public/Private toggle — shown when creating a new playlist via the
-    // save-as-playlist flow (not overwrite, not confirmation). Default-public.
-    if state.save_playlist_mode && !is_overwrite && !state.confirmation_only {
+    // Public/Private toggle — shown for any playlist-creation flow that's
+    // not overwriting an existing playlist. Default-public.
+    let public_toggle_visible = !is_overwrite
+        && !state.confirmation_only
+        && (state.save_playlist_mode
+            || matches!(
+                state.action,
+                Some(TextInputDialogAction::CreatePlaylistAndEdit)
+            ));
+    if public_toggle_visible {
         let public_check = checkbox(state.public)
             .label("Public")
             .on_toggle(TextInputDialogMessage::PublicToggled)
@@ -519,6 +550,11 @@ pub(crate) fn text_input_dialog_overlay<'a>(
         }
     } else if state.save_playlist_mode {
         if is_add_to_playlist { "Add" } else { "Create" }
+    } else if matches!(
+        state.action,
+        Some(TextInputDialogAction::CreatePlaylistAndEdit)
+    ) {
+        "Create"
     } else {
         "Submit"
     };
