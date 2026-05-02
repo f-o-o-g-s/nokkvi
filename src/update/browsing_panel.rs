@@ -98,11 +98,16 @@ impl Nokkvi {
             playlist_name, playlist_id
         );
 
+        // F2 (commit 3) plumbs the real `public` value through this handler from
+        // the dispatching message; for now seed default-public so non-toggle saves
+        // round-trip the intended default.
+        let playlist_public = true;
         // Set up edit state — snapshot gets populated after QueueLoaded arrives
         self.playlist_edit = Some(nokkvi_data::types::playlist_edit::PlaylistEditState::new(
             playlist_id.clone(),
             playlist_name,
             playlist_comment,
+            playlist_public,
             Vec::new(),
         ));
         // NOTE: Do NOT clear `active_playlist_info` here — the view code
@@ -171,13 +176,15 @@ impl Nokkvi {
         let playlist_id = edit_state.playlist_id.clone();
         let playlist_name = edit_state.playlist_name.clone();
         let playlist_comment = edit_state.playlist_comment.clone();
+        let playlist_public = edit_state.playlist_public;
         let song_ids = self.queue_song_ids();
         let name_changed = edit_state.is_name_dirty();
         let comment_changed = edit_state.is_comment_dirty();
-        let metadata_changed = name_changed || comment_changed;
+        let public_changed = edit_state.is_public_dirty();
+        let metadata_changed = edit_state.has_metadata_changes();
 
         info!(
-            " Saving playlist \"{}\" with {} tracks{}{}",
+            " Saving playlist \"{}\" with {} tracks{}{}{}",
             playlist_name,
             song_ids.len(),
             if name_changed { " (renamed)" } else { "" },
@@ -186,12 +193,17 @@ impl Nokkvi {
             } else {
                 ""
             },
+            if public_changed {
+                " (visibility changed)"
+            } else {
+                ""
+            },
         );
 
         self.shell_action_task(
             move |shell| async move {
                 let service = shell.playlists_api().await?;
-                // Update name/comment if either changed
+                // Update name/comment/visibility if any of them changed
                 if metadata_changed {
                     let comment_arg = if comment_changed {
                         Some(playlist_comment.as_str())
@@ -199,7 +211,7 @@ impl Nokkvi {
                         None
                     };
                     service
-                        .update_playlist(&playlist_id, &playlist_name, comment_arg)
+                        .update_playlist(&playlist_id, &playlist_name, comment_arg, playlist_public)
                         .await?;
                 }
                 service

@@ -357,12 +357,17 @@ impl PlaylistsApiService {
     // Mutation Methods — Navidrome Native REST API (/api/playlist)
     // =========================================================================
 
-    /// Create a new playlist with the given name and optional songs.
+    /// Create a new playlist with the given name, visibility, and optional songs.
     ///
     /// Uses Navidrome native API: POST /api/playlist + POST /api/playlist/:id/tracks
-    pub async fn create_playlist(&self, name: &str, song_ids: &[String]) -> Result<String> {
+    pub async fn create_playlist(
+        &self,
+        name: &str,
+        song_ids: &[String],
+        public: bool,
+    ) -> Result<String> {
         // Step 1: Create the playlist
-        let body = serde_json::json!({ "name": name });
+        let body = serde_json::json!({ "name": name, "public": public });
         let response = self.client.post_json("api/playlist", &body).await?;
 
         // Parse the playlist ID from response
@@ -385,7 +390,10 @@ impl PlaylistsApiService {
         Ok(playlist_id)
     }
 
-    /// Update a playlist's name and/or comment.
+    /// Update a playlist's name, optional comment, and visibility.
+    ///
+    /// `public` is always sent on the wire so non-owner edits surface as a 403
+    /// rather than silently flipping visibility from a partial-update default.
     ///
     /// Uses Navidrome native API: PUT /api/playlist/:id
     pub async fn update_playlist(
@@ -393,11 +401,11 @@ impl PlaylistsApiService {
         playlist_id: &str,
         name: &str,
         comment: Option<&str>,
+        public: bool,
     ) -> Result<()> {
-        let body = if let Some(c) = comment {
-            serde_json::json!({ "name": name, "comment": c })
-        } else {
-            serde_json::json!({ "name": name })
+        let body = match comment {
+            Some(c) => serde_json::json!({ "name": name, "comment": c, "public": public }),
+            None => serde_json::json!({ "name": name, "public": public }),
         };
         self.client
             .put_json(&format!("api/playlist/{playlist_id}"), &body)

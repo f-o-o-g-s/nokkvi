@@ -4,16 +4,20 @@
 ///
 /// Holds the playlist identity and a snapshot of song IDs at last save,
 /// enabling dirty detection by comparing against the current queue order.
-/// Also tracks the original playlist name and comment for rename/edit detection.
+/// Also tracks the original playlist name, comment, and public flag for
+/// rename/edit detection.
 #[derive(Debug, Clone)]
 pub struct PlaylistEditState {
     pub playlist_id: String,
     pub playlist_name: String,
     pub playlist_comment: String,
+    pub playlist_public: bool,
     /// Name at session start — compared against `playlist_name` to detect renames.
     original_name: String,
     /// Comment at session start — compared against `playlist_comment` to detect edits.
     original_comment: String,
+    /// Public flag at session start — compared against `playlist_public` to detect toggles.
+    original_public: bool,
     /// Song IDs in order at last save — compared against current queue to detect changes.
     saved_snapshot: Vec<String>,
 }
@@ -24,16 +28,20 @@ impl PlaylistEditState {
         playlist_id: String,
         playlist_name: String,
         playlist_comment: String,
+        playlist_public: bool,
         song_ids: Vec<String>,
     ) -> Self {
         let original_name = playlist_name.clone();
         let original_comment = playlist_comment.clone();
+        let original_public = playlist_public;
         Self {
             playlist_id,
             playlist_name,
             playlist_comment,
+            playlist_public,
             original_name,
             original_comment,
+            original_public,
             saved_snapshot: song_ids,
         }
     }
@@ -53,6 +61,17 @@ impl PlaylistEditState {
         self.playlist_comment != self.original_comment
     }
 
+    /// Check whether the public flag has been changed from the original.
+    pub fn is_public_dirty(&self) -> bool {
+        self.playlist_public != self.original_public
+    }
+
+    /// Whether any metadata field (name, comment, or public) is dirty.
+    /// Used by the save handler to decide whether to call `update_playlist`.
+    pub fn has_metadata_changes(&self) -> bool {
+        self.is_name_dirty() || self.is_comment_dirty() || self.is_public_dirty()
+    }
+
     /// Update the current playlist name (called on each keystroke).
     pub fn set_name(&mut self, name: String) {
         self.playlist_name = name;
@@ -63,12 +82,18 @@ impl PlaylistEditState {
         self.playlist_comment = comment;
     }
 
+    /// Update the current public flag (called on toggle).
+    pub fn set_public(&mut self, value: bool) {
+        self.playlist_public = value;
+    }
+
     /// Replace the saved snapshot with a new set of song IDs (after a successful save).
-    /// Also updates the original name and comment to match the current values.
+    /// Also updates the original name, comment, and public flag to match the current values.
     pub fn update_snapshot(&mut self, song_ids: Vec<String>) {
         self.saved_snapshot = song_ids;
         self.original_name = self.playlist_name.clone();
         self.original_comment = self.playlist_comment.clone();
+        self.original_public = self.playlist_public;
     }
 }
 
@@ -81,7 +106,7 @@ mod tests {
     }
 
     fn state(name: &str, comment: &str) -> PlaylistEditState {
-        PlaylistEditState::new("p1".into(), name.into(), comment.into(), ids(&["s1"]))
+        PlaylistEditState::new("p1".into(), name.into(), comment.into(), true, ids(&["s1"]))
     }
 
     #[test]
@@ -90,6 +115,7 @@ mod tests {
             "p1".into(),
             "My Mix".into(),
             String::new(),
+            true,
             ids(&["s1", "s2", "s3"]),
         );
         assert!(!state.is_dirty(&ids(&["s1", "s2", "s3"])));
@@ -101,6 +127,7 @@ mod tests {
             "p1".into(),
             "My Mix".into(),
             String::new(),
+            true,
             ids(&["s1", "s2", "s3"]),
         );
         assert!(state.is_dirty(&ids(&["s2", "s1", "s3"])));
@@ -112,6 +139,7 @@ mod tests {
             "p1".into(),
             "My Mix".into(),
             String::new(),
+            true,
             ids(&["s1", "s2", "s3"]),
         );
         assert!(state.is_dirty(&ids(&["s1", "s2", "s3", "s4"])));
@@ -123,6 +151,7 @@ mod tests {
             "p1".into(),
             "My Mix".into(),
             String::new(),
+            true,
             ids(&["s1", "s2", "s3"]),
         );
         assert!(state.is_dirty(&ids(&["s1", "s3"])));
@@ -134,6 +163,7 @@ mod tests {
             "p1".into(),
             "My Mix".into(),
             String::new(),
+            true,
             ids(&["s1", "s2", "s3"]),
         );
         let new_ids = ids(&["s2", "s1", "s3", "s4"]);
@@ -199,5 +229,37 @@ mod tests {
         assert!(s.is_comment_dirty());
         s.update_snapshot(ids(&["s1"]));
         assert!(!s.is_comment_dirty());
+    }
+
+    // ---- Public flag (T1–T4) ----
+
+    #[test]
+    fn playlist_edit_state_public_not_dirty_initially() {
+        let s = state("Mix", "");
+        assert!(!s.is_public_dirty());
+    }
+
+    #[test]
+    fn playlist_edit_state_public_dirty_after_toggle() {
+        let mut s = state("Mix", "");
+        s.set_public(false);
+        assert!(s.is_public_dirty());
+    }
+
+    #[test]
+    fn playlist_edit_state_public_not_dirty_after_revert() {
+        let mut s = state("Mix", "");
+        s.set_public(false);
+        s.set_public(true);
+        assert!(!s.is_public_dirty());
+    }
+
+    #[test]
+    fn playlist_edit_state_public_reset_after_snapshot() {
+        let mut s = state("Mix", "");
+        s.set_public(false);
+        assert!(s.is_public_dirty());
+        s.update_snapshot(ids(&["s1"]));
+        assert!(!s.is_public_dirty());
     }
 }

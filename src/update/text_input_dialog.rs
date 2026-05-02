@@ -78,12 +78,23 @@ impl Nokkvi {
                     self.toast_warn("Name cannot be empty");
                     return Task::none();
                 }
+                // Look up the playlist's current visibility so rename round-trips
+                // it unchanged. Falling back to `true` matches the default-public
+                // policy when the cache hasn't loaded yet.
+                let current_public = self
+                    .library
+                    .playlists
+                    .iter()
+                    .find(|p| p.id == playlist_id)
+                    .is_none_or(|p| p.public);
                 self.text_input_dialog.close();
                 let name = value.clone();
                 self.shell_action_task(
                     move |shell| async move {
                         let service = shell.playlists_api().await?;
-                        service.update_playlist(&playlist_id, &name, None).await
+                        service
+                            .update_playlist(&playlist_id, &name, None, current_public)
+                            .await
                     },
                     Message::PlaylistMutated(PlaylistMutation::Renamed(value)),
                     "rename playlist",
@@ -98,10 +109,12 @@ impl Nokkvi {
                 self.text_input_dialog.close();
                 let song_ids = self.queue_song_ids();
                 let name = value.clone();
+                // F1 (commit 2) wires this from the dialog's public toggle.
+                let public = true;
                 self.shell_task(
                     move |shell| async move {
                         let service = shell.playlists_api().await?;
-                        let playlist_id = service.create_playlist(&name, &song_ids).await?;
+                        let playlist_id = service.create_playlist(&name, &song_ids, public).await?;
                         Ok(playlist_id)
                     },
                     move |result: Result<String, anyhow::Error>| match result {
@@ -168,10 +181,12 @@ impl Nokkvi {
                 }
                 self.text_input_dialog.close();
                 let name = value.clone();
+                // F1 (commit 2) wires this from the dialog's public toggle.
+                let public = true;
                 self.shell_task(
                     move |shell| async move {
                         let service = shell.playlists_api().await?;
-                        service.create_playlist(&name, &song_ids).await
+                        service.create_playlist(&name, &song_ids, public).await
                     },
                     move |result: Result<String, anyhow::Error>| match result {
                         Ok(_playlist_id) => {
