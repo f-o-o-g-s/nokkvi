@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 - Full column-visibility menu on Playlists view (Index, Thumbnail, Song count, Duration, Updated at).
 - Public/private playlist support. New playlists default to public; toggle visibility in the create dialog or via a lock/unlock button in the split-view edit bar. Private playlists show a lock glyph in the list view, with hover tooltips on every control.
 - Create-new-playlist button in the Playlists view header — opens a name + public dialog and drops you into split-view edit mode for the new empty playlist.
+- Optional surfing-boat overlay for the lines visualizer — a small boat drifts across the waveform and rides each wave's slope. Toggle under Settings → Visualizer → Lines.
 
 ### Changed
 
