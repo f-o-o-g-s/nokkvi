@@ -32,10 +32,12 @@
 //!   modestly above normal cruise — feels like determined effort, not a
 //!   speed boost.
 //! - **Wall bumper** — within `WALL_ZONE` of either edge a quadratic spring
-//!   pushes the boat inward, sized so equilibrium sits a few percent inside
-//!   the zone. Boat gets visibly bounced off the edge instead of pinning
-//!   there when the slope force, charge force, or drive happens to align
-//!   outward.
+//!   pushes the boat inward, and the slope force is suppressed inside the
+//!   zone so wave drift can't keep dragging the boat into the wall (the FFT
+//!   waveform almost always slopes downward at the visualizer edges, which
+//!   would otherwise pin the boat there). Captain charges also bias toward
+//!   center when the boat has drifted noticeably off-center, so the boat
+//!   actively explores the middle instead of camping near a wall.
 //! - **Y dynamics** — `y_ratio` follows the sampled wave height through a
 //!   spring-damper rather than tracking it exactly, so the boat bobs with
 //!   buoyancy rather than glued to the curve.
@@ -125,14 +127,21 @@ const CHARGE_FORCE: f32 = 0.06;
 const IMBALANCE_THRESHOLD: f32 = 0.05;
 
 /// Width (in ratio space) of the soft "bumper" zone at each edge. Inside
-/// this zone the wall-repulsion spring is active.
-const WALL_ZONE: f32 = 0.10;
+/// this zone the wall-repulsion spring is active and the slope force is
+/// suppressed. Wider zone = larger region where the boat is actively
+/// pushed back toward center.
+const WALL_ZONE: f32 = 0.15;
 
 /// Peak strength of the wall-repulsion spring (force at the wall itself).
-/// Sized to dominate the worst-case outward sum of `MAX_SLOPE_FORCE`,
-/// `DRIVE_FORCE`, and `CHARGE_FORCE`, so the boat physically cannot park
-/// against an edge regardless of what other forces are doing.
+/// Sized to dominate the worst-case outward sum of `DRIVE_FORCE` plus
+/// `CHARGE_FORCE` (slope is suppressed inside the zone, so it doesn't
+/// factor in here). The boat physically cannot park against an edge.
 const WALL_REPULSION: f32 = 0.45;
+
+/// `|x_ratio - 0.5|` past which captain charges are redirected toward
+/// center regardless of the storm direction. Stops the captain from
+/// charging back into a wall when the boat has already drifted near it.
+const CHARGE_RETURN_THRESHOLD: f32 = 0.25;
 
 /// Friction on `x_velocity`. The dominant source of the "floating" feel —
 /// without this, the boat would build up arbitrary speed.
@@ -220,7 +229,9 @@ impl BoatState {
 /// - drive: `sin(2π·phase) · DRIVE_FORCE` — slow rhythmic push
 /// - slope: `(-slope · SLOPE_GAIN).clamp(±MAX_SLOPE_FORCE)` — surf downhill,
 ///   capped so a single tall bar can't dominate. Suppressed during a charge
-///   so the captain's heading isn't fighting wave drift.
+///   (so the captain's heading isn't fighting wave drift) AND inside the
+///   wall bumper zone (so the perpetually-outward FFT slope at the edges
+///   can't drag the boat into a wall).
 /// - restoring: `(0.5 - x) · RESTORING_K` — soft center pull
 /// - damping: `-x_velocity · X_DAMPING` — friction
 /// - charge: `charge_direction · CHARGE_FORCE` while a charge is active,
@@ -261,6 +272,12 @@ pub(crate) fn step(state: &mut BoatState, dt: Duration, bars: &[f64], angular: b
     let slope = (h_right - h_left) / (2.0 * SLOPE_DX);
     let slope_force_raw = (-slope * SLOPE_GAIN).clamp(-MAX_SLOPE_FORCE, MAX_SLOPE_FORCE);
 
+    // Slope is suppressed inside the wall zone — FFT waveforms almost always
+    // slope outward at the visualizer edges, which without this would keep
+    // dragging the boat into whichever wall it's near.
+    let in_wall_zone = state.x_ratio < WALL_ZONE || state.x_ratio > 1.0 - WALL_ZONE;
+    let slope_force_zoned = if in_wall_zone { 0.0 } else { slope_force_raw };
+
     // Charge state machine: either rowing (charge_remaining_secs > 0) or
     // counting down to the next charge. Slope is suppressed for the duration
     // of a charge so the captain's heading isn't fought by wave drift.
@@ -276,13 +293,14 @@ pub(crate) fn step(state: &mut BoatState, dt: Duration, bars: &[f64], angular: b
     } else {
         state.secs_until_next_charge -= dt_secs;
         if state.secs_until_next_charge <= 0.0 {
-            state.charge_direction = pick_charge_direction(bars, &mut state.rng_state);
+            state.charge_direction =
+                pick_charge_direction(bars, state.x_ratio, &mut state.rng_state);
             let r = next_rand_unit(&mut state.rng_state);
             state.charge_remaining_secs =
                 lerp(CHARGE_DURATION_MIN_SECS, CHARGE_DURATION_MAX_SECS, r);
             (state.charge_direction * CHARGE_FORCE, 0.0)
         } else {
-            (0.0, slope_force_raw)
+            (0.0, slope_force_zoned)
         }
     };
 
@@ -393,11 +411,18 @@ fn waveform_imbalance(bars: &[f64]) -> f32 {
     (right_avg - left_avg) as f32
 }
 
-/// Pick a charge direction (`±1`). When the waveform is meaningfully
-/// asymmetric (`|imbalance| > IMBALANCE_THRESHOLD`) the captain heads toward
-/// the storm side; otherwise it's a coin flip so symmetric tracks still
-/// produce traversal in both directions over time.
-fn pick_charge_direction(bars: &[f64], rng_state: &mut u32) -> f32 {
+/// Pick a charge direction (`±1`). Priority order:
+/// 1. If the boat has drifted past `CHARGE_RETURN_THRESHOLD` from center,
+///    head toward center regardless of the storm. Stops the captain from
+///    charging back into a wall the boat has already drifted near.
+/// 2. Otherwise, if the waveform is meaningfully asymmetric
+///    (`|imbalance| > IMBALANCE_THRESHOLD`), head toward the storm.
+/// 3. Otherwise coin flip — symmetric tracks still produce variety.
+fn pick_charge_direction(bars: &[f64], x_ratio: f32, rng_state: &mut u32) -> f32 {
+    let off_center = x_ratio - 0.5;
+    if off_center.abs() > CHARGE_RETURN_THRESHOLD {
+        return -off_center.signum();
+    }
     let imbalance = waveform_imbalance(bars);
     if imbalance.abs() > IMBALANCE_THRESHOLD {
         imbalance.signum()
@@ -662,13 +687,13 @@ mod tests {
 
     #[test]
     fn pick_charge_direction_prefers_storm_side() {
-        // Asymmetric bars: tall right half, calm left half. Direction must
-        // come back as +1 regardless of rng seed.
+        // Asymmetric bars: tall right half, calm left half. With the boat
+        // near center, direction must come back as +1 regardless of rng seed.
         let bars: Vec<f64> = (0..32).map(|i| if i > 16 { 0.8 } else { 0.1 }).collect();
         for seed in [1, 2, 3, 999, 0x9E37_79B9] {
             let mut rng = seed;
             assert_eq!(
-                pick_charge_direction(&bars, &mut rng),
+                pick_charge_direction(&bars, 0.5, &mut rng),
                 1.0,
                 "should pick right (storm) for seed {seed}"
             );
@@ -679,7 +704,7 @@ mod tests {
         for seed in [1, 2, 3, 999, 0x9E37_79B9] {
             let mut rng = seed;
             assert_eq!(
-                pick_charge_direction(&bars, &mut rng),
+                pick_charge_direction(&bars, 0.5, &mut rng),
                 -1.0,
                 "should pick left (storm) for seed {seed}"
             );
@@ -687,8 +712,31 @@ mod tests {
     }
 
     #[test]
+    fn pick_charge_direction_returns_to_center_when_off_center() {
+        // Storm is on the right but the boat has already drifted into the
+        // right side: captain must override the storm-bias and head back
+        // toward center.
+        let storm_right: Vec<f64> = (0..32).map(|i| if i > 16 { 0.8 } else { 0.1 }).collect();
+        let mut rng = 0x9E37_79B9;
+        assert_eq!(
+            pick_charge_direction(&storm_right, 0.85, &mut rng),
+            -1.0,
+            "boat already on right side should charge left even toward storm"
+        );
+
+        let storm_left: Vec<f64> = (0..32).map(|i| if i < 15 { 0.8 } else { 0.1 }).collect();
+        let mut rng = 0x9E37_79B9;
+        assert_eq!(
+            pick_charge_direction(&storm_left, 0.15, &mut rng),
+            1.0,
+            "boat already on left side should charge right even toward storm"
+        );
+    }
+
+    #[test]
     fn pick_charge_direction_random_on_symmetric_waveform() {
-        // Flat bars: imbalance is 0, falls into the rng coin-flip branch.
+        // Flat bars + boat near center: imbalance is 0 and the off-center
+        // override doesn't fire, so we land in the rng coin-flip branch.
         // Both directions must be reachable across different seeds. Use
         // production-shaped seeds (xorshift's first output is degenerate
         // for tiny seeds, so seeding from a single counter would hit one
@@ -699,7 +747,7 @@ mod tests {
         let mut saw_right = false;
         for i in 0u32..200 {
             let mut rng = 0x9E37_79B9_u32.wrapping_add(i.wrapping_mul(0x6789_ABCD));
-            match pick_charge_direction(&bars, &mut rng) {
+            match pick_charge_direction(&bars, 0.5, &mut rng) {
                 d if d < 0.0 => saw_left = true,
                 d if d > 0.0 => saw_right = true,
                 _ => {}
@@ -711,6 +759,36 @@ mod tests {
         assert!(
             saw_left && saw_right,
             "coin flip must reach both directions"
+        );
+    }
+
+    #[test]
+    fn step_slope_suppressed_inside_wall_zone() {
+        // Steep upward ramp: outside the wall zone the boat would build a
+        // strong leftward velocity from slope force. Inside the wall zone
+        // (x_ratio = 0.05) the slope must be zeroed, so velocity comes from
+        // the inward wall bumper instead.
+        let bars: Vec<f64> = (0..16).map(|i| i as f64 / 15.0).collect();
+        let mut state = BoatState {
+            x_ratio: 0.05,
+            phase: 0.0,
+            // Pre-seed rng + push next charge way out so this test isolates
+            // the slope-suppression branch.
+            rng_state: 0x12345,
+            secs_until_next_charge: 1e6,
+            ..Default::default()
+        };
+
+        // One short tick: if slope had fired (~ -0.04 leftward) it would
+        // dominate the small wall force at this depth and produce negative
+        // velocity. Instead we expect rightward velocity from the bumper.
+        step(&mut state, Duration::from_millis(16), &bars, false);
+
+        assert!(
+            state.x_velocity > 0.0,
+            "slope must be suppressed inside wall zone — velocity should be \
+             positive (rightward) from wall bumper, got {}",
+            state.x_velocity
         );
     }
 
