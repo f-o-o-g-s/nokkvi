@@ -92,16 +92,13 @@ impl Nokkvi {
         playlist_id: String,
         playlist_name: String,
         playlist_comment: String,
+        playlist_public: bool,
     ) -> Task<Message> {
         info!(
-            " Entering playlist edit mode: \"{}\" ({})",
-            playlist_name, playlist_id
+            " Entering playlist edit mode: \"{}\" ({}) [public={}]",
+            playlist_name, playlist_id, playlist_public
         );
 
-        // F2 (commit 3) plumbs the real `public` value through this handler from
-        // the dispatching message; for now seed default-public so non-toggle saves
-        // round-trip the intended default.
-        let playlist_public = true;
         // Set up edit state — snapshot gets populated after QueueLoaded arrives
         self.playlist_edit = Some(nokkvi_data::types::playlist_edit::PlaylistEditState::new(
             playlist_id.clone(),

@@ -4081,3 +4081,110 @@ fn text_input_dialog_combo_round_trip_preserves_public_off() {
         "combo round-trip must not silently reset the public toggle"
     );
 }
+
+// ============================================================================
+// Playlist Edit Mode — Public Toggle (F2, T8–T11)
+// ============================================================================
+
+#[test]
+fn enter_playlist_edit_mode_seeds_initial_public() {
+    use crate::app_message::Message;
+
+    let mut app = test_app();
+    let _ = app.update(Message::EnterPlaylistEditMode {
+        playlist_id: "p1".into(),
+        playlist_name: "Mix".into(),
+        playlist_comment: String::new(),
+        playlist_public: false,
+    });
+
+    let edit = app
+        .playlist_edit
+        .as_ref()
+        .expect("entering edit mode must populate playlist_edit");
+    assert!(
+        !edit.playlist_public,
+        "EnterPlaylistEditMode with public=false must seed playlist_public=false"
+    );
+    assert!(
+        !edit.is_public_dirty(),
+        "freshly seeded edit state must not report public-dirty"
+    );
+}
+
+#[test]
+fn playlist_edit_public_toggle_flips_state() {
+    use crate::{app_message::Message, views::QueueMessage};
+
+    let mut app = test_app();
+    let _ = app.update(Message::EnterPlaylistEditMode {
+        playlist_id: "p1".into(),
+        playlist_name: "Mix".into(),
+        playlist_comment: String::new(),
+        playlist_public: true,
+    });
+
+    let _ = app.update(Message::Queue(QueueMessage::PlaylistEditPublicToggled(
+        false,
+    )));
+
+    let edit = app.playlist_edit.as_ref().expect("playlist_edit set");
+    assert!(
+        !edit.playlist_public,
+        "PlaylistEditPublicToggled(false) must flip the edit-state flag"
+    );
+    assert!(
+        edit.is_public_dirty(),
+        "after toggle the edit state must be public-dirty"
+    );
+}
+
+#[test]
+fn playlist_edit_public_revert_clears_dirty() {
+    use crate::{app_message::Message, views::QueueMessage};
+
+    let mut app = test_app();
+    let _ = app.update(Message::EnterPlaylistEditMode {
+        playlist_id: "p1".into(),
+        playlist_name: "Mix".into(),
+        playlist_comment: String::new(),
+        playlist_public: true,
+    });
+
+    let _ = app.update(Message::Queue(QueueMessage::PlaylistEditPublicToggled(
+        false,
+    )));
+    let _ = app.update(Message::Queue(QueueMessage::PlaylistEditPublicToggled(
+        true,
+    )));
+
+    let edit = app.playlist_edit.as_ref().expect("playlist_edit set");
+    assert!(
+        !edit.is_public_dirty(),
+        "toggling back to the original value must clear public-dirty"
+    );
+}
+
+#[test]
+fn playlist_edit_public_only_change_is_metadata_dirty() {
+    use crate::{app_message::Message, views::QueueMessage};
+
+    let mut app = test_app();
+    let _ = app.update(Message::EnterPlaylistEditMode {
+        playlist_id: "p1".into(),
+        playlist_name: "Mix".into(),
+        playlist_comment: String::new(),
+        playlist_public: true,
+    });
+
+    let _ = app.update(Message::Queue(QueueMessage::PlaylistEditPublicToggled(
+        false,
+    )));
+
+    let edit = app.playlist_edit.as_ref().expect("playlist_edit set");
+    assert!(
+        edit.has_metadata_changes(),
+        "a pure-visibility flip must satisfy the predicate the save handler \
+         uses to decide whether to call update_playlist (R6 fix)"
+    );
+}

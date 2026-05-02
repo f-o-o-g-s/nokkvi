@@ -265,9 +265,9 @@ pub enum PlaylistsAction {
     RefreshViewData,        // trigger reload
     ToggleStar(String, &'static str, bool), // (item_id, item_type, starred)
     PlayNextBatch(nokkvi_data::types::batch::BatchPayload),
-    DeletePlaylist(String),               // playlist_id
-    RenamePlaylist(String),               // playlist_id — triggers rename flow
-    EditPlaylist(String, String, String), // (playlist_id, playlist_name, comment) — enter split-view edit mode
+    DeletePlaylist(String),                     // playlist_id
+    RenamePlaylist(String),                     // playlist_id — triggers rename flow
+    EditPlaylist(String, String, String, bool), // (playlist_id, playlist_name, comment, public) — enter split-view edit mode
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
     SetAsDefaultPlaylist(String, String), // (playlist_id, playlist_name) — set as quick-add default
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
@@ -613,6 +613,7 @@ impl PlaylistsPage {
                                     playlist.id.clone(),
                                     playlist.name.clone(),
                                     playlist.comment.clone(),
+                                    playlist.public,
                                 ),
                             ),
                             PlaylistContextEntry::SetAsDefault => (

@@ -503,6 +503,7 @@ pub enum Message {
         playlist_id: String,
         playlist_name: String,
         playlist_comment: String,
+        playlist_public: bool,
     },
     /// Exit split-view playlist editing mode
     ExitPlaylistEditMode,

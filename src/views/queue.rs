@@ -160,6 +160,8 @@ pub struct QueueViewData<'a> {
     pub edit_mode_info: Option<(String, bool)>,
     /// Playlist comment when in edit mode
     pub edit_mode_comment: Option<String>,
+    /// Playlist public flag when in edit mode (drives the lock toggle button)
+    pub edit_mode_public: Option<bool>,
     /// When a playlist is loaded for playback (not editing)
     pub playlist_context_info: Option<crate::state::ActivePlaylistContext>,
     /// Whether the column-visibility checkbox dropdown is open (controlled
@@ -227,6 +229,7 @@ pub enum QueueMessage {
     DiscardEdits,
     PlaylistNameChanged(String),
     PlaylistCommentChanged(String),
+    PlaylistEditPublicToggled(bool),
     EditPlaylist,      // Enter edit mode for the currently-playing playlist
     QuickSavePlaylist, // Save current queue back to the active playlist without entering edit mode
 
@@ -275,6 +278,7 @@ pub enum QueueAction {
     DiscardEdits,                   // discard edits and exit edit mode
     PlaylistNameChanged(String),    // playlist name edited inline
     PlaylistCommentChanged(String), // playlist comment edited inline
+    PlaylistEditPublicToggled(bool), // public/private toggled in the edit bar
     EditPlaylist,                   // enter edit mode from playlist context bar
     ShowInfo(usize),                // Open info modal (queue index for full Song lookup)
     ShowInFolder(usize),            // Open containing folder (queue index, path fetched via API)
@@ -552,6 +556,9 @@ impl QueuePage {
             QueueMessage::PlaylistCommentChanged(comment) => {
                 (Task::none(), QueueAction::PlaylistCommentChanged(comment))
             }
+            QueueMessage::PlaylistEditPublicToggled(value) => {
+                (Task::none(), QueueAction::PlaylistEditPublicToggled(value))
+            }
             QueueMessage::EditPlaylist => (Task::none(), QueueAction::EditPlaylist),
             QueueMessage::QuickSavePlaylist => (Task::none(), QueueAction::SaveAsPlaylist),
             QueueMessage::RefreshArtwork(album_id) => {
@@ -742,6 +749,47 @@ impl QueuePage {
                     .into()
                 };
 
+            // Public/Private toggle — accent when public (default), muted when
+            // private. Built inline (not via `icon_btn`) so the icon path and
+            // tint can vary with the current state.
+            let is_public = data.edit_mode_public.unwrap_or(true);
+            let public_toggle: Element<'a, QueueMessage> = {
+                let icon_path = if is_public {
+                    "assets/icons/lock-open.svg"
+                } else {
+                    "assets/icons/lock.svg"
+                };
+                let tint = if is_public {
+                    crate::theme::accent()
+                } else {
+                    crate::theme::fg2()
+                };
+                let icon = crate::embedded_svg::svg_widget(icon_path)
+                    .width(Length::Fixed(14.0))
+                    .height(Length::Fixed(14.0))
+                    .style(move |_theme, _status| svg::Style { color: Some(tint) });
+                mouse_area(
+                    HoverOverlay::new(
+                        container(icon)
+                            .padding([4, 6])
+                            .style(|_theme| container::Style {
+                                background: None,
+                                border: iced::Border {
+                                    color: iced::Color::TRANSPARENT,
+                                    width: 2.0,
+                                    radius: crate::theme::ui_border_radius(),
+                                },
+                                ..Default::default()
+                            })
+                            .center_y(Length::Shrink),
+                    )
+                    .border_radius(crate::theme::ui_border_radius()),
+                )
+                .on_press(QueueMessage::PlaylistEditPublicToggled(!is_public))
+                .interaction(iced::mouse::Interaction::Pointer)
+                .into()
+            };
+
             let save_btn = icon_btn("assets/icons/save.svg", QueueMessage::SavePlaylist);
             let discard_btn = icon_btn("assets/icons/x.svg", QueueMessage::DiscardEdits);
 
@@ -752,11 +800,17 @@ impl QueuePage {
                     .into();
 
             let edit_bar = container(
-                row![edit_icon, name_comment_col, save_btn, discard_btn,]
-                    .spacing(6)
-                    .align_y(Alignment::Center)
-                    .padding([0, 8])
-                    .width(Length::Fill),
+                row![
+                    edit_icon,
+                    name_comment_col,
+                    public_toggle,
+                    save_btn,
+                    discard_btn,
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center)
+                .padding([0, 8])
+                .width(Length::Fill),
             )
             .height(Length::Fixed(44.0))
             .style(|_theme| container::Style {

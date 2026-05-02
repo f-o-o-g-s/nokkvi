@@ -403,11 +403,17 @@ impl Nokkvi {
                     ),
                 );
             }
-            PlaylistsAction::EditPlaylist(playlist_id, playlist_name, playlist_comment) => {
+            PlaylistsAction::EditPlaylist(
+                playlist_id,
+                playlist_name,
+                playlist_comment,
+                playlist_public,
+            ) => {
                 return Task::done(Message::EnterPlaylistEditMode {
                     playlist_id,
                     playlist_name,
                     playlist_comment,
+                    playlist_public,
                 });
             }
             PlaylistsAction::ShowInfo(item) => {

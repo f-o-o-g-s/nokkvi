@@ -689,7 +689,8 @@ impl Nokkvi {
                 let current_ids = self.queue_song_ids();
                 let is_dirty = edit_state.is_dirty(&current_ids)
                     || edit_state.is_name_dirty()
-                    || edit_state.is_comment_dirty();
+                    || edit_state.is_comment_dirty()
+                    || edit_state.is_public_dirty();
                 (edit_state.playlist_name.clone(), is_dirty)
             });
 
@@ -697,6 +698,11 @@ impl Nokkvi {
                 .playlist_edit
                 .as_ref()
                 .map(|edit_state| edit_state.playlist_comment.clone());
+
+            let edit_mode_public = self
+                .playlist_edit
+                .as_ref()
+                .map(|edit_state| edit_state.playlist_public);
 
             let (column_dropdown_open, column_dropdown_trigger_bounds) =
                 column_dropdown_state(&self.open_menu, View::Queue);
@@ -718,6 +724,7 @@ impl Nokkvi {
                 stable_viewport: self.stable_viewport,
                 edit_mode_info,
                 edit_mode_comment,
+                edit_mode_public,
                 playlist_context_info: self.active_playlist_info.clone(),
                 column_dropdown_open,
                 column_dropdown_trigger_bounds,
@@ -951,6 +958,7 @@ impl Nokkvi {
                     stable_viewport: self.stable_viewport,
                     edit_mode_info: None,
                     edit_mode_comment: None,
+                    edit_mode_public: None,
                     playlist_context_info: self.active_playlist_info.clone(),
                     column_dropdown_open,
                     column_dropdown_trigger_bounds,

@@ -494,13 +494,27 @@ impl Nokkvi {
                     edit_state.set_comment(comment);
                 }
             }
+            QueueAction::PlaylistEditPublicToggled(value) => {
+                if let Some(edit_state) = &mut self.playlist_edit {
+                    edit_state.set_public(value);
+                }
+            }
             QueueAction::EditPlaylist => {
-                // Enter edit mode for the currently-playing playlist
+                // Enter edit mode for the currently-playing playlist. Look up
+                // the cached visibility from the playlists library; fall back
+                // to default-public when the playlists list hasn't loaded yet.
                 if let Some(ref ctx) = self.active_playlist_info {
+                    let playlist_public = self
+                        .library
+                        .playlists
+                        .iter()
+                        .find(|p| p.id == ctx.id)
+                        .is_none_or(|p| p.public);
                     return Task::done(Message::EnterPlaylistEditMode {
                         playlist_id: ctx.id.clone(),
                         playlist_name: ctx.name.clone(),
                         playlist_comment: ctx.comment.clone(),
+                        playlist_public,
                     });
                 }
             }
