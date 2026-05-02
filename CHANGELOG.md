@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - Surfing boat no longer gets stuck against the far left or right of the window — a soft wall bumper pushes it back inward — and the boat is now clipped to the visualizer area so it doesn't draw on top of the player bar.
+- Surfing boat now picks up theme changes immediately — switching presets, toggling light/dark, or editing colors no longer leaves it painting the previous palette until restart.
 
 ### Removed
 
