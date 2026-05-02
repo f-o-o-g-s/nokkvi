@@ -102,15 +102,25 @@ impl Nokkvi {
         // Set up edit state — snapshot gets populated after QueueLoaded arrives
         self.playlist_edit = Some(nokkvi_data::types::playlist_edit::PlaylistEditState::new(
             playlist_id.clone(),
-            playlist_name,
-            playlist_comment,
+            playlist_name.clone(),
+            playlist_comment.clone(),
             playlist_public,
             Vec::new(),
         ));
-        // NOTE: Do NOT clear `active_playlist_info` here — the view code
-        // checks `edit_mode_info` first (if/else-if), so the edit bar takes
-        // priority while editing.  Keeping `active_playlist_info` intact
-        // ensures the read-only playlist bar reappears after exiting edit mode.
+        // Re-anchor `active_playlist_info` to the playlist being edited.
+        // The queue is about to be replaced with this playlist's tracks
+        // (possibly zero, for a freshly-created playlist), so the read-only
+        // header that reappears after exiting edit mode must reflect the
+        // *edited* playlist — not whatever was playing before. The edit bar
+        // takes priority while editing (`edit_mode_info` checked first in the
+        // view), so this assignment isn't visible until the user saves or
+        // discards.
+        self.active_playlist_info = Some(crate::state::ActivePlaylistContext {
+            id: playlist_id.clone(),
+            name: playlist_name,
+            comment: playlist_comment,
+        });
+        self.persist_active_playlist_info();
         self.browsing_panel = Some(BrowsingPanel::new());
         self.pane_focus = PaneFocus::Queue;
         self.current_view = View::Queue;

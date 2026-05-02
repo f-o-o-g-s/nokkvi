@@ -4160,6 +4160,66 @@ fn create_playlist_dialog_opens_when_not_editing() {
 // ============================================================================
 
 #[test]
+fn enter_edit_mode_aligns_active_playlist_info() {
+    use crate::{app_message::Message, state::ActivePlaylistContext};
+
+    let mut app = test_app();
+    // Pre-condition: a different playlist is currently "active" in the header.
+    app.active_playlist_info = Some(ActivePlaylistContext {
+        id: "playing".into(),
+        name: "Currently Playing".into(),
+        comment: String::new(),
+    });
+
+    let _ = app.update(Message::EnterPlaylistEditMode {
+        playlist_id: "edited".into(),
+        playlist_name: "Being Edited".into(),
+        playlist_comment: "Edit me".into(),
+        playlist_public: false,
+    });
+
+    let active = app
+        .active_playlist_info
+        .as_ref()
+        .expect("active_playlist_info must remain Some — re-anchored, not cleared");
+    assert_eq!(
+        active.id, "edited",
+        "entering edit mode must re-anchor active_playlist_info to the edited playlist"
+    );
+    assert_eq!(active.name, "Being Edited");
+    assert_eq!(active.comment, "Edit me");
+}
+
+#[test]
+fn exit_edit_mode_preserves_aligned_context() {
+    use crate::app_message::Message;
+
+    let mut app = test_app();
+    // No active playlist initially (e.g., create-and-edit flow).
+    assert!(app.active_playlist_info.is_none());
+
+    let _ = app.update(Message::EnterPlaylistEditMode {
+        playlist_id: "new".into(),
+        playlist_name: "Brand New".into(),
+        playlist_comment: String::new(),
+        playlist_public: true,
+    });
+
+    // Discard.
+    let _ = app.update(Message::ExitPlaylistEditMode);
+
+    let active = app.active_playlist_info.as_ref().expect(
+        "exit must leave active_playlist_info pointing at the edited playlist, \
+             not clear it or revert to a stale prior context",
+    );
+    assert_eq!(active.id, "new");
+    assert!(
+        app.playlist_edit.is_none(),
+        "exit clears playlist_edit but not active_playlist_info"
+    );
+}
+
+#[test]
 fn enter_playlist_edit_mode_seeds_initial_public() {
     use crate::app_message::Message;
 
