@@ -764,11 +764,16 @@ impl QueuePage {
                 } else {
                     crate::theme::fg2()
                 };
+                let tooltip_label = if is_public {
+                    "Public — click to make private"
+                } else {
+                    "Private — click to make public"
+                };
                 let icon = crate::embedded_svg::svg_widget(icon_path)
                     .width(Length::Fixed(14.0))
                     .height(Length::Fixed(14.0))
                     .style(move |_theme, _status| svg::Style { color: Some(tint) });
-                mouse_area(
+                let trigger = mouse_area(
                     HoverOverlay::new(
                         container(icon)
                             .padding([4, 6])
@@ -786,7 +791,19 @@ impl QueuePage {
                     .border_radius(crate::theme::ui_border_radius()),
                 )
                 .on_press(QueueMessage::PlaylistEditPublicToggled(!is_public))
-                .interaction(iced::mouse::Interaction::Pointer)
+                .interaction(iced::mouse::Interaction::Pointer);
+                iced::widget::tooltip(
+                    trigger,
+                    container(
+                        iced::widget::text(tooltip_label)
+                            .size(11.0)
+                            .font(crate::theme::ui_font()),
+                    )
+                    .padding(4),
+                    iced::widget::tooltip::Position::Bottom,
+                )
+                .gap(4)
+                .style(crate::theme::container_tooltip)
                 .into()
             };
 

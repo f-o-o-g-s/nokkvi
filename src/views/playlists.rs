@@ -1035,20 +1035,33 @@ impl PlaylistsPage {
 
         // Visibility glyph slot — always pushed so the row's widget tree
         // shape stays identical between public/private states. Public renders
-        // a zero-width Space; private renders a lock SVG in muted fg3.
+        // a zero-width Space; private renders a lock SVG in muted fg3 with a
+        // tooltip explaining why the icon is there.
         columns.push(if playlist.public {
             iced::widget::Space::new()
                 .width(Length::Fixed(0.0))
                 .height(Length::Fixed(14.0))
                 .into()
         } else {
-            crate::embedded_svg::svg_widget("assets/icons/lock.svg")
+            let lock_icon = crate::embedded_svg::svg_widget("assets/icons/lock.svg")
                 .width(Length::Fixed(14.0))
                 .height(Length::Fixed(14.0))
                 .style(|_theme, _status| iced::widget::svg::Style {
                     color: Some(crate::theme::fg3()),
-                })
-                .into()
+                });
+            iced::widget::tooltip(
+                lock_icon,
+                iced::widget::container(
+                    iced::widget::text("Private playlist")
+                        .size(11.0)
+                        .font(crate::theme::ui_font()),
+                )
+                .padding(4),
+                iced::widget::tooltip::Position::Top,
+            )
+            .gap(4)
+            .style(crate::theme::container_tooltip)
+            .into()
         });
 
         if show_song_count_col {
