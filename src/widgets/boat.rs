@@ -49,8 +49,8 @@
 use std::time::{Duration, Instant};
 
 use iced::{
-    Element, Length, Vector,
-    widget::{Float, Svg, container, svg},
+    Element, Length,
+    widget::{Space, Svg, column, container, row, svg},
 };
 
 use crate::widgets::visualizer::state::catmull_rom_1d;
@@ -413,10 +413,21 @@ fn pick_charge_direction(bars: &[f64], rng_state: &mut u32) -> f32 {
 /// `column!` and `Stack::push` expect `impl Into<Element>`.
 ///
 /// `area_width` / `area_height` are the pixel dimensions of the visualizer
-/// area the boat rides over. They are needed because Float's `translate`
-/// closure receives only the bounds of its own content (the boat itself,
-/// here `boat_w × boat_h`), not the surrounding area — so the caller must
-/// supply the area dimensions explicitly.
+/// area the boat rides over. They size the outer clipping container and let
+/// us compute the boat's pixel position from `(x_ratio, y_ratio)`.
+///
+/// Layout: a fixed-size `container.clip(true)` framing the visualizer area,
+/// containing a column [top spacer, row [left spacer, boat svg]]. Spacers
+/// position the boat at `(target_x, target_y)`; the outer container scissors
+/// any overflow.
+///
+/// Why this and not `Float`: `iced::widget::Float` renders translated content
+/// via an overlay layer (`reference-iced/widget/src/float.rs:204-244`) that
+/// calls `renderer.with_layer(self.viewport, ...)` with the **full window
+/// viewport** — so a parent `container.clip(true)` is silently ignored and
+/// the boat draws over neighbouring overlays (the player bar). Positioning
+/// the boat as a normal in-flow widget lets the parent clip actually take
+/// effect, the same way the lines/bars shader respects its scissor rect.
 pub(crate) fn boat_overlay<'a, M: 'a>(
     state: &BoatState,
     area_width: f32,
@@ -430,29 +441,29 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
     });
     let boat_h = (area_height * BOAT_HEIGHT_FRACTION).max(8.0);
     let boat_w = boat_h * BOAT_ASPECT_RATIO;
-    let x_ratio = state.x_ratio;
-    let y_ratio = state.y_ratio;
 
-    Float::new(
-        container(Svg::new(handle).width(Length::Fill).height(Length::Fill))
-            .width(Length::Fixed(boat_w))
-            .height(Length::Fixed(boat_h)),
-    )
-    .translate(move |_content_bounds, _viewport| {
-        // Float lays out its content at the top-left of the surrounding
-        // container, then this translate shifts it. Target offset within the
-        // visualizer area:
-        //   centered horizontally at x_ratio * area_width
-        //   bottom of boat sits at the waterline = (1 - y_ratio) * area_height
-        //     (visualizer draws upward from bottom). The sink offset pushes
-        //     the boat down by `BOAT_SINK_FRACTION` of its height so it reads
-        //     as displacing water rather than hovering on the line.
-        let cx = x_ratio * area_width;
-        let target_x = cx - boat_w * 0.5;
-        let line_y = area_height * (1.0 - y_ratio);
-        let target_y = line_y - boat_h + boat_h * BOAT_SINK_FRACTION;
-        Vector::new(target_x, target_y)
-    })
+    // Pixel offsets within the visualizer area. The waterline is
+    // `(1 - y_ratio) * area_height` from the top (visualizer draws upward
+    // from the bottom). `BOAT_SINK_FRACTION` of the boat's height sits below
+    // the waterline; the rest sits above. Spacers can't take negative sizes,
+    // so we clamp at 0 — overflow above is then handled by the clip on the
+    // outer container, mirroring the bottom edge.
+    let cx = state.x_ratio * area_width;
+    let target_x = (cx - boat_w * 0.5).max(0.0);
+    let line_y = area_height * (1.0 - state.y_ratio);
+    let target_y = (line_y - boat_h + boat_h * BOAT_SINK_FRACTION).max(0.0);
+
+    let boat_svg = container(Svg::new(handle).width(Length::Fill).height(Length::Fill))
+        .width(Length::Fixed(boat_w))
+        .height(Length::Fixed(boat_h));
+
+    container(column![
+        Space::new().height(Length::Fixed(target_y)),
+        row![Space::new().width(Length::Fixed(target_x)), boat_svg],
+    ])
+    .width(Length::Fixed(area_width))
+    .height(Length::Fixed(area_height))
+    .clip(true)
     .into()
 }
 

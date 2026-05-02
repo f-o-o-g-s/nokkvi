@@ -359,30 +359,19 @@ impl Nokkvi {
 
             stack = stack.push(visualizer_overlay);
 
-            // Surfing-boat overlay (lines mode only). Mirrors the spacer +
-            // container shape above so the Float's content_bounds — which
-            // its `.translate(...)` closure receives, NOT the viewport — line
-            // up with the visualizer area. Without this mirroring the boat
-            // would land in the wrong band.
-            //
-            // `.clip(true)` on the visualizer-area container is what keeps
-            // the boat from drawing over the player bar: Float's translate
-            // can push the rendered boat outside its parent's layout bounds
-            // (the bottom edge especially, with `BOAT_SINK_FRACTION`), and
-            // without an explicit clip Iced happily paints over neighboring
-            // overlays. The visualizer shader is naturally bounded by its
-            // scissor rect, hence why bars never show this issue.
+            // Surfing-boat overlay (lines mode only). Mirrors the spacer
+            // shape above so the boat overlay's pixel coordinate space lines
+            // up with the visualizer area. `boat_overlay()` returns a
+            // fixed-size, self-clipping container, so we don't need an
+            // outer wrapper here.
             if self.boat.visible && self.engine.visualization_mode == VisualizationMode::Lines {
                 let boat_overlay_col = column![
                     container(iced::widget::Space::new()).height(Length::Fixed(spacer_height)),
-                    container(crate::widgets::boat::boat_overlay::<Message>(
+                    crate::widgets::boat::boat_overlay::<Message>(
                         &self.boat,
                         self.window.width,
                         visualizer_height,
-                    ))
-                    .width(Length::Fill)
-                    .height(Length::Fixed(visualizer_height))
-                    .clip(true),
+                    ),
                 ]
                 .width(Length::Fill)
                 .height(Length::Fill);
