@@ -14,11 +14,23 @@
 //!   drifts unhurriedly across the visualizer.
 //! - **Slope drift** — the local wave gradient at the boat's x position
 //!   pushes it downhill (positive slope → push left, negative → push right),
-//!   so the boat appears to surf down wave faces.
+//!   so the boat appears to surf down wave faces. Capped at
+//!   `MAX_SLOPE_FORCE` so a single tall bar can't overpower drive +
+//!   restoring indefinitely.
 //! - **Restoring force** — a soft spring toward `x = 0.5` keeps the boat off
 //!   the edges when the drive + slope conspire to push it outward.
 //! - **Velocity damping** — friction on `x_velocity` gives the "floating"
 //!   feel; the boat lags fast wave changes instead of snapping to them.
+//! - **Captain charge** — left to physics alone the slope force always pushes
+//!   downhill, so the boat camps on the calmer side of the visualizer. Every
+//!   `CHARGE_INTERVAL_*` seconds (randomized) the captain decides to row in
+//!   a chosen direction for `CHARGE_DURATION_*` seconds: a small constant
+//!   force is applied and the slope force is suppressed for the duration.
+//!   Direction is biased toward whichever half of the waveform has taller
+//!   bars (the "storm"); falls back to a coin flip on a symmetric waveform.
+//!   Force size is tuned so terminal velocity during a charge is only
+//!   modestly above normal cruise — feels like determined effort, not a
+//!   speed boost.
 //! - **Y dynamics** — `y_ratio` follows the sampled wave height through a
 //!   spring-damper rather than tracking it exactly, so the boat bobs with
 //!   buoyancy rather than glued to the curve.
@@ -45,6 +57,11 @@ pub(crate) const BOAT_HEIGHT_FRACTION: f32 = 0.18;
 /// so the boat is rendered as a square.
 pub(crate) const BOAT_ASPECT_RATIO: f32 = 1.0;
 
+/// Fraction of the boat's height that sits below the wave line ("waterline
+/// sink"). Without this offset the boat appears glued to the top of the
+/// curve and reads as floating in space rather than displacing water.
+pub(crate) const BOAT_SINK_FRACTION: f32 = 0.18;
+
 // --- physics tuning constants ---------------------------------------------
 //
 // All forces operate in normalized ratio-space (`x_ratio` ∈ [0, 1], time in
@@ -69,9 +86,38 @@ const SLOPE_DX: f32 = 0.05;
 /// Slope force gain — converts wave gradient into horizontal force.
 const SLOPE_GAIN: f32 = 0.04;
 
+/// Hard cap on `|slope_force|` so a single tall bar near the boat can't
+/// overpower drive + restoring indefinitely. Without this the boat could
+/// be pinned at an edge by a sustained steep waveform.
+const MAX_SLOPE_FORCE: f32 = 0.10;
+
 /// Spring constant for the soft pull back toward `x = 0.5`. Keeps the boat
 /// off the edges without obvious snap-back.
 const RESTORING_K: f32 = 0.06;
+
+/// Min/max delay between captain charges. The actual interval is sampled
+/// uniformly in `[MIN, MAX]` after each charge ends (and at first activation),
+/// so charges feel scheduled by mood rather than clockwork.
+const CHARGE_INTERVAL_MIN_SECS: f32 = 12.0;
+const CHARGE_INTERVAL_MAX_SECS: f32 = 30.0;
+
+/// Min/max duration of a single charge. Sampled uniformly in `[MIN, MAX]`
+/// when a charge starts. Long enough that the boat covers a notable fraction
+/// of the visualizer width before the charge ends.
+const CHARGE_DURATION_MIN_SECS: f32 = 6.0;
+const CHARGE_DURATION_MAX_SECS: f32 = 12.0;
+
+/// Constant horizontal force applied during a charge, in the chosen
+/// direction. Sized so terminal velocity (`CHARGE_FORCE / X_DAMPING`) is
+/// only slightly above normal cruise — `0.06 / 0.9 ≈ 0.067 ratio/sec`,
+/// versus the natural `~0.045 ratio/sec` drift speed. Reads as deliberate
+/// effort, not a speed boost.
+const CHARGE_FORCE: f32 = 0.06;
+
+/// Minimum waveform asymmetry (`mean(right_half) - mean(left_half)`) needed
+/// to bias the charge direction toward the "storm" side. Below this the
+/// captain just flips a coin so symmetric waveforms still produce variety.
+const IMBALANCE_THRESHOLD: f32 = 0.05;
 
 /// Friction on `x_velocity`. The dominant source of the "floating" feel —
 /// without this, the boat would build up arbitrary speed.
@@ -102,6 +148,16 @@ const Y_DAMPING: f32 = 12.0;
 ///   on/off toggle (that lives in `LinesConfig.boat`).
 /// - `last_tick` is consumed to compute `dt` between ticks; cleared when the
 ///   boat is hidden so the first frame back doesn't see a stale gap.
+/// - `secs_until_next_charge` counts down to the next captain charge; only
+///   meaningful while `charge_remaining_secs == 0`.
+/// - `charge_remaining_secs` is the time left in the current charge; > 0
+///   means the captain is actively rowing in `charge_direction`.
+/// - `charge_direction` is `+1.0` (right) or `-1.0` (left); set when a
+///   charge begins, unread otherwise.
+/// - `rng_state` seeds a tiny xorshift PRNG used for charge timing and
+///   direction. Lazily seeded on first tick (0 → seed constant) so `Default`
+///   stays clean and the schedule starts on first activation, not on
+///   construction.
 /// - `handle` caches the themed logo SVG so we don't rebuild it every frame.
 #[derive(Debug, Clone, Default)]
 pub struct BoatState {
@@ -112,6 +168,10 @@ pub struct BoatState {
     pub y_velocity: f32,
     pub visible: bool,
     pub last_tick: Option<Instant>,
+    pub secs_until_next_charge: f32,
+    pub charge_remaining_secs: f32,
+    pub charge_direction: f32,
+    pub rng_state: u32,
     pub handle: Option<svg::Handle>,
 }
 
@@ -138,17 +198,24 @@ impl BoatState {
 }
 
 /// Step the boat physics forward by `dt`, sampling slope and target height
-/// from `bars`. Mutates `phase`, `x_velocity`, `x_ratio`, `y_velocity`, and
-/// `y_ratio` on `state`.
+/// from `bars`. Mutates `phase`, `x_velocity`, `x_ratio`, `y_velocity`,
+/// `y_ratio`, the charge-state fields, and `rng_state` on `state`.
 ///
 /// Forces on `x` (semi-implicit Euler):
 /// - drive: `sin(2π·phase) · DRIVE_FORCE` — slow rhythmic push
-/// - slope: `-slope · SLOPE_GAIN` — surf downhill
+/// - slope: `(-slope · SLOPE_GAIN).clamp(±MAX_SLOPE_FORCE)` — surf downhill,
+///   capped so a single tall bar can't dominate. Suppressed during a charge
+///   so the captain's heading isn't fighting wave drift.
 /// - restoring: `(0.5 - x) · RESTORING_K` — soft center pull
 /// - damping: `-x_velocity · X_DAMPING` — friction
+/// - charge: `charge_direction · CHARGE_FORCE` while a charge is active,
+///   else 0. Captain charges fire on a randomized timer and prefer the
+///   side of the visualizer with taller bars.
 ///
 /// Y is a spring-damper tracking `target_y = sample_line_height(...)`:
-/// `ay = (target_y - y) · Y_SPRING_K - y_velocity · Y_DAMPING`.
+/// `ay = (target_y - y) · Y_SPRING_K - y_velocity · Y_DAMPING`. Y dynamics
+/// are unchanged during a charge — the boat still bobs over the waves it
+/// crosses.
 ///
 /// At the edges we clamp `x_ratio` and zero out any outward velocity
 /// component so the boat doesn't accumulate wall-pushing momentum.
@@ -158,18 +225,53 @@ pub(crate) fn step(state: &mut BoatState, dt: Duration, bars: &[f64], angular: b
         return;
     }
 
+    // Lazy schedule init. `Default` leaves rng_state == 0, which is the only
+    // value xorshift won't produce from a non-zero seed — so we use it as a
+    // sentinel and seed the very first charge interval here. After this the
+    // rng is permanently non-zero.
+    if state.rng_state == 0 {
+        state.rng_state = 0x9E37_79B9;
+        let r = next_rand_unit(&mut state.rng_state);
+        state.secs_until_next_charge = lerp(CHARGE_INTERVAL_MIN_SECS, CHARGE_INTERVAL_MAX_SECS, r);
+    }
+
     state.phase = (state.phase + dt_secs / DRIVE_PERIOD_SECS).rem_euclid(1.0);
     let drive = (state.phase * std::f32::consts::TAU).sin() * DRIVE_FORCE;
 
     let h_left = sample_line_height(bars, (state.x_ratio - SLOPE_DX).max(0.0), angular);
     let h_right = sample_line_height(bars, (state.x_ratio + SLOPE_DX).min(1.0), angular);
     let slope = (h_right - h_left) / (2.0 * SLOPE_DX);
-    let slope_force = -slope * SLOPE_GAIN;
+    let slope_force_raw = (-slope * SLOPE_GAIN).clamp(-MAX_SLOPE_FORCE, MAX_SLOPE_FORCE);
+
+    // Charge state machine: either rowing (charge_remaining_secs > 0) or
+    // counting down to the next charge. Slope is suppressed for the duration
+    // of a charge so the captain's heading isn't fought by wave drift.
+    let (charge_force, slope_force) = if state.charge_remaining_secs > 0.0 {
+        state.charge_remaining_secs -= dt_secs;
+        if state.charge_remaining_secs <= 0.0 {
+            state.charge_remaining_secs = 0.0;
+            let r = next_rand_unit(&mut state.rng_state);
+            state.secs_until_next_charge =
+                lerp(CHARGE_INTERVAL_MIN_SECS, CHARGE_INTERVAL_MAX_SECS, r);
+        }
+        (state.charge_direction * CHARGE_FORCE, 0.0)
+    } else {
+        state.secs_until_next_charge -= dt_secs;
+        if state.secs_until_next_charge <= 0.0 {
+            state.charge_direction = pick_charge_direction(bars, &mut state.rng_state);
+            let r = next_rand_unit(&mut state.rng_state);
+            state.charge_remaining_secs =
+                lerp(CHARGE_DURATION_MIN_SECS, CHARGE_DURATION_MAX_SECS, r);
+            (state.charge_direction * CHARGE_FORCE, 0.0)
+        } else {
+            (0.0, slope_force_raw)
+        }
+    };
 
     let restoring_force = (0.5 - state.x_ratio) * RESTORING_K;
     let damping_force = -state.x_velocity * X_DAMPING;
 
-    let ax = drive + slope_force + restoring_force + damping_force;
+    let ax = drive + slope_force + restoring_force + damping_force + charge_force;
     state.x_velocity = (state.x_velocity + ax * dt_secs).clamp(-MAX_X_V, MAX_X_V);
     state.x_ratio += state.x_velocity * dt_secs;
     if state.x_ratio <= 0.0 {
@@ -225,6 +327,55 @@ pub(crate) fn sample_line_height(bars: &[f64], x_ratio: f32, angular: bool) -> f
     catmull_rom_1d(p0, p1, p2, p3, t) as f32
 }
 
+/// Tiny xorshift PRNG used to schedule captain charges and pick directions.
+/// Self-contained so no extra dependency is needed in the UI crate. The
+/// caller is responsible for seeding `state` to non-zero before the first
+/// call; xorshift's only fixed point is 0, so as long as the seed is
+/// non-zero the sequence stays non-zero. Deterministic per seed — fine for
+/// timing variation, would be wrong for anything cryptographic.
+fn next_rand_unit(state: &mut u32) -> f32 {
+    let mut x = *state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    *state = x;
+    (x as f32) / (u32::MAX as f32)
+}
+
+/// Linear interpolation `a → b` by `t ∈ [0, 1]`. Used to map a uniform
+/// `[0, 1)` random sample into a charge interval/duration window.
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
+}
+
+/// Mean amplitude of the right half of `bars` minus mean of the left half.
+/// Positive → right side has taller bars (storm to the right). Returns 0
+/// for buffers shorter than 4 (not enough data to split).
+fn waveform_imbalance(bars: &[f64]) -> f32 {
+    if bars.len() < 4 {
+        return 0.0;
+    }
+    let mid = bars.len() / 2;
+    let left_avg: f64 = bars[..mid].iter().sum::<f64>() / mid as f64;
+    let right_avg: f64 = bars[mid..].iter().sum::<f64>() / (bars.len() - mid) as f64;
+    (right_avg - left_avg) as f32
+}
+
+/// Pick a charge direction (`±1`). When the waveform is meaningfully
+/// asymmetric (`|imbalance| > IMBALANCE_THRESHOLD`) the captain heads toward
+/// the storm side; otherwise it's a coin flip so symmetric tracks still
+/// produce traversal in both directions over time.
+fn pick_charge_direction(bars: &[f64], rng_state: &mut u32) -> f32 {
+    let imbalance = waveform_imbalance(bars);
+    if imbalance.abs() > IMBALANCE_THRESHOLD {
+        imbalance.signum()
+    } else if next_rand_unit(rng_state) < 0.5 {
+        -1.0
+    } else {
+        1.0
+    }
+}
+
 /// Build the boat overlay element. Returned as a plain `Element` (not
 /// `Option<Element>`) so the visibility branch lives at the call site —
 /// `column!` and `Stack::push` expect `impl Into<Element>`.
@@ -260,12 +411,14 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
         // container, then this translate shifts it. Target offset within the
         // visualizer area:
         //   centered horizontally at x_ratio * area_width
-        //   bottom of boat sits on the waveform line, which is at
-        //     (1 - y_ratio) * area_height (visualizer draws upward from bottom)
+        //   bottom of boat sits at the waterline = (1 - y_ratio) * area_height
+        //     (visualizer draws upward from bottom). The sink offset pushes
+        //     the boat down by `BOAT_SINK_FRACTION` of its height so it reads
+        //     as displacing water rather than hovering on the line.
         let cx = x_ratio * area_width;
         let target_x = cx - boat_w * 0.5;
         let line_y = area_height * (1.0 - y_ratio);
-        let target_y = line_y - boat_h;
+        let target_y = line_y - boat_h + boat_h * BOAT_SINK_FRACTION;
         Vector::new(target_x, target_y)
     })
     .into()
@@ -374,6 +527,114 @@ mod tests {
             state.x_velocity < 0.0,
             "upward-ramp bars should push boat left (got x_velocity = {v})",
             v = state.x_velocity
+        );
+    }
+
+    #[test]
+    fn step_charge_eventually_fires() {
+        // Simulate 60 s of flat-bar physics from rest. The first charge must
+        // fire well within `CHARGE_INTERVAL_MAX_SECS` of 30 s.
+        let bars = vec![0.5; 16];
+        let mut state = BoatState {
+            x_ratio: 0.5,
+            ..Default::default()
+        };
+        let dt = Duration::from_millis(16);
+        let mut fired_at: Option<f32> = None;
+        for tick in 0..(60 * 60) {
+            step(&mut state, dt, &bars, false);
+            if state.charge_remaining_secs > 0.0 {
+                fired_at = Some(tick as f32 * 0.016);
+                break;
+            }
+        }
+        let t = fired_at.expect("charge should fire within 60 s");
+        assert!(
+            t <= CHARGE_INTERVAL_MAX_SECS + 0.5,
+            "first charge fired at {t}s, expected <= {CHARGE_INTERVAL_MAX_SECS}s",
+        );
+    }
+
+    #[test]
+    fn step_charge_overrides_slope_to_climb_uphill() {
+        // Linear ramp upward to the right: slope force normally pushes the
+        // boat *left*. Pre-arm a rightward charge and verify the boat moves
+        // *right* — the slope-suppression-during-charge property the user
+        // depends on.
+        let bars: Vec<f64> = (0..32).map(|i| i as f64 / 31.0).collect();
+        let mut state = BoatState {
+            x_ratio: 0.5,
+            charge_remaining_secs: 4.0,
+            charge_direction: 1.0,
+            // Pre-seed rng + push next charge far away so the lazy-init
+            // branch doesn't reschedule mid-test.
+            rng_state: 0x12345,
+            secs_until_next_charge: 100.0,
+            ..Default::default()
+        };
+        let dt = Duration::from_millis(16);
+        for _ in 0..(3 * 60) {
+            step(&mut state, dt, &bars, false);
+        }
+        assert!(
+            state.x_ratio > 0.6,
+            "rightward charge should overcome leftward slope force \
+             (got x_ratio = {})",
+            state.x_ratio
+        );
+    }
+
+    #[test]
+    fn pick_charge_direction_prefers_storm_side() {
+        // Asymmetric bars: tall right half, calm left half. Direction must
+        // come back as +1 regardless of rng seed.
+        let bars: Vec<f64> = (0..32).map(|i| if i > 16 { 0.8 } else { 0.1 }).collect();
+        for seed in [1, 2, 3, 999, 0x9E37_79B9] {
+            let mut rng = seed;
+            assert_eq!(
+                pick_charge_direction(&bars, &mut rng),
+                1.0,
+                "should pick right (storm) for seed {seed}"
+            );
+        }
+
+        // Mirrored: tall left half. Must pick -1.
+        let bars: Vec<f64> = (0..32).map(|i| if i < 15 { 0.8 } else { 0.1 }).collect();
+        for seed in [1, 2, 3, 999, 0x9E37_79B9] {
+            let mut rng = seed;
+            assert_eq!(
+                pick_charge_direction(&bars, &mut rng),
+                -1.0,
+                "should pick left (storm) for seed {seed}"
+            );
+        }
+    }
+
+    #[test]
+    fn pick_charge_direction_random_on_symmetric_waveform() {
+        // Flat bars: imbalance is 0, falls into the rng coin-flip branch.
+        // Both directions must be reachable across different seeds. Use
+        // production-shaped seeds (xorshift's first output is degenerate
+        // for tiny seeds, so seeding from a single counter would hit one
+        // side only — irrelevant in real use where the seed is the golden
+        // ratio constant).
+        let bars = vec![0.5; 16];
+        let mut saw_left = false;
+        let mut saw_right = false;
+        for i in 0u32..200 {
+            let mut rng = 0x9E37_79B9_u32.wrapping_add(i.wrapping_mul(0x6789_ABCD));
+            match pick_charge_direction(&bars, &mut rng) {
+                d if d < 0.0 => saw_left = true,
+                d if d > 0.0 => saw_right = true,
+                _ => {}
+            }
+            if saw_left && saw_right {
+                break;
+            }
+        }
+        assert!(
+            saw_left && saw_right,
+            "coin flip must reach both directions"
         );
     }
 
