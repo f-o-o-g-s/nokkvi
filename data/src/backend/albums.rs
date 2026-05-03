@@ -316,13 +316,6 @@ impl AlbumsService {
             .await
     }
 
-    /// No-op kept for API compatibility with the Settings → Clear Artwork
-    /// Cache handler. The on-disk cache is gone; UI Handle maps live in the
-    /// frontend and are cleared there.
-    pub async fn clear_and_reset_cache(&self) -> usize {
-        0
-    }
-
     /// Load albums and return raw Album structs (first page only).
     /// Uses PAGE_SIZE as the default limit for pagination.
     pub async fn load_raw_albums(

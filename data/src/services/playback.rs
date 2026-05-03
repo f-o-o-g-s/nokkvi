@@ -88,7 +88,7 @@ impl QueueNavigator {
     ///
     /// This is the single entry point for all consume-mode cleanup.
     /// Call this after transitioning to the next song.
-    async fn record_and_consume(
+    fn record_and_consume(
         &self,
         queue_manager: &mut QueueManager,
         prev_song_id: &str,
@@ -242,7 +242,7 @@ impl QueueNavigator {
             if let Some(ref pid) = prev_id
                 && let Some(idx) = queue_manager.get_queue().current_index
             {
-                self.record_and_consume(&mut queue_manager, pid, idx).await;
+                self.record_and_consume(&mut queue_manager, pid, idx);
             }
             *self.current_song_id.lock().await = None;
             queue_manager.set_current_index(None);
@@ -281,8 +281,7 @@ impl QueueNavigator {
         if let Some(ref pid) = prev_id
             && let Some(old_idx) = transition.old_index
         {
-            self.record_and_consume(&mut queue_manager, pid, old_idx)
-                .await;
+            self.record_and_consume(&mut queue_manager, pid, old_idx);
         }
 
         *self.current_song_id.lock().await = Some(song.id.clone());

@@ -334,7 +334,7 @@ impl CustomAudioEngine {
             } // renderer guard dropped before .await
             self.state = PlaybackState::Playing;
             // Restart the decoding loop so new buffers are produced after resume
-            self.start_decoding_loop().await;
+            self.start_decoding_loop();
             // Restart render thread
             self.start_render_thread();
             return Ok(());
@@ -464,7 +464,7 @@ impl CustomAudioEngine {
 
         // Start decoding loop
         trace!(" AudioEngine: starting decoding loop");
-        self.start_decoding_loop().await;
+        self.start_decoding_loop();
         trace!(" AudioEngine: decoding loop started");
 
         // Start dedicated render thread (decoupled from iced event loop)
@@ -476,7 +476,7 @@ impl CustomAudioEngine {
     }
 
     /// Start the decoding loop in a background task
-    async fn start_decoding_loop(&mut self) {
+    fn start_decoding_loop(&mut self) {
         let decoder = self.decoder.clone();
         let renderer = self.renderer.clone();
         let live_bitrate = self.live_bitrate.clone();
@@ -982,7 +982,7 @@ impl CustomAudioEngine {
         if !decoder_initialized {
             debug!("🔍 [SEEK] Aborting - decoder not initialized");
             // Restart the decoding loop (start_decoding_loop handles generation)
-            self.start_decoding_loop().await;
+            self.start_decoding_loop();
             return;
         }
 
@@ -1063,7 +1063,7 @@ impl CustomAudioEngine {
 
         // Restart the decoding loop
         trace!("🔍 [SEEK] Restarting decoding loop");
-        self.start_decoding_loop().await;
+        self.start_decoding_loop();
 
         // Clear seeking flag
         trace!("🔍 [SEEK] Clearing seeking flag");
@@ -1338,7 +1338,7 @@ impl CustomAudioEngine {
         self.crossfade_phase = CrossfadePhase::Active;
 
         // Start a decode loop for the incoming track
-        self.start_crossfade_decode_loop().await;
+        self.start_crossfade_decode_loop();
 
         true
     }
@@ -1416,7 +1416,7 @@ impl CustomAudioEngine {
             // intentional transition, not a user-initiated skip.
 
             // Restart the primary decode loop with the new decoder
-            self.start_decoding_loop().await;
+            self.start_decoding_loop();
         }
 
         self.crossfade_phase = CrossfadePhase::Idle;
@@ -1429,7 +1429,7 @@ impl CustomAudioEngine {
 
     /// Start a decode loop for the incoming crossfade track.
     /// Similar to `start_decoding_loop` but writes to the renderer's crossfade buffer queue.
-    async fn start_crossfade_decode_loop(&mut self) {
+    fn start_crossfade_decode_loop(&mut self) {
         let decoder = self.crossfade_decoder.clone();
         let renderer = self.renderer.clone();
         let crossfade_duration_shared = self.crossfade_duration_shared.clone();
@@ -1582,7 +1582,7 @@ impl CustomAudioEngine {
 
         if should_start {
             // Restart decoding loop for the new track
-            self.start_decoding_loop().await;
+            self.start_decoding_loop();
             // Restart render thread for new track
             self.start_render_thread();
         }

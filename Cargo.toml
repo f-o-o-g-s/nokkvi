@@ -40,6 +40,12 @@ match_wildcard_for_single_variants = "deny"
 # are only invoked when the Option is actually None.
 or_fun_call = "deny"
 
+# Cargo-cult async — `async fn` declarations whose body never `.await`s
+# are zero-value ceremony that callers pay for in needless `.await` noise
+# (and the AI-failure-mode this lint targets: marking helpers async without
+# needing to). Every async fn must justify itself with at least one .await.
+unused_async = "deny"
+
 [package]
 name = "nokkvi"
 version = "0.3.9"
