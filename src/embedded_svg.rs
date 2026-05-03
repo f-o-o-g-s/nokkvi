@@ -67,8 +67,17 @@ pub(crate) fn themed_logo_svg() -> String {
         .replace("#458588", &color_to_hex(theme::accent()))
 }
 
-/// Return the themed logo SVG with a tilt rotation and optional horizontal
-/// mirror baked into its path data, used by the boat overlay.
+/// Stroke width baked into the boat SVG, in viewBox units. The logo's
+/// viewBox is 80 wide; with the boat displayed at ~27 px tall, 1 viewBox
+/// unit ≈ 0.34 display pixels, so a stroke-width of 3 lands at ~1 display
+/// pixel — comparable to `LinesConfig::outline_thickness`'s default of
+/// `1.0` px on the wave line. SVG strokes are centered on the path, so
+/// the visible stroke extends ~0.5 px on each side of the boat's edge.
+const BOAT_STROKE_WIDTH_SVG_UNITS: u32 = 3;
+
+/// Return the themed logo SVG with a tilt rotation, optional horizontal
+/// mirror, and a theme-matched stroke baked into its path data — used by
+/// the boat overlay.
 ///
 /// The logo's viewBox is `60 89.5 80 80` (x range `[60, 140]`, y range
 /// `[89.5, 169.5]`, center `(100, 129.5)`). All paths get wrapped in a
@@ -93,29 +102,47 @@ pub(crate) fn themed_logo_svg() -> String {
 /// boat first and then rotating the bitmap. The latter aliases visibly
 /// at small sprite sizes; the former produces a clean fresh rasterization
 /// at every quantized angle.
+///
+/// The stroke uses the active visualizer theme's `border_color` and
+/// `border_opacity` (same source as the lines-mode wave outline, so
+/// it's thematically consistent), with `stroke-linejoin="round"` so the
+/// joins between the boat's compound subpaths don't spike. Theme changes
+/// are picked up automatically via the cache invalidation in
+/// `BoatState::clear_if_theme_changed` — both the fill and stroke colors
+/// are read from `crate::theme`, which bumps `theme_generation()` on any
+/// reload or light/dark flip.
 pub(crate) fn themed_boat_svg(angle_radians: f32, mirrored: bool) -> String {
+    let viz_colors = crate::theme::get_visualizer_colors();
+    let stroke_attrs = format!(
+        "stroke=\"{stroke}\" stroke-width=\"{width}\" stroke-opacity=\"{opacity}\" stroke-linejoin=\"round\" ",
+        stroke = viz_colors.border_color,
+        width = BOAT_STROKE_WIDTH_SVG_UNITS,
+        opacity = viz_colors.border_opacity,
+    );
+    let mut body = themed_logo_svg().replace("<path fill=", &format!("<path {stroke_attrs}fill="));
+
     let degrees = angle_radians.to_degrees();
     let nonzero_rotation = degrees.abs() > 1e-4;
-    if !nonzero_rotation && !mirrored {
-        return themed_logo_svg();
-    }
-    let mut transform = String::new();
-    if nonzero_rotation {
-        transform.push_str(&format!("rotate({degrees} 100 129.5)"));
-    }
-    if mirrored {
-        if !transform.is_empty() {
-            transform.push(' ');
+    if nonzero_rotation || mirrored {
+        let mut transform = String::new();
+        if nonzero_rotation {
+            transform.push_str(&format!("rotate({degrees} 100 129.5)"));
         }
-        transform.push_str("translate(200 0) scale(-1 1)");
+        if mirrored {
+            if !transform.is_empty() {
+                transform.push(' ');
+            }
+            transform.push_str("translate(200 0) scale(-1 1)");
+        }
+        body = body
+            .replacen(
+                "xmlns=\"http://www.w3.org/2000/svg\">",
+                &format!("xmlns=\"http://www.w3.org/2000/svg\"><g transform=\"{transform}\">"),
+                1,
+            )
+            .replacen("</svg>", "</g></svg>", 1);
     }
-    themed_logo_svg()
-        .replacen(
-            "xmlns=\"http://www.w3.org/2000/svg\">",
-            &format!("xmlns=\"http://www.w3.org/2000/svg\"><g transform=\"{transform}\">"),
-            1,
-        )
-        .replacen("</svg>", "</g></svg>", 1)
+    body
 }
 
 #[cfg(test)]
@@ -226,13 +253,40 @@ mod tests {
         );
     }
 
-    /// `themed_boat_svg(0.0, false)` must short-circuit to `themed_logo_svg()`
-    /// — there's no point wrapping the paths in a `<g transform="">` no-op
-    /// that resvg has to parse + apply per frame, and the byte equality also
-    /// means the iced bitmap cache shares one entry with the unrotated logo.
+    /// Every boat SVG variant must carry the active theme's visualizer
+    /// border color and opacity as a stroke on each path, alongside the
+    /// existing fill — that's how the boat outline reads as part of the
+    /// same theme as the lines-mode wave outline. Sourced from
+    /// `crate::theme::get_visualizer_colors()`, which is the same
+    /// accessor `widgets/visualizer/mod.rs` uses for the wave's border.
     #[test]
-    fn themed_boat_svg_no_op_matches_themed_logo_svg() {
-        assert_eq!(themed_boat_svg(0.0, false), themed_logo_svg());
+    fn themed_boat_svg_bakes_theme_stroke_into_every_path() {
+        let viz = crate::theme::get_visualizer_colors();
+        let out = themed_boat_svg(0.0, false);
+        assert!(
+            out.contains(&format!("stroke=\"{}\"", viz.border_color)),
+            "stroke color must come from the active theme's border_color \
+             (expected stroke=\"{}\", got {out:?})",
+            viz.border_color,
+        );
+        assert!(
+            out.contains(&format!("stroke-opacity=\"{}\"", viz.border_opacity)),
+            "stroke opacity must come from the active theme's border_opacity \
+             (expected stroke-opacity=\"{}\", got {out:?})",
+            viz.border_opacity,
+        );
+        assert!(
+            out.contains("stroke-linejoin=\"round\""),
+            "stroke must use rounded joins so the boat's compound subpath \
+             corners don't spike (got {out:?})"
+        );
+        // The logo has two `<path fill=...>` elements (visualizer-bars
+        // sub-graphic + boat hull). Both must receive the stroke.
+        let stroked_paths = out.matches("stroke=\"").count();
+        assert_eq!(
+            stroked_paths, 2,
+            "every <path> must carry a stroke (got {stroked_paths})"
+        );
     }
 
     /// A non-zero rotation must inject a `rotate(...)` SVG transform
