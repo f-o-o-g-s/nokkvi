@@ -47,7 +47,10 @@
 //! so per-frame construction would churn GPU cache keys — the same class of
 //! bug as the `image::Handle::from_path` gotcha called out in `CLAUDE.md`.
 
-use std::time::{Duration, Instant};
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 
 use iced::{
     Element, Event, Length, Point, Rectangle, Size, Vector,
@@ -138,6 +141,42 @@ const Y_SPRING_K: f32 = 80.0;
 /// produces a small bob before settling.
 const Y_DAMPING: f32 = 12.0;
 
+/// Conversion from sampled wave slope to target tilt angle (radians per
+/// unit slope). A typical wave gradient is in the `0.5..2.0` range, so a
+/// gain of `0.18` lands the boat around `5°..20°` of lean before the cap.
+const TILT_GAIN: f32 = 0.18;
+
+/// Hard cap on `|tilt|`. ~17° feels like the boat is genuinely committed
+/// to the wave without flipping over. Scales the visible tilt range
+/// independently of how aggressive `TILT_GAIN` is.
+const MAX_TILT: f32 = 0.30;
+
+/// Spring constant for `tilt` tracking `target_tilt`. Higher = boat snaps
+/// to the slope; lower = the lean lags so visible motion is buoyant. Tuned
+/// alongside `TILT_DAMPING` for an underdamped feel on quick wave changes.
+const TILT_SPRING_K: f32 = 60.0;
+
+/// Damping on `tilt_velocity`. With `TILT_SPRING_K = 60` and damping `10`
+/// the damping ratio ζ ≈ 0.65 — same family as Y dynamics: slightly
+/// underdamped, a sharp wave produces a small overshoot before settling.
+const TILT_DAMPING: f32 = 10.0;
+
+/// Tilt quantization step in degrees. The boat SVG is re-baked with the
+/// rotation embedded in its path data each time the quantized angle
+/// changes (option A in the SVG-aliasing investigation), so finer
+/// quantization gives smoother visible motion at the cost of more cache
+/// entries. With `MAX_TILT ≈ 17°` and 0.5° steps that's ~70 entries per
+/// facing × theme combo, which fits comfortably in iced's bitmap atlas.
+const TILT_QUANT_DEG: f32 = 0.5;
+
+/// Minimum `|x_velocity|` (ratio/sec) needed to flip the boat's facing.
+/// Below this, `facing` holds whatever it was, so the brief sign-flips
+/// during charge handover (slope reasserting itself when a charge ends)
+/// don't make the sail jitter back and forth. ~0.03 ratio/sec is roughly
+/// half the captain's terminal velocity, well above the drive oscillator's
+/// near-zero average drift.
+const FLIP_THRESHOLD: f32 = 0.03;
+
 /// Per-frame UI-thread state for the surfing boat.
 ///
 /// - `phase` is in `[0, 1)` and ticks linearly with time. Drives the slow
@@ -146,6 +185,13 @@ const Y_DAMPING: f32 = 12.0;
 ///   integrated from the velocity fields below.
 /// - `x_velocity` / `y_velocity` are persisted across ticks so the physics
 ///   has memory (inertia → floating feel).
+/// - `tilt` is the boat's current rotation in radians (positive =
+///   counterclockwise = bow up when the boat is sailing rightward up a
+///   slope). `tilt_velocity` is the spring-damper rate; together they
+///   ease the boat into the slope so it doesn't snap to spectrum jitter.
+/// - `facing` is `+1.0` (sailing right, sail catches wind from the left)
+///   or `-1.0` (sailing left, sail mirrored). Updated with hysteresis
+///   from `x_velocity` — see `FLIP_THRESHOLD`.
 /// - `visible` is derived per tick by the handler — it is *not* the user's
 ///   on/off toggle (that lives in `LinesConfig.boat`).
 /// - `last_tick` is consumed to compute `dt` between ticks; cleared when the
@@ -160,13 +206,21 @@ const Y_DAMPING: f32 = 12.0;
 ///   direction. Lazily seeded on first tick (0 → seed constant) so `Default`
 ///   stays clean and the schedule starts on first activation, not on
 ///   construction.
-/// - `handle` caches the themed logo SVG so we don't rebuild it every frame.
-/// - `handle_generation` is the `theme::theme_generation()` snapshot taken at
-///   the time `handle` was last built. When the global counter advances —
-///   any path that runs `theme::reload_theme()` or `theme::set_light_mode()`
-///   — the cache is recognized as stale and rebuilt on the next render. This
-///   replaces the previous explicit-invalidation approach, which had to be
-///   wired up at every theme-change call site and missed preset switches.
+/// - `tilt_handles` caches the themed boat SVG keyed by quantized tilt
+///   angle and facing — see `cache_handle_for`. Because the rotation is
+///   baked into the SVG path data (rather than rotating an
+///   already-rasterized bitmap in the wgpu shader), we want one handle
+///   per visibly-distinct orientation. With a 0.5° quantization step and
+///   a ±17° tilt range, that's ~140 entries at the worst case — ~3 KB
+///   each in iced's bitmap atlas, so ~400 KB worst-case footprint per
+///   theme.
+/// - `handle_generation` is the `theme::theme_generation()` snapshot taken
+///   at the time the cache was last populated. When the global counter
+///   advances — any path that runs `theme::reload_theme()` or
+///   `theme::set_light_mode()` — the cache is recognized as stale and
+///   cleared on the next access. This replaces the previous explicit-
+///   invalidation approach, which had to be wired up at every
+///   theme-change call site and missed preset switches.
 #[derive(Debug, Clone, Default)]
 pub struct BoatState {
     pub phase: f32,
@@ -174,36 +228,78 @@ pub struct BoatState {
     pub y_ratio: f32,
     pub x_velocity: f32,
     pub y_velocity: f32,
+    pub tilt: f32,
+    pub tilt_velocity: f32,
+    pub facing: f32,
     pub visible: bool,
     pub last_tick: Option<Instant>,
     pub secs_until_next_charge: f32,
     pub charge_remaining_secs: f32,
     pub charge_direction: f32,
     pub rng_state: u32,
-    pub handle: Option<svg::Handle>,
+    pub tilt_handles: HashMap<(i16, bool), svg::Handle>,
     pub handle_generation: u64,
 }
 
+/// Snap a tilt angle (radians) to its quantized cache index. The index is
+/// `round(tilt_degrees / TILT_QUANT_DEG)` clamped into `i16`, which
+/// trivially fits the `±MAX_TILT ≈ ±17°` range with 0.5° steps.
+fn quantize_tilt(tilt: f32) -> i16 {
+    let degrees = tilt.to_degrees();
+    (degrees / TILT_QUANT_DEG).round() as i16
+}
+
+/// Inverse of `quantize_tilt`: convert a cache index back to the radians
+/// the SVG was baked at.
+fn dequantize_tilt(idx: i16) -> f32 {
+    (idx as f32 * TILT_QUANT_DEG).to_radians()
+}
+
 impl BoatState {
-    /// Lazily build (and cache) the themed boat SVG handle, rebuilding when
-    /// the active theme has changed since the cache was populated.
-    ///
-    /// The cache key is `theme::theme_generation()` — bumped by
-    /// `reload_theme()` and `set_light_mode()`. Snapshotting it here means
-    /// we don't need to remember to invalidate at every theme-change call
-    /// site (preset switch, color picker edit, restore-defaults, etc.).
-    pub(crate) fn ensure_handle(&mut self) -> svg::Handle {
+    /// Drop all cached SVG handles if the active theme has advanced since
+    /// they were built. Called by `cache_handle_for` before any insert, so
+    /// the cache stays consistent with `theme::theme_generation()` without
+    /// needing explicit invalidation hooks at every theme-change site
+    /// (preset switch, color picker edit, restore-defaults, etc.).
+    fn clear_if_theme_changed(&mut self) {
         let current_gen = crate::theme::theme_generation();
-        if let Some(h) = &self.handle
-            && self.handle_generation == current_gen
-        {
+        if self.handle_generation != current_gen {
+            self.tilt_handles.clear();
+            self.handle_generation = current_gen;
+        }
+    }
+
+    /// Build (and cache) the boat SVG handle for the given tilt + facing,
+    /// returning a clone of the cached handle. The tilt is quantized to
+    /// `TILT_QUANT_DEG`-degree steps so the cache stays bounded; the
+    /// requested radians are dequantized back before being baked into the
+    /// SVG, so the handle's rotation is exactly what the cache key
+    /// represents (no per-frame drift).
+    pub(crate) fn cache_handle_for(&mut self, tilt: f32, facing: f32) -> svg::Handle {
+        self.clear_if_theme_changed();
+        let key = (quantize_tilt(tilt), facing < 0.0);
+        if let Some(h) = self.tilt_handles.get(&key) {
             return h.clone();
         }
-        let bytes = crate::embedded_svg::themed_logo_svg().into_bytes();
+        let bytes =
+            crate::embedded_svg::themed_boat_svg(dequantize_tilt(key.0), key.1).into_bytes();
         let h = svg::Handle::from_memory(bytes);
-        self.handle = Some(h.clone());
-        self.handle_generation = current_gen;
+        self.tilt_handles.insert(key, h.clone());
         h
+    }
+
+    /// Look up a cached handle for the given tilt + facing without
+    /// mutating state. Returns `None` when the theme has advanced past
+    /// the cache, when nothing is cached yet for this orientation, or
+    /// when the boat hasn't ticked since `Default`. The render path uses
+    /// this and falls back to an inline rebuild on miss.
+    pub(crate) fn cached_handle_for(&self, tilt: f32, facing: f32) -> Option<svg::Handle> {
+        let current_gen = crate::theme::theme_generation();
+        if self.handle_generation != current_gen {
+            return None;
+        }
+        let key = (quantize_tilt(tilt), facing < 0.0);
+        self.tilt_handles.get(&key).cloned()
     }
 }
 
@@ -231,6 +327,20 @@ impl BoatState {
 /// `ay = (target_y - y) · Y_SPRING_K - y_velocity · Y_DAMPING`. Y dynamics
 /// are unchanged during a charge — the boat still bobs over the waves it
 /// crosses.
+///
+/// `tilt` is a spring-damper tracking `target_tilt = (slope · TILT_GAIN)
+/// .clamp(±MAX_TILT)` (`a_tilt = (target - tilt) · TILT_SPRING_K -
+/// tilt_velocity · TILT_DAMPING`). The sign is facing-independent: a
+/// positive slope produces positive (counterclockwise) rotation, which
+/// raises whichever end of the sprite is currently displayed on the right
+/// — that's the bow when sailing rightward, the stern when sailing
+/// leftward (mirrored sprite). So "going uphill = bow up" works for both
+/// facings without needing to multiply by `facing` here.
+///
+/// `facing` flips between `+1` and `-1` based on `sign(x_velocity)`, but
+/// only when `|x_velocity| > FLIP_THRESHOLD` so the sail doesn't twitch
+/// during the brief velocity-zero crossings when a charge ends and the
+/// slope force flips it back.
 ///
 /// `x_ratio` is wrapped via `rem_euclid(1.0)` so the boat sails freely off
 /// either edge and reappears on the opposite side with momentum intact;
@@ -295,6 +405,45 @@ pub(crate) fn step(state: &mut BoatState, dt: Duration, bars: &[f64], angular: b
     let ax = drive + slope_force + damping_force + charge_force;
     state.x_velocity = (state.x_velocity + ax * dt_secs).clamp(-MAX_X_V, MAX_X_V);
     state.x_ratio = (state.x_ratio + state.x_velocity * dt_secs).rem_euclid(1.0);
+
+    // Tilt: spring-damper toward `-slope * gain`, clamped. Reuses `slope`
+    // computed above (raw, before the during-charge suppression — tilt
+    // tracks the wave the boat is on, not the captain's intent). The
+    // sign is negated because the angle ultimately feeds an SVG
+    // `rotate(deg, cx, cy)` transform, and SVG rotation is clockwise for
+    // positive degrees in screen coords (Y-down); a positive slope means
+    // uphill to the right, which we want the boat to lean *into* (right
+    // side up = counterclockwise = negative angle). The hard `MAX_TILT`
+    // clamp after the spring step is the same pattern as y_ratio uses:
+    // the underdamped spring would otherwise overshoot the target by a
+    // few percent on sharp transients, which would visually exceed the
+    // cap.
+    let target_tilt = (-slope * TILT_GAIN).clamp(-MAX_TILT, MAX_TILT);
+    let a_tilt = (target_tilt - state.tilt) * TILT_SPRING_K - state.tilt_velocity * TILT_DAMPING;
+    state.tilt_velocity += a_tilt * dt_secs;
+    state.tilt += state.tilt_velocity * dt_secs;
+    if state.tilt > MAX_TILT {
+        state.tilt = MAX_TILT;
+        if state.tilt_velocity > 0.0 {
+            state.tilt_velocity = 0.0;
+        }
+    } else if state.tilt < -MAX_TILT {
+        state.tilt = -MAX_TILT;
+        if state.tilt_velocity < 0.0 {
+            state.tilt_velocity = 0.0;
+        }
+    }
+
+    // Facing: only update on supra-threshold velocity in a sign different
+    // from the current facing. Initial facing of `0.0` (the `Default`)
+    // also gets snapped to whichever side has any meaningful motion on
+    // the first qualifying tick.
+    if state.x_velocity.abs() > FLIP_THRESHOLD {
+        let want = state.x_velocity.signum();
+        if state.facing == 0.0 || state.facing != want {
+            state.facing = want;
+        }
+    }
 
     let target_y = sample_line_height(bars, state.x_ratio, angular);
     let ay = (target_y - state.y_ratio) * Y_SPRING_K - state.y_velocity * Y_DAMPING;
@@ -626,6 +775,16 @@ where
 /// is leaving — that's the toroidal wrap the physics rely on, drawn so the
 /// seam isn't visible.
 ///
+/// Tilt and facing are read straight from `state`. The boat picks its
+/// cached SVG handle via `cached_handle_for(tilt, facing)`, which returns
+/// a handle whose path data has the rotation (and optional horizontal
+/// mirror) *baked into the SVG itself*. resvg then rasterizes the
+/// already-rotated paths at the boat's display resolution — much cleaner
+/// than letting iced rasterize an upright sprite and then rotate the
+/// bitmap in the wgpu shader, which aliases visibly at small sprite
+/// sizes. The tilt is quantized to `TILT_QUANT_DEG`-degree steps so the
+/// underlying cache stays bounded.
+///
 /// `OverflowPin` (defined just above) is used instead of `iced::widget::pin`
 /// because the stock `Pin` shrinks `Length::Fixed`-sized content as the
 /// position approaches the parent's far edge (silently squashing the
@@ -642,32 +801,30 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
     area_width: f32,
     area_height: f32,
 ) -> Element<'a, M> {
-    // The handler is responsible for calling `ensure_handle()` on the first
-    // visible tick, so by the time we render the handle is cached. The
-    // fallback here keeps the contract robust if a render somehow precedes
-    // the tick OR if the theme just changed and the next BoatTick hasn't
-    // refreshed the cache yet — in that case the cached handle's generation
-    // won't match `theme::theme_generation()` and we rebuild inline rather
-    // than ship a stale-color frame.
-    let current_gen = crate::theme::theme_generation();
-    let cached = state
-        .handle
-        .clone()
-        .filter(|_| state.handle_generation == current_gen);
-    let handle = cached.unwrap_or_else(|| {
-        svg::Handle::from_memory(crate::embedded_svg::themed_logo_svg().into_bytes())
-    });
+    // The handler is responsible for calling `cache_handle_for(tilt,
+    // facing)` on the first visible tick, so by the time we render the
+    // matching handle is cached. The fallback rebuilds inline if a render
+    // somehow precedes the tick OR if the theme just changed and the next
+    // BoatTick hasn't refreshed the cache yet — in either case we ship a
+    // fresh-rotation, fresh-color frame rather than a stale one.
+    let handle = state
+        .cached_handle_for(state.tilt, state.facing)
+        .unwrap_or_else(|| {
+            let bytes =
+                crate::embedded_svg::themed_boat_svg(state.tilt, state.facing < 0.0).into_bytes();
+            svg::Handle::from_memory(bytes)
+        });
     let boat_h = (area_height * BOAT_HEIGHT_FRACTION).max(8.0);
     let boat_w = boat_h * BOAT_ASPECT_RATIO;
 
     // Pixel offsets within the visualizer area. The waterline is
     // `(1 - y_ratio) * area_height` from the top (visualizer draws upward
     // from the bottom). `BOAT_SINK_FRACTION` of the boat's height sits below
-    // the waterline; the rest sits above. `Pin` accepts negative `target_x`
-    // directly, so we don't clamp it here — the outer clip handles the
-    // off-screen portion. `target_y` keeps its `.max(0.0)` because Y has no
-    // wrap (wave height is bounded), so the overlap-above case really is
-    // just "nudge against the top edge".
+    // the waterline; the rest sits above. `OverflowPin` accepts negative
+    // `target_x` directly, so we don't clamp it here — the outer clip
+    // handles the off-screen portion. `target_y` keeps its `.max(0.0)`
+    // because Y has no wrap (wave height is bounded), so the overlap-above
+    // case really is just "nudge against the top edge".
     let cx = state.x_ratio * area_width;
     let target_x = cx - boat_w * 0.5;
     let line_y = area_height * (1.0 - state.y_ratio);
@@ -720,24 +877,24 @@ mod tests {
     static THEME_MUTATION_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
     /// Theme-change behavior: when the active palette changes, the next
-    /// `ensure_handle()` must return a handle whose bytes (and therefore
-    /// `id()`) reflect the new colors. Without a generation check this is a
-    /// stale-cache bug — the user changes themes and the boat keeps showing
-    /// the old palette until restart.
+    /// `cache_handle_for` call must produce a handle whose bytes (and
+    /// therefore `id()`) reflect the new colors. Without the generation
+    /// check this is a stale-cache bug — the user changes themes and the
+    /// boat keeps showing the old palette until restart.
     #[test]
-    fn ensure_handle_rebuilds_when_active_theme_changes() {
+    fn cache_handle_for_rebuilds_when_active_theme_changes() {
         let _guard = THEME_MUTATION_LOCK.lock();
 
         let mut state = BoatState::default();
         let initial_mode = crate::theme::is_light_mode();
 
-        let id_before = state.ensure_handle().id();
+        let id_before = state.cache_handle_for(0.0, 1.0).id();
 
-        // Flip light/dark — `themed_logo_svg()` now substitutes different
+        // Flip light/dark — `themed_boat_svg()` now substitutes different
         // colors, so a freshly-built handle has different bytes (and id).
         crate::theme::set_light_mode(!initial_mode);
 
-        let id_after = state.ensure_handle().id();
+        let id_after = state.cache_handle_for(0.0, 1.0).id();
 
         // Restore before any assertion fires so a panic still leaves global
         // state clean for other tests in this group.
@@ -745,26 +902,112 @@ mod tests {
 
         assert_ne!(
             id_before, id_after,
-            "ensure_handle must rebuild after a theme/mode change \
-             (got id_before = id_after = {id_before}, meaning stale cache)"
+            "handle must rebuild after a theme/mode change (got \
+             id_before = id_after = {id_before}, meaning stale cache)"
         );
     }
 
-    /// No theme change: the cache should be reused. Guards the optimization
-    /// the whole point of the cache exists for — without it we'd churn
-    /// GPU cache keys on every frame (the gotcha called out in this module's
-    /// doc comment).
+    /// No theme change: the cache should be reused for the same quantized
+    /// orientation. Guards the optimization the cache exists for —
+    /// without it we'd re-run resvg on every frame at the same angle.
     #[test]
-    fn ensure_handle_returns_cached_when_theme_unchanged() {
+    fn cache_handle_for_returns_cached_when_theme_unchanged() {
         let _guard = THEME_MUTATION_LOCK.lock();
 
         let mut state = BoatState::default();
-        let id1 = state.ensure_handle().id();
-        let id2 = state.ensure_handle().id();
+        let id1 = state.cache_handle_for(0.0, 1.0).id();
+        let id2 = state.cache_handle_for(0.0, 1.0).id();
         assert_eq!(
             id1, id2,
-            "two consecutive ensure_handle calls without a theme change \
-             must return the same cached handle"
+            "two consecutive cache_handle_for calls at the same orientation \
+             without a theme change must return the same cached handle"
+        );
+    }
+
+    /// Different (tilt, facing) combinations must produce different
+    /// handles — this is the whole reason for the cache key — and the
+    /// cache must hold all of them simultaneously.
+    #[test]
+    fn cache_handle_for_returns_distinct_handles_per_orientation() {
+        let _guard = THEME_MUTATION_LOCK.lock();
+
+        let mut state = BoatState::default();
+        let upright_right = state.cache_handle_for(0.0, 1.0).id();
+        let upright_left = state.cache_handle_for(0.0, -1.0).id();
+        let tilted_right = state.cache_handle_for(0.15, 1.0).id();
+        let tilted_left = state.cache_handle_for(0.15, -1.0).id();
+
+        assert_ne!(
+            upright_right, upright_left,
+            "facing flip must produce a distinct handle (mirror transform \
+             changes the SVG bytes)"
+        );
+        assert_ne!(
+            upright_right, tilted_right,
+            "non-zero tilt must produce a distinct handle (rotation \
+             transform changes the SVG bytes)"
+        );
+        assert_ne!(
+            tilted_right, tilted_left,
+            "tilt + facing combinations must each get their own handle"
+        );
+
+        // The cache should hold all four entries.
+        assert_eq!(
+            state.tilt_handles.len(),
+            4,
+            "every distinct orientation must occupy its own cache slot \
+             (got {} entries)",
+            state.tilt_handles.len()
+        );
+    }
+
+    /// Tilt quantization: two angles within the same `TILT_QUANT_DEG`
+    /// bucket must hit the same cache slot, so spring-damper jitter
+    /// doesn't churn the cache.
+    #[test]
+    fn cache_handle_for_quantizes_close_angles_to_one_entry() {
+        let _guard = THEME_MUTATION_LOCK.lock();
+
+        let mut state = BoatState::default();
+        // 0.001 rad ≈ 0.057°, well below the 0.5° quantization step.
+        let id_a = state.cache_handle_for(0.000, 1.0).id();
+        let id_b = state.cache_handle_for(0.001, 1.0).id();
+        assert_eq!(
+            id_a, id_b,
+            "angles within one quantization step must collapse to the \
+             same cache entry"
+        );
+        assert_eq!(
+            state.tilt_handles.len(),
+            1,
+            "only one cache entry should have been allocated"
+        );
+    }
+
+    /// Read-only `cached_handle_for` must report None when nothing is
+    /// cached, and report the handle from `cache_handle_for` afterward.
+    /// Render path relies on this: it falls back to a fresh inline build
+    /// on miss, so the boat still draws correctly during the very first
+    /// frame before the handler primes the cache.
+    #[test]
+    fn cached_handle_for_misses_then_hits_after_caching() {
+        let _guard = THEME_MUTATION_LOCK.lock();
+
+        let mut state = BoatState::default();
+        assert!(
+            state.cached_handle_for(0.0, 1.0).is_none(),
+            "empty cache must miss for any orientation"
+        );
+        let primed = state.cache_handle_for(0.0, 1.0).id();
+        let looked_up = state
+            .cached_handle_for(0.0, 1.0)
+            .expect("cache primed by cache_handle_for")
+            .id();
+        assert_eq!(
+            primed, looked_up,
+            "cached_handle_for must return the same handle that \
+             cache_handle_for just inserted"
         );
     }
 
@@ -1072,6 +1315,167 @@ mod tests {
             (state.y_ratio - 0.8).abs() < 0.05,
             "y_ratio must settle near the target after enough time (got {y})",
             y = state.y_ratio
+        );
+    }
+
+    // --- tilt physics ----------------------------------------------------------
+
+    #[test]
+    fn step_tilt_decays_to_zero_on_flat_waves() {
+        // Flat bars → slope = 0 → target_tilt = 0. Starting from a
+        // non-zero tilt, the spring-damper should pull it toward zero
+        // within a couple of seconds.
+        let bars = vec![0.5; 16];
+        let mut state = BoatState {
+            x_ratio: 0.5,
+            tilt: 0.25,
+            tilt_velocity: 0.0,
+            // Suppress charges so they don't perturb anything.
+            rng_state: 0x12345,
+            secs_until_next_charge: 1e6,
+            ..Default::default()
+        };
+        let final_state = run(state.clone(), 200, Duration::from_millis(10), &bars);
+        assert!(
+            final_state.tilt.abs() < 0.02,
+            "tilt must decay near zero on a flat waveform (got {})",
+            final_state.tilt
+        );
+        // Single tick from rest: tilt moves but doesn't overshoot the
+        // target — checks the underdamped tuning isn't *too* underdamped.
+        step(&mut state, Duration::from_millis(16), &bars, false);
+        assert!(
+            state.tilt < 0.25,
+            "tilt must have started decaying after one tick (got {})",
+            state.tilt
+        );
+    }
+
+    #[test]
+    fn step_tilt_converges_to_signed_value_on_steady_slope() {
+        // Linear ramp upward to the right (positive slope everywhere).
+        // After enough ticks, tilt should converge to a *negative* value
+        // (counterclockwise in iced's CW-positive convention = bow up
+        // when sailing rightward up the ramp), bounded by MAX_TILT.
+        let bars: Vec<f64> = (0..16).map(|i| i as f64 / 15.0).collect();
+        let initial = BoatState {
+            x_ratio: 0.5,
+            // Pin the boat in place so the slope sample stays steady.
+            x_velocity: 0.0,
+            rng_state: 0x12345,
+            secs_until_next_charge: 1e6,
+            ..Default::default()
+        };
+        let final_state = run(initial, 400, Duration::from_millis(10), &bars);
+        assert!(
+            final_state.tilt < 0.0,
+            "positive slope must produce negative tilt — bow-up = CCW = \
+             negative in iced's CW-positive rotation (got {})",
+            final_state.tilt
+        );
+        assert!(
+            final_state.tilt.abs() <= MAX_TILT + 1e-3,
+            "tilt magnitude must respect MAX_TILT cap (got {}, cap {})",
+            final_state.tilt,
+            MAX_TILT
+        );
+    }
+
+    #[test]
+    fn step_tilt_stays_bounded_under_extreme_slope() {
+        // Very steep oscillating waveform: slope sample swings to large
+        // values in both directions. Tilt must never exceed the cap in
+        // either direction across many simulated ticks.
+        let bars: Vec<f64> = (0..32)
+            .map(|i| ((i as f64 * 0.7).sin() * 0.5 + 0.5).clamp(0.0, 1.0))
+            .collect();
+        let initial = BoatState {
+            x_ratio: 0.5,
+            x_velocity: 0.05,
+            rng_state: 0x12345,
+            secs_until_next_charge: 1e6,
+            ..Default::default()
+        };
+        let mut state = initial;
+        let dt = Duration::from_millis(10);
+        for _ in 0..2000 {
+            step(&mut state, dt, &bars, false);
+            assert!(
+                state.tilt.abs() <= MAX_TILT + 1e-3,
+                "tilt must always stay within ±MAX_TILT (got {})",
+                state.tilt
+            );
+        }
+    }
+
+    // --- facing flip ----------------------------------------------------------
+
+    #[test]
+    fn step_facing_holds_below_threshold() {
+        // Flat bars + tiny rightward velocity below FLIP_THRESHOLD: the
+        // captain's coin-flip charge can perturb x_velocity, so suppress
+        // charges. With pre-set facing = -1, the boat must NOT flip even
+        // though sign(x_velocity) > 0, because |v| stays sub-threshold.
+        let bars = vec![0.5; 16];
+        let mut state = BoatState {
+            x_ratio: 0.5,
+            x_velocity: FLIP_THRESHOLD * 0.5, // half-threshold rightward
+            facing: -1.0,
+            rng_state: 0x12345,
+            secs_until_next_charge: 1e6,
+            ..Default::default()
+        };
+        // One short tick — drive force at phase=0 is zero, damping shrinks
+        // velocity, no charge, no slope. Velocity stays below threshold.
+        step(&mut state, Duration::from_millis(16), &bars, false);
+        assert_eq!(
+            state.facing, -1.0,
+            "facing must hold at -1 when |x_velocity| < FLIP_THRESHOLD \
+             (x_velocity = {}, FLIP_THRESHOLD = {})",
+            state.x_velocity, FLIP_THRESHOLD
+        );
+    }
+
+    #[test]
+    fn step_facing_flips_above_threshold() {
+        // Same setup but with velocity well above the threshold — the
+        // boat should snap facing to match the velocity sign on the next
+        // tick.
+        let bars = vec![0.5; 16];
+        let mut state = BoatState {
+            x_ratio: 0.5,
+            x_velocity: 0.10, // well above FLIP_THRESHOLD
+            facing: -1.0,
+            rng_state: 0x12345,
+            secs_until_next_charge: 1e6,
+            ..Default::default()
+        };
+        step(&mut state, Duration::from_millis(16), &bars, false);
+        assert_eq!(
+            state.facing, 1.0,
+            "facing must flip to +1 when x_velocity > FLIP_THRESHOLD \
+             (x_velocity = {})",
+            state.x_velocity
+        );
+    }
+
+    #[test]
+    fn step_facing_initializes_from_zero_on_first_qualifying_tick() {
+        // Default facing is 0.0. First tick with supra-threshold velocity
+        // must snap facing to the velocity sign.
+        let bars = vec![0.5; 16];
+        let mut state = BoatState {
+            x_ratio: 0.5,
+            x_velocity: -0.10,
+            // facing left default of 0.0
+            rng_state: 0x12345,
+            secs_until_next_charge: 1e6,
+            ..Default::default()
+        };
+        step(&mut state, Duration::from_millis(16), &bars, false);
+        assert_eq!(
+            state.facing, -1.0,
+            "facing must initialize to sign(x_velocity) on first qualifying tick"
         );
     }
 

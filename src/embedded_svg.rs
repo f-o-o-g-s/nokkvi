@@ -67,6 +67,57 @@ pub(crate) fn themed_logo_svg() -> String {
         .replace("#458588", &color_to_hex(theme::accent()))
 }
 
+/// Return the themed logo SVG with a tilt rotation and optional horizontal
+/// mirror baked into its path data, used by the boat overlay.
+///
+/// The logo's viewBox is `60 89.5 80 80` (x range `[60, 140]`, y range
+/// `[89.5, 169.5]`, center `(100, 129.5)`). All paths get wrapped in a
+/// single `<g transform="...">` whose composition is rotate-then-mirror
+/// (rightmost SVG transform applies first to coordinates):
+///
+/// - `scale(-1, 1)` then `translate(200, 0)` reflects every point `x` to
+///   `200 - x`, mapping viewBox edges `60 ↔ 140` and leaving the center
+///   fixed — that's the horizontal flip used when sailing leftward so
+///   the sail catches wind from behind regardless of travel direction.
+/// - `rotate(deg, 100, 129.5)` then rotates the (possibly mirrored)
+///   geometry around the viewBox center by `deg` degrees. SVG rotate is
+///   clockwise for positive degrees in screen coords (Y down), matching
+///   iced's rotation convention — so the tilt sign computed in
+///   `widgets/boat.rs::step()` (negative for "bow up uphill rightward")
+///   carries through unchanged after `f32::to_degrees()`.
+///
+/// The whole point of baking the rotation into the SVG (rather than
+/// passing it to `iced::widget::Svg::rotation()`) is to stay in vector
+/// land for as long as possible: resvg rasterizes the *already-rotated*
+/// paths at the boat's display size, instead of rasterizing the upright
+/// boat first and then rotating the bitmap. The latter aliases visibly
+/// at small sprite sizes; the former produces a clean fresh rasterization
+/// at every quantized angle.
+pub(crate) fn themed_boat_svg(angle_radians: f32, mirrored: bool) -> String {
+    let degrees = angle_radians.to_degrees();
+    let nonzero_rotation = degrees.abs() > 1e-4;
+    if !nonzero_rotation && !mirrored {
+        return themed_logo_svg();
+    }
+    let mut transform = String::new();
+    if nonzero_rotation {
+        transform.push_str(&format!("rotate({degrees} 100 129.5)"));
+    }
+    if mirrored {
+        if !transform.is_empty() {
+            transform.push(' ');
+        }
+        transform.push_str("translate(200 0) scale(-1 1)");
+    }
+    themed_logo_svg()
+        .replacen(
+            "xmlns=\"http://www.w3.org/2000/svg\">",
+            &format!("xmlns=\"http://www.w3.org/2000/svg\"><g transform=\"{transform}\">"),
+            1,
+        )
+        .replacen("</svg>", "</g></svg>", 1)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
@@ -172,6 +223,56 @@ mod tests {
         assert_eq!(
             on_disk, known,
             "generated KNOWN_PATHS drifted from assets/icons/ contents — rebuild"
+        );
+    }
+
+    /// `themed_boat_svg(0.0, false)` must short-circuit to `themed_logo_svg()`
+    /// — there's no point wrapping the paths in a `<g transform="">` no-op
+    /// that resvg has to parse + apply per frame, and the byte equality also
+    /// means the iced bitmap cache shares one entry with the unrotated logo.
+    #[test]
+    fn themed_boat_svg_no_op_matches_themed_logo_svg() {
+        assert_eq!(themed_boat_svg(0.0, false), themed_logo_svg());
+    }
+
+    /// A non-zero rotation must inject a `rotate(...)` SVG transform
+    /// around the viewBox center `(100, 129.5)`. We don't pin the exact
+    /// degrees string (formatting differs between e.g. `5` and `5.0`) —
+    /// we just confirm the keyword and the pivot are present.
+    #[test]
+    fn themed_boat_svg_bakes_rotation_around_viewbox_center() {
+        let out = themed_boat_svg(0.1, false);
+        assert!(
+            out.contains("<g transform=\""),
+            "rotated boat must wrap content in a <g transform=...>"
+        );
+        assert!(
+            out.contains("rotate("),
+            "non-zero angle must use rotate(...) transform"
+        );
+        assert!(
+            out.contains("100 129.5"),
+            "rotation pivot must be the viewBox center"
+        );
+        assert!(
+            out.ends_with("</g></svg>\n") || out.ends_with("</g></svg>"),
+            "wrapping group must close before the </svg>"
+        );
+    }
+
+    /// `mirrored = true` with zero rotation must produce just the mirror
+    /// transform (no rotate). Confirms the path used by leftward-sailing
+    /// boats while exactly upright.
+    #[test]
+    fn themed_boat_svg_mirror_only_omits_rotate() {
+        let out = themed_boat_svg(0.0, true);
+        assert!(
+            out.contains("translate(200 0) scale(-1 1)"),
+            "mirrored boat must apply the horizontal-flip transform"
+        );
+        assert!(
+            !out.contains("rotate("),
+            "zero rotation must not emit rotate(...)"
         );
     }
 

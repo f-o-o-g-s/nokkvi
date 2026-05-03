@@ -47,7 +47,11 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
     if app.playback.paused {
         app.boat.visible = true;
         app.boat.last_tick = None;
-        let _ = app.boat.ensure_handle();
+        // Keep the current orientation's handle warm while paused so the
+        // frozen frame doesn't re-rasterize on resume.
+        let tilt = app.boat.tilt;
+        let facing = app.boat.facing;
+        let _ = app.boat.cache_handle_for(tilt, facing);
         return Task::none();
     }
 
@@ -73,9 +77,15 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
     let bars = boat::effective_bars(app.playback.playing, &raw_bars);
     boat::step(&mut app.boat, dt, bars, angular);
     app.boat.visible = true;
-    // Pre-build (and cache) the SVG handle so the immutable `view()` render
-    // path can clone it cheaply. Lazy by design — first visible tick only.
-    let _ = app.boat.ensure_handle();
+    // Pre-build (and cache) the SVG handle for the current quantized
+    // tilt + facing so the immutable `view()` render path can clone it
+    // cheaply. The cache is keyed by `(quantized_tilt_index, mirrored)`,
+    // so each visibly-distinct orientation pays a one-time resvg cost
+    // and every subsequent tick at that same quantized angle is a free
+    // hashmap lookup.
+    let tilt = app.boat.tilt;
+    let facing = app.boat.facing;
+    let _ = app.boat.cache_handle_for(tilt, facing);
 
     Task::none()
 }
