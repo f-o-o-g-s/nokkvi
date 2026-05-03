@@ -6,10 +6,15 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Genre column toggle on Queue and Songs views — stacks under the album when both are visible, takes over the album slot at album-size font when album is hidden, and auto-shows when the list is sorted by Genre.
+
 ### Changed
+
+- Clicking an album, artist, or genre name link in any list now navigates to that item's view and expands it inline at the top, instead of leaving you on a one-row filtered list with the contents hidden behind a follow-up Shift+Enter.
 
 ### Fixed
 
+- Thumbnails in large genre and artist expansion rows no longer leave a stray slot or two permanently blank — failed cover-art fetches now retry up to three times instead of caching the empty result.
 - Clicking an artist name link in the queue or songs view now loads the large artist image and dominant color in the artwork column on arrival — previously it stayed blank until you scrolled to a different artist and back. Same fix for the genre 3×3 collage column when clicking a genre name link.
 
 ### Removed
