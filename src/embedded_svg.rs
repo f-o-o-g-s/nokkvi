@@ -69,11 +69,12 @@ pub(crate) fn themed_logo_svg() -> String {
 
 /// Stroke width baked into the boat SVG, in viewBox units. The logo's
 /// viewBox is 80 wide; with the boat displayed at ~27 px tall, 1 viewBox
-/// unit ≈ 0.34 display pixels, so a stroke-width of 3 lands at ~1 display
-/// pixel — comparable to `LinesConfig::outline_thickness`'s default of
-/// `1.0` px on the wave line. SVG strokes are centered on the path, so
-/// the visible stroke extends ~0.5 px on each side of the boat's edge.
-const BOAT_STROKE_WIDTH_SVG_UNITS: u32 = 3;
+/// unit ≈ 0.34 display pixels, so a stroke-width of 1.5 lands at ~0.5
+/// display pixels — half the wave line's `LinesConfig::outline_thickness`
+/// default of `1.0` px, which read as too heavy on the small boat sprite.
+/// SVG strokes are centered on the path, so the visible stroke extends
+/// ~0.25 px on each side of the boat's edge.
+const BOAT_STROKE_WIDTH_SVG_UNITS: f32 = 1.5;
 
 /// Return the themed logo SVG with a tilt rotation, optional horizontal
 /// mirror, and a theme-matched stroke baked into its path data — used by
