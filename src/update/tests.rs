@@ -4530,6 +4530,49 @@ mod boat_tests {
     }
 
     #[test]
+    fn boat_handler_runs_physics_when_not_playing() {
+        // The not-playing path must KEEP ticking physics — the boat
+        // smoothly relaxes to the bottom under the silence-override
+        // rather than freezing. This guards against a regression where
+        // someone copies the pause-fix's early-return and accidentally
+        // freezes the boat the moment a track ends.
+        //
+        // The y_ratio decay itself can't be observed at this surface
+        // (test_app's `visualizer` is None, so raw bars are already
+        // empty regardless of the gate). The widget-level integration
+        // test in widgets/boat.rs covers the gate's regression directly.
+        let mut app = test_app();
+        enable_boat_in_config(&app, true);
+        app.engine.visualization_mode = VisualizationMode::Lines;
+        app.playback.playing = false;
+        app.playback.paused = false;
+
+        // Seed phase + x_velocity so the integration step produces
+        // observable motion when it actually runs.
+        app.boat.phase = 0.25;
+        app.boat.x_velocity = 0.05;
+
+        let t0 = Instant::now();
+        let _ = app.update(Message::BoatTick(t0));
+        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
+
+        assert!(
+            app.boat.visible,
+            "boat must remain visible while not-playing"
+        );
+        assert!(
+            app.boat.last_tick.is_some(),
+            "last_tick must update — physics still ticks when not-playing"
+        );
+        assert!(
+            app.boat.phase > 0.25,
+            "phase must advance during not-playing ticks (got {}); the silence \
+             override drops bars but does NOT skip step() the way pause does",
+            app.boat.phase
+        );
+    }
+
+    #[test]
     fn boat_resumes_motion_after_unpause() {
         // The pause freeze must not be sticky — once `paused` flips back to
         // false, the next ticks integrate physics again.

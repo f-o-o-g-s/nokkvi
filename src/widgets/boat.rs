@@ -347,7 +347,31 @@ pub(crate) fn step(state: &mut BoatState, dt: Duration, bars: &[f64], angular: b
     let target_y = sample_line_height(bars, state.x_ratio, angular);
     let ay = (target_y - state.y_ratio) * Y_SPRING_K - state.y_velocity * Y_DAMPING;
     state.y_velocity += ay * dt_secs;
-    state.y_ratio = (state.y_ratio + state.y_velocity * dt_secs).clamp(0.0, 1.0);
+    state.y_ratio += state.y_velocity * dt_secs;
+    if state.y_ratio <= 0.0 {
+        state.y_ratio = 0.0;
+        if state.y_velocity < 0.0 {
+            state.y_velocity = 0.0;
+        }
+    } else if state.y_ratio >= 1.0 {
+        state.y_ratio = 1.0;
+        if state.y_velocity > 0.0 {
+            state.y_velocity = 0.0;
+        }
+    }
+}
+
+/// Pick the bars buffer the boat physics should sample for this tick.
+///
+/// When audio isn't actively producing samples (`playing == false`) we
+/// return an empty slice so `sample_line_height` reports 0 and the spring
+/// pulls `y_ratio` toward the bottom. The visualizer's `display.bars`
+/// buffer can stay frozen at non-zero values during silence — the FFT
+/// thread's gravity-falloff path only runs when a full sample chunk is
+/// available — and we don't want the boat tracking those stale values
+/// while the user perceives "no waves".
+pub(crate) fn effective_bars(playing: bool, raw_bars: &[f64]) -> &[f64] {
+    if playing { raw_bars } else { &[] }
 }
 
 /// Sample the visible waveform height at a given normalized horizontal
@@ -355,7 +379,12 @@ pub(crate) fn step(state: &mut BoatState, dt: Duration, bars: &[f64], angular: b
 ///
 /// In `smooth` (Catmull-Rom) mode this matches the curve the shader draws.
 /// In `angular` mode it's a straight-line lerp between the two flanking
-/// control points. Returns 0.0 for empty / 1-element buffers.
+/// control points. Returns 0.0 for empty / 1-element buffers. Output is
+/// clamped to `[0, 1]` to match the lines shader's `clamp(value, 0, 1)`
+/// at `shaders/lines.wgsl:202` — Catmull-Rom can extrapolate outside the
+/// control-point range when neighbours are sharply peaked, and a transient
+/// spectrum-engine overshoot above 1.0 (auto-sensitivity hasn't yet
+/// adapted) would otherwise push the boat above the rendered wave.
 pub(crate) fn sample_line_height(bars: &[f64], x_ratio: f32, angular: bool) -> f32 {
     if bars.is_empty() {
         return 0.0;
@@ -373,7 +402,7 @@ pub(crate) fn sample_line_height(bars: &[f64], x_ratio: f32, angular: bool) -> f
     if angular {
         let p1 = bars[segment];
         let p2 = bars[segment + 1];
-        return (p1 + (p2 - p1) * t) as f32;
+        return ((p1 + (p2 - p1) * t) as f32).clamp(0.0, 1.0);
     }
 
     // Edge-clamped Catmull-Rom: the four flanking control points around `pos`.
@@ -382,7 +411,7 @@ pub(crate) fn sample_line_height(bars: &[f64], x_ratio: f32, angular: bool) -> f
     let p2 = bars[(segment + 1).min(n - 1)];
     let p3 = bars[(segment + 2).min(n - 1)];
 
-    catmull_rom_1d(p0, p1, p2, p3, t) as f32
+    (catmull_rom_1d(p0, p1, p2, p3, t) as f32).clamp(0.0, 1.0)
 }
 
 /// Tiny xorshift PRNG used to schedule captain charges and pick directions.
@@ -963,5 +992,162 @@ mod tests {
         assert_eq!(sample_line_height(&[], 0.5, false), 0.0);
         assert_eq!(sample_line_height(&[0.42], 0.5, false), 0.42);
         assert_eq!(sample_line_height(&[0.42], 0.5, true), 0.42);
+    }
+
+    #[test]
+    fn sample_line_height_clamps_overshoot_to_unit_range() {
+        // Mirror the lines shader's `clamp(value, 0.0, 1.0)`. Catmull-Rom
+        // extrapolates outside the control-point range when neighbours
+        // are sharply peaked — without an explicit clamp the boat would
+        // ride above where the wave can actually be drawn.
+        let bars = vec![0.0, 1.0, 1.0, 0.0];
+        let v = sample_line_height(&bars, 0.5, false);
+        assert!(
+            (0.0..=1.0).contains(&v),
+            "Catmull-Rom overshoot above 1.0 must clamp to 1.0 (got {v})"
+        );
+
+        // Negative extrapolation past low control points must also clamp
+        // to 0 (matches the shader at the bottom edge).
+        let bars = vec![1.0, 0.0, 0.0, 1.0];
+        let v = sample_line_height(&bars, 0.5, false);
+        assert!(
+            (0.0..=1.0).contains(&v),
+            "Catmull-Rom undershoot below 0.0 must clamp to 0.0 (got {v})"
+        );
+
+        // Raw bar overshoot above 1.0 (e.g., spectrum-engine transient
+        // before auto-sensitivity adapts) must also clamp.
+        let bars = vec![1.5; 8];
+        let v = sample_line_height(&bars, 0.5, false);
+        assert!(v <= 1.0, "raw bar value > 1.0 must clamp to 1.0 (got {v})");
+    }
+
+    // --- effective_bars (playing-state gate) -----------------------------------
+
+    #[test]
+    fn effective_bars_passes_raw_through_when_playing() {
+        let raw = [0.4, 0.7, 0.9];
+        let got = effective_bars(true, &raw);
+        assert_eq!(
+            got,
+            &raw[..],
+            "playing must hand the raw bar buffer to the boat unchanged"
+        );
+    }
+
+    #[test]
+    fn effective_bars_drops_raw_when_not_playing() {
+        // Silence override: the visualizer's bar buffer can stay frozen
+        // at non-zero values when audio isn't producing samples (the FFT
+        // thread's gravity-falloff path requires a full sample chunk to
+        // run). Returning empty bars makes sample_line_height report 0,
+        // which lets the spring pull the boat to the bottom instead of
+        // tracking stale data.
+        let raw = [0.4, 0.7, 0.9];
+        let got = effective_bars(false, &raw);
+        assert!(
+            got.is_empty(),
+            "not-playing must produce empty bars regardless of input \
+             (got len {})",
+            got.len()
+        );
+    }
+
+    #[test]
+    fn step_with_silence_override_decays_y_ratio_to_bottom() {
+        // End-to-end of the silence path: bars are frozen high (last
+        // loud chunk before audio stopped), playback is not playing →
+        // effective_bars() returns empty → step() targets y_ratio=0 →
+        // the spring decays toward 0. Without the gate the boat would
+        // settle near 0.8 (the frozen bar height).
+        let raw = vec![0.8; 32];
+        let mut state = BoatState {
+            y_ratio: 0.9,
+            ..Default::default()
+        };
+        let dt = Duration::from_millis(16);
+
+        for _ in 0..120 {
+            // 120 ticks = ~2 s
+            let bars = effective_bars(false, &raw);
+            step(&mut state, dt, bars, false);
+        }
+
+        assert!(
+            state.y_ratio < 0.05,
+            "boat must sink to ~0 within 2 s when not-playing despite frozen-high \
+             raw bars (y_ratio = {})",
+            state.y_ratio
+        );
+    }
+
+    // --- y-velocity edge clamping ---------------------------------------------
+
+    #[test]
+    fn step_zeros_outward_y_velocity_at_top_clamp() {
+        // Mirror the x-axis edge-clamp pattern: when y_ratio hits 1.0
+        // with positive (outward) velocity, that velocity must be zeroed
+        // so the boat can drop the moment the target lowers — instead
+        // of holding upward momentum and sticking at the top until
+        // damping eats it.
+        let bars = vec![1.0; 16];
+        let mut state = BoatState {
+            y_ratio: 0.99,
+            y_velocity: 1.0,
+            ..Default::default()
+        };
+
+        step(&mut state, Duration::from_millis(16), &bars, false);
+
+        assert_eq!(state.y_ratio, 1.0, "y_ratio must clamp at top");
+        assert!(
+            state.y_velocity <= 0.0,
+            "outward (positive) y_velocity must be zeroed once y_ratio \
+             reaches 1.0 (got {})",
+            state.y_velocity
+        );
+    }
+
+    #[test]
+    fn step_zeros_outward_y_velocity_at_bottom_clamp() {
+        let bars = vec![0.0; 16];
+        let mut state = BoatState {
+            y_ratio: 0.01,
+            y_velocity: -1.0,
+            ..Default::default()
+        };
+
+        step(&mut state, Duration::from_millis(16), &bars, false);
+
+        assert_eq!(state.y_ratio, 0.0, "y_ratio must clamp at bottom");
+        assert!(
+            state.y_velocity >= 0.0,
+            "outward (negative) y_velocity must be zeroed once y_ratio \
+             reaches 0.0 (got {})",
+            state.y_velocity
+        );
+    }
+
+    #[test]
+    fn step_preserves_inward_y_velocity_at_clamp() {
+        // The edge-clamp zeroing must only apply to *outward* velocity —
+        // inward velocity (pulling the boat back into [0,1]) must pass
+        // through, otherwise the spring loses its restoring kick.
+        let bars = vec![0.5; 16];
+        let mut state = BoatState {
+            y_ratio: 1.0,
+            y_velocity: -0.5, // inward (downward at top)
+            ..Default::default()
+        };
+
+        step(&mut state, Duration::from_millis(16), &bars, false);
+
+        assert!(
+            state.y_velocity < 0.0,
+            "inward (negative) y_velocity at top must be preserved — \
+             only outward velocity is zeroed (got {})",
+            state.y_velocity
+        );
     }
 }

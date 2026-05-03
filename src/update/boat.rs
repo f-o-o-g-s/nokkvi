@@ -60,12 +60,18 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
     // Sample the live waveform. When the visualizer hasn't been mounted yet
     // (pre-login, or visualizer disabled mid-flight) `app.visualizer` is
     // None — feed an empty slice so y_ratio settles toward 0.
-    let bars = if let Some(viz) = &app.visualizer {
+    let raw_bars = if let Some(viz) = &app.visualizer {
         viz.current_bars()
     } else {
         Vec::new()
     };
-    boat::step(&mut app.boat, dt, &bars, angular);
+    // Silence override: when audio isn't actively producing samples, drop
+    // the raw bars to empty so the boat sinks to the bottom rather than
+    // tracking the visualizer's frozen-high `display.bars` (the FFT
+    // thread's gravity-falloff path only runs when a full sample chunk is
+    // available, so the buffer can stay elevated for the entire silence).
+    let bars = boat::effective_bars(app.playback.playing, &raw_bars);
+    boat::step(&mut app.boat, dt, bars, angular);
     app.boat.visible = true;
     // Pre-build (and cache) the SVG handle so the immutable `view()` render
     // path can clone it cheaply. Lazy by design — first visible tick only.
