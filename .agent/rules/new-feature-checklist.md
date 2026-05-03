@@ -19,7 +19,7 @@ description: End-to-end checklist when building new features. Covers cross-view 
 - [ ] Paginated loads use `PaginatedFetch::from_common()` (needs_fetch gating built in)
 - [ ] Artwork prefetch dispatched from `update/window.rs` if the view shows art
 - [ ] Slot list wrapped in `wrap_with_scroll_indicator()`
-- [ ] Multi-selection: `handle_slot_click()` + `evaluate_context_menu()` for batch resolution
+- [ ] Multi-selection: `handle_slot_click()` + `evaluate_context_menu()` for batch resolution. For new slot-list views, wire the optional checkbox column via `wrap_with_select_column()` / `compose_header_with_select()` and add a `{view}_show_select` toggle
 
 ## Cross-Cutting
 - [ ] **Cross-view sync**: star/rating/play-count changes propagate across views

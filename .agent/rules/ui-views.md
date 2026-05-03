@@ -19,7 +19,7 @@ Pages on `Nokkvi`: Login, Albums, Artists, Genres, Playlists, Queue, Songs, Radi
 
 Shared by every slot-list view: search query, scroll position, focus index. Visible slot count is computed dynamically from window height (always odd, capped at `MAX_SLOT_COUNT = 29`); window resizes propagate via `update/window.rs`. Prefetch radius = `slot_count + MIN_PREFETCH_BUFFER` (3 by default).
 
-**Multi-selection** (Ctrl+click / Shift+click): `selected_indices: HashSet`, `anchor_index` for range. `handle_slot_click()` handles modifier-aware selection. `clear_multi_selection()` resets. `evaluate_context_menu()` resolves batch targets for right-click menus.
+**Multi-selection** (Ctrl+click / Shift+click / per-row checkbox / select-all): `selected_indices: HashSet`, `anchor_index` for range. `handle_slot_click()` handles modifier-aware selection; `handle_selection_toggle(offset, total)` and `handle_select_all_toggle(total)` drive the optional checkbox column. `select_all_state(total)` returns the tri-state (`None` / `Some` / `All`) the header bar uses. `clear_multi_selection()` resets. `evaluate_context_menu()` resolves batch targets for right-click menus.
 
 ## Navigation & Interaction
 
@@ -36,9 +36,15 @@ Shared by every slot-list view: search query, scroll position, focus index. Visi
 
 Generic `ExpansionState<C>` + `SlotListEntry<P, C>`. When active, sort/search may target the expansion — check `expansion.is_expanded()`. Center-entry resolution is centralized in `views/expansion.rs`. Shift+Enter on Artists/Genres collapses the outer expansion.
 
-## Column Visibility (Albums / Artists / Songs / Queue)
+**Find-and-expand** (clicking an inline album/artist/genre link): the chain runs through a single `Nokkvi.pending_expand: Option<state::PendingExpand>` (variants `Album { album_id, for_browsing_pane }`, `Artist { ... }`, `Genre { ... }`). Per-view `try_resolve_pending_expand_*` consume it once the target appears in its library buffer; `PendingTopPin` re-pins the highlight after the matching `set_children` lands. `for_browsing_pane = true` routes the final `FocusAndExpand` into the browsing-panel tab instead of the top pane. `PendingExpand::host_view()` drives the cancel-on-navigation check in `handle_switch_view`.
 
-`view_header.rs` exposes a `checkbox_dropdown` of column toggles per view. The dropdown is a controlled overlay — opening it dispatches `Message::SetOpenMenu(Some(OpenMenu::CheckboxDropdown { view, trigger_bounds }))`. Column flags persist on `PlayerSettings` (`{view}_show_*` fields). Stars columns are always rendered with responsive hide rather than per-mode toggling.
+## Column Visibility (Albums / Artists / Genres / Playlists / Queue / Songs / Similar)
+
+`view_header.rs` exposes a `checkbox_dropdown` of column toggles per view. The dropdown is a controlled overlay — opening it dispatches `Message::SetOpenMenu(Some(OpenMenu::CheckboxDropdown { view, trigger_bounds }))`. Similar lives only inside the browsing panel and lacks a `View::Similar` variant, so it uses its own `OpenMenu::CheckboxDropdownSimilar { trigger_bounds }`. Column flags persist on `PlayerSettings` (`{view}_show_*` fields, including `_select`, `_index`, `_thumbnail`, `_album`, `_genre`, `_stars`, `_default_playlist`, etc.). Stars use responsive hide rather than per-mode toggling.
+
+**Multi-select column**: opt-in `{view}_show_select` flag adds a per-row checkbox + tri-state "select all" header bar to every slot-list view. Helpers `wrap_with_select_column()` and `compose_header_with_select()` (`widgets/slot_list.rs`) keep per-view plumbing minimal; the checkbox state mirrors `selected_indices` regardless of how membership was set.
+
+**Genre column** (Queue / Songs): stacks under the album when both columns are visible, takes over the album slot at album-size font when album is hidden. Auto-shows when sort = Genre (mirrors how the plays column auto-shows on MostPlayed sort).
 
 ## Context Menus & Toasts
 

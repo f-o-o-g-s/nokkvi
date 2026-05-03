@@ -33,7 +33,7 @@ Catmull-Rom spline (`smooth`) or straight segments (`angular`). 6-instance rende
 
 Gradient modes: `breathing`, `static`, `position`, `height`, `gradient`. Reuses bar gradient palette.
 
-Key settings: `point_count` (8–512), `line_thickness`, `outline_thickness`, `fill_opacity`, `mirror`, `style`.
+Key settings: `point_count` (8–512), `line_thickness`, `outline_thickness`, `fill_opacity`, `mirror`, `style`, `boat` (toggle the surfing-boat overlay; `widgets/boat.rs`, CPU-only, themed via `embedded_svg::themed_boat_svg()` using `border_color`).
 
 ## Configuration
 

@@ -37,7 +37,7 @@ Steps to add a new slot-list-based view, in order.
 
 10. Context menu: wrap rows in `context_menu()` with `LibraryContextEntry` / `QueueContextEntry`. Resolve batch targets via `evaluate_context_menu()` and `get_batch_target_indices()` / `get_queue_target_indices()`. Build payloads via `expansion::build_batch_payload()`.
 
-11. Multi-selection: route clicks through `handle_slot_click()`; clear with `clear_multi_selection()` after every batch op.
+11. Multi-selection: route clicks through `handle_slot_click()`; clear with `clear_multi_selection()` after every batch op. Add an opt-in checkbox column via `wrap_with_select_column()` + `compose_header_with_select()` (`widgets/slot_list.rs`) and a `{view}_show_select` flag in `PlayerSettings` so the columns dropdown can toggle it.
 
 12. Toasts: `toast_success()` / `toast_error()` / `toast_warn()` / `toast_info()`.
 

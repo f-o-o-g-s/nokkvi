@@ -12,7 +12,8 @@ trigger: always_on
 
 ## Rust Conventions
 
-- **Production error handling**: use `?`, `unwrap_or_default()`, or explicit match — **no `.unwrap()`** in production paths.
+- **Production error handling**: use `?`, `unwrap_or_default()`, or explicit match — **no `.unwrap()`** in production paths. Enforced by the `unwrap_used = "deny"` workspace lint; tests opt out via `#![cfg_attr(test, allow(clippy::unwrap_used, clippy::print_stderr))]` at each crate root.
+- **No `println!` / `dbg!` / `todo!()` / `unimplemented!()` / `mem::forget`**: all `deny` at workspace level. Use `tracing` macros for output; prefer `*_or_else` over `*_or` for non-trivial fallbacks (`or_fun_call = "deny"`); `async fn` without `.await` is rejected (`unused_async = "deny"`); enum matches must enumerate every variant rather than `_ =>` (`match_wildcard_for_single_variants = "deny"`). Don't paper over with broader allows — fix at the call site.
 - **Cloning**: prefer references / `Cow<>` over explicit `.clone()`. Search-filter helpers return `Cow::Borrowed` when no query is active.
 - **Logging**: structured `tracing` macros — `error!` (failures), `warn!` (recoverable), `info!` (milestones), `debug!` (flow), `trace!` (per-frame / per-packet / startup enumeration). Stderr is quiet by default; the file log at `~/.local/state/nokkvi/nokkvi.log` stays verbose.
 - **Threading**: prefer `Arc` + atomics over `Mutex<T>` for simple shared state. Theme color reads use `ArcSwap` (lock-free).

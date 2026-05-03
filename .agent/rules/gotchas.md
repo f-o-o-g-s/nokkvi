@@ -8,6 +8,9 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 ## Queue & Indices
 
 - **Filtered indices**: when search is active, slot-list indices are relative to `filtered_songs` — always map through the filtered view before queue mutations.
+- **Queue remove uses song IDs, not indices**: `QueueAction::RemoveFromQueue` / `PlayNext` carry `Vec<String>` of song IDs. `track_number` cannot be used to map filtered display index → backend queue index because it drifts after any optimistic in-place mutation or client-side sort. Convert at the view boundary; everything downstream goes through `QueueManager::remove_song_by_id` / `remove_songs_by_ids`.
+- **Stale multi-selection across refreshes**: `handle_queue_loaded` and `apply_queue_sort` clear `selected_indices` + `anchor_index`. Without this, indices kept pointing at whatever rows occupied those positions after a consume-mode auto-advance / external refresh — different songs.
+- **Three sources of truth for "what's playing"**: `QueueManager.current_index`, `QueueNavigator.current_song_id`, and the engine's active source. The remove path uses `decide_removal_aftermath` (pure) → `PlaybackController::apply_removal_aftermath` to keep all three in sync; never bypass it. History append is intentionally skipped on remove (the song was deleted, not skipped past).
 - **Queue peek/transition**: track transitions go `peek_next_song()` → `transition_to_queued()`. Use `set_current_index()` ONLY for non-transition updates (play-from-here).
 - **Progressive queue generation**: `ProgressiveQueueAppendPage` chains check `progressive_queue_generation` before appending — stale chains silently stop.
 - **Play button cold-start**: uses `get_effective_center_index` (selected track), not `queue_songs.first()`.
@@ -74,7 +77,10 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 
 - **CenterOnPlaying (Shift+C)**: call `handle_set_offset()` directly. Dispatching `SlotListMessage::SetOffset` routes through the click-to-highlight path.
 - **Expansion sort state**: when expansion is active, sort/search may target the expansion. Check `expansion.is_expanded()`. Shift+Enter on Artists/Genres collapses the outer expansion.
+- **Pending find-and-expand chain**: at most one `Nokkvi.pending_expand` runs at a time. Starting a new chain (or any user-driven view change matching `PendingExpand::host_view()`) supersedes the previous one. `PendingTopPin` re-pins the highlight after `set_children` lands.
+- **Expansion artwork retry**: artwork fetches dispatched from inline expansions retry on transient failure and reject empty-bytes responses, so a flaky first request doesn't leave a permanent empty cell.
 - **Playlist edit guard**: `guard_play_action()` at the top of every play handler.
 - **Chrome height**: must account for every visible header bar. Update constants in `widgets/slot_list.rs` when chrome changes.
 - **Cross-pane drag center index**: snapshotted on drag activation (5 px threshold) — decoupled from subsequent state changes.
 - **Stale progress-track segments**: when a metadata toggle changes, `overlay_segments` must be rebuilt and a `Tick` dispatched to force re-render.
+- **Workspace lints are deny-level ship blockers**: `unwrap_used`, `print_stdout`, `print_stderr`, `dbg_macro`, `mem_forget`, `todo`, `unimplemented`, `or_fun_call`, `unused_async`, `match_wildcard_for_single_variants` all `deny` in `[workspace.lints.clippy]`. Tests opt out via `#![cfg_attr(test, allow(...))]` at each crate root; intentional CLI prints use targeted `#[allow]`. Don't paper over with broader allows — fix at the call site.

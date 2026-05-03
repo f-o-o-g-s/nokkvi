@@ -20,7 +20,7 @@ AppService (orchestrator)
 │   `similar_api()` / `songs_api()` from the auth gateway
 ├── Artwork — server-only, no client-side persistent cache
 │   ├── `AlbumsService::artwork_client: Arc<reqwest::Client>` (bare reqwest)
-│   ├── `AlbumsService::fetch_album_artwork(art_id, size, updated_at)` — single fetch path; every call hits Navidrome
+│   ├── `AlbumsService::fetch_album_artwork(art_id, size, updated_at)` — single fetch path; every call hits Navidrome. Empty-bytes responses return an error (so retries can recover instead of caching a blank handle)
 │   └── Session-scoped Handle reuse via UI's `album_art` (LRU 512) + `large_artwork` (LRU 200) maps
 ├── SSE — `data/src/services/navidrome_events.rs` parses events; the
 │   subscription itself runs in the UI crate (`src/services/navidrome_sse.rs`)
@@ -57,7 +57,7 @@ AppService (orchestrator)
 |-------|----------|---------|
 | **redb** (`~/.local/state/nokkvi/app.redb`) | `services/state_storage.rs` | Generic key/value (`save` / `load` JSON, `save_binary` / `load_binary` bincode). Stores queue order + song pool, `user_settings`, JWT, Subsonic credential |
 | **TOML config** (`~/.config/nokkvi/config.toml`, `config.debug.toml` in debug builds) | `services/toml_settings_io.rs` | Hot-reloadable via `toml_edit`. `verbose_config` writes all defaults |
-| **Theme files** (`~/.config/nokkvi/themes/`) | `services/theme_loader.rs` | Named `.toml`. **22 built-in** (compiled via `include_str!`, seeded on first run; `everforest` is the first-run default). Discovery, load/save, restore-builtin |
+| **Theme files** (`~/.config/nokkvi/themes/`) | `services/theme_loader.rs` | Named `.toml`. **21 built-in** (compiled via `include_str!`, seeded on first run; `everforest` is the first-run default). Discovery, load/save, restore-builtin |
 | **Artwork** | (no disk cache) | Server-only. Session-scoped Handle reuse in UI maps |
 | **Config writer** | `src/config_writer.rs` (UI crate) | Typed `ConfigKey { AppScalar, AppArrayEntry, Theme, ThemeArrayEntry }`. Per-key TOML updates, atomic via temp + rename |
 | **Credentials** | `data/src/credentials.rs` | `server_url` / `username` in `config.toml`; JWT + Subsonic credential in redb. **No password on disk** — JWT auto-refreshes via `X-ND-Authorization`; expired JWT (48h default) drops to the login screen |
