@@ -2659,6 +2659,180 @@ fn albums_page_navigate_and_expand_artist_returns_action() {
 }
 
 // ============================================================================
+// Highlight pin (selected_offset stays on the focused item after expansion)
+// ============================================================================
+
+#[test]
+fn try_resolve_album_sets_top_pin_when_target_found() {
+    let mut app = test_app();
+    app.pending_expand_album_target = Some(crate::state::PendingExpandTarget {
+        album_id: "a2".to_string(),
+        for_browsing_pane: false,
+    });
+    app.library.albums.set_from_vec(vec![
+        make_album("a1", "Album One", "Artist"),
+        make_album("a2", "Album Two", "Artist"),
+        make_album("a3", "Album Three", "Artist"),
+    ]);
+
+    let _ = app.try_resolve_pending_expand_album();
+
+    match app.pending_top_pin.as_ref() {
+        Some(crate::state::PendingTopPin::Album(id)) => assert_eq!(id, "a2"),
+        other => panic!("expected pending_top_pin = Album(a2), got {other:?}"),
+    }
+}
+
+#[test]
+fn try_resolve_artist_sets_top_pin_when_target_found() {
+    let mut app = test_app();
+    app.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+        artist_id: "ar2".to_string(),
+        for_browsing_pane: false,
+    });
+    app.library.artists.set_from_vec(vec![
+        make_artist("ar1", "Artist One"),
+        make_artist("ar2", "Artist Two"),
+        make_artist("ar3", "Artist Three"),
+    ]);
+
+    let _ = app.try_resolve_pending_expand_artist();
+
+    match app.pending_top_pin.as_ref() {
+        Some(crate::state::PendingTopPin::Artist(id)) => assert_eq!(id, "ar2"),
+        other => panic!("expected pending_top_pin = Artist(ar2), got {other:?}"),
+    }
+}
+
+#[test]
+fn tracks_loaded_re_pins_selected_offset_for_album() {
+    let mut app = test_app();
+    app.library.albums.set_from_vec(vec![
+        make_album("a1", "Album One", "Artist"),
+        make_album("a2", "Album Two", "Artist"),
+        make_album("a3", "Album Three", "Artist"),
+    ]);
+    // Simulate the post-find state: highlight on target, pin set.
+    app.albums_page
+        .common
+        .slot_list
+        .set_selected(1, app.library.albums.len());
+    app.pending_top_pin = Some(crate::state::PendingTopPin::Album("a2".to_string()));
+
+    // TracksLoaded fires for the pinned album — set_children inside the
+    // page update clears selected_offset, then the handler should re-pin.
+    let _ = app.handle_albums(crate::views::AlbumsMessage::TracksLoaded(
+        "a2".to_string(),
+        vec![make_song("s1", "Song", "Artist")],
+    ));
+
+    assert_eq!(
+        app.albums_page.common.slot_list.selected_offset,
+        Some(1),
+        "highlight must follow the target album after expansion completes"
+    );
+    assert!(
+        app.pending_top_pin.is_none(),
+        "pin should be consumed once applied"
+    );
+}
+
+#[test]
+fn albums_loaded_re_pins_selected_offset_for_artist() {
+    let mut app = test_app();
+    app.library.artists.set_from_vec(vec![
+        make_artist("ar1", "Artist One"),
+        make_artist("ar2", "Artist Two"),
+        make_artist("ar3", "Artist Three"),
+    ]);
+    app.artists_page
+        .common
+        .slot_list
+        .set_selected(1, app.library.artists.len());
+    app.pending_top_pin = Some(crate::state::PendingTopPin::Artist("ar2".to_string()));
+
+    let _ = app.handle_artists(crate::views::ArtistsMessage::AlbumsLoaded(
+        "ar2".to_string(),
+        vec![make_album("a1", "Album One", "Artist Two")],
+    ));
+
+    assert_eq!(
+        app.artists_page.common.slot_list.selected_offset,
+        Some(1),
+        "highlight must follow the target artist after expansion completes"
+    );
+    assert!(app.pending_top_pin.is_none());
+}
+
+#[test]
+fn tracks_loaded_for_unrelated_album_does_not_re_pin() {
+    // User clicked album a2 → pin = Album(a2). Then user (somehow) triggers
+    // expansion of a different album a3 — the children-load for a3 must
+    // not steal the highlight from a2's pin.
+    let mut app = test_app();
+    app.library.albums.set_from_vec(vec![
+        make_album("a1", "Album One", "Artist"),
+        make_album("a2", "Album Two", "Artist"),
+        make_album("a3", "Album Three", "Artist"),
+    ]);
+    app.pending_top_pin = Some(crate::state::PendingTopPin::Album("a2".to_string()));
+
+    let _ = app.handle_albums(crate::views::AlbumsMessage::TracksLoaded(
+        "a3".to_string(),
+        vec![make_song("s1", "Song", "Artist")],
+    ));
+
+    assert!(
+        matches!(
+            app.pending_top_pin,
+            Some(crate::state::PendingTopPin::Album(ref id)) if id == "a2"
+        ),
+        "pin must not be consumed by an unrelated TracksLoaded"
+    );
+}
+
+#[test]
+fn pending_top_pin_cleared_on_search_in_albums() {
+    let mut app = test_app();
+    app.pending_top_pin = Some(crate::state::PendingTopPin::Album("a1".to_string()));
+
+    let _ = app.handle_albums(crate::views::AlbumsMessage::SearchQueryChanged(
+        "foo".to_string(),
+    ));
+
+    assert!(
+        app.pending_top_pin.is_none(),
+        "user-driven search supersedes the find chain — pin should clear"
+    );
+}
+
+#[test]
+fn pending_top_pin_cleared_on_switch_view_away() {
+    let mut app = test_app();
+    app.pending_top_pin = Some(crate::state::PendingTopPin::Album("a1".to_string()));
+
+    let _ = app.handle_switch_view(View::Songs);
+
+    assert!(app.pending_top_pin.is_none());
+}
+
+#[test]
+fn pending_top_pin_cleared_on_navigate_and_filter() {
+    let mut app = test_app();
+    app.pending_top_pin = Some(crate::state::PendingTopPin::Artist("ar1".to_string()));
+
+    let _ = app.handle_navigate_and_filter(
+        View::Songs,
+        nokkvi_data::types::filter::LibraryFilter::ArtistId {
+            id: "ar1".to_string(),
+            name: "Artist".to_string(),
+        },
+    );
+
+    assert!(app.pending_top_pin.is_none());
+}
+
+// ============================================================================
 // Sort Mode: Most Played (PROMPT 6)
 // ============================================================================
 

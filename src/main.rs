@@ -261,6 +261,11 @@ pub struct Nokkvi {
     /// load handlers page through the library until the target id appears,
     /// then dispatch the outer-expand `ArtistsMessage::FocusAndExpand`.
     pub pending_expand_artist_target: Option<crate::state::PendingExpandArtistTarget>,
+    /// Re-pin the highlight onto the find-chain target after `set_children`
+    /// runs. Set by `try_resolve_pending_expand_*` once the target is
+    /// found; consumed by the matching children-loaded handler
+    /// (`TracksLoaded` for albums, `AlbumsLoaded` for artists).
+    pub pending_top_pin: Option<crate::state::PendingTopPin>,
     /// Default playlist ID for quick-add (None = no default set)
     pub default_playlist_id: Option<String>,
     /// Default playlist display name (for settings UI readout)
@@ -350,6 +355,7 @@ impl Default for Nokkvi {
             pending_center_on_playing: false,
             pending_expand_album_target: None,
             pending_expand_artist_target: None,
+            pending_top_pin: None,
             default_playlist_id: None,
             default_playlist_name: String::new(),
             quick_add_to_playlist: false,

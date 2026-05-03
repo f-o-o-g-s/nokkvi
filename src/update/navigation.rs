@@ -113,6 +113,19 @@ impl Nokkvi {
                 self.cancel_pending_expand_artist();
             }
         }
+        // The top-pin can outlive the target by the brief window between
+        // try_resolve_*  consuming the target and TracksLoaded/AlbumsLoaded
+        // re-pinning. Drop it on the same navigate-away condition.
+        if let Some(pin) = self.pending_top_pin.as_ref() {
+            let host_view = match pin {
+                crate::state::PendingTopPin::Album(_) => View::Albums,
+                crate::state::PendingTopPin::Artist(_) => View::Artists,
+            };
+            let in_browsing_pane = self.browsing_panel.is_some() && view == View::Queue;
+            if view != host_view && !in_browsing_pane {
+                self.pending_top_pin = None;
+            }
+        }
         // Play view select SFX for tab/hotkey switching
         self.sfx_engine.play(audio::SfxType::ViewSelect);
         self.current_view = view;
@@ -505,13 +518,29 @@ impl Nokkvi {
     /// Drop a pending album-expand target. Called from cancellation hooks
     /// (search edit, sort change, navigation away, refresh) so an in-flight
     /// find chain doesn't continue paging after the user has moved on.
+    /// Also clears any matching `pending_top_pin` — the pin only outlives
+    /// the target by the brief window between `try_resolve` and
+    /// `set_children`, so a target cancellation always implies pin
+    /// cancellation when kinds match.
     pub(crate) fn cancel_pending_expand_album(&mut self) {
         self.pending_expand_album_target = None;
+        if matches!(
+            self.pending_top_pin,
+            Some(crate::state::PendingTopPin::Album(_))
+        ) {
+            self.pending_top_pin = None;
+        }
     }
 
     /// Artist-side mirror of `cancel_pending_expand_album`.
     pub(crate) fn cancel_pending_expand_artist(&mut self) {
         self.pending_expand_artist_target = None;
+        if matches!(
+            self.pending_top_pin,
+            Some(crate::state::PendingTopPin::Artist(_))
+        ) {
+            self.pending_top_pin = None;
+        }
     }
 
     /// Artist-side mirror of `handle_navigate_and_expand_album`. Lands on
@@ -599,6 +628,10 @@ impl Nokkvi {
                 .set_offset(target_offset, total);
             self.artists_page.common.slot_list.set_selected(idx, total);
             self.artists_page.common.slot_list.flash_center();
+            // Pin the highlight onto the target so it survives `set_children`
+            // when albums land — handle_artists' AlbumsLoaded post-hook
+            // re-runs set_selected for this id.
+            self.pending_top_pin = Some(crate::state::PendingTopPin::Artist(target_id.clone()));
             let prefetch_task = self.prefetch_viewport_artwork();
             return Some(Task::batch([
                 prefetch_task,
@@ -660,6 +693,10 @@ impl Nokkvi {
             // selected_offset before falling back to viewport_offset).
             self.albums_page.common.slot_list.set_selected(idx, total);
             self.albums_page.common.slot_list.flash_center();
+            // Pin the highlight onto the target so it survives `set_children`
+            // when tracks land — handle_albums' TracksLoaded post-hook
+            // re-runs set_selected for this id.
+            self.pending_top_pin = Some(crate::state::PendingTopPin::Album(target_id.clone()));
             // Mini-artwork prefetch follows the viewport. The page-load
             // prefetch ran for viewport=0 (and page-2/3 loads don't prefetch
             // at all), so the rows around the new viewport would render

@@ -88,6 +88,23 @@ pub struct PendingExpandArtistTarget {
     pub for_browsing_pane: bool,
 }
 
+/// Item to re-pin the highlight onto after `set_children` fires.
+///
+/// `try_resolve_pending_expand_*` sets this after dispatching
+/// `FocusAndExpand`, naming the target id and which library to look it
+/// up in. When the corresponding children-load message lands
+/// (`TracksLoaded` for albums, `AlbumsLoaded` for artists), the handler
+/// re-runs `set_selected` on the target's flat-list index so the
+/// highlight stays on the focused item rather than drifting to whatever
+/// happens to live at the center slot.
+///
+/// Cleared on the same triggers as `pending_expand_*_target`.
+#[derive(Debug, Clone)]
+pub enum PendingTopPin {
+    Album(String),
+    Artist(String),
+}
+
 // ============================================================================
 // Session & Playlist Context
 // ============================================================================

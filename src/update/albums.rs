@@ -516,9 +516,34 @@ impl Nokkvi {
                 AlbumsMessage::CollapseExpansion | AlbumsMessage::ExpandCenter
             ),
         );
+        // The page's `update` calls `set_children` for `TracksLoaded`, which
+        // wipes `selected_offset` to clamp the viewport into the post-
+        // expansion flat list. For find-chain navigations we want the
+        // highlight to stay on the target, so pre-extract the album_id and
+        // re-pin afterwards. Cloned because `msg` moves into the page update.
+        let pin_after_tracks = if let AlbumsMessage::TracksLoaded(ref id, _) = msg {
+            Some(id.clone())
+        } else {
+            None
+        };
         let (cmd, action) =
             self.albums_page
                 .update(msg, self.library.albums.len(), &self.library.albums);
+
+        if let Some(loaded_id) = pin_after_tracks
+            && matches!(
+                self.pending_top_pin,
+                Some(crate::state::PendingTopPin::Album(ref pinned)) if pinned == &loaded_id
+            )
+            && let Some(idx) = self.library.albums.iter().position(|a| a.id == loaded_id)
+        {
+            let total = self
+                .albums_page
+                .expansion
+                .flattened_len(&self.library.albums);
+            self.albums_page.common.slot_list.set_selected(idx, total);
+            self.pending_top_pin = None;
+        }
 
         // User-driven changes (search edit, sort, refresh) supersede any
         // in-flight find-and-expand chain. FocusAndExpand dispatched by the

@@ -336,9 +336,33 @@ impl Nokkvi {
             }
             _ => Vec::new(),
         };
+        // Capture the loaded artist id too — the page's `update` runs
+        // `set_children` (which clears `selected_offset`), and the find-
+        // chain pin needs to re-pin the highlight on the target afterwards.
+        let pin_after_albums = if let ArtistsMessage::AlbumsLoaded(ref id, _) = msg {
+            Some(id.clone())
+        } else {
+            None
+        };
         let (cmd, action) =
             self.artists_page
                 .update(msg, self.library.artists.len(), &self.library.artists);
+
+        if let Some(loaded_id) = pin_after_albums
+            && matches!(
+                self.pending_top_pin,
+                Some(crate::state::PendingTopPin::Artist(ref pinned)) if pinned == &loaded_id
+            )
+            && let Some(idx) = self.library.artists.iter().position(|a| a.id == loaded_id)
+        {
+            let total = crate::views::expansion::three_tier_flattened_len(
+                &self.library.artists,
+                &self.artists_page.expansion,
+                self.artists_page.sub_expansion.children.len(),
+            );
+            self.artists_page.common.slot_list.set_selected(idx, total);
+            self.pending_top_pin = None;
+        }
 
         // User-driven changes supersede any in-flight find-and-expand chain.
         if matches!(
