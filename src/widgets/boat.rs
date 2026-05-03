@@ -15,22 +15,18 @@
 //! - **Slope drift** — the local wave gradient at the boat's x position
 //!   pushes it downhill (positive slope → push left, negative → push right),
 //!   so the boat appears to surf down wave faces. Capped at
-//!   `MAX_SLOPE_FORCE` so a single tall bar can't overpower drive +
-//!   restoring indefinitely.
-//! - **Restoring force** — a soft spring toward `x = 0.5` keeps the boat off
-//!   the edges when the drive + slope conspire to push it outward.
+//!   `MAX_SLOPE_FORCE` so a single tall bar can't dominate the sum.
 //! - **Velocity damping** — friction on `x_velocity` gives the "floating"
 //!   feel; the boat lags fast wave changes instead of snapping to them.
-//! - **Captain charge** — left to physics alone the slope force always pushes
-//!   downhill, so the boat camps on the calmer side of the visualizer. Every
-//!   `CHARGE_INTERVAL_*` seconds (randomized) the captain decides to row in
-//!   a chosen direction for `CHARGE_DURATION_*` seconds: a small constant
-//!   force is applied and the slope force is suppressed for the duration.
-//!   Direction is biased toward whichever half of the waveform has taller
-//!   bars (the "storm"); falls back to a coin flip on a symmetric waveform.
-//!   Force size is tuned so terminal velocity during a charge is only
-//!   modestly above normal cruise — feels like determined effort, not a
-//!   speed boost.
+//! - **Captain charge** — every `CHARGE_INTERVAL_*` seconds (randomized) the
+//!   captain decides to row in a chosen direction for `CHARGE_DURATION_*`
+//!   seconds: a small constant force is applied and the slope force is
+//!   suppressed for the duration. Direction is a fair coin flip — earlier
+//!   revisions biased it toward the louder half of the spectrum, but on a
+//!   torus that systematically favored one wrap direction for any
+//!   asymmetric track. Force size is tuned so terminal velocity during a
+//!   charge is only modestly above normal cruise — feels like determined
+//!   effort, not a speed boost.
 //! - **Toroidal X wrap** — when `x_ratio` leaves `[0, 1)` it wraps via
 //!   `rem_euclid(1.0)` and `x_velocity` is preserved. There is no wall to
 //!   bounce off; the boat sails off one edge and reappears on the other
@@ -101,13 +97,10 @@ const SLOPE_DX: f32 = 0.05;
 const SLOPE_GAIN: f32 = 0.04;
 
 /// Hard cap on `|slope_force|` so a single tall bar near the boat can't
-/// overpower drive + restoring indefinitely. Without this the boat could
-/// be pinned at an edge by a sustained steep waveform.
+/// overpower the rest of the force budget. Without this the boat could
+/// briefly run at maximum velocity in one direction whenever a sharp
+/// transient lined up under it.
 const MAX_SLOPE_FORCE: f32 = 0.10;
-
-/// Spring constant for the soft pull back toward `x = 0.5`. Keeps the boat
-/// off the edges without obvious snap-back.
-const RESTORING_K: f32 = 0.06;
 
 /// Min/max delay between captain charges. The actual interval is sampled
 /// uniformly in `[MIN, MAX]` after each charge ends (and at first activation),
@@ -127,11 +120,6 @@ const CHARGE_DURATION_MAX_SECS: f32 = 12.0;
 /// versus the natural `~0.045 ratio/sec` drift speed. Reads as deliberate
 /// effort, not a speed boost.
 const CHARGE_FORCE: f32 = 0.06;
-
-/// Minimum waveform asymmetry (`mean(right_half) - mean(left_half)`) needed
-/// to bias the charge direction toward the "storm" side. Below this the
-/// captain just flips a coin so symmetric waveforms still produce variety.
-const IMBALANCE_THRESHOLD: f32 = 0.05;
 
 /// Friction on `x_velocity`. The dominant source of the "floating" feel —
 /// without this, the boat would build up arbitrary speed.
@@ -228,11 +216,16 @@ impl BoatState {
 /// - slope: `(-slope · SLOPE_GAIN).clamp(±MAX_SLOPE_FORCE)` — surf downhill,
 ///   capped so a single tall bar can't dominate. Suppressed during a charge
 ///   (so the captain's heading isn't fighting wave drift).
-/// - restoring: `(0.5 - x) · RESTORING_K` — soft center pull
 /// - damping: `-x_velocity · X_DAMPING` — friction
 /// - charge: `charge_direction · CHARGE_FORCE` while a charge is active,
-///   else 0. Captain charges fire on a randomized timer and prefer the
-///   side of the visualizer with taller bars.
+///   else 0. Captain charges fire on a randomized timer with a fair-coin
+///   direction.
+///
+/// There is no centering / restoring force. A spring toward `x = 0.5` made
+/// sense when the boat could get pinned against an edge, but on a torus
+/// "the middle" isn't geometrically privileged, and a one-sided pull
+/// systematically favored whichever wrap the slope happened to be biasing
+/// toward.
 ///
 /// Y is a spring-damper tracking `target_y = sample_line_height(...)`:
 /// `ay = (target_y - y) · Y_SPRING_K - y_velocity · Y_DAMPING`. Y dynamics
@@ -287,7 +280,7 @@ pub(crate) fn step(state: &mut BoatState, dt: Duration, bars: &[f64], angular: b
     } else {
         state.secs_until_next_charge -= dt_secs;
         if state.secs_until_next_charge <= 0.0 {
-            state.charge_direction = pick_charge_direction(bars, &mut state.rng_state);
+            state.charge_direction = pick_charge_direction(&mut state.rng_state);
             let r = next_rand_unit(&mut state.rng_state);
             state.charge_remaining_secs =
                 lerp(CHARGE_DURATION_MIN_SECS, CHARGE_DURATION_MAX_SECS, r);
@@ -297,10 +290,9 @@ pub(crate) fn step(state: &mut BoatState, dt: Duration, bars: &[f64], angular: b
         }
     };
 
-    let restoring_force = (0.5 - state.x_ratio) * RESTORING_K;
     let damping_force = -state.x_velocity * X_DAMPING;
 
-    let ax = drive + slope_force + restoring_force + damping_force + charge_force;
+    let ax = drive + slope_force + damping_force + charge_force;
     state.x_velocity = (state.x_velocity + ax * dt_secs).clamp(-MAX_X_V, MAX_X_V);
     state.x_ratio = (state.x_ratio + state.x_velocity * dt_secs).rem_euclid(1.0);
 
@@ -395,31 +387,17 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
 
-/// Mean amplitude of the right half of `bars` minus mean of the left half.
-/// Positive → right side has taller bars (storm to the right). Returns 0
-/// for buffers shorter than 4 (not enough data to split).
-fn waveform_imbalance(bars: &[f64]) -> f32 {
-    if bars.len() < 4 {
-        return 0.0;
-    }
-    let mid = bars.len() / 2;
-    let left_avg: f64 = bars[..mid].iter().sum::<f64>() / mid as f64;
-    let right_avg: f64 = bars[mid..].iter().sum::<f64>() / (bars.len() - mid) as f64;
-    (right_avg - left_avg) as f32
-}
-
-/// Pick a charge direction (`±1`).
+/// Pick a charge direction (`±1`) with a fair coin flip.
 ///
-/// If the waveform is meaningfully asymmetric (`|imbalance| >
-/// IMBALANCE_THRESHOLD`), head toward the storm. Otherwise coin flip — so
-/// symmetric tracks still produce variety. The boat's current position
-/// doesn't enter into it: with the toroidal wrap there's no edge to steer
-/// away from.
-fn pick_charge_direction(bars: &[f64], rng_state: &mut u32) -> f32 {
-    let imbalance = waveform_imbalance(bars);
-    if imbalance.abs() > IMBALANCE_THRESHOLD {
-        imbalance.signum()
-    } else if next_rand_unit(rng_state) < 0.5 {
+/// Earlier revisions biased the direction toward the louder half of the
+/// spectrum (the "storm side") so the boat would seek out interesting
+/// content, but on a torus that biased the wrap direction too: any
+/// consistently-asymmetric track (most music — bass on the left,
+/// declining toward treble on the right) ended up with the captain
+/// always charging toward bass and the slope force always pushing away
+/// from it, so the boat only ever wrapped one way.
+fn pick_charge_direction(rng_state: &mut u32) -> f32 {
+    if next_rand_unit(rng_state) < 0.5 {
         -1.0
     } else {
         1.0
@@ -1041,45 +1019,17 @@ mod tests {
     }
 
     #[test]
-    fn pick_charge_direction_prefers_storm_side() {
-        // Asymmetric bars: tall right half, calm left half. Direction must
-        // come back as +1 regardless of rng seed.
-        let bars: Vec<f64> = (0..32).map(|i| if i > 16 { 0.8 } else { 0.1 }).collect();
-        for seed in [1, 2, 3, 999, 0x9E37_79B9] {
-            let mut rng = seed;
-            assert_eq!(
-                pick_charge_direction(&bars, &mut rng),
-                1.0,
-                "should pick right (storm) for seed {seed}"
-            );
-        }
-
-        // Mirrored: tall left half. Must pick -1.
-        let bars: Vec<f64> = (0..32).map(|i| if i < 15 { 0.8 } else { 0.1 }).collect();
-        for seed in [1, 2, 3, 999, 0x9E37_79B9] {
-            let mut rng = seed;
-            assert_eq!(
-                pick_charge_direction(&bars, &mut rng),
-                -1.0,
-                "should pick left (storm) for seed {seed}"
-            );
-        }
-    }
-
-    #[test]
-    fn pick_charge_direction_random_on_symmetric_waveform() {
-        // Flat bars: imbalance is 0, so we land in the rng coin-flip branch.
+    fn pick_charge_direction_is_a_fair_coin_flip() {
         // Both directions must be reachable across different seeds. Use
         // production-shaped seeds (xorshift's first output is degenerate
         // for tiny seeds, so seeding from a single counter would hit one
         // side only — irrelevant in real use where the seed is the golden
         // ratio constant).
-        let bars = vec![0.5; 16];
         let mut saw_left = false;
         let mut saw_right = false;
         for i in 0u32..200 {
             let mut rng = 0x9E37_79B9_u32.wrapping_add(i.wrapping_mul(0x6789_ABCD));
-            match pick_charge_direction(&bars, &mut rng) {
+            match pick_charge_direction(&mut rng) {
                 d if d < 0.0 => saw_left = true,
                 d if d > 0.0 => saw_right = true,
                 _ => {}

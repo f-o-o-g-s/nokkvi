@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - Surfing boat now sails continuously through the screen edges instead of bouncing back: when it reaches one side it keeps its momentum and emerges from the opposite side, drawn split across the seam during the crossing so the wrap looks seamless.
+- Surfing boat now wanders both directions evenly instead of drifting consistently toward bass: the soft pull-toward-center spring and the captain's bias toward the louder half of the spectrum are gone, since on a torus they conspired to favor whichever wrap direction the music's spectrum happened to lean.
 - Clicking an album, artist, or genre name link in any list now navigates to that item's view and expands it inline at the top, instead of leaving you on a one-row filtered list with the contents hidden behind a follow-up Shift+Enter.
 
 ### Fixed
