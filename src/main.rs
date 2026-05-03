@@ -1,4 +1,5 @@
 #![warn(unreachable_pub)]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::print_stderr))]
 //! Nokkvi
 //!
 //! A Rust/Iced client for Navidrome music servers.
@@ -851,7 +852,10 @@ pub fn main() -> iced::Result {
     for arg in std::env::args().skip(1) {
         match arg.as_str() {
             "-V" | "--version" => {
-                println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+                #[allow(clippy::print_stdout)]
+                {
+                    println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+                }
                 return Ok(());
             }
             "-h" | "--help" => {
@@ -960,6 +964,7 @@ pub fn main() -> iced::Result {
 
 /// Print `--help` to stdout. Format follows GNU conventions: usage line,
 /// option table, environment vars, file paths, then a docs URL.
+#[allow(clippy::print_stdout)]
 fn print_cli_help() {
     let name = env!("CARGO_PKG_NAME");
     let version = env!("CARGO_PKG_VERSION");

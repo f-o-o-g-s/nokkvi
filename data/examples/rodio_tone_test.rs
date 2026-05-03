@@ -1,5 +1,7 @@
 // Standalone test: can rodio/cpal produce audible output on this system?
 // Run: cargo run --example rodio_tone_test -p navidrome-data
+#![allow(clippy::print_stdout, clippy::unwrap_used)]
+
 use std::{num::NonZero, time::Duration};
 
 use rodio::{DeviceSinkBuilder, buffer::SamplesBuffer};

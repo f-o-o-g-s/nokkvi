@@ -1,3 +1,4 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::print_stderr))]
 //! Nokkvi Data Crate
 //!
 //! Iced-free business logic: types, backend services, audio engine, utilities,

@@ -19,6 +19,17 @@ semicolon_if_nothing_returned = "warn"
 uninlined_format_args = "warn"
 unnested_or_patterns = "warn"
 
+# Ship-blockers — codify the CLAUDE.md "no .unwrap() in production" /
+# "use tracing, not println" rules. Tests opt out via #![cfg_attr(test, ...)]
+# at each crate root; intentional CLI output uses targeted #[allow].
+unwrap_used = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+dbg_macro = "deny"
+mem_forget = "deny"
+todo = "deny"
+unimplemented = "deny"
+
 [package]
 name = "nokkvi"
 version = "0.3.9"
