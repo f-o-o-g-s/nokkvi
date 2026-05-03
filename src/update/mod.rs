@@ -182,6 +182,15 @@ impl Nokkvi {
             Message::PendingExpandAlbumTimeout(album_id) => {
                 self.handle_pending_expand_album_timeout(album_id)
             }
+            Message::NavigateAndExpandArtist { artist_id } => {
+                self.handle_navigate_and_expand_artist(artist_id)
+            }
+            Message::BrowserPaneNavigateAndExpandArtist { artist_id } => {
+                self.handle_browser_pane_navigate_and_expand_artist(artist_id)
+            }
+            Message::PendingExpandArtistTimeout(artist_id) => {
+                self.handle_pending_expand_artist_timeout(artist_id)
+            }
             Message::StripClicked => {
                 use nokkvi_data::types::player_settings::StripClickAction;
                 match crate::theme::strip_click_action() {

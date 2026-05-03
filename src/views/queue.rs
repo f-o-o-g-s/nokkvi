@@ -241,6 +241,8 @@ pub enum QueueMessage {
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
     /// Navigate to Albums and auto-expand the album with this id (no filter set).
     NavigateAndExpandAlbum(String),
+    /// Navigate to Artists and auto-expand the artist with this id (no filter set).
+    NavigateAndExpandArtist(String),
     /// Column-dropdown open/close request — bubbled to root
     /// `Message::SetOpenMenu`. Intercepted in `handle_queue` before the
     /// page's `update` runs.
@@ -289,6 +291,7 @@ pub enum QueueAction {
     TopSongs(usize),                // Open Top Songs panel for queue index
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     NavigateAndExpandAlbum(String), // album_id - navigate to Albums and auto-expand
+    NavigateAndExpandArtist(String), // artist_id - navigate to Artists and auto-expand
     /// User toggled a queue column's visibility — persist to config.toml.
     ColumnVisibilityChanged(QueueColumn, bool),
     /// Bubble to root: open the default-playlist picker overlay.
@@ -365,6 +368,10 @@ impl QueuePage {
             QueueMessage::NavigateAndExpandAlbum(album_id) => {
                 (Task::none(), QueueAction::NavigateAndExpandAlbum(album_id))
             }
+            QueueMessage::NavigateAndExpandArtist(artist_id) => (
+                Task::none(),
+                QueueAction::NavigateAndExpandArtist(artist_id),
+            ),
             QueueMessage::SortModeSelected(sort_mode) => {
                 self.queue_sort_mode = sort_mode;
                 (Task::none(), QueueAction::SortModeChanged(sort_mode))
@@ -1120,13 +1127,7 @@ impl QueuePage {
                         title,
                         title_click,
                         artist.clone(),
-                        Some(QueueMessage::NavigateAndFilter(
-                            crate::View::Artists,
-                            nokkvi_data::types::filter::LibraryFilter::ArtistId {
-                                id: artist_id.clone(),
-                                name: artist.clone(),
-                            },
-                        )),
+                        Some(QueueMessage::NavigateAndExpandArtist(artist_id.clone())),
                         title_size,
                         subtitle_size,
                         style,

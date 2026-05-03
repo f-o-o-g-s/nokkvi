@@ -256,6 +256,11 @@ pub struct Nokkvi {
     /// id, dispatches `FocusAndExpand` when found, or kicks the next page
     /// when not.
     pub pending_expand_album_target: Option<crate::state::PendingExpandTarget>,
+    /// Artist-side mirror of `pending_expand_album_target`. Set when an
+    /// artist-text click dispatches `NavigateAndExpandArtist`; the artists
+    /// load handlers page through the library until the target id appears,
+    /// then dispatch the outer-expand `ArtistsMessage::FocusAndExpand`.
+    pub pending_expand_artist_target: Option<crate::state::PendingExpandArtistTarget>,
     /// Default playlist ID for quick-add (None = no default set)
     pub default_playlist_id: Option<String>,
     /// Default playlist display name (for settings UI readout)
@@ -344,6 +349,7 @@ impl Default for Nokkvi {
             suppress_next_auto_center: false,
             pending_center_on_playing: false,
             pending_expand_album_target: None,
+            pending_expand_artist_target: None,
             default_playlist_id: None,
             default_playlist_name: String::new(),
             quick_add_to_playlist: false,

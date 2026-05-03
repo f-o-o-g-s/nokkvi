@@ -77,6 +77,17 @@ pub struct PendingExpandTarget {
     pub for_browsing_pane: bool,
 }
 
+/// Artist-side mirror of `PendingExpandTarget`. Set by
+/// `handle_navigate_and_expand_artist` and consumed by
+/// `try_resolve_pending_expand_artist` — pages through Artists until the
+/// id appears, then dispatches `ArtistsMessage::FocusAndExpand` so the
+/// outer expansion (artist → albums) opens inline.
+#[derive(Debug, Clone)]
+pub struct PendingExpandArtistTarget {
+    pub artist_id: String,
+    pub for_browsing_pane: bool,
+}
+
 // ============================================================================
 // Session & Playlist Context
 // ============================================================================

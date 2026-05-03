@@ -237,6 +237,8 @@ pub enum PlaylistsMessage {
     PlaylistsLoaded(Result<Vec<PlaylistUIViewData>, String>, usize), // result, total_count
 
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
+    /// Navigate to Artists and auto-expand the artist with this id (no filter set).
+    NavigateAndExpandArtist(String),
 
     /// Context-menu open/close request — bubbled to root
     /// `Message::SetOpenMenu`. Intercepted in `handle_playlists` before the
@@ -274,6 +276,7 @@ pub enum PlaylistsAction {
     ShowInfo(Box<nokkvi_data::types::info_modal::InfoModalItem>), // Open info modal
     SetAsDefaultPlaylist(String, String), // (playlist_id, playlist_name) — set as quick-add default
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
+    NavigateAndExpandArtist(String), // artist_id - navigate to Artists and auto-expand
     /// Bubble to root: open the default-playlist picker overlay.
     OpenDefaultPlaylistPicker,
     /// Bubble to root: open the Create-New-Playlist dialog.
@@ -293,6 +296,9 @@ impl super::HasCommonAction for PlaylistsAction {
             Self::RefreshViewData => super::CommonViewAction::RefreshViewData,
             Self::NavigateAndFilter(v, f) => {
                 super::CommonViewAction::NavigateAndFilter(*v, f.clone())
+            }
+            Self::NavigateAndExpandArtist(id) => {
+                super::CommonViewAction::NavigateAndExpandArtist(id.clone())
             }
 
             Self::None => super::CommonViewAction::None,
@@ -498,6 +504,10 @@ impl PlaylistsPage {
                 PlaylistsMessage::NavigateAndFilter(view, filter) => (
                     Task::none(),
                     PlaylistsAction::NavigateAndFilter(view, filter),
+                ),
+                PlaylistsMessage::NavigateAndExpandArtist(artist_id) => (
+                    Task::none(),
+                    PlaylistsAction::NavigateAndExpandArtist(artist_id),
                 ),
 
                 PlaylistsMessage::OpenDefaultPlaylistPicker => {
@@ -1181,15 +1191,9 @@ impl PlaylistsPage {
                 PlaylistsMessage::SlotListClickPlay(ctx.item_index)
             },
             Some(PlaylistsMessage::ClickToggleStar(ctx.item_index)),
-            song.artist_id.as_ref().map(|id| {
-                PlaylistsMessage::NavigateAndFilter(
-                    crate::View::Artists,
-                    nokkvi_data::types::filter::LibraryFilter::ArtistId {
-                        id: id.clone(),
-                        name: song.artist.clone(),
-                    },
-                )
-            }),
+            song.artist_id
+                .as_ref()
+                .map(|id| PlaylistsMessage::NavigateAndExpandArtist(id.clone())),
             1, // depth 1: child tracks under playlist
         )
     }

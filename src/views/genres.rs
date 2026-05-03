@@ -151,6 +151,8 @@ pub enum GenresMessage {
     GenresLoaded(Result<Vec<GenreUIViewData>, String>, usize), // result, total_count
 
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
+    /// Navigate to Artists and auto-expand the artist with this id (no filter set).
+    NavigateAndExpandArtist(String),
 
     /// Context-menu open/close request — bubbled to root
     /// `Message::SetOpenMenu`. Intercepted in `handle_genres` before the
@@ -188,6 +190,7 @@ pub enum GenresAction {
     ShowSongInFolder(String),    // song path - open containing folder directly
     CenterOnPlaying,
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
+    NavigateAndExpandArtist(String), // artist_id - navigate to Artists and auto-expand
     /// Persist a column-visibility toggle change. Root forwards to the
     /// settings service so the new value survives across launches.
     ColumnVisibilityChanged(GenresColumn, bool),
@@ -204,6 +207,9 @@ impl super::HasCommonAction for GenresAction {
             Self::CenterOnPlaying => super::CommonViewAction::CenterOnPlaying,
             Self::NavigateAndFilter(v, f) => {
                 super::CommonViewAction::NavigateAndFilter(*v, f.clone())
+            }
+            Self::NavigateAndExpandArtist(id) => {
+                super::CommonViewAction::NavigateAndExpandArtist(id.clone())
             }
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
@@ -596,6 +602,10 @@ impl GenresPage {
                 GenresMessage::NavigateAndFilter(view, filter) => {
                     (Task::none(), GenresAction::NavigateAndFilter(view, filter))
                 }
+                GenresMessage::NavigateAndExpandArtist(artist_id) => (
+                    Task::none(),
+                    GenresAction::NavigateAndExpandArtist(artist_id),
+                ),
                 GenresMessage::ToggleColumnVisible(col) => {
                     let new_value = !self.column_visibility.get(col);
                     self.column_visibility.set(col, new_value);
@@ -894,15 +904,9 @@ impl GenresPage {
                             GenresMessage::SlotListClickPlay(ctx.item_index)
                         },
                         Some(GenresMessage::ClickToggleStar(ctx.item_index)),
-                        song.artist_id.as_ref().map(|id| {
-                            GenresMessage::NavigateAndFilter(
-                                crate::View::Artists,
-                                nokkvi_data::types::filter::LibraryFilter::ArtistId {
-                                    id: id.clone(),
-                                    name: song.artist.clone(),
-                                },
-                            )
-                        }),
+                        song.artist_id
+                            .as_ref()
+                            .map(|id| GenresMessage::NavigateAndExpandArtist(id.clone())),
                         2, // depth 2: grandchild tracks (genre → album → track)
                     );
                     use crate::widgets::context_menu::{
@@ -1162,12 +1166,8 @@ impl GenresPage {
             Some(GenresMessage::ClickToggleStar(ctx.item_index)),
             Some(GenresMessage::FocusAndExpandAlbum(ctx.item_index)),
             Some(GenresMessage::FocusAndExpandAlbum(ctx.item_index)),
-            Some(GenresMessage::NavigateAndFilter(
-                crate::View::Artists,
-                nokkvi_data::types::filter::LibraryFilter::ArtistId {
-                    id: album.artist_id.clone(),
-                    name: album.artist.clone(),
-                },
+            Some(GenresMessage::NavigateAndExpandArtist(
+                album.artist_id.clone(),
             )),
             1, // depth 1: child albums under genre
         );

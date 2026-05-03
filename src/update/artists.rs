@@ -30,13 +30,18 @@ impl Nokkvi {
     /// (`handle_artists_load_page`, offset N). Preserves the rating-sort
     /// carve-out: when the user picks "Rating" sort, the API can't sort
     /// for us, so we sort client-side after each page completes.
-    fn load_artists_internal<M>(&mut self, offset: usize, msg_ctor: M) -> Task<Message>
+    ///
+    /// `force = true` skips the scroll-edge `needs_fetch` gate. Used by the
+    /// artist-find-and-expand chain, which leaves viewport at 0 while
+    /// paging through the library.
+    fn load_artists_internal<M>(&mut self, offset: usize, force: bool, msg_ctor: M) -> Task<Message>
     where
         M: FnOnce((Result<Vec<ArtistUIViewData>, String>, usize)) -> Message + Send + 'static,
     {
         let page_size = self.library_page_size.to_usize();
         // Phase 5A defensive gate — see load_albums_internal for rationale.
-        if offset > 0
+        if !force
+            && offset > 0
             && self
                 .library
                 .artists
@@ -105,7 +110,7 @@ impl Nokkvi {
         background: bool,
         anchor_id: Option<String>,
     ) -> Task<Message> {
-        self.load_artists_internal(0, move |(result, total_count)| {
+        self.load_artists_internal(0, false, move |(result, total_count)| {
             Message::Artists(ArtistsMessage::ArtistsLoaded {
                 result,
                 total_count,
@@ -117,18 +122,56 @@ impl Nokkvi {
 
     /// Load a subsequent page of artists (triggered by scroll near edge of loaded data)
     pub(crate) fn handle_artists_load_page(&mut self, offset: usize) -> Task<Message> {
-        self.load_artists_internal(offset, |(result, total_count)| {
+        self.load_artists_internal(offset, false, |(result, total_count)| {
             Message::Artists(ArtistsMessage::ArtistsPageLoaded(result, total_count))
         })
     }
 
-    /// Handle a subsequent page of artists being loaded (appends to buffer)
+    /// Force-load an artists page regardless of the scroll-edge gate. Used
+    /// by `try_resolve_pending_expand_artist` to walk the full library.
+    pub(crate) fn force_load_artists_page(&mut self, offset: usize) -> Task<Message> {
+        self.load_artists_internal(offset, true, |(result, total_count)| {
+            Message::Artists(ArtistsMessage::ArtistsPageLoaded(result, total_count))
+        })
+    }
+
+    /// Handle a subsequent page of artists being loaded (appends to buffer).
+    /// Mirror of the inlined `handle_albums_page_loaded` so the find chain
+    /// can drive `try_resolve_pending_expand_artist` after the macro's
+    /// terminal `Task::none()` would otherwise stop the chain.
     pub(crate) fn handle_artists_page_loaded(
         &mut self,
         result: Result<Vec<ArtistUIViewData>, String>,
         total_count: usize,
     ) -> Task<Message> {
-        impl_page_loaded_handler!(self, artists, "Artists", result, total_count)
+        match result {
+            Ok(new_items) => {
+                let count = new_items.len();
+                let loaded_before = self.library.artists.loaded_count();
+                self.library.artists.append_page(new_items, total_count);
+                debug!(
+                    "📄 Artists page loaded: {} new items ({}→{} of {})",
+                    count,
+                    loaded_before,
+                    self.library.artists.loaded_count(),
+                    total_count,
+                );
+                if let Some(task) = self.try_resolve_pending_expand_artist() {
+                    return task;
+                }
+            }
+            Err(e) => {
+                if e.contains("Unauthorized") {
+                    self.library.artists.set_loading(false);
+                    return self.handle_session_expired();
+                }
+                error!("Error loading Artists page: {}", e);
+                self.library.artists.set_loading(false);
+                self.cancel_pending_expand_artist();
+                self.toast_error(format!("Failed to load Artists: {e}"));
+            }
+        }
+        Task::none()
     }
 
     pub(crate) fn handle_artists_loaded(
@@ -241,6 +284,12 @@ impl Nokkvi {
                     )));
                 }
 
+                // Drive the artist find-and-expand chain forward when a click
+                // navigated here with a pending target.
+                if let Some(task) = self.try_resolve_pending_expand_artist() {
+                    tasks.push(task);
+                }
+
                 if !tasks.is_empty() {
                     return Task::batch(tasks);
                 }
@@ -252,6 +301,7 @@ impl Nokkvi {
                 }
                 error!("Error loading artists: {}", e);
                 self.library.artists.set_loading(false);
+                self.cancel_pending_expand_artist();
                 self.toast_error(format!("Failed to load artists: {e}"));
             }
         }
@@ -289,6 +339,17 @@ impl Nokkvi {
         let (cmd, action) =
             self.artists_page
                 .update(msg, self.library.artists.len(), &self.library.artists);
+
+        // User-driven changes supersede any in-flight find-and-expand chain.
+        if matches!(
+            action,
+            ArtistsAction::SearchChanged(_)
+                | ArtistsAction::SortModeChanged(_)
+                | ArtistsAction::SortOrderChanged(_)
+                | ArtistsAction::RefreshViewData
+        ) {
+            self.cancel_pending_expand_artist();
+        }
 
         // Handle common actions (SearchChanged, SortModeChanged, SortOrderChanged)
         if let Some(task) = self.handle_common_view_action(

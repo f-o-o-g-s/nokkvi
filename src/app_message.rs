@@ -346,6 +346,19 @@ pub enum Message {
     /// the target is still pending and shows a "Finding album…" toast if so.
     /// No-op when the find resolved within the threshold.
     PendingExpandAlbumTimeout(String),
+    /// Artist-side mirror of `NavigateAndExpandAlbum`. Routes to the Artists
+    /// view, clears search/filter, pages through until the target id
+    /// appears, then auto-expands so the artist's albums show inline.
+    NavigateAndExpandArtist {
+        artist_id: String,
+    },
+    /// Browsing-pane variant — switches the browsing panel's tab to Artists
+    /// and runs the find chain there, leaving Queue intact in split-view.
+    BrowserPaneNavigateAndExpandArtist {
+        artist_id: String,
+    },
+    /// Internal 2s "Finding artist…" toast trigger.
+    PendingExpandArtistTimeout(String),
     /// Track info strip was clicked — dispatch depends on strip_click_action setting
     StripClicked,
     /// Track info strip right-click context menu action

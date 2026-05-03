@@ -161,6 +161,8 @@ pub enum SongsMessage {
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
     /// Navigate to Albums and auto-expand the album with this id (no filter set).
     NavigateAndExpandAlbum(String),
+    /// Navigate to Artists and auto-expand the artist with this id (no filter set).
+    NavigateAndExpandArtist(String),
     ToggleColumnVisible(SongsColumn),
     /// Column-dropdown open/close request — bubbled to root
     /// `Message::SetOpenMenu`. Intercepted in `handle_songs` before the
@@ -196,6 +198,7 @@ pub enum SongsAction {
     CenterOnPlaying,
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     NavigateAndExpandAlbum(String), // album_id - navigate to Albums and auto-expand this album
+    NavigateAndExpandArtist(String), // artist_id - navigate to Artists and auto-expand this artist
     ColumnVisibilityChanged(SongsColumn, bool),
     None,
 }
@@ -213,6 +216,9 @@ impl super::HasCommonAction for SongsAction {
             }
             Self::NavigateAndExpandAlbum(id) => {
                 super::CommonViewAction::NavigateAndExpandAlbum(id.clone())
+            }
+            Self::NavigateAndExpandArtist(id) => {
+                super::CommonViewAction::NavigateAndExpandArtist(id.clone())
             }
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
@@ -471,6 +477,10 @@ impl SongsPage {
             SongsMessage::NavigateAndExpandAlbum(album_id) => {
                 (Task::none(), SongsAction::NavigateAndExpandAlbum(album_id))
             }
+            SongsMessage::NavigateAndExpandArtist(artist_id) => (
+                Task::none(),
+                SongsAction::NavigateAndExpandArtist(artist_id),
+            ),
             SongsMessage::ToggleColumnVisible(col) => {
                 let new_value = !self.column_visibility.get(col);
                 self.column_visibility.set(col, new_value);
@@ -700,15 +710,10 @@ impl SongsPage {
                 }
                 content_row = content_row.push({
                     use crate::widgets::slot_list::slot_list_text_column;
-                    let artist_click = song.artist_id.as_ref().map(|id| {
-                        SongsMessage::NavigateAndFilter(
-                            crate::View::Artists,
-                            nokkvi_data::types::filter::LibraryFilter::ArtistId {
-                                id: id.clone(),
-                                name: song_artist.clone(),
-                            },
-                        )
-                    });
+                    let artist_click = song
+                        .artist_id
+                        .as_ref()
+                        .map(|id| SongsMessage::NavigateAndExpandArtist(id.clone()));
                     let title_click = Some(SongsMessage::ContextMenuAction(
                         ctx.item_index,
                         crate::widgets::context_menu::LibraryContextEntry::GetInfo,

@@ -125,6 +125,9 @@ pub(crate) enum CommonViewAction {
     /// Navigate to Albums and auto-expand the album with this id, with no
     /// filter set. Dispatched by album-text clicks in Songs/Queue.
     NavigateAndExpandAlbum(String),
+    /// Navigate to Artists and auto-expand the artist with this id, with
+    /// no filter set. Dispatched by artist-text clicks in any view.
+    NavigateAndExpandArtist(String),
     /// No action — the view's update produced no effect.
     None,
     /// The action is view-specific and not handled generically.

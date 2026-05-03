@@ -658,6 +658,14 @@ impl Nokkvi {
                 }
                 Some(Task::done(Message::NavigateAndExpandAlbum { album_id }))
             }
+            views::CommonViewAction::NavigateAndExpandArtist(artist_id) => {
+                if self.browsing_panel.is_some() && self.current_view == crate::View::Queue {
+                    return Some(Task::done(Message::BrowserPaneNavigateAndExpandArtist {
+                        artist_id,
+                    }));
+                }
+                Some(Task::done(Message::NavigateAndExpandArtist { artist_id }))
+            }
             views::CommonViewAction::None | views::CommonViewAction::ViewSpecific => None,
         }
     }

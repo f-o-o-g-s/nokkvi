@@ -2353,6 +2353,312 @@ fn queue_page_navigate_and_expand_album_returns_action() {
 }
 
 // ============================================================================
+// Navigate-and-Expand-Artist (mirror of album navigate-and-expand for artists)
+// ============================================================================
+
+#[test]
+fn navigate_and_expand_artist_clears_search_filter_and_sets_target() {
+    let mut app = test_app();
+    app.current_view = View::Songs;
+    app.artists_page.common.active_filter =
+        Some(nokkvi_data::types::filter::LibraryFilter::ArtistId {
+            id: "old".to_string(),
+            name: "Old Artist".to_string(),
+        });
+    app.artists_page.common.search_query = "old".to_string();
+    app.artists_page.common.search_input_focused = true;
+
+    let _ = app.handle_navigate_and_expand_artist("ar1".to_string());
+
+    assert_eq!(app.current_view, View::Artists);
+    assert!(app.artists_page.common.active_filter.is_none());
+    assert!(app.artists_page.common.search_query.is_empty());
+    assert!(!app.artists_page.common.search_input_focused);
+    let target = app
+        .pending_expand_artist_target
+        .as_ref()
+        .expect("target should be set");
+    assert_eq!(target.artist_id, "ar1");
+    assert!(!target.for_browsing_pane);
+}
+
+#[test]
+fn navigate_and_expand_artist_collapses_existing_artists_expansion() {
+    let mut app = test_app();
+    app.current_view = View::Songs;
+    app.artists_page.expansion.expanded_id = Some("other".to_string());
+    app.artists_page.expansion.children = vec![make_album("a1", "Album", "Artist")];
+
+    let _ = app.handle_navigate_and_expand_artist("ar1".to_string());
+
+    assert!(app.artists_page.expansion.expanded_id.is_none());
+    assert!(app.artists_page.expansion.children.is_empty());
+}
+
+#[test]
+fn browser_pane_navigate_and_expand_artist_sets_browsing_flag() {
+    let mut app = test_app();
+
+    let _ = app.handle_browser_pane_navigate_and_expand_artist("ar1".to_string());
+
+    let target = app
+        .pending_expand_artist_target
+        .as_ref()
+        .expect("target should be set");
+    assert_eq!(target.artist_id, "ar1");
+    assert!(target.for_browsing_pane);
+}
+
+#[test]
+fn pending_expand_artist_target_cleared_on_switch_view_away() {
+    let mut app = test_app();
+    app.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+        artist_id: "ar1".to_string(),
+        for_browsing_pane: false,
+    });
+
+    let _ = app.handle_switch_view(View::Songs);
+
+    assert!(app.pending_expand_artist_target.is_none());
+}
+
+#[test]
+fn pending_expand_artist_target_persists_on_switch_view_to_artists() {
+    let mut app = test_app();
+    app.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+        artist_id: "ar1".to_string(),
+        for_browsing_pane: false,
+    });
+
+    let _ = app.handle_switch_view(View::Artists);
+
+    assert!(app.pending_expand_artist_target.is_some());
+}
+
+#[test]
+fn pending_expand_artist_target_cleared_on_navigate_and_filter() {
+    let mut app = test_app();
+    app.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+        artist_id: "ar1".to_string(),
+        for_browsing_pane: false,
+    });
+
+    let _ = app.handle_navigate_and_filter(
+        View::Albums,
+        nokkvi_data::types::filter::LibraryFilter::AlbumId {
+            id: "al1".to_string(),
+            title: "Album".to_string(),
+        },
+    );
+
+    assert!(app.pending_expand_artist_target.is_none());
+}
+
+#[test]
+fn try_resolve_pending_expand_artist_finds_loaded_and_takes_target() {
+    let mut app = test_app();
+    app.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+        artist_id: "ar2".to_string(),
+        for_browsing_pane: false,
+    });
+    app.library.artists.set_from_vec(vec![
+        make_artist("ar1", "Artist One"),
+        make_artist("ar2", "Artist Two"),
+        make_artist("ar3", "Artist Three"),
+    ]);
+
+    let task = app.try_resolve_pending_expand_artist();
+
+    assert!(task.is_some(), "found target should produce a task");
+    assert!(
+        app.pending_expand_artist_target.is_none(),
+        "target should be taken once dispatched"
+    );
+    assert_eq!(
+        app.artists_page.common.slot_list.viewport_offset, 2,
+        "viewport_offset must be set so target is visible"
+    );
+    assert_eq!(
+        app.artists_page.common.slot_list.selected_offset,
+        Some(1),
+        "target must keep highlight via selected_offset"
+    );
+}
+
+#[test]
+fn try_resolve_pending_expand_artist_places_target_at_top_slot() {
+    let mut app = test_app();
+    app.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+        artist_id: "ar320".to_string(),
+        for_browsing_pane: false,
+    });
+    let artists: Vec<_> = (0..1000)
+        .map(|i| make_artist(&format!("ar{i}"), &format!("Artist {i}")))
+        .collect();
+    app.library.artists.set_from_vec(artists);
+
+    let task = app.try_resolve_pending_expand_artist();
+    assert!(task.is_some(), "found target should dispatch a task");
+
+    let center_slot = app.artists_page.common.slot_list.slot_count / 2;
+    assert_eq!(
+        app.artists_page.common.slot_list.viewport_offset,
+        320 + center_slot,
+        "target must land at slot 0 (top), not the center"
+    );
+    assert_eq!(
+        app.artists_page.common.slot_list.selected_offset,
+        Some(320),
+        "highlight must follow target"
+    );
+}
+
+#[test]
+fn try_resolve_pending_expand_artist_clears_when_fully_loaded_and_missing() {
+    let mut app = test_app();
+    app.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+        artist_id: "missing".to_string(),
+        for_browsing_pane: false,
+    });
+    app.library
+        .artists
+        .set_from_vec(vec![make_artist("ar1", "Artist One")]);
+
+    let task = app.try_resolve_pending_expand_artist();
+
+    assert!(task.is_some(), "fully-loaded miss should produce a task");
+    assert!(
+        app.pending_expand_artist_target.is_none(),
+        "target should be cleared when known-not-in-library"
+    );
+}
+
+#[test]
+fn try_resolve_pending_expand_artist_returns_none_when_loading() {
+    let mut app = test_app();
+    app.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+        artist_id: "ar2".to_string(),
+        for_browsing_pane: false,
+    });
+    app.library
+        .artists
+        .set_first_page(vec![make_artist("ar1", "Artist One")], 100);
+    app.library.artists.set_loading(true);
+
+    let task = app.try_resolve_pending_expand_artist();
+
+    assert!(task.is_none(), "should wait while a page is in flight");
+    assert!(app.pending_expand_artist_target.is_some());
+}
+
+#[test]
+fn try_resolve_pending_expand_artist_kicks_next_page_when_idle() {
+    let mut app = test_app();
+    app.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+        artist_id: "ar999".to_string(),
+        for_browsing_pane: false,
+    });
+    app.library
+        .artists
+        .set_first_page(vec![make_artist("ar1", "Artist One")], 100);
+
+    let task = app.try_resolve_pending_expand_artist();
+
+    assert!(task.is_some());
+    assert!(app.pending_expand_artist_target.is_some());
+}
+
+#[test]
+fn try_resolve_pending_expand_artist_bypasses_scroll_edge_gate_when_paging() {
+    let mut app = test_app();
+    app.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+        artist_id: "missing".to_string(),
+        for_browsing_pane: false,
+    });
+    let artists: Vec<_> = (0..200)
+        .map(|i| make_artist(&format!("ar{i}"), &format!("Artist {i}")))
+        .collect();
+    app.library.artists.set_first_page(artists, 1000);
+    assert!(!app.library.artists.is_loading(), "precondition: idle");
+
+    let task = app.try_resolve_pending_expand_artist();
+    assert!(task.is_some());
+    assert!(
+        app.library.artists.is_loading(),
+        "next-page fetch must actually start — scroll-edge gate must be bypassed"
+    );
+}
+
+#[test]
+fn pending_artist_timeout_does_not_toast_when_target_already_resolved() {
+    let mut app = test_app();
+    let _ = app.handle_pending_expand_artist_timeout("ar1".to_string());
+    assert!(app.toast.toasts.is_empty());
+}
+
+#[test]
+fn pending_artist_timeout_does_not_toast_for_stale_id() {
+    let mut app = test_app();
+    app.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+        artist_id: "newer".to_string(),
+        for_browsing_pane: false,
+    });
+    let _ = app.handle_pending_expand_artist_timeout("older".to_string());
+    assert!(app.toast.toasts.is_empty());
+}
+
+#[test]
+fn pending_artist_timeout_toasts_when_target_still_in_flight() {
+    let mut app = test_app();
+    app.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+        artist_id: "ar1".to_string(),
+        for_browsing_pane: false,
+    });
+    let _ = app.handle_pending_expand_artist_timeout("ar1".to_string());
+    assert_eq!(app.toast.toasts.len(), 1);
+}
+
+#[test]
+fn songs_page_navigate_and_expand_artist_returns_action() {
+    let mut app = test_app();
+    let (_, action) = app.songs_page.update(
+        crate::views::SongsMessage::NavigateAndExpandArtist("ar1".to_string()),
+        &[],
+    );
+    assert!(matches!(
+        action,
+        crate::views::SongsAction::NavigateAndExpandArtist(ref id) if id == "ar1"
+    ));
+}
+
+#[test]
+fn queue_page_navigate_and_expand_artist_returns_action() {
+    let mut app = test_app();
+    let (_, action) = app.queue_page.update(
+        crate::views::QueueMessage::NavigateAndExpandArtist("ar1".to_string()),
+        &[],
+    );
+    assert!(matches!(
+        action,
+        crate::views::QueueAction::NavigateAndExpandArtist(ref id) if id == "ar1"
+    ));
+}
+
+#[test]
+fn albums_page_navigate_and_expand_artist_returns_action() {
+    let mut app = test_app();
+    let (_, action) = app.albums_page.update(
+        crate::views::AlbumsMessage::NavigateAndExpandArtist("ar1".to_string()),
+        0,
+        &[],
+    );
+    assert!(matches!(
+        action,
+        crate::views::AlbumsAction::NavigateAndExpandArtist(ref id) if id == "ar1"
+    ));
+}
+
+// ============================================================================
 // Sort Mode: Most Played (PROMPT 6)
 // ============================================================================
 

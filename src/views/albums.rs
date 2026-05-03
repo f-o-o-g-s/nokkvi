@@ -186,6 +186,8 @@ pub enum AlbumsMessage {
 
     /// Navigate to a view and apply an ID filter
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
+    /// Navigate to Artists and auto-expand the artist with this id (no filter set).
+    NavigateAndExpandArtist(String),
     ToggleColumnVisible(AlbumsColumn),
     /// Column-dropdown open/close request — bubbled to root
     /// `Message::SetOpenMenu`. Intercepted in `handle_albums` before the
@@ -225,6 +227,7 @@ pub enum AlbumsAction {
     RefreshArtwork(String), // album_id - refresh artwork from server
     FindSimilar(String, String), // (entity_id, label) - open similar tab
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
+    NavigateAndExpandArtist(String), // artist_id - navigate to Artists and auto-expand
     ColumnVisibilityChanged(AlbumsColumn, bool),
     None,
 }
@@ -239,6 +242,9 @@ impl super::HasCommonAction for AlbumsAction {
             Self::CenterOnPlaying => super::CommonViewAction::CenterOnPlaying,
             Self::NavigateAndFilter(v, f) => {
                 super::CommonViewAction::NavigateAndFilter(*v, f.clone())
+            }
+            Self::NavigateAndExpandArtist(id) => {
+                super::CommonViewAction::NavigateAndExpandArtist(id.clone())
             }
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
@@ -617,6 +623,10 @@ impl AlbumsPage {
                 AlbumsMessage::NavigateAndFilter(view, filter) => {
                     (Task::none(), AlbumsAction::NavigateAndFilter(view, filter))
                 }
+                AlbumsMessage::NavigateAndExpandArtist(artist_id) => (
+                    Task::none(),
+                    AlbumsAction::NavigateAndExpandArtist(artist_id),
+                ),
                 AlbumsMessage::ToggleColumnVisible(col) => {
                     let new_value = !self.column_visibility.get(col);
                     self.column_visibility.set(col, new_value);
@@ -994,12 +1004,8 @@ impl AlbumsPage {
         }
         content_row = content_row.push({
             use crate::widgets::slot_list::slot_list_text_column;
-            let artist_click = Some(AlbumsMessage::NavigateAndFilter(
-                crate::View::Artists,
-                nokkvi_data::types::filter::LibraryFilter::ArtistId {
-                    id: album.artist_id.clone(),
-                    name: album_artist.clone(),
-                },
+            let artist_click = Some(AlbumsMessage::NavigateAndExpandArtist(
+                album.artist_id.clone(),
             ));
             let title_click = Some(AlbumsMessage::ContextMenuAction(
                 ctx.item_index,
@@ -1181,15 +1187,9 @@ impl AlbumsPage {
                 AlbumsMessage::SlotListClickPlay(ctx.item_index)
             },
             Some(AlbumsMessage::ClickToggleStar(ctx.item_index)),
-            song.artist_id.as_ref().map(|id| {
-                AlbumsMessage::NavigateAndFilter(
-                    crate::View::Artists,
-                    nokkvi_data::types::filter::LibraryFilter::ArtistId {
-                        id: id.clone(),
-                        name: song.artist.clone(),
-                    },
-                )
-            }),
+            song.artist_id
+                .as_ref()
+                .map(|id| AlbumsMessage::NavigateAndExpandArtist(id.clone())),
             1, // depth 1: child tracks under album
         );
 

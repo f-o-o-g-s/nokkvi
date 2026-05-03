@@ -25,6 +25,16 @@ fn expand_album_timeout_task(album_id: String) -> Task<Message> {
     )
 }
 
+/// Artist-side mirror of `expand_album_timeout_task`.
+fn expand_artist_timeout_task(artist_id: String) -> Task<Message> {
+    Task::perform(
+        async {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        },
+        move |()| Message::PendingExpandArtistTimeout(artist_id.clone()),
+    )
+}
+
 impl Nokkvi {
     pub(crate) fn handle_session_expired(&mut self) -> Task<Message> {
         info!(" [SESSION] Session expired (401 Unauthorized)");
@@ -89,6 +99,18 @@ impl Nokkvi {
             };
             if view != host_view {
                 self.cancel_pending_expand_album();
+            }
+        }
+        // Same for the artist-find chain — host view is Artists (or Queue
+        // when split-view is active).
+        if let Some(target) = self.pending_expand_artist_target.as_ref() {
+            let host_view = if target.for_browsing_pane {
+                View::Queue
+            } else {
+                View::Artists
+            };
+            if view != host_view {
+                self.cancel_pending_expand_artist();
             }
         }
         // Play view select SFX for tab/hotkey switching
@@ -388,6 +410,7 @@ impl Nokkvi {
         filter: nokkvi_data::types::filter::LibraryFilter,
     ) -> Task<Message> {
         self.cancel_pending_expand_album();
+        self.cancel_pending_expand_artist();
         let switch_task = self.handle_switch_view(view);
 
         // Defocus search input
@@ -486,6 +509,125 @@ impl Nokkvi {
         self.pending_expand_album_target = None;
     }
 
+    /// Artist-side mirror of `cancel_pending_expand_album`.
+    pub(crate) fn cancel_pending_expand_artist(&mut self) {
+        self.pending_expand_artist_target = None;
+    }
+
+    /// Artist-side mirror of `handle_navigate_and_expand_album`. Lands on
+    /// the Artists view, clears any active search/filter, and primes a
+    /// find-and-expand target. The artists load handlers consume it after
+    /// each page arrives.
+    pub(crate) fn handle_navigate_and_expand_artist(&mut self, artist_id: String) -> Task<Message> {
+        self.prime_expand_artist_target(artist_id.clone(), false);
+        let switch_task = self.handle_switch_view(View::Artists);
+        Task::batch([switch_task, expand_artist_timeout_task(artist_id)])
+    }
+
+    /// Browsing-pane variant of `handle_navigate_and_expand_artist`.
+    pub(crate) fn handle_browser_pane_navigate_and_expand_artist(
+        &mut self,
+        artist_id: String,
+    ) -> Task<Message> {
+        self.prime_expand_artist_target(artist_id.clone(), true);
+        let switch_task = self.handle_browsing_panel_message(
+            crate::views::BrowsingPanelMessage::SwitchView(crate::views::BrowsingView::Artists),
+        );
+        Task::batch([
+            switch_task,
+            Task::done(Message::LoadArtists),
+            expand_artist_timeout_task(artist_id),
+        ])
+    }
+
+    /// Shared setup for both artist navigate-and-expand variants.
+    fn prime_expand_artist_target(&mut self, artist_id: String, for_browsing_pane: bool) {
+        self.artists_page.common.search_input_focused = false;
+        self.artists_page.common.active_filter = None;
+        self.artists_page.common.search_query.clear();
+        self.artists_page.expansion.clear();
+        self.artists_page.sub_expansion.clear();
+        self.artists_page.common.slot_list.viewport_offset = 0;
+        self.artists_page.common.slot_list.selected_indices.clear();
+        self.artists_page.common.slot_list.selected_offset = None;
+        self.library.artists.clear();
+        self.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+            artist_id,
+            for_browsing_pane,
+        });
+    }
+
+    /// Artist-side mirror of `handle_pending_expand_album_timeout`.
+    pub(crate) fn handle_pending_expand_artist_timeout(
+        &mut self,
+        artist_id: String,
+    ) -> Task<Message> {
+        if self
+            .pending_expand_artist_target
+            .as_ref()
+            .is_some_and(|t| t.artist_id == artist_id)
+        {
+            self.toast_info("Finding artist…");
+        }
+        Task::none()
+    }
+
+    /// Artist-side mirror of `try_resolve_pending_expand_album`. After each
+    /// artists page lands, look for the pending target in `library.artists`
+    /// and either dispatch FocusAndExpand at the right viewport position,
+    /// give up if fully loaded, wait if still loading, or kick the next
+    /// page (force-loaded) if more remain.
+    pub(crate) fn try_resolve_pending_expand_artist(&mut self) -> Option<Task<Message>> {
+        let target_id = self
+            .pending_expand_artist_target
+            .as_ref()?
+            .artist_id
+            .clone();
+
+        if let Some(idx) = self.library.artists.iter().position(|a| a.id == target_id) {
+            debug!(
+                " [EXPAND] Found artist '{}' at index {} — scrolling + dispatching FocusAndExpand",
+                target_id, idx
+            );
+            self.pending_expand_artist_target = None;
+            let total = self.library.artists.len();
+            let center_slot = self.artists_page.common.slot_list.slot_count.max(2) / 2;
+            let target_offset = idx.saturating_add(center_slot).min(total.saturating_sub(1));
+            self.artists_page
+                .common
+                .slot_list
+                .set_offset(target_offset, total);
+            self.artists_page.common.slot_list.set_selected(idx, total);
+            self.artists_page.common.slot_list.flash_center();
+            let prefetch_task = self.prefetch_viewport_artwork();
+            return Some(Task::batch([
+                prefetch_task,
+                Task::done(Message::Artists(views::ArtistsMessage::FocusAndExpand(idx))),
+            ]));
+        }
+
+        if self.library.artists.fully_loaded() {
+            warn!(
+                " [EXPAND] Artist '{}' not found after full load — clearing target",
+                target_id
+            );
+            self.toast_warn("Artist not found in library");
+            self.pending_expand_artist_target = None;
+            return Some(Task::none());
+        }
+
+        if self.library.artists.is_loading() {
+            return None;
+        }
+
+        let next_offset = self.library.artists.loaded_count();
+        debug!(
+            " [EXPAND] Artist '{}' not in buffer — force-fetching next page at offset {}",
+            target_id, next_offset
+        );
+        Some(self.force_load_artists_page(next_offset))
+    }
+
     /// After each albums page lands, look for the pending expand target in
     /// `library.albums`. Returns `Some(task)` if the helper acted (found and
     /// dispatched, fully-loaded miss, or kicked the next page) and `None` if
@@ -578,6 +720,7 @@ impl Nokkvi {
         filter: nokkvi_data::types::filter::LibraryFilter,
     ) -> Task<Message> {
         self.cancel_pending_expand_album();
+        self.cancel_pending_expand_artist();
         let browse_view = match view {
             View::Albums => Some(crate::views::BrowsingView::Albums),
             View::Songs => Some(crate::views::BrowsingView::Songs),
