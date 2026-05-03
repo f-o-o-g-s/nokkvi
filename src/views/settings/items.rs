@@ -543,7 +543,7 @@ mod tests {
             .iter()
             .filter_map(|e| match e {
                 SettingsEntry::Item(item) => Some(item.key.as_ref()),
-                _ => None,
+                SettingsEntry::Header { .. } => None,
             })
             .collect()
     }

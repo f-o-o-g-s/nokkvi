@@ -121,7 +121,7 @@ impl ActivePlayback {
     pub fn radio_station(&self) -> Option<&nokkvi_data::types::radio_station::RadioStation> {
         match self {
             Self::Radio(state) => Some(&state.station),
-            _ => None,
+            Self::Queue => None,
         }
     }
 

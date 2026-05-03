@@ -3185,7 +3185,7 @@ fn radios_play_filtered_station_plays_correct_station() {
                 "Should play the filtered station, not the first station in unfiltered list"
             );
         }
-        _ => panic!("Expected Radio playback"),
+        crate::state::ActivePlayback::Queue => panic!("Expected Radio playback"),
     }
 }
 

@@ -81,7 +81,7 @@ pub(crate) fn iced_key_to_keycode(key: &keyboard::Key) -> Option<KeyCode> {
             key::Named::F12 => Some(KeyCode::F12),
             _ => None,
         },
-        _ => None,
+        keyboard::Key::Unidentified => None,
     }
 }
 

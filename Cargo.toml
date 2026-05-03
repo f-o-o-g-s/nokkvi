@@ -30,6 +30,11 @@ mem_forget = "deny"
 todo = "deny"
 unimplemented = "deny"
 
+# Drift-prevention — every match over an enum must enumerate variants
+# explicitly so adding a new variant becomes a compile error at every
+# match site instead of being silently absorbed by `_ =>`.
+match_wildcard_for_single_variants = "deny"
+
 [package]
 name = "nokkvi"
 version = "0.3.9"

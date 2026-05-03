@@ -1141,7 +1141,7 @@ impl SettingsPage {
                     value: new_value,
                     description: self.cached_entries.get(edit_idx).and_then(|e| match e {
                         SettingsEntry::Item(item) => item.subtitle.map(String::from),
-                        _ => None,
+                        SettingsEntry::Header { .. } => None,
                     }),
                 };
             }

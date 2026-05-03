@@ -514,7 +514,7 @@ mod tests {
                 assert_eq!(*song_count, 32);
                 assert_eq!(*duration_seconds, 6862);
             }
-            _ => panic!("expected Playlist entry at index 1"),
+            PickerEntry::Clear => panic!("expected Playlist entry at index 1"),
         }
     }
 

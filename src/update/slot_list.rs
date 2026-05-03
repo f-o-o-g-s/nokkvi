@@ -304,7 +304,7 @@ impl Nokkvi {
                 )
                 .is_empty(),
                 View::Radios => self.filter_radio_stations().is_empty(),
-                _ => false,
+                View::Settings => false,
             };
 
             if is_empty {

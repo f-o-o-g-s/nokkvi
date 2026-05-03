@@ -188,7 +188,7 @@ impl Nokkvi {
                     .as_ref()
                     .and_then(|opt| match opt {
                         PlaylistOption::Existing { name, .. } => Some(name.clone()),
-                        _ => None,
+                        PlaylistOption::NewPlaylist => None,
                     })
                     .unwrap_or_default();
                 self.text_input_dialog.close();
@@ -256,7 +256,7 @@ impl Nokkvi {
                     .as_ref()
                     .and_then(|opt| match opt {
                         PlaylistOption::Existing { name, .. } => Some(name.clone()),
-                        _ => None,
+                        PlaylistOption::NewPlaylist => None,
                     })
                     .unwrap_or_default();
                 self.text_input_dialog.close();

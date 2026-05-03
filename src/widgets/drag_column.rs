@@ -342,7 +342,7 @@ where
                                 shell.request_redraw();
                             }
                         }
-                        _ => {}
+                        DragState::Idle => {}
                     }
                 }
                 Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
@@ -368,7 +368,7 @@ where
                             // Released without exceeding threshold — treat as a click.
                             *action = DragState::Idle;
                         }
-                        _ => {}
+                        DragState::Idle => {}
                     }
                 }
                 _ => {}
@@ -410,7 +410,7 @@ where
                 DragState::Dragging { .. } | DragState::Picking { .. } => {
                     return mouse::Interaction::Grabbing;
                 }
-                _ => {}
+                DragState::Idle => {}
             }
         }
 

@@ -115,7 +115,7 @@ impl Nokkvi {
                 state.icy_artist.as_deref(),
                 state.icy_title.as_deref(),
             ),
-            _ => (None, None, None, None),
+            crate::state::ActivePlayback::Queue => (None, None, None, None),
         };
 
         let has_queue = !self.library.queue_songs.is_empty();
@@ -648,7 +648,7 @@ impl Nokkvi {
                 state.icy_artist.clone(),
                 state.icy_title.clone(),
             ),
-            _ => (None, None, None, None),
+            crate::state::ActivePlayback::Queue => (None, None, None, None),
         };
 
         let nav_bar_data = widgets::NavBarViewData {
