@@ -239,6 +239,13 @@ impl AlbumsService {
 
     /// Fetch album artwork from Navidrome, given a fully-built URL. No client
     /// cache — every call goes to the server. Returns the raw image bytes.
+    ///
+    /// Treats a zero-byte success body as an error. Navidrome's
+    /// `getCoverArt` throttle middleware can return `200 OK` with an empty
+    /// body when a backlog cap is exceeded (or when the server rejects a
+    /// burst of concurrent requests); without this check we'd happily
+    /// cache an empty `image::Handle` and never retry, leaving a few
+    /// permanently-blank thumbnails after large expansions.
     pub async fn fetch_artwork_by_url(&self, url: &str) -> Result<Vec<u8>> {
         if url.is_empty() {
             return Err(anyhow::anyhow!("empty artwork url"));
@@ -262,6 +269,10 @@ impl AlbumsService {
             .bytes()
             .await
             .map_err(|e| anyhow::anyhow!("artwork body read failed: {e}"))?;
+
+        if bytes.is_empty() {
+            return Err(anyhow::anyhow!("artwork fetch returned 0 bytes"));
+        }
 
         Ok(bytes.to_vec())
     }

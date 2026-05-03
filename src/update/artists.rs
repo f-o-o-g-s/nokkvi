@@ -330,10 +330,11 @@ impl Nokkvi {
         );
         // Capture child album ids before consuming `msg` so we can fan out
         // mini-artwork fetches for the newly-loaded expansion children.
-        let expansion_album_ids: Vec<String> = match &msg {
-            ArtistsMessage::AlbumsLoaded(_, albums) => {
-                albums.iter().map(|a| a.id.clone()).collect()
-            }
+        let expansion_album_ids: Vec<(String, String)> = match &msg {
+            ArtistsMessage::AlbumsLoaded(_, albums) => albums
+                .iter()
+                .map(|a| (a.id.clone(), a.artwork_url.clone()))
+                .collect(),
             _ => Vec::new(),
         };
         // Capture the loaded artist id too — the page's `update` runs

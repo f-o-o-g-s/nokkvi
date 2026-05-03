@@ -179,20 +179,58 @@ where
 /// already in the cache; each surviving id dispatches an
 /// `ArtworkMessage::Loaded` so the centralized `handle_artwork_loaded`
 /// arm puts the handle into `album_art` exactly the way Albums view does.
+///
+/// Callers pass `(album.id, album.artwork_url)` pairs — the URL is
+/// pre-built by `AlbumUIViewData::from_album` from `album.cover_art`
+/// (with `album.id` as fallback). For albums whose artwork lives on a
+/// media file (`cover_art = "mf-…"`) this matters — passing only the
+/// album id would build the wrong URL and the fetch would return empty.
+///
+/// Each fetch retries up to 3 times with brief jittered backoff. Without
+/// retries, large expansions (e.g. a genre with 150+ albums) reliably
+/// drop 1–2 thumbnails because Navidrome's `getCoverArt` throttle
+/// middleware rejects requests that exceed its in-flight backlog cap and
+/// `fetch_artwork_by_url` (after the empty-body guard) surfaces those as
+/// errors. Genre/artist expansions have no scroll-triggered re-fetch
+/// path, so a single dropped fetch leaves a permanently-blank slot until
+/// the next expansion.
 pub(super) fn expansion_album_artwork_tasks(
     cached_ids: &HashSet<&String>,
     albums_vm: AlbumsService,
-    album_ids: Vec<String>,
+    album_ids_urls: Vec<(String, String)>,
 ) -> Vec<Task<Message>> {
-    album_ids
+    album_ids_urls
         .into_iter()
-        .filter(|id| !cached_ids.contains(id))
-        .map(|id| {
+        .filter(|(id, _)| !cached_ids.contains(id))
+        .map(|(id, url)| {
             let vm = albums_vm.clone();
             Task::perform(
                 async move {
-                    let bytes = vm.fetch_album_artwork(&id, Some(80), None).await.ok();
-                    (id, bytes.map(image::Handle::from_bytes))
+                    const MAX_ATTEMPTS: u32 = 3;
+                    let mut last_err: Option<String> = None;
+                    for attempt in 0..MAX_ATTEMPTS {
+                        if attempt > 0 {
+                            // 100ms / 200ms backoff between retries. No
+                            // jitter — would need a new dependency in this
+                            // crate and the spread isn't critical with
+                            // only 3 attempts against a per-host server.
+                            let backoff = 100u64 << (attempt - 1);
+                            tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
+                        }
+                        match vm.fetch_artwork_by_url(&url).await {
+                            Ok(bytes) => {
+                                return (id, Some(image::Handle::from_bytes(bytes)));
+                            }
+                            Err(e) => last_err = Some(e.to_string()),
+                        }
+                    }
+                    tracing::warn!(
+                        "Mini artwork fetch gave up after {} attempts for {}: {:?}",
+                        MAX_ATTEMPTS,
+                        id,
+                        last_err
+                    );
+                    (id, None)
                 },
                 |(id, handle)| Message::Artwork(ArtworkMessage::Loaded(id, handle)),
             )
