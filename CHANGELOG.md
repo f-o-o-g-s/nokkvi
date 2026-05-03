@@ -16,6 +16,8 @@ All notable changes to this project will be documented in this file.
 - Surfing boat now picks up theme changes immediately — switching presets, toggling light/dark, or editing colors no longer leaves it painting the previous palette until restart.
 - Surfing boat now freezes when audio is paused — previously it kept drifting against the held waveform and ended up off the line with no way to resync on resume.
 - Surfing boat now stays aligned with the wave line during play and sinks to the bottom during silence — previously the visualizer's frozen baseline at the end of a track could leave it parked well above the visible wave with no way back down.
+- Remove from queue (right-click or Ctrl+D) and Play next now consistently target the song you clicked — previously, after sorting the queue or removing other songs in the same session, the action could hit a different row or silently do nothing.
+- Multi-selection in the queue now clears on background queue refreshes (consume mode advancing, navigation reload) and on sort changes — previously the selection kept its row positions across the reorder and could target the wrong songs on the next bulk action.
 
 ### Removed
 
