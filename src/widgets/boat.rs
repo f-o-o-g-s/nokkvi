@@ -31,13 +31,16 @@
 //!   Force size is tuned so terminal velocity during a charge is only
 //!   modestly above normal cruise — feels like determined effort, not a
 //!   speed boost.
-//! - **Wall bumper** — within `WALL_ZONE` of either edge a quadratic spring
-//!   pushes the boat inward, and the slope force is suppressed inside the
-//!   zone so wave drift can't keep dragging the boat into the wall (the FFT
-//!   waveform almost always slopes downward at the visualizer edges, which
-//!   would otherwise pin the boat there). Captain charges also bias toward
-//!   center when the boat has drifted noticeably off-center, so the boat
-//!   actively explores the middle instead of camping near a wall.
+//! - **Toroidal X wrap** — when `x_ratio` leaves `[0, 1)` it wraps via
+//!   `rem_euclid(1.0)` and `x_velocity` is preserved. There is no wall to
+//!   bounce off; the boat sails off one edge and reappears on the other
+//!   with the same momentum. The renderer draws a second copy at
+//!   `x ± area_width` whenever the primary boat overlaps an edge so the
+//!   crossing reads as one continuous boat split across the seam, not a
+//!   teleport. (Earlier revisions used a quadratic wall-repulsion spring
+//!   plus a clamp; that behavior was deliberate before the wrap and is
+//!   gone with it — including the slope-suppression and center-return
+//!   charge bias that existed only to keep the boat away from those walls.)
 //! - **Y dynamics** — `y_ratio` follows the sampled wave height through a
 //!   spring-damper rather than tracking it exactly, so the boat bobs with
 //!   buoyancy rather than glued to the curve.
@@ -51,8 +54,12 @@
 use std::time::{Duration, Instant};
 
 use iced::{
-    Element, Length,
-    widget::{Space, Svg, column, container, row, svg},
+    Element, Event, Length, Point, Rectangle, Size, Vector,
+    advanced::{
+        Layout, Shell, Widget, layout, mouse, overlay, renderer,
+        widget::{Operation, Tree},
+    },
+    widget::{Stack, Svg, container, svg},
 };
 
 use crate::widgets::visualizer::state::catmull_rom_1d;
@@ -125,23 +132,6 @@ const CHARGE_FORCE: f32 = 0.06;
 /// to bias the charge direction toward the "storm" side. Below this the
 /// captain just flips a coin so symmetric waveforms still produce variety.
 const IMBALANCE_THRESHOLD: f32 = 0.05;
-
-/// Width (in ratio space) of the soft "bumper" zone at each edge. Inside
-/// this zone the wall-repulsion spring is active and the slope force is
-/// suppressed. Wider zone = larger region where the boat is actively
-/// pushed back toward center.
-const WALL_ZONE: f32 = 0.15;
-
-/// Peak strength of the wall-repulsion spring (force at the wall itself).
-/// Sized to dominate the worst-case outward sum of `DRIVE_FORCE` plus
-/// `CHARGE_FORCE` (slope is suppressed inside the zone, so it doesn't
-/// factor in here). The boat physically cannot park against an edge.
-const WALL_REPULSION: f32 = 0.45;
-
-/// `|x_ratio - 0.5|` past which captain charges are redirected toward
-/// center regardless of the storm direction. Stops the captain from
-/// charging back into a wall when the boat has already drifted near it.
-const CHARGE_RETURN_THRESHOLD: f32 = 0.25;
 
 /// Friction on `x_velocity`. The dominant source of the "floating" feel —
 /// without this, the boat would build up arbitrary speed.
@@ -237,25 +227,22 @@ impl BoatState {
 /// - drive: `sin(2π·phase) · DRIVE_FORCE` — slow rhythmic push
 /// - slope: `(-slope · SLOPE_GAIN).clamp(±MAX_SLOPE_FORCE)` — surf downhill,
 ///   capped so a single tall bar can't dominate. Suppressed during a charge
-///   (so the captain's heading isn't fighting wave drift) AND inside the
-///   wall bumper zone (so the perpetually-outward FFT slope at the edges
-///   can't drag the boat into a wall).
+///   (so the captain's heading isn't fighting wave drift).
 /// - restoring: `(0.5 - x) · RESTORING_K` — soft center pull
 /// - damping: `-x_velocity · X_DAMPING` — friction
 /// - charge: `charge_direction · CHARGE_FORCE` while a charge is active,
 ///   else 0. Captain charges fire on a randomized timer and prefer the
 ///   side of the visualizer with taller bars.
-/// - wall: quadratic spring active inside `WALL_ZONE` of either edge,
-///   peaking at `WALL_REPULSION` at the wall itself. Stops the boat from
-///   parking against an edge when other forces happen to align outward.
 ///
 /// Y is a spring-damper tracking `target_y = sample_line_height(...)`:
 /// `ay = (target_y - y) · Y_SPRING_K - y_velocity · Y_DAMPING`. Y dynamics
 /// are unchanged during a charge — the boat still bobs over the waves it
 /// crosses.
 ///
-/// At the edges we clamp `x_ratio` and zero out any outward velocity
-/// component so the boat doesn't accumulate wall-pushing momentum.
+/// `x_ratio` is wrapped via `rem_euclid(1.0)` so the boat sails freely off
+/// either edge and reappears on the opposite side with momentum intact;
+/// `y_ratio` still clamps to `[0, 1]` (with outward velocity zeroed) since
+/// the wave height is bounded — there's no toroidal Y to wrap into.
 pub(crate) fn step(state: &mut BoatState, dt: Duration, bars: &[f64], angular: bool) {
     let dt_secs = dt.as_secs_f32();
     if dt_secs <= 0.0 {
@@ -275,16 +262,15 @@ pub(crate) fn step(state: &mut BoatState, dt: Duration, bars: &[f64], angular: b
     state.phase = (state.phase + dt_secs / DRIVE_PERIOD_SECS).rem_euclid(1.0);
     let drive = (state.phase * std::f32::consts::TAU).sin() * DRIVE_FORCE;
 
+    // Slope sampling stays clamped at the buffer edges — the bars buffer is
+    // not periodic, so wrap-around sampling would mix the right-edge spectrum
+    // into the left-edge gradient and vice versa. The boat happily crosses
+    // the seam regardless; a brief slope discontinuity at the wrap point is
+    // hidden by inertia.
     let h_left = sample_line_height(bars, (state.x_ratio - SLOPE_DX).max(0.0), angular);
     let h_right = sample_line_height(bars, (state.x_ratio + SLOPE_DX).min(1.0), angular);
     let slope = (h_right - h_left) / (2.0 * SLOPE_DX);
     let slope_force_raw = (-slope * SLOPE_GAIN).clamp(-MAX_SLOPE_FORCE, MAX_SLOPE_FORCE);
-
-    // Slope is suppressed inside the wall zone — FFT waveforms almost always
-    // slope outward at the visualizer edges, which without this would keep
-    // dragging the boat into whichever wall it's near.
-    let in_wall_zone = state.x_ratio < WALL_ZONE || state.x_ratio > 1.0 - WALL_ZONE;
-    let slope_force_zoned = if in_wall_zone { 0.0 } else { slope_force_raw };
 
     // Charge state machine: either rowing (charge_remaining_secs > 0) or
     // counting down to the next charge. Slope is suppressed for the duration
@@ -301,48 +287,22 @@ pub(crate) fn step(state: &mut BoatState, dt: Duration, bars: &[f64], angular: b
     } else {
         state.secs_until_next_charge -= dt_secs;
         if state.secs_until_next_charge <= 0.0 {
-            state.charge_direction =
-                pick_charge_direction(bars, state.x_ratio, &mut state.rng_state);
+            state.charge_direction = pick_charge_direction(bars, &mut state.rng_state);
             let r = next_rand_unit(&mut state.rng_state);
             state.charge_remaining_secs =
                 lerp(CHARGE_DURATION_MIN_SECS, CHARGE_DURATION_MAX_SECS, r);
             (state.charge_direction * CHARGE_FORCE, 0.0)
         } else {
-            (0.0, slope_force_zoned)
+            (0.0, slope_force_raw)
         }
     };
 
     let restoring_force = (0.5 - state.x_ratio) * RESTORING_K;
     let damping_force = -state.x_velocity * X_DAMPING;
 
-    // Wall bumper: quadratic spring active only inside `WALL_ZONE`. `depth`
-    // is 0 at the zone boundary and 1 at the wall, so force ramps from 0 up
-    // to `WALL_REPULSION`. Quadratic (`depth²`) gives a soft cushion entering
-    // the zone, then bites hard near the wall — the user-facing "bounce".
-    let wall_force = if state.x_ratio < WALL_ZONE {
-        let depth = 1.0 - state.x_ratio / WALL_ZONE;
-        WALL_REPULSION * depth * depth
-    } else if state.x_ratio > 1.0 - WALL_ZONE {
-        let depth = (state.x_ratio - (1.0 - WALL_ZONE)) / WALL_ZONE;
-        -WALL_REPULSION * depth * depth
-    } else {
-        0.0
-    };
-
-    let ax = drive + slope_force + restoring_force + damping_force + charge_force + wall_force;
+    let ax = drive + slope_force + restoring_force + damping_force + charge_force;
     state.x_velocity = (state.x_velocity + ax * dt_secs).clamp(-MAX_X_V, MAX_X_V);
-    state.x_ratio += state.x_velocity * dt_secs;
-    if state.x_ratio <= 0.0 {
-        state.x_ratio = 0.0;
-        if state.x_velocity < 0.0 {
-            state.x_velocity = 0.0;
-        }
-    } else if state.x_ratio >= 1.0 {
-        state.x_ratio = 1.0;
-        if state.x_velocity > 0.0 {
-            state.x_velocity = 0.0;
-        }
-    }
+    state.x_ratio = (state.x_ratio + state.x_velocity * dt_secs).rem_euclid(1.0);
 
     let target_y = sample_line_height(bars, state.x_ratio, angular);
     let ay = (target_y - state.y_ratio) * Y_SPRING_K - state.y_velocity * Y_DAMPING;
@@ -448,18 +408,14 @@ fn waveform_imbalance(bars: &[f64]) -> f32 {
     (right_avg - left_avg) as f32
 }
 
-/// Pick a charge direction (`±1`). Priority order:
-/// 1. If the boat has drifted past `CHARGE_RETURN_THRESHOLD` from center,
-///    head toward center regardless of the storm. Stops the captain from
-///    charging back into a wall the boat has already drifted near.
-/// 2. Otherwise, if the waveform is meaningfully asymmetric
-///    (`|imbalance| > IMBALANCE_THRESHOLD`), head toward the storm.
-/// 3. Otherwise coin flip — symmetric tracks still produce variety.
-fn pick_charge_direction(bars: &[f64], x_ratio: f32, rng_state: &mut u32) -> f32 {
-    let off_center = x_ratio - 0.5;
-    if off_center.abs() > CHARGE_RETURN_THRESHOLD {
-        return -off_center.signum();
-    }
+/// Pick a charge direction (`±1`).
+///
+/// If the waveform is meaningfully asymmetric (`|imbalance| >
+/// IMBALANCE_THRESHOLD`), head toward the storm. Otherwise coin flip — so
+/// symmetric tracks still produce variety. The boat's current position
+/// doesn't enter into it: with the toroidal wrap there's no edge to steer
+/// away from.
+fn pick_charge_direction(bars: &[f64], rng_state: &mut u32) -> f32 {
     let imbalance = waveform_imbalance(bars);
     if imbalance.abs() > IMBALANCE_THRESHOLD {
         imbalance.signum()
@@ -470,26 +426,239 @@ fn pick_charge_direction(bars: &[f64], x_ratio: f32, rng_state: &mut u32) -> f32
     }
 }
 
+/// Position a child element at an arbitrary `(x, y)` (including negative
+/// coordinates) inside a parent without shrinking the child.
+///
+/// `iced::widget::Pin` does almost the right thing — it accepts negative
+/// coordinates and respects the parent clip — but it computes the child's
+/// available layout space as `parent_max - position`, which silently
+/// squashes a `Length::Fixed`-sized child as `position` approaches the
+/// parent's far edge (`Length::Fixed(40)` with available `20` clamps to
+/// `20` via `Limits::width()` at `core/src/layout/limits.rs:57`). For the
+/// boat that produces a visible "shrinking ship" artifact at the wrap
+/// seam. `OverflowPin` instead passes the parent's full limits through to
+/// the child, then translates the laid-out node — the child keeps its
+/// natural size and any portion that falls outside the parent is trimmed
+/// by the ancestor clip in `draw()`.
+struct OverflowPin<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
+where
+    Renderer: iced::advanced::Renderer,
+{
+    content: Element<'a, Message, Theme, Renderer>,
+    position: Point,
+}
+
+impl<'a, Message, Theme, Renderer> OverflowPin<'a, Message, Theme, Renderer>
+where
+    Renderer: iced::advanced::Renderer,
+{
+    fn new(content: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
+        Self {
+            content: content.into(),
+            position: Point::ORIGIN,
+        }
+    }
+
+    fn position(mut self, position: Point) -> Self {
+        self.position = position;
+        self
+    }
+}
+
+impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for OverflowPin<'_, Message, Theme, Renderer>
+where
+    Renderer: iced::advanced::Renderer,
+{
+    fn tag(&self) -> iced::advanced::widget::tree::Tag {
+        self.content.as_widget().tag()
+    }
+
+    fn state(&self) -> iced::advanced::widget::tree::State {
+        self.content.as_widget().state()
+    }
+
+    fn children(&self) -> Vec<Tree> {
+        self.content.as_widget().children()
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        self.content.as_widget().diff(tree);
+    }
+
+    fn size(&self) -> Size<Length> {
+        Size {
+            width: Length::Fill,
+            height: Length::Fill,
+        }
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        let node = self
+            .content
+            .as_widget_mut()
+            .layout(tree, renderer, limits)
+            .move_to(self.position);
+
+        let size = limits.resolve(Length::Fill, Length::Fill, node.size());
+        layout::Node::with_children(size, vec![node])
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        self.content.as_widget_mut().operate(
+            tree,
+            layout
+                .children()
+                .next()
+                .expect("OverflowPin always lays out exactly one child"),
+            renderer,
+            operation,
+        );
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        self.content.as_widget_mut().update(
+            tree,
+            event,
+            layout
+                .children()
+                .next()
+                .expect("OverflowPin always lays out exactly one child"),
+            cursor,
+            renderer,
+            shell,
+            viewport,
+        );
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.content.as_widget().mouse_interaction(
+            tree,
+            layout
+                .children()
+                .next()
+                .expect("OverflowPin always lays out exactly one child"),
+            cursor,
+            viewport,
+            renderer,
+        )
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+    ) {
+        let bounds = layout.bounds();
+        if let Some(clipped_viewport) = bounds.intersection(viewport) {
+            self.content.as_widget().draw(
+                tree,
+                renderer,
+                theme,
+                style,
+                layout
+                    .children()
+                    .next()
+                    .expect("OverflowPin always lays out exactly one child"),
+                cursor,
+                &clipped_viewport,
+            );
+        }
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        renderer: &Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        self.content.as_widget_mut().overlay(
+            tree,
+            layout
+                .children()
+                .next()
+                .expect("OverflowPin always lays out exactly one child"),
+            renderer,
+            viewport,
+            translation,
+        )
+    }
+}
+
+impl<'a, Message, Theme, Renderer> From<OverflowPin<'a, Message, Theme, Renderer>>
+    for Element<'a, Message, Theme, Renderer>
+where
+    Message: 'a,
+    Theme: 'a,
+    Renderer: iced::advanced::Renderer + 'a,
+{
+    fn from(p: OverflowPin<'a, Message, Theme, Renderer>) -> Self {
+        Element::new(p)
+    }
+}
+
 /// Build the boat overlay element. Returned as a plain `Element` (not
 /// `Option<Element>`) so the visibility branch lives at the call site —
-/// `column!` and `Stack::push` expect `impl Into<Element>`.
+/// `Stack::push` expects `impl Into<Element>`.
 ///
 /// `area_width` / `area_height` are the pixel dimensions of the visualizer
 /// area the boat rides over. They size the outer clipping container and let
 /// us compute the boat's pixel position from `(x_ratio, y_ratio)`.
 ///
 /// Layout: a fixed-size `container.clip(true)` framing the visualizer area,
-/// containing a column [top spacer, row [left spacer, boat svg]]. Spacers
-/// position the boat at `(target_x, target_y)`; the outer container scissors
-/// any overflow.
+/// containing a `Stack` of `OverflowPin`-positioned boat sprites. The
+/// primary copy sits at `(target_x, target_y)` (which may have negative
+/// `target_x` once the boat starts sliding off the left edge). When the
+/// boat overlaps an edge a second copy is pushed at `target_x ± area_width`
+/// so the bow emerges from the opposite edge in the same frame the stern
+/// is leaving — that's the toroidal wrap the physics rely on, drawn so the
+/// seam isn't visible.
 ///
-/// Why this and not `Float`: `iced::widget::Float` renders translated content
-/// via an overlay layer (`reference-iced/widget/src/float.rs:204-244`) that
-/// calls `renderer.with_layer(self.viewport, ...)` with the **full window
-/// viewport** — so a parent `container.clip(true)` is silently ignored and
-/// the boat draws over neighbouring overlays (the player bar). Positioning
-/// the boat as a normal in-flow widget lets the parent clip actually take
-/// effect, the same way the lines/bars shader respects its scissor rect.
+/// `OverflowPin` (defined just above) is used instead of `iced::widget::pin`
+/// because the stock `Pin` shrinks `Length::Fixed`-sized content as the
+/// position approaches the parent's far edge (silently squashing the
+/// boat). `OverflowPin` lets the boat keep its real size and trims the
+/// off-screen portion via the ancestor clip in its `draw()` path.
+///
+/// Why not `Float`: `iced::widget::Float` renders translated content via an
+/// overlay layer (`reference-iced/widget/src/float.rs:204-244`) that calls
+/// `renderer.with_layer(self.viewport, ...)` with the full window viewport,
+/// so a parent `container.clip(true)` is silently ignored and the boat
+/// would draw over neighbouring overlays (the player bar).
 pub(crate) fn boat_overlay<'a, M: 'a>(
     state: &BoatState,
     area_width: f32,
@@ -516,26 +685,46 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
     // Pixel offsets within the visualizer area. The waterline is
     // `(1 - y_ratio) * area_height` from the top (visualizer draws upward
     // from the bottom). `BOAT_SINK_FRACTION` of the boat's height sits below
-    // the waterline; the rest sits above. Spacers can't take negative sizes,
-    // so we clamp at 0 — overflow above is then handled by the clip on the
-    // outer container, mirroring the bottom edge.
+    // the waterline; the rest sits above. `Pin` accepts negative `target_x`
+    // directly, so we don't clamp it here — the outer clip handles the
+    // off-screen portion. `target_y` keeps its `.max(0.0)` because Y has no
+    // wrap (wave height is bounded), so the overlap-above case really is
+    // just "nudge against the top edge".
     let cx = state.x_ratio * area_width;
-    let target_x = (cx - boat_w * 0.5).max(0.0);
+    let target_x = cx - boat_w * 0.5;
     let line_y = area_height * (1.0 - state.y_ratio);
     let target_y = (line_y - boat_h + boat_h * BOAT_SINK_FRACTION).max(0.0);
 
-    let boat_svg = container(Svg::new(handle).width(Length::Fill).height(Length::Fill))
-        .width(Length::Fixed(boat_w))
-        .height(Length::Fixed(boat_h));
+    let pin_at = |x: f32| {
+        OverflowPin::new(
+            container(
+                Svg::new(handle.clone())
+                    .width(Length::Fill)
+                    .height(Length::Fill),
+            )
+            .width(Length::Fixed(boat_w))
+            .height(Length::Fixed(boat_h)),
+        )
+        .position(Point::new(x, target_y))
+    };
 
-    container(column![
-        Space::new().height(Length::Fixed(target_y)),
-        row![Space::new().width(Length::Fixed(target_x)), boat_svg],
-    ])
-    .width(Length::Fixed(area_width))
-    .height(Length::Fixed(area_height))
-    .clip(true)
-    .into()
+    let mut overlay = Stack::new().push(pin_at(target_x));
+    // Off-left overlap → ghost peeks in from the right edge.
+    if target_x < 0.0 {
+        overlay = overlay.push(pin_at(target_x + area_width));
+    }
+    // Off-right overlap → ghost peeks in from the left edge. (`x_ratio` is
+    // already wrapped to `[0, 1)` in `step()`, so both branches can never
+    // fire in the same frame.)
+    if target_x + boat_w > area_width {
+        overlay = overlay.push(pin_at(target_x - area_width));
+    }
+
+    container(overlay)
+        .width(Length::Fixed(area_width))
+        .height(Length::Fixed(area_height))
+        .clip(true)
+        .into()
 }
 
 #[cfg(test)]
@@ -664,7 +853,9 @@ mod tests {
     #[test]
     fn step_keeps_x_in_unit_range_under_extreme_slope() {
         // Large amplitude waveform that would produce big slope forces in
-        // every direction. After many ticks `x_ratio` must stay clamped.
+        // every direction. The toroidal wrap (`rem_euclid`) must keep
+        // `x_ratio` in `[0, 1)` no matter how aggressively the slope and
+        // velocity push past either edge.
         let bars: Vec<f64> = (0..32)
             .map(|i| ((i as f64 * 0.7).sin() * 0.5 + 0.5).clamp(0.0, 1.0))
             .collect();
@@ -675,8 +866,8 @@ mod tests {
         };
         let final_state = run(initial, 5000, Duration::from_millis(10), &bars);
         assert!(
-            (0.0..=1.0).contains(&final_state.x_ratio),
-            "x_ratio must remain in [0, 1] (got {x})",
+            (0.0..1.0).contains(&final_state.x_ratio),
+            "x_ratio must wrap into [0, 1) after every step (got {x})",
             x = final_state.x_ratio
         );
     }
@@ -704,35 +895,94 @@ mod tests {
     }
 
     #[test]
-    fn step_wall_bumper_prevents_edge_pinning() {
-        // Waveform that would normally pin the boat at the right wall: bars
-        // are tall everywhere except the last few slots, so slope sampling
-        // near x = 1.0 sees a steep negative slope → strong rightward force.
-        // Suppress the captain charge so this test isolates the bumper.
-        let bars: Vec<f64> = (0..32).map(|i| if i >= 30 { 0.05 } else { 0.95 }).collect();
+    fn step_wraps_x_ratio_off_right_edge() {
+        // Boat near the right edge with strong rightward velocity: a single
+        // tick should carry it past 1.0, where `rem_euclid` should drop it
+        // back near 0.0 with momentum intact (no clamp, no zeroing).
+        let bars = vec![0.5; 16];
         let mut state = BoatState {
-            x_ratio: 1.0,
-            x_velocity: 0.0,
-            // Pre-seed rng + push next charge way out so the lazy-init branch
-            // doesn't reschedule mid-test.
+            x_ratio: 0.99,
+            x_velocity: MAX_X_V, // 0.15 ratio/sec
+            // Suppress the captain so velocity changes come from physics only.
             rng_state: 0x12345,
             secs_until_next_charge: 1e6,
             ..Default::default()
         };
 
-        // Settle for 30 s. The bumper should evict the boat from the wall
-        // and keep it outside the wall zone.
-        let dt = Duration::from_millis(16);
-        for _ in 0..(30 * 60) {
-            step(&mut state, dt, &bars, false);
-        }
+        // dt large enough that x_velocity * dt clearly exceeds (1.0 - 0.99).
+        // 0.15 * 0.5 = 0.075 → unwrapped position would be ~1.065.
+        step(&mut state, Duration::from_millis(500), &bars, false);
 
-        let zone_inner = 1.0 - WALL_ZONE * 0.5;
         assert!(
-            state.x_ratio < zone_inner,
-            "wall bumper should keep boat off right wall (got x_ratio = {}, expected < {})",
-            state.x_ratio,
-            zone_inner
+            state.x_ratio < 0.5,
+            "boat should wrap from right edge to near 0 (got x_ratio = {})",
+            state.x_ratio
+        );
+        assert!(
+            state.x_velocity > 0.0,
+            "rightward velocity must survive the wrap (got {})",
+            state.x_velocity
+        );
+    }
+
+    #[test]
+    fn step_wraps_x_ratio_off_left_edge() {
+        // Mirror of the right-edge case: boat near 0 with leftward velocity
+        // wraps back near 1.0 with momentum intact.
+        let bars = vec![0.5; 16];
+        let mut state = BoatState {
+            x_ratio: 0.01,
+            x_velocity: -MAX_X_V,
+            rng_state: 0x12345,
+            secs_until_next_charge: 1e6,
+            ..Default::default()
+        };
+
+        step(&mut state, Duration::from_millis(500), &bars, false);
+
+        assert!(
+            state.x_ratio > 0.5,
+            "boat should wrap from left edge to near 1 (got x_ratio = {})",
+            state.x_ratio
+        );
+        assert!(
+            state.x_velocity < 0.0,
+            "leftward velocity must survive the wrap (got {})",
+            state.x_velocity
+        );
+    }
+
+    #[test]
+    fn step_wrap_does_not_zero_velocity_at_seam() {
+        // Specifically guards the regression from the old hard-clamp behavior:
+        // the previous code would zero `x_velocity` at the edge, which under
+        // a wrap model would visibly stall the boat the moment it touched a
+        // seam. Crossing the seam must leave `|x_velocity|` essentially
+        // unchanged from one tick to the next.
+        let bars = vec![0.5; 16];
+        let mut state = BoatState {
+            x_ratio: 0.999,
+            x_velocity: 0.10,
+            rng_state: 0x12345,
+            secs_until_next_charge: 1e6,
+            ..Default::default()
+        };
+
+        let v_before = state.x_velocity;
+        step(&mut state, Duration::from_millis(50), &bars, false);
+
+        // After one tick the boat has crossed x = 1.0 and re-entered near 0.
+        assert!(
+            state.x_ratio < 0.5,
+            "precondition: boat should have wrapped (got {})",
+            state.x_ratio
+        );
+        // Velocity may have shifted slightly from drive/damping/restoring,
+        // but the hard-clamp regression would zero it outright.
+        assert!(
+            state.x_velocity > v_before * 0.5,
+            "x_velocity must not collapse across the wrap (before {v_before}, after {})",
+            state.x_velocity
         );
     }
 
@@ -792,13 +1042,13 @@ mod tests {
 
     #[test]
     fn pick_charge_direction_prefers_storm_side() {
-        // Asymmetric bars: tall right half, calm left half. With the boat
-        // near center, direction must come back as +1 regardless of rng seed.
+        // Asymmetric bars: tall right half, calm left half. Direction must
+        // come back as +1 regardless of rng seed.
         let bars: Vec<f64> = (0..32).map(|i| if i > 16 { 0.8 } else { 0.1 }).collect();
         for seed in [1, 2, 3, 999, 0x9E37_79B9] {
             let mut rng = seed;
             assert_eq!(
-                pick_charge_direction(&bars, 0.5, &mut rng),
+                pick_charge_direction(&bars, &mut rng),
                 1.0,
                 "should pick right (storm) for seed {seed}"
             );
@@ -809,7 +1059,7 @@ mod tests {
         for seed in [1, 2, 3, 999, 0x9E37_79B9] {
             let mut rng = seed;
             assert_eq!(
-                pick_charge_direction(&bars, 0.5, &mut rng),
+                pick_charge_direction(&bars, &mut rng),
                 -1.0,
                 "should pick left (storm) for seed {seed}"
             );
@@ -817,31 +1067,8 @@ mod tests {
     }
 
     #[test]
-    fn pick_charge_direction_returns_to_center_when_off_center() {
-        // Storm is on the right but the boat has already drifted into the
-        // right side: captain must override the storm-bias and head back
-        // toward center.
-        let storm_right: Vec<f64> = (0..32).map(|i| if i > 16 { 0.8 } else { 0.1 }).collect();
-        let mut rng = 0x9E37_79B9;
-        assert_eq!(
-            pick_charge_direction(&storm_right, 0.85, &mut rng),
-            -1.0,
-            "boat already on right side should charge left even toward storm"
-        );
-
-        let storm_left: Vec<f64> = (0..32).map(|i| if i < 15 { 0.8 } else { 0.1 }).collect();
-        let mut rng = 0x9E37_79B9;
-        assert_eq!(
-            pick_charge_direction(&storm_left, 0.15, &mut rng),
-            1.0,
-            "boat already on left side should charge right even toward storm"
-        );
-    }
-
-    #[test]
     fn pick_charge_direction_random_on_symmetric_waveform() {
-        // Flat bars + boat near center: imbalance is 0 and the off-center
-        // override doesn't fire, so we land in the rng coin-flip branch.
+        // Flat bars: imbalance is 0, so we land in the rng coin-flip branch.
         // Both directions must be reachable across different seeds. Use
         // production-shaped seeds (xorshift's first output is degenerate
         // for tiny seeds, so seeding from a single counter would hit one
@@ -852,7 +1079,7 @@ mod tests {
         let mut saw_right = false;
         for i in 0u32..200 {
             let mut rng = 0x9E37_79B9_u32.wrapping_add(i.wrapping_mul(0x6789_ABCD));
-            match pick_charge_direction(&bars, 0.5, &mut rng) {
+            match pick_charge_direction(&bars, &mut rng) {
                 d if d < 0.0 => saw_left = true,
                 d if d > 0.0 => saw_right = true,
                 _ => {}
@@ -864,36 +1091,6 @@ mod tests {
         assert!(
             saw_left && saw_right,
             "coin flip must reach both directions"
-        );
-    }
-
-    #[test]
-    fn step_slope_suppressed_inside_wall_zone() {
-        // Steep upward ramp: outside the wall zone the boat would build a
-        // strong leftward velocity from slope force. Inside the wall zone
-        // (x_ratio = 0.05) the slope must be zeroed, so velocity comes from
-        // the inward wall bumper instead.
-        let bars: Vec<f64> = (0..16).map(|i| i as f64 / 15.0).collect();
-        let mut state = BoatState {
-            x_ratio: 0.05,
-            phase: 0.0,
-            // Pre-seed rng + push next charge way out so this test isolates
-            // the slope-suppression branch.
-            rng_state: 0x12345,
-            secs_until_next_charge: 1e6,
-            ..Default::default()
-        };
-
-        // One short tick: if slope had fired (~ -0.04 leftward) it would
-        // dominate the small wall force at this depth and produce negative
-        // velocity. Instead we expect rightward velocity from the bumper.
-        step(&mut state, Duration::from_millis(16), &bars, false);
-
-        assert!(
-            state.x_velocity > 0.0,
-            "slope must be suppressed inside wall zone — velocity should be \
-             positive (rightward) from wall bumper, got {}",
-            state.x_velocity
         );
     }
 

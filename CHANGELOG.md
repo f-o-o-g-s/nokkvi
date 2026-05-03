@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Surfing boat now sails continuously through the screen edges instead of bouncing back: when it reaches one side it keeps its momentum and emerges from the opposite side, drawn split across the seam during the crossing so the wrap looks seamless.
 - Clicking an album, artist, or genre name link in any list now navigates to that item's view and expands it inline at the top, instead of leaving you on a one-row filtered list with the contents hidden behind a follow-up Shift+Enter.
 
 ### Fixed
