@@ -467,12 +467,14 @@ mod tests {
 
     #[test]
     fn toml_roundtrip_queue_column_visibility() {
-        let mut settings = TomlSettings::default();
-        settings.queue_show_stars = false;
-        settings.queue_show_album = true;
-        settings.queue_show_duration = false;
-        settings.queue_show_love = false;
-        settings.queue_show_plays = true;
+        let settings = TomlSettings {
+            queue_show_stars: false,
+            queue_show_album: true,
+            queue_show_duration: false,
+            queue_show_love: false,
+            queue_show_plays: true,
+            ..TomlSettings::default()
+        };
 
         let toml_str = toml::to_string_pretty(&settings).expect("serialize");
         let parsed: TomlSettings = toml::from_str(&toml_str).expect("deserialize");
@@ -513,13 +515,15 @@ mod tests {
 
     #[test]
     fn toml_roundtrip_view_column_visibility() {
-        let mut s = TomlSettings::default();
-        s.albums_show_stars = true;
-        s.albums_show_plays = true;
-        s.songs_show_stars = true;
-        s.songs_show_album = false;
-        s.artists_show_plays = false;
-        s.artists_show_love = false;
+        let s = TomlSettings {
+            albums_show_stars: true,
+            albums_show_plays: true,
+            songs_show_stars: true,
+            songs_show_album: false,
+            artists_show_plays: false,
+            artists_show_love: false,
+            ..TomlSettings::default()
+        };
 
         let toml_str = toml::to_string_pretty(&s).expect("serialize");
         let parsed: TomlSettings = toml::from_str(&toml_str).expect("deserialize");
@@ -539,8 +543,10 @@ mod tests {
 
     #[test]
     fn toml_strip_merged_mode_roundtrip() {
-        let mut settings = TomlSettings::default();
-        settings.strip_merged_mode = true;
+        let settings = TomlSettings {
+            strip_merged_mode: true,
+            ..TomlSettings::default()
+        };
         let toml_str = toml::to_string_pretty(&settings).expect("serialize");
         let parsed: TomlSettings = toml::from_str(&toml_str).expect("deserialize");
         assert!(parsed.strip_merged_mode);

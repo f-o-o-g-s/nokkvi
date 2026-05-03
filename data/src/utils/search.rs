@@ -81,7 +81,6 @@ mod tests {
 
     #[derive(Clone)]
     struct TestItem {
-        name: String,
         description: String,
         searchable_lower: String,
     }
@@ -89,7 +88,6 @@ mod tests {
     impl TestItem {
         fn new(name: &str, description: &str) -> Self {
             Self {
-                name: name.to_string(),
                 description: description.to_string(),
                 searchable_lower: build_searchable_lower(&[name, description]),
             }

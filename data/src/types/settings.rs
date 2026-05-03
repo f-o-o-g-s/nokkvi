@@ -561,8 +561,10 @@ mod tests {
 
     #[test]
     fn strip_merged_mode_roundtrips_through_serde() {
-        let mut p = PlayerSettings::default();
-        p.strip_merged_mode = true;
+        let p = PlayerSettings {
+            strip_merged_mode: true,
+            ..PlayerSettings::default()
+        };
         let json = serde_json::to_string(&p).expect("serialize");
         let parsed: PlayerSettings = serde_json::from_str(&json).expect("deserialize");
         assert!(parsed.strip_merged_mode);
