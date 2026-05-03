@@ -20,13 +20,15 @@
 //!   feel; the boat lags fast wave changes instead of snapping to them.
 //! - **Captain charge** — every `CHARGE_INTERVAL_*` seconds (randomized) the
 //!   captain decides to row in a chosen direction for `CHARGE_DURATION_*`
-//!   seconds: a small constant force is applied and the slope force is
-//!   suppressed for the duration. Direction is a fair coin flip — earlier
-//!   revisions biased it toward the louder half of the spectrum, but on a
-//!   torus that systematically favored one wrap direction for any
-//!   asymmetric track. Force size is tuned so terminal velocity during a
-//!   charge is only modestly above normal cruise — feels like determined
-//!   effort, not a speed boost.
+//!   seconds. Force traces a half-sine envelope over the charge
+//!   (`CHARGE_FORCE * sin(π · progress)`), so the captain ramps up,
+//!   peaks mid-stroke, and tapers off — a step function felt motorized.
+//!   Slope force is blended at `CHARGE_SLOPE_BLEND` rather than fully
+//!   suppressed, so the boat still feels wave faces while rowing
+//!   ("battling the waves") instead of plowing through indifferent to
+//!   them. Direction is a fair coin flip — earlier revisions biased it
+//!   toward the louder half of the spectrum, but on a torus that
+//!   systematically favored one wrap direction for any asymmetric track.
 //! - **Toroidal X wrap** — when `x_ratio` leaves `[0, 1)` it wraps via
 //!   `rem_euclid(1.0)` and `x_velocity` is preserved. There is no wall to
 //!   bounce off; the boat sails off one edge and reappears on the other
@@ -105,6 +107,21 @@ const SLOPE_GAIN: f32 = 0.04;
 /// transient lined up under it.
 const MAX_SLOPE_FORCE: f32 = 0.10;
 
+/// Local-height threshold below which the slope force is fully suppressed.
+/// "No surfing in calm water": when the wave under the boat is essentially
+/// flat (`target_y < FLOOR`), `downhill` has no physical meaning and the
+/// gradient at the foot of the basin would otherwise drag the boat further
+/// into low-energy edge regions.
+const SLOPE_GATE_FLOOR: f32 = 0.05;
+
+/// Width of the linear ramp from "fully suppressed" to "full slope force".
+/// At `target_y = FLOOR + RAMP` the gate is 1.0 (full surf force); between
+/// FLOOR and FLOOR + RAMP it lerps. Tuned so anything above ~25% of the
+/// visualizer height surfs at full force, while the bottom ~5% is dead
+/// zone — covers the V-basin at the seam without flattening surfing on
+/// real wave faces.
+const SLOPE_GATE_RAMP: f32 = 0.20;
+
 /// Min/max delay between captain charges. The actual interval is sampled
 /// uniformly in `[MIN, MAX]` after each charge ends (and at first activation),
 /// so charges feel scheduled by mood rather than clockwork.
@@ -112,17 +129,35 @@ const CHARGE_INTERVAL_MIN_SECS: f32 = 12.0;
 const CHARGE_INTERVAL_MAX_SECS: f32 = 30.0;
 
 /// Min/max duration of a single charge. Sampled uniformly in `[MIN, MAX]`
-/// when a charge starts. Long enough that the boat covers a notable fraction
-/// of the visualizer width before the charge ends.
-const CHARGE_DURATION_MIN_SECS: f32 = 6.0;
-const CHARGE_DURATION_MAX_SECS: f32 = 12.0;
+/// when a charge starts. Tuned so a charge covers a notable but bounded
+/// fraction of the visualizer — under the half-sine envelope (average
+/// thrust ≈ 64% of peak) a 6 s charge crosses roughly a third of the
+/// screen, which reads as deliberate rowing rather than traversing the
+/// whole ocean.
+const CHARGE_DURATION_MIN_SECS: f32 = 4.0;
+const CHARGE_DURATION_MAX_SECS: f32 = 8.0;
 
-/// Constant horizontal force applied during a charge, in the chosen
-/// direction. Sized so terminal velocity (`CHARGE_FORCE / X_DAMPING`) is
-/// only slightly above normal cruise — `0.06 / 0.9 ≈ 0.067 ratio/sec`,
-/// versus the natural `~0.045 ratio/sec` drift speed. Reads as deliberate
-/// effort, not a speed boost.
+/// Peak horizontal force during a charge. The actual instantaneous force
+/// is `CHARGE_FORCE · sin(π · progress)` where `progress = elapsed /
+/// total ∈ [0, 1]` — half-sine envelope, zero at the endpoints, peak
+/// mid-stroke. Average force across a charge is `(2/π) · CHARGE_FORCE
+/// ≈ 0.038`, well below the peak. Peak terminal velocity
+/// (`CHARGE_FORCE / X_DAMPING ≈ 0.067 ratio/sec`) is preserved at the
+/// natural rower's mid-stroke strength; average distance covered drops
+/// because the captain spends time ramping in and out instead of holding
+/// peak thrust.
 const CHARGE_FORCE: f32 = 0.06;
+
+/// Fraction of the raw slope force that remains active during a charge.
+/// Earlier revisions zeroed slope entirely so the captain could escape
+/// any basin no matter how deep — but the height gate
+/// (`SLOPE_GATE_FLOOR/RAMP`) already prevents low-amplitude basins from
+/// pinning the boat, so full suppression is no longer needed for trap
+/// escape. Blending at 50% gives the "battling the waves" feel: a steep
+/// wave face still pushes the boat around while the captain rows with
+/// intent. Trade-off: charges no longer dominate slope outright, just
+/// make net progress against it.
+const CHARGE_SLOPE_BLEND: f32 = 0.5;
 
 /// Friction on `x_velocity`. The dominant source of the "floating" feel —
 /// without this, the boat would build up arbitrary speed.
@@ -200,6 +235,10 @@ const FLIP_THRESHOLD: f32 = 0.03;
 ///   meaningful while `charge_remaining_secs == 0`.
 /// - `charge_remaining_secs` is the time left in the current charge; > 0
 ///   means the captain is actively rowing in `charge_direction`.
+/// - `charge_total_secs` is the duration set when the current charge began;
+///   together with `charge_remaining_secs` it defines `progress` for the
+///   half-sine envelope. Stays at the previous charge's value between
+///   charges (harmless — only read while `charge_remaining_secs > 0`).
 /// - `charge_direction` is `+1.0` (right) or `-1.0` (left); set when a
 ///   charge begins, unread otherwise.
 /// - `rng_state` seeds a tiny xorshift PRNG used for charge timing and
@@ -235,6 +274,7 @@ pub struct BoatState {
     pub last_tick: Option<Instant>,
     pub secs_until_next_charge: f32,
     pub charge_remaining_secs: f32,
+    pub charge_total_secs: f32,
     pub charge_direction: f32,
     pub rng_state: u32,
     pub tilt_handles: HashMap<(i16, bool), svg::Handle>,
@@ -309,13 +349,17 @@ impl BoatState {
 ///
 /// Forces on `x` (semi-implicit Euler):
 /// - drive: `sin(2π·phase) · DRIVE_FORCE` — slow rhythmic push
-/// - slope: `(-slope · SLOPE_GAIN).clamp(±MAX_SLOPE_FORCE)` — surf downhill,
-///   capped so a single tall bar can't dominate. Suppressed during a charge
-///   (so the captain's heading isn't fighting wave drift).
+/// - slope: `(-slope · SLOPE_GAIN · surf_gate).clamp(±MAX_SLOPE_FORCE)` —
+///   surf downhill, capped so a single tall bar can't dominate. The
+///   `surf_gate` (lerped over `SLOPE_GATE_FLOOR` → `+RAMP`) zeroes the
+///   force in low-amplitude regions so the boat doesn't surf calm
+///   water. Multiplied by `CHARGE_SLOPE_BLEND` while a charge is active
+///   — captain still feels wave faces but isn't yanked off course.
 /// - damping: `-x_velocity · X_DAMPING` — friction
-/// - charge: `charge_direction · CHARGE_FORCE` while a charge is active,
-///   else 0. Captain charges fire on a randomized timer with a fair-coin
-///   direction.
+/// - charge: `charge_direction · CHARGE_FORCE · sin(π · progress)` while
+///   a charge is active, else 0. Half-sine envelope ramps the captain's
+///   effort in and out — a step function felt motorized. Charges fire
+///   on a randomized timer with a fair-coin direction.
 ///
 /// There is no centering / restoring force. A spring toward `x = 0.5` made
 /// sense when the boat could get pinned against an edge, but on a torus
@@ -365,19 +409,40 @@ pub(crate) fn step(state: &mut BoatState, dt: Duration, bars: &[f64], angular: b
     state.phase = (state.phase + dt_secs / DRIVE_PERIOD_SECS).rem_euclid(1.0);
     let drive = (state.phase * std::f32::consts::TAU).sin() * DRIVE_FORCE;
 
-    // Slope sampling stays clamped at the buffer edges — the bars buffer is
-    // not periodic, so wrap-around sampling would mix the right-edge spectrum
-    // into the left-edge gradient and vice versa. The boat happily crosses
-    // the seam regardless; a brief slope discontinuity at the wrap point is
-    // hidden by inertia.
-    let h_left = sample_line_height(bars, (state.x_ratio - SLOPE_DX).max(0.0), angular);
-    let h_right = sample_line_height(bars, (state.x_ratio + SLOPE_DX).min(1.0), angular);
+    // Slope sampling wraps toroidally to match the boat's wrap geometry.
+    // Without this, both samples near the seam clamp to the low-energy
+    // edge bins (sub-bass on the left, top-treble on the right — quiet in
+    // most music), forming a `\/` basin whose downhill slope force can
+    // exceed `CHARGE_FORCE` and pin the boat at the seam until the next
+    // captain charge fires. Wrapping reads the seam as flat when both
+    // ends are low (slope ≈ 0), so drive + inertia carry the boat
+    // through. Inside `(0, 1)` `rem_euclid` is a no-op, so mid-screen
+    // behavior is unchanged. The "right-edge spectrum bleeds into the
+    // left-edge gradient" concern noted earlier is visually irrelevant:
+    // those bins are low-energy precisely because there's nothing
+    // interesting to surf there.
+    let h_left = sample_line_height(bars, (state.x_ratio - SLOPE_DX).rem_euclid(1.0), angular);
+    let h_right = sample_line_height(bars, (state.x_ratio + SLOPE_DX).rem_euclid(1.0), angular);
     let slope = (h_right - h_left) / (2.0 * SLOPE_DX);
-    let slope_force_raw = (-slope * SLOPE_GAIN).clamp(-MAX_SLOPE_FORCE, MAX_SLOPE_FORCE);
+
+    // Gate the horizontal slope force on local wave height: full force on
+    // visible wave faces, fading to zero in low-energy regions. Real
+    // (asymmetric) music spectra still slope downhill toward the seam
+    // even with toroidal sampling — the V-shape at the edges extends a
+    // few percent inward — and that residual ramp was enough to keep the
+    // boat hovering near the edges between captain charges. Tilt is left
+    // ungated so the boat still leans naturally on whatever wisp of
+    // curve it's on; only the horizontal pull is suppressed.
+    let local_height = sample_line_height(bars, state.x_ratio, angular);
+    let surf_gate = ((local_height - SLOPE_GATE_FLOOR) / SLOPE_GATE_RAMP).clamp(0.0, 1.0);
+    let slope_force_raw =
+        (-slope * SLOPE_GAIN * surf_gate).clamp(-MAX_SLOPE_FORCE, MAX_SLOPE_FORCE);
 
     // Charge state machine: either rowing (charge_remaining_secs > 0) or
-    // counting down to the next charge. Slope is suppressed for the duration
-    // of a charge so the captain's heading isn't fought by wave drift.
+    // counting down to the next charge. While rowing, force traces a
+    // half-sine envelope (zero at start/end, peak mid-stroke) and slope
+    // is blended at `CHARGE_SLOPE_BLEND` instead of fully suppressed —
+    // so the boat still feels wave faces while the captain rows.
     let (charge_force, slope_force) = if state.charge_remaining_secs > 0.0 {
         state.charge_remaining_secs -= dt_secs;
         if state.charge_remaining_secs <= 0.0 {
@@ -386,15 +451,24 @@ pub(crate) fn step(state: &mut BoatState, dt: Duration, bars: &[f64], angular: b
             state.secs_until_next_charge =
                 lerp(CHARGE_INTERVAL_MIN_SECS, CHARGE_INTERVAL_MAX_SECS, r);
         }
-        (state.charge_direction * CHARGE_FORCE, 0.0)
+        let envelope = charge_envelope(state.charge_total_secs, state.charge_remaining_secs);
+        (
+            state.charge_direction * CHARGE_FORCE * envelope,
+            slope_force_raw * CHARGE_SLOPE_BLEND,
+        )
     } else {
         state.secs_until_next_charge -= dt_secs;
         if state.secs_until_next_charge <= 0.0 {
             state.charge_direction = pick_charge_direction(&mut state.rng_state);
             let r = next_rand_unit(&mut state.rng_state);
-            state.charge_remaining_secs =
-                lerp(CHARGE_DURATION_MIN_SECS, CHARGE_DURATION_MAX_SECS, r);
-            (state.charge_direction * CHARGE_FORCE, 0.0)
+            let duration = lerp(CHARGE_DURATION_MIN_SECS, CHARGE_DURATION_MAX_SECS, r);
+            state.charge_remaining_secs = duration;
+            state.charge_total_secs = duration;
+            // First tick of a brand-new charge: progress = 0, envelope = 0.
+            // Force is zero this tick; the next tick's decrement advances
+            // progress and the captain starts pulling. Slope is already on
+            // the charge-blend regime since the charge is "active".
+            (0.0, slope_force_raw * CHARGE_SLOPE_BLEND)
         } else {
             (0.0, slope_force_raw)
         }
@@ -445,8 +519,11 @@ pub(crate) fn step(state: &mut BoatState, dt: Duration, bars: &[f64], angular: b
         }
     }
 
-    let target_y = sample_line_height(bars, state.x_ratio, angular);
-    let ay = (target_y - state.y_ratio) * Y_SPRING_K - state.y_velocity * Y_DAMPING;
+    // Reuses `local_height` from the slope-gate computation above —
+    // same expression (`sample_line_height(bars, state.x_ratio, angular)`)
+    // sampled at the boat's current x, so y dynamics and the surf gate
+    // stay in lockstep without a second `sample_line_height` call.
+    let ay = (local_height - state.y_ratio) * Y_SPRING_K - state.y_velocity * Y_DAMPING;
     state.y_velocity += ay * dt_secs;
     state.y_ratio += state.y_velocity * dt_secs;
     if state.y_ratio <= 0.0 {
@@ -534,6 +611,25 @@ fn next_rand_unit(state: &mut u32) -> f32 {
 /// `[0, 1)` random sample into a charge interval/duration window.
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
+}
+
+/// Half-sine envelope over a charge's progress: 0 at `progress = 0` and
+/// `progress = 1`, peaks at 1 at `progress = 0.5`. Multiplied onto the
+/// peak charge force so the captain ramps in, holds peak briefly, and
+/// tapers off — the "step function" feel of constant thrust is the main
+/// thing that read as motorized in earlier revisions.
+///
+/// `progress = 1 - remaining / total`. Returns 0 when `total <= 0` so a
+/// `Default`-initialized `BoatState` (with `charge_total_secs == 0`)
+/// doesn't divide-by-zero into NaN; the guard fires only when the field
+/// is set without a corresponding charge start, which doesn't happen in
+/// production.
+fn charge_envelope(total_secs: f32, remaining_secs: f32) -> f32 {
+    if total_secs <= 0.0 {
+        return 0.0;
+    }
+    let progress = (1.0 - remaining_secs / total_secs).clamp(0.0, 1.0);
+    (std::f32::consts::PI * progress).sin()
 }
 
 /// Pick a charge direction (`±1`) with a fair coin flip.
@@ -1208,6 +1304,121 @@ mod tests {
     }
 
     #[test]
+    fn step_seam_slope_cancels_under_symmetric_low_edges() {
+        // Music-shaped FFT spectra are usually low at both ends (sub-bass
+        // on the left, top-treble on the right) with content in the
+        // middle. Combined with the boat's wrap geometry that creates a
+        // `\/` basin at the seam: edge-clamped slope sampling read a
+        // strong inward gradient from either side, pinning the boat
+        // there until the next captain charge fired. Toroidal slope
+        // sampling reads the opposite edge instead of clamping, so on a
+        // curve symmetric about the seam the two samples cancel and the
+        // slope force vanishes — drive + inertia carry the boat through.
+        //
+        // Worst case: bars shaped like `sin(π·t)`, low at both ends,
+        // peaked in the middle. Place the boat at x=0 with phase tuned
+        // so step()'s drive force lands at exactly 0 this tick. With the
+        // fix the only force acting is slope; symmetry guarantees it's
+        // near zero. Without the fix the slope would push the boat
+        // inward at ~0.003 ratio/sec on the very first tick.
+        let n = 33;
+        let bars: Vec<f64> = (0..n)
+            .map(|i| {
+                let t = i as f64 / (n - 1) as f64;
+                (std::f64::consts::PI * t).sin()
+            })
+            .collect();
+        assert!(
+            (bars[0] - bars[n - 1]).abs() < 1e-9,
+            "precondition: bars must be symmetric so any non-zero slope \
+             at the seam comes from the sampling rule, not the data"
+        );
+
+        let dt = Duration::from_millis(50);
+        // step() advances phase before sampling drive. Pre-position phase
+        // so the post-advance value is exactly 0 → sin(0) = 0 → drive
+        // contribution this tick is 0.
+        let phase_advance = dt.as_secs_f32() / DRIVE_PERIOD_SECS;
+        let mut state = BoatState {
+            x_ratio: 0.0,
+            x_velocity: 0.0,
+            phase: (1.0 - phase_advance).rem_euclid(1.0),
+            rng_state: 0x12345,
+            secs_until_next_charge: 1e6,
+            ..Default::default()
+        };
+
+        step(&mut state, dt, &bars, false);
+
+        assert!(
+            state.x_velocity.abs() < 1e-3,
+            "toroidal slope sampling should cancel at a symmetric seam \
+             basin (got x_velocity = {}, expected ~0; pre-fix value \
+             would be ~3e-3)",
+            state.x_velocity
+        );
+    }
+
+    #[test]
+    fn step_slope_force_is_gated_when_local_height_is_low() {
+        // The toroidal-sampling fix removed the *hard* gradient at the
+        // exact seam, but on real (asymmetric) spectra the V-shape
+        // extends a few percent inward from each edge — enough residual
+        // downhill pull to keep the boat dwelling near the edges between
+        // captain charges. This test guards the height-gate that
+        // suppresses slope force in low-amplitude regions.
+        //
+        // Construct: flat low baseline (0.01) with a sharp peak in the
+        // middle. Place the boat in the flat region close enough that
+        // the slope sampler reaches into the peak's rising face — so
+        // pre-gate, slope force would saturate at the cap and slam the
+        // boat toward the peak. Local height at the boat's position is
+        // still essentially 0, well below the gate floor, so the gate
+        // multiplies the slope force by zero.
+        let mut bars = vec![0.01_f64; 33];
+        bars[16] = 1.0;
+        bars[15] = 0.7;
+        bars[17] = 0.7;
+        bars[14] = 0.3;
+        bars[18] = 0.3;
+
+        let dt = Duration::from_millis(50);
+        let phase_advance = dt.as_secs_f32() / DRIVE_PERIOD_SECS;
+        let mut state = BoatState {
+            // pos ≈ 8.6 in a 33-bar buffer — far enough below the peak
+            // (pos 16) that local_height is the flat baseline, but the
+            // right slope sample reaches up the rising face.
+            x_ratio: 0.27,
+            x_velocity: 0.0,
+            phase: (1.0 - phase_advance).rem_euclid(1.0),
+            rng_state: 0x12345,
+            secs_until_next_charge: 1e6,
+            ..Default::default()
+        };
+
+        let h_local = sample_line_height(&bars, state.x_ratio, false);
+        assert!(
+            h_local < SLOPE_GATE_FLOOR,
+            "precondition: local height must be below SLOPE_GATE_FLOOR \
+             so the gate fully suppresses slope force (got {h_local}, \
+             floor {SLOPE_GATE_FLOOR})"
+        );
+
+        step(&mut state, dt, &bars, false);
+
+        // Without the gate, slope force would saturate at -MAX_SLOPE_FORCE
+        // and produce |x_velocity| ≈ 5e-3 in this single tick. With the
+        // gate, only the (phase-zeroed) drive contributes — essentially 0.
+        assert!(
+            state.x_velocity.abs() < 1e-3,
+            "slope force must be gated to ~0 when local_height < FLOOR \
+             (got x_velocity = {}, expected ~0; pre-gate value would be \
+             ~5e-3)",
+            state.x_velocity
+        );
+    }
+
+    #[test]
     fn step_charge_eventually_fires() {
         // Simulate 60 s of flat-bar physics from rest. The first charge must
         // fire well within `CHARGE_INTERVAL_MAX_SECS` of 30 s.
@@ -1233,31 +1444,159 @@ mod tests {
     }
 
     #[test]
-    fn step_charge_overrides_slope_to_climb_uphill() {
-        // Linear ramp upward to the right: slope force normally pushes the
-        // boat *left*. Pre-arm a rightward charge and verify the boat moves
-        // *right* — the slope-suppression-during-charge property the user
-        // depends on.
+    fn step_charge_makes_net_progress_against_slope() {
+        // Linear ramp upward to the right: slope force normally pushes
+        // the boat *left*. Pre-arm a rightward charge and verify the
+        // boat still ends up *right* of where it started — the captain's
+        // intent dominates net displacement, even though slope is now
+        // blended at `CHARGE_SLOPE_BLEND` rather than fully zeroed.
+        //
+        // Pre-envelope+blend the assertion was `> 0.6` because slope was
+        // zeroed and force was constant. With the half-sine envelope
+        // (avg ~64% of peak) plus 50% slope blend, net thrust against a
+        // max-steepness ramp drops to ~30% of the old value — the boat
+        // still moves right, just less aggressively. Run for the full
+        // charge duration so the envelope accumulates fully.
         let bars: Vec<f64> = (0..32).map(|i| i as f64 / 31.0).collect();
+        let duration = 6.0;
         let mut state = BoatState {
             x_ratio: 0.5,
-            charge_remaining_secs: 4.0,
+            charge_remaining_secs: duration,
+            charge_total_secs: duration,
             charge_direction: 1.0,
-            // Pre-seed rng + push next charge far away so the lazy-init
-            // branch doesn't reschedule mid-test.
             rng_state: 0x12345,
             secs_until_next_charge: 100.0,
             ..Default::default()
         };
         let dt = Duration::from_millis(16);
-        for _ in 0..(3 * 60) {
+        let ticks = (duration / dt.as_secs_f32()) as usize;
+        for _ in 0..ticks {
             step(&mut state, dt, &bars, false);
         }
         assert!(
-            state.x_ratio > 0.6,
-            "rightward charge should overcome leftward slope force \
-             (got x_ratio = {})",
+            state.x_ratio > 0.55,
+            "rightward charge should still gain ground against a steep \
+             leftward slope (got x_ratio = {})",
             state.x_ratio
+        );
+    }
+
+    #[test]
+    fn charge_envelope_zero_at_endpoints_peak_at_midpoint() {
+        // Half-sine shape: zero start, full peak mid-stroke, zero end.
+        // This is the contract `step()` relies on to ramp the captain's
+        // effort in and out instead of slamming on full thrust.
+        let total = 4.0;
+        // remaining == total → progress = 0 → sin(0) = 0
+        assert!(
+            charge_envelope(total, total).abs() < 1e-6,
+            "envelope at progress=0 must be 0 (got {})",
+            charge_envelope(total, total)
+        );
+        // remaining == total/2 → progress = 0.5 → sin(π/2) = 1
+        assert!(
+            (charge_envelope(total, total / 2.0) - 1.0).abs() < 1e-6,
+            "envelope at progress=0.5 must peak at 1 (got {})",
+            charge_envelope(total, total / 2.0)
+        );
+        // remaining == 0 → progress = 1 → sin(π) ≈ 0
+        assert!(
+            charge_envelope(total, 0.0).abs() < 1e-5,
+            "envelope at progress=1 must be 0 (got {})",
+            charge_envelope(total, 0.0)
+        );
+        // total == 0 sentinel: BoatState::default has charge_total_secs = 0,
+        // so the helper must not divide-by-zero into NaN before the first
+        // charge starts.
+        assert_eq!(charge_envelope(0.0, 4.0), 0.0);
+    }
+
+    #[test]
+    fn step_charge_force_is_zero_on_first_tick_then_ramps_up() {
+        // Half-sine envelope at progress=0 is exactly 0 — so the very
+        // first tick of a fresh charge applies no horizontal force from
+        // the captain. Subsequent ticks ramp up smoothly. This is the
+        // anti-step-function contract.
+        let bars = vec![0.5_f64; 16];
+        let mut state = BoatState {
+            x_ratio: 0.5,
+            // Pre-arm: charge fires on the next tick because
+            // secs_until_next_charge ticks below 0.
+            secs_until_next_charge: 0.0,
+            // Stable rng so charge direction is deterministic.
+            rng_state: 0x12345,
+            ..Default::default()
+        };
+
+        let dt = Duration::from_millis(16);
+        step(&mut state, dt, &bars, false);
+
+        // Charge has now been started. charge_total_secs is set, but the
+        // first tick's progress is 0, so envelope=0 and charge_force=0.
+        // x_velocity should be effectively zero (only drive contributes,
+        // and at phase ≈ 0 drive is nearly zero from rest).
+        assert!(state.charge_remaining_secs > 0.0);
+        assert!(state.charge_total_secs > 0.0);
+        assert!(
+            state.x_velocity.abs() < 1e-3,
+            "first tick of a fresh charge must apply ~0 horizontal force \
+             (envelope = sin(π·0) = 0; got x_velocity = {})",
+            state.x_velocity
+        );
+
+        // Run a few more ticks; the captain should be pulling now.
+        for _ in 0..30 {
+            step(&mut state, dt, &bars, false);
+        }
+        assert!(
+            state.x_velocity.abs() > 1e-3,
+            "after ramp-in the captain should be applying meaningful \
+             force (got x_velocity = {})",
+            state.x_velocity
+        );
+    }
+
+    #[test]
+    fn step_slope_partially_felt_during_charge() {
+        // Boat charging leftward: with flat bars only the charge force
+        // acts. With a descending ramp (slope pushing rightward against
+        // the leftward charge), the slope blend partially cancels the
+        // charge — the boat accelerates LESS leftward than on flat
+        // water. This is the "battling the waves" property: the captain
+        // still feels wave faces while rowing.
+        let flat = vec![0.5_f64; 32];
+        // Descending ramp: bars[i] high at i=0, low at i=n-1. Slope at
+        // x=0.5 is negative; -slope * GAIN > 0 → slope force pushes right.
+        let descending: Vec<f64> = (0..32).map(|i| (31 - i) as f64 / 31.0).collect();
+
+        let duration = 4.0;
+        let mid_progress_remaining = duration / 2.0;
+        let template = BoatState {
+            x_ratio: 0.5,
+            charge_remaining_secs: mid_progress_remaining,
+            charge_total_secs: duration,
+            charge_direction: -1.0,
+            rng_state: 0x12345,
+            secs_until_next_charge: 100.0,
+            ..Default::default()
+        };
+
+        let dt = Duration::from_millis(50);
+        let mut state_flat = template.clone();
+        step(&mut state_flat, dt, &flat, false);
+        let mut state_against = template.clone();
+        step(&mut state_against, dt, &descending, false);
+
+        // On flat water, slope = 0 → only charge force acts.
+        // On descending ramp, slope force partially counters the charge
+        // (blended at CHARGE_SLOPE_BLEND), so the leftward velocity is
+        // smaller in magnitude.
+        assert!(
+            state_against.x_velocity > state_flat.x_velocity,
+            "downhill slope must partially cancel a leftward charge \
+             via the blend (flat v = {}, against v = {})",
+            state_flat.x_velocity,
+            state_against.x_velocity
         );
     }
 
