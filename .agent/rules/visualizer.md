@@ -9,7 +9,7 @@ globs: src/widgets/visualizer/**,src/visualizer_config.rs
 
 Pure-Rust FFT in `data/src/audio/spectrum.rs`. Dual-band FFT (bass 2×, treble 1×). `max_bars_for_sample_rate()` caps treble bins; `interpolate_bars()` fills gaps. Zero allocation (pre-allocated scratch). Engine reinitializes on sample rate change.
 
-Spectrum config: `lower_cutoff_freq`, `higher_cutoff_freq`, `noise_reduction`, `auto_sensitivity`. Smoothing filters (mutually exclusive): `waves` (Catmull-Rom, `waves_smoothing` 2–16) or `monstercat` (exponential, 0.7–1.0).
+Spectrum config: `lower_cutoff_freq`, `higher_cutoff_freq`, `noise_reduction`, `auto_sensitivity`. Smoothing filters (mutually exclusive): `waves` (Catmull-Rom, `waves_smoothing` 2–16) or `monstercat` (exponential; values < `MONSTERCAT_MIN_EFFECTIVE = 0.7` are snapped to 0 / off; default 1.0).
 
 ## Shader Pipeline
 
@@ -25,7 +25,7 @@ Spectrum config: `lower_cutoff_freq`, `higher_cutoff_freq`, `noise_reduction`, `
 
 - **Peak modes**: `none`, `fade`, `fall`, `fall_accel`, `fall_fade`. `peak_fall_speed` 1–20.
 - **Gradient modes**: `static` (height-based), `wave` (stretch), `shimmer` (per-bar cycling), `energy` (loudness offset), `alternate` (first two colors). `gradient_orientation`: `vertical` | `horizontal`.
-- **Peak gradient modes**: `static`, `shimmer`, `energy`, `alternate` (no `wave`).
+- **Peak gradient modes**: `static`, `cycle`, `height`, `match` (separate enum from bar gradients).
 
 ## Lines Mode
 

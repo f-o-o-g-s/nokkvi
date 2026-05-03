@@ -11,7 +11,6 @@ globs: data/src/backend/**,data/src/services/**,data/src/types/**,data/src/crede
 AppService (orchestrator)
 ├── PlaybackController (audio engine + queue navigator)
 │   ├── Transport, volume, modes, gapless transitions
-│   ├── Playback history (Vec<Song>, capped, dedup-on-push)
 │   └── reset_next_track() on mode toggles
 ├── Backend services composed on AppService:
 │   AuthGateway, AlbumsService, ArtistsService, SongsService,
