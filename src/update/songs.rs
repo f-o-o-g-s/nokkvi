@@ -587,6 +587,11 @@ impl Nokkvi {
                     shell.settings().set_songs_show_thumbnail(value).await
                 });
             }
+            views::SongsColumn::Genre => {
+                self.shell_spawn("persist_songs_show_genre", move |shell| async move {
+                    shell.settings().set_songs_show_genre(value).await
+                });
+            }
         }
         Task::none()
     }

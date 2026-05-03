@@ -201,6 +201,12 @@ pub struct PlayerSettings {
     /// Whether the queue's leading thumbnail column is visible (default: true).
     #[serde(default = "default_true")]
     pub queue_show_thumbnail: bool,
+    /// Whether the queue's genre is shown stacked under the album in the
+    /// album column slot (default: false). When sort = Genre, the genre
+    /// auto-shows regardless of this toggle. When the album column is
+    /// hidden, the genre takes its slot at album-size font.
+    #[serde(default)]
+    pub queue_show_genre: bool,
 
     // -- Albums view column toggles --
     /// Stars column. Auto-shows when sort = Rating regardless of toggle.
@@ -244,6 +250,11 @@ pub struct PlayerSettings {
     /// Leading thumbnail column.
     #[serde(default = "default_true")]
     pub songs_show_thumbnail: bool,
+    /// Genre stacked under album in the album column slot. Auto-shows when
+    /// sort = Genre regardless of toggle. Replaces the album slot at
+    /// album-size font when the album column is hidden.
+    #[serde(default)]
+    pub songs_show_genre: bool,
 
     // -- Artists view column toggles --
     /// Stars column. Auto-shows when sort = Rating regardless of toggle.
@@ -442,6 +453,7 @@ impl Default for PlayerSettings {
             queue_show_plays: false,
             queue_show_index: true,
             queue_show_thumbnail: true,
+            queue_show_genre: false,
             albums_show_stars: false,
             albums_show_songcount: true,
             albums_show_plays: false,
@@ -455,6 +467,7 @@ impl Default for PlayerSettings {
             songs_show_love: true,
             songs_show_index: true,
             songs_show_thumbnail: true,
+            songs_show_genre: false,
             artists_show_stars: true,
             artists_show_albumcount: true,
             artists_show_songcount: true,

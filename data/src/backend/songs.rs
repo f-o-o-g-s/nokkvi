@@ -337,7 +337,8 @@ impl SongsService {
                     }
                 })
                 .unwrap_or_default(),
-            "genre" => song.genre.clone().unwrap_or_default(),
+            // Genre is rendered in the album column slot via the dedicated
+            // `songs_show_genre` toggle, not in the dynamic slot.
             "comment" => song.comment.clone().unwrap_or_default(),
             "albumArtist" => song.album_artist.clone().unwrap_or_default(),
             // No extra column for these views: Rating/MostPlayed/Duration

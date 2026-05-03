@@ -1097,6 +1097,7 @@ impl Nokkvi {
         self.queue_page.column_visibility.plays = settings.queue_show_plays;
         self.queue_page.column_visibility.index = settings.queue_show_index;
         self.queue_page.column_visibility.thumbnail = settings.queue_show_thumbnail;
+        self.queue_page.column_visibility.genre = settings.queue_show_genre;
 
         // Restore Artists view column visibility.
         self.artists_page.column_visibility.stars = settings.artists_show_stars;
@@ -1136,6 +1137,7 @@ impl Nokkvi {
         self.songs_page.column_visibility.love = settings.songs_show_love;
         self.songs_page.column_visibility.index = settings.songs_show_index;
         self.songs_page.column_visibility.thumbnail = settings.songs_show_thumbnail;
+        self.songs_page.column_visibility.genre = settings.songs_show_genre;
 
         // Restore active playlist context from persisted settings
         self.active_playlist_info =

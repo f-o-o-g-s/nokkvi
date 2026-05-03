@@ -886,6 +886,11 @@ pub struct PlayerSettings {
     pub queue_show_index: bool,
     /// Whether the queue's leading thumbnail column is visible.
     pub queue_show_thumbnail: bool,
+    /// Whether the queue's genre is shown stacked under the album in the
+    /// album column slot. Auto-shown when sort = Genre regardless of this
+    /// toggle. Falls into the album slot at album-size font when the album
+    /// column is hidden.
+    pub queue_show_genre: bool,
 
     // -- Albums view column toggles --
     pub albums_show_stars: bool,
@@ -903,6 +908,10 @@ pub struct PlayerSettings {
     pub songs_show_love: bool,
     pub songs_show_index: bool,
     pub songs_show_thumbnail: bool,
+    /// Genre stacked under album in the album column slot. Auto-shown when
+    /// sort = Genre regardless of this toggle. Replaces the album slot at
+    /// album-size font when the album column is hidden.
+    pub songs_show_genre: bool,
 
     // -- Artists view column toggles --
     pub artists_show_stars: bool,

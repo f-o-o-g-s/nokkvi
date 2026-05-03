@@ -22,8 +22,9 @@ pub struct SongsPage {
 }
 
 /// Toggleable songs columns. Index/Art/Title+Artist are always shown; the
-/// dynamic 18% slot still auto-renders Date/Year/Genre when sorted by those
-/// modes. Stars and Plays are now dedicated columns.
+/// dynamic 18% slot still auto-renders Date/Year when sorted by those modes;
+/// Genre lives in the album column slot via the dedicated Genre toggle. Stars
+/// and Plays are now dedicated columns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SongsColumn {
     Index,
@@ -33,6 +34,7 @@ pub enum SongsColumn {
     Duration,
     Plays,
     Love,
+    Genre,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,12 +46,14 @@ pub struct SongsColumnVisibility {
     pub duration: bool,
     pub plays: bool,
     pub love: bool,
+    pub genre: bool,
 }
 
 impl Default for SongsColumnVisibility {
     fn default() -> Self {
         // Stars and Plays opt-in; Album/Duration/Love always-on today.
         // Index/Thumbnail default on to match historical always-on rendering.
+        // Genre opt-in; auto-shows when sort = Genre regardless of toggle.
         Self {
             index: true,
             thumbnail: true,
@@ -58,6 +62,7 @@ impl Default for SongsColumnVisibility {
             duration: true,
             plays: false,
             love: true,
+            genre: false,
         }
     }
 }
@@ -72,6 +77,7 @@ impl SongsColumnVisibility {
             SongsColumn::Duration => self.duration,
             SongsColumn::Plays => self.plays,
             SongsColumn::Love => self.love,
+            SongsColumn::Genre => self.genre,
         }
     }
 
@@ -84,6 +90,7 @@ impl SongsColumnVisibility {
             SongsColumn::Duration => self.duration = value,
             SongsColumn::Plays => self.plays = value,
             SongsColumn::Love => self.love = value,
+            SongsColumn::Genre => self.genre = value,
         }
     }
 }
@@ -94,6 +101,12 @@ pub(crate) fn songs_stars_visible(sort: SortMode, user_visible: bool) -> bool {
 
 pub(crate) fn songs_plays_visible(sort: SortMode, user_visible: bool) -> bool {
     user_visible || matches!(sort, SortMode::MostPlayed)
+}
+
+/// Pure decision: should the genre be rendered (stacked under album, or in
+/// place of album when album is hidden)? Toggle on, OR sort = Genre.
+pub(crate) fn songs_genre_visible(sort: SortMode, user_visible: bool) -> bool {
+    user_visible || matches!(sort, SortMode::Genre)
 }
 
 /// View data passed from root (read-only, borrows from app state to avoid allocations)
@@ -522,6 +535,7 @@ impl SongsPage {
                 ),
                 (SongsColumn::Stars, "Stars", self.column_visibility.stars),
                 (SongsColumn::Album, "Album", self.column_visibility.album),
+                (SongsColumn::Genre, "Genre", self.column_visibility.genre),
                 (
                     SongsColumn::Duration,
                     "Duration",
@@ -625,6 +639,7 @@ impl SongsPage {
                 let song_title = song.title.clone();
                 let song_artist = song.artist.clone();
                 let song_album = song.album.clone();
+                let song_genre = song.genre.clone().unwrap_or_default();
                 let album_id = song.album_id.clone();
                 let duration = song.duration;
                 let is_starred = song.is_starred;
@@ -659,15 +674,17 @@ impl SongsPage {
                 let index_size = m.metadata_size;
                 let play_count = song.play_count.unwrap_or(0);
 
-                // Per-column visibility (Stars/Plays auto-shown by sort mode).
+                // Per-column visibility (Stars/Plays/Genre auto-shown by sort mode).
                 let vis = self.column_visibility;
                 let show_stars = songs_stars_visible(current_sort_mode, vis.stars);
                 let show_album = vis.album;
+                let show_genre = songs_genre_visible(current_sort_mode, vis.genre);
                 let show_plays = songs_plays_visible(current_sort_mode, vis.plays);
                 let show_duration = vis.duration;
                 let show_love = vis.love;
-                // Dynamic slot now only carries non-Rating/MostPlayed/Duration
-                // sort modes (those have dedicated columns or are redundant).
+                // Dynamic slot carries year / BPM / channels / comment /
+                // albumArtist for those sort modes. Genre lives in the album
+                // column slot via `show_genre`, not here.
                 let show_dynamic_slot = !extra_value.is_empty();
 
                 const ALBUM_PORTION: u16 = 22;
@@ -677,7 +694,7 @@ impl SongsPage {
                 const DURATION_PORTION: u16 = 10;
                 const LOVE_PORTION: u16 = 5;
                 let mut consumed: u16 = 0;
-                if show_album {
+                if show_album || show_genre {
                     consumed += ALBUM_PORTION;
                 }
                 if show_stars {
@@ -740,19 +757,59 @@ impl SongsPage {
                     )
                 });
 
-                if show_album {
-                    use crate::widgets::slot_list::slot_list_metadata_column;
+                // Album / genre column — slot renders when either is visible.
+                //   Both    → column![album, small_genre]
+                //   Album   → album alone (today's behavior)
+                //   Genre   → genre alone at album-size font, vertically centered
+                if show_album || show_genre {
+                    use iced::widget::column;
                     let album_click = song
                         .album_id
                         .as_ref()
                         .map(|id| SongsMessage::NavigateAndExpandAlbum(id.clone()));
-                    content_row = content_row.push(slot_list_metadata_column(
-                        song_album,
-                        album_click,
-                        metadata_size,
-                        style,
-                        ALBUM_PORTION,
-                    ));
+                    let genre_click =
+                        Some(SongsMessage::NavigateAndExpandGenre(song_genre.clone()));
+                    let genre_label = if song_genre.is_empty() {
+                        "Unknown".to_string()
+                    } else {
+                        song_genre.clone()
+                    };
+                    let stacked_genre_size = nokkvi_data::utils::scale::calculate_font_size(
+                        10.0,
+                        ctx.row_height,
+                        ctx.scale_factor,
+                    ) * ctx.scale_factor;
+                    let links_enabled = crate::theme::is_slot_text_links();
+                    let make_link = |label: String,
+                                     font_size: f32,
+                                     click: Option<SongsMessage>|
+                     -> Element<'_, SongsMessage> {
+                        crate::widgets::link_text::LinkText::new(label)
+                            .size(font_size)
+                            .color(style.subtext_color)
+                            .hover_color(style.hover_text_color)
+                            .font(crate::theme::ui_font())
+                            .on_press(if links_enabled { click } else { None })
+                            .into()
+                    };
+                    let content: Element<'_, SongsMessage> = match (show_album, show_genre) {
+                        (true, true) => {
+                            let album_widget = make_link(song_album, metadata_size, album_click);
+                            let genre_widget =
+                                make_link(genre_label, stacked_genre_size, genre_click);
+                            column![album_widget, genre_widget].spacing(2.0).into()
+                        }
+                        (true, false) => make_link(song_album, metadata_size, album_click),
+                        (false, true) => make_link(genre_label, metadata_size, genre_click),
+                        (false, false) => unreachable!(),
+                    };
+                    content_row = content_row.push(
+                        container(content)
+                            .width(Length::FillPortion(ALBUM_PORTION))
+                            .height(Length::Fill)
+                            .clip(true)
+                            .align_y(Alignment::Center),
+                    );
                 }
 
                 if show_stars {
@@ -781,14 +838,10 @@ impl SongsPage {
                 }
 
                 if show_dynamic_slot {
-                    let mut click_msg = None;
-                    if current_sort_mode == SortMode::Genre {
-                        click_msg = Some(SongsMessage::NavigateAndExpandGenre(extra_value.clone()));
-                    }
                     use crate::widgets::slot_list::slot_list_metadata_column;
                     content_row = content_row.push(slot_list_metadata_column(
                         extra_value,
-                        click_msg,
+                        None,
                         m.title_size,
                         style,
                         DYNAMIC_PORTION,
@@ -1082,6 +1135,20 @@ mod tests {
     }
 
     #[test]
+    fn songs_genre_visible_auto_shows_on_genre_sort() {
+        assert!(songs_genre_visible(SortMode::Genre, false));
+        assert!(songs_genre_visible(SortMode::Genre, true));
+        assert!(!songs_genre_visible(SortMode::Title, false));
+        assert!(songs_genre_visible(SortMode::Title, true));
+    }
+
+    #[test]
+    fn songs_column_visibility_default_keeps_genre_off() {
+        let v = SongsColumnVisibility::default();
+        assert!(!v.genre);
+    }
+
+    #[test]
     fn songs_toggle_column_visible_flips_state_and_emits_action() {
         let mut page = SongsPage::default();
         let empty: Vec<SongUIViewData> = vec![];
@@ -1093,6 +1160,17 @@ mod tests {
         assert!(matches!(
             action,
             SongsAction::ColumnVisibilityChanged(SongsColumn::Plays, true)
+        ));
+
+        // Genre default is off → toggle ON, message carries Genre+true.
+        let (_t, action) = page.update(
+            SongsMessage::ToggleColumnVisible(SongsColumn::Genre),
+            &empty,
+        );
+        assert!(page.column_visibility.genre);
+        assert!(matches!(
+            action,
+            SongsAction::ColumnVisibilityChanged(SongsColumn::Genre, true)
         ));
     }
 }

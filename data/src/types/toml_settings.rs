@@ -42,6 +42,8 @@ pub struct TomlSettings {
     pub queue_show_index: bool,
     #[serde(default = "default_true")]
     pub queue_show_thumbnail: bool,
+    #[serde(default)]
+    pub queue_show_genre: bool,
 
     pub albums_show_stars: bool,
     pub albums_show_songcount: bool,
@@ -61,6 +63,8 @@ pub struct TomlSettings {
     pub songs_show_index: bool,
     #[serde(default = "default_true")]
     pub songs_show_thumbnail: bool,
+    #[serde(default)]
+    pub songs_show_genre: bool,
 
     pub artists_show_stars: bool,
     pub artists_show_albumcount: bool,
@@ -237,6 +241,7 @@ impl Default for TomlSettings {
             queue_show_plays: false,
             queue_show_index: true,
             queue_show_thumbnail: true,
+            queue_show_genre: false,
             albums_show_stars: false,
             albums_show_songcount: true,
             albums_show_plays: false,
@@ -250,6 +255,7 @@ impl Default for TomlSettings {
             songs_show_love: true,
             songs_show_index: true,
             songs_show_thumbnail: true,
+            songs_show_genre: false,
             artists_show_stars: true,
             artists_show_albumcount: true,
             artists_show_songcount: true,
@@ -336,6 +342,7 @@ impl TomlSettings {
             queue_show_plays: ps.queue_show_plays,
             queue_show_index: ps.queue_show_index,
             queue_show_thumbnail: ps.queue_show_thumbnail,
+            queue_show_genre: ps.queue_show_genre,
             albums_show_stars: ps.albums_show_stars,
             albums_show_songcount: ps.albums_show_songcount,
             albums_show_plays: ps.albums_show_plays,
@@ -349,6 +356,7 @@ impl TomlSettings {
             songs_show_love: ps.songs_show_love,
             songs_show_index: ps.songs_show_index,
             songs_show_thumbnail: ps.songs_show_thumbnail,
+            songs_show_genre: ps.songs_show_genre,
             artists_show_stars: ps.artists_show_stars,
             artists_show_albumcount: ps.artists_show_albumcount,
             artists_show_songcount: ps.artists_show_songcount,
@@ -489,6 +497,26 @@ mod tests {
     fn toml_queue_show_plays_default_is_off() {
         let settings = TomlSettings::default();
         assert!(!settings.queue_show_plays);
+    }
+
+    #[test]
+    fn toml_show_genre_defaults_are_off() {
+        let s = TomlSettings::default();
+        assert!(!s.queue_show_genre);
+        assert!(!s.songs_show_genre);
+    }
+
+    #[test]
+    fn toml_show_genre_roundtrips() {
+        let s = TomlSettings {
+            queue_show_genre: true,
+            songs_show_genre: true,
+            ..TomlSettings::default()
+        };
+        let toml_str = toml::to_string_pretty(&s).expect("serialize");
+        let parsed: TomlSettings = toml::from_str(&toml_str).expect("deserialize");
+        assert!(parsed.queue_show_genre);
+        assert!(parsed.songs_show_genre);
     }
 
     #[test]

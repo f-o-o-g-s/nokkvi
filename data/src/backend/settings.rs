@@ -243,6 +243,7 @@ impl SettingsService {
     delegate_setter!(set_queue_show_plays, bool);
     delegate_setter!(set_queue_show_index, bool);
     delegate_setter!(set_queue_show_thumbnail, bool);
+    delegate_setter!(set_queue_show_genre, bool);
     delegate_setter!(set_albums_show_stars, bool);
     delegate_setter!(set_albums_show_songcount, bool);
     delegate_setter!(set_albums_show_plays, bool);
@@ -256,6 +257,7 @@ impl SettingsService {
     delegate_setter!(set_songs_show_love, bool);
     delegate_setter!(set_songs_show_index, bool);
     delegate_setter!(set_songs_show_thumbnail, bool);
+    delegate_setter!(set_songs_show_genre, bool);
     delegate_setter!(set_artists_show_stars, bool);
     delegate_setter!(set_artists_show_albumcount, bool);
     delegate_setter!(set_artists_show_songcount, bool);

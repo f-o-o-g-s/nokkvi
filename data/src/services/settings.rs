@@ -468,6 +468,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_queue_show_genre(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.queue_show_genre = enabled;
+        self.save()
+    }
+
     pub fn set_albums_show_stars(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.albums_show_stars = enabled;
         self.save()
@@ -530,6 +535,11 @@ impl SettingsManager {
 
     pub fn set_songs_show_thumbnail(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.songs_show_thumbnail = enabled;
+        self.save()
+    }
+
+    pub fn set_songs_show_genre(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.songs_show_genre = enabled;
         self.save()
     }
 
@@ -830,6 +840,7 @@ impl SettingsManager {
             queue_show_plays: p.queue_show_plays,
             queue_show_index: p.queue_show_index,
             queue_show_thumbnail: p.queue_show_thumbnail,
+            queue_show_genre: p.queue_show_genre,
             albums_show_stars: p.albums_show_stars,
             albums_show_songcount: p.albums_show_songcount,
             albums_show_plays: p.albums_show_plays,
@@ -843,6 +854,7 @@ impl SettingsManager {
             songs_show_love: p.songs_show_love,
             songs_show_index: p.songs_show_index,
             songs_show_thumbnail: p.songs_show_thumbnail,
+            songs_show_genre: p.songs_show_genre,
             artists_show_stars: p.artists_show_stars,
             artists_show_albumcount: p.artists_show_albumcount,
             artists_show_songcount: p.artists_show_songcount,

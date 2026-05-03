@@ -47,6 +47,7 @@ pub enum QueueColumn {
     Duration,
     Love,
     Plays,
+    Genre,
 }
 
 /// User-toggle state for each toggleable queue column.
@@ -59,6 +60,7 @@ pub struct QueueColumnVisibility {
     pub duration: bool,
     pub love: bool,
     pub plays: bool,
+    pub genre: bool,
 }
 
 impl Default for QueueColumnVisibility {
@@ -71,6 +73,7 @@ impl Default for QueueColumnVisibility {
             duration: true,
             love: true,
             plays: false,
+            genre: false,
         }
     }
 }
@@ -85,6 +88,7 @@ impl QueueColumnVisibility {
             QueueColumn::Duration => self.duration,
             QueueColumn::Love => self.love,
             QueueColumn::Plays => self.plays,
+            QueueColumn::Genre => self.genre,
         }
     }
 
@@ -97,6 +101,7 @@ impl QueueColumnVisibility {
             QueueColumn::Duration => self.duration = value,
             QueueColumn::Love => self.love = value,
             QueueColumn::Plays => self.plays = value,
+            QueueColumn::Genre => self.genre = value,
         }
     }
 }
@@ -140,6 +145,13 @@ pub(crate) fn love_column_visible(user_visible: bool) -> bool {
 /// sees the data they're sorting by).
 pub(crate) fn plays_column_visible(sort: QueueSortMode, user_visible: bool) -> bool {
     user_visible || matches!(sort, QueueSortMode::MostPlayed)
+}
+
+/// Pure decision: should the genre be rendered (stacked under album, or in
+/// place of the album when album is hidden)? Toggle on, OR queue is sorted by
+/// Genre — mirrors the plays-on-MostPlayed auto-show.
+pub(crate) fn genre_column_visible(sort: QueueSortMode, user_visible: bool) -> bool {
+    user_visible || matches!(sort, QueueSortMode::Genre)
 }
 
 /// View data passed from root (read-only)
@@ -624,6 +636,7 @@ impl QueuePage {
                 ),
                 (QueueColumn::Stars, "Stars", self.column_visibility.stars),
                 (QueueColumn::Album, "Album", self.column_visibility.album),
+                (QueueColumn::Genre, "Genre", self.column_visibility.genre),
                 (
                     QueueColumn::Duration,
                     "Duration",
@@ -1027,6 +1040,7 @@ impl QueuePage {
         // gates inside the per-row `responsive(...)` closure below.
         let column_visibility = self.column_visibility;
         let show_album_column = album_column_visible(column_visibility.album);
+        let show_genre_column = genre_column_visible(current_sort_mode, column_visibility.genre);
         let show_duration_column = duration_column_visible(column_visibility.duration);
         let show_love_column = love_column_visible(column_visibility.love);
         let show_plays_column = plays_column_visible(current_sort_mode, column_visibility.plays);
@@ -1142,67 +1156,61 @@ impl QueuePage {
                     )
                 });
 
-                // 3. Album column — always shown
-                if show_album_column {
-                    content_row =
-                        content_row.push(
-                            container({
-                                let click_album =
-                                    QueueMessage::NavigateAndExpandAlbum(album_id.clone());
-                                let links_enabled = crate::theme::is_slot_text_links();
-                                let album_widget: Element<'_, QueueMessage> =
-                                    crate::widgets::link_text::LinkText::new(album)
-                                        .size(subtitle_size)
+                // 3. Album / genre column — slot renders when either is visible.
+                //    Both → column![album, small_genre]. Album only → album.
+                //    Genre only → genre at album-size font, vertically centered.
+                if show_album_column || show_genre_column {
+                    content_row = content_row.push(
+                        container({
+                            let links_enabled = crate::theme::is_slot_text_links();
+                            let click_album =
+                                QueueMessage::NavigateAndExpandAlbum(album_id.clone());
+                            let click_genre = QueueMessage::NavigateAndExpandGenre(genre.clone());
+                            let genre_label = if genre.is_empty() {
+                                "Unknown".to_string()
+                            } else {
+                                genre.clone()
+                            };
+                            let stacked_genre_size = nokkvi_data::utils::scale::calculate_font_size(
+                                10.0,
+                                ctx.row_height,
+                                ctx.scale_factor,
+                            ) * ctx.scale_factor;
+                            let make_link =
+                                |label: String,
+                                 font_size: f32,
+                                 click: QueueMessage|
+                                 -> Element<'_, QueueMessage> {
+                                    crate::widgets::link_text::LinkText::new(label)
+                                        .size(font_size)
                                         .color(style.subtext_color)
                                         .hover_color(style.hover_text_color)
                                         .font(crate::theme::ui_font())
-                                        .on_press(if links_enabled {
-                                            Some(click_album)
-                                        } else {
-                                            None
-                                        })
-                                        .into();
-
-                                let content: Element<'_, QueueMessage> =
-                                    if current_sort_mode == QueueSortMode::Genre {
-                                        let click_genre =
-                                            QueueMessage::NavigateAndExpandGenre(genre.clone());
-                                        let genre_font_size =
-                                            nokkvi_data::utils::scale::calculate_font_size(
-                                                10.0,
-                                                ctx.row_height,
-                                                ctx.scale_factor,
-                                            ) * ctx.scale_factor;
-                                        let genre_widget: Element<'_, QueueMessage> =
-                                            crate::widgets::link_text::LinkText::new(
-                                                if genre.is_empty() {
-                                                    "Unknown".to_string()
-                                                } else {
-                                                    genre
-                                                },
-                                            )
-                                            .size(genre_font_size)
-                                            .color(style.subtext_color)
-                                            .hover_color(style.hover_text_color)
-                                            .font(crate::theme::ui_font())
-                                            .on_press(if links_enabled {
-                                                Some(click_genre)
-                                            } else {
-                                                None
-                                            })
-                                            .into();
-
+                                        .on_press(if links_enabled { Some(click) } else { None })
+                                        .into()
+                                };
+                            let content: Element<'_, QueueMessage> =
+                                match (show_album_column, show_genre_column) {
+                                    (true, true) => {
+                                        let album_widget =
+                                            make_link(album, subtitle_size, click_album);
+                                        let genre_widget =
+                                            make_link(genre_label, stacked_genre_size, click_genre);
                                         column![album_widget, genre_widget].spacing(2.0).into()
-                                    } else {
-                                        album_widget
-                                    };
-                                content
-                            })
-                            .width(Length::FillPortion(30))
-                            .height(Length::Fill)
-                            .clip(true)
-                            .align_y(Alignment::Center),
-                        );
+                                    }
+                                    (true, false) => make_link(album, subtitle_size, click_album),
+                                    (false, true) => {
+                                        make_link(genre_label, subtitle_size, click_genre)
+                                    }
+                                    (false, false) => unreachable!(),
+                                };
+                            content
+                        })
+                        .width(Length::FillPortion(30))
+                        .height(Length::Fill)
+                        .clip(true)
+                        .align_y(Alignment::Center),
+                    );
                 }
 
                 // 4. Rating column — only shown for Rating sort mode (dedicated column, not inline with title)
@@ -1664,6 +1672,26 @@ mod tests {
     }
 
     #[test]
+    fn genre_column_visible_auto_shows_on_genre_sort() {
+        assert!(genre_column_visible(QueueSortMode::Genre, false));
+        assert!(genre_column_visible(QueueSortMode::Genre, true));
+    }
+
+    #[test]
+    fn genre_column_visible_follows_user_toggle_for_other_sorts() {
+        assert!(!genre_column_visible(QueueSortMode::Title, false));
+        assert!(genre_column_visible(QueueSortMode::Title, true));
+        assert!(!genre_column_visible(QueueSortMode::MostPlayed, false));
+        assert!(genre_column_visible(QueueSortMode::MostPlayed, true));
+    }
+
+    #[test]
+    fn queue_column_visibility_default_keeps_genre_off() {
+        let v = QueueColumnVisibility::default();
+        assert!(!v.genre);
+    }
+
+    #[test]
     fn toggle_column_visible_flips_state() {
         let mut page = QueuePage::default();
         let songs: Vec<QueueSongUIViewData> = Vec::new();
@@ -1695,6 +1723,17 @@ mod tests {
             &songs,
         );
         assert!(!page.column_visibility.album);
+
+        // Genre default is off → toggle ON, message carries Genre+true.
+        let (_t, action) = page.update(
+            QueueMessage::ToggleColumnVisible(QueueColumn::Genre),
+            &songs,
+        );
+        assert!(page.column_visibility.genre);
+        assert!(matches!(
+            action,
+            QueueAction::ColumnVisibilityChanged(QueueColumn::Genre, true)
+        ));
         // Other columns unaffected.
         assert!(page.column_visibility.stars);
         assert!(page.column_visibility.duration);
