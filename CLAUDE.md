@@ -58,7 +58,7 @@ Key shared infrastructure:
 - `CommonViewAction` + `HasCommonAction` — generic SearchChanged/SortModeChanged/SortOrderChanged dispatch. Handled centrally by `handle_common_view_action()` in `update/components.rs`.
 - `impl_expansion_update!` macro — deduplicates inline expansion handling.
 - `SlotListPageState` — shared state for every slot-list view (search, scroll, focus, multi-selection set).
-- Helpers in `update/components.rs`: `shell_task` / `shell_spawn` (run async work against `AppService`), `guard_play_action` (block plays during playlist edit / split-view conflicts), `set_item_rating_task`, `radio_mutation_task`.
+- Helpers: `shell_task` / `shell_spawn` are defined on `Nokkvi` in `src/main.rs` (run async work against `AppService`); `guard_play_action` (block plays during playlist edit / split-view conflicts), `set_item_rating_task`, `radio_mutation_task`, and `handle_common_view_action` live in `update/components.rs`.
 
 Root `Message` is namespaced via sub-enums (`PlaybackMessage`, `ScrobbleMessage`, `HotkeyMessage`, `ArtworkMessage`, `SlotListMessage` (carries `View`), `ToastMessage`). Flat variants remain only for cross-cutting concerns. See `src/app_message.rs`.
 
@@ -66,17 +66,20 @@ Root `Message` is namespaced via sub-enums (`PlaybackMessage`, `ScrobbleMessage`
 
 ```
 AppService (orchestrator)
-├── PlaybackController       — audio engine + queue navigator + transport + history + reset_next_track()
-├── Domain Services          — Albums, Artists, Songs, Genres, Playlists, Radios, Similar, Queue,
-│                              Settings, Auth (lazy via tokio OnceCell)
-├── ArtworkPrefetch          — background library-wide artwork download w/ pagination + dynamic key map
-├── NavidromeEvents          — SSE subscription → triggers ID-anchored library refresh
+├── PlaybackController       — audio engine + queue navigator + transport + mode toggles
+│                              (random/repeat/consume) + reset_next_track()
+├── Domain Services          — Albums, Artists, Songs, Queue, Settings, Auth
+│                              (each lazy-inits its API client via tokio OnceCell)
+├── API factory methods      — genres_api(), playlists_api(), radios_api(), similar_api()
+│                              (construct *ApiService instances on demand; not stored on AppService)
 └── TaskManager              — centralized spawn tracking + status channel for UI notifications
 ```
 
+The Navidrome SSE subscriber lives in the **UI crate** (`src/services/navidrome_sse.rs`) and parses events with `data/src/services/navidrome_events.rs::parse_sse_event()`; it is not part of `AppService`. There is no centralized `ArtworkPrefetch` component — artwork prefetching is dispatched ad-hoc through `TaskManager::spawn_cancellable` from update handlers.
+
 - **`PagedBuffer<T>`** (`data/src/types/paged_buffer.rs`) replaces `Vec<T>` for all library data. `Deref<Target = [T]>` makes it drop-in. Load state via `set_loading()` / `needs_fetch()`. Always call `set_loading(true)` before dispatching a page fetch — otherwise rapid scroll triggers duplicate fetches.
 - **Persistence**: `redb` (`app.redb`) for queue/session/structured state via `services/state_storage.rs`; TOML (`config.toml`) for user-editable config via `services/toml_settings_io.rs` and `src/config_writer.rs`. **Routing matters**: `update_config_value()` writes `config.toml`; `update_theme_value()` writes the active theme file in `~/.config/nokkvi/themes/`. Misrouting silently overwrites the wrong file.
-- **Queue serialization** is bincode (`Encode`/`Decode`); `load_binary_or_json()` migrates legacy JSON.
+- **Queue serialization** is bincode (`Encode`/`Decode`) via `StateStorage::save_binary()` / `load_binary()` — no JSON fallback path.
 - **Domain types are iced-free.** Anything in `data/src/types/` must not import `iced`.
 
 ## Audio engine (`data/src/audio/`)
@@ -109,7 +112,7 @@ Critical invariants:
 - **Cloning**: prefer references / `Cow<>` over `.clone()`. Search filter helpers return `Cow::Borrowed` when no query is active (zero-cost).
 - **Threading**: prefer `Arc` + atomics over `Mutex<T>` for simple shared state.
 - **Search**: always immediate — never debounce.
-- **Dependencies**: rely on the existing workspace crates; discuss before adding new ones. Runtime: `iced`, `tokio`, `tracing` (+ `tracing-subscriber`), `parking_lot`, `futures`, `anyhow`, `image`, `notify`, `mpris-server`, `reqwest`, `serde` (+ `serde_json`), `toml` (+ `toml_edit`), `bincode-next`, `redb`, `chrono`, `directories`, `url`, `httpdate`, `rand`, `lru`, `bytemuck`, `font-kit`, `rodio`, `ringbuf`, `rustfft`, `num-complex`, `biquad`, `symphonia`, `icy-metadata`, `color-thief`, `thiserror`, `pipewire` (linux-only). Test-only `[dev-dependencies]`: `proptest`, `tempfile`.
+- **Dependencies**: rely on the existing workspace crates; discuss before adding new ones. Runtime: `iced`, `tokio` (+ `tokio-util`), `tracing` (+ `tracing-subscriber`), `parking_lot`, `arc-swap`, `futures`, `anyhow`, `image`, `notify`, `mpris-server`, `reqwest`, `serde` (+ `serde_json`), `toml` (+ `toml_edit`), `bincode-next`, `redb`, `chrono`, `directories`, `url`, `httpdate`, `rand`, `lru`, `bytemuck`, `font-kit`, `rodio`, `ringbuf`, `rustfft`, `num-complex`, `biquad`, `symphonia`, `icy-metadata`, `color-thief`, `thiserror`, `pipewire`, `ksni` (last two linux-only). Test-only `[dev-dependencies]`: `proptest`, `tempfile`.
 - **Render output**: keep a view's root widget type stable across renders (e.g., always `Column`) — changing it destroys `text_input` focus. Use `base_slot_list_empty_state` for empty/loaded parity.
 - **Border radii**: use `ui_border_radius()` (theme-aware via `ROUNDED_MODE` atomic), not hardcoded values. Iced clips background to border radius even when the border is transparent — leave radius unset on flush-to-edge bars.
 - **Manual UI verification (overrides default Claude Code guidance)**: nokkvi is a native Rust/Iced desktop app — there is no browser, no dev server, no `npm run dev`. Ignore any default instruction to "start the dev server" or "test in a browser". When the human owner asks for a UI change, deliver code that compiles cleanly (`cargo build`), passes tests/clippy/fmt, and stop there. The human runs `cargo run` (or a release build) and tests the running window themselves; their feedback is the verification loop. If a change has UI implications you cannot validate from code alone (visual layout, focus, marquee timing, etc.), say so explicitly in the handoff so the owner knows what to look at.
@@ -128,7 +131,7 @@ Test placement: `update/tests.rs` for handler tests; inline `#[cfg(test)] mod te
 
 ## Gotchas (the silent ones)
 
-- **Embedded SVG icons fall back silently to play.svg.** Adding an icon means: copy SVG to `assets/icons/`, add `const` + `include_str!` in `src/embedded_svg.rs`, add a match arm in `get_svg()`, **and** add to the `KNOWN` test array. Compiler will not warn if you forget. Run `cargo test --bin nokkvi -- embedded_svg` to catch unbound paths.
+- **Embedded SVG icons fall back silently to play.svg.** `build.rs` walks `assets/icons/` at compile time and emits the `get_svg()` lookup table + `KNOWN_PATHS` array, so adding an icon is a one-step drop into `assets/icons/` followed by a rebuild — no manual `const` / match arm / KNOWN-list edits. The silent fallback still bites when code references a path that doesn't exist on disk; `cargo test --bin nokkvi -- embedded_svg` runs `all_svg_paths_in_source_are_registered`, which scans every `.rs` file for `assets/icons/*.svg` string literals and asserts each one ships.
 - **Artwork**: use `iced::widget::image::Handle::from_bytes(data)` for refreshable artwork — `Handle::from_path` keys on path and produces stale GPU textures when the file is overwritten. After every `put()` / `get()` on the artwork LRU, call `refresh_large_artwork_snapshot()` so `ViewData.large_artwork` borrows the new map.
 - **Queue artwork URLs**: queue song mini thumbnails MUST request 80px using `album_id` to hit the prefetch cache; large artwork fallback MUST construct the full-size URL (`size=1000`) — never reuse the 80px URL.
 - **Filtered queue indices**: when a search is active, slot-list indices are relative to `filtered_songs`. Always map through the filtered view before doing queue mutations.
