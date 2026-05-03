@@ -8,6 +8,14 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+### Fixed
+
+### Removed
+
+## v0.3.10 — 2026-05-02
+
+### Changed
+
 - Surfing boat now makes periodic rowing charges toward the louder side of the waveform instead of camping on the calm side, and sits slightly into the wave line instead of hovering above it.
 
 ### Fixed
@@ -19,8 +27,6 @@ All notable changes to this project will be documented in this file.
 - Remove from queue (right-click or Ctrl+D) and Play next now consistently target the song you clicked — previously, after sorting the queue or removing other songs in the same session, the action could hit a different row or silently do nothing.
 - Multi-selection in the queue now clears on background queue refreshes (consume mode advancing, navigation reload) and on sort changes — previously the selection kept its row positions across the reorder and could target the wrong songs on the next bulk action.
 - Removing the currently-playing song from the queue now stops that track and rolls forward to the next song (or stops if the queue empties) — previously the audio kept streaming the deleted song while the strip advertised a different one as "now playing".
-
-### Removed
 
 ## v0.3.9 — 2026-05-01
 
