@@ -16,7 +16,10 @@ use tracing::debug;
 use crate::{
     audio::engine::CustomAudioEngine,
     backend::{queue::QueueService, settings::SettingsService},
-    services::{playback::QueueNavigator, task_manager::TaskManager},
+    services::{
+        playback::{QueueNavigator, RemovalAftermath},
+        task_manager::TaskManager,
+    },
 };
 
 /// PlaybackController — Owns the audio engine and queue navigator.
@@ -696,5 +699,86 @@ impl PlaybackController {
             .await;
 
         Ok(())
+    }
+
+    /// Snapshot the navigator's current song ID without holding any other lock.
+    ///
+    /// Callers use this to capture "what was playing" before a queue mutation
+    /// so [`crate::services::playback::decide_removal_aftermath`] can later
+    /// detect whether the removal unhooked the engine.
+    pub async fn current_song_id(&self) -> Option<String> {
+        self.queue_navigator
+            .lock()
+            .await
+            .get_current_song_id()
+            .await
+    }
+
+    /// Apply a [`RemovalAftermath`] plan to the engine + navigator.
+    ///
+    /// Called from [`super::app_service::AppService::remove_queue_songs`]
+    /// after the queue has already been mutated and the plan has been decided.
+    /// Mirrors the engine-load body of [`Self::play_song_from_queue`] but skips
+    /// the play-history append (the previous song is being deleted, not skipped).
+    ///
+    /// Lock discipline: each lock is taken and dropped independently. We never
+    /// hold the engine and navigator locks simultaneously, and `qm` is only
+    /// held briefly to read the replay-gain.
+    pub async fn apply_removal_aftermath(&self, plan: RemovalAftermath) -> Result<()> {
+        match plan {
+            RemovalAftermath::NoCurrentChange => Ok(()),
+            RemovalAftermath::StopEmpty => {
+                {
+                    let mut engine = self.audio_engine.lock().await;
+                    engine.stop().await;
+                }
+                self.queue_navigator
+                    .lock()
+                    .await
+                    .set_current_song_id(None)
+                    .await;
+                debug!("⏹️ Queue emptied by removal — engine stopped");
+                Ok(())
+            }
+            RemovalAftermath::LoadNewCurrent {
+                new_song_id,
+                new_index: _,
+            } => {
+                let replay_gain = {
+                    let qm_arc = self.queue_service.queue_manager();
+                    let qm = qm_arc.lock().await;
+                    qm.get_song(&new_song_id)
+                        .and_then(|s| s.replay_gain.clone())
+                };
+
+                let (server_url, subsonic_credential) =
+                    self.queue_service.get_server_config().await;
+                let stream_url = crate::utils::artwork_url::build_stream_url(
+                    &new_song_id,
+                    &server_url,
+                    &subsonic_credential,
+                );
+                if stream_url.is_empty() {
+                    return Err(anyhow::anyhow!(
+                        "Failed to build stream URL for removal-aftermath transition"
+                    ));
+                }
+
+                {
+                    let mut engine = self.audio_engine.lock().await;
+                    engine.set_pending_replay_gain(replay_gain);
+                    engine.set_source(stream_url).await;
+                    engine.play().await?;
+                }
+
+                self.queue_navigator
+                    .lock()
+                    .await
+                    .set_current_song_id(Some(new_song_id.clone()))
+                    .await;
+                debug!("▶️ Removal advanced engine to new current: {}", new_song_id);
+                Ok(())
+            }
+        }
     }
 }

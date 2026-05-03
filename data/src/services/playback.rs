@@ -28,6 +28,67 @@ pub enum TrackTransitionPlan {
     },
 }
 
+/// Plan describing what the audio engine must do after a queue-removal has
+/// already updated `QueueManager.queue.current_index`.
+///
+/// Returned by [`decide_removal_aftermath`]. The decision is pure — no engine
+/// I/O, no further queue mutation — so the orchestrator can drop the queue
+/// lock before applying the plan via
+/// [`PlaybackController::apply_removal_aftermath`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RemovalAftermath {
+    /// Either nothing was playing or the playing song survived the removal.
+    /// The engine and the navigator stay as they are.
+    NoCurrentChange,
+    /// The playing song was removed and the queue still has songs. The engine
+    /// must load `new_song_id` (which the queue model has already promoted to
+    /// `queue.current_index = new_index`) and the navigator's `current_song_id`
+    /// must follow.
+    LoadNewCurrent {
+        new_song_id: String,
+        new_index: usize,
+    },
+    /// The playing song was removed and the queue is now empty. The engine
+    /// must stop and the navigator's `current_song_id` must clear.
+    StopEmpty,
+}
+
+/// Decide what the audio engine must do after a queue-removal mutation has
+/// already updated `QueueManager.queue.current_index`.
+///
+/// Pure — reads inputs only, no I/O, no mutation. Runs after
+/// `QueueManager::remove_songs_by_ids` so `qm.queue.current_index` already
+/// names whatever now occupies the playing slot (per the clamp in
+/// `QueueManager::remove_song`).
+///
+/// `was_playing_id` is the song the navigator named *before* the removal;
+/// the caller must snapshot it because the navigator's stored
+/// `current_song_id` is stale by the time this decision runs.
+pub fn decide_removal_aftermath(
+    qm: &QueueManager,
+    was_playing_id: Option<&str>,
+    removed_ids: &[String],
+) -> RemovalAftermath {
+    let was_playing = match was_playing_id {
+        Some(id) => id,
+        None => return RemovalAftermath::NoCurrentChange,
+    };
+    if !removed_ids.iter().any(|id| id == was_playing) {
+        return RemovalAftermath::NoCurrentChange;
+    }
+    let queue = qm.get_queue();
+    match queue
+        .current_index
+        .and_then(|idx| queue.song_ids.get(idx).map(|id| (id.clone(), idx)))
+    {
+        Some((new_id, idx)) => RemovalAftermath::LoadNewCurrent {
+            new_song_id: new_id,
+            new_index: idx,
+        },
+        None => RemovalAftermath::StopEmpty,
+    }
+}
+
 /// QueueNavigator - Low-level queue navigation and track transition handling
 ///
 /// Handles:
@@ -682,5 +743,128 @@ mod tests {
             matches!(plan, TrackTransitionPlan::Stop),
             "expected Stop, got {plan:?}"
         );
+    }
+
+    // ── decide_removal_aftermath unit tests ──
+    //
+    // These cover the "remove from queue" decision matrix in isolation.
+    // The contract: after `QueueManager::remove_songs_by_ids` has already
+    // mutated the queue, `decide_removal_aftermath` reads the post-removal
+    // state plus the snapshotted `was_playing_id` and decides whether the
+    // engine must keep going as-is, swap to a new source, or stop.
+    //
+    // Engine is never constructed here; the function under test is a pure
+    // free function over `QueueManager` + `Option<&str>` + `&[String]`.
+
+    /// Nothing was playing → removal can't have unhooked anything.
+    #[test]
+    fn removal_aftermath_no_playing_song_returns_no_change() {
+        let qm = manager_with_songs(vec![make_song("a"), make_song("b")], None);
+        let plan = decide_removal_aftermath(&qm, None, &["a".to_string()]);
+        assert_eq!(plan, RemovalAftermath::NoCurrentChange);
+    }
+
+    /// Playing song was NOT among the removed → engine should be left alone.
+    #[test]
+    fn removal_aftermath_other_song_removed_returns_no_change() {
+        // Queue: [a, b, c], current = a (idx 0). Remove b. a still plays.
+        let mut qm = manager_with_songs(
+            vec![make_song("a"), make_song("b"), make_song("c")],
+            Some(0),
+        );
+        qm.remove_song_by_id("b").expect("remove b");
+
+        let plan = decide_removal_aftermath(&qm, Some("a"), &["b".to_string()]);
+
+        assert_eq!(
+            plan,
+            RemovalAftermath::NoCurrentChange,
+            "removing a non-playing song must not retarget the engine",
+        );
+    }
+
+    /// Playing song was removed and the queue still has songs → the engine
+    /// must load the song that the queue now exposes at `current_index`.
+    #[test]
+    fn removal_aftermath_playing_song_removed_loads_new_current() {
+        // Queue: [a, b, c], current = b (idx 1). Remove b.
+        // After: [a, c], queue's `remove_song` clamp leaves current_index = 1
+        // (now pointing at c). The engine must transition to c.
+        let mut qm = manager_with_songs(
+            vec![make_song("a"), make_song("b"), make_song("c")],
+            Some(1),
+        );
+        qm.remove_song_by_id("b").expect("remove b");
+
+        let plan = decide_removal_aftermath(&qm, Some("b"), &["b".to_string()]);
+
+        assert_eq!(
+            plan,
+            RemovalAftermath::LoadNewCurrent {
+                new_song_id: "c".to_string(),
+                new_index: 1,
+            },
+            "engine must follow the queue's clamped current_index to the next song",
+        );
+    }
+
+    /// The playing song was removed in a multi-ID batch → still loads
+    /// whatever now occupies `current_index` (immune to ID order).
+    #[test]
+    fn removal_aftermath_playing_in_batch_loads_new_current() {
+        // Queue: [a, b, c, d], current = b (idx 1). Remove [b, d].
+        // After: [a, c]. current_index clamped to 1 (c). Engine → c.
+        let mut qm = manager_with_songs(
+            vec![
+                make_song("a"),
+                make_song("b"),
+                make_song("c"),
+                make_song("d"),
+            ],
+            Some(1),
+        );
+        qm.remove_songs_by_ids(&["b".to_string(), "d".to_string()])
+            .expect("remove batch");
+
+        let plan = decide_removal_aftermath(&qm, Some("b"), &["b".to_string(), "d".to_string()]);
+
+        assert_eq!(
+            plan,
+            RemovalAftermath::LoadNewCurrent {
+                new_song_id: "c".to_string(),
+                new_index: 1,
+            },
+        );
+    }
+
+    /// Playing song was the last in queue and gets removed → queue empty,
+    /// engine must stop and the navigator's current_song_id must clear.
+    #[test]
+    fn removal_aftermath_last_song_removed_returns_stop_empty() {
+        // Queue: [only], current = 0. Remove only. After: [], current_index = None.
+        let mut qm = manager_with_songs(vec![make_song("only")], Some(0));
+        qm.remove_song_by_id("only").expect("remove only");
+
+        let plan = decide_removal_aftermath(&qm, Some("only"), &["only".to_string()]);
+
+        assert_eq!(
+            plan,
+            RemovalAftermath::StopEmpty,
+            "empty queue after removing the playing song must stop the engine",
+        );
+    }
+
+    /// Edge case: every remaining queue song is also removed in the same
+    /// batch → still StopEmpty, never panics on `song_ids.get(idx)`.
+    #[test]
+    fn removal_aftermath_clear_queue_returns_stop_empty() {
+        // Queue: [a, b], current = a (idx 0). Remove [a, b]. After: [].
+        let mut qm = manager_with_songs(vec![make_song("a"), make_song("b")], Some(0));
+        qm.remove_songs_by_ids(&["a".to_string(), "b".to_string()])
+            .expect("remove all");
+
+        let plan = decide_removal_aftermath(&qm, Some("a"), &["a".to_string(), "b".to_string()]);
+
+        assert_eq!(plan, RemovalAftermath::StopEmpty);
     }
 }

@@ -907,4 +907,41 @@ impl AppService {
         }
         Ok(())
     }
+
+    /// Remove songs from the queue by ID and keep the audio engine in sync.
+    ///
+    /// The bare [`QueueService::remove_songs_by_ids`] only mutates queue state.
+    /// If the currently-playing song is among the removed IDs, the queue's
+    /// `current_index` is clamped to the next valid slot — but the engine
+    /// keeps decoding the removed song's URL, so the UI would advertise a
+    /// different "now playing" track than the engine is producing.
+    ///
+    /// This method closes that gap: snapshot what the navigator was playing,
+    /// mutate the queue, then ask
+    /// [`crate::services::playback::decide_removal_aftermath`] whether the
+    /// engine needs to swap sources or stop, and execute that plan via
+    /// [`PlaybackController::apply_removal_aftermath`]. The reactive UI
+    /// projection is refreshed last so all three sources of truth agree.
+    pub async fn remove_queue_songs(&self, ids: &[String]) -> Result<()> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+
+        // Snapshot before mutating — the navigator's current_song_id is the
+        // only place that records "what the engine actually has loaded."
+        let was_playing_id = self.playback.current_song_id().await;
+
+        self.queue_service.remove_songs_by_ids(ids).await?;
+
+        let plan = {
+            let qm_arc = self.queue_service.queue_manager();
+            let qm = qm_arc.lock().await;
+            crate::services::playback::decide_removal_aftermath(&qm, was_playing_id.as_deref(), ids)
+        };
+
+        self.playback.apply_removal_aftermath(plan).await?;
+
+        self.queue_service.refresh_from_queue().await?;
+        Ok(())
+    }
 }

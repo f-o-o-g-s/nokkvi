@@ -386,9 +386,12 @@ impl Nokkvi {
                     .retain(|s| !id_set.contains(s.id.as_str()));
                 self.toast_info(format!("Removed {title_text} from queue"));
 
+                // Goes through `AppService::remove_queue_songs` so the audio
+                // engine follows the queue when the playing song is removed —
+                // a bare `QueueService` call would leave the engine streaming
+                // the deleted track while the UI advertises a different one.
                 self.shell_spawn("queue_remove_batch", move |shell| async move {
-                    shell.queue().remove_songs_by_ids(&song_ids).await?;
-                    shell.queue().refresh_from_queue().await
+                    shell.remove_queue_songs(&song_ids).await
                 });
             }
             QueueAction::PlayNext(song_ids) => {
