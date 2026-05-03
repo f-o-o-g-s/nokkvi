@@ -37,6 +37,20 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
         return Task::none();
     }
 
+    // Audio pause: the FFT thread's sample buffer drains and the visualizer
+    // waveform decays to silence, so integrating the drive oscillator against
+    // a flat line walks the boat off the wave with no spring force to pull
+    // it back. Hold every dynamic field while paused; clearing `last_tick`
+    // gives the first tick after resume a dt=0 baseline (same contract as the
+    // hidden branch above). The handle is still primed so the boat keeps
+    // rendering at its frozen position.
+    if app.playback.paused {
+        app.boat.visible = true;
+        app.boat.last_tick = None;
+        let _ = app.boat.ensure_handle();
+        return Task::none();
+    }
+
     let dt = match app.boat.last_tick {
         Some(prev) => now.saturating_duration_since(prev),
         None => std::time::Duration::ZERO,

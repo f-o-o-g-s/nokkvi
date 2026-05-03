@@ -4471,4 +4471,90 @@ mod boat_tests {
             "last_tick must be cleared while hidden so re-show starts with dt=0"
         );
     }
+
+    #[test]
+    fn boat_freezes_while_audio_paused() {
+        // The visualizer waveform decays to silence when audio is paused
+        // (the FFT thread's sample buffer empties), so integrating the drive
+        // oscillator against a flat line walks the boat off the wave with
+        // no spring force to pull it back. Every dynamic physics field must
+        // hold while `playback.paused` is true.
+        let mut app = test_app();
+        enable_boat_in_config(&app, true);
+        app.engine.visualization_mode = VisualizationMode::Lines;
+
+        // Seed non-default values so an accidental "field stayed at 0
+        // because it was already 0" pass can't sneak through.
+        app.boat.phase = 0.25;
+        app.boat.x_ratio = 0.6;
+        app.boat.x_velocity = 0.05;
+        app.boat.y_ratio = 0.7;
+        app.boat.y_velocity = 0.02;
+
+        // First tick seats `last_tick`; dt=0 keeps the snapshot intact.
+        let t0 = Instant::now();
+        let _ = app.update(Message::BoatTick(t0));
+        let snap = app.boat.clone();
+
+        // Pause and tick after a long gap — under the bug the boat would
+        // integrate a half-second of drive against an empty bar buffer.
+        app.playback.paused = true;
+        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(500)));
+
+        assert_eq!(app.boat.phase, snap.phase, "phase must hold while paused");
+        assert_eq!(
+            app.boat.x_ratio, snap.x_ratio,
+            "x_ratio must hold while paused"
+        );
+        assert_eq!(
+            app.boat.x_velocity, snap.x_velocity,
+            "x_velocity must hold while paused"
+        );
+        assert_eq!(
+            app.boat.y_ratio, snap.y_ratio,
+            "y_ratio must hold while paused"
+        );
+        assert_eq!(
+            app.boat.y_velocity, snap.y_velocity,
+            "y_velocity must hold while paused"
+        );
+        assert!(
+            app.boat.visible,
+            "boat must still render while paused — it just stops moving"
+        );
+        assert!(
+            app.boat.last_tick.is_none(),
+            "last_tick must clear so the first tick after resume sees dt=0 \
+             (same contract as the hidden branch)"
+        );
+    }
+
+    #[test]
+    fn boat_resumes_motion_after_unpause() {
+        // The pause freeze must not be sticky — once `paused` flips back to
+        // false, the next ticks integrate physics again.
+        let mut app = test_app();
+        enable_boat_in_config(&app, true);
+        app.engine.visualization_mode = VisualizationMode::Lines;
+        app.boat.phase = 0.25;
+        app.boat.x_velocity = 0.05;
+
+        let t0 = Instant::now();
+        let _ = app.update(Message::BoatTick(t0));
+
+        app.playback.paused = true;
+        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(200)));
+        let frozen_x = app.boat.x_ratio;
+
+        // Resume. First tick after unpause sees dt=0 (last_tick was cleared);
+        // the second tick has a real gap and must mutate position.
+        app.playback.paused = false;
+        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(300)));
+        let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(400)));
+
+        assert_ne!(
+            app.boat.x_ratio, frozen_x,
+            "boat must integrate again after unpause (x_ratio still {frozen_x})"
+        );
+    }
 }
