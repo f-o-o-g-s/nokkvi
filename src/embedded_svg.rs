@@ -76,6 +76,20 @@ pub(crate) fn themed_logo_svg() -> String {
 /// ~0.25 px on each side of the boat's edge.
 const BOAT_STROKE_WIDTH_SVG_UNITS: f32 = 1.5;
 
+/// Per-side viewBox padding for the boat SVG, expressed as a fraction of
+/// the boat sprite's visual size (the unrotated 80×80 hull region of the
+/// logo viewBox). `widgets/boat.rs::boat_overlay` scales the iced container
+/// by `1 + 2 · BOAT_VIEWBOX_PAD_FRACTION` so the boat's *content* keeps its
+/// target display size while the padded margin around it is transparent.
+///
+/// Sized to fit a `MAX_TILT ≈ 17°` rotation without clipping the rotated
+/// bounding box's corners. Worst-case axis-aligned bounding box of an
+/// 80×80 square rotated by θ around its center is
+/// `80·(|cos θ| + |sin θ|)` ≈ `80·1.251 ≈ 100` units, so 12 padding units
+/// per side (15% of 80) gives a small safety margin for the stroke
+/// (~0.75 units extending past the path edge).
+pub(crate) const BOAT_VIEWBOX_PAD_FRACTION: f32 = 0.15;
+
 /// Return the themed logo SVG with a tilt rotation, optional horizontal
 /// mirror, and a theme-matched stroke baked into its path data — used by
 /// the boat overlay.
@@ -121,6 +135,22 @@ pub(crate) fn themed_boat_svg(angle_radians: f32, mirrored: bool) -> String {
         opacity = viz_colors.border_opacity,
     );
     let mut body = themed_logo_svg().replace("<path fill=", &format!("<path {stroke_attrs}fill="));
+
+    // Expand the viewBox around the original `60 89.5 80 80` (center
+    // `100, 129.5`) so a `MAX_TILT` rotation around that center doesn't
+    // clip the corners of the rotated bounding box. The container in
+    // `widgets/boat.rs::boat_overlay` is scaled by the matching factor
+    // (`1 + 2·BOAT_VIEWBOX_PAD_FRACTION`) so the boat content lands at
+    // its intended display size with transparent margin around it.
+    let pad_units = 80.0 * BOAT_VIEWBOX_PAD_FRACTION;
+    let padded_origin_x = 60.0 - pad_units;
+    let padded_origin_y = 89.5 - pad_units;
+    let padded_size = 80.0 + 2.0 * pad_units;
+    body = body.replacen(
+        "viewBox=\"60 89.5 80 80\"",
+        &format!("viewBox=\"{padded_origin_x} {padded_origin_y} {padded_size} {padded_size}\""),
+        1,
+    );
 
     let degrees = angle_radians.to_degrees();
     let nonzero_rotation = degrees.abs() > 1e-4;

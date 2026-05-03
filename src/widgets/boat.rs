@@ -943,6 +943,17 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
     let boat_h = (area_height * BOAT_HEIGHT_FRACTION).max(8.0);
     let boat_w = boat_h * BOAT_ASPECT_RATIO;
 
+    // The boat SVG carries a padded viewBox so a `MAX_TILT` rotation
+    // doesn't clip the rotated bounding box's corners. Scale the iced
+    // container by the matching factor so the boat *content* still
+    // renders at `boat_w × boat_h` pixels — `pad_x`/`pad_y` is the
+    // half-padding the rotated corners can occupy on each side.
+    let pad_factor = 1.0 + 2.0 * crate::embedded_svg::BOAT_VIEWBOX_PAD_FRACTION;
+    let container_w = boat_w * pad_factor;
+    let container_h = boat_h * pad_factor;
+    let pad_x = (container_w - boat_w) * 0.5;
+    let pad_y = (container_h - boat_h) * 0.5;
+
     // Pixel offsets within the visualizer area. The waterline is
     // `(1 - y_ratio) * area_height` from the top (visualizer draws upward
     // from the bottom). `BOAT_SINK_FRACTION` of the boat's height sits below
@@ -951,6 +962,10 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
     // handles the off-screen portion. `target_y` keeps its `.max(0.0)`
     // because Y has no wrap (wave height is bounded), so the overlap-above
     // case really is just "nudge against the top edge".
+    //
+    // `target_x` / `target_y` describe where the boat *content* lands.
+    // The container is shifted left/up by the half-padding so the content
+    // remains at those coordinates regardless of the surrounding margin.
     let cx = state.x_ratio * area_width;
     let target_x = cx - boat_w * 0.5;
     let line_y = area_height * (1.0 - state.y_ratio);
@@ -963,10 +978,10 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
                     .width(Length::Fill)
                     .height(Length::Fill),
             )
-            .width(Length::Fixed(boat_w))
-            .height(Length::Fixed(boat_h)),
+            .width(Length::Fixed(container_w))
+            .height(Length::Fixed(container_h)),
         )
-        .position(Point::new(x, target_y))
+        .position(Point::new(x - pad_x, target_y - pad_y))
     };
 
     // Single sprite. The wrap zone in `step()` is sized so the boat fully
