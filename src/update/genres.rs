@@ -116,7 +116,7 @@ impl Nokkvi {
                 }
                 error!("Error loading genres: {}", e);
                 self.library.genres.set_loading(false);
-                self.cancel_pending_expand_genre();
+                self.cancel_pending_expand();
                 self.toast_error(format!("Failed to load genres: {e}"));
             }
         }
@@ -179,7 +179,7 @@ impl Nokkvi {
                 | GenresAction::SortOrderChanged(_)
                 | GenresAction::RefreshViewData
         ) {
-            self.cancel_pending_expand_genre();
+            self.cancel_pending_expand();
         }
 
         // Handle common actions (SearchChanged, SortModeChanged, SortOrderChanged)

@@ -167,7 +167,7 @@ impl Nokkvi {
                 }
                 error!("Error loading Artists page: {}", e);
                 self.library.artists.set_loading(false);
-                self.cancel_pending_expand_artist();
+                self.cancel_pending_expand();
                 self.toast_error(format!("Failed to load Artists: {e}"));
             }
         }
@@ -301,7 +301,7 @@ impl Nokkvi {
                 }
                 error!("Error loading artists: {}", e);
                 self.library.artists.set_loading(false);
-                self.cancel_pending_expand_artist();
+                self.cancel_pending_expand();
                 self.toast_error(format!("Failed to load artists: {e}"));
             }
         }
@@ -372,7 +372,7 @@ impl Nokkvi {
                 | ArtistsAction::SortOrderChanged(_)
                 | ArtistsAction::RefreshViewData
         ) {
-            self.cancel_pending_expand_artist();
+            self.cancel_pending_expand();
         }
 
         // Handle common actions (SearchChanged, SortModeChanged, SortOrderChanged)

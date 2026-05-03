@@ -98,41 +98,15 @@ impl Nokkvi {
         } else {
             view
         };
-        // Cancel any in-flight album-find chain when the user navigates away
-        // from its host view. Top-pane targets host on Albums; browsing-pane
-        // targets host on Queue (the panel is destroyed when leaving Queue).
-        if let Some(target) = self.pending_expand_album_target.as_ref() {
-            let host_view = if target.for_browsing_pane {
-                View::Queue
-            } else {
-                View::Albums
-            };
-            if view != host_view {
-                self.cancel_pending_expand_album();
-            }
-        }
-        // Same for the artist-find chain — host view is Artists (or Queue
-        // when split-view is active).
-        if let Some(target) = self.pending_expand_artist_target.as_ref() {
-            let host_view = if target.for_browsing_pane {
-                View::Queue
-            } else {
-                View::Artists
-            };
-            if view != host_view {
-                self.cancel_pending_expand_artist();
-            }
-        }
-        // Same for the genre-find chain.
-        if let Some(target) = self.pending_expand_genre_target.as_ref() {
-            let host_view = if target.for_browsing_pane {
-                View::Queue
-            } else {
-                View::Genres
-            };
-            if view != host_view {
-                self.cancel_pending_expand_genre();
-            }
+        // Cancel any in-flight find-and-expand chain when navigating away
+        // from its host view. PendingExpand::host_view() collapses the
+        // per-kind logic — top-pane chains host on Albums/Artists/Genres,
+        // browsing-pane chains all host on Queue (the panel is destroyed
+        // when leaving Queue).
+        if let Some(host_view) = self.pending_expand.as_ref().map(|p| p.host_view())
+            && view != host_view
+        {
+            self.cancel_pending_expand();
         }
         // The top-pin can outlive the target by the brief window between
         // try_resolve_*  consuming the target and TracksLoaded/AlbumsLoaded
@@ -444,9 +418,7 @@ impl Nokkvi {
         view: crate::View,
         filter: nokkvi_data::types::filter::LibraryFilter,
     ) -> Task<Message> {
-        self.cancel_pending_expand_album();
-        self.cancel_pending_expand_artist();
-        self.cancel_pending_expand_genre();
+        self.cancel_pending_expand();
         let switch_task = self.handle_switch_view(view);
 
         // Defocus search input
@@ -532,49 +504,21 @@ impl Nokkvi {
         self.albums_page.common.slot_list.selected_indices.clear();
         self.albums_page.common.slot_list.selected_offset = None;
         self.library.albums.clear();
-        self.pending_expand_album_target = Some(crate::state::PendingExpandTarget {
+        self.pending_expand = Some(crate::state::PendingExpand::Album {
             album_id,
             for_browsing_pane,
         });
     }
 
-    /// Drop a pending album-expand target. Called from cancellation hooks
-    /// (search edit, sort change, navigation away, refresh) so an in-flight
-    /// find chain doesn't continue paging after the user has moved on.
-    /// Also clears any matching `pending_top_pin` — the pin only outlives
-    /// the target by the brief window between `try_resolve` and
-    /// `set_children`, so a target cancellation always implies pin
-    /// cancellation when kinds match.
-    pub(crate) fn cancel_pending_expand_album(&mut self) {
-        self.pending_expand_album_target = None;
-        if matches!(
-            self.pending_top_pin,
-            Some(crate::state::PendingTopPin::Album(_))
-        ) {
-            self.pending_top_pin = None;
-        }
-    }
-
-    /// Artist-side mirror of `cancel_pending_expand_album`.
-    pub(crate) fn cancel_pending_expand_artist(&mut self) {
-        self.pending_expand_artist_target = None;
-        if matches!(
-            self.pending_top_pin,
-            Some(crate::state::PendingTopPin::Artist(_))
-        ) {
-            self.pending_top_pin = None;
-        }
-    }
-
-    /// Genre-side mirror of `cancel_pending_expand_album`.
-    pub(crate) fn cancel_pending_expand_genre(&mut self) {
-        self.pending_expand_genre_target = None;
-        if matches!(
-            self.pending_top_pin,
-            Some(crate::state::PendingTopPin::Genre(_))
-        ) {
-            self.pending_top_pin = None;
-        }
+    /// Drop the in-flight find-and-expand chain (whichever kind) plus any
+    /// pending top-pin. Called from cancellation hooks (search edit, sort
+    /// change, navigation away, refresh) so the chain doesn't continue
+    /// after the user has moved on. The pin only outlives the target by
+    /// the brief window between `try_resolve` and the corresponding
+    /// `set_children`, so unconditional pin clearing is correct here.
+    pub(crate) fn cancel_pending_expand(&mut self) {
+        self.pending_expand = None;
+        self.pending_top_pin = None;
     }
 
     /// Genre-side mirror of `handle_navigate_and_expand_album`. The find
@@ -612,7 +556,7 @@ impl Nokkvi {
         self.genres_page.common.slot_list.selected_indices.clear();
         self.genres_page.common.slot_list.selected_offset = None;
         self.library.genres.clear();
-        self.pending_expand_genre_target = Some(crate::state::PendingExpandGenreTarget {
+        self.pending_expand = Some(crate::state::PendingExpand::Genre {
             genre_id,
             for_browsing_pane,
         });
@@ -623,11 +567,10 @@ impl Nokkvi {
         &mut self,
         genre_id: String,
     ) -> Task<Message> {
-        if self
-            .pending_expand_genre_target
-            .as_ref()
-            .is_some_and(|t| t.genre_id == genre_id)
-        {
+        if matches!(
+            &self.pending_expand,
+            Some(crate::state::PendingExpand::Genre { genre_id: pending, .. }) if pending == &genre_id
+        ) {
             self.toast_info("Finding genre…");
         }
         Task::none()
@@ -649,7 +592,10 @@ impl Nokkvi {
     /// that internal id — the post-hook in `handle_genres` matches against
     /// it to decide whether to re-pin the highlight.
     pub(crate) fn try_resolve_pending_expand_genre(&mut self) -> Option<Task<Message>> {
-        let target_id = self.pending_expand_genre_target.as_ref()?.genre_id.clone();
+        let target_id = match &self.pending_expand {
+            Some(crate::state::PendingExpand::Genre { genre_id, .. }) => genre_id.clone(),
+            _ => return None,
+        };
 
         let found = self
             .library
@@ -662,7 +608,7 @@ impl Nokkvi {
                 " [EXPAND] Found genre '{}' at index {} (id={}) — scrolling + dispatching FocusAndExpand",
                 target_id, idx, resolved_id
             );
-            self.pending_expand_genre_target = None;
+            self.pending_expand = None;
             let total = self.library.genres.len();
             let center_slot = self.genres_page.common.slot_list.slot_count.max(2) / 2;
             let target_offset = idx.saturating_add(center_slot).min(total.saturating_sub(1));
@@ -691,7 +637,7 @@ impl Nokkvi {
             target_id
         );
         self.toast_warn("Genre not found in library");
-        self.pending_expand_genre_target = None;
+        self.pending_expand = None;
         Some(Task::none())
     }
 
@@ -732,7 +678,7 @@ impl Nokkvi {
         self.artists_page.common.slot_list.selected_indices.clear();
         self.artists_page.common.slot_list.selected_offset = None;
         self.library.artists.clear();
-        self.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+        self.pending_expand = Some(crate::state::PendingExpand::Artist {
             artist_id,
             for_browsing_pane,
         });
@@ -743,11 +689,10 @@ impl Nokkvi {
         &mut self,
         artist_id: String,
     ) -> Task<Message> {
-        if self
-            .pending_expand_artist_target
-            .as_ref()
-            .is_some_and(|t| t.artist_id == artist_id)
-        {
+        if matches!(
+            &self.pending_expand,
+            Some(crate::state::PendingExpand::Artist { artist_id: pending, .. }) if pending == &artist_id
+        ) {
             self.toast_info("Finding artist…");
         }
         Task::none()
@@ -759,18 +704,17 @@ impl Nokkvi {
     /// give up if fully loaded, wait if still loading, or kick the next
     /// page (force-loaded) if more remain.
     pub(crate) fn try_resolve_pending_expand_artist(&mut self) -> Option<Task<Message>> {
-        let target_id = self
-            .pending_expand_artist_target
-            .as_ref()?
-            .artist_id
-            .clone();
+        let target_id = match &self.pending_expand {
+            Some(crate::state::PendingExpand::Artist { artist_id, .. }) => artist_id.clone(),
+            _ => return None,
+        };
 
         if let Some(idx) = self.library.artists.iter().position(|a| a.id == target_id) {
             debug!(
                 " [EXPAND] Found artist '{}' at index {} — scrolling + dispatching FocusAndExpand",
                 target_id, idx
             );
-            self.pending_expand_artist_target = None;
+            self.pending_expand = None;
             let total = self.library.artists.len();
             let center_slot = self.artists_page.common.slot_list.slot_count.max(2) / 2;
             let target_offset = idx.saturating_add(center_slot).min(total.saturating_sub(1));
@@ -797,7 +741,7 @@ impl Nokkvi {
                 target_id
             );
             self.toast_warn("Artist not found in library");
-            self.pending_expand_artist_target = None;
+            self.pending_expand = None;
             return Some(Task::none());
         }
 
@@ -818,14 +762,17 @@ impl Nokkvi {
     /// dispatched, fully-loaded miss, or kicked the next page) and `None` if
     /// it should be retried after the next page arrives.
     pub(crate) fn try_resolve_pending_expand_album(&mut self) -> Option<Task<Message>> {
-        let target_id = self.pending_expand_album_target.as_ref()?.album_id.clone();
+        let target_id = match &self.pending_expand {
+            Some(crate::state::PendingExpand::Album { album_id, .. }) => album_id.clone(),
+            _ => return None,
+        };
 
         if let Some(idx) = self.library.albums.iter().position(|a| a.id == target_id) {
             debug!(
                 " [EXPAND] Found album '{}' at index {} — scrolling + dispatching FocusAndExpand",
                 target_id, idx
             );
-            self.pending_expand_album_target = None;
+            self.pending_expand = None;
             // Position the target at slot 0 (top of the visible list) — fewer
             // distractions above the expansion, and most visible rows are
             // tracks instead of unrelated albums. viewport_offset is the
@@ -866,7 +813,7 @@ impl Nokkvi {
                 target_id
             );
             self.toast_warn("Album not found in library");
-            self.pending_expand_album_target = None;
+            self.pending_expand = None;
             return Some(Task::none());
         }
 
@@ -890,11 +837,10 @@ impl Nokkvi {
         &mut self,
         album_id: String,
     ) -> Task<Message> {
-        if self
-            .pending_expand_album_target
-            .as_ref()
-            .is_some_and(|t| t.album_id == album_id)
-        {
+        if matches!(
+            &self.pending_expand,
+            Some(crate::state::PendingExpand::Album { album_id: pending, .. }) if pending == &album_id
+        ) {
             self.toast_info("Finding album…");
         }
         Task::none()
@@ -908,9 +854,7 @@ impl Nokkvi {
         view: crate::View,
         filter: nokkvi_data::types::filter::LibraryFilter,
     ) -> Task<Message> {
-        self.cancel_pending_expand_album();
-        self.cancel_pending_expand_artist();
-        self.cancel_pending_expand_genre();
+        self.cancel_pending_expand();
         let browse_view = match view {
             View::Albums => Some(crate::views::BrowsingView::Albums),
             View::Songs => Some(crate::views::BrowsingView::Songs),

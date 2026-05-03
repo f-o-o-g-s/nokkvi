@@ -155,7 +155,7 @@ impl Nokkvi {
                 }
                 error!("Error loading Albums page: {}", e);
                 self.library.albums.set_loading(false);
-                self.cancel_pending_expand_album();
+                self.cancel_pending_expand();
                 self.toast_error(format!("Failed to load Albums: {e}"));
             }
         }
@@ -268,7 +268,7 @@ impl Nokkvi {
                 }
                 error!("Error loading albums: {}", e);
                 self.library.albums.set_loading(false);
-                self.cancel_pending_expand_album();
+                self.cancel_pending_expand();
                 self.toast_error(format!("Failed to load albums: {e}"));
             }
         }
@@ -555,7 +555,7 @@ impl Nokkvi {
                 | AlbumsAction::SortOrderChanged(_)
                 | AlbumsAction::RefreshViewData
         ) {
-            self.cancel_pending_expand_album();
+            self.cancel_pending_expand();
         }
 
         // Handle common actions (SearchChanged, SortModeChanged, SortOrderChanged)

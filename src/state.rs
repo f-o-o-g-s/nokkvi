@@ -61,40 +61,57 @@ pub struct CrossPaneDragState {
 }
 
 // ============================================================================
-// Pending Album Expansion (find-and-expand chain)
+// Pending Find-and-Expand (album / artist / genre)
 // ============================================================================
 
-/// Target tracked while paginating through Albums to find a specific id and
-/// auto-expand it. Set by `handle_navigate_and_expand_album` and consumed by
-/// `try_resolve_pending_expand_album` after each page load.
+/// In-flight find-and-expand target. Set by the matching
+/// `handle_navigate_and_expand_*` and consumed by
+/// `try_resolve_pending_expand_*` once the target id appears in its
+/// library buffer. Album/Artist load paginated; Genre is single-shot.
 ///
-/// `for_browsing_pane` routes the final `FocusAndExpand` dispatch into the
-/// browsing-panel's Albums tab when split-view is active, leaving the top
-/// pane (Queue) untouched.
+/// `for_browsing_pane = true` routes the final `FocusAndExpand` dispatch
+/// into the browsing-panel's tab (split-view) instead of the top pane.
+///
+/// Mutually exclusive — at most one chain runs at a time. Starting a new
+/// chain (or any user-driven view change) supersedes the previous one.
 #[derive(Debug, Clone)]
-pub struct PendingExpandTarget {
-    pub album_id: String,
-    pub for_browsing_pane: bool,
+pub enum PendingExpand {
+    Album {
+        album_id: String,
+        for_browsing_pane: bool,
+    },
+    Artist {
+        artist_id: String,
+        for_browsing_pane: bool,
+    },
+    Genre {
+        genre_id: String,
+        for_browsing_pane: bool,
+    },
 }
 
-/// Artist-side mirror of `PendingExpandTarget`. Set by
-/// `handle_navigate_and_expand_artist` and consumed by
-/// `try_resolve_pending_expand_artist` — pages through Artists until the
-/// id appears, then dispatches `ArtistsMessage::FocusAndExpand` so the
-/// outer expansion (artist → albums) opens inline.
-#[derive(Debug, Clone)]
-pub struct PendingExpandArtistTarget {
-    pub artist_id: String,
-    pub for_browsing_pane: bool,
-}
-
-/// Genre-side mirror of `PendingExpandTarget`. Genres load all-at-once
-/// (no pagination), so the find chain is single-shot: one load either
-/// resolves the target or proves it isn't in the library.
-#[derive(Debug, Clone)]
-pub struct PendingExpandGenreTarget {
-    pub genre_id: String,
-    pub for_browsing_pane: bool,
+impl PendingExpand {
+    /// View where the chain renders its result. Used by `handle_switch_view`
+    /// to decide whether navigating away should cancel the chain.
+    pub fn host_view(&self) -> crate::View {
+        match self {
+            Self::Album {
+                for_browsing_pane: true,
+                ..
+            }
+            | Self::Artist {
+                for_browsing_pane: true,
+                ..
+            }
+            | Self::Genre {
+                for_browsing_pane: true,
+                ..
+            } => crate::View::Queue,
+            Self::Album { .. } => crate::View::Albums,
+            Self::Artist { .. } => crate::View::Artists,
+            Self::Genre { .. } => crate::View::Genres,
+        }
+    }
 }
 
 /// Item to re-pin the highlight onto after `set_children` fires.

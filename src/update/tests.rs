@@ -2035,12 +2035,14 @@ fn navigate_and_expand_album_clears_search_filter_and_sets_target() {
     assert!(app.albums_page.common.active_filter.is_none());
     assert!(app.albums_page.common.search_query.is_empty());
     assert!(!app.albums_page.common.search_input_focused);
-    let target = app
-        .pending_expand_album_target
-        .as_ref()
-        .expect("target should be set");
-    assert_eq!(target.album_id, "a1");
-    assert!(!target.for_browsing_pane);
+    assert!(
+        matches!(
+            app.pending_expand,
+            Some(crate::state::PendingExpand::Album { ref album_id, for_browsing_pane: false }) if album_id == "a1"
+        ),
+        "expected pending_expand = Album {{ a1, top-pane }}, got {:?}",
+        app.pending_expand
+    );
 }
 
 #[test]
@@ -2062,31 +2064,33 @@ fn browser_pane_navigate_and_expand_album_sets_browsing_flag() {
 
     let _ = app.handle_browser_pane_navigate_and_expand_album("a1".to_string());
 
-    let target = app
-        .pending_expand_album_target
-        .as_ref()
-        .expect("target should be set");
-    assert_eq!(target.album_id, "a1");
-    assert!(target.for_browsing_pane);
+    assert!(
+        matches!(
+            app.pending_expand,
+            Some(crate::state::PendingExpand::Album { ref album_id, for_browsing_pane: true }) if album_id == "a1"
+        ),
+        "expected pending_expand = Album {{ a1, browsing-pane }}, got {:?}",
+        app.pending_expand
+    );
 }
 
 #[test]
 fn pending_expand_album_target_cleared_on_switch_view_away() {
     let mut app = test_app();
-    app.pending_expand_album_target = Some(crate::state::PendingExpandTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
         album_id: "a1".to_string(),
         for_browsing_pane: false,
     });
 
     let _ = app.handle_switch_view(View::Songs);
 
-    assert!(app.pending_expand_album_target.is_none());
+    assert!(app.pending_expand.is_none());
 }
 
 #[test]
 fn pending_expand_album_target_persists_on_switch_view_to_albums() {
     let mut app = test_app();
-    app.pending_expand_album_target = Some(crate::state::PendingExpandTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
         album_id: "a1".to_string(),
         for_browsing_pane: false,
     });
@@ -2094,7 +2098,7 @@ fn pending_expand_album_target_persists_on_switch_view_to_albums() {
     let _ = app.handle_switch_view(View::Albums);
 
     assert!(
-        app.pending_expand_album_target.is_some(),
+        app.pending_expand.is_some(),
         "switching to Albums should not cancel the in-flight find chain"
     );
 }
@@ -2102,7 +2106,7 @@ fn pending_expand_album_target_persists_on_switch_view_to_albums() {
 #[test]
 fn pending_expand_album_target_cleared_on_navigate_and_filter() {
     let mut app = test_app();
-    app.pending_expand_album_target = Some(crate::state::PendingExpandTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
         album_id: "a1".to_string(),
         for_browsing_pane: false,
     });
@@ -2115,13 +2119,13 @@ fn pending_expand_album_target_cleared_on_navigate_and_filter() {
         },
     );
 
-    assert!(app.pending_expand_album_target.is_none());
+    assert!(app.pending_expand.is_none());
 }
 
 #[test]
 fn try_resolve_pending_expand_finds_loaded_album_and_takes_target() {
     let mut app = test_app();
-    app.pending_expand_album_target = Some(crate::state::PendingExpandTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
         album_id: "a2".to_string(),
         for_browsing_pane: false,
     });
@@ -2135,7 +2139,7 @@ fn try_resolve_pending_expand_finds_loaded_album_and_takes_target() {
 
     assert!(task.is_some(), "found target should produce a task");
     assert!(
-        app.pending_expand_album_target.is_none(),
+        app.pending_expand.is_none(),
         "target should be taken once dispatched"
     );
     // For a 3-album library with default slot_count=9 (center_slot=4), the
@@ -2160,7 +2164,7 @@ fn try_resolve_pending_expand_places_target_at_top_slot() {
     // viewport_offset = target_idx + center_slot. With slot_count=9
     // (default), center_slot=4, so target_idx=320 → viewport_offset=324.
     let mut app = test_app();
-    app.pending_expand_album_target = Some(crate::state::PendingExpandTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
         album_id: "a320".to_string(),
         for_browsing_pane: false,
     });
@@ -2189,7 +2193,7 @@ fn try_resolve_pending_expand_places_target_at_top_slot() {
 #[test]
 fn try_resolve_pending_expand_clears_when_fully_loaded_and_missing() {
     let mut app = test_app();
-    app.pending_expand_album_target = Some(crate::state::PendingExpandTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
         album_id: "missing".to_string(),
         for_browsing_pane: false,
     });
@@ -2202,7 +2206,7 @@ fn try_resolve_pending_expand_clears_when_fully_loaded_and_missing() {
 
     assert!(task.is_some(), "fully-loaded miss should produce a task");
     assert!(
-        app.pending_expand_album_target.is_none(),
+        app.pending_expand.is_none(),
         "target should be cleared when known-not-in-library"
     );
 }
@@ -2210,7 +2214,7 @@ fn try_resolve_pending_expand_clears_when_fully_loaded_and_missing() {
 #[test]
 fn try_resolve_pending_expand_returns_none_when_loading() {
     let mut app = test_app();
-    app.pending_expand_album_target = Some(crate::state::PendingExpandTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
         album_id: "a2".to_string(),
         for_browsing_pane: false,
     });
@@ -2223,7 +2227,7 @@ fn try_resolve_pending_expand_returns_none_when_loading() {
 
     assert!(task.is_none(), "should wait while a page is in flight");
     assert!(
-        app.pending_expand_album_target.is_some(),
+        app.pending_expand.is_some(),
         "target preserved while loading"
     );
 }
@@ -2231,7 +2235,7 @@ fn try_resolve_pending_expand_returns_none_when_loading() {
 #[test]
 fn try_resolve_pending_expand_kicks_next_page_when_idle_and_more_remain() {
     let mut app = test_app();
-    app.pending_expand_album_target = Some(crate::state::PendingExpandTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
         album_id: "a999".to_string(),
         for_browsing_pane: false,
     });
@@ -2244,7 +2248,7 @@ fn try_resolve_pending_expand_kicks_next_page_when_idle_and_more_remain() {
 
     assert!(task.is_some(), "should dispatch next-page load");
     assert!(
-        app.pending_expand_album_target.is_some(),
+        app.pending_expand.is_some(),
         "target preserved while still hunting"
     );
 }
@@ -2263,7 +2267,7 @@ fn try_resolve_pending_expand_bypasses_scroll_edge_gate_when_paging() {
     // in tests because app_service is None — the gate behavior is what
     // we're verifying.)
     let mut app = test_app();
-    app.pending_expand_album_target = Some(crate::state::PendingExpandTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
         album_id: "missing".to_string(),
         for_browsing_pane: false,
     });
@@ -2287,7 +2291,7 @@ fn try_resolve_pending_expand_bypasses_scroll_edge_gate_when_paging() {
 #[test]
 fn pending_timeout_does_not_toast_when_target_already_resolved() {
     let mut app = test_app();
-    assert!(app.pending_expand_album_target.is_none());
+    assert!(app.pending_expand.is_none());
 
     let _ = app.handle_pending_expand_album_timeout("a1".to_string());
 
@@ -2300,7 +2304,7 @@ fn pending_timeout_does_not_toast_when_target_already_resolved() {
 #[test]
 fn pending_timeout_does_not_toast_for_stale_album_id() {
     let mut app = test_app();
-    app.pending_expand_album_target = Some(crate::state::PendingExpandTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
         album_id: "newer".to_string(),
         for_browsing_pane: false,
     });
@@ -2316,7 +2320,7 @@ fn pending_timeout_does_not_toast_for_stale_album_id() {
 #[test]
 fn pending_timeout_toasts_when_target_still_in_flight() {
     let mut app = test_app();
-    app.pending_expand_album_target = Some(crate::state::PendingExpandTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
         album_id: "a1".to_string(),
         for_browsing_pane: false,
     });
@@ -2374,12 +2378,14 @@ fn navigate_and_expand_artist_clears_search_filter_and_sets_target() {
     assert!(app.artists_page.common.active_filter.is_none());
     assert!(app.artists_page.common.search_query.is_empty());
     assert!(!app.artists_page.common.search_input_focused);
-    let target = app
-        .pending_expand_artist_target
-        .as_ref()
-        .expect("target should be set");
-    assert_eq!(target.artist_id, "ar1");
-    assert!(!target.for_browsing_pane);
+    assert!(
+        matches!(
+            app.pending_expand,
+            Some(crate::state::PendingExpand::Artist { ref artist_id, for_browsing_pane: false }) if artist_id == "ar1"
+        ),
+        "expected pending_expand = Artist {{ ar1, top-pane }}, got {:?}",
+        app.pending_expand
+    );
 }
 
 #[test]
@@ -2401,44 +2407,46 @@ fn browser_pane_navigate_and_expand_artist_sets_browsing_flag() {
 
     let _ = app.handle_browser_pane_navigate_and_expand_artist("ar1".to_string());
 
-    let target = app
-        .pending_expand_artist_target
-        .as_ref()
-        .expect("target should be set");
-    assert_eq!(target.artist_id, "ar1");
-    assert!(target.for_browsing_pane);
+    assert!(
+        matches!(
+            app.pending_expand,
+            Some(crate::state::PendingExpand::Artist { ref artist_id, for_browsing_pane: true }) if artist_id == "ar1"
+        ),
+        "expected pending_expand = Artist {{ ar1, browsing-pane }}, got {:?}",
+        app.pending_expand
+    );
 }
 
 #[test]
 fn pending_expand_artist_target_cleared_on_switch_view_away() {
     let mut app = test_app();
-    app.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
         artist_id: "ar1".to_string(),
         for_browsing_pane: false,
     });
 
     let _ = app.handle_switch_view(View::Songs);
 
-    assert!(app.pending_expand_artist_target.is_none());
+    assert!(app.pending_expand.is_none());
 }
 
 #[test]
 fn pending_expand_artist_target_persists_on_switch_view_to_artists() {
     let mut app = test_app();
-    app.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
         artist_id: "ar1".to_string(),
         for_browsing_pane: false,
     });
 
     let _ = app.handle_switch_view(View::Artists);
 
-    assert!(app.pending_expand_artist_target.is_some());
+    assert!(app.pending_expand.is_some());
 }
 
 #[test]
 fn pending_expand_artist_target_cleared_on_navigate_and_filter() {
     let mut app = test_app();
-    app.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
         artist_id: "ar1".to_string(),
         for_browsing_pane: false,
     });
@@ -2451,13 +2459,13 @@ fn pending_expand_artist_target_cleared_on_navigate_and_filter() {
         },
     );
 
-    assert!(app.pending_expand_artist_target.is_none());
+    assert!(app.pending_expand.is_none());
 }
 
 #[test]
 fn try_resolve_pending_expand_artist_finds_loaded_and_takes_target() {
     let mut app = test_app();
-    app.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
         artist_id: "ar2".to_string(),
         for_browsing_pane: false,
     });
@@ -2471,7 +2479,7 @@ fn try_resolve_pending_expand_artist_finds_loaded_and_takes_target() {
 
     assert!(task.is_some(), "found target should produce a task");
     assert!(
-        app.pending_expand_artist_target.is_none(),
+        app.pending_expand.is_none(),
         "target should be taken once dispatched"
     );
     assert_eq!(
@@ -2488,7 +2496,7 @@ fn try_resolve_pending_expand_artist_finds_loaded_and_takes_target() {
 #[test]
 fn try_resolve_pending_expand_artist_places_target_at_top_slot() {
     let mut app = test_app();
-    app.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
         artist_id: "ar320".to_string(),
         for_browsing_pane: false,
     });
@@ -2516,7 +2524,7 @@ fn try_resolve_pending_expand_artist_places_target_at_top_slot() {
 #[test]
 fn try_resolve_pending_expand_artist_clears_when_fully_loaded_and_missing() {
     let mut app = test_app();
-    app.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
         artist_id: "missing".to_string(),
         for_browsing_pane: false,
     });
@@ -2528,7 +2536,7 @@ fn try_resolve_pending_expand_artist_clears_when_fully_loaded_and_missing() {
 
     assert!(task.is_some(), "fully-loaded miss should produce a task");
     assert!(
-        app.pending_expand_artist_target.is_none(),
+        app.pending_expand.is_none(),
         "target should be cleared when known-not-in-library"
     );
 }
@@ -2536,7 +2544,7 @@ fn try_resolve_pending_expand_artist_clears_when_fully_loaded_and_missing() {
 #[test]
 fn try_resolve_pending_expand_artist_returns_none_when_loading() {
     let mut app = test_app();
-    app.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
         artist_id: "ar2".to_string(),
         for_browsing_pane: false,
     });
@@ -2548,13 +2556,13 @@ fn try_resolve_pending_expand_artist_returns_none_when_loading() {
     let task = app.try_resolve_pending_expand_artist();
 
     assert!(task.is_none(), "should wait while a page is in flight");
-    assert!(app.pending_expand_artist_target.is_some());
+    assert!(app.pending_expand.is_some());
 }
 
 #[test]
 fn try_resolve_pending_expand_artist_kicks_next_page_when_idle() {
     let mut app = test_app();
-    app.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
         artist_id: "ar999".to_string(),
         for_browsing_pane: false,
     });
@@ -2565,13 +2573,13 @@ fn try_resolve_pending_expand_artist_kicks_next_page_when_idle() {
     let task = app.try_resolve_pending_expand_artist();
 
     assert!(task.is_some());
-    assert!(app.pending_expand_artist_target.is_some());
+    assert!(app.pending_expand.is_some());
 }
 
 #[test]
 fn try_resolve_pending_expand_artist_bypasses_scroll_edge_gate_when_paging() {
     let mut app = test_app();
-    app.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
         artist_id: "missing".to_string(),
         for_browsing_pane: false,
     });
@@ -2599,7 +2607,7 @@ fn pending_artist_timeout_does_not_toast_when_target_already_resolved() {
 #[test]
 fn pending_artist_timeout_does_not_toast_for_stale_id() {
     let mut app = test_app();
-    app.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
         artist_id: "newer".to_string(),
         for_browsing_pane: false,
     });
@@ -2610,7 +2618,7 @@ fn pending_artist_timeout_does_not_toast_for_stale_id() {
 #[test]
 fn pending_artist_timeout_toasts_when_target_still_in_flight() {
     let mut app = test_app();
-    app.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
         artist_id: "ar1".to_string(),
         for_browsing_pane: false,
     });
@@ -2665,7 +2673,7 @@ fn albums_page_navigate_and_expand_artist_returns_action() {
 #[test]
 fn try_resolve_album_sets_top_pin_when_target_found() {
     let mut app = test_app();
-    app.pending_expand_album_target = Some(crate::state::PendingExpandTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
         album_id: "a2".to_string(),
         for_browsing_pane: false,
     });
@@ -2686,7 +2694,7 @@ fn try_resolve_album_sets_top_pin_when_target_found() {
 #[test]
 fn try_resolve_artist_sets_top_pin_when_target_found() {
     let mut app = test_app();
-    app.pending_expand_artist_target = Some(crate::state::PendingExpandArtistTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
         artist_id: "ar2".to_string(),
         for_browsing_pane: false,
     });
@@ -2854,12 +2862,14 @@ fn navigate_and_expand_genre_clears_search_filter_and_sets_target() {
     assert!(app.genres_page.common.active_filter.is_none());
     assert!(app.genres_page.common.search_query.is_empty());
     assert!(!app.genres_page.common.search_input_focused);
-    let target = app
-        .pending_expand_genre_target
-        .as_ref()
-        .expect("target should be set");
-    assert_eq!(target.genre_id, "Rock");
-    assert!(!target.for_browsing_pane);
+    assert!(
+        matches!(
+            app.pending_expand,
+            Some(crate::state::PendingExpand::Genre { ref genre_id, for_browsing_pane: false }) if genre_id == "Rock"
+        ),
+        "expected pending_expand = Genre {{ Rock, top-pane }}, got {:?}",
+        app.pending_expand
+    );
 }
 
 #[test]
@@ -2880,43 +2890,49 @@ fn browser_pane_navigate_and_expand_genre_sets_browsing_flag() {
 
     let _ = app.handle_browser_pane_navigate_and_expand_genre("Rock".to_string());
 
-    let target = app
-        .pending_expand_genre_target
-        .as_ref()
-        .expect("target should be set");
-    assert!(target.for_browsing_pane);
+    assert!(
+        matches!(
+            app.pending_expand,
+            Some(crate::state::PendingExpand::Genre {
+                for_browsing_pane: true,
+                ..
+            })
+        ),
+        "expected pending_expand = Genre {{ browsing-pane }}, got {:?}",
+        app.pending_expand
+    );
 }
 
 #[test]
 fn pending_expand_genre_target_cleared_on_switch_view_away() {
     let mut app = test_app();
-    app.pending_expand_genre_target = Some(crate::state::PendingExpandGenreTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Genre {
         genre_id: "Rock".to_string(),
         for_browsing_pane: false,
     });
 
     let _ = app.handle_switch_view(View::Songs);
 
-    assert!(app.pending_expand_genre_target.is_none());
+    assert!(app.pending_expand.is_none());
 }
 
 #[test]
 fn pending_expand_genre_target_persists_on_switch_view_to_genres() {
     let mut app = test_app();
-    app.pending_expand_genre_target = Some(crate::state::PendingExpandGenreTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Genre {
         genre_id: "Rock".to_string(),
         for_browsing_pane: false,
     });
 
     let _ = app.handle_switch_view(View::Genres);
 
-    assert!(app.pending_expand_genre_target.is_some());
+    assert!(app.pending_expand.is_some());
 }
 
 #[test]
 fn pending_expand_genre_target_cleared_on_navigate_and_filter() {
     let mut app = test_app();
-    app.pending_expand_genre_target = Some(crate::state::PendingExpandGenreTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Genre {
         genre_id: "Rock".to_string(),
         for_browsing_pane: false,
     });
@@ -2929,7 +2945,7 @@ fn pending_expand_genre_target_cleared_on_navigate_and_filter() {
         },
     );
 
-    assert!(app.pending_expand_genre_target.is_none());
+    assert!(app.pending_expand.is_none());
 }
 
 #[test]
@@ -2940,7 +2956,7 @@ fn try_resolve_pending_expand_genre_matches_by_name_not_internal_id() {
     // The lookup must therefore match against `g.name`, not `g.id`, or
     // every click toasts "Genre not found in library".
     let mut app = test_app();
-    app.pending_expand_genre_target = Some(crate::state::PendingExpandGenreTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Genre {
         genre_id: "Black Metal".to_string(), // the displayed name, not an internal id
         for_browsing_pane: false,
     });
@@ -2973,7 +2989,7 @@ fn try_resolve_pending_expand_genre_matches_by_name_not_internal_id() {
 #[test]
 fn try_resolve_pending_expand_genre_finds_loaded_and_takes_target() {
     let mut app = test_app();
-    app.pending_expand_genre_target = Some(crate::state::PendingExpandGenreTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Genre {
         genre_id: "Jazz".to_string(),
         for_browsing_pane: false,
     });
@@ -2987,7 +3003,7 @@ fn try_resolve_pending_expand_genre_finds_loaded_and_takes_target() {
 
     assert!(task.is_some(), "found target should produce a task");
     assert!(
-        app.pending_expand_genre_target.is_none(),
+        app.pending_expand.is_none(),
         "target should be taken once dispatched"
     );
     assert_eq!(
@@ -3009,7 +3025,7 @@ fn try_resolve_pending_expand_genre_finds_loaded_and_takes_target() {
 fn try_resolve_pending_expand_genre_places_target_at_top_slot() {
     let mut app = test_app();
     // Click sites dispatch the display name, not the internal id.
-    app.pending_expand_genre_target = Some(crate::state::PendingExpandGenreTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Genre {
         genre_id: "Genre 50".to_string(),
         for_browsing_pane: false,
     });
@@ -3039,7 +3055,7 @@ fn try_resolve_pending_expand_genre_clears_when_idle_and_missing() {
     // Genres are single-shot: if not loading and target absent, it really
     // isn't in the library — no further pages to wait for.
     let mut app = test_app();
-    app.pending_expand_genre_target = Some(crate::state::PendingExpandGenreTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Genre {
         genre_id: "Missing".to_string(),
         for_browsing_pane: false,
     });
@@ -3052,7 +3068,7 @@ fn try_resolve_pending_expand_genre_clears_when_idle_and_missing() {
 
     assert!(task.is_some(), "missing target should produce a task");
     assert!(
-        app.pending_expand_genre_target.is_none(),
+        app.pending_expand.is_none(),
         "target should be cleared when known-not-in-library"
     );
 }
@@ -3060,7 +3076,7 @@ fn try_resolve_pending_expand_genre_clears_when_idle_and_missing() {
 #[test]
 fn try_resolve_pending_expand_genre_returns_none_when_loading() {
     let mut app = test_app();
-    app.pending_expand_genre_target = Some(crate::state::PendingExpandGenreTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Genre {
         genre_id: "Rock".to_string(),
         for_browsing_pane: false,
     });
@@ -3069,7 +3085,7 @@ fn try_resolve_pending_expand_genre_returns_none_when_loading() {
     let task = app.try_resolve_pending_expand_genre();
 
     assert!(task.is_none(), "should wait while load is in flight");
-    assert!(app.pending_expand_genre_target.is_some());
+    assert!(app.pending_expand.is_some());
 }
 
 #[test]
@@ -3082,7 +3098,7 @@ fn pending_genre_timeout_does_not_toast_when_target_already_resolved() {
 #[test]
 fn pending_genre_timeout_toasts_when_target_still_in_flight() {
     let mut app = test_app();
-    app.pending_expand_genre_target = Some(crate::state::PendingExpandGenreTarget {
+    app.pending_expand = Some(crate::state::PendingExpand::Genre {
         genre_id: "Rock".to_string(),
         for_browsing_pane: false,
     });

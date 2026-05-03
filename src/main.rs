@@ -250,21 +250,12 @@ pub struct Nokkvi {
     /// loaded PagedBuffer and a search-based reload was dispatched. When the
     /// data-loaded handler fires, it re-dispatches CenterOnPlaying.
     pub pending_center_on_playing: bool,
-    /// In-flight album-find-and-expand target. Set when an album-text click
-    /// from Songs/Queue dispatches `NavigateAndExpandAlbum`. The albums load
-    /// handlers consume it: each page that arrives triggers a search for the
-    /// id, dispatches `FocusAndExpand` when found, or kicks the next page
-    /// when not.
-    pub pending_expand_album_target: Option<crate::state::PendingExpandTarget>,
-    /// Artist-side mirror of `pending_expand_album_target`. Set when an
-    /// artist-text click dispatches `NavigateAndExpandArtist`; the artists
-    /// load handlers page through the library until the target id appears,
-    /// then dispatch the outer-expand `ArtistsMessage::FocusAndExpand`.
-    pub pending_expand_artist_target: Option<crate::state::PendingExpandArtistTarget>,
-    /// Genre-side mirror. Single-shot since genres don't paginate — the
-    /// helper either finds the target on the one-and-only load or warns
-    /// that the genre isn't in the library.
-    pub pending_expand_genre_target: Option<crate::state::PendingExpandGenreTarget>,
+    /// In-flight find-and-expand target — at most one chain runs at a time
+    /// across album / artist / genre. Set by the matching
+    /// `handle_navigate_and_expand_*` and consumed by the matching
+    /// `try_resolve_pending_expand_*` after the load resolves (paginated
+    /// for album/artist, single-shot for genre).
+    pub pending_expand: Option<crate::state::PendingExpand>,
     /// Re-pin the highlight onto the find-chain target after `set_children`
     /// runs. Set by `try_resolve_pending_expand_*` once the target is
     /// found; consumed by the matching children-loaded handler
@@ -357,9 +348,7 @@ impl Default for Nokkvi {
             library_page_size: nokkvi_data::types::player_settings::LibraryPageSize::Default,
             suppress_next_auto_center: false,
             pending_center_on_playing: false,
-            pending_expand_album_target: None,
-            pending_expand_artist_target: None,
-            pending_expand_genre_target: None,
+            pending_expand: None,
             pending_top_pin: None,
             default_playlist_id: None,
             default_playlist_name: String::new(),
