@@ -36,12 +36,19 @@
 //!   (`BOAT_WRAP_MARGIN_BOAT_WIDTHS · boat_w / area_width`) so the boat
 //!   fully exits the visible area before wrapping — the renderer draws a
 //!   single copy at `target_x` and lets the outer clip trim the off-screen
-//!   portion, so the boat is never visible in two places at once. The
-//!   off-screen stretch also gives the captain a quiet zone to charge
-//!   through stuck regions where the visible wave face would otherwise
-//!   pin the boat. (Earlier revisions used a quadratic wall-repulsion
-//!   spring plus a clamp before any wrap; that behavior — and its
-//!   slope-suppression / center-return charge bias — is gone.)
+//!   portion, so the boat is never visible in two places at once.
+//!   (Earlier revisions used a quadratic wall-repulsion spring plus a
+//!   clamp before any wrap; that behavior — and its slope-suppression /
+//!   center-return charge bias — is gone.)
+//! - **Eject through the deadspace** — while in the margin, slope force
+//!   is muted (so toroidal "across the seam" gradients can't drag the
+//!   boat back into the edge it just left) and a constant `EJECT_FORCE`
+//!   in the latched `eject_dir` shoots the boat through the wrap and
+//!   out the opposite side. Without this, music whose loudest bins live
+//!   near a spectrum edge could pin the boat at the visible boundary
+//!   for long stretches; with it, every margin entry resolves into a
+//!   brisk crossing, which biases the boat's time-averaged position
+//!   toward the center of the visible area.
 //! - **Y dynamics** — `y_ratio` follows the sampled wave height through a
 //!   spring-damper rather than tracking it exactly, so the boat bobs with
 //!   buoyancy rather than glued to the curve.
@@ -140,6 +147,19 @@ const SLOPE_GATE_RAMP: f32 = 0.20;
 /// so charges feel scheduled by mood rather than clockwork.
 const CHARGE_INTERVAL_MIN_SECS: f32 = 12.0;
 const CHARGE_INTERVAL_MAX_SECS: f32 = 30.0;
+
+/// Constant outward force applied while the boat is in the off-screen
+/// wrap margin. Once the boat crosses from the visible area into a
+/// margin we latch `eject_dir` to whichever side it entered (`+1` for
+/// right, `-1` for left) and apply this force in that direction every
+/// tick until the boat re-enters the visible area on the *opposite*
+/// side. Sized larger than `MAX_SLOPE_FORCE` so the worst-case
+/// drive + charge headwind (`-0.04 + -0.06 = -0.10`) can never stall
+/// the eject mid-margin — net force stays positive in the eject
+/// direction. Slope force is also gated to zero while in the margin so
+/// the deadspace is a true "shoot through" zone where wave gradients
+/// can't drag the boat back into the edge it just left.
+const EJECT_FORCE: f32 = 0.15;
 
 /// Min/max duration of a single charge. Sampled uniformly in `[MIN, MAX]`
 /// when a charge starts. Tuned so a charge covers a notable but bounded
@@ -298,6 +318,15 @@ pub struct BoatState {
     /// what the in-crate physics tests rely on (they construct `BoatState`
     /// directly without going through the handler).
     pub x_wrap_margin: f32,
+    /// Direction of the eject force that fires while the boat is in the
+    /// off-screen wrap margin: `+1.0` to push right, `-1.0` to push left,
+    /// `0.0` while in the visible area. Latched in `step()` the tick the
+    /// boat crosses out of `[0, 1]` (sign chosen by which side it
+    /// entered) and held across the wrap teleport so the force keeps
+    /// pointing the same world-direction after the seam. Cleared at the
+    /// top of any tick that finds the boat back inside `[0, 1]`. See
+    /// `EJECT_FORCE` for the magnitude and motivation.
+    pub eject_dir: f32,
     pub tilt_handles: HashMap<(i16, bool), svg::Handle>,
     pub handle_generation: u64,
 }
@@ -429,6 +458,19 @@ pub(crate) fn step(state: &mut BoatState, dt: Duration, bars: &[f64], angular: b
         state.secs_until_next_charge = lerp(CHARGE_INTERVAL_MIN_SECS, CHARGE_INTERVAL_MAX_SECS, r);
     }
 
+    // The off-screen wrap margin is "deadspace" — slope force is muted
+    // here so wave gradients at the seam can't drag the boat back into
+    // the edge it just left, and a constant `EJECT_FORCE` (in the
+    // latched `eject_dir`) shoots the boat through the wrap and out the
+    // far side. Clear `eject_dir` whenever the boat is back in the
+    // visible area so the next entry rearms cleanly. The latch itself
+    // is set further down, after we know where this tick's integration
+    // landed.
+    let in_margin = !(0.0..=1.0).contains(&state.x_ratio);
+    if !in_margin {
+        state.eject_dir = 0.0;
+    }
+
     state.phase = (state.phase + dt_secs / DRIVE_PERIOD_SECS).rem_euclid(1.0);
     let drive = (state.phase * std::f32::consts::TAU).sin() * DRIVE_FORCE;
 
@@ -458,8 +500,16 @@ pub(crate) fn step(state: &mut BoatState, dt: Duration, bars: &[f64], angular: b
     // curve it's on; only the horizontal pull is suppressed.
     let local_height = sample_line_height(bars, state.x_ratio, angular);
     let surf_gate = ((local_height - SLOPE_GATE_FLOOR) / SLOPE_GATE_RAMP).clamp(0.0, 1.0);
-    let slope_force_raw =
-        (-slope * SLOPE_GAIN * surf_gate).clamp(-MAX_SLOPE_FORCE, MAX_SLOPE_FORCE);
+    let slope_force_raw = if in_margin {
+        // Deadspace: the boat is between the visible boundary and the
+        // wrap seam, where toroidal slope sampling reads "across the
+        // seam" and routinely points back toward the edge the boat just
+        // crossed. Zeroing it here keeps that residual force from
+        // re-grabbing the boat before the eject can flush it through.
+        0.0
+    } else {
+        (-slope * SLOPE_GAIN * surf_gate).clamp(-MAX_SLOPE_FORCE, MAX_SLOPE_FORCE)
+    };
 
     // Charge state machine: either rowing (charge_remaining_secs > 0) or
     // counting down to the next charge. While rowing, force traces a
@@ -498,15 +548,39 @@ pub(crate) fn step(state: &mut BoatState, dt: Duration, bars: &[f64], angular: b
     };
 
     let damping_force = -state.x_velocity * X_DAMPING;
+    // Eject force fires only inside the wrap margin and points in the
+    // latched `eject_dir`. In the visible area `eject_dir` is held at
+    // 0 by the top-of-tick clear, so this term contributes nothing
+    // there. Sized so the worst-case headwind (`drive_min + charge_min
+    // = -0.10`) still leaves a positive net push, which guarantees the
+    // boat can never stall mid-margin.
+    let eject_force = if in_margin {
+        state.eject_dir * EJECT_FORCE
+    } else {
+        0.0
+    };
 
-    let ax = drive + slope_force + damping_force + charge_force;
+    let ax = drive + slope_force + damping_force + charge_force + eject_force;
     state.x_velocity = (state.x_velocity + ax * dt_secs).clamp(-MAX_X_V, MAX_X_V);
     // Wrap x_ratio over the extended span `[-x_wrap_margin, 1 + x_wrap_margin)`
     // so the boat slides fully off one edge before reappearing on the other.
     // Margin defaults to 0.0 (collapses to `rem_euclid(1.0)`), which is what
     // the standalone physics tests construct.
+    //
+    // Latch `eject_dir` whenever this tick's *raw* (pre-wrap) integration
+    // crosses out of `[0, 1]` — the sign picks the side the boat is
+    // entering. We check against `raw_x` (not the wrapped result) so a
+    // wrap teleport that lands back in the margin on the opposite side
+    // doesn't show up as a bogus visible→margin transition; the latch
+    // is preserved across the seam, so the eject keeps pointing the same
+    // world-direction after the wrap and pushes the boat out into the
+    // visible area on the far side. The clearing side of this state
+    // machine lives at the top of `step()`.
     let span = 1.0 + 2.0 * state.x_wrap_margin;
     let raw_x = state.x_ratio + state.x_velocity * dt_secs;
+    if !in_margin && !(0.0..=1.0).contains(&raw_x) {
+        state.eject_dir = if raw_x > 1.0 { 1.0 } else { -1.0 };
+    }
     state.x_ratio = (raw_x + state.x_wrap_margin).rem_euclid(span) - state.x_wrap_margin;
 
     // Tilt: spring-damper toward `-slope * gain`, clamped. Reuses `slope`
@@ -521,7 +595,16 @@ pub(crate) fn step(state: &mut BoatState, dt: Duration, bars: &[f64], angular: b
     // the underdamped spring would otherwise overshoot the target by a
     // few percent on sharp transients, which would visually exceed the
     // cap.
-    let target_tilt = (-slope * TILT_GAIN).clamp(-MAX_TILT, MAX_TILT);
+    // In the deadspace there's no wave under the boat, so target a
+    // neutral tilt and let the spring-damper ease the boat to flat as
+    // it transits the margin. When it re-enters the visible area, the
+    // slope-driven target picks back up smoothly from wherever the
+    // spring left things.
+    let target_tilt = if in_margin {
+        0.0
+    } else {
+        (-slope * TILT_GAIN).clamp(-MAX_TILT, MAX_TILT)
+    };
     let a_tilt = (target_tilt - state.tilt) * TILT_SPRING_K - state.tilt_velocity * TILT_DAMPING;
     state.tilt_velocity += a_tilt * dt_secs;
     state.tilt += state.tilt_velocity * dt_secs;
@@ -1306,6 +1389,124 @@ mod tests {
             state.x_velocity < 0.0,
             "leftward velocity must survive the wrap (got {})",
             state.x_velocity
+        );
+    }
+
+    #[test]
+    fn step_latches_eject_dir_on_crossing_into_right_margin() {
+        // Boat in the visible area with rightward velocity, just barely
+        // past the right edge after one tick. The transition must arm
+        // `eject_dir = +1` so subsequent ticks apply the deadspace
+        // ejection force in that direction.
+        let bars = vec![0.5; 16];
+        let mut state = BoatState {
+            x_ratio: 0.999,
+            x_velocity: 0.05,
+            x_wrap_margin: 0.05,
+            rng_state: 0x12345,
+            secs_until_next_charge: 1e6,
+            ..Default::default()
+        };
+
+        step(&mut state, Duration::from_millis(50), &bars, false);
+
+        assert!(
+            state.x_ratio > 1.0,
+            "precondition: boat should have crossed into the right margin (got {})",
+            state.x_ratio
+        );
+        assert_eq!(
+            state.eject_dir, 1.0,
+            "eject_dir must latch to +1.0 on visible→right-margin crossing"
+        );
+    }
+
+    #[test]
+    fn step_latches_eject_dir_on_crossing_into_left_margin() {
+        // Mirror of the right-margin case.
+        let bars = vec![0.5; 16];
+        let mut state = BoatState {
+            x_ratio: 0.001,
+            x_velocity: -0.05,
+            x_wrap_margin: 0.05,
+            rng_state: 0x12345,
+            secs_until_next_charge: 1e6,
+            ..Default::default()
+        };
+
+        step(&mut state, Duration::from_millis(50), &bars, false);
+
+        assert!(
+            state.x_ratio < 0.0,
+            "precondition: boat should have crossed into the left margin (got {})",
+            state.x_ratio
+        );
+        assert_eq!(
+            state.eject_dir, -1.0,
+            "eject_dir must latch to -1.0 on visible→left-margin crossing"
+        );
+    }
+
+    #[test]
+    fn step_clears_stale_eject_dir_when_in_visible_area() {
+        // A `BoatState` reconstructed from persisted state could carry a
+        // stale `eject_dir` while sitting in the visible area (e.g. the
+        // user rebuilt state mid-eject). The first tick after such a
+        // state must clear the latch so the eject force doesn't fire
+        // inside the visible area.
+        let bars = vec![0.5; 16];
+        let mut state = BoatState {
+            x_ratio: 0.5,
+            x_velocity: 0.0,
+            x_wrap_margin: 0.05,
+            eject_dir: 1.0,
+            rng_state: 0x12345,
+            secs_until_next_charge: 1e6,
+            ..Default::default()
+        };
+
+        step(&mut state, Duration::from_millis(16), &bars, false);
+
+        assert_eq!(
+            state.eject_dir, 0.0,
+            "eject_dir must clear at the top of any tick that starts in the visible area"
+        );
+    }
+
+    #[test]
+    fn step_eject_force_drives_boat_through_deadspace() {
+        // Boat parked in the right margin with the eject latched and zero
+        // velocity. Flat bars and a parked captain — the only force in the
+        // x direction should be the eject. Over a few seconds the boat
+        // must traverse the wrap and re-enter the visible area on the left
+        // side, with `eject_dir` cleared once it does.
+        let bars = vec![0.5; 16];
+        let initial = BoatState {
+            x_ratio: 1.01,
+            x_velocity: 0.0,
+            x_wrap_margin: 0.05,
+            eject_dir: 1.0,
+            rng_state: 0x12345,
+            secs_until_next_charge: 1e6,
+            ..Default::default()
+        };
+        let final_state = run(initial, 200, Duration::from_millis(10), &bars);
+
+        assert!(
+            (0.0..=1.0).contains(&final_state.x_ratio),
+            "boat should have completed the eject and re-entered the visible area \
+             (final x_ratio = {})",
+            final_state.x_ratio
+        );
+        assert_eq!(
+            final_state.eject_dir, 0.0,
+            "eject_dir must clear after the boat re-enters the visible area"
+        );
+        assert!(
+            final_state.x_ratio < 0.5,
+            "post-wrap re-entry should land near the left side of the visible area \
+             (got x_ratio = {})",
+            final_state.x_ratio
         );
     }
 
