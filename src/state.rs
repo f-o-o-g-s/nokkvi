@@ -61,6 +61,23 @@ pub struct CrossPaneDragState {
 }
 
 // ============================================================================
+// Pending Album Expansion (find-and-expand chain)
+// ============================================================================
+
+/// Target tracked while paginating through Albums to find a specific id and
+/// auto-expand it. Set by `handle_navigate_and_expand_album` and consumed by
+/// `try_resolve_pending_expand_album` after each page load.
+///
+/// `for_browsing_pane` routes the final `FocusAndExpand` dispatch into the
+/// browsing-panel's Albums tab when split-view is active, leaving the top
+/// pane (Queue) untouched.
+#[derive(Debug, Clone)]
+pub struct PendingExpandTarget {
+    pub album_id: String,
+    pub for_browsing_pane: bool,
+}
+
+// ============================================================================
 // Session & Playlist Context
 // ============================================================================
 

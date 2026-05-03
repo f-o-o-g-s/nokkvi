@@ -173,6 +173,15 @@ impl Nokkvi {
             Message::BrowserPaneNavigateAndFilter(view, filter) => {
                 self.handle_browser_pane_navigate_and_filter(view, filter)
             }
+            Message::NavigateAndExpandAlbum { album_id } => {
+                self.handle_navigate_and_expand_album(album_id)
+            }
+            Message::BrowserPaneNavigateAndExpandAlbum { album_id } => {
+                self.handle_browser_pane_navigate_and_expand_album(album_id)
+            }
+            Message::PendingExpandAlbumTimeout(album_id) => {
+                self.handle_pending_expand_album_timeout(album_id)
+            }
             Message::StripClicked => {
                 use nokkvi_data::types::player_settings::StripClickAction;
                 match crate::theme::strip_click_action() {

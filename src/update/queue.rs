@@ -578,6 +578,9 @@ impl Nokkvi {
             QueueAction::NavigateAndFilter(view, filter) => {
                 return Task::done(Message::NavigateAndFilter(view, filter));
             }
+            QueueAction::NavigateAndExpandAlbum(album_id) => {
+                return Task::done(Message::NavigateAndExpandAlbum { album_id });
+            }
             QueueAction::ColumnVisibilityChanged(col, value) => {
                 return self.persist_queue_column_visibility(col, value);
             }

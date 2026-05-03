@@ -239,6 +239,8 @@ pub enum QueueMessage {
     RefreshArtwork(String),
     /// Navigate to a view and apply an ID filter
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
+    /// Navigate to Albums and auto-expand the album with this id (no filter set).
+    NavigateAndExpandAlbum(String),
     /// Column-dropdown open/close request — bubbled to root
     /// `Message::SetOpenMenu`. Intercepted in `handle_queue` before the
     /// page's `update` runs.
@@ -286,6 +288,7 @@ pub enum QueueAction {
     FindSimilar(usize),             // Open Find Similar panel for queue index
     TopSongs(usize),                // Open Top Songs panel for queue index
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
+    NavigateAndExpandAlbum(String), // album_id - navigate to Albums and auto-expand
     /// User toggled a queue column's visibility — persist to config.toml.
     ColumnVisibilityChanged(QueueColumn, bool),
     /// Bubble to root: open the default-playlist picker overlay.
@@ -358,6 +361,9 @@ impl QueuePage {
             }
             QueueMessage::NavigateAndFilter(view, filter) => {
                 (Task::none(), QueueAction::NavigateAndFilter(view, filter))
+            }
+            QueueMessage::NavigateAndExpandAlbum(album_id) => {
+                (Task::none(), QueueAction::NavigateAndExpandAlbum(album_id))
             }
             QueueMessage::SortModeSelected(sort_mode) => {
                 self.queue_sort_mode = sort_mode;
@@ -1134,13 +1140,8 @@ impl QueuePage {
                     content_row =
                         content_row.push(
                             container({
-                                let click_album = QueueMessage::NavigateAndFilter(
-                                    crate::View::Albums,
-                                    nokkvi_data::types::filter::LibraryFilter::AlbumId {
-                                        id: album_id.clone(),
-                                        title: album.clone(),
-                                    },
-                                );
+                                let click_album =
+                                    QueueMessage::NavigateAndExpandAlbum(album_id.clone());
                                 let links_enabled = crate::theme::is_slot_text_links();
                                 let album_widget: Element<'_, QueueMessage> =
                                     crate::widgets::link_text::LinkText::new(album)

@@ -250,6 +250,12 @@ pub struct Nokkvi {
     /// loaded PagedBuffer and a search-based reload was dispatched. When the
     /// data-loaded handler fires, it re-dispatches CenterOnPlaying.
     pub pending_center_on_playing: bool,
+    /// In-flight album-find-and-expand target. Set when an album-text click
+    /// from Songs/Queue dispatches `NavigateAndExpandAlbum`. The albums load
+    /// handlers consume it: each page that arrives triggers a search for the
+    /// id, dispatches `FocusAndExpand` when found, or kicks the next page
+    /// when not.
+    pub pending_expand_album_target: Option<crate::state::PendingExpandTarget>,
     /// Default playlist ID for quick-add (None = no default set)
     pub default_playlist_id: Option<String>,
     /// Default playlist display name (for settings UI readout)
@@ -337,6 +343,7 @@ impl Default for Nokkvi {
             library_page_size: nokkvi_data::types::player_settings::LibraryPageSize::Default,
             suppress_next_auto_center: false,
             pending_center_on_playing: false,
+            pending_expand_album_target: None,
             default_playlist_id: None,
             default_playlist_name: String::new(),
             quick_add_to_playlist: false,

@@ -1161,13 +1161,7 @@ impl GenresPage {
             true, // show artist since genre groups albums from different artists
             Some(GenresMessage::ClickToggleStar(ctx.item_index)),
             Some(GenresMessage::FocusAndExpandAlbum(ctx.item_index)),
-            Some(GenresMessage::NavigateAndFilter(
-                crate::View::Albums,
-                nokkvi_data::types::filter::LibraryFilter::AlbumId {
-                    id: album.id.clone(),
-                    title: album.name.clone(),
-                },
-            )),
+            Some(GenresMessage::FocusAndExpandAlbum(ctx.item_index)),
             Some(GenresMessage::NavigateAndFilter(
                 crate::View::Artists,
                 nokkvi_data::types::filter::LibraryFilter::ArtistId {

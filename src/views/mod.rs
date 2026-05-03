@@ -122,6 +122,9 @@ pub(crate) enum CommonViewAction {
     /// Navigate to a different view and apply an ID filter.
     /// Used by inline link clicks (e.g. artist name → Artists view).
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
+    /// Navigate to Albums and auto-expand the album with this id, with no
+    /// filter set. Dispatched by album-text clicks in Songs/Queue.
+    NavigateAndExpandAlbum(String),
     /// No action — the view's update produced no effect.
     None,
     /// The action is view-specific and not handled generically.

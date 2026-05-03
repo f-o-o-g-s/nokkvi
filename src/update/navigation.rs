@@ -1,5 +1,7 @@
 //! Navigation message handlers
 
+use std::time::Duration;
+
 use iced::Task;
 use nokkvi_data::{audio, backend::app_service::AppService};
 use tracing::{debug, error, info, warn};
@@ -9,6 +11,19 @@ use crate::{
     app_message::{Message, PlaybackMessage},
     services, views, widgets,
 };
+
+/// 2s delayed task that emits `PendingExpandAlbumTimeout` so the handler can
+/// surface a "Finding album…" toast only when the find chain hasn't already
+/// resolved. The handler verifies the id still matches the active target
+/// before toasting, so superseded clicks stay silent.
+fn expand_album_timeout_task(album_id: String) -> Task<Message> {
+    Task::perform(
+        async {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        },
+        move |()| Message::PendingExpandAlbumTimeout(album_id.clone()),
+    )
+}
 
 impl Nokkvi {
     pub(crate) fn handle_session_expired(&mut self) -> Task<Message> {
@@ -63,6 +78,19 @@ impl Nokkvi {
         } else {
             view
         };
+        // Cancel any in-flight album-find chain when the user navigates away
+        // from its host view. Top-pane targets host on Albums; browsing-pane
+        // targets host on Queue (the panel is destroyed when leaving Queue).
+        if let Some(target) = self.pending_expand_album_target.as_ref() {
+            let host_view = if target.for_browsing_pane {
+                View::Queue
+            } else {
+                View::Albums
+            };
+            if view != host_view {
+                self.cancel_pending_expand_album();
+            }
+        }
         // Play view select SFX for tab/hotkey switching
         self.sfx_engine.play(audio::SfxType::ViewSelect);
         self.current_view = view;
@@ -359,6 +387,7 @@ impl Nokkvi {
         view: crate::View,
         filter: nokkvi_data::types::filter::LibraryFilter,
     ) -> Task<Message> {
+        self.cancel_pending_expand_album();
         let switch_task = self.handle_switch_view(view);
 
         // Defocus search input
@@ -400,6 +429,146 @@ impl Nokkvi {
         Task::batch([switch_task, load_task])
     }
 
+    /// Cross-view navigation that lands in the Albums view, clears any active
+    /// search/filter, and primes a "find-and-expand" target. The albums load
+    /// handlers consume the target after each page arrives — paging through
+    /// the unfiltered list until the album appears, then dispatching
+    /// `FocusAndExpand` so its tracks render inline.
+    pub(crate) fn handle_navigate_and_expand_album(&mut self, album_id: String) -> Task<Message> {
+        self.prime_expand_album_target(album_id.clone(), false);
+        // Clearing `library.albums` above flips `is_empty()` to true, so
+        // handle_switch_view's Albums arm dispatches LoadAlbums for us.
+        let switch_task = self.handle_switch_view(View::Albums);
+        Task::batch([switch_task, expand_album_timeout_task(album_id)])
+    }
+
+    /// Browsing-pane variant of `handle_navigate_and_expand_album` — switches
+    /// the browsing panel to its Albums tab and runs the same find chain
+    /// without disrupting the top-pane Queue.
+    pub(crate) fn handle_browser_pane_navigate_and_expand_album(
+        &mut self,
+        album_id: String,
+    ) -> Task<Message> {
+        self.prime_expand_album_target(album_id.clone(), true);
+        let switch_task = self.handle_browsing_panel_message(
+            crate::views::BrowsingPanelMessage::SwitchView(crate::views::BrowsingView::Albums),
+        );
+        Task::batch([
+            switch_task,
+            Task::done(Message::LoadAlbums),
+            expand_album_timeout_task(album_id),
+        ])
+    }
+
+    /// Shared setup for both navigate-and-expand variants: reset Albums page
+    /// state, defocus its search input (so the user isn't typing into it on
+    /// arrival), drop the current buffer, and install the pending target.
+    /// Caller dispatches the actual load + timeout tasks.
+    fn prime_expand_album_target(&mut self, album_id: String, for_browsing_pane: bool) {
+        self.albums_page.common.search_input_focused = false;
+        self.albums_page.common.active_filter = None;
+        self.albums_page.common.search_query.clear();
+        self.albums_page.expansion.clear();
+        self.albums_page.common.slot_list.viewport_offset = 0;
+        self.albums_page.common.slot_list.selected_indices.clear();
+        self.albums_page.common.slot_list.selected_offset = None;
+        self.library.albums.clear();
+        self.pending_expand_album_target = Some(crate::state::PendingExpandTarget {
+            album_id,
+            for_browsing_pane,
+        });
+    }
+
+    /// Drop a pending album-expand target. Called from cancellation hooks
+    /// (search edit, sort change, navigation away, refresh) so an in-flight
+    /// find chain doesn't continue paging after the user has moved on.
+    pub(crate) fn cancel_pending_expand_album(&mut self) {
+        self.pending_expand_album_target = None;
+    }
+
+    /// After each albums page lands, look for the pending expand target in
+    /// `library.albums`. Returns `Some(task)` if the helper acted (found and
+    /// dispatched, fully-loaded miss, or kicked the next page) and `None` if
+    /// it should be retried after the next page arrives.
+    pub(crate) fn try_resolve_pending_expand_album(&mut self) -> Option<Task<Message>> {
+        let target_id = self.pending_expand_album_target.as_ref()?.album_id.clone();
+
+        if let Some(idx) = self.library.albums.iter().position(|a| a.id == target_id) {
+            debug!(
+                " [EXPAND] Found album '{}' at index {} — scrolling + dispatching FocusAndExpand",
+                target_id, idx
+            );
+            self.pending_expand_album_target = None;
+            // Position the target at slot 0 (top of the visible list) — fewer
+            // distractions above the expansion, and most visible rows are
+            // tracks instead of unrelated albums. viewport_offset is the
+            // index of the item rendered at the *center slot*, so adding
+            // center_slot shifts the displayed window down by that many
+            // positions, leaving the target at slot 0. Falls back to
+            // (total-1) when target is near the end of the library.
+            let total = self.library.albums.len();
+            let center_slot = self.albums_page.common.slot_list.slot_count.max(2) / 2;
+            let target_offset = idx.saturating_add(center_slot).min(total.saturating_sub(1));
+            self.albums_page
+                .common
+                .slot_list
+                .set_offset(target_offset, total);
+            // set_offset clears selected_offset; re-set so the target keeps
+            // the highlight styling (effective center derives from
+            // selected_offset before falling back to viewport_offset).
+            self.albums_page.common.slot_list.set_selected(idx, total);
+            self.albums_page.common.slot_list.flash_center();
+            // Mini-artwork prefetch follows the viewport. The page-load
+            // prefetch ran for viewport=0 (and page-2/3 loads don't prefetch
+            // at all), so the rows around the new viewport would render
+            // as empty placeholders without an explicit kick here.
+            let prefetch_task = self.prefetch_viewport_artwork();
+            return Some(Task::batch([
+                prefetch_task,
+                Task::done(Message::Albums(views::AlbumsMessage::FocusAndExpand(idx))),
+            ]));
+        }
+
+        if self.library.albums.fully_loaded() {
+            warn!(
+                " [EXPAND] Album '{}' not found after full load — clearing target",
+                target_id
+            );
+            self.toast_warn("Album not found in library");
+            self.pending_expand_album_target = None;
+            return Some(Task::none());
+        }
+
+        if self.library.albums.is_loading() {
+            return None;
+        }
+
+        let next_offset = self.library.albums.loaded_count();
+        debug!(
+            " [EXPAND] Album '{}' not in buffer — force-fetching next page at offset {}",
+            target_id, next_offset
+        );
+        Some(self.force_load_albums_page(next_offset))
+    }
+
+    /// Fired ~2s after `handle_navigate_and_expand_album` to surface a
+    /// "Finding album…" toast when the chain is still hunting. Compares
+    /// `album_id` against the currently pending target so a stale timeout
+    /// from a superseded click does not toast.
+    pub(crate) fn handle_pending_expand_album_timeout(
+        &mut self,
+        album_id: String,
+    ) -> Task<Message> {
+        if self
+            .pending_expand_album_target
+            .as_ref()
+            .is_some_and(|t| t.album_id == album_id)
+        {
+            self.toast_info("Finding album…");
+        }
+        Task::none()
+    }
+
     /// Handles cross-view navigation specifically intercepted from within the right-side browsing pane.
     /// Operates identically to `handle_navigate_and_filter` but targets `BrowsingPane` tab state
     /// rather than disrupting the main structural `current_view` state (which stays as Queue).
@@ -408,6 +577,7 @@ impl Nokkvi {
         view: crate::View,
         filter: nokkvi_data::types::filter::LibraryFilter,
     ) -> Task<Message> {
+        self.cancel_pending_expand_album();
         let browse_view = match view {
             View::Albums => Some(crate::views::BrowsingView::Albums),
             View::Songs => Some(crate::views::BrowsingView::Songs),

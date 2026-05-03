@@ -330,6 +330,22 @@ pub enum Message {
     NavigateAndFilter(View, nokkvi_data::types::filter::LibraryFilter),
     /// Navigate and filter exclusively targeting the browsing panel's internal tabs
     BrowserPaneNavigateAndFilter(View, nokkvi_data::types::filter::LibraryFilter),
+    /// Navigate to the Albums view, clear any active search/filter, and page
+    /// through the unfiltered list until the target id appears, then auto-
+    /// expand it inline. Dispatched by album-text clicks in Songs/Queue.
+    NavigateAndExpandAlbum {
+        album_id: String,
+    },
+    /// Browsing-panel variant of `NavigateAndExpandAlbum` — switches the
+    /// browsing panel's tab to Albums and runs the same find chain there,
+    /// leaving the top pane (Queue) untouched in split-view.
+    BrowserPaneNavigateAndExpandAlbum {
+        album_id: String,
+    },
+    /// Internal: 2s after `NavigateAndExpandAlbum` fires, this checks whether
+    /// the target is still pending and shows a "Finding album…" toast if so.
+    /// No-op when the find resolved within the threshold.
+    PendingExpandAlbumTimeout(String),
     /// Track info strip was clicked — dispatch depends on strip_click_action setting
     StripClicked,
     /// Track info strip right-click context menu action

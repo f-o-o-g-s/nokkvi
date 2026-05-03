@@ -19,7 +19,11 @@ impl Nokkvi {
     /// (`handle_albums_load_page`, offset N). The caller supplies a
     /// message constructor so the result lands on the right
     /// `AlbumsMessage` variant.
-    fn load_albums_internal<M>(&mut self, offset: usize, msg_ctor: M) -> Task<Message>
+    ///
+    /// `force = true` skips the scroll-edge `needs_fetch` gate. The
+    /// find-and-expand chain uses this so it can page through the entire
+    /// library without first scrolling the viewport to the edge.
+    fn load_albums_internal<M>(&mut self, offset: usize, force: bool, msg_ctor: M) -> Task<Message>
     where
         M: FnOnce((Result<Vec<AlbumUIViewData>, String>, usize)) -> Message + Send + 'static,
     {
@@ -29,7 +33,8 @@ impl Nokkvi {
         // the upstream needs_fetch check at the action site. Initial
         // loads (offset 0) always proceed — sort/search changes need a
         // fresh page even if the old one is still in flight.
-        if offset > 0
+        if !force
+            && offset > 0
             && self
                 .library
                 .albums
@@ -89,7 +94,7 @@ impl Nokkvi {
         background: bool,
         anchor_id: Option<String>,
     ) -> Task<Message> {
-        self.load_albums_internal(0, move |(result, total_count)| {
+        self.load_albums_internal(0, false, move |(result, total_count)| {
             Message::Albums(AlbumsMessage::AlbumsLoaded {
                 result,
                 total_count,
@@ -101,18 +106,60 @@ impl Nokkvi {
 
     /// Load a subsequent page of albums (triggered by scroll near edge of loaded data)
     pub(crate) fn handle_albums_load_page(&mut self, offset: usize) -> Task<Message> {
-        self.load_albums_internal(offset, |(result, total_count)| {
+        self.load_albums_internal(offset, false, |(result, total_count)| {
+            Message::Albums(AlbumsMessage::AlbumsPageLoaded(result, total_count))
+        })
+    }
+
+    /// Force-load an albums page regardless of the scroll-edge `needs_fetch`
+    /// gate. Used by the find-and-expand chain to page through the full
+    /// library while the viewport stays at 0 (the user hasn't scrolled
+    /// because they're waiting for the target to appear).
+    pub(crate) fn force_load_albums_page(&mut self, offset: usize) -> Task<Message> {
+        self.load_albums_internal(offset, true, |(result, total_count)| {
             Message::Albums(AlbumsMessage::AlbumsPageLoaded(result, total_count))
         })
     }
 
     /// Handle a subsequent page of albums being loaded (appends to buffer)
+    ///
+    /// Inlines the body that the `impl_page_loaded_handler!` macro generates
+    /// for songs/artists so we can drive the album-find-and-expand chain
+    /// from the same hook (the macro's tail is `Task::none()`, with no seam
+    /// for a post-success callback).
     pub(crate) fn handle_albums_page_loaded(
         &mut self,
         result: Result<Vec<AlbumUIViewData>, String>,
         total_count: usize,
     ) -> Task<Message> {
-        impl_page_loaded_handler!(self, albums, "Albums", result, total_count)
+        match result {
+            Ok(new_items) => {
+                let count = new_items.len();
+                let loaded_before = self.library.albums.loaded_count();
+                self.library.albums.append_page(new_items, total_count);
+                debug!(
+                    "📄 Albums page loaded: {} new items ({}→{} of {})",
+                    count,
+                    loaded_before,
+                    self.library.albums.loaded_count(),
+                    total_count,
+                );
+                if let Some(task) = self.try_resolve_pending_expand_album() {
+                    return task;
+                }
+            }
+            Err(e) => {
+                if e.contains("Unauthorized") {
+                    self.library.albums.set_loading(false);
+                    return self.handle_session_expired();
+                }
+                error!("Error loading Albums page: {}", e);
+                self.library.albums.set_loading(false);
+                self.cancel_pending_expand_album();
+                self.toast_error(format!("Failed to load Albums: {e}"));
+            }
+        }
+        Task::none()
     }
 
     pub(crate) fn handle_albums_loaded(
@@ -205,6 +252,13 @@ impl Nokkvi {
                     )));
                 }
 
+                // If a NavigateAndExpandAlbum is in flight, see whether the
+                // first page already contains the target — found → dispatch
+                // FocusAndExpand; not found → kick the next page or warn.
+                if let Some(task) = self.try_resolve_pending_expand_album() {
+                    tasks.push(task);
+                }
+
                 return Task::batch(tasks);
             }
             Err(e) => {
@@ -214,6 +268,7 @@ impl Nokkvi {
                 }
                 error!("Error loading albums: {}", e);
                 self.library.albums.set_loading(false);
+                self.cancel_pending_expand_album();
                 self.toast_error(format!("Failed to load albums: {e}"));
             }
         }
@@ -464,6 +519,19 @@ impl Nokkvi {
         let (cmd, action) =
             self.albums_page
                 .update(msg, self.library.albums.len(), &self.library.albums);
+
+        // User-driven changes (search edit, sort, refresh) supersede any
+        // in-flight find-and-expand chain. FocusAndExpand dispatched by the
+        // chain itself produces ExpandAlbum, which is not in this list.
+        if matches!(
+            action,
+            AlbumsAction::SearchChanged(_)
+                | AlbumsAction::SortModeChanged(_)
+                | AlbumsAction::SortOrderChanged(_)
+                | AlbumsAction::RefreshViewData
+        ) {
+            self.cancel_pending_expand_album();
+        }
 
         // Handle common actions (SearchChanged, SortModeChanged, SortOrderChanged)
         if let Some(task) = self.handle_common_view_action(

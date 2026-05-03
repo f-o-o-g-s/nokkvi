@@ -1484,13 +1484,7 @@ impl ArtistsPage {
             false, // artist is already the parent row
             Some(ArtistsMessage::ClickToggleStar(ctx.item_index)),
             Some(ArtistsMessage::FocusAndExpandAlbum(ctx.item_index)),
-            Some(ArtistsMessage::NavigateAndFilter(
-                crate::View::Albums,
-                nokkvi_data::types::filter::LibraryFilter::AlbumId {
-                    id: album.id.clone(),
-                    title: album.name.clone(),
-                },
-            )),
+            Some(ArtistsMessage::FocusAndExpandAlbum(ctx.item_index)),
             None, // artist click - artist is already the parent
             1,    // depth 1: child albums under artist
         );
