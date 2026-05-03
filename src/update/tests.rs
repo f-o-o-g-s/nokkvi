@@ -3716,6 +3716,41 @@ fn album_focus_and_expand_triggers_large_artwork_load() {
 // Only AlbumsPage uses the dominant_color overlay logic which requires LoadLargeArtwork
 // to be triggered when expanding via click.
 
+#[test]
+fn artist_focus_and_expand_triggers_large_artwork_load() {
+    let mut app = test_app();
+    app.current_view = View::Artists;
+    app.library
+        .artists
+        .set_from_vec(vec![make_artist("ar1", "Artist 1")]);
+
+    let _ = app.handle_artists(crate::views::ArtistsMessage::FocusAndExpand(0));
+
+    assert_eq!(
+        app.artwork.loading_large_artwork.as_deref(),
+        Some("ar1"),
+        "FocusAndExpand on an artist should kick off a large-artwork fetch \
+         so the artwork column populates without a scroll round-trip"
+    );
+}
+
+#[test]
+fn genre_focus_and_expand_triggers_collage_load() {
+    let mut app = test_app();
+    app.current_view = View::Genres;
+    app.library
+        .genres
+        .set_from_vec(vec![make_genre("g1", "Rock")]);
+
+    let _ = app.handle_genres(crate::views::GenresMessage::FocusAndExpand(0));
+
+    assert!(
+        app.artwork.genre.pending.contains("g1"),
+        "FocusAndExpand on a genre should mark its collage as pending so the \
+         3x3 artwork column populates without a scroll round-trip"
+    );
+}
+
 // ============================================================================
 // Crossfade Toggle (playback.rs)
 // ============================================================================

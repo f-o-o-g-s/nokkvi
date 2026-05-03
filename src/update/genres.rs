@@ -55,6 +55,63 @@ impl Nokkvi {
         )
     }
 
+    /// Kick off a single-genre collage fetch through the shared
+    /// `LoadCollage` pipeline (which writes both the row mini and the 3×3
+    /// artwork-column tiles into `artwork.genre`).
+    ///
+    /// Skipped if the collage is already cached or a fetch is in flight.
+    /// Marks the genre `pending` synchronously so the caller — typically
+    /// `ExpandGenre` — can rely on the same de-dup gate the viewport-based
+    /// `LoadArtwork` uses; otherwise rapid `FocusAndExpand` clicks could
+    /// stack duplicate requests.
+    ///
+    /// Used by `ExpandGenre` because `FocusAndExpand` from a queue/songs
+    /// link click does not flow through any scroll-driven `LoadArtwork`
+    /// path — without this the artwork column stays blank until the user
+    /// nudges the list.
+    pub(crate) fn handle_load_genre_collage(&mut self, genre_id: String) -> Task<Message> {
+        if self.artwork.genre.collage.contains_key(&genre_id)
+            || self.artwork.genre.pending.contains(&genre_id)
+        {
+            return Task::none();
+        }
+
+        let cached_album_ids = self
+            .library
+            .genres
+            .iter()
+            .find(|g| g.id == genre_id)
+            .map(|g| g.artwork_album_ids.clone())
+            .unwrap_or_default();
+
+        // Mark pending before the `app_service` check so the de-dup gate
+        // engages even in tests where `app_service` is None — and so
+        // observable state matches the eventual production fetch.
+        self.artwork.genre.pending.insert(genre_id.clone());
+
+        let Some(shell) = &self.app_service else {
+            return Task::none();
+        };
+        let auth_vm = shell.auth().clone();
+
+        Task::perform(
+            async move {
+                let server_url = auth_vm.get_server_url().await;
+                let cred = auth_vm.get_subsonic_credential().await;
+                (genre_id, server_url, cred, cached_album_ids)
+            },
+            |(id, url, cred, ids)| {
+                Message::Artwork(ArtworkMessage::LoadCollage(
+                    CollageTarget::Genre,
+                    id,
+                    url,
+                    cred,
+                    ids,
+                ))
+            },
+        )
+    }
+
     pub(crate) fn handle_genres_loaded(
         &mut self,
         result: Result<Vec<GenreUIViewData>, String>,
@@ -288,7 +345,14 @@ impl Nokkvi {
                 // Load albums for the genre and send them back to the view
                 let name = genre_name.clone();
                 let gid = genre_id.clone();
-                return self.shell_task(
+
+                // FocusAndExpand (link-text click in queue/songs) skips the
+                // scroll-driven `LoadArtwork` path, so the 3×3 collage
+                // column would stay blank until the user nudged the list.
+                // Mirror the Albums fix and kick the fetch from here.
+                let collage_task = self.handle_load_genre_collage(genre_id);
+
+                let albums_task = self.shell_task(
                     move |shell| async move {
                         let genres_service = shell.genres_api().await?;
                         let albums: Vec<nokkvi_data::types::album::Album> =
@@ -322,6 +386,8 @@ impl Nokkvi {
                         }
                     },
                 );
+
+                return Task::batch([collage_task, albums_task]);
             }
             GenresAction::ExpandAlbum(album_id) => {
                 // Load tracks for the expanded album and send them back to the view

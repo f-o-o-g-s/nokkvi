@@ -135,6 +135,69 @@ impl Nokkvi {
         })
     }
 
+    /// Fetch the 500 px artist artwork plus its dominant color and stash both
+    /// in `large_artwork` / `album_dominant_colors`. Skipped when already
+    /// cached; the artist must be present in `library.artists` so we can
+    /// resolve `image_url` (Navidrome may return an external poster URL).
+    ///
+    /// Shared by `LoadLargeArtwork` (settled-scroll / hotkey navigation) and
+    /// the `ExpandArtist` action — `FocusAndExpand` from a queue/songs link
+    /// click bypasses every scroll-driven trigger, so the expand path has to
+    /// kick the fetch itself or the artwork column would stay blank until
+    /// the user scrolled away and back.
+    pub(crate) fn handle_load_artist_large_artwork(&mut self, artist_id: String) -> Task<Message> {
+        if self.artwork.large_artwork.peek(&artist_id).is_some() {
+            return Task::none();
+        }
+
+        let external_url = self
+            .library
+            .artists
+            .iter()
+            .find(|a| a.id == artist_id)
+            .and_then(|a| a.image_url.clone());
+
+        // Set the in-flight marker before the `app_service` check so it
+        // matches the Albums helper's ordering — the marker is the
+        // observable side-effect tests rely on.
+        self.artwork.loading_large_artwork = Some(artist_id.clone());
+
+        let Some(shell) = &self.app_service else {
+            return Task::none();
+        };
+        let vm = shell.albums().clone();
+
+        let id = artist_id;
+        Task::perform(
+            async move {
+                let art_id = external_url.unwrap_or_else(|| format!("ar-{id}"));
+                match vm.fetch_album_artwork(&art_id, Some(500), None).await {
+                    Ok(bytes) if bytes.len() > 100 => {
+                        let dominant = tokio::task::spawn_blocking({
+                            let b = bytes.clone();
+                            move || nokkvi_data::utils::dominant_color::extract_dominant_color(&b)
+                        })
+                        .await
+                        .unwrap_or(None);
+                        (id, Some(image::Handle::from_bytes(bytes)), dominant)
+                    }
+                    _ => (id, None, None),
+                }
+            },
+            |(id, handle, color)| {
+                if handle.is_none() && color.is_none() {
+                    Message::NoOp
+                } else {
+                    Message::Artwork(ArtworkMessage::LargeArtistLoaded(
+                        id,
+                        handle,
+                        color.map(|(r, g, b)| iced::Color::from_rgb8(r, g, b)),
+                    ))
+                }
+            },
+        )
+    }
+
     /// Handle a subsequent page of artists being loaded (appends to buffer).
     /// Mirror of the inlined `handle_albums_page_loaded` so the find chain
     /// can drive `try_resolve_pending_expand_artist` after the macro's
@@ -218,61 +281,21 @@ impl Nokkvi {
                 // NOTE: Don't re-focus search field here - text_input maintains its own focus state.
                 // Re-focusing here causes issues when users press Escape (widget unfocuses but we'd re-focus).
 
-                if let Some(shell) = &self.app_service {
-                    let albums_vm = shell.albums().clone();
-                    let total = self.library.artists.len();
-                    if total > 0 {
-                        // Mini artwork for visible slots — async fetches via cached HTTP client.
-                        tasks.push(self.prefetch_artist_mini_artwork_tasks());
+                let total = self.library.artists.len();
+                if total > 0 && self.app_service.is_some() {
+                    // Mini artwork for visible slots — async fetches via cached HTTP client.
+                    tasks.push(self.prefetch_artist_mini_artwork_tasks());
 
-                        // Large artwork for the center artist.
-                        if let Some(center_idx) = self
-                            .artists_page
-                            .common
-                            .slot_list
-                            .get_center_item_index(total)
-                            && let Some(artist) = self.library.artists.get(center_idx)
-                            && self.artwork.large_artwork.peek(&artist.id).is_none()
-                        {
-                            let id = artist.id.clone();
-                            let external_url = artist.image_url.clone();
-                            let vm = albums_vm.clone();
-                            tasks.push(Task::perform(
-                                async move {
-                                    let art_id = external_url
-                                        .unwrap_or_else(|| format!("ar-{id}"));
-                                    match vm.fetch_album_artwork(&art_id, Some(500), None).await {
-                                        Ok(bytes) if bytes.len() > 100 => {
-                                            let dominant = tokio::task::spawn_blocking({
-                                                let b = bytes.clone();
-                                                move || {
-                                                    nokkvi_data::utils::dominant_color::extract_dominant_color(&b)
-                                                }
-                                            })
-                                            .await
-                                            .unwrap_or(None);
-                                            (
-                                                id,
-                                                Some(image::Handle::from_bytes(bytes)),
-                                                dominant,
-                                            )
-                                        }
-                                        _ => (id, None, None),
-                                    }
-                                },
-                                |(id, handle, color)| {
-                                    if handle.is_none() && color.is_none() {
-                                        Message::NoOp
-                                    } else {
-                                        Message::Artwork(ArtworkMessage::LargeArtistLoaded(
-                                            id,
-                                            handle,
-                                            color.map(|(r, g, b)| iced::Color::from_rgb8(r, g, b)),
-                                        ))
-                                    }
-                                },
-                            ));
-                        }
+                    // Large artwork for the center artist.
+                    if let Some(center_idx) = self
+                        .artists_page
+                        .common
+                        .slot_list
+                        .get_center_item_index(total)
+                        && let Some(artist) = self.library.artists.get(center_idx)
+                    {
+                        let id = artist.id.clone();
+                        tasks.push(self.handle_load_artist_large_artwork(id));
                     }
                 }
 
@@ -488,7 +511,14 @@ impl Nokkvi {
             ArtistsAction::ExpandArtist(artist_id) => {
                 // Load albums for the artist and send them back to the view
                 let id = artist_id.clone();
-                return self.shell_task(
+
+                // FocusAndExpand (link-text click in queue/songs) skips the
+                // scroll-driven `LoadLargeArtwork` path, so the artwork
+                // column would stay blank until the user nudged the list.
+                // Mirror the Albums fix and kick the fetch from here.
+                let artwork_task = self.handle_load_artist_large_artwork(id.clone());
+
+                let albums_task = self.shell_task(
                     move |shell| async move {
                         let artists_vm = shell.artists().clone();
                         let albums_vm = shell.albums().clone();
@@ -520,6 +550,8 @@ impl Nokkvi {
                         }
                     },
                 );
+
+                return Task::batch([artwork_task, albums_task]);
             }
             ArtistsAction::ExpandAlbum(album_id) => {
                 // Load tracks for the expanded album and send them back to the view
@@ -681,42 +713,9 @@ impl Nokkvi {
                         .slot_list
                         .get_center_item_index(total)
                     && let Some(artist) = self.library.artists.get(center_idx)
-                    && self.artwork.large_artwork.peek(&artist.id).is_none()
-                    && let Some(shell) = &self.app_service
                 {
                     let id = artist.id.clone();
-                    let external_url = artist.image_url.clone();
-                    let vm = shell.albums().clone();
-                    batch.push(Task::perform(
-                        async move {
-                            let art_id = external_url.unwrap_or_else(|| format!("ar-{id}"));
-                            match vm.fetch_album_artwork(&art_id, Some(500), None).await {
-                                Ok(bytes) if bytes.len() > 100 => {
-                                    let dominant = tokio::task::spawn_blocking({
-                                        let b = bytes.clone();
-                                        move || {
-                                            nokkvi_data::utils::dominant_color::extract_dominant_color(&b)
-                                        }
-                                    })
-                                    .await
-                                    .unwrap_or(None);
-                                    (id, Some(image::Handle::from_bytes(bytes)), dominant)
-                                }
-                                _ => (id, None, None),
-                            }
-                        },
-                        |(id, handle, color)| {
-                            if handle.is_none() && color.is_none() {
-                                Message::NoOp
-                            } else {
-                                Message::Artwork(ArtworkMessage::LargeArtistLoaded(
-                                    id,
-                                    handle,
-                                    color.map(|(r, g, b)| iced::Color::from_rgb8(r, g, b)),
-                                ))
-                            }
-                        },
-                    ));
+                    batch.push(self.handle_load_artist_large_artwork(id));
                 }
 
                 let page_size = self.library_page_size.to_usize();

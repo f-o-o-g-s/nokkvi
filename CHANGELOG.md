@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Clicking an artist name link in the queue or songs view now loads the large artist image and dominant color in the artwork column on arrival — previously it stayed blank until you scrolled to a different artist and back. Same fix for the genre 3×3 collage column when clicking a genre name link.
+
 ### Removed
 
 ## v0.3.10 — 2026-05-02
