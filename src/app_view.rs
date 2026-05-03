@@ -343,20 +343,18 @@ impl Nokkvi {
                 .width(self.window.width);
 
             // Visualizer height scales with window (configurable via config.toml, min 80px)
-            // Read height_percent and opacity from shared config (hot-reloadable)
-            // Height also scales proportionally with window width for better aesthetics
+            // Read height_percent from shared config (hot-reloadable). Sizing logic lives
+            // in `widgets::visualizer::visualizer_area_height` so the boat-tick handler
+            // can derive the same value without duplicating the curve.
             let cfg = self.visualizer_config.read();
             let height_percent = cfg.height_percent;
             drop(cfg);
 
-            // Scale height proportionally with window width
-            // window_width=800 is baseline (1.0x), larger windows get taller visualizer
-            // Using sqrt for gentler scaling curve
-            let width_scale = (self.window.width / 800.0).sqrt().clamp(0.7, 1.5);
-            let scaled_height_percent = height_percent * width_scale;
-
-            // Create a column with a spacer to push visualizer to the bottom
-            let visualizer_height = (self.window.height * scaled_height_percent).max(80.0);
+            let visualizer_height = widgets::visualizer::visualizer_area_height(
+                self.window.width,
+                self.window.height,
+                height_percent,
+            );
             let spacer_height =
                 (self.window.height - widgets::player_bar::player_bar_height() - visualizer_height)
                     .max(0.0);

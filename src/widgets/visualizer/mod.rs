@@ -20,6 +20,22 @@ pub enum VisualizationMode {
 /// Default bar width in pixels (fallback when dynamic calculation fails)
 const BAR_WIDTH: f32 = 4.0;
 
+/// Pixel height of the visualizer overlay area for the current window.
+///
+/// Same formula `app_view::view()` uses to size the visualizer column —
+/// extracted so other code that needs the area's pixel space (e.g.
+/// `update/boat.rs` computing the boat's wrap margin) stays in lockstep
+/// when the scaling curve changes.
+pub(crate) fn visualizer_area_height(
+    window_width: f32,
+    window_height: f32,
+    height_percent: f32,
+) -> f32 {
+    let width_scale = (window_width / 800.0).sqrt().clamp(0.7, 1.5);
+    let scaled_height_percent = height_percent * width_scale;
+    (window_height * scaled_height_percent).max(80.0)
+}
+
 /// Minimum bar count for display (if fewer bars fit, return 0 to skip rendering)
 const MIN_BAR_COUNT: usize = 4;
 

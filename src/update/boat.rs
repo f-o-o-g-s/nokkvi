@@ -11,7 +11,11 @@ use std::time::Instant;
 use iced::Task;
 use nokkvi_data::types::player_settings::VisualizationMode;
 
-use crate::{Nokkvi, app_message::Message, widgets::boat};
+use crate::{
+    Nokkvi,
+    app_message::Message,
+    widgets::{boat, visualizer::visualizer_area_height},
+};
 
 /// Handle a per-frame boat tick. Visibility is derived; physics step runs
 /// against the live bar buffer. When hidden, position/velocity/phase are
@@ -26,6 +30,7 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
     let cfg = app.visualizer_config.read();
     let cfg_boat_on = cfg.lines.boat;
     let angular = cfg.lines.style.eq_ignore_ascii_case("angular");
+    let height_percent = cfg.height_percent;
     drop(cfg);
 
     let visible = in_lines_mode && cfg_boat_on;
@@ -75,6 +80,23 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
     // thread's gravity-falloff path only runs when a full sample chunk is
     // available, so the buffer can stay elevated for the entire silence).
     let bars = boat::effective_bars(app.playback.playing, &raw_bars);
+
+    // Size the off-screen wrap margin from the live boat sprite width so the
+    // boat clears the visible area before reappearing on the opposite side
+    // (`widgets::boat::BOAT_WRAP_MARGIN_BOAT_WIDTHS` boat-widths of pixel
+    // travel beyond the edge). The visualizer area height is computed by
+    // the same helper `app_view::view()` uses, so the margin tracks any
+    // future scaling-curve changes.
+    let area_width = app.window.width;
+    let area_height = visualizer_area_height(app.window.width, app.window.height, height_percent);
+    let boat_h = (area_height * boat::BOAT_HEIGHT_FRACTION).max(8.0);
+    let boat_w = boat_h * boat::BOAT_ASPECT_RATIO;
+    app.boat.x_wrap_margin = if area_width > 0.0 {
+        (boat_w * boat::BOAT_WRAP_MARGIN_BOAT_WIDTHS) / area_width
+    } else {
+        0.0
+    };
+
     boat::step(&mut app.boat, dt, bars, angular);
     app.boat.visible = true;
     // Pre-build (and cache) the SVG handle for the current quantized

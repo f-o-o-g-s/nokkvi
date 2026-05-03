@@ -29,16 +29,19 @@
 //!   them. Direction is a fair coin flip — earlier revisions biased it
 //!   toward the louder half of the spectrum, but on a torus that
 //!   systematically favored one wrap direction for any asymmetric track.
-//! - **Toroidal X wrap** — when `x_ratio` leaves `[0, 1)` it wraps via
-//!   `rem_euclid(1.0)` and `x_velocity` is preserved. There is no wall to
-//!   bounce off; the boat sails off one edge and reappears on the other
-//!   with the same momentum. The renderer draws a second copy at
-//!   `x ± area_width` whenever the primary boat overlaps an edge so the
-//!   crossing reads as one continuous boat split across the seam, not a
-//!   teleport. (Earlier revisions used a quadratic wall-repulsion spring
-//!   plus a clamp; that behavior was deliberate before the wrap and is
-//!   gone with it — including the slope-suppression and center-return
-//!   charge bias that existed only to keep the boat away from those walls.)
+//! - **Toroidal X wrap with off-screen margin** — `x_ratio` lives in
+//!   `[-x_wrap_margin, 1 + x_wrap_margin)` and wraps via `rem_euclid` over
+//!   that extended span; `x_velocity` is preserved across the seam. The
+//!   margin is sized in the handler from the live boat sprite width
+//!   (`BOAT_WRAP_MARGIN_BOAT_WIDTHS · boat_w / area_width`) so the boat
+//!   fully exits the visible area before wrapping — the renderer draws a
+//!   single copy at `target_x` and lets the outer clip trim the off-screen
+//!   portion, so the boat is never visible in two places at once. The
+//!   off-screen stretch also gives the captain a quiet zone to charge
+//!   through stuck regions where the visible wave face would otherwise
+//!   pin the boat. (Earlier revisions used a quadratic wall-repulsion
+//!   spring plus a clamp before any wrap; that behavior — and its
+//!   slope-suppression / center-return charge bias — is gone.)
 //! - **Y dynamics** — `y_ratio` follows the sampled wave height through a
 //!   spring-damper rather than tracking it exactly, so the boat bobs with
 //!   buoyancy rather than glued to the curve.
@@ -76,6 +79,16 @@ pub(crate) const BOAT_ASPECT_RATIO: f32 = 1.0;
 /// sink"). Without this offset the boat appears glued to the top of the
 /// curve and reads as floating in space rather than displacing water.
 pub(crate) const BOAT_SINK_FRACTION: f32 = 0.18;
+
+/// Off-screen travel beyond each visible edge, expressed as a multiple of
+/// the boat sprite width. The wrap zone on each side spans this many boat
+/// widths in pixels — sized so the sprite (centered at `x_ratio = 1`,
+/// half-overlapping the right edge) clears the visible area entirely (after
+/// `0.5 · boat_w` of travel) and gets ~1.25 boat widths of fully off-screen
+/// drift before wrapping. That hidden stretch eliminates the dual-render
+/// at the seam and gives the captain time to charge through stuck regions
+/// without the visible wave face dragging the boat back.
+pub(crate) const BOAT_WRAP_MARGIN_BOAT_WIDTHS: f32 = 1.75;
 
 // --- physics tuning constants ---------------------------------------------
 //
@@ -277,6 +290,14 @@ pub struct BoatState {
     pub charge_total_secs: f32,
     pub charge_direction: f32,
     pub rng_state: u32,
+    /// Half-width of the off-screen wrap margin in `x_ratio` units. Set by
+    /// the boat-tick handler from the current boat sprite width and
+    /// visualizer area width — see `BOAT_WRAP_MARGIN_BOAT_WIDTHS`. `step()`
+    /// wraps `x_ratio` over `[-x_wrap_margin, 1 + x_wrap_margin)`. Default
+    /// of `0.0` reproduces the legacy `rem_euclid(1.0)` behavior, which is
+    /// what the in-crate physics tests rely on (they construct `BoatState`
+    /// directly without going through the handler).
+    pub x_wrap_margin: f32,
     pub tilt_handles: HashMap<(i16, bool), svg::Handle>,
     pub handle_generation: u64,
 }
@@ -386,10 +407,12 @@ impl BoatState {
 /// during the brief velocity-zero crossings when a charge ends and the
 /// slope force flips it back.
 ///
-/// `x_ratio` is wrapped via `rem_euclid(1.0)` so the boat sails freely off
-/// either edge and reappears on the opposite side with momentum intact;
-/// `y_ratio` still clamps to `[0, 1]` (with outward velocity zeroed) since
-/// the wave height is bounded — there's no toroidal Y to wrap into.
+/// `x_ratio` is wrapped over `[-x_wrap_margin, 1 + x_wrap_margin)` so the
+/// boat sails fully off one edge — through a hidden stretch sized to a
+/// boat-and-a-bit — before reappearing on the opposite side with momentum
+/// intact. `y_ratio` still clamps to `[0, 1]` (with outward velocity
+/// zeroed) since the wave height is bounded — there's no toroidal Y to
+/// wrap into.
 pub(crate) fn step(state: &mut BoatState, dt: Duration, bars: &[f64], angular: bool) {
     let dt_secs = dt.as_secs_f32();
     if dt_secs <= 0.0 {
@@ -478,7 +501,13 @@ pub(crate) fn step(state: &mut BoatState, dt: Duration, bars: &[f64], angular: b
 
     let ax = drive + slope_force + damping_force + charge_force;
     state.x_velocity = (state.x_velocity + ax * dt_secs).clamp(-MAX_X_V, MAX_X_V);
-    state.x_ratio = (state.x_ratio + state.x_velocity * dt_secs).rem_euclid(1.0);
+    // Wrap x_ratio over the extended span `[-x_wrap_margin, 1 + x_wrap_margin)`
+    // so the boat slides fully off one edge before reappearing on the other.
+    // Margin defaults to 0.0 (collapses to `rem_euclid(1.0)`), which is what
+    // the standalone physics tests construct.
+    let span = 1.0 + 2.0 * state.x_wrap_margin;
+    let raw_x = state.x_ratio + state.x_velocity * dt_secs;
+    state.x_ratio = (raw_x + state.x_wrap_margin).rem_euclid(span) - state.x_wrap_margin;
 
     // Tilt: spring-damper toward `-slope * gain`, clamped. Reuses `slope`
     // computed above (raw, before the during-charge suppression — tilt
@@ -863,13 +892,14 @@ where
 /// us compute the boat's pixel position from `(x_ratio, y_ratio)`.
 ///
 /// Layout: a fixed-size `container.clip(true)` framing the visualizer area,
-/// containing a `Stack` of `OverflowPin`-positioned boat sprites. The
-/// primary copy sits at `(target_x, target_y)` (which may have negative
-/// `target_x` once the boat starts sliding off the left edge). When the
-/// boat overlaps an edge a second copy is pushed at `target_x ± area_width`
-/// so the bow emerges from the opposite edge in the same frame the stern
-/// is leaving — that's the toroidal wrap the physics rely on, drawn so the
-/// seam isn't visible.
+/// containing a single `OverflowPin`-positioned boat sprite at
+/// `(target_x, target_y)`. `target_x` may extend past either edge by up to
+/// `BOAT_WRAP_MARGIN_BOAT_WIDTHS · boat_w` — the physics in `step()` wrap
+/// only after the boat has fully cleared the visible area, so a second
+/// "ghost" copy at `target_x ± area_width` is unnecessary (and would put
+/// the boat in two places at once during the off-screen drift). The outer
+/// clip handles the fade-out as the sprite slides off; the next visible
+/// frame on the opposite edge picks it up after the wrap fires.
 ///
 /// Tilt and facing are read straight from `state`. The boat picks its
 /// cached SVG handle via `cached_handle_for(tilt, facing)`, which returns
@@ -939,17 +969,12 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
         .position(Point::new(x, target_y))
     };
 
-    let mut overlay = Stack::new().push(pin_at(target_x));
-    // Off-left overlap → ghost peeks in from the right edge.
-    if target_x < 0.0 {
-        overlay = overlay.push(pin_at(target_x + area_width));
-    }
-    // Off-right overlap → ghost peeks in from the left edge. (`x_ratio` is
-    // already wrapped to `[0, 1)` in `step()`, so both branches can never
-    // fire in the same frame.)
-    if target_x + boat_w > area_width {
-        overlay = overlay.push(pin_at(target_x - area_width));
-    }
+    // Single sprite. The wrap zone in `step()` is sized so the boat fully
+    // exits the visible area before reappearing on the opposite side, so
+    // there is never a frame where two copies would be on screen at once
+    // — outer clip handles the off-screen portion of the sprite as it
+    // slides through the hidden stretch.
+    let overlay = Stack::new().push(pin_at(target_x));
 
     container(overlay)
         .width(Length::Fixed(area_width))
