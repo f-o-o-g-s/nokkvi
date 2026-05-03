@@ -35,6 +35,16 @@ fn expand_artist_timeout_task(artist_id: String) -> Task<Message> {
     )
 }
 
+/// Genre-side mirror — see `expand_album_timeout_task`.
+fn expand_genre_timeout_task(genre_id: String) -> Task<Message> {
+    Task::perform(
+        async {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        },
+        move |()| Message::PendingExpandGenreTimeout(genre_id.clone()),
+    )
+}
+
 impl Nokkvi {
     pub(crate) fn handle_session_expired(&mut self) -> Task<Message> {
         info!(" [SESSION] Session expired (401 Unauthorized)");
@@ -113,6 +123,17 @@ impl Nokkvi {
                 self.cancel_pending_expand_artist();
             }
         }
+        // Same for the genre-find chain.
+        if let Some(target) = self.pending_expand_genre_target.as_ref() {
+            let host_view = if target.for_browsing_pane {
+                View::Queue
+            } else {
+                View::Genres
+            };
+            if view != host_view {
+                self.cancel_pending_expand_genre();
+            }
+        }
         // The top-pin can outlive the target by the brief window between
         // try_resolve_*  consuming the target and TracksLoaded/AlbumsLoaded
         // re-pinning. Drop it on the same navigate-away condition.
@@ -120,6 +141,7 @@ impl Nokkvi {
             let host_view = match pin {
                 crate::state::PendingTopPin::Album(_) => View::Albums,
                 crate::state::PendingTopPin::Artist(_) => View::Artists,
+                crate::state::PendingTopPin::Genre(_) => View::Genres,
             };
             let in_browsing_pane = self.browsing_panel.is_some() && view == View::Queue;
             if view != host_view && !in_browsing_pane {
@@ -424,6 +446,7 @@ impl Nokkvi {
     ) -> Task<Message> {
         self.cancel_pending_expand_album();
         self.cancel_pending_expand_artist();
+        self.cancel_pending_expand_genre();
         let switch_task = self.handle_switch_view(view);
 
         // Defocus search input
@@ -541,6 +564,135 @@ impl Nokkvi {
         ) {
             self.pending_top_pin = None;
         }
+    }
+
+    /// Genre-side mirror of `cancel_pending_expand_album`.
+    pub(crate) fn cancel_pending_expand_genre(&mut self) {
+        self.pending_expand_genre_target = None;
+        if matches!(
+            self.pending_top_pin,
+            Some(crate::state::PendingTopPin::Genre(_))
+        ) {
+            self.pending_top_pin = None;
+        }
+    }
+
+    /// Genre-side mirror of `handle_navigate_and_expand_album`. The find
+    /// chain is single-shot since genres don't paginate.
+    pub(crate) fn handle_navigate_and_expand_genre(&mut self, genre_id: String) -> Task<Message> {
+        self.prime_expand_genre_target(genre_id.clone(), false);
+        let switch_task = self.handle_switch_view(View::Genres);
+        Task::batch([switch_task, expand_genre_timeout_task(genre_id)])
+    }
+
+    /// Browsing-pane variant of `handle_navigate_and_expand_genre`.
+    pub(crate) fn handle_browser_pane_navigate_and_expand_genre(
+        &mut self,
+        genre_id: String,
+    ) -> Task<Message> {
+        self.prime_expand_genre_target(genre_id.clone(), true);
+        let switch_task = self.handle_browsing_panel_message(
+            crate::views::BrowsingPanelMessage::SwitchView(crate::views::BrowsingView::Genres),
+        );
+        Task::batch([
+            switch_task,
+            Task::done(Message::LoadGenres),
+            expand_genre_timeout_task(genre_id),
+        ])
+    }
+
+    /// Shared setup for both genre navigate-and-expand variants.
+    fn prime_expand_genre_target(&mut self, genre_id: String, for_browsing_pane: bool) {
+        self.genres_page.common.search_input_focused = false;
+        self.genres_page.common.active_filter = None;
+        self.genres_page.common.search_query.clear();
+        self.genres_page.expansion.clear();
+        self.genres_page.sub_expansion.clear();
+        self.genres_page.common.slot_list.viewport_offset = 0;
+        self.genres_page.common.slot_list.selected_indices.clear();
+        self.genres_page.common.slot_list.selected_offset = None;
+        self.library.genres.clear();
+        self.pending_expand_genre_target = Some(crate::state::PendingExpandGenreTarget {
+            genre_id,
+            for_browsing_pane,
+        });
+    }
+
+    /// Genre-side mirror of `handle_pending_expand_album_timeout`.
+    pub(crate) fn handle_pending_expand_genre_timeout(
+        &mut self,
+        genre_id: String,
+    ) -> Task<Message> {
+        if self
+            .pending_expand_genre_target
+            .as_ref()
+            .is_some_and(|t| t.genre_id == genre_id)
+        {
+            self.toast_info("Finding genre…");
+        }
+        Task::none()
+    }
+
+    /// Genre-side mirror of `try_resolve_pending_expand_album`. Single-shot:
+    /// once the load completes, the target is either in the buffer or
+    /// genuinely not in the library — there are no further pages to await.
+    ///
+    /// Match is by `name`, not `id`. Navidrome's `/api/genre` returns proper
+    /// internal IDs (UUIDs) that differ from the display names, but the
+    /// click sites only have access to the displayed string (`extra_value`
+    /// / `genre`) — that's the dispatched target. The convention mirrors
+    /// the existing `LibraryFilter::GenreId` which also passes the name in
+    /// both id and name fields.
+    ///
+    /// The resolved internal id IS what we store in the pin, though, because
+    /// the downstream `GenresMessage::AlbumsLoaded(genre_id, …)` carries
+    /// that internal id — the post-hook in `handle_genres` matches against
+    /// it to decide whether to re-pin the highlight.
+    pub(crate) fn try_resolve_pending_expand_genre(&mut self) -> Option<Task<Message>> {
+        let target_id = self.pending_expand_genre_target.as_ref()?.genre_id.clone();
+
+        let found = self
+            .library
+            .genres
+            .iter()
+            .enumerate()
+            .find_map(|(i, g)| (g.name == target_id).then(|| (i, g.id.clone())));
+        if let Some((idx, resolved_id)) = found {
+            debug!(
+                " [EXPAND] Found genre '{}' at index {} (id={}) — scrolling + dispatching FocusAndExpand",
+                target_id, idx, resolved_id
+            );
+            self.pending_expand_genre_target = None;
+            let total = self.library.genres.len();
+            let center_slot = self.genres_page.common.slot_list.slot_count.max(2) / 2;
+            let target_offset = idx.saturating_add(center_slot).min(total.saturating_sub(1));
+            self.genres_page
+                .common
+                .slot_list
+                .set_offset(target_offset, total);
+            self.genres_page.common.slot_list.set_selected(idx, total);
+            self.genres_page.common.slot_list.flash_center();
+            self.pending_top_pin = Some(crate::state::PendingTopPin::Genre(resolved_id));
+            let prefetch_task = self.prefetch_viewport_artwork();
+            return Some(Task::batch([
+                prefetch_task,
+                Task::done(Message::Genres(views::GenresMessage::FocusAndExpand(idx))),
+            ]));
+        }
+
+        if self.library.genres.is_loading() {
+            return None;
+        }
+
+        // Single-shot: idle + not-found means the genre genuinely isn't in
+        // the library — no more pages will arrive.
+        warn!(
+            " [EXPAND] Genre '{}' not found after load — clearing target",
+            target_id
+        );
+        self.toast_warn("Genre not found in library");
+        self.pending_expand_genre_target = None;
+        Some(Task::none())
     }
 
     /// Artist-side mirror of `handle_navigate_and_expand_album`. Lands on
@@ -758,6 +910,7 @@ impl Nokkvi {
     ) -> Task<Message> {
         self.cancel_pending_expand_album();
         self.cancel_pending_expand_artist();
+        self.cancel_pending_expand_genre();
         let browse_view = match view {
             View::Albums => Some(crate::views::BrowsingView::Albums),
             View::Songs => Some(crate::views::BrowsingView::Songs),

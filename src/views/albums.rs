@@ -188,6 +188,8 @@ pub enum AlbumsMessage {
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
     /// Navigate to Artists and auto-expand the artist with this id (no filter set).
     NavigateAndExpandArtist(String),
+    /// Navigate to Genres and auto-expand the genre with this id (no filter set).
+    NavigateAndExpandGenre(String),
     ToggleColumnVisible(AlbumsColumn),
     /// Column-dropdown open/close request — bubbled to root
     /// `Message::SetOpenMenu`. Intercepted in `handle_albums` before the
@@ -228,6 +230,7 @@ pub enum AlbumsAction {
     FindSimilar(String, String), // (entity_id, label) - open similar tab
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     NavigateAndExpandArtist(String), // artist_id - navigate to Artists and auto-expand
+    NavigateAndExpandGenre(String),  // genre_id - navigate to Genres and auto-expand
     ColumnVisibilityChanged(AlbumsColumn, bool),
     None,
 }
@@ -245,6 +248,9 @@ impl super::HasCommonAction for AlbumsAction {
             }
             Self::NavigateAndExpandArtist(id) => {
                 super::CommonViewAction::NavigateAndExpandArtist(id.clone())
+            }
+            Self::NavigateAndExpandGenre(id) => {
+                super::CommonViewAction::NavigateAndExpandGenre(id.clone())
             }
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
@@ -627,6 +633,9 @@ impl AlbumsPage {
                     Task::none(),
                     AlbumsAction::NavigateAndExpandArtist(artist_id),
                 ),
+                AlbumsMessage::NavigateAndExpandGenre(genre_id) => {
+                    (Task::none(), AlbumsAction::NavigateAndExpandGenre(genre_id))
+                }
                 AlbumsMessage::ToggleColumnVisible(col) => {
                     let new_value = !self.column_visibility.get(col);
                     self.column_visibility.set(col, new_value);
@@ -1064,13 +1073,7 @@ impl AlbumsPage {
         if show_dynamic_slot {
             let mut click_msg = None;
             if current_sort_mode == SortMode::Genre {
-                click_msg = Some(AlbumsMessage::NavigateAndFilter(
-                    crate::View::Genres,
-                    nokkvi_data::types::filter::LibraryFilter::GenreId {
-                        id: extra_value.clone(),
-                        name: extra_value.clone(),
-                    },
-                ));
+                click_msg = Some(AlbumsMessage::NavigateAndExpandGenre(extra_value.clone()));
             }
             use crate::widgets::slot_list::slot_list_metadata_column;
             content_row = content_row.push(slot_list_metadata_column(

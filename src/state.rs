@@ -88,13 +88,22 @@ pub struct PendingExpandArtistTarget {
     pub for_browsing_pane: bool,
 }
 
+/// Genre-side mirror of `PendingExpandTarget`. Genres load all-at-once
+/// (no pagination), so the find chain is single-shot: one load either
+/// resolves the target or proves it isn't in the library.
+#[derive(Debug, Clone)]
+pub struct PendingExpandGenreTarget {
+    pub genre_id: String,
+    pub for_browsing_pane: bool,
+}
+
 /// Item to re-pin the highlight onto after `set_children` fires.
 ///
 /// `try_resolve_pending_expand_*` sets this after dispatching
 /// `FocusAndExpand`, naming the target id and which library to look it
 /// up in. When the corresponding children-load message lands
-/// (`TracksLoaded` for albums, `AlbumsLoaded` for artists), the handler
-/// re-runs `set_selected` on the target's flat-list index so the
+/// (`TracksLoaded` for albums, `AlbumsLoaded` for artists/genres), the
+/// handler re-runs `set_selected` on the target's flat-list index so the
 /// highlight stays on the focused item rather than drifting to whatever
 /// happens to live at the center slot.
 ///
@@ -103,6 +112,7 @@ pub struct PendingExpandArtistTarget {
 pub enum PendingTopPin {
     Album(String),
     Artist(String),
+    Genre(String),
 }
 
 // ============================================================================

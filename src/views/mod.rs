@@ -128,6 +128,10 @@ pub(crate) enum CommonViewAction {
     /// Navigate to Artists and auto-expand the artist with this id, with
     /// no filter set. Dispatched by artist-text clicks in any view.
     NavigateAndExpandArtist(String),
+    /// Navigate to Genres and auto-expand the genre with this id, with no
+    /// filter set. Dispatched by genre-text clicks in Songs/Albums/Queue
+    /// dynamic columns when the user has chosen Genre sort.
+    NavigateAndExpandGenre(String),
     /// No action — the view's update produced no effect.
     None,
     /// The action is view-specific and not handled generically.

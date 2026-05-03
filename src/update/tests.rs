@@ -2833,6 +2833,331 @@ fn pending_top_pin_cleared_on_navigate_and_filter() {
 }
 
 // ============================================================================
+// Navigate-and-Expand-Genre (single-shot mirror — genres don't paginate)
+// ============================================================================
+
+#[test]
+fn navigate_and_expand_genre_clears_search_filter_and_sets_target() {
+    let mut app = test_app();
+    app.current_view = View::Songs;
+    app.genres_page.common.active_filter =
+        Some(nokkvi_data::types::filter::LibraryFilter::GenreId {
+            id: "Old".to_string(),
+            name: "Old".to_string(),
+        });
+    app.genres_page.common.search_query = "old".to_string();
+    app.genres_page.common.search_input_focused = true;
+
+    let _ = app.handle_navigate_and_expand_genre("Rock".to_string());
+
+    assert_eq!(app.current_view, View::Genres);
+    assert!(app.genres_page.common.active_filter.is_none());
+    assert!(app.genres_page.common.search_query.is_empty());
+    assert!(!app.genres_page.common.search_input_focused);
+    let target = app
+        .pending_expand_genre_target
+        .as_ref()
+        .expect("target should be set");
+    assert_eq!(target.genre_id, "Rock");
+    assert!(!target.for_browsing_pane);
+}
+
+#[test]
+fn navigate_and_expand_genre_collapses_existing_genres_expansion() {
+    let mut app = test_app();
+    app.genres_page.expansion.expanded_id = Some("other".to_string());
+    app.genres_page.expansion.children = vec![make_album("a1", "Album", "Artist")];
+
+    let _ = app.handle_navigate_and_expand_genre("Rock".to_string());
+
+    assert!(app.genres_page.expansion.expanded_id.is_none());
+    assert!(app.genres_page.expansion.children.is_empty());
+}
+
+#[test]
+fn browser_pane_navigate_and_expand_genre_sets_browsing_flag() {
+    let mut app = test_app();
+
+    let _ = app.handle_browser_pane_navigate_and_expand_genre("Rock".to_string());
+
+    let target = app
+        .pending_expand_genre_target
+        .as_ref()
+        .expect("target should be set");
+    assert!(target.for_browsing_pane);
+}
+
+#[test]
+fn pending_expand_genre_target_cleared_on_switch_view_away() {
+    let mut app = test_app();
+    app.pending_expand_genre_target = Some(crate::state::PendingExpandGenreTarget {
+        genre_id: "Rock".to_string(),
+        for_browsing_pane: false,
+    });
+
+    let _ = app.handle_switch_view(View::Songs);
+
+    assert!(app.pending_expand_genre_target.is_none());
+}
+
+#[test]
+fn pending_expand_genre_target_persists_on_switch_view_to_genres() {
+    let mut app = test_app();
+    app.pending_expand_genre_target = Some(crate::state::PendingExpandGenreTarget {
+        genre_id: "Rock".to_string(),
+        for_browsing_pane: false,
+    });
+
+    let _ = app.handle_switch_view(View::Genres);
+
+    assert!(app.pending_expand_genre_target.is_some());
+}
+
+#[test]
+fn pending_expand_genre_target_cleared_on_navigate_and_filter() {
+    let mut app = test_app();
+    app.pending_expand_genre_target = Some(crate::state::PendingExpandGenreTarget {
+        genre_id: "Rock".to_string(),
+        for_browsing_pane: false,
+    });
+
+    let _ = app.handle_navigate_and_filter(
+        View::Albums,
+        nokkvi_data::types::filter::LibraryFilter::AlbumId {
+            id: "al1".to_string(),
+            title: "Album".to_string(),
+        },
+    );
+
+    assert!(app.pending_expand_genre_target.is_none());
+}
+
+#[test]
+fn try_resolve_pending_expand_genre_matches_by_name_not_internal_id() {
+    // Regression: Navidrome's /api/genre returns genres with proper IDs
+    // (UUIDs) that differ from their display names, but the click sites
+    // dispatch the displayed name (`extra_value` / `genre` in the slot).
+    // The lookup must therefore match against `g.name`, not `g.id`, or
+    // every click toasts "Genre not found in library".
+    let mut app = test_app();
+    app.pending_expand_genre_target = Some(crate::state::PendingExpandGenreTarget {
+        genre_id: "Black Metal".to_string(), // the displayed name, not an internal id
+        for_browsing_pane: false,
+    });
+    app.library.genres.set_from_vec(vec![
+        make_genre("uuid-rock-123", "Rock"),
+        make_genre("uuid-blackmetal-456", "Black Metal"),
+        make_genre("uuid-ambient-789", "Ambient"),
+    ]);
+
+    let _ = app.try_resolve_pending_expand_genre();
+
+    // Side-effects only on the found-path: viewport scroll + highlight pin.
+    // The pin stores the resolved internal id (the uuid we look up in
+    // library.genres), not the display name we matched on, because that's
+    // what downstream `GenresMessage::AlbumsLoaded(genre_id, _)` will carry.
+    assert!(
+        matches!(
+            app.pending_top_pin,
+            Some(crate::state::PendingTopPin::Genre(ref id)) if id == "uuid-blackmetal-456"
+        ),
+        "found-path must set pending_top_pin to the resolved internal id (got {:?})",
+        app.pending_top_pin
+    );
+    assert!(
+        app.toast.toasts.is_empty(),
+        "found-path must not push the 'Genre not found in library' warn toast"
+    );
+}
+
+#[test]
+fn try_resolve_pending_expand_genre_finds_loaded_and_takes_target() {
+    let mut app = test_app();
+    app.pending_expand_genre_target = Some(crate::state::PendingExpandGenreTarget {
+        genre_id: "Jazz".to_string(),
+        for_browsing_pane: false,
+    });
+    app.library.genres.set_from_vec(vec![
+        make_genre("Rock", "Rock"),
+        make_genre("Jazz", "Jazz"),
+        make_genre("Classical", "Classical"),
+    ]);
+
+    let task = app.try_resolve_pending_expand_genre();
+
+    assert!(task.is_some(), "found target should produce a task");
+    assert!(
+        app.pending_expand_genre_target.is_none(),
+        "target should be taken once dispatched"
+    );
+    assert_eq!(
+        app.genres_page.common.slot_list.viewport_offset, 2,
+        "viewport_offset must be set so target is visible"
+    );
+    assert_eq!(
+        app.genres_page.common.slot_list.selected_offset,
+        Some(1),
+        "target must keep highlight via selected_offset"
+    );
+    match app.pending_top_pin.as_ref() {
+        Some(crate::state::PendingTopPin::Genre(id)) => assert_eq!(id, "Jazz"),
+        other => panic!("expected pending_top_pin = Genre(Jazz), got {other:?}"),
+    }
+}
+
+#[test]
+fn try_resolve_pending_expand_genre_places_target_at_top_slot() {
+    let mut app = test_app();
+    // Click sites dispatch the display name, not the internal id.
+    app.pending_expand_genre_target = Some(crate::state::PendingExpandGenreTarget {
+        genre_id: "Genre 50".to_string(),
+        for_browsing_pane: false,
+    });
+    let genres: Vec<_> = (0..200)
+        .map(|i| make_genre(&format!("uuid-{i}"), &format!("Genre {i}")))
+        .collect();
+    app.library.genres.set_from_vec(genres);
+
+    let task = app.try_resolve_pending_expand_genre();
+    assert!(task.is_some());
+
+    let center_slot = app.genres_page.common.slot_list.slot_count / 2;
+    assert_eq!(
+        app.genres_page.common.slot_list.viewport_offset,
+        50 + center_slot,
+        "target must land at slot 0 (top), not the center"
+    );
+    assert_eq!(
+        app.genres_page.common.slot_list.selected_offset,
+        Some(50),
+        "highlight must follow target"
+    );
+}
+
+#[test]
+fn try_resolve_pending_expand_genre_clears_when_idle_and_missing() {
+    // Genres are single-shot: if not loading and target absent, it really
+    // isn't in the library — no further pages to wait for.
+    let mut app = test_app();
+    app.pending_expand_genre_target = Some(crate::state::PendingExpandGenreTarget {
+        genre_id: "Missing".to_string(),
+        for_browsing_pane: false,
+    });
+    app.library
+        .genres
+        .set_from_vec(vec![make_genre("Rock", "Rock")]);
+    assert!(!app.library.genres.is_loading());
+
+    let task = app.try_resolve_pending_expand_genre();
+
+    assert!(task.is_some(), "missing target should produce a task");
+    assert!(
+        app.pending_expand_genre_target.is_none(),
+        "target should be cleared when known-not-in-library"
+    );
+}
+
+#[test]
+fn try_resolve_pending_expand_genre_returns_none_when_loading() {
+    let mut app = test_app();
+    app.pending_expand_genre_target = Some(crate::state::PendingExpandGenreTarget {
+        genre_id: "Rock".to_string(),
+        for_browsing_pane: false,
+    });
+    app.library.genres.set_loading(true);
+
+    let task = app.try_resolve_pending_expand_genre();
+
+    assert!(task.is_none(), "should wait while load is in flight");
+    assert!(app.pending_expand_genre_target.is_some());
+}
+
+#[test]
+fn pending_genre_timeout_does_not_toast_when_target_already_resolved() {
+    let mut app = test_app();
+    let _ = app.handle_pending_expand_genre_timeout("Rock".to_string());
+    assert!(app.toast.toasts.is_empty());
+}
+
+#[test]
+fn pending_genre_timeout_toasts_when_target_still_in_flight() {
+    let mut app = test_app();
+    app.pending_expand_genre_target = Some(crate::state::PendingExpandGenreTarget {
+        genre_id: "Rock".to_string(),
+        for_browsing_pane: false,
+    });
+    let _ = app.handle_pending_expand_genre_timeout("Rock".to_string());
+    assert_eq!(app.toast.toasts.len(), 1);
+}
+
+#[test]
+fn songs_page_navigate_and_expand_genre_returns_action() {
+    let mut app = test_app();
+    let (_, action) = app.songs_page.update(
+        crate::views::SongsMessage::NavigateAndExpandGenre("Rock".to_string()),
+        &[],
+    );
+    assert!(matches!(
+        action,
+        crate::views::SongsAction::NavigateAndExpandGenre(ref id) if id == "Rock"
+    ));
+}
+
+#[test]
+fn albums_page_navigate_and_expand_genre_returns_action() {
+    let mut app = test_app();
+    let (_, action) = app.albums_page.update(
+        crate::views::AlbumsMessage::NavigateAndExpandGenre("Rock".to_string()),
+        0,
+        &[],
+    );
+    assert!(matches!(
+        action,
+        crate::views::AlbumsAction::NavigateAndExpandGenre(ref id) if id == "Rock"
+    ));
+}
+
+#[test]
+fn queue_page_navigate_and_expand_genre_returns_action() {
+    let mut app = test_app();
+    let (_, action) = app.queue_page.update(
+        crate::views::QueueMessage::NavigateAndExpandGenre("Rock".to_string()),
+        &[],
+    );
+    assert!(matches!(
+        action,
+        crate::views::QueueAction::NavigateAndExpandGenre(ref id) if id == "Rock"
+    ));
+}
+
+#[test]
+fn albums_loaded_re_pins_selected_offset_for_genre() {
+    let mut app = test_app();
+    app.library.genres.set_from_vec(vec![
+        make_genre("Rock", "Rock"),
+        make_genre("Jazz", "Jazz"),
+        make_genre("Classical", "Classical"),
+    ]);
+    app.genres_page
+        .common
+        .slot_list
+        .set_selected(1, app.library.genres.len());
+    app.pending_top_pin = Some(crate::state::PendingTopPin::Genre("Jazz".to_string()));
+
+    let _ = app.handle_genres(crate::views::GenresMessage::AlbumsLoaded(
+        "Jazz".to_string(),
+        vec![make_album("a1", "Album One", "Artist")],
+    ));
+
+    assert_eq!(
+        app.genres_page.common.slot_list.selected_offset,
+        Some(1),
+        "highlight must follow the target genre after expansion completes"
+    );
+    assert!(app.pending_top_pin.is_none());
+}
+
+// ============================================================================
 // Sort Mode: Most Played (PROMPT 6)
 // ============================================================================
 

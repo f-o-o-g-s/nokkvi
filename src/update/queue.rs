@@ -584,6 +584,9 @@ impl Nokkvi {
             QueueAction::NavigateAndExpandArtist(artist_id) => {
                 return Task::done(Message::NavigateAndExpandArtist { artist_id });
             }
+            QueueAction::NavigateAndExpandGenre(genre_id) => {
+                return Task::done(Message::NavigateAndExpandGenre { genre_id });
+            }
             QueueAction::ColumnVisibilityChanged(col, value) => {
                 return self.persist_queue_column_visibility(col, value);
             }

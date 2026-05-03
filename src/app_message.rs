@@ -359,6 +359,16 @@ pub enum Message {
     },
     /// Internal 2s "Finding artist…" toast trigger.
     PendingExpandArtistTimeout(String),
+    /// Genre-side mirror — navigate to Genres, find the genre, expand it.
+    NavigateAndExpandGenre {
+        genre_id: String,
+    },
+    /// Browsing-pane variant of `NavigateAndExpandGenre`.
+    BrowserPaneNavigateAndExpandGenre {
+        genre_id: String,
+    },
+    /// Internal 2s "Finding genre…" toast trigger.
+    PendingExpandGenreTimeout(String),
     /// Track info strip was clicked — dispatch depends on strip_click_action setting
     StripClicked,
     /// Track info strip right-click context menu action

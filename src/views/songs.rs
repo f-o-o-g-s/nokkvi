@@ -163,6 +163,8 @@ pub enum SongsMessage {
     NavigateAndExpandAlbum(String),
     /// Navigate to Artists and auto-expand the artist with this id (no filter set).
     NavigateAndExpandArtist(String),
+    /// Navigate to Genres and auto-expand the genre with this id (no filter set).
+    NavigateAndExpandGenre(String),
     ToggleColumnVisible(SongsColumn),
     /// Column-dropdown open/close request — bubbled to root
     /// `Message::SetOpenMenu`. Intercepted in `handle_songs` before the
@@ -199,6 +201,7 @@ pub enum SongsAction {
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     NavigateAndExpandAlbum(String), // album_id - navigate to Albums and auto-expand this album
     NavigateAndExpandArtist(String), // artist_id - navigate to Artists and auto-expand this artist
+    NavigateAndExpandGenre(String), // genre_id - navigate to Genres and auto-expand this genre
     ColumnVisibilityChanged(SongsColumn, bool),
     None,
 }
@@ -219,6 +222,9 @@ impl super::HasCommonAction for SongsAction {
             }
             Self::NavigateAndExpandArtist(id) => {
                 super::CommonViewAction::NavigateAndExpandArtist(id.clone())
+            }
+            Self::NavigateAndExpandGenre(id) => {
+                super::CommonViewAction::NavigateAndExpandGenre(id.clone())
             }
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
@@ -481,6 +487,9 @@ impl SongsPage {
                 Task::none(),
                 SongsAction::NavigateAndExpandArtist(artist_id),
             ),
+            SongsMessage::NavigateAndExpandGenre(genre_id) => {
+                (Task::none(), SongsAction::NavigateAndExpandGenre(genre_id))
+            }
             SongsMessage::ToggleColumnVisible(col) => {
                 let new_value = !self.column_visibility.get(col);
                 self.column_visibility.set(col, new_value);
@@ -774,13 +783,7 @@ impl SongsPage {
                 if show_dynamic_slot {
                     let mut click_msg = None;
                     if current_sort_mode == SortMode::Genre {
-                        click_msg = Some(SongsMessage::NavigateAndFilter(
-                            crate::View::Genres,
-                            nokkvi_data::types::filter::LibraryFilter::GenreId {
-                                id: extra_value.clone(),
-                                name: extra_value.clone(),
-                            },
-                        ));
+                        click_msg = Some(SongsMessage::NavigateAndExpandGenre(extra_value.clone()));
                     }
                     use crate::widgets::slot_list::slot_list_metadata_column;
                     content_row = content_row.push(slot_list_metadata_column(

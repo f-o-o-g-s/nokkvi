@@ -243,6 +243,8 @@ pub enum QueueMessage {
     NavigateAndExpandAlbum(String),
     /// Navigate to Artists and auto-expand the artist with this id (no filter set).
     NavigateAndExpandArtist(String),
+    /// Navigate to Genres and auto-expand the genre with this id (no filter set).
+    NavigateAndExpandGenre(String),
     /// Column-dropdown open/close request — bubbled to root
     /// `Message::SetOpenMenu`. Intercepted in `handle_queue` before the
     /// page's `update` runs.
@@ -292,6 +294,7 @@ pub enum QueueAction {
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     NavigateAndExpandAlbum(String), // album_id - navigate to Albums and auto-expand
     NavigateAndExpandArtist(String), // artist_id - navigate to Artists and auto-expand
+    NavigateAndExpandGenre(String), // genre_id - navigate to Genres and auto-expand
     /// User toggled a queue column's visibility — persist to config.toml.
     ColumnVisibilityChanged(QueueColumn, bool),
     /// Bubble to root: open the default-playlist picker overlay.
@@ -372,6 +375,9 @@ impl QueuePage {
                 Task::none(),
                 QueueAction::NavigateAndExpandArtist(artist_id),
             ),
+            QueueMessage::NavigateAndExpandGenre(genre_id) => {
+                (Task::none(), QueueAction::NavigateAndExpandGenre(genre_id))
+            }
             QueueMessage::SortModeSelected(sort_mode) => {
                 self.queue_sort_mode = sort_mode;
                 (Task::none(), QueueAction::SortModeChanged(sort_mode))
@@ -1159,13 +1165,8 @@ impl QueuePage {
 
                                 let content: Element<'_, QueueMessage> =
                                     if current_sort_mode == QueueSortMode::Genre {
-                                        let click_genre = QueueMessage::NavigateAndFilter(
-                                            crate::View::Genres,
-                                            nokkvi_data::types::filter::LibraryFilter::GenreId {
-                                                id: genre.clone(),
-                                                name: genre.clone(),
-                                            },
-                                        );
+                                        let click_genre =
+                                            QueueMessage::NavigateAndExpandGenre(genre.clone());
                                         let genre_font_size =
                                             nokkvi_data::utils::scale::calculate_font_size(
                                                 10.0,

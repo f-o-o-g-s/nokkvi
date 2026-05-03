@@ -261,6 +261,10 @@ pub struct Nokkvi {
     /// load handlers page through the library until the target id appears,
     /// then dispatch the outer-expand `ArtistsMessage::FocusAndExpand`.
     pub pending_expand_artist_target: Option<crate::state::PendingExpandArtistTarget>,
+    /// Genre-side mirror. Single-shot since genres don't paginate — the
+    /// helper either finds the target on the one-and-only load or warns
+    /// that the genre isn't in the library.
+    pub pending_expand_genre_target: Option<crate::state::PendingExpandGenreTarget>,
     /// Re-pin the highlight onto the find-chain target after `set_children`
     /// runs. Set by `try_resolve_pending_expand_*` once the target is
     /// found; consumed by the matching children-loaded handler
@@ -355,6 +359,7 @@ impl Default for Nokkvi {
             pending_center_on_playing: false,
             pending_expand_album_target: None,
             pending_expand_artist_target: None,
+            pending_expand_genre_target: None,
             pending_top_pin: None,
             default_playlist_id: None,
             default_playlist_name: String::new(),

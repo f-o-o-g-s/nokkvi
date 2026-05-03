@@ -99,6 +99,12 @@ impl Nokkvi {
                     )));
                 }
 
+                // Drive the genre find-and-expand chain forward when a click
+                // navigated here with a pending target.
+                if let Some(task) = self.try_resolve_pending_expand_genre() {
+                    tasks.push(task);
+                }
+
                 if !tasks.is_empty() {
                     return Task::batch(tasks);
                 }
@@ -110,6 +116,7 @@ impl Nokkvi {
                 }
                 error!("Error loading genres: {}", e);
                 self.library.genres.set_loading(false);
+                self.cancel_pending_expand_genre();
                 self.toast_error(format!("Failed to load genres: {e}"));
             }
         }
@@ -136,9 +143,44 @@ impl Nokkvi {
             GenresMessage::AlbumsLoaded(_, albums) => albums.iter().map(|a| a.id.clone()).collect(),
             _ => Vec::new(),
         };
+        // Capture the loaded genre id too — set_children inside the page
+        // update clears `selected_offset`, and a find-chain pin needs to
+        // re-pin the highlight on the target afterwards.
+        let pin_after_albums = if let GenresMessage::AlbumsLoaded(ref id, _) = msg {
+            Some(id.clone())
+        } else {
+            None
+        };
         let (cmd, action) =
             self.genres_page
                 .update(msg, self.library.genres.len(), &self.library.genres);
+
+        if let Some(loaded_id) = pin_after_albums
+            && matches!(
+                self.pending_top_pin,
+                Some(crate::state::PendingTopPin::Genre(ref pinned)) if pinned == &loaded_id
+            )
+            && let Some(idx) = self.library.genres.iter().position(|g| g.id == loaded_id)
+        {
+            let total = crate::views::expansion::three_tier_flattened_len(
+                &self.library.genres,
+                &self.genres_page.expansion,
+                self.genres_page.sub_expansion.children.len(),
+            );
+            self.genres_page.common.slot_list.set_selected(idx, total);
+            self.pending_top_pin = None;
+        }
+
+        // User-driven changes supersede any in-flight find-and-expand chain.
+        if matches!(
+            action,
+            GenresAction::SearchChanged(_)
+                | GenresAction::SortModeChanged(_)
+                | GenresAction::SortOrderChanged(_)
+                | GenresAction::RefreshViewData
+        ) {
+            self.cancel_pending_expand_genre();
+        }
 
         // Handle common actions (SearchChanged, SortModeChanged, SortOrderChanged)
         if let Some(task) = self.handle_common_view_action(
