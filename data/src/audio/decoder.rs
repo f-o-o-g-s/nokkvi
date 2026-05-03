@@ -908,7 +908,7 @@ impl AudioDecoder {
             .iter()
             .find(|t| t.id == track_id)
             .and_then(|t| t.codec_params.time_base)
-            .unwrap_or(TimeBase::new(1, 1000));
+            .unwrap_or_else(|| TimeBase::new(1, 1000));
 
         // Convert milliseconds to seconds
         let seconds = position_ms / 1000;

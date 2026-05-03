@@ -576,7 +576,9 @@ pub(crate) fn render_child_track_row<'a, M: Clone + 'a + 'static>(
     let meta_size = ctx.metrics.metadata_size;
     let star_size = ctx.metrics.star_size_child;
 
-    let track_num = song.track.map_or("-".to_string(), |t| t.to_string());
+    let track_num = song
+        .track
+        .map_or_else(|| "-".to_string(), |t| t.to_string());
     let duration_str = formatters::format_time(song.duration);
 
     let indent_width = if depth > 0 { 30.0 * depth as f32 } else { 50.0 };
@@ -672,11 +674,13 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
     let star_size = ctx.metrics.star_size_child;
     let artwork_size = ctx.metrics.artwork_size;
 
-    let year_str = album.year.map_or("-".to_string(), |y| y.to_string());
+    let year_str = album
+        .year
+        .map_or_else(|| "-".to_string(), |y| y.to_string());
     let songs_str = format!("{} songs", album.song_count);
     let duration_str = album
         .duration
-        .map_or("-".to_string(), |d| formatters::format_time(d as u32));
+        .map_or_else(|| "-".to_string(), |d| formatters::format_time(d as u32));
 
     // Adjust album name width when artist column is shown
     let name_portion = if show_artist { 30 } else { 50 };

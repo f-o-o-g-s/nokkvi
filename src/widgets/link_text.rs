@@ -175,7 +175,7 @@ impl<M: Clone + 'static> Widget<M, Theme, iced::Renderer> for LinkText<M> {
         let color = if state.is_hovered {
             self.hover_color.unwrap_or_else(crate::theme::accent_bright)
         } else {
-            self.color.unwrap_or(crate::theme::fg0())
+            self.color.unwrap_or_else(crate::theme::fg0)
         };
 
         // Draw text

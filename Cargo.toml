@@ -35,6 +35,11 @@ unimplemented = "deny"
 # match site instead of being silently absorbed by `_ =>`.
 match_wildcard_for_single_variants = "deny"
 
+# Perf trap — `unwrap_or(expensive())` / `map_or(expensive(), ...)` evaluate
+# the fallback eagerly even on the Some path. Force *_or_else so closures
+# are only invoked when the Option is actually None.
+or_fun_call = "deny"
+
 [package]
 name = "nokkvi"
 version = "0.3.9"

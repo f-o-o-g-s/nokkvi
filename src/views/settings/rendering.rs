@@ -104,7 +104,7 @@ fn render_hex_editor<'a>(
             ..theme::ui_font()
         });
 
-    let preview_color = crate::theme_config::parse_hex_color(hex_input).unwrap_or(theme::fg4());
+    let preview_color = crate::theme_config::parse_hex_color(hex_input).unwrap_or_else(theme::fg4);
     let preview_swatch = container(Space::new())
         .width(Length::Fixed(swatch_size))
         .height(Length::Fixed(swatch_size))
@@ -579,7 +579,7 @@ fn render_value_display<'a>(
         }
 
         SettingValue::HexColor(hex) => {
-            let parsed_color = crate::theme_config::parse_hex_color(hex).unwrap_or(theme::fg4());
+            let parsed_color = crate::theme_config::parse_hex_color(hex).unwrap_or_else(theme::fg4);
             let eff_opacity = if is_center { 1.0 } else { opacity };
             let swatch_size = (font_size * 1.2).clamp(12.0, 20.0);
 
@@ -626,7 +626,7 @@ fn render_value_display<'a>(
             // Show mini color swatches for each color in the gradient
             let mut r = row![].spacing(2).align_y(Alignment::Center);
             for hex in colors.iter().take(8) {
-                let parsed = crate::theme_config::parse_hex_color(hex).unwrap_or(theme::fg4());
+                let parsed = crate::theme_config::parse_hex_color(hex).unwrap_or_else(theme::fg4);
                 r = r.push(
                     container(Space::new())
                         .width(Length::Fixed(swatch_size))
@@ -1037,7 +1037,7 @@ pub(crate) fn render_color_slot<'a>(
     let eff_opacity = if ctx.is_center { 1.0 } else { ctx.opacity };
 
     // Color swatch (larger than the mini swatches in the main slot list)
-    let parsed_color = crate::theme_config::parse_hex_color(hex_color).unwrap_or(theme::fg4());
+    let parsed_color = crate::theme_config::parse_hex_color(hex_color).unwrap_or_else(theme::fg4);
     let swatch_size = (label_size * 2.0).clamp(20.0, 36.0);
 
     let swatch = container(Space::new())
