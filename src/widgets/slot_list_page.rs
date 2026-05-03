@@ -59,6 +59,25 @@ pub enum SlotListPageAction {
     None,
 }
 
+/// Tri-state for the column-header "select all" checkbox.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectAllState {
+    /// No rows in the current visible set are selected.
+    None,
+    /// At least one — but not every — visible row is selected.
+    Some,
+    /// Every visible row is selected.
+    All,
+}
+
+impl SelectAllState {
+    /// Whether the tri-state header checkbox renders as "checked" (filled).
+    /// Both `Some` and `All` show as checked; the icon distinguishes them.
+    pub fn is_checked_visual(self) -> bool {
+        matches!(self, SelectAllState::All | SelectAllState::Some)
+    }
+}
+
 /// Helper functions for common slot list page update logic
 impl SlotListPageState {
     /// Handle slot list navigation up
@@ -143,6 +162,67 @@ impl SlotListPageState {
         self.slot_list.selected_indices.clear();
         self.slot_list.anchor_index = None;
         has_selection
+    }
+
+    /// Toggle membership of `offset` in the multi-selection set. Used by the
+    /// per-row select checkbox column. Mirrors the ctrl+click path in
+    /// `handle_slot_click` minus the modifier branch — caller is the checkbox,
+    /// which is unconditionally a "toggle this row" affordance.
+    pub fn handle_selection_toggle(&mut self, offset: usize, total_items: usize) {
+        if offset >= total_items {
+            return;
+        }
+        if self.slot_list.selected_indices.contains(&offset) {
+            self.slot_list.selected_indices.remove(&offset);
+            if self.slot_list.anchor_index == Some(offset) {
+                self.slot_list.anchor_index = None;
+            }
+            if self.slot_list.selected_indices.is_empty() {
+                self.slot_list.selected_offset = None;
+            }
+        } else {
+            self.slot_list.selected_indices.insert(offset);
+            self.slot_list.anchor_index = Some(offset);
+            self.slot_list.selected_offset = Some(offset);
+        }
+    }
+
+    /// Tri-state derived from `selected_indices` against the visible
+    /// (filtered) item count. Drives the column-header checkbox icon.
+    pub fn select_all_state(&self, total_items: usize) -> SelectAllState {
+        let count = self.slot_list.selected_indices.len();
+        if total_items == 0 || count == 0 {
+            SelectAllState::None
+        } else if count >= total_items
+            && (0..total_items).all(|i| self.slot_list.selected_indices.contains(&i))
+        {
+            SelectAllState::All
+        } else {
+            SelectAllState::Some
+        }
+    }
+
+    /// Header checkbox click. If every visible row is already selected, clear
+    /// the selection; otherwise fill `selected_indices` with every visible
+    /// index. Anchor lands at index 0 so a subsequent shift+click extends from
+    /// the top; viewport offset is intentionally unchanged so toggling
+    /// select-all does not jump the view.
+    pub fn handle_select_all_toggle(&mut self, total_items: usize) {
+        if total_items == 0 {
+            return;
+        }
+        match self.select_all_state(total_items) {
+            SelectAllState::All => {
+                self.clear_multi_selection();
+            }
+            SelectAllState::None | SelectAllState::Some => {
+                self.slot_list.selected_indices.clear();
+                for i in 0..total_items {
+                    self.slot_list.selected_indices.insert(i);
+                }
+                self.slot_list.anchor_index = Some(0);
+            }
+        }
     }
 
     /// Evaluate a context menu click. If the clicked index is not in the selection,
@@ -533,5 +613,168 @@ mod tests {
         assert_eq!(targets, vec![7]);
         // Multi-selection should be cleared
         assert!(state.slot_list.selected_indices.is_empty());
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  handle_selection_toggle (per-row checkbox column)
+    // ══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn selection_toggle_adds_index() {
+        let mut state = SlotListPageState::default();
+        state.handle_selection_toggle(3, 10);
+
+        assert!(state.slot_list.selected_indices.contains(&3));
+        assert_eq!(state.slot_list.anchor_index, Some(3));
+        assert_eq!(state.slot_list.selected_offset, Some(3));
+    }
+
+    #[test]
+    fn selection_toggle_removes_existing() {
+        let mut state = SlotListPageState::default();
+        state.handle_selection_toggle(3, 10); // add
+        state.handle_selection_toggle(3, 10); // remove
+
+        assert!(state.slot_list.selected_indices.is_empty());
+        assert_eq!(state.slot_list.anchor_index, None);
+    }
+
+    #[test]
+    fn selection_toggle_clears_selected_offset_when_empty() {
+        let mut state = SlotListPageState::default();
+        state.handle_selection_toggle(5, 10);
+        state.handle_selection_toggle(5, 10);
+        assert_eq!(
+            state.slot_list.selected_offset, None,
+            "selected_offset must be None when set empties via the checkbox toggle path"
+        );
+    }
+
+    #[test]
+    fn selection_toggle_keeps_offset_when_remaining_items() {
+        let mut state = SlotListPageState::default();
+        state.handle_selection_toggle(3, 10);
+        state.handle_selection_toggle(5, 10);
+        state.handle_selection_toggle(3, 10); // remove 3, 5 still selected
+
+        assert!(state.slot_list.selected_indices.contains(&5));
+        assert!(!state.slot_list.selected_indices.contains(&3));
+        assert!(state.slot_list.selected_offset.is_some());
+    }
+
+    #[test]
+    fn selection_toggle_out_of_bounds_is_noop() {
+        let mut state = SlotListPageState::default();
+        state.handle_selection_toggle(15, 10);
+
+        assert!(state.slot_list.selected_indices.is_empty());
+        assert_eq!(state.slot_list.selected_offset, None);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  select_all_state (tri-state derivation)
+    // ══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn select_all_state_empty_set_is_none() {
+        let state = SlotListPageState::default();
+        assert_eq!(state.select_all_state(10), SelectAllState::None);
+    }
+
+    #[test]
+    fn select_all_state_zero_total_is_none() {
+        let state = SlotListPageState::default();
+        assert_eq!(state.select_all_state(0), SelectAllState::None);
+    }
+
+    #[test]
+    fn select_all_state_partial_is_some() {
+        let mut state = SlotListPageState::default();
+        state.handle_selection_toggle(2, 10);
+        state.handle_selection_toggle(5, 10);
+        assert_eq!(state.select_all_state(10), SelectAllState::Some);
+    }
+
+    #[test]
+    fn select_all_state_all_visible_is_all() {
+        let mut state = SlotListPageState::default();
+        for i in 0..5 {
+            state.handle_selection_toggle(i, 5);
+        }
+        assert_eq!(state.select_all_state(5), SelectAllState::All);
+    }
+
+    #[test]
+    fn select_all_state_includes_extra_indices_still_all() {
+        // Selection is over absolute slice indices; the visible total is the
+        // filtered count. As long as every visible index is selected, the
+        // state is `All` even if `selected_indices` carries extra entries
+        // outside that range (e.g., from before a search narrowed the list).
+        let mut state = SlotListPageState::default();
+        for i in 0..3 {
+            state.handle_selection_toggle(i, 10);
+        }
+        // Visible total shrinks to 3 — matches what's selected.
+        assert_eq!(state.select_all_state(3), SelectAllState::All);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  handle_select_all_toggle (header tri-state)
+    // ══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn select_all_promotes_empty_to_all() {
+        let mut state = SlotListPageState::default();
+        state.handle_select_all_toggle(5);
+
+        assert_eq!(state.slot_list.selected_indices.len(), 5);
+        for i in 0..5 {
+            assert!(state.slot_list.selected_indices.contains(&i));
+        }
+        assert_eq!(state.slot_list.anchor_index, Some(0));
+    }
+
+    #[test]
+    fn select_all_promotes_partial_to_all() {
+        let mut state = SlotListPageState::default();
+        state.handle_selection_toggle(2, 10);
+        state.handle_selection_toggle(7, 10);
+        state.handle_select_all_toggle(10);
+
+        assert_eq!(state.slot_list.selected_indices.len(), 10);
+        for i in 0..10 {
+            assert!(state.slot_list.selected_indices.contains(&i));
+        }
+    }
+
+    #[test]
+    fn select_all_clears_when_already_all() {
+        let mut state = SlotListPageState::default();
+        for i in 0..5 {
+            state.handle_selection_toggle(i, 5);
+        }
+        state.handle_select_all_toggle(5);
+
+        assert!(state.slot_list.selected_indices.is_empty());
+        assert_eq!(state.slot_list.anchor_index, None);
+    }
+
+    #[test]
+    fn select_all_is_noop_for_zero_total() {
+        let mut state = SlotListPageState::default();
+        state.handle_select_all_toggle(0);
+        assert!(state.slot_list.selected_indices.is_empty());
+    }
+
+    #[test]
+    fn select_all_then_partial_toggle_preserves_remainder() {
+        let mut state = SlotListPageState::default();
+        state.handle_select_all_toggle(5);
+        state.handle_selection_toggle(2, 5); // remove index 2
+
+        assert_eq!(state.slot_list.selected_indices.len(), 4);
+        assert!(!state.slot_list.selected_indices.contains(&2));
+        // Tri-state should be Some (not All, not None)
+        assert_eq!(state.select_all_state(5), SelectAllState::Some);
     }
 }

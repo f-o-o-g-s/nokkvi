@@ -473,6 +473,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_queue_show_select(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.queue_show_select = enabled;
+        self.save()
+    }
+
     pub fn set_albums_show_stars(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.albums_show_stars = enabled;
         self.save()
@@ -500,6 +505,11 @@ impl SettingsManager {
 
     pub fn set_albums_show_thumbnail(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.albums_show_thumbnail = enabled;
+        self.save()
+    }
+
+    pub fn set_albums_show_select(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.albums_show_select = enabled;
         self.save()
     }
 
@@ -543,6 +553,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_songs_show_select(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.songs_show_select = enabled;
+        self.save()
+    }
+
     pub fn set_artists_show_stars(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.artists_show_stars = enabled;
         self.save()
@@ -578,6 +593,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_artists_show_select(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.artists_show_select = enabled;
+        self.save()
+    }
+
     pub fn set_genres_show_index(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.genres_show_index = enabled;
         self.save()
@@ -595,6 +615,11 @@ impl SettingsManager {
 
     pub fn set_genres_show_songcount(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.genres_show_songcount = enabled;
+        self.save()
+    }
+
+    pub fn set_genres_show_select(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.genres_show_select = enabled;
         self.save()
     }
 
@@ -620,6 +645,41 @@ impl SettingsManager {
 
     pub fn set_playlists_show_updatedat(&mut self, enabled: bool) -> Result<()> {
         self.settings.player.playlists_show_updatedat = enabled;
+        self.save()
+    }
+
+    pub fn set_playlists_show_select(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.playlists_show_select = enabled;
+        self.save()
+    }
+
+    pub fn set_similar_show_index(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.similar_show_index = enabled;
+        self.save()
+    }
+
+    pub fn set_similar_show_thumbnail(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.similar_show_thumbnail = enabled;
+        self.save()
+    }
+
+    pub fn set_similar_show_album(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.similar_show_album = enabled;
+        self.save()
+    }
+
+    pub fn set_similar_show_duration(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.similar_show_duration = enabled;
+        self.save()
+    }
+
+    pub fn set_similar_show_love(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.similar_show_love = enabled;
+        self.save()
+    }
+
+    pub fn set_similar_show_select(&mut self, enabled: bool) -> Result<()> {
+        self.settings.player.similar_show_select = enabled;
         self.save()
     }
 
@@ -841,12 +901,14 @@ impl SettingsManager {
             queue_show_index: p.queue_show_index,
             queue_show_thumbnail: p.queue_show_thumbnail,
             queue_show_genre: p.queue_show_genre,
+            queue_show_select: p.queue_show_select,
             albums_show_stars: p.albums_show_stars,
             albums_show_songcount: p.albums_show_songcount,
             albums_show_plays: p.albums_show_plays,
             albums_show_love: p.albums_show_love,
             albums_show_index: p.albums_show_index,
             albums_show_thumbnail: p.albums_show_thumbnail,
+            albums_show_select: p.albums_show_select,
             songs_show_stars: p.songs_show_stars,
             songs_show_album: p.songs_show_album,
             songs_show_duration: p.songs_show_duration,
@@ -855,6 +917,7 @@ impl SettingsManager {
             songs_show_index: p.songs_show_index,
             songs_show_thumbnail: p.songs_show_thumbnail,
             songs_show_genre: p.songs_show_genre,
+            songs_show_select: p.songs_show_select,
             artists_show_stars: p.artists_show_stars,
             artists_show_albumcount: p.artists_show_albumcount,
             artists_show_songcount: p.artists_show_songcount,
@@ -862,15 +925,24 @@ impl SettingsManager {
             artists_show_love: p.artists_show_love,
             artists_show_index: p.artists_show_index,
             artists_show_thumbnail: p.artists_show_thumbnail,
+            artists_show_select: p.artists_show_select,
             genres_show_index: p.genres_show_index,
             genres_show_thumbnail: p.genres_show_thumbnail,
             genres_show_albumcount: p.genres_show_albumcount,
             genres_show_songcount: p.genres_show_songcount,
+            genres_show_select: p.genres_show_select,
             playlists_show_index: p.playlists_show_index,
             playlists_show_thumbnail: p.playlists_show_thumbnail,
             playlists_show_songcount: p.playlists_show_songcount,
             playlists_show_duration: p.playlists_show_duration,
             playlists_show_updatedat: p.playlists_show_updatedat,
+            playlists_show_select: p.playlists_show_select,
+            similar_show_index: p.similar_show_index,
+            similar_show_thumbnail: p.similar_show_thumbnail,
+            similar_show_album: p.similar_show_album,
+            similar_show_duration: p.similar_show_duration,
+            similar_show_love: p.similar_show_love,
+            similar_show_select: p.similar_show_select,
             albums_artwork_overlay: p.albums_artwork_overlay,
             artists_artwork_overlay: p.artists_artwork_overlay,
             songs_artwork_overlay: p.songs_artwork_overlay,
@@ -962,12 +1034,14 @@ fn apply_toml_settings_to_internal(
     p.queue_show_plays = ts.queue_show_plays;
     p.queue_show_index = ts.queue_show_index;
     p.queue_show_thumbnail = ts.queue_show_thumbnail;
+    p.queue_show_select = ts.queue_show_select;
     p.albums_show_stars = ts.albums_show_stars;
     p.albums_show_songcount = ts.albums_show_songcount;
     p.albums_show_plays = ts.albums_show_plays;
     p.albums_show_love = ts.albums_show_love;
     p.albums_show_index = ts.albums_show_index;
     p.albums_show_thumbnail = ts.albums_show_thumbnail;
+    p.albums_show_select = ts.albums_show_select;
     p.songs_show_stars = ts.songs_show_stars;
     p.songs_show_album = ts.songs_show_album;
     p.songs_show_duration = ts.songs_show_duration;
@@ -975,6 +1049,7 @@ fn apply_toml_settings_to_internal(
     p.songs_show_love = ts.songs_show_love;
     p.songs_show_index = ts.songs_show_index;
     p.songs_show_thumbnail = ts.songs_show_thumbnail;
+    p.songs_show_select = ts.songs_show_select;
     p.artists_show_stars = ts.artists_show_stars;
     p.artists_show_albumcount = ts.artists_show_albumcount;
     p.artists_show_songcount = ts.artists_show_songcount;
@@ -982,15 +1057,24 @@ fn apply_toml_settings_to_internal(
     p.artists_show_love = ts.artists_show_love;
     p.artists_show_index = ts.artists_show_index;
     p.artists_show_thumbnail = ts.artists_show_thumbnail;
+    p.artists_show_select = ts.artists_show_select;
     p.genres_show_index = ts.genres_show_index;
     p.genres_show_thumbnail = ts.genres_show_thumbnail;
     p.genres_show_albumcount = ts.genres_show_albumcount;
     p.genres_show_songcount = ts.genres_show_songcount;
+    p.genres_show_select = ts.genres_show_select;
     p.playlists_show_index = ts.playlists_show_index;
     p.playlists_show_thumbnail = ts.playlists_show_thumbnail;
     p.playlists_show_songcount = ts.playlists_show_songcount;
     p.playlists_show_duration = ts.playlists_show_duration;
     p.playlists_show_updatedat = ts.playlists_show_updatedat;
+    p.playlists_show_select = ts.playlists_show_select;
+    p.similar_show_index = ts.similar_show_index;
+    p.similar_show_thumbnail = ts.similar_show_thumbnail;
+    p.similar_show_album = ts.similar_show_album;
+    p.similar_show_duration = ts.similar_show_duration;
+    p.similar_show_love = ts.similar_show_love;
+    p.similar_show_select = ts.similar_show_select;
     p.albums_artwork_overlay = ts.albums_artwork_overlay;
     p.artists_artwork_overlay = ts.artists_artwork_overlay;
     p.songs_artwork_overlay = ts.songs_artwork_overlay;

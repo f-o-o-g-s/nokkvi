@@ -800,6 +800,11 @@ impl Nokkvi {
                     shell.settings().set_artists_show_thumbnail(value).await
                 });
             }
+            views::ArtistsColumn::Select => {
+                self.shell_spawn("persist_artists_show_select", move |shell| async move {
+                    shell.settings().set_artists_show_select(value).await
+                });
+            }
         }
         Task::none()
     }

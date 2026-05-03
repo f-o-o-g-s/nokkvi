@@ -34,7 +34,9 @@ pub(crate) use queue::{
 };
 pub(crate) use radios::{RadiosAction, RadiosMessage, RadiosPage, RadiosViewData};
 pub(crate) use settings::{SettingsAction, SettingsMessage, SettingsPage, SettingsViewData};
-pub(crate) use similar::{SimilarAction, SimilarMessage, SimilarPage, SimilarViewData};
+pub(crate) use similar::{
+    SimilarAction, SimilarColumn, SimilarMessage, SimilarPage, SimilarViewData,
+};
 pub(crate) use songs::{SongsAction, SongsColumn, SongsMessage, SongsPage, SongsViewData};
 
 use crate::{

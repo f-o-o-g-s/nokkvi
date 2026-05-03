@@ -35,6 +35,7 @@ pub struct GenresPage {
 /// genre→album expansion render their artwork column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GenresColumn {
+    Select,
     Index,
     Thumbnail,
     AlbumCount,
@@ -44,6 +45,7 @@ pub enum GenresColumn {
 /// User-toggle state for each toggleable genres column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GenresColumnVisibility {
+    pub select: bool,
     pub index: bool,
     pub thumbnail: bool,
     pub albumcount: bool,
@@ -53,6 +55,7 @@ pub struct GenresColumnVisibility {
 impl Default for GenresColumnVisibility {
     fn default() -> Self {
         Self {
+            select: false,
             index: true,
             thumbnail: true,
             albumcount: true,
@@ -64,6 +67,7 @@ impl Default for GenresColumnVisibility {
 impl GenresColumnVisibility {
     pub fn get(&self, col: GenresColumn) -> bool {
         match col {
+            GenresColumn::Select => self.select,
             GenresColumn::Index => self.index,
             GenresColumn::Thumbnail => self.thumbnail,
             GenresColumn::AlbumCount => self.albumcount,
@@ -73,6 +77,7 @@ impl GenresColumnVisibility {
 
     pub fn set(&mut self, col: GenresColumn, value: bool) {
         match col {
+            GenresColumn::Select => self.select = value,
             GenresColumn::Index => self.index = value,
             GenresColumn::Thumbnail => self.thumbnail = value,
             GenresColumn::AlbumCount => self.albumcount = value,
@@ -117,7 +122,13 @@ pub enum GenresMessage {
     SlotListScrollSeek(usize),
     SlotListActivateCenter,
     SlotListClickPlay(usize), // Click non-center to play directly (skip focus)
-    AddCenterToQueue,         // Add all songs from centered genre to queue (Shift+Q)
+    /// Click on a row's leading select checkbox — toggles `item_index` in
+    /// `selected_indices`. No play/highlight side effects.
+    SlotListSelectionToggle(usize),
+    /// Click on the tri-state "select all" header — fills selection with
+    /// every visible row, or clears if every visible row is already selected.
+    SlotListSelectAllToggle,
+    AddCenterToQueue, // Add all songs from centered genre to queue (Shift+Q)
 
     // Mouse click on heart
     ClickToggleStar(usize), // item_index
@@ -498,6 +509,14 @@ impl GenresPage {
                     self.common.handle_set_offset(offset, len);
                     self.update(GenresMessage::SlotListActivateCenter, total_items, genres)
                 }
+                GenresMessage::SlotListSelectionToggle(offset) => {
+                    self.common.handle_selection_toggle(offset, total_items);
+                    (Task::none(), GenresAction::None)
+                }
+                GenresMessage::SlotListSelectAllToggle => {
+                    self.common.handle_select_all_toggle(total_items);
+                    (Task::none(), GenresAction::None)
+                }
                 GenresMessage::SlotListActivateCenter => {
                     let total = super::expansion::three_tier_flattened_len(
                         genres,
@@ -762,6 +781,11 @@ impl GenresPage {
         let column_dropdown: Element<'a, GenresMessage> = {
             use crate::widgets::checkbox_dropdown::checkbox_dropdown;
             let items: Vec<(GenresColumn, &'static str, bool)> = vec![
+                (
+                    GenresColumn::Select,
+                    "Select",
+                    self.column_visibility.select,
+                ),
                 (GenresColumn::Index, "Index", self.column_visibility.index),
                 (
                     GenresColumn::Thumbnail,
@@ -819,6 +843,23 @@ impl GenresPage {
             GenresMessage::SearchQueryChanged,
         );
 
+        // Compose with the tri-state "select all" header bar when the
+        // multi-select column is on. Tri-state derives from the current
+        // selection set against the *flattened* (visible) row count.
+        let header = {
+            let flattened_len = super::expansion::three_tier_flattened_len(
+                data.genres,
+                &self.expansion,
+                self.sub_expansion.children.len(),
+            );
+            crate::widgets::slot_list::compose_header_with_select(
+                self.column_visibility.select,
+                self.common.select_all_state(flattened_len),
+                GenresMessage::SlotListSelectAllToggle,
+                header,
+            )
+        };
+
         // Create layout config BEFORE empty checks to route empty states through
         // base_slot_list_layout, preserving the widget tree structure and search focus
         use crate::widgets::base_slot_list_layout::BaseSlotListLayoutConfig;
@@ -844,12 +885,15 @@ impl GenresPage {
 
         // Configure slot list with genres-specific chrome height (has view header)
         use crate::widgets::slot_list::{
-            SlotListConfig, chrome_height_with_header, slot_list_view_with_scroll,
+            SlotListConfig, chrome_height_with_select_header, slot_list_view_with_scroll,
         };
 
-        let config =
-            SlotListConfig::with_dynamic_slots(data.window_height, chrome_height_with_header())
-                .with_modifiers(data.modifiers);
+        let select_header_visible = self.column_visibility.select;
+        let config = SlotListConfig::with_dynamic_slots(
+            data.window_height,
+            chrome_height_with_select_header(select_header_visible),
+        )
+        .with_modifiers(data.modifiers);
 
         // Capture values needed in closure
         let genres = data.genres; // Borrow slice to extend lifetime
@@ -879,13 +923,22 @@ impl GenresPage {
                 move |f| GenresMessage::SlotListScrollSeek((f * total as f32) as usize)
             },
             |entry, ctx| match entry {
-                ThreeTierEntry::Parent(genre) => self.render_genre_row(
-                    genre,
-                    &ctx,
-                    genre_artwork,
-                    data.stable_viewport,
-                    open_menu_for_rows,
-                ),
+                ThreeTierEntry::Parent(genre) => {
+                    let row = self.render_genre_row(
+                        genre,
+                        &ctx,
+                        genre_artwork,
+                        data.stable_viewport,
+                        open_menu_for_rows,
+                    );
+                    crate::widgets::slot_list::wrap_with_select_column(
+                        select_header_visible,
+                        ctx.is_selected,
+                        ctx.item_index,
+                        GenresMessage::SlotListSelectionToggle,
+                        row,
+                    )
+                }
                 ThreeTierEntry::Child(album, _parent_genre_id) => self.render_album_row(
                     album,
                     &ctx,

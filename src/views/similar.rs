@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use iced::{
     Alignment, Element, Length, Task,
-    widget::{button, container, image, row},
+    widget::{button, container, image},
 };
 use nokkvi_data::{types::song::Song, utils::formatters};
 
@@ -18,6 +18,70 @@ use crate::widgets::{self, SlotListPageState, view_header::SortMode};
 #[derive(Debug)]
 pub struct SimilarPage {
     pub common: SlotListPageState,
+    /// Per-column visibility toggles surfaced via the columns-cog dropdown.
+    pub column_visibility: SimilarColumnVisibility,
+}
+
+/// Toggleable similar columns. Title/Artist is always shown; everything
+/// else is user-toggleable through the columns-cog dropdown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SimilarColumn {
+    Select,
+    Index,
+    Thumbnail,
+    Album,
+    Duration,
+    Love,
+}
+
+/// User-toggle state for each toggleable similar column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SimilarColumnVisibility {
+    pub select: bool,
+    pub index: bool,
+    pub thumbnail: bool,
+    pub album: bool,
+    pub duration: bool,
+    pub love: bool,
+}
+
+impl Default for SimilarColumnVisibility {
+    fn default() -> Self {
+        // Match today's always-on layout (Index/Art/Album/Duration/Love); the
+        // Select column is opt-in like elsewhere in the app.
+        Self {
+            select: false,
+            index: true,
+            thumbnail: true,
+            album: true,
+            duration: true,
+            love: true,
+        }
+    }
+}
+
+impl SimilarColumnVisibility {
+    pub fn get(&self, col: SimilarColumn) -> bool {
+        match col {
+            SimilarColumn::Select => self.select,
+            SimilarColumn::Index => self.index,
+            SimilarColumn::Thumbnail => self.thumbnail,
+            SimilarColumn::Album => self.album,
+            SimilarColumn::Duration => self.duration,
+            SimilarColumn::Love => self.love,
+        }
+    }
+
+    pub fn set(&mut self, col: SimilarColumn, value: bool) {
+        match col {
+            SimilarColumn::Select => self.select = value,
+            SimilarColumn::Index => self.index = value,
+            SimilarColumn::Thumbnail => self.thumbnail = value,
+            SimilarColumn::Album => self.album = value,
+            SimilarColumn::Duration => self.duration = value,
+            SimilarColumn::Love => self.love = value,
+        }
+    }
 }
 
 /// View data passed from root (read-only borrows from app state).
@@ -36,6 +100,11 @@ pub struct SimilarViewData<'a> {
     /// Borrowed reference to the root open-menu state, so per-row context
     /// menus can resolve their own open/closed status.
     pub open_menu: Option<&'a crate::app_message::OpenMenu>,
+    /// Whether the column-visibility checkbox dropdown is open (controlled
+    /// by `Nokkvi.open_menu`).
+    pub column_dropdown_open: bool,
+    /// Trigger bounds captured when the dropdown was opened.
+    pub column_dropdown_trigger_bounds: Option<iced::Rectangle>,
 }
 
 /// Messages for local similar page interactions
@@ -48,6 +117,12 @@ pub enum SimilarMessage {
     SlotListNavigateDown,
     SlotListSetOffset(usize, iced::keyboard::Modifiers),
     SlotListScrollSeek(usize),
+    /// Click on a row's leading select checkbox — toggles `item_index` in
+    /// `selected_indices`. No play/highlight side effects.
+    SlotListSelectionToggle(usize),
+    /// Click on the tri-state "select all" header — fills selection with
+    /// every visible row, or clears if every visible row is already selected.
+    SlotListSelectAllToggle,
     AddCenterToQueue,
 
     // Mouse click on star/heart (item_index, value)
@@ -55,6 +130,9 @@ pub enum SimilarMessage {
 
     // Context menu
     ContextMenuAction(usize, crate::widgets::context_menu::LibraryContextEntry),
+
+    /// Toggle a similar column's visibility from the columns-cog dropdown.
+    ToggleColumnVisible(SimilarColumn),
 
     /// Context-menu open/close request — bubbled to root
     /// `Message::SetOpenMenu`. Intercepted in `handle_similar` before the
@@ -78,6 +156,8 @@ pub enum SimilarAction {
     FindSimilar(String, String),
     /// Top Songs for an artist, triggered from within similar results
     FindTopSongs(String, String),
+    /// User toggled a similar column's visibility — persist to config.toml.
+    ColumnVisibilityChanged(SimilarColumn, bool),
     None,
 }
 
@@ -88,6 +168,7 @@ impl Default for SimilarPage {
                 SortMode::Title, // unused — no sort controls
                 true,
             ),
+            column_visibility: SimilarColumnVisibility::default(),
         }
     }
 }
@@ -157,6 +238,22 @@ impl SimilarPage {
             SimilarMessage::SlotListScrollSeek(offset) => {
                 self.common.handle_set_offset(offset, total_items);
                 (Task::none(), SimilarAction::None)
+            }
+            SimilarMessage::SlotListSelectionToggle(offset) => {
+                self.common.handle_selection_toggle(offset, total_items);
+                (Task::none(), SimilarAction::None)
+            }
+            SimilarMessage::SlotListSelectAllToggle => {
+                self.common.handle_select_all_toggle(total_items);
+                (Task::none(), SimilarAction::None)
+            }
+            SimilarMessage::ToggleColumnVisible(col) => {
+                let new_value = !self.column_visibility.get(col);
+                self.column_visibility.set(col, new_value);
+                (
+                    Task::none(),
+                    SimilarAction::ColumnVisibilityChanged(col, new_value),
+                )
             }
             SimilarMessage::AddCenterToQueue => {
                 use nokkvi_data::types::batch::BatchItem;
@@ -266,6 +363,48 @@ impl SimilarPage {
         // to hide the sort dropdown entirely, and pass the header_prefix as the view title.
         let empty_options: &[String] = &[];
 
+        // Columns-cog dropdown for the view header. Emits its own
+        // `OpenMenu::CheckboxDropdownSimilar` variant since `View` has no
+        // `Similar` member to disambiguate against.
+        let column_dropdown: Element<'a, SimilarMessage> = {
+            use crate::widgets::checkbox_dropdown::checkbox_dropdown;
+            let items: Vec<(SimilarColumn, &'static str, bool)> = vec![
+                (
+                    SimilarColumn::Select,
+                    "Select",
+                    self.column_visibility.select,
+                ),
+                (SimilarColumn::Index, "Index", self.column_visibility.index),
+                (
+                    SimilarColumn::Thumbnail,
+                    "Thumbnail",
+                    self.column_visibility.thumbnail,
+                ),
+                (SimilarColumn::Album, "Album", self.column_visibility.album),
+                (
+                    SimilarColumn::Duration,
+                    "Duration",
+                    self.column_visibility.duration,
+                ),
+                (SimilarColumn::Love, "Love", self.column_visibility.love),
+            ];
+            checkbox_dropdown(
+                "assets/icons/columns-3-cog.svg",
+                "Show/hide columns",
+                items,
+                SimilarMessage::ToggleColumnVisible,
+                |trigger_bounds| match trigger_bounds {
+                    Some(b) => SimilarMessage::SetOpenMenu(Some(
+                        crate::app_message::OpenMenu::CheckboxDropdownSimilar { trigger_bounds: b },
+                    )),
+                    None => SimilarMessage::SetOpenMenu(None),
+                },
+                data.column_dropdown_open,
+                data.column_dropdown_trigger_bounds,
+            )
+            .into()
+        };
+
         let header = widgets::view_header::view_header(
             header_prefix,
             empty_options,
@@ -276,14 +415,24 @@ impl SimilarPage {
             "songs",
             crate::views::SIMILAR_SEARCH_ID,
             |_| SimilarMessage::NoOp,
-            None,  // Hide sort button
-            None,  // Hide shuffle button
-            None,  // Hide refresh
-            None,  // Hide center on playing
-            None,  // on_add
-            None,  // trailing_button
-            false, // Hide search
+            None,                  // Hide sort button
+            None,                  // Hide shuffle button
+            None,                  // Hide refresh
+            None,                  // Hide center on playing
+            None,                  // on_add
+            Some(column_dropdown), // trailing_button
+            false,                 // Hide search
             |_| SimilarMessage::NoOp,
+        );
+
+        // Compose with the tri-state "select all" header bar when the
+        // multi-select column is on. Tri-state derives from the current
+        // selection set against the visible row count.
+        let header = crate::widgets::slot_list::compose_header_with_select(
+            self.column_visibility.select,
+            self.common.select_all_state(data.songs.len()),
+            SimilarMessage::SlotListSelectAllToggle,
+            header,
         );
 
         // Layout config
@@ -316,17 +465,21 @@ impl SimilarPage {
 
         // Configure slot list
         use crate::widgets::slot_list::{
-            SlotListConfig, chrome_height_with_header, slot_list_view_with_scroll,
+            SlotListConfig, chrome_height_with_select_header, slot_list_view_with_scroll,
         };
 
-        let config =
-            SlotListConfig::with_dynamic_slots(data.window_height, chrome_height_with_header())
-                .with_modifiers(data.modifiers);
+        let select_header_visible = self.column_visibility.select;
+        let config = SlotListConfig::with_dynamic_slots(
+            data.window_height,
+            chrome_height_with_select_header(select_header_visible),
+        )
+        .with_modifiers(data.modifiers);
 
         let songs = data.songs;
         let song_artwork = data.album_art;
         let center_index = self.common.slot_list.get_center_item_index(songs.len());
         let open_menu_for_rows = data.open_menu;
+        let column_visibility = self.column_visibility;
 
         // Render slot list
         let slot_list_content = slot_list_view_with_scroll(
@@ -368,40 +521,72 @@ impl SimilarPage {
                 let star_size = m.star_size;
                 let index_size = m.metadata_size;
 
-                // Layout: [Index] [Art] [Title/Artist (45%)] [Album (30%)] [Duration (15%)] [Star (5%)]
-                let content = row![
-                    slot_list_index_column(ctx.item_index, index_size, style, ctx.opacity),
-                    {
-                        use crate::widgets::slot_list::slot_list_artwork_column;
-                        let artwork_handle = album_id.as_ref().and_then(|id| song_artwork.get(id));
-                        slot_list_artwork_column(
-                            artwork_handle,
-                            artwork_size,
-                            ctx.is_center,
-                            false,
-                            ctx.opacity,
-                        )
-                    },
-                    {
-                        use crate::widgets::slot_list::slot_list_text_column;
-                        slot_list_text_column(
-                            song_title,
-                            None,
-                            song_artist,
-                            None,
-                            title_size,
-                            subtitle_size,
-                            style,
-                            ctx.is_center,
-                            45,
-                        )
-                    },
-                    {
-                        use crate::widgets::slot_list::slot_list_metadata_column;
-                        slot_list_metadata_column(song_album, None, metadata_size, style, 30)
-                    },
-                    {
-                        let duration_str = formatters::format_time(duration);
+                // Title slot grows when other columns hide so the row never
+                // collapses into empty filler.
+                let title_portion: u16 = {
+                    let mut p: u16 = 45;
+                    if !column_visibility.album {
+                        p += 30;
+                    }
+                    if !column_visibility.duration {
+                        p += 15;
+                    }
+                    if !column_visibility.love {
+                        p += 5;
+                    }
+                    p
+                };
+
+                // Layout: [Index?] [Art?] [Title/Artist] [Album?] [Duration?] [Heart?]
+                let mut content_row = iced::widget::Row::new()
+                    .spacing(6.0)
+                    .align_y(Alignment::Center);
+                if column_visibility.index {
+                    content_row = content_row.push(slot_list_index_column(
+                        ctx.item_index,
+                        index_size,
+                        style,
+                        ctx.opacity,
+                    ));
+                }
+                if column_visibility.thumbnail {
+                    use crate::widgets::slot_list::slot_list_artwork_column;
+                    let artwork_handle = album_id.as_ref().and_then(|id| song_artwork.get(id));
+                    content_row = content_row.push(slot_list_artwork_column(
+                        artwork_handle,
+                        artwork_size,
+                        ctx.is_center,
+                        false,
+                        ctx.opacity,
+                    ));
+                }
+                content_row = content_row.push({
+                    use crate::widgets::slot_list::slot_list_text_column;
+                    slot_list_text_column(
+                        song_title,
+                        None,
+                        song_artist,
+                        None,
+                        title_size,
+                        subtitle_size,
+                        style,
+                        ctx.is_center,
+                        title_portion,
+                    )
+                });
+                if column_visibility.album {
+                    use crate::widgets::slot_list::slot_list_metadata_column;
+                    content_row = content_row.push(slot_list_metadata_column(
+                        song_album,
+                        None,
+                        metadata_size,
+                        style,
+                        30,
+                    ));
+                }
+                if column_visibility.duration {
+                    let duration_str = formatters::format_time(duration);
+                    content_row = content_row.push(
                         container(slot_list_text(
                             duration_str,
                             metadata_size,
@@ -410,38 +595,41 @@ impl SimilarPage {
                         .width(Length::FillPortion(15))
                         .height(Length::Fill)
                         .align_x(Alignment::End)
-                        .align_y(Alignment::Center)
-                    },
-                    container({
-                        use crate::widgets::slot_list::slot_list_favorite_icon;
-                        slot_list_favorite_icon(
-                            is_starred,
-                            ctx.is_center,
-                            false,
-                            ctx.opacity,
-                            star_size,
-                            "heart",
-                            Some(SimilarMessage::ClickToggleStar(ctx.item_index)),
-                        )
-                    })
-                    .width(Length::FillPortion(5))
+                        .align_y(Alignment::Center),
+                    );
+                }
+                if column_visibility.love {
+                    content_row = content_row.push(
+                        container({
+                            use crate::widgets::slot_list::slot_list_favorite_icon;
+                            slot_list_favorite_icon(
+                                is_starred,
+                                ctx.is_center,
+                                false,
+                                ctx.opacity,
+                                star_size,
+                                "heart",
+                                Some(SimilarMessage::ClickToggleStar(ctx.item_index)),
+                            )
+                        })
+                        .width(Length::FillPortion(5))
+                        .padding(iced::Padding {
+                            left: 4.0,
+                            right: 4.0,
+                            ..Default::default()
+                        })
+                        .align_x(Alignment::Center)
+                        .align_y(Alignment::Center),
+                    );
+                }
+                let content = content_row
                     .padding(iced::Padding {
-                        left: 4.0,
+                        left: SLOT_LIST_SLOT_PADDING,
                         right: 4.0,
-                        ..Default::default()
+                        top: 4.0,
+                        bottom: 4.0,
                     })
-                    .align_x(Alignment::Center)
-                    .align_y(Alignment::Center),
-                ]
-                .spacing(6.0)
-                .padding(iced::Padding {
-                    left: SLOT_LIST_SLOT_PADDING,
-                    right: 4.0,
-                    top: 4.0,
-                    bottom: 4.0,
-                })
-                .align_y(Alignment::Center)
-                .height(Length::Fill);
+                    .height(Length::Fill);
 
                 let clickable = container(content)
                     .style(move |_theme| style.to_container_style())
@@ -466,7 +654,7 @@ impl SimilarPage {
                 let item_idx = ctx.item_index;
                 let cm_id = crate::app_message::ContextMenuId::SimilarRow(item_idx);
                 let (cm_open, cm_position) = open_state_for(open_menu_for_rows, &cm_id);
-                context_menu(
+                let cm = context_menu(
                     slot_button,
                     similar_entries(),
                     move |entry, length| {
@@ -485,8 +673,14 @@ impl SimilarPage {
                         )),
                         None => SimilarMessage::SetOpenMenu(None),
                     },
+                );
+                crate::widgets::slot_list::wrap_with_select_column(
+                    select_header_visible,
+                    ctx.is_selected,
+                    ctx.item_index,
+                    SimilarMessage::SlotListSelectionToggle,
+                    cm.into(),
                 )
-                .into()
             },
         );
 

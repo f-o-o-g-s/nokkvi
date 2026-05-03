@@ -508,6 +508,11 @@ impl Nokkvi {
                     },
                 );
             }
+            views::PlaylistsColumn::Select => {
+                self.shell_spawn("persist_playlists_show_select", move |shell| async move {
+                    shell.settings().set_playlists_show_select(value).await
+                });
+            }
         }
         Task::none()
     }

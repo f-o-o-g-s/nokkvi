@@ -40,6 +40,7 @@ pub struct QueuePage {
 /// columns stay always-on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueColumn {
+    Select,
     Index,
     Thumbnail,
     Stars,
@@ -53,6 +54,7 @@ pub enum QueueColumn {
 /// User-toggle state for each toggleable queue column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct QueueColumnVisibility {
+    pub select: bool,
     pub index: bool,
     pub thumbnail: bool,
     pub stars: bool,
@@ -66,6 +68,7 @@ pub struct QueueColumnVisibility {
 impl Default for QueueColumnVisibility {
     fn default() -> Self {
         Self {
+            select: false,
             index: true,
             thumbnail: true,
             stars: true,
@@ -81,6 +84,7 @@ impl Default for QueueColumnVisibility {
 impl QueueColumnVisibility {
     pub fn get(&self, col: QueueColumn) -> bool {
         match col {
+            QueueColumn::Select => self.select,
             QueueColumn::Index => self.index,
             QueueColumn::Thumbnail => self.thumbnail,
             QueueColumn::Stars => self.stars,
@@ -94,6 +98,7 @@ impl QueueColumnVisibility {
 
     pub fn set(&mut self, col: QueueColumn, value: bool) {
         match col {
+            QueueColumn::Select => self.select = value,
             QueueColumn::Index => self.index = value,
             QueueColumn::Thumbnail => self.thumbnail = value,
             QueueColumn::Stars => self.stars = value,
@@ -217,6 +222,13 @@ pub enum QueueMessage {
     SlotListScrollSeek(usize),
     SlotListActivateCenter,
     SlotListClickPlay(usize), // Click non-center to play directly (skip focus)
+    /// Click on a row's leading select checkbox — toggles `item_index` in the
+    /// page's `selected_indices` set. No play/highlight side effects.
+    SlotListSelectionToggle(usize),
+    /// Click on the tri-state "select all" header checkbox — fills the
+    /// selection set with every visible (filtered) row, or clears it when
+    /// every visible row is already selected.
+    SlotListSelectAllToggle,
     FocusCurrentPlaying(usize, bool), // Auto-scroll slot list to center currently playing track (by queue index, flash)
 
     // Mouse click on star/heart (item_index, value)
@@ -367,6 +379,14 @@ impl QueuePage {
             QueueMessage::SlotListClickPlay(offset) => {
                 self.common.handle_set_offset(offset, total_items);
                 self.update(QueueMessage::SlotListActivateCenter, queue_songs)
+            }
+            QueueMessage::SlotListSelectionToggle(offset) => {
+                self.common.handle_selection_toggle(offset, total_items);
+                (Task::none(), QueueAction::None)
+            }
+            QueueMessage::SlotListSelectAllToggle => {
+                self.common.handle_select_all_toggle(total_items);
+                (Task::none(), QueueAction::None)
             }
             QueueMessage::FocusCurrentPlaying(queue_index, flash) => {
                 // Auto-scroll slot list to center the currently playing track by queue index
@@ -628,6 +648,7 @@ impl QueuePage {
         let column_dropdown: Element<'a, QueueMessage> = {
             use crate::widgets::checkbox_dropdown::checkbox_dropdown;
             let items: Vec<(QueueColumn, &'static str, bool)> = vec![
+                (QueueColumn::Select, "Select", self.column_visibility.select),
                 (QueueColumn::Index, "Index", self.column_visibility.index),
                 (
                     QueueColumn::Thumbnail,
@@ -995,6 +1016,16 @@ impl QueuePage {
 
         let header: Element<'a, QueueMessage> = header;
 
+        // Compose with the tri-state "select all" header bar when the
+        // multi-select column is on. The bar's tri-state derives from the
+        // current selection set against the *filtered* (visible) row count.
+        let header = crate::widgets::slot_list::compose_header_with_select(
+            self.column_visibility.select,
+            self.common.select_all_state(data.queue_songs.len()),
+            QueueMessage::SlotListSelectAllToggle,
+            header,
+        );
+
         // Create layout config BEFORE empty checks to route empty states through
         // base_slot_list_layout, preserving the widget tree structure and search focus
         use crate::widgets::base_slot_list_layout::BaseSlotListLayoutConfig;
@@ -1017,13 +1048,23 @@ impl QueuePage {
         // Configure slot list with queue-specific chrome height (with view header now)
         // Edit mode adds a 44px bar + context bar adds 32px bar; account for the tallest so
         // the last slot isn't shorter than the rest.
-        use crate::widgets::slot_list::chrome_height_with_header;
+        use crate::widgets::slot_list::{
+            chrome_height_with_header, chrome_height_with_select_header,
+        };
+        let select_header_visible = self.column_visibility.select;
         let chrome_height = if data.edit_mode_info.is_some() {
             chrome_height_with_header() + 45.0 // 44px edit bar + 1px separator
         } else if data.playlist_context_info.is_some() {
             chrome_height_with_header() + 33.0 // 32px context bar + 1px separator
         } else {
-            chrome_height_with_header()
+            chrome_height_with_select_header(select_header_visible)
+        };
+        let chrome_height = if select_header_visible
+            && (data.edit_mode_info.is_some() || data.playlist_context_info.is_some())
+        {
+            chrome_height + crate::widgets::slot_list::SELECT_HEADER_HEIGHT
+        } else {
+            chrome_height
         };
         let config = SlotListConfig::with_dynamic_slots(data.window_height, chrome_height)
             .with_modifiers(data.modifiers);
@@ -1076,7 +1117,7 @@ impl QueuePage {
             // is gated by the queue panel's measured width rather than the full
             // window width. This is correct in split-view (Ctrl+E), where the
             // queue panel is roughly half the window.
-            iced::widget::responsive(move |size| {
+            let responsive_row = iced::widget::responsive(move |size| {
                 let panel_width = size.width;
 
                 // Re-clone owned values each layout pass: the responsive
@@ -1424,8 +1465,14 @@ impl QueuePage {
                     },
                 )
                 .into()
-            })
-            .into()
+            });
+            crate::widgets::slot_list::wrap_with_select_column(
+                column_visibility.select,
+                ctx.is_selected,
+                ctx.item_index,
+                QueueMessage::SlotListSelectionToggle,
+                responsive_row.into(),
+            )
         };
 
         // Build slot list content: always use DragColumn so we detect drag attempts

@@ -10,6 +10,7 @@ use crate::{
     Nokkvi,
     app_message::Message,
     state::SimilarSongsState,
+    views,
     views::{BrowsingPanel, BrowsingView, SimilarAction, SimilarMessage},
 };
 
@@ -105,10 +106,56 @@ impl Nokkvi {
                 // Top songs for artist — from within similar results
                 Task::done(Message::FindTopSongs { artist_name, label })
             }
+            SimilarAction::ColumnVisibilityChanged(col, value) => {
+                self.persist_similar_column_visibility(col, value)
+            }
             SimilarAction::None => Task::none(),
         };
 
         Task::batch([task, action_task])
+    }
+
+    /// Persist the user's similar column visibility toggle to config.toml +
+    /// redb via `AppService::settings()`. The page's in-memory state was
+    /// already mutated in `SimilarPage::update`.
+    pub(crate) fn persist_similar_column_visibility(
+        &self,
+        col: views::SimilarColumn,
+        value: bool,
+    ) -> Task<Message> {
+        match col {
+            views::SimilarColumn::Select => {
+                self.shell_spawn("persist_similar_show_select", move |shell| async move {
+                    shell.settings().set_similar_show_select(value).await
+                });
+            }
+            views::SimilarColumn::Index => {
+                self.shell_spawn("persist_similar_show_index", move |shell| async move {
+                    shell.settings().set_similar_show_index(value).await
+                });
+            }
+            views::SimilarColumn::Thumbnail => {
+                self.shell_spawn("persist_similar_show_thumbnail", move |shell| async move {
+                    shell.settings().set_similar_show_thumbnail(value).await
+                });
+            }
+            views::SimilarColumn::Album => {
+                self.shell_spawn("persist_similar_show_album", move |shell| async move {
+                    shell.settings().set_similar_show_album(value).await
+                });
+            }
+            views::SimilarColumn::Duration => {
+                self.shell_spawn("persist_similar_show_duration", move |shell| async move {
+                    shell.settings().set_similar_show_duration(value).await
+                });
+            }
+            views::SimilarColumn::Love => {
+                self.shell_spawn("persist_similar_show_love", move |shell| async move {
+                    shell.settings().set_similar_show_love(value).await
+                });
+            }
+        }
+        Task::none()
     }
 
     /// Handle "Find Similar" — opens browsing panel on Similar tab and fires API.

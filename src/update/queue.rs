@@ -816,6 +816,11 @@ impl Nokkvi {
                     shell.settings().set_queue_show_genre(value).await
                 });
             }
+            views::QueueColumn::Select => {
+                self.shell_spawn("persist_queue_show_select", move |shell| async move {
+                    shell.settings().set_queue_show_select(value).await
+                });
+            }
         }
         Task::none()
     }

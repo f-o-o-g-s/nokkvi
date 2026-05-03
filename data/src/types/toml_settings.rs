@@ -44,6 +44,8 @@ pub struct TomlSettings {
     pub queue_show_thumbnail: bool,
     #[serde(default)]
     pub queue_show_genre: bool,
+    #[serde(default)]
+    pub queue_show_select: bool,
 
     pub albums_show_stars: bool,
     pub albums_show_songcount: bool,
@@ -53,6 +55,8 @@ pub struct TomlSettings {
     pub albums_show_index: bool,
     #[serde(default = "default_true")]
     pub albums_show_thumbnail: bool,
+    #[serde(default)]
+    pub albums_show_select: bool,
 
     pub songs_show_stars: bool,
     pub songs_show_album: bool,
@@ -65,6 +69,8 @@ pub struct TomlSettings {
     pub songs_show_thumbnail: bool,
     #[serde(default)]
     pub songs_show_genre: bool,
+    #[serde(default)]
+    pub songs_show_select: bool,
 
     pub artists_show_stars: bool,
     pub artists_show_albumcount: bool,
@@ -75,6 +81,8 @@ pub struct TomlSettings {
     pub artists_show_index: bool,
     #[serde(default = "default_true")]
     pub artists_show_thumbnail: bool,
+    #[serde(default)]
+    pub artists_show_select: bool,
 
     // -- Genres view column toggles --
     #[serde(default = "default_true")]
@@ -85,6 +93,8 @@ pub struct TomlSettings {
     pub genres_show_albumcount: bool,
     #[serde(default = "default_true")]
     pub genres_show_songcount: bool,
+    #[serde(default)]
+    pub genres_show_select: bool,
 
     // -- Playlists view column toggles --
     #[serde(default = "default_true")]
@@ -97,6 +107,22 @@ pub struct TomlSettings {
     pub playlists_show_duration: bool,
     #[serde(default)]
     pub playlists_show_updatedat: bool,
+    #[serde(default)]
+    pub playlists_show_select: bool,
+
+    // -- Similar view column toggles (Find Similar / Top Songs results) --
+    #[serde(default = "default_true")]
+    pub similar_show_index: bool,
+    #[serde(default = "default_true")]
+    pub similar_show_thumbnail: bool,
+    #[serde(default = "default_true")]
+    pub similar_show_album: bool,
+    #[serde(default = "default_true")]
+    pub similar_show_duration: bool,
+    #[serde(default = "default_true")]
+    pub similar_show_love: bool,
+    #[serde(default)]
+    pub similar_show_select: bool,
 
     // -- Per-view artwork text overlay toggles --
     pub albums_artwork_overlay: bool,
@@ -242,12 +268,14 @@ impl Default for TomlSettings {
             queue_show_index: true,
             queue_show_thumbnail: true,
             queue_show_genre: false,
+            queue_show_select: false,
             albums_show_stars: false,
             albums_show_songcount: true,
             albums_show_plays: false,
             albums_show_love: true,
             albums_show_index: true,
             albums_show_thumbnail: true,
+            albums_show_select: false,
             songs_show_stars: false,
             songs_show_album: true,
             songs_show_duration: true,
@@ -256,6 +284,7 @@ impl Default for TomlSettings {
             songs_show_index: true,
             songs_show_thumbnail: true,
             songs_show_genre: false,
+            songs_show_select: false,
             artists_show_stars: true,
             artists_show_albumcount: true,
             artists_show_songcount: true,
@@ -263,15 +292,24 @@ impl Default for TomlSettings {
             artists_show_love: true,
             artists_show_index: true,
             artists_show_thumbnail: true,
+            artists_show_select: false,
             genres_show_index: true,
             genres_show_thumbnail: true,
             genres_show_albumcount: true,
             genres_show_songcount: true,
+            genres_show_select: false,
             playlists_show_index: true,
             playlists_show_thumbnail: true,
             playlists_show_songcount: false,
             playlists_show_duration: false,
             playlists_show_updatedat: false,
+            playlists_show_select: false,
+            similar_show_index: true,
+            similar_show_thumbnail: true,
+            similar_show_album: true,
+            similar_show_duration: true,
+            similar_show_love: true,
+            similar_show_select: false,
             albums_artwork_overlay: true,
             artists_artwork_overlay: true,
             songs_artwork_overlay: true,
@@ -343,12 +381,14 @@ impl TomlSettings {
             queue_show_index: ps.queue_show_index,
             queue_show_thumbnail: ps.queue_show_thumbnail,
             queue_show_genre: ps.queue_show_genre,
+            queue_show_select: ps.queue_show_select,
             albums_show_stars: ps.albums_show_stars,
             albums_show_songcount: ps.albums_show_songcount,
             albums_show_plays: ps.albums_show_plays,
             albums_show_love: ps.albums_show_love,
             albums_show_index: ps.albums_show_index,
             albums_show_thumbnail: ps.albums_show_thumbnail,
+            albums_show_select: ps.albums_show_select,
             songs_show_stars: ps.songs_show_stars,
             songs_show_album: ps.songs_show_album,
             songs_show_duration: ps.songs_show_duration,
@@ -357,6 +397,7 @@ impl TomlSettings {
             songs_show_index: ps.songs_show_index,
             songs_show_thumbnail: ps.songs_show_thumbnail,
             songs_show_genre: ps.songs_show_genre,
+            songs_show_select: ps.songs_show_select,
             artists_show_stars: ps.artists_show_stars,
             artists_show_albumcount: ps.artists_show_albumcount,
             artists_show_songcount: ps.artists_show_songcount,
@@ -364,15 +405,24 @@ impl TomlSettings {
             artists_show_love: ps.artists_show_love,
             artists_show_index: ps.artists_show_index,
             artists_show_thumbnail: ps.artists_show_thumbnail,
+            artists_show_select: ps.artists_show_select,
             genres_show_index: ps.genres_show_index,
             genres_show_thumbnail: ps.genres_show_thumbnail,
             genres_show_albumcount: ps.genres_show_albumcount,
             genres_show_songcount: ps.genres_show_songcount,
+            genres_show_select: ps.genres_show_select,
             playlists_show_index: ps.playlists_show_index,
             playlists_show_thumbnail: ps.playlists_show_thumbnail,
             playlists_show_songcount: ps.playlists_show_songcount,
             playlists_show_duration: ps.playlists_show_duration,
             playlists_show_updatedat: ps.playlists_show_updatedat,
+            playlists_show_select: ps.playlists_show_select,
+            similar_show_index: ps.similar_show_index,
+            similar_show_thumbnail: ps.similar_show_thumbnail,
+            similar_show_album: ps.similar_show_album,
+            similar_show_duration: ps.similar_show_duration,
+            similar_show_love: ps.similar_show_love,
+            similar_show_select: ps.similar_show_select,
             albums_artwork_overlay: ps.albums_artwork_overlay,
             artists_artwork_overlay: ps.artists_artwork_overlay,
             songs_artwork_overlay: ps.songs_artwork_overlay,

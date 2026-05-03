@@ -891,6 +891,8 @@ pub struct PlayerSettings {
     /// toggle. Falls into the album slot at album-size font when the album
     /// column is hidden.
     pub queue_show_genre: bool,
+    /// Whether the queue's leading multi-select checkbox column is visible.
+    pub queue_show_select: bool,
 
     // -- Albums view column toggles --
     pub albums_show_stars: bool,
@@ -899,6 +901,8 @@ pub struct PlayerSettings {
     pub albums_show_love: bool,
     pub albums_show_index: bool,
     pub albums_show_thumbnail: bool,
+    /// Whether the albums view's leading multi-select checkbox column is visible.
+    pub albums_show_select: bool,
 
     // -- Songs view column toggles --
     pub songs_show_stars: bool,
@@ -912,6 +916,8 @@ pub struct PlayerSettings {
     /// sort = Genre regardless of this toggle. Replaces the album slot at
     /// album-size font when the album column is hidden.
     pub songs_show_genre: bool,
+    /// Whether the songs view's leading multi-select checkbox column is visible.
+    pub songs_show_select: bool,
 
     // -- Artists view column toggles --
     pub artists_show_stars: bool,
@@ -921,12 +927,16 @@ pub struct PlayerSettings {
     pub artists_show_love: bool,
     pub artists_show_index: bool,
     pub artists_show_thumbnail: bool,
+    /// Whether the artists view's leading multi-select checkbox column is visible.
+    pub artists_show_select: bool,
 
     // -- Genres view column toggles --
     pub genres_show_index: bool,
     pub genres_show_thumbnail: bool,
     pub genres_show_albumcount: bool,
     pub genres_show_songcount: bool,
+    /// Whether the genres view's leading multi-select checkbox column is visible.
+    pub genres_show_select: bool,
 
     // -- Playlists view column toggles --
     pub playlists_show_index: bool,
@@ -934,6 +944,17 @@ pub struct PlayerSettings {
     pub playlists_show_songcount: bool,
     pub playlists_show_duration: bool,
     pub playlists_show_updatedat: bool,
+    /// Whether the playlists view's leading multi-select checkbox column is visible.
+    pub playlists_show_select: bool,
+
+    // -- Similar view column toggles --
+    pub similar_show_index: bool,
+    pub similar_show_thumbnail: bool,
+    pub similar_show_album: bool,
+    pub similar_show_duration: bool,
+    pub similar_show_love: bool,
+    /// Whether the similar view's leading multi-select checkbox column is visible.
+    pub similar_show_select: bool,
 
     // -- Per-view artwork text overlay toggles --
     /// Whether the metadata text overlay is rendered on the large artwork in Albums view.

@@ -191,6 +191,15 @@ pub(crate) const SLOT_LIST_COL_SPACING: f32 = 4.0;
 /// Standard width for the index column (supports up to 4 digits)
 pub(crate) const SLOT_LIST_INDEX_WIDTH: f32 = 60.0;
 
+/// Width reserved for the leading multi-select checkbox column. Wide enough
+/// to give the 16px box a comfortable click target with surrounding padding.
+pub(crate) const SLOT_LIST_SELECT_WIDTH: f32 = 40.0;
+
+/// Height of the tri-state "select all" header bar that appears above the
+/// slot list when the per-view select column is active. Subtracted from the
+/// slot list available height so slot count math stays correct.
+pub(crate) const SELECT_HEADER_HEIGHT: f32 = 24.0;
+
 /// Minimum row height before we try to reduce slot count (pixels)
 const MIN_COMFORTABLE_ROW_HEIGHT: f32 = 55.0;
 
@@ -683,6 +692,200 @@ pub(crate) fn slot_list_index_column<'a, Message: 'a>(
     .align_x(Alignment::Center)
     .align_y(Alignment::Center)
     .into()
+}
+
+/// Render the leading multi-select checkbox column for a slot list row.
+///
+/// The checkbox itself captures click events (publishes the toggle message
+/// and calls `shell.capture_event()`), so clicks on the checkbox don't
+/// propagate to the row's surrounding `mouse_area` play handler.
+pub(crate) fn slot_list_select_checkbox<'a, Message: 'a>(
+    is_checked: bool,
+    item_index: usize,
+    on_toggle: impl Fn(usize) -> Message + 'a,
+) -> Element<'a, Message> {
+    use iced::widget::checkbox;
+
+    let cb = checkbox::Checkbox::new(is_checked)
+        .size(16.0)
+        .spacing(0.0)
+        .on_toggle(move |_new_value| on_toggle(item_index))
+        .style(|_theme, status| {
+            let visually_checked = matches!(
+                status,
+                checkbox::Status::Active { is_checked: true }
+                    | checkbox::Status::Hovered { is_checked: true }
+                    | checkbox::Status::Disabled { is_checked: true }
+            );
+            checkbox::Style {
+                background: if visually_checked {
+                    theme::accent().into()
+                } else {
+                    theme::bg0_soft().into()
+                },
+                icon_color: theme::fg0(),
+                border: iced::Border {
+                    color: if visually_checked {
+                        theme::accent_bright()
+                    } else {
+                        theme::bg3()
+                    },
+                    width: 1.0,
+                    radius: theme::ui_border_radius(),
+                },
+                text_color: Some(theme::fg2()),
+            }
+        });
+
+    container(cb)
+        .width(Length::Fixed(SLOT_LIST_SELECT_WIDTH))
+        .height(Length::Fill)
+        .align_x(iced::Alignment::Center)
+        .align_y(iced::Alignment::Center)
+        .into()
+}
+
+/// Wrap a slot's main content with the leading select-checkbox column when
+/// the per-view "select" flag is on. Returns `inner` unchanged when the
+/// column is hidden.
+///
+/// The checkbox state mirrors `selected_indices` membership, regardless of
+/// how membership was set (ctrl/shift+click, the checkbox itself, or the
+/// header tri-state). Click on the checkbox dispatches `on_toggle(item_index)`.
+pub(crate) fn wrap_with_select_column<'a, Message: 'a>(
+    show: bool,
+    is_selected: bool,
+    item_index: usize,
+    on_toggle: impl Fn(usize) -> Message + 'a,
+    inner: Element<'a, Message>,
+) -> Element<'a, Message> {
+    if !show {
+        return inner;
+    }
+    use iced::widget::row;
+    let cb = slot_list_select_checkbox(is_selected, item_index, on_toggle);
+    row![cb, inner]
+        .align_y(iced::Alignment::Center)
+        .spacing(0.0)
+        .into()
+}
+
+/// Render the tri-state "select all" header bar that sits above the slot
+/// list when the per-view select column is active. Built from a `mouse_area`
+/// wrapping a custom container instead of `iced::widget::checkbox` so we
+/// can paint the partial-selection state with a visible dash, since iced's
+/// binary checkbox lacks a tri-state mode.
+pub(crate) fn slot_list_select_header<'a, Message: Clone + 'a>(
+    state: crate::widgets::slot_list_page::SelectAllState,
+    on_toggle: Message,
+) -> Element<'a, Message> {
+    use iced::{
+        Alignment, Length,
+        widget::{Space, container, mouse_area, row, svg},
+    };
+
+    use crate::widgets::slot_list_page::SelectAllState;
+
+    let visually_checked = state.is_checked_visual();
+    let bg_color = if visually_checked {
+        theme::accent()
+    } else {
+        theme::bg0_soft()
+    };
+    let border_color = if visually_checked {
+        theme::accent_bright()
+    } else {
+        theme::bg3()
+    };
+
+    let inner: Element<'a, Message> = match state {
+        SelectAllState::All => crate::embedded_svg::svg_widget("assets/icons/check.svg")
+            .width(Length::Fixed(12.0))
+            .height(Length::Fixed(12.0))
+            .style(|_, _| svg::Style {
+                color: Some(theme::fg0()),
+            })
+            .into(),
+        SelectAllState::Some => container(Space::new())
+            .width(Length::Fixed(10.0))
+            .height(Length::Fixed(2.0))
+            .style(|_| container::Style {
+                background: Some(theme::fg0().into()),
+                ..Default::default()
+            })
+            .into(),
+        SelectAllState::None => Space::new()
+            .width(Length::Fixed(0.0))
+            .height(Length::Fixed(0.0))
+            .into(),
+    };
+
+    let box_visual = container(inner)
+        .width(Length::Fixed(16.0))
+        .height(Length::Fixed(16.0))
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .style(move |_| container::Style {
+            background: Some(bg_color.into()),
+            border: iced::Border {
+                color: border_color,
+                width: 1.0,
+                radius: theme::ui_border_radius(),
+            },
+            ..Default::default()
+        });
+
+    let cb_cell = mouse_area(box_visual)
+        .on_press(on_toggle)
+        .interaction(iced::mouse::Interaction::Pointer);
+
+    container(
+        row![
+            container(cb_cell)
+                .width(Length::Fixed(SLOT_LIST_SELECT_WIDTH))
+                .height(Length::Fill)
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center),
+            Space::new().width(Length::Fill),
+        ]
+        .height(Length::Fill),
+    )
+    .height(Length::Fixed(SELECT_HEADER_HEIGHT))
+    .width(Length::Fill)
+    .style(|_| container::Style {
+        background: Some(theme::bg0_soft().into()),
+        ..Default::default()
+    })
+    .into()
+}
+
+/// Compose a view's existing header element with the tri-state select-all
+/// header bar below it. Returns `header` unchanged when the select column
+/// is off, so out-of-scope views keep their original layout.
+pub(crate) fn compose_header_with_select<'a, Message: Clone + 'a>(
+    show: bool,
+    state: crate::widgets::slot_list_page::SelectAllState,
+    on_toggle: Message,
+    header: Element<'a, Message>,
+) -> Element<'a, Message> {
+    if !show {
+        return header;
+    }
+    iced::widget::column![header, slot_list_select_header(state, on_toggle)]
+        .spacing(0)
+        .into()
+}
+
+/// Chrome height with optional select-header bar. Each view consults this
+/// instead of [`chrome_height_with_header`] when its select column may be
+/// active, so slot-count math accounts for the extra 24 px above the slots.
+pub(crate) fn chrome_height_with_select_header(select_header_visible: bool) -> f32 {
+    chrome_height_with_header()
+        + if select_header_visible {
+            SELECT_HEADER_HEIGHT
+        } else {
+            0.0
+        }
 }
 
 /// Render an artwork column for a slot list slot

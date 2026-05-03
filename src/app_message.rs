@@ -282,6 +282,10 @@ pub enum OpenMenu {
         view: View,
         trigger_bounds: iced::Rectangle,
     },
+    /// Similar's columns dropdown lives in the browsing panel only and lacks a
+    /// matching `View` variant, so it gets its own discriminator instead of
+    /// shoehorning a synthetic `View::Similar` through the rest of the app.
+    CheckboxDropdownSimilar { trigger_bounds: iced::Rectangle },
     /// Right-click context menu, anchored to the screen-space cursor position
     /// captured at click time. `id` disambiguates between widget instances
     /// (slot rows, browsing-panel rows, the now-playing strip), which matters

@@ -34,6 +34,7 @@ pub struct PlaylistsPage {
 /// mode is active regardless of the user toggle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlaylistsColumn {
+    Select,
     Index,
     Thumbnail,
     SongCount,
@@ -44,6 +45,7 @@ pub enum PlaylistsColumn {
 /// User-toggle state for each toggleable playlists column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlaylistsColumnVisibility {
+    pub select: bool,
     pub index: bool,
     pub thumbnail: bool,
     pub songcount: bool,
@@ -56,8 +58,10 @@ impl Default for PlaylistsColumnVisibility {
         // Index/Thumbnail historically always render. SongCount/Duration/
         // UpdatedAt historically only render when sorting by the matching
         // mode — keep that as the default to avoid surprising layout
-        // changes on first launch.
+        // changes on first launch. Select defaults off — opt-in discovery
+        // affordance for multi-selection.
         Self {
+            select: false,
             index: true,
             thumbnail: true,
             songcount: false,
@@ -70,6 +74,7 @@ impl Default for PlaylistsColumnVisibility {
 impl PlaylistsColumnVisibility {
     pub fn get(&self, col: PlaylistsColumn) -> bool {
         match col {
+            PlaylistsColumn::Select => self.select,
             PlaylistsColumn::Index => self.index,
             PlaylistsColumn::Thumbnail => self.thumbnail,
             PlaylistsColumn::SongCount => self.songcount,
@@ -80,6 +85,7 @@ impl PlaylistsColumnVisibility {
 
     pub fn set(&mut self, col: PlaylistsColumn, value: bool) {
         match col {
+            PlaylistsColumn::Select => self.select = value,
             PlaylistsColumn::Index => self.index = value,
             PlaylistsColumn::Thumbnail => self.thumbnail = value,
             PlaylistsColumn::SongCount => self.songcount = value,
@@ -210,7 +216,13 @@ pub enum PlaylistsMessage {
     SlotListScrollSeek(usize),
     SlotListActivateCenter,
     SlotListClickPlay(usize), // Click non-center to play directly (skip focus)
-    AddCenterToQueue,         // Add all songs from centered playlist to queue (Shift+A)
+    /// Click on a row's leading select checkbox — toggles `item_index` in
+    /// `selected_indices`. No play/highlight side effects.
+    SlotListSelectionToggle(usize),
+    /// Click on the tri-state "select all" header — fills selection with
+    /// every visible row, or clears if every visible row is already selected.
+    SlotListSelectAllToggle,
+    AddCenterToQueue, // Add all songs from centered playlist to queue (Shift+A)
 
     // Mouse click on heart
     ClickToggleStar(usize), // item_index
@@ -411,6 +423,14 @@ impl PlaylistsPage {
                         total_items,
                         playlists,
                     )
+                }
+                PlaylistsMessage::SlotListSelectionToggle(offset) => {
+                    self.common.handle_selection_toggle(offset, total_items);
+                    (Task::none(), PlaylistsAction::None)
+                }
+                PlaylistsMessage::SlotListSelectAllToggle => {
+                    self.common.handle_select_all_toggle(total_items);
+                    (Task::none(), PlaylistsAction::None)
                 }
                 PlaylistsMessage::SlotListActivateCenter => {
                     let total = self.expansion.flattened_len(playlists);
@@ -682,6 +702,11 @@ impl PlaylistsPage {
             use crate::widgets::checkbox_dropdown::checkbox_dropdown;
             let items: Vec<(PlaylistsColumn, &'static str, bool)> = vec![
                 (
+                    PlaylistsColumn::Select,
+                    "Select",
+                    self.column_visibility.select,
+                ),
+                (
                     PlaylistsColumn::Index,
                     "Index",
                     self.column_visibility.index,
@@ -755,6 +780,22 @@ impl PlaylistsPage {
             PlaylistsMessage::SearchQueryChanged,
         );
 
+        // Compose with the tri-state "select all" header bar when the
+        // multi-select column is on. Tri-state derives from the current
+        // selection set against the *flattened* (visible) row count.
+        let header = {
+            let flattened_len = self
+                .expansion
+                .build_flattened_list(data.playlists, |p| &p.id)
+                .len();
+            crate::widgets::slot_list::compose_header_with_select(
+                self.column_visibility.select,
+                self.common.select_all_state(flattened_len),
+                PlaylistsMessage::SlotListSelectAllToggle,
+                header,
+            )
+        };
+
         // Create layout config BEFORE empty checks to route empty states through
         // base_slot_list_layout, preserving the widget tree structure and search focus
         use crate::widgets::base_slot_list_layout::BaseSlotListLayoutConfig;
@@ -780,12 +821,15 @@ impl PlaylistsPage {
 
         // Configure slot list with playlists-specific chrome height (has view header)
         use crate::widgets::slot_list::{
-            SlotListConfig, chrome_height_with_header, slot_list_view_with_scroll,
+            SlotListConfig, chrome_height_with_select_header, slot_list_view_with_scroll,
         };
 
-        let config =
-            SlotListConfig::with_dynamic_slots(data.window_height, chrome_height_with_header())
-                .with_modifiers(data.modifiers);
+        let select_header_visible = self.column_visibility.select;
+        let config = SlotListConfig::with_dynamic_slots(
+            data.window_height,
+            chrome_height_with_select_header(select_header_visible),
+        )
+        .with_modifiers(data.modifiers);
 
         // Capture values needed in closure
         let playlists = data.playlists; // Borrow slice to extend lifetime
@@ -809,13 +853,22 @@ impl PlaylistsPage {
                 move |f| PlaylistsMessage::SlotListScrollSeek((f * total as f32) as usize)
             },
             |entry, ctx| match entry {
-                SlotListEntry::Parent(playlist) => self.render_playlist_row(
-                    playlist,
-                    &ctx,
-                    playlist_artwork,
-                    data.stable_viewport,
-                    open_menu_for_rows,
-                ),
+                SlotListEntry::Parent(playlist) => {
+                    let row = self.render_playlist_row(
+                        playlist,
+                        &ctx,
+                        playlist_artwork,
+                        data.stable_viewport,
+                        open_menu_for_rows,
+                    );
+                    crate::widgets::slot_list::wrap_with_select_column(
+                        select_header_visible,
+                        ctx.is_selected,
+                        ctx.item_index,
+                        PlaylistsMessage::SlotListSelectionToggle,
+                        row,
+                    )
+                }
                 SlotListEntry::Child(song, _parent_playlist_id) => {
                     self.render_track_row(song, &ctx, data.stable_viewport)
                 }

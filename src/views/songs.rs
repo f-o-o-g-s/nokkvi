@@ -27,6 +27,7 @@ pub struct SongsPage {
 /// and Plays are now dedicated columns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SongsColumn {
+    Select,
     Index,
     Thumbnail,
     Stars,
@@ -39,6 +40,7 @@ pub enum SongsColumn {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SongsColumnVisibility {
+    pub select: bool,
     pub index: bool,
     pub thumbnail: bool,
     pub stars: bool,
@@ -54,7 +56,9 @@ impl Default for SongsColumnVisibility {
         // Stars and Plays opt-in; Album/Duration/Love always-on today.
         // Index/Thumbnail default on to match historical always-on rendering.
         // Genre opt-in; auto-shows when sort = Genre regardless of toggle.
+        // Select opt-in — checkbox column for multi-selection.
         Self {
+            select: false,
             index: true,
             thumbnail: true,
             stars: false,
@@ -70,6 +74,7 @@ impl Default for SongsColumnVisibility {
 impl SongsColumnVisibility {
     pub fn get(&self, col: SongsColumn) -> bool {
         match col {
+            SongsColumn::Select => self.select,
             SongsColumn::Index => self.index,
             SongsColumn::Thumbnail => self.thumbnail,
             SongsColumn::Stars => self.stars,
@@ -83,6 +88,7 @@ impl SongsColumnVisibility {
 
     pub fn set(&mut self, col: SongsColumn, value: bool) {
         match col {
+            SongsColumn::Select => self.select = value,
             SongsColumn::Index => self.index = value,
             SongsColumn::Thumbnail => self.thumbnail = value,
             SongsColumn::Stars => self.stars = value,
@@ -143,7 +149,13 @@ pub enum SongsMessage {
     SlotListScrollSeek(usize),
     SlotListActivateCenter,
     SlotListClickPlay(usize), // Click non-center to play directly (skip focus)
-    AddCenterToQueue,         // Add centered song to queue (Shift+Q)
+    /// Click on a row's leading select checkbox — toggles `item_index` in
+    /// `selected_indices`. No play/highlight side effects.
+    SlotListSelectionToggle(usize),
+    /// Click on the tri-state "select all" header — fills selection with
+    /// every visible row, or clears if every visible row is already selected.
+    SlotListSelectAllToggle,
+    AddCenterToQueue, // Add centered song to queue (Shift+Q)
 
     // Mouse click on star/heart (item_index, value)
     ClickSetRating(usize, usize), // (item_index, rating 1-5)
@@ -342,6 +354,14 @@ impl SongsPage {
                 self.common.handle_set_offset(offset, total_items);
                 self.update(SongsMessage::SlotListActivateCenter, songs)
             }
+            SongsMessage::SlotListSelectionToggle(offset) => {
+                self.common.handle_selection_toggle(offset, total_items);
+                (Task::none(), SongsAction::None)
+            }
+            SongsMessage::SlotListSelectAllToggle => {
+                self.common.handle_select_all_toggle(total_items);
+                (Task::none(), SongsAction::None)
+            }
             SongsMessage::AddCenterToQueue => {
                 use nokkvi_data::types::batch::BatchItem;
 
@@ -527,6 +547,7 @@ impl SongsPage {
         let column_dropdown: Element<'a, SongsMessage> = {
             use crate::widgets::checkbox_dropdown::checkbox_dropdown;
             let items: Vec<(SongsColumn, &'static str, bool)> = vec![
+                (SongsColumn::Select, "Select", self.column_visibility.select),
                 (SongsColumn::Index, "Index", self.column_visibility.index),
                 (
                     SongsColumn::Thumbnail,
@@ -584,6 +605,16 @@ impl SongsPage {
             SongsMessage::SearchQueryChanged,
         );
 
+        // Compose with the tri-state "select all" header bar when the
+        // multi-select column is on. Tri-state derives from the current
+        // selection set against the *visible* (filtered) row count.
+        let header = crate::widgets::slot_list::compose_header_with_select(
+            self.column_visibility.select,
+            self.common.select_all_state(data.songs.len()),
+            SongsMessage::SlotListSelectAllToggle,
+            header,
+        );
+
         // Create layout config BEFORE empty checks to route empty states through
         // base_slot_list_layout, preserving the widget tree structure and search focus
         use crate::widgets::base_slot_list_layout::BaseSlotListLayoutConfig;
@@ -609,12 +640,15 @@ impl SongsPage {
 
         // Configure slot list with songs-specific chrome height (has view header)
         use crate::widgets::slot_list::{
-            SlotListConfig, chrome_height_with_header, slot_list_view_with_scroll,
+            SlotListConfig, chrome_height_with_select_header, slot_list_view_with_scroll,
         };
 
-        let config =
-            SlotListConfig::with_dynamic_slots(data.window_height, chrome_height_with_header())
-                .with_modifiers(data.modifiers);
+        let select_header_visible = self.column_visibility.select;
+        let config = SlotListConfig::with_dynamic_slots(
+            data.window_height,
+            chrome_height_with_select_header(select_header_visible),
+        )
+        .with_modifiers(data.modifiers);
 
         // Capture values needed in closure
         let songs = data.songs;
@@ -928,7 +962,7 @@ impl SongsPage {
                     item_index: item_idx,
                 };
                 let (cm_open, cm_position) = open_state_for(open_menu_for_rows, &cm_id);
-                context_menu(
+                let cm = context_menu(
                     slot_button,
                     song_entries_with_folder(),
                     move |entry, length| {
@@ -947,8 +981,14 @@ impl SongsPage {
                         }
                         None => SongsMessage::SetOpenMenu(None),
                     },
+                );
+                crate::widgets::slot_list::wrap_with_select_column(
+                    select_header_visible,
+                    ctx.is_selected,
+                    ctx.item_index,
+                    SongsMessage::SlotListSelectionToggle,
+                    cm.into(),
                 )
-                .into()
             },
         );
 

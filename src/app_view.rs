@@ -31,6 +31,18 @@ fn column_dropdown_state(
     }
 }
 
+/// Sibling of [`column_dropdown_state`] for the Similar view, which uses its
+/// own `OpenMenu` variant because it has no matching `View` enum value.
+fn similar_column_dropdown_state(
+    open_menu: &Option<crate::app_message::OpenMenu>,
+) -> (bool, Option<iced::Rectangle>) {
+    use crate::app_message::OpenMenu;
+    match open_menu {
+        Some(OpenMenu::CheckboxDropdownSimilar { trigger_bounds }) => (true, Some(*trigger_bounds)),
+        _ => (false, None),
+    }
+}
+
 /// Extract `(is_open, position)` for the now-playing strip context menu (only
 /// one strip is on-screen at a time, so the `Strip` id is unambiguous).
 fn strip_context_state(
@@ -813,6 +825,8 @@ impl Nokkvi {
                 // Delegate to the active view's existing page
                 let view_content: Element<'_, Message> = match panel.active_view {
                     views::BrowsingView::Albums => {
+                        let (column_dropdown_open, column_dropdown_trigger_bounds) =
+                            column_dropdown_state(&self.open_menu, View::Albums);
                         let view_data = views::AlbumsViewData {
                             albums: &self.library.albums,
                             album_art: &self.artwork.album_art_snapshot,
@@ -825,16 +839,19 @@ impl Nokkvi {
                             total_album_count: self.library.counts.albums,
                             loading: self.library.albums.is_loading(),
                             stable_viewport: true, // Browser pane: click to highlight, not play
-                            // Column dropdown is suppressed in browsing-panel
-                            // renders; the same dropdown rendered in the main
-                            // view owns the open state.
-                            column_dropdown_open: false,
-                            column_dropdown_trigger_bounds: None,
+                            // The browsing panel only renders while the main
+                            // pane is on Queue, so there is no main-pane
+                            // Albums dropdown to compete with — claim the
+                            // open-state directly via `View::Albums`.
+                            column_dropdown_open,
+                            column_dropdown_trigger_bounds,
                             open_menu: self.open_menu.as_ref(),
                         };
                         self.albums_page.view(view_data).map(Message::Albums)
                     }
                     views::BrowsingView::Songs => {
+                        let (column_dropdown_open, column_dropdown_trigger_bounds) =
+                            column_dropdown_state(&self.open_menu, View::Songs);
                         let view_data = views::SongsViewData {
                             songs: &self.library.songs,
                             album_art: &self.artwork.album_art_snapshot,
@@ -847,13 +864,15 @@ impl Nokkvi {
                             total_song_count: self.library.counts.songs,
                             loading: self.library.songs.is_loading(),
                             stable_viewport: true, // Browser pane: click to highlight, not play
-                            column_dropdown_open: false,
-                            column_dropdown_trigger_bounds: None,
+                            column_dropdown_open,
+                            column_dropdown_trigger_bounds,
                             open_menu: self.open_menu.as_ref(),
                         };
                         self.songs_page.view(view_data).map(Message::Songs)
                     }
                     views::BrowsingView::Artists => {
+                        let (column_dropdown_open, column_dropdown_trigger_bounds) =
+                            column_dropdown_state(&self.open_menu, View::Artists);
                         let view_data = views::ArtistsViewData {
                             artists: &self.library.artists,
                             artist_art: &self.artwork.album_art_snapshot,
@@ -867,13 +886,15 @@ impl Nokkvi {
                             total_artist_count: self.library.counts.artists,
                             loading: self.library.artists.is_loading(),
                             stable_viewport: true, // Browser pane: click to highlight, not play
-                            column_dropdown_open: false,
-                            column_dropdown_trigger_bounds: None,
+                            column_dropdown_open,
+                            column_dropdown_trigger_bounds,
                             open_menu: self.open_menu.as_ref(),
                         };
                         self.artists_page.view(view_data).map(Message::Artists)
                     }
                     views::BrowsingView::Genres => {
+                        let (column_dropdown_open, column_dropdown_trigger_bounds) =
+                            column_dropdown_state(&self.open_menu, View::Genres);
                         let view_data = views::GenresViewData {
                             genres: &self.library.genres,
                             genre_artwork: &self.artwork.genre.mini,
@@ -886,8 +907,8 @@ impl Nokkvi {
                             total_genre_count: self.library.counts.genres,
                             loading: self.library.genres.is_loading(),
                             stable_viewport: true, // Browser pane: click to highlight, not play
-                            column_dropdown_open: false,
-                            column_dropdown_trigger_bounds: None,
+                            column_dropdown_open,
+                            column_dropdown_trigger_bounds,
                             open_menu: self.open_menu.as_ref(),
                         };
                         self.genres_page.view(view_data).map(Message::Genres)
@@ -897,6 +918,8 @@ impl Nokkvi {
                             Some(s) => (s.songs.as_slice(), s.label.as_str(), s.loading),
                             None => (&[][..], "", false),
                         };
+                        let (column_dropdown_open, column_dropdown_trigger_bounds) =
+                            similar_column_dropdown_state(&self.open_menu);
                         let view_data = views::SimilarViewData {
                             songs,
                             album_art: &self.artwork.album_art_snapshot,
@@ -908,6 +931,8 @@ impl Nokkvi {
                             label,
                             loading,
                             open_menu: self.open_menu.as_ref(),
+                            column_dropdown_open,
+                            column_dropdown_trigger_bounds,
                         };
                         self.similar_page.view(view_data).map(Message::Similar)
                     }

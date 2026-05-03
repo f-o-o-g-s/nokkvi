@@ -244,12 +244,14 @@ impl SettingsService {
     delegate_setter!(set_queue_show_index, bool);
     delegate_setter!(set_queue_show_thumbnail, bool);
     delegate_setter!(set_queue_show_genre, bool);
+    delegate_setter!(set_queue_show_select, bool);
     delegate_setter!(set_albums_show_stars, bool);
     delegate_setter!(set_albums_show_songcount, bool);
     delegate_setter!(set_albums_show_plays, bool);
     delegate_setter!(set_albums_show_love, bool);
     delegate_setter!(set_albums_show_index, bool);
     delegate_setter!(set_albums_show_thumbnail, bool);
+    delegate_setter!(set_albums_show_select, bool);
     delegate_setter!(set_songs_show_stars, bool);
     delegate_setter!(set_songs_show_album, bool);
     delegate_setter!(set_songs_show_duration, bool);
@@ -258,6 +260,7 @@ impl SettingsService {
     delegate_setter!(set_songs_show_index, bool);
     delegate_setter!(set_songs_show_thumbnail, bool);
     delegate_setter!(set_songs_show_genre, bool);
+    delegate_setter!(set_songs_show_select, bool);
     delegate_setter!(set_artists_show_stars, bool);
     delegate_setter!(set_artists_show_albumcount, bool);
     delegate_setter!(set_artists_show_songcount, bool);
@@ -265,15 +268,24 @@ impl SettingsService {
     delegate_setter!(set_artists_show_love, bool);
     delegate_setter!(set_artists_show_index, bool);
     delegate_setter!(set_artists_show_thumbnail, bool);
+    delegate_setter!(set_artists_show_select, bool);
     delegate_setter!(set_genres_show_index, bool);
     delegate_setter!(set_genres_show_thumbnail, bool);
     delegate_setter!(set_genres_show_albumcount, bool);
     delegate_setter!(set_genres_show_songcount, bool);
+    delegate_setter!(set_genres_show_select, bool);
     delegate_setter!(set_playlists_show_index, bool);
     delegate_setter!(set_playlists_show_thumbnail, bool);
     delegate_setter!(set_playlists_show_songcount, bool);
     delegate_setter!(set_playlists_show_duration, bool);
     delegate_setter!(set_playlists_show_updatedat, bool);
+    delegate_setter!(set_playlists_show_select, bool);
+    delegate_setter!(set_similar_show_index, bool);
+    delegate_setter!(set_similar_show_thumbnail, bool);
+    delegate_setter!(set_similar_show_album, bool);
+    delegate_setter!(set_similar_show_duration, bool);
+    delegate_setter!(set_similar_show_love, bool);
+    delegate_setter!(set_similar_show_select, bool);
 
     // -- Volume normalization / ReplayGain --
     delegate_setter!(set_volume_normalization, VolumeNormalizationMode);

@@ -207,6 +207,9 @@ pub struct PlayerSettings {
     /// hidden, the genre takes its slot at album-size font.
     #[serde(default)]
     pub queue_show_genre: bool,
+    /// Leading multi-select checkbox column (default: false).
+    #[serde(default)]
+    pub queue_show_select: bool,
 
     // -- Albums view column toggles --
     /// Stars column. Auto-shows when sort = Rating regardless of toggle.
@@ -227,6 +230,9 @@ pub struct PlayerSettings {
     /// Leading thumbnail column.
     #[serde(default = "default_true")]
     pub albums_show_thumbnail: bool,
+    /// Leading multi-select checkbox column (default: false).
+    #[serde(default)]
+    pub albums_show_select: bool,
 
     // -- Songs view column toggles --
     /// Stars column. Auto-shows when sort = Rating regardless of toggle.
@@ -255,6 +261,9 @@ pub struct PlayerSettings {
     /// album-size font when the album column is hidden.
     #[serde(default)]
     pub songs_show_genre: bool,
+    /// Leading multi-select checkbox column (default: false).
+    #[serde(default)]
+    pub songs_show_select: bool,
 
     // -- Artists view column toggles --
     /// Stars column. Auto-shows when sort = Rating regardless of toggle.
@@ -278,6 +287,9 @@ pub struct PlayerSettings {
     /// Leading thumbnail column.
     #[serde(default = "default_true")]
     pub artists_show_thumbnail: bool,
+    /// Leading multi-select checkbox column (default: false).
+    #[serde(default)]
+    pub artists_show_select: bool,
 
     // -- Genres view column toggles --
     /// Leading row-index column.
@@ -293,6 +305,9 @@ pub struct PlayerSettings {
     /// Song-count column.
     #[serde(default = "default_true")]
     pub genres_show_songcount: bool,
+    /// Leading multi-select checkbox column (default: false).
+    #[serde(default)]
+    pub genres_show_select: bool,
 
     // -- Playlists view column toggles --
     /// Leading row-index column.
@@ -310,6 +325,29 @@ pub struct PlayerSettings {
     /// Updated-at column. Auto-shows when sort = UpdatedAt regardless of toggle.
     #[serde(default)]
     pub playlists_show_updatedat: bool,
+    /// Leading multi-select checkbox column (default: false).
+    #[serde(default)]
+    pub playlists_show_select: bool,
+
+    // -- Similar view column toggles (Find Similar / Top Songs results) --
+    /// Leading row-index column.
+    #[serde(default = "default_true")]
+    pub similar_show_index: bool,
+    /// Leading thumbnail column.
+    #[serde(default = "default_true")]
+    pub similar_show_thumbnail: bool,
+    /// Album column.
+    #[serde(default = "default_true")]
+    pub similar_show_album: bool,
+    /// Duration column.
+    #[serde(default = "default_true")]
+    pub similar_show_duration: bool,
+    /// Heart (favorite) column.
+    #[serde(default = "default_true")]
+    pub similar_show_love: bool,
+    /// Leading multi-select checkbox column (default: false).
+    #[serde(default)]
+    pub similar_show_select: bool,
 
     // -- Per-view artwork text overlay toggles --
     /// Whether the metadata text overlay is rendered on the large artwork in Albums view.
@@ -454,12 +492,14 @@ impl Default for PlayerSettings {
             queue_show_index: true,
             queue_show_thumbnail: true,
             queue_show_genre: false,
+            queue_show_select: false,
             albums_show_stars: false,
             albums_show_songcount: true,
             albums_show_plays: false,
             albums_show_love: true,
             albums_show_index: true,
             albums_show_thumbnail: true,
+            albums_show_select: false,
             songs_show_stars: false,
             songs_show_album: true,
             songs_show_duration: true,
@@ -468,6 +508,7 @@ impl Default for PlayerSettings {
             songs_show_index: true,
             songs_show_thumbnail: true,
             songs_show_genre: false,
+            songs_show_select: false,
             artists_show_stars: true,
             artists_show_albumcount: true,
             artists_show_songcount: true,
@@ -475,15 +516,24 @@ impl Default for PlayerSettings {
             artists_show_love: true,
             artists_show_index: true,
             artists_show_thumbnail: true,
+            artists_show_select: false,
             genres_show_index: true,
             genres_show_thumbnail: true,
             genres_show_albumcount: true,
             genres_show_songcount: true,
+            genres_show_select: false,
             playlists_show_index: true,
             playlists_show_thumbnail: true,
             playlists_show_songcount: false,
             playlists_show_duration: false,
             playlists_show_updatedat: false,
+            playlists_show_select: false,
+            similar_show_index: true,
+            similar_show_thumbnail: true,
+            similar_show_album: true,
+            similar_show_duration: true,
+            similar_show_love: true,
+            similar_show_select: false,
             albums_artwork_overlay: true,
             artists_artwork_overlay: true,
             songs_artwork_overlay: true,

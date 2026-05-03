@@ -36,6 +36,7 @@ pub struct AlbumsPage {
 /// sorted by those modes — Stars and Plays are now dedicated columns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlbumsColumn {
+    Select,
     Index,
     Thumbnail,
     Stars,
@@ -47,6 +48,7 @@ pub enum AlbumsColumn {
 /// User-toggle state for each toggleable albums column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AlbumsColumnVisibility {
+    pub select: bool,
     pub index: bool,
     pub thumbnail: bool,
     pub stars: bool,
@@ -60,8 +62,10 @@ impl Default for AlbumsColumnVisibility {
         // Stars and Plays default off — today they only appear when their
         // sort mode is active. SongCount and Love default on (always-shown
         // today). Index/Thumbnail default on to match historical always-on
-        // rendering of those leading columns.
+        // rendering of those leading columns. Select defaults off — opt-in
+        // discovery affordance for multi-selection.
         Self {
+            select: false,
             index: true,
             thumbnail: true,
             stars: false,
@@ -75,6 +79,7 @@ impl Default for AlbumsColumnVisibility {
 impl AlbumsColumnVisibility {
     pub fn get(&self, col: AlbumsColumn) -> bool {
         match col {
+            AlbumsColumn::Select => self.select,
             AlbumsColumn::Index => self.index,
             AlbumsColumn::Thumbnail => self.thumbnail,
             AlbumsColumn::Stars => self.stars,
@@ -86,6 +91,7 @@ impl AlbumsColumnVisibility {
 
     pub fn set(&mut self, col: AlbumsColumn, value: bool) {
         match col {
+            AlbumsColumn::Select => self.select = value,
             AlbumsColumn::Index => self.index = value,
             AlbumsColumn::Thumbnail => self.thumbnail = value,
             AlbumsColumn::Stars => self.stars = value,
@@ -142,7 +148,13 @@ pub enum AlbumsMessage {
     SlotListScrollSeek(usize),
     SlotListActivateCenter,
     SlotListClickPlay(usize), // Click non-center to play directly (skip focus)
-    AddCenterToQueue,         // Add centered album to queue (Shift+Q)
+    /// Click on a row's leading select checkbox — toggles `item_index` in
+    /// `selected_indices`. No play/highlight side effects.
+    SlotListSelectionToggle(usize),
+    /// Click on the tri-state "select all" header — fills selection with
+    /// every visible row, or clears if every visible row is already selected.
+    SlotListSelectAllToggle,
+    AddCenterToQueue, // Add centered album to queue (Shift+Q)
 
     // Mouse click on star/heart (item_index, value)
     ClickSetRating(usize, usize), // (item_index, rating 1-5)
@@ -376,6 +388,14 @@ impl AlbumsPage {
                     self.expansion
                         .handle_set_offset(offset, albums, &mut self.common);
                     self.update(AlbumsMessage::SlotListActivateCenter, total_items, albums)
+                }
+                AlbumsMessage::SlotListSelectionToggle(offset) => {
+                    self.common.handle_selection_toggle(offset, total_items);
+                    (Task::none(), AlbumsAction::None)
+                }
+                AlbumsMessage::SlotListSelectAllToggle => {
+                    self.common.handle_select_all_toggle(total_items);
+                    (Task::none(), AlbumsAction::None)
                 }
                 AlbumsMessage::SlotListActivateCenter => {
                     let total = self.expansion.flattened_len(albums);
@@ -658,6 +678,11 @@ impl AlbumsPage {
         let column_dropdown: Element<'a, AlbumsMessage> = {
             use crate::widgets::checkbox_dropdown::checkbox_dropdown;
             let items: Vec<(AlbumsColumn, &'static str, bool)> = vec![
+                (
+                    AlbumsColumn::Select,
+                    "Select",
+                    self.column_visibility.select,
+                ),
                 (AlbumsColumn::Index, "Index", self.column_visibility.index),
                 (
                     AlbumsColumn::Thumbnail,
@@ -713,6 +738,22 @@ impl AlbumsPage {
             AlbumsMessage::SearchQueryChanged,
         );
 
+        // Compose with the tri-state "select all" header bar when the
+        // multi-select column is on. Tri-state derives from the current
+        // selection set against the *flattened* (visible) row count.
+        let header = {
+            let flattened_len = self
+                .expansion
+                .build_flattened_list(data.albums, |a| &a.id)
+                .len();
+            crate::widgets::slot_list::compose_header_with_select(
+                self.column_visibility.select,
+                self.common.select_all_state(flattened_len),
+                AlbumsMessage::SlotListSelectAllToggle,
+                header,
+            )
+        };
+
         // Create layout config BEFORE empty checks to route empty states through
         // base_slot_list_layout, preserving the widget tree structure and search focus
         use crate::widgets::base_slot_list_layout::BaseSlotListLayoutConfig;
@@ -738,12 +779,15 @@ impl AlbumsPage {
 
         // Configure slot list with albums-specific chrome height (has view header)
         use crate::widgets::slot_list::{
-            SlotListConfig, chrome_height_with_header, slot_list_view_with_scroll,
+            SlotListConfig, chrome_height_with_select_header, slot_list_view_with_scroll,
         };
 
-        let config =
-            SlotListConfig::with_dynamic_slots(data.window_height, chrome_height_with_header())
-                .with_modifiers(data.modifiers);
+        let select_header_visible = self.column_visibility.select;
+        let config = SlotListConfig::with_dynamic_slots(
+            data.window_height,
+            chrome_height_with_select_header(select_header_visible),
+        )
+        .with_modifiers(data.modifiers);
 
         // Capture values needed in closure
         let _scale_factor = data.scale_factor;
@@ -767,14 +811,23 @@ impl AlbumsPage {
                 move |f| AlbumsMessage::SlotListScrollSeek((f * total as f32) as usize)
             },
             |entry, ctx| match entry {
-                SlotListEntry::Parent(album) => self.render_album_row(
-                    album,
-                    &ctx,
-                    album_art,
-                    current_sort_mode,
-                    data.stable_viewport,
-                    data.open_menu,
-                ),
+                SlotListEntry::Parent(album) => {
+                    let row = self.render_album_row(
+                        album,
+                        &ctx,
+                        album_art,
+                        current_sort_mode,
+                        data.stable_viewport,
+                        data.open_menu,
+                    );
+                    crate::widgets::slot_list::wrap_with_select_column(
+                        select_header_visible,
+                        ctx.is_selected,
+                        ctx.item_index,
+                        AlbumsMessage::SlotListSelectionToggle,
+                        row,
+                    )
+                }
                 SlotListEntry::Child(song, _parent_album_id) => {
                     self.render_track_row(song, &ctx, data.stable_viewport, data.open_menu)
                 }
