@@ -34,6 +34,11 @@ impl Nokkvi {
         match result {
             Ok(songs) => {
                 self.library.queue_songs = songs;
+                // Drop any stale multi-selection — the new contents may not
+                // line up with the rows the user had selected before the
+                // reload (consume-mode advance, SSE refresh, navigation).
+                self.queue_page.common.slot_list.selected_indices.clear();
+                self.queue_page.common.slot_list.anchor_index = None;
 
                 // Load artwork for queue songs using canonical prefetch
                 let mut tasks: Vec<Task<Message>> = Vec::new();
@@ -356,62 +361,50 @@ impl Nokkvi {
                     shell.queue().refresh_from_queue().await
                 });
             }
-            QueueAction::RemoveFromQueue(indices) => {
-                let mut raw_indices_desc: Vec<usize> = indices
-                    .iter()
-                    .filter_map(|&idx| filtered_queue.get(idx).map(|s| s.track_number as usize - 1))
-                    .collect();
-                if raw_indices_desc.is_empty() {
+            QueueAction::RemoveFromQueue(song_ids) => {
+                if song_ids.is_empty() {
                     return Task::none();
                 }
-                raw_indices_desc.sort_unstable_by(|a, b| b.cmp(a)); // Descending
 
-                let title_text = if raw_indices_desc.len() == 1 {
+                let title_text = if song_ids.len() == 1 {
                     self.library
                         .queue_songs
-                        .get(raw_indices_desc[0])
+                        .iter()
+                        .find(|s| s.id == song_ids[0])
                         .map(|s| format!("\"{}\"", s.title))
                         .unwrap_or_default()
                 } else {
-                    format!("{} songs", raw_indices_desc.len())
+                    format!("{} songs", song_ids.len())
                 };
 
-                // Optimistic local removal
-                for &qi in &raw_indices_desc {
-                    if qi < self.library.queue_songs.len() {
-                        self.library.queue_songs.remove(qi);
-                    }
-                }
+                // Optimistic local removal — ID lookup is immune to stale
+                // `track_number` left behind by previous in-place mutations.
+                let id_set: std::collections::HashSet<&str> =
+                    song_ids.iter().map(|s| s.as_str()).collect();
+                self.library
+                    .queue_songs
+                    .retain(|s| !id_set.contains(s.id.as_str()));
                 self.toast_info(format!("Removed {title_text} from queue"));
 
                 self.shell_spawn("queue_remove_batch", move |shell| async move {
-                    let qm_arc = shell.queue().queue_manager();
-                    let mut qm = qm_arc.lock().await;
-                    for &qi in &raw_indices_desc {
-                        qm.remove_song(qi).ok();
-                    }
-                    drop(qm);
+                    shell.queue().remove_songs_by_ids(&song_ids).await?;
                     shell.queue().refresh_from_queue().await
                 });
             }
-            QueueAction::PlayNext(indices) => {
-                let mut raw_indices_desc: Vec<usize> = indices
-                    .iter()
-                    .filter_map(|&idx| filtered_queue.get(idx).map(|s| s.track_number as usize - 1))
-                    .collect();
-                if raw_indices_desc.is_empty() {
+            QueueAction::PlayNext(song_ids) => {
+                if song_ids.is_empty() {
                     return Task::none();
                 }
-                raw_indices_desc.sort_unstable_by(|a, b| b.cmp(a)); // Descending
 
-                let title_text = if raw_indices_desc.len() == 1 {
+                let title_text = if song_ids.len() == 1 {
                     self.library
                         .queue_songs
-                        .get(raw_indices_desc[0])
+                        .iter()
+                        .find(|s| s.id == song_ids[0])
                         .map(|s| format!("\"{}\"", s.title))
                         .unwrap_or_default()
                 } else {
-                    format!("{} songs", raw_indices_desc.len())
+                    format!("{} songs", song_ids.len())
                 };
 
                 self.toast_info(format!("{title_text} will play next"));
@@ -419,22 +412,16 @@ impl Nokkvi {
                     self.toast_warn("Shuffle is on — next tracks will be random, not these");
                 }
 
-                // Skip optimistic UI for PlayNext as it requires dynamic target resolution, just rely on backend sync
+                // Skip optimistic UI for PlayNext — target slot depends on the
+                // current playing index, which lives in the backend.
                 self.shell_spawn("queue_play_next_batch", move |shell| async move {
                     let qm_arc = shell.queue().queue_manager();
                     let mut qm = qm_arc.lock().await;
-                    let mut extracted = Vec::new();
-                    for &qi in &raw_indices_desc {
-                        if let Some(id) = qm.get_queue().song_ids.get(qi).cloned()
-                            && let Some(song) = qm.get_song(&id)
-                        {
-                            extracted.push(song.clone());
-                        }
-                    }
-                    for &qi in &raw_indices_desc {
-                        qm.remove_song(qi).ok();
-                    }
-                    extracted.reverse(); // Now ascending
+                    let extracted: Vec<_> = song_ids
+                        .iter()
+                        .filter_map(|id| qm.get_song(id).cloned())
+                        .collect();
+                    qm.remove_songs_by_ids(&song_ids).ok();
                     qm.insert_after_current(extracted).ok();
                     drop(qm);
                     shell.queue().refresh_from_queue().await
@@ -730,11 +717,15 @@ impl Nokkvi {
 
     /// Sort the queue locally, re-filter, re-center on the playing song,
     /// and dispatch a backend reorder + persist task.
-    fn apply_queue_sort(
+    pub(crate) fn apply_queue_sort(
         &mut self,
         sort_mode: QueueSortMode,
         ascending: bool,
     ) -> std::borrow::Cow<'_, [QueueSongUIViewData]> {
+        // Drop any multi-selection — the in-place reorder leaves the indices
+        // pointing at different songs.
+        self.queue_page.common.slot_list.selected_indices.clear();
+        self.queue_page.common.slot_list.anchor_index = None;
         self.sort_queue_songs();
         let filtered = self.filter_queue_songs().into_owned();
         // Re-center on the currently playing song in the new sort order

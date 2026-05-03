@@ -4601,3 +4601,130 @@ mod boat_tests {
         );
     }
 }
+
+// ============================================================================
+// Queue Removal & Selection Clear (queue.rs)
+// ============================================================================
+//
+// Two intertwined bugs the user reported as "remove sometimes targets the
+// wrong song, sometimes nothing":
+//
+// 1. The handler used `track_number` (set in `transform_songs_from_pool` from
+//    the backend's `song_ids` order) to map filtered display index → backend
+//    queue index. After any optimistic in-place mutation or client-side sort,
+//    `track_number` no longer matches positions, so subsequent removes
+//    targeted the wrong row in the backend.
+// 2. `selected_indices` was never cleared on cross-source queue refreshes
+//    (e.g. consume-mode auto-advance fires `LoadQueue`), so the indices kept
+//    pointing at the rows now occupying those positions — different songs.
+//
+// Fix shape: `QueueAction::RemoveFromQueue` carries `Vec<String>` (song IDs)
+// instead of `Vec<usize>`; the optimistic local removal uses ID lookup; and
+// `handle_queue_loaded` / `apply_queue_sort` clear `selected_indices`.
+
+#[test]
+fn handle_queue_loaded_clears_selected_indices() {
+    let mut app = test_app();
+    // User had multi-selected before the backend pushed a queue update.
+    app.queue_page.common.slot_list.selected_indices.insert(0);
+    app.queue_page.common.slot_list.selected_indices.insert(2);
+
+    let new_songs = vec![
+        make_queue_song("a", "A", "Artist", "Album"),
+        make_queue_song("b", "B", "Artist", "Album"),
+        make_queue_song("c", "C", "Artist", "Album"),
+    ];
+    let _ = app.handle_queue_loaded(Ok(new_songs));
+
+    assert!(
+        app.queue_page.common.slot_list.selected_indices.is_empty(),
+        "selected_indices must clear on queue reload — stale indices point at different songs after refresh"
+    );
+}
+
+#[test]
+fn apply_queue_sort_clears_selected_indices() {
+    use nokkvi_data::types::queue_sort_mode::QueueSortMode;
+
+    let mut app = test_app();
+    app.library.queue_songs = vec![
+        make_queue_song("a", "Charlie", "Artist", "Album"),
+        make_queue_song("b", "Alpha", "Artist", "Album"),
+        make_queue_song("c", "Bravo", "Artist", "Album"),
+    ];
+    app.queue_page.common.slot_list.selected_indices.insert(0);
+    app.queue_page.common.slot_list.selected_indices.insert(1);
+
+    let _ = app.apply_queue_sort(QueueSortMode::Title, true);
+
+    assert!(
+        app.queue_page.common.slot_list.selected_indices.is_empty(),
+        "selected_indices must clear on sort — sort reorders rows so indices now point at different songs"
+    );
+}
+
+#[test]
+fn remove_from_queue_uses_id_lookup_immune_to_stale_track_number() {
+    use crate::views::{QueueMessage, queue::QueueContextEntry};
+
+    let mut app = test_app();
+    // Reproduce the post-mutation state: originally [A(tn=1), B(tn=2), C(tn=3)],
+    // B was removed in-place, leaving the surviving C with stale track_number=3.
+    let mut song_a = make_queue_song("a", "A", "Artist", "Album");
+    song_a.track_number = 1;
+    let mut song_c = make_queue_song("c", "C", "Artist", "Album");
+    song_c.track_number = 3; // stale — should be 2 after compaction
+    app.library.queue_songs = vec![song_a, song_c];
+
+    // Right-click row 1 (C) → Remove from queue. The pre-fix handler computed
+    // raw_idx = stale_track_number - 1 = 2, then `library.queue_songs.remove(2)`
+    // — out of bounds, so nothing happened locally; the backend received an
+    // index that pointed at a different song.
+    let _ = app.handle_queue(QueueMessage::ContextMenuAction(
+        1,
+        QueueContextEntry::RemoveFromQueue,
+    ));
+
+    assert_eq!(
+        app.library.queue_songs.len(),
+        1,
+        "exactly one song should be removed regardless of stale track_number"
+    );
+    assert_eq!(
+        app.library.queue_songs[0].id, "a",
+        "A should remain — the user clicked C"
+    );
+}
+
+#[test]
+fn remove_from_queue_via_filtered_view_removes_correct_song() {
+    use crate::views::{QueueMessage, queue::QueueContextEntry};
+
+    let mut app = test_app();
+    app.library.queue_songs = vec![
+        make_queue_song("s1", "Alpha", "Artist A", "Album"),
+        make_queue_song("s2", "Beta Ballad", "Artist B", "Album"),
+        make_queue_song("s3", "Gamma", "Artist C", "Album"),
+        make_queue_song("s4", "Beta Bop", "Artist D", "Album"),
+    ];
+    // Filter to "Beta" → filtered display = [s2, s4].
+    app.queue_page.common.search_query = "Beta".to_string();
+
+    // Right-click filtered row 1 (s4 "Beta Bop") → Remove.
+    let _ = app.handle_queue(QueueMessage::ContextMenuAction(
+        1,
+        QueueContextEntry::RemoveFromQueue,
+    ));
+
+    let remaining_ids: Vec<&str> = app
+        .library
+        .queue_songs
+        .iter()
+        .map(|s| s.id.as_str())
+        .collect();
+    assert_eq!(
+        remaining_ids,
+        vec!["s1", "s2", "s3"],
+        "only s4 (filtered row 1) should be removed"
+    );
+}

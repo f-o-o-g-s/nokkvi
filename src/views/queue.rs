@@ -268,8 +268,8 @@ pub enum QueueAction {
         indices: Vec<usize>,
         target: usize,
     }, // multi-selection drag reorder
-    RemoveFromQueue(Vec<usize>),    // remove songs at indices
-    PlayNext(Vec<usize>),           // insert songs after currently playing
+    RemoveFromQueue(Vec<String>),   // remove songs by ID (immune to index drift)
+    PlayNext(Vec<String>),          // insert songs after currently playing (by ID)
     ShowToast(String),              // informational toast (e.g. drag disabled reason)
     SaveAsPlaylist,                 // open dialog to save queue as new playlist
     OpenBrowsingPanel,              // toggle the library browser panel
@@ -511,12 +511,21 @@ impl QueuePage {
                     let target_indices = self.common.evaluate_context_menu(clicked_idx);
                     self.common.clear_multi_selection();
 
+                    // Resolve filtered indices → song IDs at the boundary so
+                    // downstream code is index-free. Stale `track_number`,
+                    // client-side sorts, and optimistic mutations can't desync
+                    // an ID-based target.
+                    let target_ids: Vec<String> = target_indices
+                        .iter()
+                        .filter_map(|&idx| queue_songs.get(idx).map(|s| s.id.clone()))
+                        .collect();
+
                     match entry {
                         QueueContextEntry::RemoveFromQueue => {
-                            (Task::none(), QueueAction::RemoveFromQueue(target_indices))
+                            (Task::none(), QueueAction::RemoveFromQueue(target_ids))
                         }
                         QueueContextEntry::PlayNext => {
-                            (Task::none(), QueueAction::PlayNext(target_indices))
+                            (Task::none(), QueueAction::PlayNext(target_ids))
                         }
                         _ => unreachable!(),
                     }

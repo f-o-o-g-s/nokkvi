@@ -271,6 +271,15 @@ impl QueueService {
         Ok(())
     }
 
+    /// Remove a batch of songs from the queue by ID. Index-immune — pass the
+    /// song identifiers rather than positions so optimistic UI mutations,
+    /// client-side sorts, or concurrent backend changes can't desync targets.
+    pub async fn remove_songs_by_ids(&self, ids: &[String]) -> Result<()> {
+        let mut qm = self.queue_manager.lock().await;
+        qm.remove_songs_by_ids(ids)?;
+        Ok(())
+    }
+
     /// Insert songs at a specific position in the queue (cross-pane drag drop)
     pub async fn insert_songs_at(&self, index: usize, songs: Vec<Song>) -> Result<()> {
         {

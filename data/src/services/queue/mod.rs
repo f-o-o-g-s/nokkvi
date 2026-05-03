@@ -202,6 +202,32 @@ impl QueueManager {
         self.pool.remove(id);
     }
 
+    /// Remove a single song from the queue by its ID.
+    ///
+    /// Resolves the index freshly via [`Self::index_of`] so callers don't have
+    /// to track positions across optimistic UI mutations, client-side sorts,
+    /// or concurrent queue changes. No-op if the ID isn't present.
+    pub fn remove_song_by_id(&mut self, id: &str) -> Result<()> {
+        if let Some(idx) = self.index_of(id) {
+            self.remove_song(idx)?;
+        }
+        Ok(())
+    }
+
+    /// Remove multiple songs from the queue by ID.
+    ///
+    /// Each ID is resolved freshly between removals so cascading shifts can't
+    /// desync the targets. Unknown IDs are skipped silently. Order of `ids`
+    /// is irrelevant — each lookup is against the current queue state.
+    pub fn remove_songs_by_ids(&mut self, ids: &[String]) -> Result<()> {
+        for id in ids {
+            if let Some(idx) = self.index_of(id) {
+                self.remove_song(idx)?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn toggle_shuffle(&mut self) -> Result<()> {
         self.queue.shuffle = !self.queue.shuffle;
         debug!(
@@ -1161,5 +1187,118 @@ pub(crate) mod tests {
 
         qm.increment_song_play_count("nonexistent").unwrap();
         assert_eq!(qm.pool.get("a").unwrap().play_count, Some(2));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  ID-Based Removal (immune to index drift)
+    // ══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn remove_song_by_id_removes_correct_song() {
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+            make_test_song("d"),
+        ];
+        let mut qm = make_test_manager(songs, Some(0));
+
+        qm.remove_song_by_id("c").unwrap();
+
+        assert_eq!(qm.queue.song_ids, vec!["a", "b", "d"]);
+        assert!(qm.pool.get("c").is_none());
+    }
+
+    #[test]
+    fn remove_song_by_id_unknown_id_is_noop() {
+        let songs = vec![make_test_song("a"), make_test_song("b")];
+        let mut qm = make_test_manager(songs, Some(0));
+
+        qm.remove_song_by_id("nonexistent").unwrap();
+
+        assert_eq!(qm.queue.song_ids, vec!["a", "b"]);
+        assert_eq!(qm.queue.current_index, Some(0));
+    }
+
+    #[test]
+    fn remove_song_by_id_adjusts_current_index() {
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+        ];
+        let mut qm = make_test_manager(songs, Some(2)); // playing "c"
+
+        // Remove "a" (before current) — current should shift back
+        qm.remove_song_by_id("a").unwrap();
+        assert_eq!(qm.queue.song_ids, vec!["b", "c"]);
+        assert_eq!(qm.queue.current_index, Some(1)); // still points at "c"
+    }
+
+    #[test]
+    fn remove_songs_by_ids_removes_all_specified() {
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+            make_test_song("d"),
+            make_test_song("e"),
+        ];
+        let mut qm = make_test_manager(songs, Some(0));
+
+        qm.remove_songs_by_ids(&["b".to_string(), "d".to_string()])
+            .unwrap();
+
+        assert_eq!(qm.queue.song_ids, vec!["a", "c", "e"]);
+        assert!(qm.pool.get("b").is_none());
+        assert!(qm.pool.get("d").is_none());
+        assert!(qm.pool.get("a").is_some());
+    }
+
+    #[test]
+    fn remove_songs_by_ids_handles_partial_unknown() {
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+        ];
+        let mut qm = make_test_manager(songs, Some(0));
+
+        qm.remove_songs_by_ids(&["b".to_string(), "nonexistent".to_string(), "c".to_string()])
+            .unwrap();
+
+        assert_eq!(qm.queue.song_ids, vec!["a"]);
+    }
+
+    #[test]
+    fn remove_songs_by_ids_resolves_indices_per_step() {
+        // Regression: a naive impl that snapshots indices upfront and removes
+        // ascending would shift later positions and remove the wrong songs.
+        // ID-based resolution must look up each ID against the current state.
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+            make_test_song("d"),
+        ];
+        let mut qm = make_test_manager(songs, Some(0));
+
+        // IDs deliberately given in ascending-index order — the buggy version
+        // (snapshot indices, remove ascending) would mistakenly remove "b" and "d".
+        qm.remove_songs_by_ids(&["a".to_string(), "c".to_string()])
+            .unwrap();
+
+        assert_eq!(qm.queue.song_ids, vec!["b", "d"]);
+    }
+
+    #[test]
+    fn remove_songs_by_ids_empty_is_noop() {
+        let songs = vec![make_test_song("a"), make_test_song("b")];
+        let mut qm = make_test_manager(songs, Some(0));
+
+        qm.remove_songs_by_ids(&[]).unwrap();
+
+        assert_eq!(qm.queue.song_ids, vec!["a", "b"]);
+        assert_eq!(qm.queue.current_index, Some(0));
     }
 }
