@@ -1321,10 +1321,15 @@ impl QueuePage {
                     );
                 }
 
+                // When the love column is hidden, the rightmost trailing
+                // column (duration or plays) sits flush against the slot
+                // edge — bump the row's right padding to restore the
+                // breathing room the love column would have provided.
+                let row_right_padding = if show_love_column { 4.0 } else { 12.0 };
                 let content = content_row
                     .padding(iced::Padding {
                         left: SLOT_LIST_SLOT_PADDING,
-                        right: 4.0,
+                        right: row_right_padding,
                         top: 4.0,
                         bottom: 4.0,
                     })
