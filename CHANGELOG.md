@@ -10,6 +10,9 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Surfing boat now moves on ambient and soundtrack tracks (sustained pads, drones, slow swells) that produce loud but slowly-changing spectra — these previously made the boat coast to a stop because the cruise signal listened only to spectral change.
+- Surfing boat's top speed now scales with the music's energy stack instead of pinning every percussive track at the same ceiling — energetic tracks (brick-walled, blast-beat, heavy-onset material) now read visibly faster than steady punchy tracks, and the baseline cruise speed is lifted across the board.
+
 ### Removed
 
 ## v0.3.12 — 2026-05-04
