@@ -5923,3 +5923,213 @@ fn remove_from_queue_via_filtered_view_removes_correct_song() {
         "only s4 (filtered row 1) should be removed"
     );
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  Multi-select checkbox column on expansion children
+//
+//  The per-row select column originally rendered only on parent rows; the
+//  toggle handlers were already wired to the flattened (parents+children)
+//  index space, but no checkbox UI existed on child rows so those indices
+//  were unreachable. These tests pin the flattened-index contract for the
+//  toggle dispatch on each expansion-capable view, so a regression on the
+//  render side (or the handler side) trips here instead of silently leaving
+//  expansion children unselectable.
+// ══════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn albums_selection_toggle_on_expansion_child_lands_in_selected_indices() {
+    let mut app = test_app();
+    let albums = vec![
+        make_album("a1", "Album 1", "Artist"),
+        make_album("a2", "Album 2", "Artist"),
+    ];
+    app.library.albums.set_from_vec(albums.clone());
+
+    // Expand album a1 with two tracks. Flattened: [a1=0, t1=1, t2=2, a2=3].
+    let tracks = vec![
+        make_song("t1", "Track 1", "Artist"),
+        make_song("t2", "Track 2", "Artist"),
+    ];
+    app.albums_page.expansion.expanded_id = Some("a1".to_string());
+    app.albums_page.expansion.children = tracks;
+
+    // Toggle the second child track (flattened index 2).
+    let (_, _action) = app.albums_page.update(
+        crate::views::AlbumsMessage::SlotListSelectionToggle(2),
+        albums.len(),
+        &albums,
+    );
+
+    assert!(
+        app.albums_page
+            .common
+            .slot_list
+            .selected_indices
+            .contains(&2),
+        "child track at flattened index 2 should be in selected_indices after toggle"
+    );
+}
+
+#[test]
+fn albums_select_all_with_expansion_covers_child_indices() {
+    let mut app = test_app();
+    let albums = vec![make_album("a1", "Album 1", "Artist")];
+    app.library.albums.set_from_vec(albums.clone());
+
+    app.albums_page.expansion.expanded_id = Some("a1".to_string());
+    app.albums_page.expansion.children = vec![
+        make_song("t1", "Track 1", "Artist"),
+        make_song("t2", "Track 2", "Artist"),
+        make_song("t3", "Track 3", "Artist"),
+    ];
+
+    // Flattened length is 1 parent + 3 children = 4.
+    let (_, _action) = app.albums_page.update(
+        crate::views::AlbumsMessage::SlotListSelectAllToggle,
+        albums.len(),
+        &albums,
+    );
+
+    let selected = &app.albums_page.common.slot_list.selected_indices;
+    assert_eq!(
+        selected.len(),
+        4,
+        "select-all must cover the flattened range"
+    );
+    for i in 0..4 {
+        assert!(selected.contains(&i), "index {i} missing from select-all");
+    }
+}
+
+#[test]
+fn playlists_selection_toggle_on_expansion_child_lands_in_selected_indices() {
+    let mut app = test_app();
+    let playlists: Vec<nokkvi_data::backend::playlists::PlaylistUIViewData> =
+        vec![nokkvi_data::backend::playlists::PlaylistUIViewData {
+            id: "p1".to_string(),
+            name: "Playlist 1".to_string(),
+            comment: String::new(),
+            duration: 0.0,
+            song_count: 2,
+            owner_name: String::new(),
+            public: false,
+            updated_at: String::new(),
+            artwork_album_ids: vec![],
+            searchable_lower: "playlist 1".to_string(),
+        }];
+    app.library
+        .playlists
+        .append_page(playlists.clone(), playlists.len());
+
+    // Expand playlist p1. Flattened: [p1=0, t1=1, t2=2].
+    app.playlists_page.expansion.expanded_id = Some("p1".to_string());
+    app.playlists_page.expansion.children = vec![
+        make_song("t1", "Track 1", "Artist"),
+        make_song("t2", "Track 2", "Artist"),
+    ];
+
+    let (_, _action) = app.playlists_page.update(
+        crate::views::PlaylistsMessage::SlotListSelectionToggle(2),
+        playlists.len(),
+        &playlists,
+    );
+
+    assert!(
+        app.playlists_page
+            .common
+            .slot_list
+            .selected_indices
+            .contains(&2),
+        "child track at flattened index 2 should be in selected_indices after toggle"
+    );
+}
+
+#[test]
+fn artists_selection_toggle_on_album_child_lands_in_selected_indices() {
+    let mut app = test_app();
+    let artists = vec![make_artist("ar1", "Artist 1")];
+    app.library.artists.set_from_vec(artists.clone());
+
+    // Outer expansion: artist ar1 → 2 albums. Flattened: [ar1=0, a1=1, a2=2].
+    app.artists_page.expansion.expanded_id = Some("ar1".to_string());
+    app.artists_page.expansion.children = vec![
+        make_album("a1", "Album 1", "Artist 1"),
+        make_album("a2", "Album 2", "Artist 1"),
+    ];
+
+    let (_, _action) = app.artists_page.update(
+        crate::views::ArtistsMessage::SlotListSelectionToggle(2),
+        artists.len(),
+        &artists,
+    );
+
+    assert!(
+        app.artists_page
+            .common
+            .slot_list
+            .selected_indices
+            .contains(&2),
+        "album child at flattened index 2 should be in selected_indices after toggle"
+    );
+}
+
+#[test]
+fn artists_selection_toggle_on_grandchild_track_lands_in_selected_indices() {
+    let mut app = test_app();
+    let artists = vec![make_artist("ar1", "Artist 1")];
+    app.library.artists.set_from_vec(artists.clone());
+
+    // Three-tier expansion: artist ar1 → 1 album → 2 tracks.
+    // Flattened: [ar1=0, a1=1, t1=2, t2=3].
+    app.artists_page.expansion.expanded_id = Some("ar1".to_string());
+    app.artists_page.expansion.children = vec![make_album("a1", "Album 1", "Artist 1")];
+    app.artists_page.sub_expansion.expanded_id = Some("a1".to_string());
+    app.artists_page.sub_expansion.children = vec![
+        make_song("t1", "Track 1", "Artist 1"),
+        make_song("t2", "Track 2", "Artist 1"),
+    ];
+
+    let (_, _action) = app.artists_page.update(
+        crate::views::ArtistsMessage::SlotListSelectionToggle(3),
+        artists.len(),
+        &artists,
+    );
+
+    assert!(
+        app.artists_page
+            .common
+            .slot_list
+            .selected_indices
+            .contains(&3),
+        "grandchild track at flattened index 3 should be in selected_indices after toggle"
+    );
+}
+
+#[test]
+fn genres_selection_toggle_on_album_child_lands_in_selected_indices() {
+    let mut app = test_app();
+    let genres = vec![make_genre("g1", "Rock")];
+    app.library.genres.set_from_vec(genres.clone());
+
+    // Outer expansion: genre g1 → 2 albums. Flattened: [g1=0, a1=1, a2=2].
+    app.genres_page.expansion.expanded_id = Some("g1".to_string());
+    app.genres_page.expansion.children = vec![
+        make_album("a1", "Album 1", "Artist"),
+        make_album("a2", "Album 2", "Artist"),
+    ];
+
+    let (_, _action) = app.genres_page.update(
+        crate::views::GenresMessage::SlotListSelectionToggle(2),
+        genres.len(),
+        &genres,
+    );
+
+    assert!(
+        app.genres_page
+            .common
+            .slot_list
+            .selected_indices
+            .contains(&2),
+        "album child at flattened index 2 should be in selected_indices after toggle"
+    );
+}

@@ -874,7 +874,14 @@ impl PlaylistsPage {
                     )
                 }
                 SlotListEntry::Child(song, _parent_playlist_id) => {
-                    self.render_track_row(song, &ctx, data.stable_viewport)
+                    let row = self.render_track_row(song, &ctx, data.stable_viewport);
+                    crate::widgets::slot_list::wrap_with_select_column(
+                        select_header_visible,
+                        ctx.is_selected,
+                        ctx.item_index,
+                        PlaylistsMessage::SlotListSelectionToggle,
+                        row,
+                    )
                 }
             },
         );

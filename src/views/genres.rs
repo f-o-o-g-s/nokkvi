@@ -952,13 +952,22 @@ impl GenresPage {
                         row,
                     )
                 }
-                ThreeTierEntry::Child(album, _parent_genre_id) => self.render_album_row(
-                    album,
-                    &ctx,
-                    data.album_art,
-                    data.stable_viewport,
-                    open_menu_for_rows,
-                ),
+                ThreeTierEntry::Child(album, _parent_genre_id) => {
+                    let row = self.render_album_row(
+                        album,
+                        &ctx,
+                        data.album_art,
+                        data.stable_viewport,
+                        open_menu_for_rows,
+                    );
+                    crate::widgets::slot_list::wrap_with_select_column(
+                        select_header_visible,
+                        ctx.is_selected,
+                        ctx.item_index,
+                        GenresMessage::SlotListSelectionToggle,
+                        row,
+                    )
+                }
                 ThreeTierEntry::Grandchild(song, _album_id) => {
                     let track_el = super::expansion::render_child_track_row(
                         song,
@@ -984,7 +993,7 @@ impl GenresPage {
                         item_index: item_idx,
                     };
                     let (cm_open, cm_position) = open_state_for(open_menu_for_rows, &cm_id);
-                    context_menu(
+                    let row: Element<'_, GenresMessage> = context_menu(
                         track_el,
                         song_entries_with_folder(),
                         move |entry, length| {
@@ -1004,7 +1013,14 @@ impl GenresPage {
                             None => GenresMessage::SetOpenMenu(None),
                         },
                     )
-                    .into()
+                    .into();
+                    crate::widgets::slot_list::wrap_with_select_column(
+                        select_header_visible,
+                        ctx.is_selected,
+                        ctx.item_index,
+                        GenresMessage::SlotListSelectionToggle,
+                        row,
+                    )
                 }
             },
         );

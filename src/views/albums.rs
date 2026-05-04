@@ -835,7 +835,15 @@ impl AlbumsPage {
                     )
                 }
                 SlotListEntry::Child(song, _parent_album_id) => {
-                    self.render_track_row(song, &ctx, data.stable_viewport, data.open_menu)
+                    let row =
+                        self.render_track_row(song, &ctx, data.stable_viewport, data.open_menu);
+                    crate::widgets::slot_list::wrap_with_select_column(
+                        select_header_visible,
+                        ctx.is_selected,
+                        ctx.item_index,
+                        AlbumsMessage::SlotListSelectionToggle,
+                        row,
+                    )
                 }
             },
         );
