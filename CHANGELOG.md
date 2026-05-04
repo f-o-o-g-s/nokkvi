@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Surfing boat sprite size is now clamped to a 48–160 px pixel range so it stays readable at any window size — the boat previously shrank to ~14 px on small/short windows and ballooned past 230 px on 4K. Rope thickness now scales with the boat (1.5–3.5 px) so it never looks hairline against a large boat or chunky against a small one, and the anchor inherits the new bounds automatically.
+
 ### Fixed
 
 - Surfing boat now moves on ambient and soundtrack tracks (sustained pads, drones, slow swells) that produce loud but slowly-changing spectra — these previously made the boat coast to a stop because the cruise signal listened only to spectral change.
