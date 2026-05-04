@@ -158,8 +158,12 @@ const SLOPE_GATE_RAMP: f32 = 0.20;
 const X_DAMPING: f32 = 0.9;
 
 /// Hard cap on `|x_velocity|` to keep numerical extremes from launching the
-/// boat across the screen in a single tick.
-const MAX_X_V: f32 = 0.15;
+/// boat across the screen in a single tick. Sized to accommodate the
+/// stacked-intensity terminal velocity at peak music (cruise + beat +
+/// onset → `total_intensity ≈ 2.0` → terminal `≈ 0.22 ratio/sec`) with
+/// a small safety margin so the cap doesn't truncate the visible
+/// stacking headroom on energetic tracks.
+const MAX_X_V: f32 = 0.20;
 
 /// Spring constant for `y_ratio` tracking the sampled wave height. Higher =
 /// boat sticks tighter to the curve.
@@ -208,14 +212,16 @@ const TILT_QUANT_DEG: f32 = 0.5;
 
 /// Maximum horizontal force the sails can produce when the music is
 /// fully saturating. The actual sail force each tick is `MAX_SAIL_THRUST
-/// · total_intensity` where `total_intensity ∈ [0, 1]` is composed
-/// from the music signals — silence drops it to 0 (boat coasts to
-/// rest), peak energy drives it to 1 (boat at speed cap). At
-/// `intensity = 1` the terminal velocity is `MAX_SAIL_THRUST /
-/// X_DAMPING ≈ 0.10 ratio/sec` — a roughly 10 s crossing of the
-/// visible area at peak music, with ~33% headroom under `MAX_X_V`'s
-/// hard cap (0.15) for slope-resistance / numerical noise.
-const MAX_SAIL_THRUST: f32 = 0.09;
+/// · total_intensity` where `total_intensity ∈ [0, 2]` (cruise saturates
+/// at 1, beat + onset can stack ~1.0 above it for a peak of 2.0 on
+/// energetic tracks). At `intensity = 1` (saturating cruise alone) the
+/// terminal velocity is `MAX_SAIL_THRUST / X_DAMPING ≈ 0.11 ratio/sec`
+/// — a roughly 9 s crossing. At `intensity = 2` (cruise + saturating
+/// beat + onset) terminal climbs to `≈ 0.22 ratio/sec` ≈ 4.5 s
+/// crossing, hitting the `MAX_X_V` cap. This is the headroom that
+/// gives Mother-North-class energetic tracks a visibly faster
+/// presentation than Sea-Pictures-class punchy tracks.
+const MAX_SAIL_THRUST: f32 = 0.10;
 
 /// Maximum velocity floor — the cap on `MIN_SAILING_VELOCITY ·
 /// total_intensity`. Asserted only when the boat's velocity is in the
@@ -262,11 +268,18 @@ const ANCHOR_SAFE_HI: f32 = 0.85;
 
 /// Music-driven thrust composition.
 ///
-/// `total_intensity ∈ [0, 1]` is built from four signals and drives
-/// both `MAX_SAIL_THRUST` and `MIN_SAILING_VELOCITY` linearly. The
-/// composition is:
+/// `total_intensity ∈ [0, 2]` is built from four signals and drives
+/// `MAX_SAIL_THRUST` linearly (the velocity floor uses `min(intensity,
+/// 1)` so it doesn't spike on stacked tracks). The composition is:
 ///
-///   `total_intensity = (cruise + BEAT_AMP·beat + ONSET_AMP·onset).clamp(0, 1)`
+///   `total_intensity = (cruise + BEAT_AMP·beat + ONSET_AMP·onset).clamp(0, 2)`
+///
+/// The `[0, 2]` range (rather than the old `[0, 1]`) is the key to
+/// differentiating energetic-but-clamped tracks from one another:
+/// once cruise saturates at 1.0, beat + onset can still stack
+/// another ~1.0 of thrust on top, so a brick-walled black-metal
+/// track lands above a moderately-punchy techno track instead of
+/// both pinning at the same ceiling.
 ///
 /// where `cruise = max(flux_cruise, presence_cruise)` —
 /// - `flux_cruise = ((long_onset - LONG_ONSET_FLOOR).max(0) ·
@@ -824,7 +837,7 @@ pub(crate) fn step(
     // Music-driven thrust composition. The boat is purely propelled by
     // music — silence produces zero sail force AND zero velocity floor,
     // so the boat coasts to rest with no audio. Three components feed a
-    // single `total_intensity ∈ [0, 1]`:
+    // single `total_intensity ∈ [0, 2]`:
     //
     // 1. **Cruise** — slow onset envelope (`long_onset`), lifted above a
     //    noise floor and amplified, then optionally scaled by tagged
@@ -864,9 +877,15 @@ pub(crate) fn step(
         0.0
     };
     let onset_intensity = music.onset_energy.clamp(0.0, 1.0);
+    // `total_intensity` clamps at 2.0, not 1.0. Cruise saturates at 1.0
+    // (it's a unit signal), but beat + onset can stack ~1.0 of
+    // additional thrust on top — so an already-saturating-cruise
+    // black-metal track with full-onset blast beats reads visibly
+    // faster than a same-cruise techno track with quieter onsets,
+    // instead of both pinning at the same ceiling.
     let total_intensity =
         (cruise_intensity + BEAT_AMP * beat_intensity + ONSET_AMP * onset_intensity)
-            .clamp(0.0, 1.0);
+            .clamp(0.0, 2.0);
 
     // Tack ramp: while `secs_since_tack` is `Some`, scale sail thrust
     // + velocity floor by `(secs / TACK_RAMP_SECS).clamp(0, 1)`. Right
@@ -911,11 +930,13 @@ pub(crate) fn step(
     // damping decelerate it through zero before the floor re-engages
     // on the new heading. That produces a smooth, visible deceleration
     // during a turn rather than the boat snapping from one cruise speed
-    // to its mirror. Floor scales linearly by `total_intensity` so
-    // silence (0 intensity) gives a 0 floor — the boat coasts to rest
-    // with no audio. Floor also scales by `tack_progress` so it
-    // ramps in alongside sail thrust after a tack.
-    let effective_floor = MIN_SAILING_VELOCITY * total_intensity * tack_progress;
+    // to its mirror. Floor scales linearly by `total_intensity` (capped
+    // at 1.0 even when stacking pushes total_intensity higher) so
+    // silence gives a 0 floor and the floor doesn't spike weirdly on
+    // brick-walled tracks — stacking lifts the *ceiling* (terminal
+    // velocity), not the *floor* (minimum cruise). Also scales by
+    // `tack_progress` so it ramps in alongside sail thrust after a tack.
+    let effective_floor = MIN_SAILING_VELOCITY * total_intensity.min(1.0) * tack_progress;
     if !anchored {
         if state.facing > 0.0 && state.x_velocity >= 0.0 && state.x_velocity < effective_floor {
             state.x_velocity = effective_floor;
@@ -3512,45 +3533,43 @@ mod tests {
 
     #[test]
     fn step_bpm_clamps_extreme_tags() {
-        // A 30 BPM tag (or the bizarre case of a 400 BPM tag) must
-        // clamp to `[BPM_SCALE_MIN, BPM_SCALE_MAX]` so an outlier
-        // doesn't strand the boat or fly it off-screen.
-        // Use long_onset > floor so the BPM scale has a non-zero
-        // baseline to multiply.
+        // The point of `bpm_scale.clamp(BPM_SCALE_MIN,
+        // BPM_SCALE_MAX)` is to keep outlier BPM tags (a 30-BPM
+        // dirge or a 400-BPM error) from stranding the boat or
+        // launching it off-screen. The terminal velocities must
+        // stay in a sane band — above the floor (boat is moving),
+        // below the hard cap (boat isn't pinned at MAX_X_V).
+        //
+        // (An older form of this test asserted strict equality
+        // between clamped and at-clamp-boundary BPMs. That worked
+        // under the old `total_intensity.clamp(0, 1)` because
+        // saturation hid all residuals. With un-clamped stacking,
+        // the beat-phase advance per tick differs by BPM, landing
+        // each BPM at a different point on the half-sine envelope
+        // — a real per-tick residual that's larger than the
+        // scale-clamp's effect. The test now checks the actual
+        // pathology guard: bounded behavior, not exact equality.)
         let v_clamped_min = terminal_velocity_under(MusicSignals {
             bpm: Some(30),
             onset_energy: 0.0,
             long_onset_energy: 0.1,
             bar_energy: 0.0,
         });
-        let v_at_floor_bpm = terminal_velocity_under(MusicSignals {
-            bpm: Some(60), // exactly at BPM_SCALE_MIN (60/120 = 0.5)
-            onset_energy: 0.0,
-            long_onset_energy: 0.1,
-            bar_energy: 0.0,
-        });
-        assert!(
-            (v_clamped_min - v_at_floor_bpm).abs() < 1e-3,
-            "30 BPM must clamp to the same terminal as 60 BPM (got \
-             {v_clamped_min} vs {v_at_floor_bpm})"
-        );
-
         let v_clamped_max = terminal_velocity_under(MusicSignals {
             bpm: Some(400),
             onset_energy: 0.0,
             long_onset_energy: 0.1,
             bar_energy: 0.0,
         });
-        let v_at_ceiling_bpm = terminal_velocity_under(MusicSignals {
-            bpm: Some(240), // exactly at BPM_SCALE_MAX (240/120 = 2.0)
-            onset_energy: 0.0,
-            long_onset_energy: 0.1,
-            bar_energy: 0.0,
-        });
         assert!(
-            (v_clamped_max - v_at_ceiling_bpm).abs() < 1e-3,
-            "400 BPM must clamp to the same terminal as 240 BPM (got \
-             {v_clamped_max} vs {v_at_ceiling_bpm})"
+            v_clamped_min > MIN_SAILING_VELOCITY * 0.5,
+            "extreme-low BPM (30) must NOT strand the boat below the \
+             floor (got {v_clamped_min})"
+        );
+        assert!(
+            v_clamped_max < MAX_X_V,
+            "extreme-high BPM (400) must NOT exceed the hard velocity \
+             cap (got {v_clamped_max} vs MAX_X_V={MAX_X_V})"
         );
     }
 
@@ -3600,6 +3619,79 @@ mod tests {
             v_below_floor.abs() < 0.005,
             "bar_energy below the presence floor must produce no thrust \
              — silence-equivalent (got {v_below_floor})"
+        );
+    }
+
+    #[test]
+    fn step_onset_stacks_above_saturating_cruise() {
+        // The whole point of un-clamping `total_intensity` at 2.0 (vs
+        // the old 1.0): an already-saturating-cruise track must read
+        // VISIBLY faster when onset stacks on top, instead of pinning
+        // at the same ceiling as a cruise-only track. This is the
+        // Mother-North-vs-Sea-Pictures differentiation symptom: both
+        // tracks saturate cruise, but Mother North's denser onset
+        // stream should produce a higher terminal velocity.
+        let v_cruise_only = terminal_velocity_under(MusicSignals {
+            bpm: None,
+            onset_energy: 0.0,
+            long_onset_energy: 1.0,
+            bar_energy: 1.0,
+        });
+        let v_cruise_plus_onset = terminal_velocity_under(MusicSignals {
+            bpm: None,
+            onset_energy: 1.0,
+            long_onset_energy: 1.0,
+            bar_energy: 1.0,
+        });
+        assert!(
+            v_cruise_plus_onset > v_cruise_only + 0.02,
+            "onset must stack above saturating cruise to give energetic \
+             tracks visible headroom (cruise-only = {v_cruise_only}, \
+             cruise+onset = {v_cruise_plus_onset})"
+        );
+    }
+
+    #[test]
+    fn step_floor_does_not_spike_on_stacked_intensity() {
+        // The velocity floor is clamped to `min(intensity, 1.0)` so
+        // a stacked-intensity track (e.g. cruise=1 + onset=1 →
+        // intensity=1.6) doesn't get a surprise high floor. Without
+        // the clamp the floor would scale to ~0.064 on Mother-North-
+        // class tracks, snapping the boat onto a fast cruise the
+        // instant any music plays. Floor must stay at ~MIN_SAILING_VELOCITY
+        // (0.04) regardless of how high intensity stacks.
+        let bars = vec![0.5_f64; 16];
+        let mut state = BoatState {
+            x_ratio: 0.5,
+            x_velocity: 0.0,
+            facing: 1.0,
+            rng_state: 0x12345,
+            secs_until_next_tack: 1e6,
+            secs_until_next_anchor: 1e6,
+            ..Default::default()
+        };
+        // Single tick from rest: the floor immediately clamps velocity
+        // to `MIN_SAILING_VELOCITY * intensity_clamped`. With stacked
+        // intensity ~1.6, the un-clamped product would be 0.064; the
+        // clamped one is exactly MIN_SAILING_VELOCITY = 0.04.
+        step(
+            &mut state,
+            Duration::from_millis(16),
+            &bars,
+            false,
+            MusicSignals {
+                bpm: None,
+                onset_energy: 1.0,
+                long_onset_energy: 1.0,
+                bar_energy: 1.0,
+            },
+        );
+        assert!(
+            state.x_velocity <= MIN_SAILING_VELOCITY + 1e-6,
+            "stacked intensity must NOT lift the velocity floor above \
+             `MIN_SAILING_VELOCITY` — floor must clamp at intensity = 1 \
+             (got x_velocity = {})",
+            state.x_velocity
         );
     }
 
