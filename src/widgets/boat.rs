@@ -117,7 +117,7 @@ pub(crate) const ANCHOR_HEIGHT_MULTIPLE_OF_BOAT: f32 = 0.6;
 // All forces operate in normalized ratio-space (`x_ratio` ∈ [0, 1], time in
 // seconds). Sail thrust along `facing` is the dominant horizontal force,
 // driven by music intensity in `[0, 1]`. Terminal velocity at saturating
-// music is `MAX_SAIL_THRUST / X_DAMPING ≈ 0.13 ratio/sec` (roughly an 8 s
+// music is `MAX_SAIL_THRUST / X_DAMPING ≈ 0.10 ratio/sec` (roughly a 10 s
 // crossing); at silence the boat coasts to rest.
 
 /// Sample distance (in ratio space) on either side of the boat for the
@@ -128,11 +128,14 @@ const SLOPE_DX: f32 = 0.05;
 /// Slope force gain — converts wave gradient into horizontal force.
 const SLOPE_GAIN: f32 = 0.04;
 
-/// Hard cap on `|slope_force|`. Sized below `MAX_SAIL_THRUST` so even peak
-/// slope force never overcomes the sail in the facing direction —
-/// uphills slow the boat (downhill terminal `(SAIL + SLOPE_MAX) /
-/// X_DAMPING ≈ 0.10`, uphill terminal `≈ 0.033`), but the velocity floor
-/// keeps the boat moving forward when the wave alone would stall it.
+/// Hard cap on `|slope_force|`. Sized below `MAX_SAIL_THRUST` so peak
+/// slope resistance never overcomes the sail in the facing direction.
+/// Slope force is masked to RESIST motion only (never assist), so an
+/// uphill flank produces a headwind that slows the sail's terminal
+/// velocity from `MAX_SAIL_THRUST / X_DAMPING ≈ 0.10` down to
+/// `(MAX_SAIL_THRUST - MAX_SLOPE_FORCE) / X_DAMPING ≈ 0.067`. The
+/// velocity floor keeps the boat moving forward when the wave alone
+/// would stall it.
 const MAX_SLOPE_FORCE: f32 = 0.03;
 
 /// Local-height threshold below which the slope force is fully suppressed.
@@ -209,9 +212,10 @@ const TILT_QUANT_DEG: f32 = 0.5;
 /// from the music signals — silence drops it to 0 (boat coasts to
 /// rest), peak energy drives it to 1 (boat at speed cap). At
 /// `intensity = 1` the terminal velocity is `MAX_SAIL_THRUST /
-/// X_DAMPING ≈ 0.067 ratio/sec` — a roughly 15 s crossing of the
-/// visible area at peak music, well below `MAX_X_V`'s hard cap.
-const MAX_SAIL_THRUST: f32 = 0.06;
+/// X_DAMPING ≈ 0.10 ratio/sec` — a roughly 10 s crossing of the
+/// visible area at peak music, with ~33% headroom under `MAX_X_V`'s
+/// hard cap (0.15) for slope-resistance / numerical noise.
+const MAX_SAIL_THRUST: f32 = 0.09;
 
 /// Maximum velocity floor — the cap on `MIN_SAILING_VELOCITY ·
 /// total_intensity`. Asserted only when the boat's velocity is in the
@@ -219,7 +223,9 @@ const MAX_SAIL_THRUST: f32 = 0.06;
 /// zero before the floor re-engages on the new heading (smooth turns).
 /// At full music intensity the boat's minimum cruise speed is this
 /// value; at silence the floor is 0 and the boat is allowed to stop.
-const MIN_SAILING_VELOCITY: f32 = 0.025;
+/// Scaled in lockstep with `MAX_SAIL_THRUST` so the floor-to-cruise
+/// ratio stays roughly constant across tuning changes.
+const MIN_SAILING_VELOCITY: f32 = 0.04;
 
 /// Min/max delay between tack events (random "wind shift" that flips
 /// `facing`). Sampled uniformly in `[MIN, MAX]` after each tack and at
@@ -256,24 +262,43 @@ const ANCHOR_SAFE_HI: f32 = 0.85;
 
 /// Music-driven thrust composition.
 ///
-/// `total_intensity ∈ [0, 1]` is built from three signals and drives
+/// `total_intensity ∈ [0, 1]` is built from four signals and drives
 /// both `MAX_SAIL_THRUST` and `MIN_SAILING_VELOCITY` linearly. The
 /// composition is:
 ///
 ///   `total_intensity = (cruise + BEAT_AMP·beat + ONSET_AMP·onset).clamp(0, 1)`
 ///
-/// where `cruise = ((long_onset - LONG_ONSET_FLOOR).max(0) ·
-/// LONG_ONSET_AMP).clamp(0, 1)`.
+/// where `cruise = max(flux_cruise, presence_cruise)` —
+/// - `flux_cruise = ((long_onset - LONG_ONSET_FLOOR).max(0) ·
+///    LONG_ONSET_AMP · bpm_scale).clamp(0, 1)`
+/// - `presence_cruise = ((bar_energy - PRESENCE_FLOOR).max(0) ·
+///    PRESENCE_AMP · bpm_scale).clamp(0, 1)`
 ///
-/// At silence (all zeros), `total_intensity = 0` and both sail thrust
-/// and the velocity floor are zero — the boat coasts to a stop and
-/// stays there. At saturating music, `total_intensity = 1` and the
-/// boat sails at the cap. Different songs settle the slow envelope
-/// (`long_onset`) at different values, producing visibly different
-/// cruise speeds; transient hits and beat pulses surge above the
-/// cruise level.
+/// The two cruise inputs are **complementary**: `long_onset` is a
+/// spectral-flux EMA (good on transient/percussive material, dies on
+/// sustained pads) while `bar_energy` is the average of the visible
+/// bar buffer (good on sustained material, dies only at silence).
+/// `max()` lets whichever signal has more to say drive the boat
+/// without the two diluting each other on punchy tracks. Both
+/// signals → 0 at silence so the boat still coasts to rest with no
+/// audio. Different songs settle each signal at different values,
+/// producing visibly different cruise speeds; transient hits and
+/// beat pulses surge above the cruise level.
 const LONG_ONSET_FLOOR: f32 = 0.02;
 const LONG_ONSET_AMP: f32 = 18.0;
+/// Spectrum-presence cruise — average of the visible bars (the same
+/// buffer the lines shader paints, already auto-sensitivity
+/// normalized in `[0, ~1]`). Catches sustained material that
+/// produces low spectral flux but fills the screen — pads, drones,
+/// organs, vocal-only tracks. `PRESENCE_FLOOR = 0.10` is a deadzone
+/// so a barely-visible spectrum doesn't propel the boat;
+/// `PRESENCE_AMP = 1.5` shapes the response so a comfortably-full
+/// spectrum (~0.6 avg) lands near 75% cruise without saturating, and
+/// only a wall-of-sound spectrum reaches the cap. Tuned so the boat
+/// tracks "what the user perceives on screen" — visible waves =
+/// boat moves, empty visualizer = boat stops.
+const PRESENCE_FLOOR: f32 = 0.10;
+const PRESENCE_AMP: f32 = 1.5;
 /// Beat-pulse contribution to total intensity. Range is the half-sine-
 /// squared envelope `[0, 1]`; `BEAT_AMP = 0.4` lets a beat add up to
 /// 40 percentage points to intensity on top of the cruise level.
@@ -349,6 +374,15 @@ pub(crate) struct MusicSignals {
     /// tracks), so the boat's resting cruise speed differs between
     /// songs.
     pub(crate) long_onset_energy: f32,
+    /// Average of the visible bar buffer (the same data the lines
+    /// shader paints), in `[0, ~1]`. Captures *sustained* spectrum
+    /// presence that complements `long_onset_energy`'s flux-based
+    /// signal: ambient pads / drones / organs that produce loud but
+    /// flat spectra still drive the boat through this channel. Goes
+    /// to 0 only at true silence (empty bars). The boat handler
+    /// computes this from `current_bars()` so the boat propulsion
+    /// stays in lockstep with the visible waveform.
+    pub(crate) bar_energy: f32,
 }
 
 /// Per-frame UI-thread state for the surfing boat.
@@ -807,8 +841,22 @@ pub(crate) fn step(
     let bpm_scale = music.bpm.map_or(1.0, |bpm| {
         (bpm as f32 / REFERENCE_BPM).clamp(BPM_SCALE_MIN, BPM_SCALE_MAX)
     });
+    // Flux-based cruise: positive spectral flux EMA. Strong on
+    // percussive / transient-rich material, ~0 on sustained pads.
     let lifted_long_onset = (music.long_onset_energy - LONG_ONSET_FLOOR).max(0.0);
-    let cruise_intensity = (lifted_long_onset * LONG_ONSET_AMP * bpm_scale).clamp(0.0, 1.0);
+    let flux_cruise = (lifted_long_onset * LONG_ONSET_AMP * bpm_scale).clamp(0.0, 1.0);
+    // Presence-based cruise: average bar height. Strong on sustained
+    // material (pads, drones), ~0 only at true silence. Both inputs
+    // share `bpm_scale` so a tagged tempo lifts whichever path is
+    // active for the current song.
+    let lifted_presence = (music.bar_energy - PRESENCE_FLOOR).max(0.0);
+    let presence_cruise = (lifted_presence * PRESENCE_AMP * bpm_scale).clamp(0.0, 1.0);
+    // Take the max so whichever cruise signal has more to say wins —
+    // sum/blend would dilute each one's strength on material it's
+    // good at (a punchy techno track shouldn't read slower than a
+    // pad-only ambient track just because flux + presence happen to
+    // saturate at the same combined level).
+    let cruise_intensity = flux_cruise.max(presence_cruise);
     let beat_intensity = if music.bpm.is_some() {
         let s = (state.beat_phase * std::f32::consts::TAU).sin();
         if s > 0.0 { s * s } else { 0.0 }
@@ -892,7 +940,10 @@ pub(crate) fn step(
             bpm = ?music.bpm,
             onset = music.onset_energy,
             long_onset = music.long_onset_energy,
+            bar_energy = music.bar_energy,
             bpm_scale,
+            flux_cruise,
+            presence_cruise,
             cruise_intensity,
             beat_intensity,
             onset_intensity,
@@ -1734,16 +1785,17 @@ mod tests {
 
     /// A saturating music signal — boat is propelled by music in the
     /// new model, so most physics tests need a non-zero `MusicSignals`
-    /// to produce any motion at all. `music_on()` sets `onset_energy`
-    /// and `long_onset_energy` to 1.0 so `total_intensity` clamps to
-    /// the cap, putting sail thrust and the velocity floor at full
-    /// strength. Tests that explicitly care about silence (or about
-    /// individual signals) build their own `MusicSignals` literal.
+    /// to produce any motion at all. `music_on()` sets every signal to
+    /// its saturating value so `total_intensity` clamps to the cap,
+    /// putting sail thrust and the velocity floor at full strength.
+    /// Tests that explicitly care about silence (or about individual
+    /// signals) build their own `MusicSignals` literal.
     fn music_on() -> MusicSignals {
         MusicSignals {
             bpm: None,
             onset_energy: 1.0,
             long_onset_energy: 1.0,
+            bar_energy: 1.0,
         }
     }
 
@@ -3334,6 +3386,7 @@ mod tests {
             bpm: None,
             onset_energy: 1.0,
             long_onset_energy: 0.0,
+            bar_energy: 0.0,
         });
         assert!(
             v_silent.abs() < 0.005,
@@ -3364,6 +3417,7 @@ mod tests {
             bpm: Some(120),
             onset_energy: 0.0,
             long_onset_energy: 0.0,
+            bar_energy: 0.0,
         };
         step(&mut state, Duration::from_millis(500), &bars, false, music);
         // After exactly one cycle, phase wraps to ~0. Allow some slack
@@ -3387,6 +3441,7 @@ mod tests {
             bpm: Some(120),
             onset_energy: 0.0,
             long_onset_energy: 0.0,
+            bar_energy: 0.0,
         });
         assert!(
             v_no_beat.abs() < 0.005,
@@ -3419,6 +3474,7 @@ mod tests {
             bpm: None,
             onset_energy: 0.0,
             long_onset_energy: 0.0,
+            bar_energy: 0.0,
         };
         step(&mut state, Duration::from_millis(500), &bars, false, music);
         assert!(
@@ -3438,11 +3494,13 @@ mod tests {
             bpm: Some(60),
             onset_energy: 0.0,
             long_onset_energy: 0.04,
+            bar_energy: 0.0,
         });
         let v_fast = terminal_velocity_under(MusicSignals {
             bpm: Some(180),
             onset_energy: 0.0,
             long_onset_energy: 0.04,
+            bar_energy: 0.0,
         });
         assert!(
             v_fast > v_slow + 0.005,
@@ -3463,11 +3521,13 @@ mod tests {
             bpm: Some(30),
             onset_energy: 0.0,
             long_onset_energy: 0.1,
+            bar_energy: 0.0,
         });
         let v_at_floor_bpm = terminal_velocity_under(MusicSignals {
             bpm: Some(60), // exactly at BPM_SCALE_MIN (60/120 = 0.5)
             onset_energy: 0.0,
             long_onset_energy: 0.1,
+            bar_energy: 0.0,
         });
         assert!(
             (v_clamped_min - v_at_floor_bpm).abs() < 1e-3,
@@ -3479,16 +3539,106 @@ mod tests {
             bpm: Some(400),
             onset_energy: 0.0,
             long_onset_energy: 0.1,
+            bar_energy: 0.0,
         });
         let v_at_ceiling_bpm = terminal_velocity_under(MusicSignals {
             bpm: Some(240), // exactly at BPM_SCALE_MAX (240/120 = 2.0)
             onset_energy: 0.0,
             long_onset_energy: 0.1,
+            bar_energy: 0.0,
         });
         assert!(
             (v_clamped_max - v_at_ceiling_bpm).abs() < 1e-3,
             "400 BPM must clamp to the same terminal as 240 BPM (got \
              {v_clamped_max} vs {v_at_ceiling_bpm})"
+        );
+    }
+
+    #[test]
+    fn step_bar_energy_drives_cruise_on_flux_poor_material() {
+        // Spectrum-presence cruise covers the case the spectral-flux
+        // signal misses: sustained pads / drones / soundtrack
+        // material with high RMS but near-zero bin-to-bin delta. The
+        // M83 "A Necessary Escape" case in production: BPM=0 (None),
+        // very low onset & long_onset (sustained synths), but a
+        // visibly full spectrum. Without `bar_energy` driving cruise
+        // the boat would coast to rest under this signal — with it,
+        // the boat must produce visible motion.
+        let v_silent = terminal_velocity_under(MusicSignals::default());
+        let v_pad = terminal_velocity_under(MusicSignals {
+            bpm: None,
+            onset_energy: 0.0,
+            long_onset_energy: 0.0,
+            bar_energy: 0.5,
+        });
+        assert!(
+            v_silent.abs() < 0.005,
+            "silence (all signals zero) must give near-zero terminal \
+             velocity (got {v_silent})"
+        );
+        assert!(
+            v_pad > 0.03,
+            "a half-full visible spectrum must propel the boat through \
+             the presence channel even when flux is zero (got v_pad = \
+             {v_pad})"
+        );
+    }
+
+    #[test]
+    fn step_bar_energy_below_floor_yields_no_thrust() {
+        // The presence floor (`PRESENCE_FLOOR`) is a deadzone: a
+        // barely-visible spectrum must not propel the boat. This
+        // protects the "pre-roll silence with FFT noise" case where
+        // a couple of bars wiggle near zero.
+        let v_below_floor = terminal_velocity_under(MusicSignals {
+            bpm: None,
+            onset_energy: 0.0,
+            long_onset_energy: 0.0,
+            bar_energy: 0.05, // strictly below PRESENCE_FLOOR (0.10)
+        });
+        assert!(
+            v_below_floor.abs() < 0.005,
+            "bar_energy below the presence floor must produce no thrust \
+             — silence-equivalent (got {v_below_floor})"
+        );
+    }
+
+    #[test]
+    fn step_cruise_signals_compose_via_max_not_sum() {
+        // `cruise_intensity = max(flux_cruise, presence_cruise)`.
+        // A track with both signals saturating must not exceed the
+        // single-saturating-signal terminal velocity — sum/blend
+        // semantics would push above the cap and erase the dynamic
+        // range across genres. (Beat / onset still surge ABOVE
+        // cruise via BEAT_AMP / ONSET_AMP; this test isolates the
+        // cruise composition only.)
+        let v_flux_only = terminal_velocity_under(MusicSignals {
+            bpm: None,
+            onset_energy: 0.0,
+            long_onset_energy: 1.0,
+            bar_energy: 0.0,
+        });
+        let v_presence_only = terminal_velocity_under(MusicSignals {
+            bpm: None,
+            onset_energy: 0.0,
+            long_onset_energy: 0.0,
+            bar_energy: 1.0,
+        });
+        let v_both = terminal_velocity_under(MusicSignals {
+            bpm: None,
+            onset_energy: 0.0,
+            long_onset_energy: 1.0,
+            bar_energy: 1.0,
+        });
+        // `max` semantics: both-signals terminal must equal the
+        // higher of the two single-signal terminals (within a small
+        // numerical tolerance), not their sum.
+        let single_cap = v_flux_only.max(v_presence_only);
+        assert!(
+            (v_both - single_cap).abs() < 1e-3,
+            "max(flux, presence) cruise must not exceed single-signal \
+             saturation (flux-only = {v_flux_only}, presence-only = \
+             {v_presence_only}, both = {v_both})"
         );
     }
 
@@ -3503,6 +3653,7 @@ mod tests {
             bpm: None,
             onset_energy: 0.0,
             long_onset_energy: 1.0,
+            bar_energy: 0.0,
         });
         assert!(
             v_silent.abs() < 0.005,
@@ -3553,6 +3704,7 @@ mod tests {
                 bpm: Some(180),
                 onset_energy: 0.0,
                 long_onset_energy: 1.0,
+                bar_energy: 0.0,
             },
         );
 
@@ -3830,6 +3982,7 @@ mod tests {
             bpm: Some(140),
             onset_energy: 1.0,
             long_onset_energy: 1.0,
+            bar_energy: 1.0,
         };
         // 5 s of damping at X_DAMPING = 0.9 takes velocity from 0.05
         // down to ~0.05 · exp(-4.5) ≈ 5e-4. Anything still moving

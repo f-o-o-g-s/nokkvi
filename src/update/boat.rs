@@ -106,6 +106,18 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
     // surges on hits and pulses to the beat. Both fall back to "no
     // modulation" when their source isn't available — silence /
     // un-tagged tracks behave like the pre-music constant-thrust model.
+    // `bar_energy` is the average of the *effective* bars (the same
+    // buffer the boat samples for slope/local height). When playback
+    // is paused/stopped, `effective_bars` returns an empty slice and
+    // average → 0, so silence correctly drives no presence. The
+    // visualizer's auto-sensitivity has already normalized bars into
+    // a useful range, so this metric reads "how full the wave looks"
+    // and tracks the boat to what the user perceives.
+    let bar_energy = if bars.is_empty() {
+        0.0
+    } else {
+        (bars.iter().sum::<f64>() / bars.len() as f64) as f32
+    };
     let music = MusicSignals {
         bpm: app.playback.bpm,
         onset_energy: app
@@ -116,6 +128,7 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
             .visualizer
             .as_ref()
             .map_or(0.0, |v| v.current_long_onset_energy()),
+        bar_energy,
     };
     boat::step(&mut app.boat, dt, bars, angular, music);
     app.boat.visible = true;
