@@ -543,17 +543,26 @@ impl Nokkvi {
             // Drop indicator: thin accent line between queue slots showing insertion point
             if let Some(slot) = drag.drop_target_slot {
                 use crate::widgets::slot_list::{
-                    EDIT_BAR_HEIGHT, SLOT_SPACING, SlotListConfig, chrome_height_with_header,
+                    EDIT_BAR_HEIGHT, SELECT_HEADER_HEIGHT, SLOT_SPACING, SlotListConfig,
+                    chrome_height_with_header,
                 };
 
-                // Match the queue view's chrome height calculation (edit bar adds 32px)
+                // Match the queue view's chrome height calculation (edit bar adds 32px,
+                // tri-state select header adds 24px when the queue's Select column is on)
                 let edit_bar_height: f32 =
                     if self.playlist_edit.is_some() || self.active_playlist_info.is_some() {
                         EDIT_BAR_HEIGHT
                     } else {
                         0.0
                     };
-                let chrome_height = chrome_height_with_header() + edit_bar_height;
+                let select_header_visible = self.queue_page.column_visibility.select;
+                let chrome_height = chrome_height_with_header()
+                    + edit_bar_height
+                    + if select_header_visible {
+                        SELECT_HEADER_HEIGHT
+                    } else {
+                        0.0
+                    };
                 let config = SlotListConfig::with_dynamic_slots(self.window.height, chrome_height);
                 let row_height = config.row_height();
                 let slot_spacing = SLOT_SPACING;
@@ -567,8 +576,10 @@ impl Nokkvi {
                     0.0
                 };
 
-                let slot_list_start_y =
-                    crate::widgets::slot_list::queue_slot_list_start_y(edit_bar_height);
+                let slot_list_start_y = crate::widgets::slot_list::queue_slot_list_start_y(
+                    edit_bar_height,
+                    select_header_visible,
+                );
 
                 // Convert the item index back to a slot position for rendering.
                 // We need the slot that corresponds to this item in the current viewport.

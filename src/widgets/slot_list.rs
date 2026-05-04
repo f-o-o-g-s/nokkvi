@@ -265,8 +265,11 @@ pub(crate) fn chrome_height_with_header() -> f32 {
 /// previously inlined in `app_view.rs` and `cross_pane_drag.rs`.
 ///
 /// `edit_bar_height`: extra height from playlist edit/context bars (typically 0 or 32).
-pub(crate) fn queue_slot_list_start_y(edit_bar_height: f32) -> f32 {
-    if crate::theme::is_top_nav() {
+/// `select_header_visible`: when the queue has its multi-select column on,
+/// the tri-state header bar adds another `SELECT_HEADER_HEIGHT` between the
+/// view header and the first slot row.
+pub(crate) fn queue_slot_list_start_y(edit_bar_height: f32, select_header_visible: bool) -> f32 {
+    let base = if crate::theme::is_top_nav() {
         NAV_BAR_HEIGHT + VIEW_HEADER_HEIGHT + edit_bar_height
     } else {
         let top_strip = if crate::theme::show_top_bar_strip() {
@@ -275,6 +278,11 @@ pub(crate) fn queue_slot_list_start_y(edit_bar_height: f32) -> f32 {
             0.0
         };
         top_strip + VIEW_HEADER_HEIGHT + edit_bar_height
+    };
+    base + if select_header_visible {
+        SELECT_HEADER_HEIGHT
+    } else {
+        0.0
     }
 }
 
@@ -1506,13 +1514,32 @@ mod tests {
     fn queue_slot_list_start_y_includes_edit_bar() {
         // With edit_bar_height=0 and edit_bar_height=32, the difference
         // should be exactly the edit bar.
-        let base = queue_slot_list_start_y(0.0);
-        let with_edit = queue_slot_list_start_y(EDIT_BAR_HEIGHT);
+        let base = queue_slot_list_start_y(0.0, false);
+        let with_edit = queue_slot_list_start_y(EDIT_BAR_HEIGHT, false);
         assert_eq!(
             with_edit - base,
             EDIT_BAR_HEIGHT,
             "edit bar height must be additive"
         );
+    }
+
+    #[test]
+    fn queue_slot_list_start_y_includes_select_header() {
+        // The tri-state select-all header sits between the view header and
+        // the first slot row when the queue's Select column is on; the
+        // start-y must shift down by exactly its height, otherwise the
+        // cross-pane drop indicator and slot-mapping math land 24 px high.
+        let base = queue_slot_list_start_y(0.0, false);
+        let with_select = queue_slot_list_start_y(0.0, true);
+        assert_eq!(
+            with_select - base,
+            SELECT_HEADER_HEIGHT,
+            "select header height must be additive"
+        );
+
+        // And it stacks with the edit bar, not replaces it.
+        let with_both = queue_slot_list_start_y(EDIT_BAR_HEIGHT, true);
+        assert_eq!(with_both - base, EDIT_BAR_HEIGHT + SELECT_HEADER_HEIGHT);
     }
 
     #[test]

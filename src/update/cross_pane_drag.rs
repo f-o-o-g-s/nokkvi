@@ -550,7 +550,8 @@ impl Nokkvi {
     /// Returns `Some(index)` when pointing at a valid slot, `None` to append.
     fn compute_queue_drop_slot(&self, cursor_y: f32) -> Option<usize> {
         use crate::widgets::slot_list::{
-            EDIT_BAR_HEIGHT, SLOT_SPACING, SlotListConfig, chrome_height_with_header,
+            EDIT_BAR_HEIGHT, SELECT_HEADER_HEIGHT, SLOT_SPACING, SlotListConfig,
+            chrome_height_with_header,
         };
 
         let edit_bar_height: f32 =
@@ -559,13 +560,24 @@ impl Nokkvi {
             } else {
                 0.0
             };
+        let select_header_visible = self.queue_page.column_visibility.select;
 
-        // Match the queue view's chrome height (edit bar adds 32px)
-        let chrome_height = chrome_height_with_header() + edit_bar_height;
+        // Match the queue view's chrome height: base header + edit bar +
+        // tri-state select header (24px) when the queue's Select column is on.
+        let chrome_height = chrome_height_with_header()
+            + edit_bar_height
+            + if select_header_visible {
+                SELECT_HEADER_HEIGHT
+            } else {
+                0.0
+            };
         let config = SlotListConfig::with_dynamic_slots(self.window.height, chrome_height);
         let row_height = config.row_height();
 
-        let slot_list_start_y = crate::widgets::slot_list::queue_slot_list_start_y(edit_bar_height);
+        let slot_list_start_y = crate::widgets::slot_list::queue_slot_list_start_y(
+            edit_bar_height,
+            select_header_visible,
+        );
         let slot_list_y = cursor_y - slot_list_start_y;
 
         if slot_list_y < 0.0 {
