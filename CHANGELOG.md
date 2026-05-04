@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - Genre column toggle on Queue and Songs views — stacks under the album when both are visible, takes over the album slot at album-size font when album is hidden, and auto-shows when the list is sorted by Genre.
+- Multi-select column UI-wide — opt in per view (Albums, Artists, Genres, Playlists, Queue, Songs, Similar) under each view's columns-cog dropdown to add a row-level checkbox plus a tri-state select-all header that mirrors ctrl/shift+click selections.
 
 ### Changed
 
@@ -14,14 +15,23 @@ All notable changes to this project will be documented in this file.
 - Surfing boat now wanders both directions evenly instead of drifting consistently toward bass: the soft pull-toward-center spring and the captain's bias toward the louder half of the spectrum are gone, since on a torus they conspired to favor whichever wrap direction the music's spectrum happened to lean.
 - Surfing boat now tilts to match the local wave slope (spring-damped so it eases into the lean instead of snapping to spectrum jitter, capped at ~17°) and horizontally mirrors itself based on travel direction so the sail catches wind from behind whichever way the boat is sailing. Tilt is baked into the SVG path data each frame (rotation applied in vector space and then rasterized fresh, rather than rotating an upright bitmap in the GPU shader) so the rotated boat stays sharp even at small sprite sizes; the resulting handle is cached per quantized angle to keep resvg cost bounded.
 - Surfing boat now carries a thin outline that uses the same `border_color` / `border_opacity` as the lines-mode wave outline, so it reads as part of the same theme. The outline tracks the active theme automatically and follows whichever opacity the theme defines (so it matches the wave's behavior in light mode where the border is intentionally hidden).
+- Surfing boat outline is now half as thick (~0.5 px instead of ~1 px) — the previous stroke read as too heavy on the small sprite and competed with the fill instead of just tracing it. Wave-line outline thickness is unchanged.
 - Clicking an album, artist, or genre name link in any list now navigates to that item's view and expands it inline at the top, instead of leaving you on a one-row filtered list with the contents hidden behind a follow-up Shift+Enter.
+- Surfing boat now gets a brief off-screen stretch past each screen edge with a quiet eject impulse — when it leaves frame, slope-tracking pauses and a firm push eases it through the seam, so music with loud bins near a spectrum edge can no longer keep dragging it back to the edge it just tried to leave.
 
 ### Fixed
 
 - Thumbnails in large genre and artist expansion rows no longer leave a stray slot or two permanently blank — failed cover-art fetches now retry up to three times instead of caching the empty result.
 - Clicking an artist name link in the queue or songs view now loads the large artist image and dominant color in the artwork column on arrival — previously it stayed blank until you scrolled to a different artist and back. Same fix for the genre 3×3 collage column when clicking a genre name link.
+- Surfing boat no longer gets pinned at the wrap seam or dwells near either screen edge, and the captain's rowing charges now ramp in and out smoothly (half-sine envelope) instead of feeling like motor thrust kicking on and off.
+- Columns-cog dropdown in the library browsing panel now opens — previously it was wired closed and never showed its menu.
+- Surfing boat no longer clips its corners off when tilting to extreme angles.
+- Multi-select checkbox toggles in the library browsing panel now add or remove only the clicked row — previously, clicking an already-checked checkbox kept it checked while every other selected row was wiped.
+- Drop indicator during cross-pane drag-and-drop now aligns with the queue rows when the queue's Select column is enabled, instead of riding 24 px above where it should have been.
 
 ### Removed
+
+- Third-tier inline expansion in Artists and Genres views (album → tracks). Both views are now 2 levels deep like the others; the "X songs" link on a child album row and Shift+Enter on a centered child album now jump to the Albums view and expand the album there.
 
 ## v0.3.10 — 2026-05-02
 
