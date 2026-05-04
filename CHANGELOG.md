@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.3.11 — 2026-05-03
+
+### Added
+
 - Genre column toggle on Queue and Songs views — stacks under the album when both are visible, takes over the album slot at album-size font when album is hidden, and auto-shows when the list is sorted by Genre.
 - Multi-select column UI-wide — opt in per view (Albums, Artists, Genres, Playlists, Queue, Songs, Similar) under each view's columns-cog dropdown to add a row-level checkbox plus a tri-state select-all header that mirrors ctrl/shift+click selections.
 
@@ -28,6 +38,7 @@ All notable changes to this project will be documented in this file.
 - Surfing boat no longer clips its corners off when tilting to extreme angles.
 - Multi-select checkbox toggles in the library browsing panel now add or remove only the clicked row — previously, clicking an already-checked checkbox kept it checked while every other selected row was wiped.
 - Drop indicator during cross-pane drag-and-drop now aligns with the queue rows when the queue's Select column is enabled, instead of riding 24 px above where it should have been.
+- First mouse-wheel scroll after clicking a name link to inline-expand a target in another view no longer jerks the highlighted target row from the top of the list down to the middle — the highlight now stays on the row and rides the scroll naturally until it leaves the viewport.
 
 ### Removed
 
