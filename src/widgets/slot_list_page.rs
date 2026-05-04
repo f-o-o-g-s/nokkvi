@@ -111,6 +111,10 @@ impl SlotListPageState {
             return;
         }
 
+        // Any click ends a top-pin from find-and-expand: subsequent
+        // scrolls should resume click-to-focus snap semantics.
+        self.slot_list.selected_offset_pinned = false;
+
         if modifiers.control() {
             // Toggle selection for clicked item
             if self.slot_list.selected_indices.contains(&offset) {

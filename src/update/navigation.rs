@@ -615,7 +615,7 @@ impl Nokkvi {
                 .common
                 .slot_list
                 .set_offset(target_offset, total);
-            self.genres_page.common.slot_list.set_selected(idx, total);
+            self.genres_page.common.slot_list.pin_selected(idx, total);
             self.genres_page.common.slot_list.flash_center();
             self.pending_top_pin = Some(crate::state::PendingTopPin::Genre(resolved_id));
             let prefetch_task = self.prefetch_viewport_artwork();
@@ -720,7 +720,7 @@ impl Nokkvi {
                 .common
                 .slot_list
                 .set_offset(target_offset, total);
-            self.artists_page.common.slot_list.set_selected(idx, total);
+            self.artists_page.common.slot_list.pin_selected(idx, total);
             self.artists_page.common.slot_list.flash_center();
             // Pin the highlight onto the target so it survives `set_children`
             // when albums land — handle_artists' AlbumsLoaded post-hook
@@ -785,10 +785,12 @@ impl Nokkvi {
                 .common
                 .slot_list
                 .set_offset(target_offset, total);
-            // set_offset clears selected_offset; re-set so the target keeps
-            // the highlight styling (effective center derives from
-            // selected_offset before falling back to viewport_offset).
-            self.albums_page.common.slot_list.set_selected(idx, total);
+            // set_offset clears selected_offset; re-set as a top-pin so the
+            // target keeps the highlight styling (effective center derives
+            // from selected_offset before falling back to viewport_offset)
+            // AND the next mouse-wheel scroll doesn't snap the viewport
+            // backward to `idx`.
+            self.albums_page.common.slot_list.pin_selected(idx, total);
             self.albums_page.common.slot_list.flash_center();
             // Pin the highlight onto the target so it survives `set_children`
             // when tracks land — handle_albums' TracksLoaded post-hook

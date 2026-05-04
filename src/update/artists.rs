@@ -383,7 +383,7 @@ impl Nokkvi {
                 .artists_page
                 .expansion
                 .flattened_len(&self.library.artists);
-            self.artists_page.common.slot_list.set_selected(idx, total);
+            self.artists_page.common.slot_list.pin_selected(idx, total);
             self.pending_top_pin = None;
         }
 

@@ -12,6 +12,15 @@ pub struct SlotListView {
     /// Used by click-to-focus to highlight a clicked item in-place.
     /// Cleared automatically by keyboard navigation (`move_up`/`move_down`).
     pub selected_offset: Option<usize>,
+    /// When true, `selected_offset` is a "top-pin" from find-and-expand (the
+    /// viewport was positioned to place the pinned item near the top of the
+    /// visible list). Mouse-wheel and keyboard scrolls then advance the
+    /// viewport by 1 instead of snapping it to `selected_offset` — without
+    /// this flag, the first scroll would jump the viewport backward by
+    /// `center_slot - 1` rows and the highlight would visibly "warp" from
+    /// slot 0 to the visual center. Set by `pin_selected`; cleared by
+    /// `set_selected`, `set_offset`, and click-to-focus paths.
+    pub selected_offset_pinned: bool,
     /// Current slot count (set during render by `build_slot_list_slots`).
     /// Used by `slot_to_item_index` to translate drag slot indices to item indices.
     pub slot_count: usize,
@@ -35,6 +44,7 @@ impl SlotListView {
         Self {
             viewport_offset: 0,
             selected_offset: None,
+            selected_offset_pinned: false,
             slot_count: 9,
             last_scrolled: None,
             scroll_generation_id: 0,
@@ -156,9 +166,15 @@ impl SlotListView {
     /// Move viewport up (decrease offset, clamped at 0).
     /// If `selected_offset` is set (click-to-focus), snaps the viewport there
     /// first so scrolling continues from the clicked item rather than the old
-    /// viewport position.
+    /// viewport position. When the selection is a top-pin
+    /// (`selected_offset_pinned`), the snap is skipped and the highlight
+    /// rides the target until it scrolls off-screen.
     pub fn move_up(&mut self, total_items: usize) {
         if total_items == 0 {
+            return;
+        }
+        if self.selected_offset_pinned {
+            self.viewport_offset = self.viewport_offset.saturating_sub(1);
             return;
         }
         // Capture before take(): a Some value here means the single-item
@@ -179,9 +195,15 @@ impl SlotListView {
     /// Move viewport down (increase offset, clamped at total_items - 1).
     /// If `selected_offset` is set (click-to-focus), snaps the viewport there
     /// first so scrolling continues from the clicked item rather than the old
-    /// viewport position.
+    /// viewport position. When the selection is a top-pin
+    /// (`selected_offset_pinned`), the snap is skipped and the highlight
+    /// rides the target until it scrolls off-screen.
     pub fn move_down(&mut self, total_items: usize) {
         if total_items == 0 {
+            return;
+        }
+        if self.selected_offset_pinned {
+            self.viewport_offset = (self.viewport_offset + 1).min(total_items - 1);
             return;
         }
         let was_focus_marker = self.selected_offset.is_some();
@@ -195,19 +217,33 @@ impl SlotListView {
         self.viewport_offset = (self.viewport_offset + 1).min(total_items - 1);
     }
 
-    /// Set viewport to specific offset (clears selected_offset)
+    /// Set viewport to specific offset (clears selected_offset and the pin).
     pub fn set_offset(&mut self, offset: usize, total_items: usize) {
         if total_items > 0 && offset < total_items {
             self.viewport_offset = offset;
             self.selected_offset = None;
+            self.selected_offset_pinned = false;
         }
     }
 
     /// Set the selected item without moving the viewport.
     /// The selected item will receive "center" styling in the slot list render.
+    /// Demotes any prior top-pin to a click-to-focus marker.
     pub fn set_selected(&mut self, offset: usize, total_items: usize) {
         if total_items > 0 && offset < total_items {
             self.selected_offset = Some(offset);
+            self.selected_offset_pinned = false;
+        }
+    }
+
+    /// Set the selected item as a "top-pin" from find-and-expand.
+    /// Behaves like `set_selected` for highlight purposes, but suppresses the
+    /// click-to-focus snap on the next mouse-wheel / keyboard scroll so the
+    /// viewport advances by 1 row instead of jumping backward to `offset`.
+    pub fn pin_selected(&mut self, offset: usize, total_items: usize) {
+        if total_items > 0 && offset < total_items {
+            self.selected_offset = Some(offset);
+            self.selected_offset_pinned = true;
         }
     }
 
@@ -413,6 +449,61 @@ mod tests {
         // Out-of-range selected_offset falls back to center
         sl.selected_offset = Some(25); // beyond total_items
         assert_eq!(sl.get_effective_center_index(20), Some(5));
+    }
+
+    #[test]
+    fn test_pin_selected_does_not_snap_viewport_on_scroll() {
+        // Find-and-expand setup: viewport positions the target at slot 0,
+        // and pin_selected marks the highlight as a top-pin (not a
+        // click-to-focus marker). Mouse-wheel scrolls must advance the
+        // viewport by 1 row, not snap backward to the pinned index.
+        let mut sl = SlotListView::new();
+        sl.slot_count = 9;
+        let target_idx = 200;
+        let total = 1000;
+        let center_slot = sl.slot_count / 2;
+
+        sl.set_offset(target_idx + center_slot, total);
+        sl.pin_selected(target_idx, total);
+        assert_eq!(sl.viewport_offset, 204);
+        assert_eq!(sl.selected_offset, Some(200));
+        assert!(sl.selected_offset_pinned);
+
+        sl.move_down(total);
+        assert_eq!(
+            sl.viewport_offset, 205,
+            "scroll-down on a pinned selection must advance vp by 1, not snap"
+        );
+        assert_eq!(
+            sl.selected_offset,
+            Some(200),
+            "pinned selection should survive scroll so the highlight tracks the target"
+        );
+        assert!(sl.selected_offset_pinned);
+
+        sl.move_up(total);
+        assert_eq!(sl.viewport_offset, 204);
+        assert_eq!(sl.selected_offset, Some(200));
+    }
+
+    #[test]
+    fn test_pin_selected_cleared_by_set_offset_and_set_selected() {
+        let mut sl = SlotListView::new();
+        sl.pin_selected(5, 20);
+        assert!(sl.selected_offset_pinned);
+
+        sl.set_offset(10, 20);
+        assert_eq!(sl.selected_offset, None);
+        assert!(!sl.selected_offset_pinned);
+
+        sl.pin_selected(5, 20);
+        assert!(sl.selected_offset_pinned);
+        sl.set_selected(7, 20);
+        assert_eq!(sl.selected_offset, Some(7));
+        assert!(
+            !sl.selected_offset_pinned,
+            "set_selected should demote a top-pin to click-to-focus semantics"
+        );
     }
 
     #[test]

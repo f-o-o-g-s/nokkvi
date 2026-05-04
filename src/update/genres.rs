@@ -226,7 +226,7 @@ impl Nokkvi {
                 .genres_page
                 .expansion
                 .flattened_len(&self.library.genres);
-            self.genres_page.common.slot_list.set_selected(idx, total);
+            self.genres_page.common.slot_list.pin_selected(idx, total);
             self.pending_top_pin = None;
         }
 
