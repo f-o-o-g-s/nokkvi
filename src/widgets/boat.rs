@@ -112,6 +112,42 @@ pub(crate) const BOAT_WRAP_MARGIN_BOAT_WIDTHS: f32 = 1.75;
 /// doodad without rivaling the boat hull for visual weight.
 pub(crate) const ANCHOR_HEIGHT_MULTIPLE_OF_BOAT: f32 = 0.6;
 
+/// Absolute pixel floor on the boat sprite's height. Without this,
+/// half-screen / short-window configurations drop the boat to a
+/// barely-recognizable ~14–30 px dot. 48 px reads as a clear sprite
+/// at any window size while still leaving room above for the
+/// visualizer waves.
+pub(crate) const BOAT_MIN_HEIGHT_PX: f32 = 48.0;
+
+/// Absolute pixel ceiling on the boat sprite's height. On 4K windows
+/// the 18% rule otherwise produces a 230+ px boat that overpowers
+/// the wave it's surfing on. 160 px stays bold without dominating;
+/// the anchor sprite (60% of boat) and the rope (scaled below)
+/// inherit the cap automatically.
+pub(crate) const BOAT_MAX_HEIGHT_PX: f32 = 160.0;
+
+/// Compute the boat sprite's pixel size from the visualizer area
+/// height. Returns `(width, height)` in pixels. Centralizes the
+/// formula so the wrap-margin handler in `update/boat.rs` and the
+/// render path in `boat_overlay()` can never drift apart — both
+/// callers go through this helper. The clamp keeps the boat in a
+/// readable range across the full window-size spectrum (tiny short
+/// windows can't shrink it below 48 px; 4K windows can't blow it up
+/// past 160 px).
+pub(crate) fn boat_pixel_size(area_height: f32) -> (f32, f32) {
+    let h = (area_height * BOAT_HEIGHT_FRACTION).clamp(BOAT_MIN_HEIGHT_PX, BOAT_MAX_HEIGHT_PX);
+    (h * BOAT_ASPECT_RATIO, h)
+}
+
+/// Compute the rope's stroke width in pixels, scaled to the boat's
+/// height so a 48 px boat keeps a 1.5 px hairline rope while a
+/// 160 px boat reads with a thicker 3.5 px stroke. Without scaling,
+/// a fixed 1.5 px rope looks invisible against a large boat and
+/// chunky against a small one.
+pub(crate) fn rope_stroke_for(boat_h: f32) -> f32 {
+    (boat_h * 0.025).clamp(1.5, 3.5)
+}
+
 // --- physics tuning constants ---------------------------------------------
 //
 // All forces operate in normalized ratio-space (`x_ratio` ∈ [0, 1], time in
@@ -1439,8 +1475,7 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
                 crate::embedded_svg::themed_boat_svg(state.tilt, state.facing < 0.0).into_bytes();
             svg::Handle::from_memory(bytes)
         });
-    let boat_h = (area_height * BOAT_HEIGHT_FRACTION).max(8.0);
-    let boat_w = boat_h * BOAT_ASPECT_RATIO;
+    let (boat_w, boat_h) = boat_pixel_size(area_height);
 
     // The boat SVG carries a padded viewBox so a `MAX_TILT` rotation
     // doesn't clip the rotated bounding box's corners. Scale the iced
@@ -1550,7 +1585,7 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
                 a: rope_alpha,
                 ..rope_color
             },
-            stroke_width: ROPE_STROKE_WIDTH_PX,
+            stroke_width: rope_stroke_for(boat_h),
         };
         overlay = overlay.push(
             canvas::Canvas::new(rope)
@@ -1565,11 +1600,6 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
         .clip(true)
         .into()
 }
-
-/// Stroke width of the rope canvas path, in display pixels. Sized to
-/// match the boat outline's apparent visual weight (~0.5–1 px after
-/// the SVG-to-pixel ratio shakes out at typical visualizer sizes).
-const ROPE_STROKE_WIDTH_PX: f32 = 1.5;
 
 /// Parse a `#rrggbb` hex color string into an `iced::Color`. Returns
 /// `None` if the string isn't a 7-character hex form. The visualizer

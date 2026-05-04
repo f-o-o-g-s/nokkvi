@@ -92,8 +92,7 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
     // future scaling-curve changes.
     let area_width = app.window.width;
     let area_height = visualizer_area_height(app.window.width, app.window.height, height_percent);
-    let boat_h = (area_height * boat::BOAT_HEIGHT_FRACTION).max(8.0);
-    let boat_w = boat_h * boat::BOAT_ASPECT_RATIO;
+    let (boat_w, _boat_h) = boat::boat_pixel_size(area_height);
     app.boat.x_wrap_margin = if area_width > 0.0 {
         (boat_w * boat::BOAT_WRAP_MARGIN_BOAT_WIDTHS) / area_width
     } else {
