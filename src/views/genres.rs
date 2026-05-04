@@ -11,7 +11,7 @@ use iced::{
 };
 use nokkvi_data::backend::{albums::AlbumUIViewData, genres::GenreUIViewData};
 
-use super::expansion::{ExpansionState, ThreeTierEntry};
+use super::expansion::{ExpansionState, SlotListEntry};
 use crate::{
     app_message::Message,
     widgets::{self, SlotListPageState, view_header::SortMode},
@@ -23,8 +23,6 @@ pub struct GenresPage {
     pub common: SlotListPageState,
     /// Inline expansion state (genre → albums)
     pub expansion: ExpansionState<AlbumUIViewData>,
-    /// Sub-expansion state (album → tracks)
-    pub sub_expansion: ExpansionState<nokkvi_data::backend::songs::SongUIViewData>,
     /// Per-column visibility toggles surfaced via the columns-cog dropdown.
     pub column_visibility: GenresColumnVisibility,
 }
@@ -136,19 +134,17 @@ pub enum GenresMessage {
     // Context menu
     ContextMenuAction(usize, crate::widgets::context_menu::LibraryContextEntry),
 
-    // Inline expansion — first level (Shift+Enter on genre)
+    // Inline expansion (Shift+Enter on genre)
     ExpandCenter,
     FocusAndExpand(usize), // Clicked 'X albums' — focus that row and expand it
     CollapseExpansion,
     /// Albums loaded for expanded genre (genre_id, albums)
     AlbumsLoaded(String, Vec<AlbumUIViewData>),
 
-    // Inline expansion — second level (Shift+Enter on child album)
-    ExpandAlbum,
-    FocusAndExpandAlbum(usize), // Clicked 'X songs' on child album — focus and expand tracks
-    CollapseAlbumExpansion,
-    /// Tracks loaded for expanded album (album_id, songs)
-    TracksLoaded(String, Vec<nokkvi_data::backend::songs::SongUIViewData>),
+    /// Click on a child album row's "X songs" / album-name link, or
+    /// Shift+Enter on a centered child album row. Bubbles up as
+    /// `GenresAction::NavigateAndExpandAlbum` for cross-view drill-down.
+    NavigateAndExpandAlbum(String),
 
     // View header
     SortModeSelected(widgets::view_header::SortMode),
@@ -181,11 +177,10 @@ pub enum GenresAction {
     PlayGenre(String), // genre_id - clear queue and play all songs in genre
     AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
     PlayAlbum(String), // album_id - play child album
-    PlayTrack(String), // song_id - play single expanded track
     /// Expand genre inline — root should load albums (genre_name, genre_id)
     ExpandGenre(String, String),
-    /// Expand album inline — root should load tracks (album_id)
-    ExpandAlbum(String),
+    /// Switch to Albums view and prime the named album for inline expansion.
+    NavigateAndExpandAlbum(String),
     LoadArtwork(String), // genre_id - load artwork for centered genre on slot list scroll
     PreloadArtwork(usize), // viewport_offset - preload artwork for visible + buffer
     SearchChanged(String), // trigger reload
@@ -222,6 +217,9 @@ impl super::HasCommonAction for GenresAction {
             Self::NavigateAndExpandArtist(id) => {
                 super::CommonViewAction::NavigateAndExpandArtist(id.clone())
             }
+            Self::NavigateAndExpandAlbum(id) => {
+                super::CommonViewAction::NavigateAndExpandAlbum(id.clone())
+            }
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
         }
@@ -236,7 +234,6 @@ impl Default for GenresPage {
                 true, // sort_ascending
             ),
             expansion: ExpansionState::default(),
-            sub_expansion: ExpansionState::default(),
             column_visibility: GenresColumnVisibility::default(),
         }
     }
@@ -256,31 +253,15 @@ impl GenresPage {
     }
 
     /// Resolve the centered item to a LoadArtwork action.
-    /// When on a child album or grandchild track, looks up the parent genre's original index.
+    /// When on a child album, looks up the parent genre's original index.
     fn resolve_artwork_action(&self, genres: &[GenreUIViewData]) -> GenresAction {
-        let total = super::expansion::three_tier_flattened_len(
-            genres,
-            &self.expansion,
-            self.sub_expansion.children.len(),
-        );
+        let total = self.expansion.flattened_len(genres);
         if let Some(center_idx) = self.common.get_center_item_index(total) {
-            let genre_idx = match super::expansion::three_tier_get_entry_at(
-                center_idx,
-                genres,
-                &self.expansion,
-                &self.sub_expansion,
-                |g| &g.id,
-                |a| &a.id,
-            ) {
-                Some(ThreeTierEntry::Parent(genre)) => genres.iter().position(|g| g.id == genre.id),
-                Some(ThreeTierEntry::Child(_, parent_id)) => {
+            let genre_idx = match self.expansion.get_entry_at(center_idx, genres, |g| &g.id) {
+                Some(SlotListEntry::Parent(genre)) => genres.iter().position(|g| g.id == genre.id),
+                Some(SlotListEntry::Child(_, parent_id)) => {
                     genres.iter().position(|g| g.id == parent_id)
                 }
-                Some(ThreeTierEntry::Grandchild(_, _)) => self
-                    .expansion
-                    .expanded_id
-                    .as_ref()
-                    .and_then(|id| genres.iter().position(|g| &g.id == id)),
                 None => None,
             };
             if let Some(idx) = genre_idx {
@@ -297,35 +278,20 @@ impl GenresPage {
         total_items: usize,
         genres: &[GenreUIViewData],
     ) -> (Task<GenresMessage>, GenresAction) {
-        // Shift+Enter routing for the 3-tier list — see the matching block in
-        // artists.rs for the rationale. Routes Child/Grandchild rows to
-        // ExpandAlbum and Parent rows to a direct outer collapse.
+        // Shift+Enter on a centered child album row: route to the
+        // cross-view "navigate to Albums + expand there" path. Mirrors
+        // the equivalent block in artists.rs.
         if matches!(message, GenresMessage::ExpandCenter) && self.expansion.is_expanded() {
-            let total = super::expansion::three_tier_flattened_len(
-                genres,
-                &self.expansion,
-                self.sub_expansion.children.len(),
-            );
-            let entry = self.common.get_center_item_index(total).and_then(|idx| {
-                super::expansion::three_tier_get_entry_at(
-                    idx,
-                    genres,
-                    &self.expansion,
-                    &self.sub_expansion,
-                    |g| &g.id,
-                    |a| &a.id,
-                )
-            });
-            match entry {
-                Some(ThreeTierEntry::Child(_, _) | ThreeTierEntry::Grandchild(_, _)) => {
-                    return self.update(GenresMessage::ExpandAlbum, total_items, genres);
-                }
-                Some(ThreeTierEntry::Parent(_)) => {
-                    self.sub_expansion.clear();
-                    self.expansion.collapse(genres, |g| &g.id, &mut self.common);
-                    return (Task::none(), GenresAction::None);
-                }
-                None => {}
+            let total = self.expansion.flattened_len(genres);
+            let center = self
+                .common
+                .get_center_item_index(total)
+                .and_then(|idx| self.expansion.get_entry_at(idx, genres, |g| &g.id));
+            if let Some(SlotListEntry::Child(album, _)) = center {
+                return (
+                    Task::none(),
+                    GenresAction::NavigateAndExpandAlbum(album.id.clone()),
+                );
             }
         }
 
@@ -344,32 +310,16 @@ impl GenresPage {
             search_focused: GenresMessage::SearchFocused,
             action_none: GenresAction::None,
         ) {
-            Ok((task, action)) => {
-                if matches!(
-                    action,
-                    GenresAction::SortModeChanged(_)
-                        | GenresAction::SortOrderChanged(_)
-                        | GenresAction::SearchChanged(_)
-                ) {
-                    self.sub_expansion.clear();
-                }
-                (task, action)
-            }
+            Ok(result) => result,
             Err(msg) => match msg {
                 GenresMessage::FocusAndExpand(offset) => {
-                    let len = super::expansion::three_tier_flattened_len(
-                        genres,
-                        &self.expansion,
-                        self.sub_expansion.children.len(),
-                    );
+                    let len = self.expansion.flattened_len(genres);
                     self.common
                         .handle_slot_click(offset, len, Default::default());
-                    // Now expand the centered genre
                     if let Some(parent_id) =
                         self.expansion
                             .handle_expand_center(genres, |g| &g.id, &mut self.common)
                     {
-                        self.sub_expansion.clear();
                         let genre_name = genres
                             .iter()
                             .find(|g| g.id == parent_id)
@@ -383,176 +333,55 @@ impl GenresPage {
                         (Task::none(), GenresAction::None)
                     }
                 }
-                GenresMessage::CollapseAlbumExpansion => {
-                    let saved = self.sub_expansion.parent_offset;
-                    self.sub_expansion.clear();
-                    let total =
-                        super::expansion::three_tier_flattened_len(genres, &self.expansion, 0);
-                    self.common.handle_set_offset(saved, total);
-                    (Task::none(), GenresAction::None)
-                }
-                GenresMessage::FocusAndExpandAlbum(offset) => {
-                    let len = super::expansion::three_tier_flattened_len(
-                        genres,
-                        &self.expansion,
-                        self.sub_expansion.children.len(),
-                    );
-                    self.common
-                        .handle_slot_click(offset, len, Default::default());
-                    self.update(GenresMessage::ExpandAlbum, total_items, genres)
-                }
-                GenresMessage::ExpandAlbum => {
-                    let total = super::expansion::three_tier_flattened_len(
-                        genres,
-                        &self.expansion,
-                        self.sub_expansion.children.len(),
-                    );
-                    let center_idx = self.common.get_center_item_index(total);
-                    let entry = center_idx.and_then(|idx| {
-                        super::expansion::three_tier_get_entry_at(
-                            idx,
-                            genres,
-                            &self.expansion,
-                            &self.sub_expansion,
-                            |g| &g.id,
-                            |a| &a.id,
-                        )
-                    });
-                    match entry {
-                        Some(ThreeTierEntry::Child(album, _)) => {
-                            let aid = album.id.clone();
-                            if self.sub_expansion.is_expanded_parent(&aid) {
-                                let saved = self.sub_expansion.parent_offset;
-                                self.sub_expansion.clear();
-                                let total = super::expansion::three_tier_flattened_len(
-                                    genres,
-                                    &self.expansion,
-                                    0,
-                                );
-                                self.common.handle_set_offset(saved, total);
-                                (Task::none(), GenresAction::None)
-                            } else {
-                                self.sub_expansion.clear();
-                                self.sub_expansion.parent_offset =
-                                    self.common.slot_list.viewport_offset;
-                                (Task::none(), GenresAction::ExpandAlbum(aid))
-                            }
-                        }
-                        Some(ThreeTierEntry::Grandchild(_, _)) => {
-                            let saved = self.sub_expansion.parent_offset;
-                            self.sub_expansion.clear();
-                            let total = super::expansion::three_tier_flattened_len(
-                                genres,
-                                &self.expansion,
-                                0,
-                            );
-                            self.common.handle_set_offset(saved, total);
-                            (Task::none(), GenresAction::None)
-                        }
-                        _ => (Task::none(), GenresAction::None),
-                    }
-                }
-                GenresMessage::TracksLoaded(album_id, songs) => {
-                    self.sub_expansion.set_children(
-                        album_id,
-                        songs,
-                        &self.expansion.children,
-                        &mut self.common,
-                    );
-                    (Task::none(), GenresAction::None)
+                GenresMessage::NavigateAndExpandAlbum(album_id) => {
+                    (Task::none(), GenresAction::NavigateAndExpandAlbum(album_id))
                 }
                 GenresMessage::SlotListNavigateUp => {
-                    let len = super::expansion::three_tier_flattened_len(
-                        genres,
-                        &self.expansion,
-                        self.sub_expansion.children.len(),
-                    );
-                    self.common.handle_navigate_up(len);
+                    self.expansion.handle_navigate_up(genres, &mut self.common);
                     let action = self.resolve_artwork_action(genres);
                     (Task::none(), action)
                 }
                 GenresMessage::SlotListNavigateDown => {
-                    let len = super::expansion::three_tier_flattened_len(
-                        genres,
-                        &self.expansion,
-                        self.sub_expansion.children.len(),
-                    );
-                    self.common.handle_navigate_down(len);
+                    self.expansion
+                        .handle_navigate_down(genres, &mut self.common);
                     let action = self.resolve_artwork_action(genres);
                     (Task::none(), action)
                 }
                 GenresMessage::SlotListSetOffset(offset, modifiers) => {
-                    let len = super::expansion::three_tier_flattened_len(
-                        genres,
-                        &self.expansion,
-                        self.sub_expansion.children.len(),
-                    );
+                    let len = self.expansion.flattened_len(genres);
                     self.common.handle_slot_click(offset, len, modifiers);
                     let action = self.resolve_artwork_action(genres);
                     (Task::none(), action)
                 }
                 GenresMessage::SlotListScrollSeek(offset) => {
-                    let len = super::expansion::three_tier_flattened_len(
-                        genres,
-                        &self.expansion,
-                        self.sub_expansion.children.len(),
-                    );
+                    let len = self.expansion.flattened_len(genres);
                     self.common.handle_set_offset(offset, len);
                     (Task::none(), GenresAction::None)
                 }
                 GenresMessage::SlotListClickPlay(offset) => {
-                    let len = super::expansion::three_tier_flattened_len(
-                        genres,
-                        &self.expansion,
-                        self.sub_expansion.children.len(),
-                    );
+                    let len = self.expansion.flattened_len(genres);
                     self.common.handle_set_offset(offset, len);
                     self.update(GenresMessage::SlotListActivateCenter, total_items, genres)
                 }
                 GenresMessage::SlotListSelectionToggle(offset) => {
-                    // Three-tier flattened (genres + albums + tracks) index
-                    // space — `total_items` from the dispatcher is the
-                    // base genre count.
-                    let flattened = super::expansion::three_tier_flattened_len(
-                        genres,
-                        &self.expansion,
-                        self.sub_expansion.children.len(),
-                    );
+                    let flattened = self.expansion.flattened_len(genres);
                     self.common.handle_selection_toggle(offset, flattened);
                     (Task::none(), GenresAction::None)
                 }
                 GenresMessage::SlotListSelectAllToggle => {
-                    let flattened = super::expansion::three_tier_flattened_len(
-                        genres,
-                        &self.expansion,
-                        self.sub_expansion.children.len(),
-                    );
+                    let flattened = self.expansion.flattened_len(genres);
                     self.common.handle_select_all_toggle(flattened);
                     (Task::none(), GenresAction::None)
                 }
                 GenresMessage::SlotListActivateCenter => {
-                    let total = super::expansion::three_tier_flattened_len(
-                        genres,
-                        &self.expansion,
-                        self.sub_expansion.children.len(),
-                    );
+                    let total = self.expansion.flattened_len(genres);
                     if let Some(center_idx) = self.common.get_center_item_index(total) {
                         self.common.slot_list.flash_center();
-                        match super::expansion::three_tier_get_entry_at(
-                            center_idx,
-                            genres,
-                            &self.expansion,
-                            &self.sub_expansion,
-                            |g| &g.id,
-                            |a| &a.id,
-                        ) {
-                            Some(ThreeTierEntry::Grandchild(song, _)) => {
-                                (Task::none(), GenresAction::PlayTrack(song.id.clone()))
-                            }
-                            Some(ThreeTierEntry::Child(album, _)) => {
+                        match self.expansion.get_entry_at(center_idx, genres, |g| &g.id) {
+                            Some(SlotListEntry::Child(album, _)) => {
                                 (Task::none(), GenresAction::PlayAlbum(album.id.clone()))
                             }
-                            Some(ThreeTierEntry::Parent(genre)) => {
+                            Some(SlotListEntry::Parent(genre)) => {
                                 (Task::none(), GenresAction::PlayGenre(genre.name.clone()))
                             }
                             None => (Task::none(), GenresAction::None),
@@ -563,11 +392,7 @@ impl GenresPage {
                 }
                 GenresMessage::AddCenterToQueue => {
                     use nokkvi_data::types::batch::BatchItem;
-                    let total = super::expansion::three_tier_flattened_len(
-                        genres,
-                        &self.expansion,
-                        self.sub_expansion.children.len(),
-                    );
+                    let total = self.expansion.flattened_len(genres);
 
                     let target_indices = self.common.get_queue_target_indices(total);
 
@@ -576,23 +401,12 @@ impl GenresPage {
                     }
 
                     let payload = super::expansion::build_batch_payload(target_indices, |i| {
-                        match super::expansion::three_tier_get_entry_at(
-                            i,
-                            genres,
-                            &self.expansion,
-                            &self.sub_expansion,
-                            |g| &g.id,
-                            |a| &a.id,
-                        ) {
-                            Some(ThreeTierEntry::Parent(genre)) => {
+                        match self.expansion.get_entry_at(i, genres, |g| &g.id) {
+                            Some(SlotListEntry::Parent(genre)) => {
                                 Some(BatchItem::Genre(genre.name.clone()))
                             }
-                            Some(ThreeTierEntry::Child(album, _)) => {
+                            Some(SlotListEntry::Child(album, _)) => {
                                 Some(BatchItem::Album(album.id.clone()))
-                            }
-                            Some(ThreeTierEntry::Grandchild(song, _)) => {
-                                let item: nokkvi_data::types::song::Song = song.clone().into();
-                                Some(BatchItem::Song(Box::new(item)))
                             }
                             None => None,
                         }
@@ -601,23 +415,12 @@ impl GenresPage {
                     (Task::none(), GenresAction::AddBatchToQueue(payload))
                 }
                 GenresMessage::ClickToggleStar(item_index) => {
-                    match super::expansion::three_tier_get_entry_at(
-                        item_index,
-                        genres,
-                        &self.expansion,
-                        &self.sub_expansion,
-                        |g| &g.id,
-                        |a| &a.id,
-                    ) {
-                        Some(ThreeTierEntry::Grandchild(song, _)) => (
-                            Task::none(),
-                            GenresAction::ToggleStar(song.id.clone(), "song", !song.is_starred),
-                        ),
-                        Some(ThreeTierEntry::Child(album, _)) => (
+                    match self.expansion.get_entry_at(item_index, genres, |g| &g.id) {
+                        Some(SlotListEntry::Child(album, _)) => (
                             Task::none(),
                             GenresAction::ToggleStar(album.id.clone(), "album", !album.is_starred),
                         ),
-                        Some(ThreeTierEntry::Parent(_genre)) => {
+                        Some(SlotListEntry::Parent(_genre)) => {
                             // Genres don't have starred state
                             (Task::none(), GenresAction::None)
                         }
@@ -654,30 +457,18 @@ impl GenresPage {
                     match entry {
                         LibraryContextEntry::AddToQueue | LibraryContextEntry::AddToPlaylist => {
                             let target_indices = self.common.get_batch_target_indices(clicked_idx);
-                            let payload =
-                                super::expansion::build_batch_payload(target_indices, |i| {
-                                    match super::expansion::three_tier_get_entry_at(
-                                        i,
-                                        genres,
-                                        &self.expansion,
-                                        &self.sub_expansion,
-                                        |g| &g.id,
-                                        |a| &a.id,
-                                    ) {
-                                        Some(ThreeTierEntry::Parent(genre)) => {
-                                            Some(BatchItem::Genre(genre.name.clone()))
-                                        }
-                                        Some(ThreeTierEntry::Child(album, _)) => {
-                                            Some(BatchItem::Album(album.id.clone()))
-                                        }
-                                        Some(ThreeTierEntry::Grandchild(song, _)) => {
-                                            let item: nokkvi_data::types::song::Song =
-                                                song.clone().into();
-                                            Some(BatchItem::Song(Box::new(item)))
-                                        }
-                                        None => None,
+                            let payload = super::expansion::build_batch_payload(
+                                target_indices,
+                                |i| match self.expansion.get_entry_at(i, genres, |g| &g.id) {
+                                    Some(SlotListEntry::Parent(genre)) => {
+                                        Some(BatchItem::Genre(genre.name.clone()))
                                     }
-                                });
+                                    Some(SlotListEntry::Child(album, _)) => {
+                                        Some(BatchItem::Album(album.id.clone()))
+                                    }
+                                    None => None,
+                                },
+                            );
 
                             match entry {
                                 LibraryContextEntry::AddToQueue => {
@@ -690,95 +481,60 @@ impl GenresPage {
                             }
                         }
                         // Non-batched actions (apply only to the clicked item)
-                        _ => {
-                            match super::expansion::three_tier_get_entry_at(
-                                clicked_idx,
-                                genres,
-                                &self.expansion,
-                                &self.sub_expansion,
-                                |g| &g.id,
-                                |a| &a.id,
-                            ) {
-                                Some(ThreeTierEntry::Parent(_genre)) => {
+                        _ => match self.expansion.get_entry_at(clicked_idx, genres, |g| &g.id) {
+                            Some(SlotListEntry::Parent(_genre)) => {
+                                (Task::none(), GenresAction::None)
+                            }
+                            Some(SlotListEntry::Child(album, _)) => match entry {
+                                LibraryContextEntry::GetInfo => {
+                                    use nokkvi_data::types::info_modal::InfoModalItem;
+                                    let item = InfoModalItem::Album {
+                                        name: album.name.clone(),
+                                        album_artist: Some(album.artist.clone()),
+                                        release_type: album.release_type.clone(),
+                                        genre: album.genre.clone(),
+                                        genres: album.genres.clone(),
+                                        duration: album.duration,
+                                        year: album.year,
+                                        song_count: Some(album.song_count),
+                                        compilation: album.compilation,
+                                        size: album.size,
+                                        is_starred: album.is_starred,
+                                        rating: album.rating,
+                                        play_count: album.play_count,
+                                        play_date: album.play_date.clone(),
+                                        updated_at: album.updated_at.clone(),
+                                        created_at: album.created_at.clone(),
+                                        mbz_album_id: album.mbz_album_id.clone(),
+                                        comment: album.comment.clone(),
+                                        id: album.id.clone(),
+                                        tags: album.tags.clone(),
+                                        participants: album.participants.clone(),
+                                        representative_path: None,
+                                    };
+                                    (Task::none(), GenresAction::ShowInfo(Box::new(item)))
+                                }
+                                LibraryContextEntry::ShowInFolder => (
+                                    Task::none(),
+                                    GenresAction::ShowAlbumInFolder(album.id.clone()),
+                                ),
+                                LibraryContextEntry::Separator => {
                                     (Task::none(), GenresAction::None)
                                 }
-                                Some(ThreeTierEntry::Child(album, _)) => match entry {
-                                    LibraryContextEntry::GetInfo => {
-                                        use nokkvi_data::types::info_modal::InfoModalItem;
-                                        let item = InfoModalItem::Album {
-                                            name: album.name.clone(),
-                                            album_artist: Some(album.artist.clone()),
-                                            release_type: album.release_type.clone(),
-                                            genre: album.genre.clone(),
-                                            genres: album.genres.clone(),
-                                            duration: album.duration,
-                                            year: album.year,
-                                            song_count: Some(album.song_count),
-                                            compilation: album.compilation,
-                                            size: album.size,
-                                            is_starred: album.is_starred,
-                                            rating: album.rating,
-                                            play_count: album.play_count,
-                                            play_date: album.play_date.clone(),
-                                            updated_at: album.updated_at.clone(),
-                                            created_at: album.created_at.clone(),
-                                            mbz_album_id: album.mbz_album_id.clone(),
-                                            comment: album.comment.clone(),
-                                            id: album.id.clone(),
-                                            tags: album.tags.clone(),
-                                            participants: album.participants.clone(),
-                                            representative_path: self
-                                                .sub_expansion
-                                                .children
-                                                .first()
-                                                .map(|s| s.path.clone()),
-                                        };
-                                        (Task::none(), GenresAction::ShowInfo(Box::new(item)))
-                                    }
-                                    LibraryContextEntry::ShowInFolder => (
-                                        Task::none(),
-                                        GenresAction::ShowAlbumInFolder(album.id.clone()),
-                                    ),
-                                    LibraryContextEntry::Separator => {
-                                        (Task::none(), GenresAction::None)
-                                    }
-                                    LibraryContextEntry::FindSimilar => {
-                                        let aid = album.artist.clone();
-                                        (
-                                            Task::none(),
-                                            GenresAction::FindSimilar(
-                                                aid,
-                                                format!("Similar to: {}", album.name),
-                                            ),
-                                        )
-                                    }
-                                    _ => (Task::none(), GenresAction::None),
-                                },
-                                Some(ThreeTierEntry::Grandchild(song, _)) => match entry {
-                                    LibraryContextEntry::GetInfo => {
-                                        use nokkvi_data::types::info_modal::InfoModalItem;
-                                        let item = InfoModalItem::from_song_view_data(song);
-                                        (Task::none(), GenresAction::ShowInfo(Box::new(item)))
-                                    }
-                                    LibraryContextEntry::ShowInFolder => (
-                                        Task::none(),
-                                        GenresAction::ShowSongInFolder(song.path.clone()),
-                                    ),
-                                    LibraryContextEntry::Separator => {
-                                        (Task::none(), GenresAction::None)
-                                    }
-                                    LibraryContextEntry::FindSimilar => (
+                                LibraryContextEntry::FindSimilar => {
+                                    let aid = album.artist.clone();
+                                    (
                                         Task::none(),
                                         GenresAction::FindSimilar(
-                                            song.id.clone(),
-                                            format!("Similar to: {}", song.title),
+                                            aid,
+                                            format!("Similar to: {}", album.name),
                                         ),
-                                    ),
-                                    _ => (Task::none(), GenresAction::None),
-                                },
-                                None => (Task::none(), GenresAction::None),
-                            }
-                        }
+                                    )
+                                }
+                                _ => (Task::none(), GenresAction::None),
+                            },
+                            None => (Task::none(), GenresAction::None),
+                        },
                     }
                 }
                 // Common arms already handled by macro above
@@ -860,11 +616,7 @@ impl GenresPage {
         // multi-select column is on. Tri-state derives from the current
         // selection set against the *flattened* (visible) row count.
         let header = {
-            let flattened_len = super::expansion::three_tier_flattened_len(
-                data.genres,
-                &self.expansion,
-                self.sub_expansion.children.len(),
-            );
+            let flattened_len = self.expansion.flattened_len(data.genres);
             crate::widgets::slot_list::compose_header_with_select(
                 self.column_visibility.select,
                 self.common.select_all_state(flattened_len),
@@ -914,14 +666,8 @@ impl GenresPage {
         let genre_collage_artwork = data.genre_collage_artwork;
         let open_menu_for_rows = data.open_menu;
 
-        // Build flattened list (genres + injected albums + injected tracks when expanded)
-        let flattened = super::expansion::build_three_tier_list(
-            genres,
-            &self.expansion,
-            &self.sub_expansion,
-            |g| &g.id,
-            |a| &a.id,
-        );
+        // Build flattened list (genres + injected albums when expanded)
+        let flattened = self.expansion.build_flattened_list(genres, |g| &g.id);
         let center_index = self.common.get_center_item_index(flattened.len());
 
         // Render slot list using generic component with item renderer closure
@@ -936,7 +682,7 @@ impl GenresPage {
                 move |f| GenresMessage::SlotListScrollSeek((f * total as f32) as usize)
             },
             |entry, ctx| match entry {
-                ThreeTierEntry::Parent(genre) => {
+                SlotListEntry::Parent(genre) => {
                     let row = self.render_genre_row(
                         genre,
                         &ctx,
@@ -952,7 +698,7 @@ impl GenresPage {
                         row,
                     )
                 }
-                ThreeTierEntry::Child(album, _parent_genre_id) => {
+                SlotListEntry::Child(album, _parent_genre_id) => {
                     let row = self.render_album_row(
                         album,
                         &ctx,
@@ -960,60 +706,6 @@ impl GenresPage {
                         data.stable_viewport,
                         open_menu_for_rows,
                     );
-                    crate::widgets::slot_list::wrap_with_select_column(
-                        select_header_visible,
-                        ctx.is_selected,
-                        ctx.item_index,
-                        GenresMessage::SlotListSelectionToggle,
-                        row,
-                    )
-                }
-                ThreeTierEntry::Grandchild(song, _album_id) => {
-                    let track_el = super::expansion::render_child_track_row(
-                        song,
-                        &ctx,
-                        GenresMessage::SlotListActivateCenter,
-                        if data.stable_viewport {
-                            GenresMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
-                        } else {
-                            GenresMessage::SlotListClickPlay(ctx.item_index)
-                        },
-                        Some(GenresMessage::ClickToggleStar(ctx.item_index)),
-                        song.artist_id
-                            .as_ref()
-                            .map(|id| GenresMessage::NavigateAndExpandArtist(id.clone())),
-                        2, // depth 2: grandchild tracks (genre → album → track)
-                    );
-                    use crate::widgets::context_menu::{
-                        context_menu, library_entry_view, open_state_for, song_entries_with_folder,
-                    };
-                    let item_idx = ctx.item_index;
-                    let cm_id = crate::app_message::ContextMenuId::LibraryRow {
-                        view: crate::View::Genres,
-                        item_index: item_idx,
-                    };
-                    let (cm_open, cm_position) = open_state_for(open_menu_for_rows, &cm_id);
-                    let row: Element<'_, GenresMessage> = context_menu(
-                        track_el,
-                        song_entries_with_folder(),
-                        move |entry, length| {
-                            library_entry_view(entry, length, |e| {
-                                GenresMessage::ContextMenuAction(item_idx, e)
-                            })
-                        },
-                        cm_open,
-                        cm_position,
-                        move |position| match position {
-                            Some(p) => GenresMessage::SetOpenMenu(Some(
-                                crate::app_message::OpenMenu::Context {
-                                    id: cm_id.clone(),
-                                    position: p,
-                                },
-                            )),
-                            None => GenresMessage::SetOpenMenu(None),
-                        },
-                    )
-                    .into();
                     crate::widgets::slot_list::wrap_with_select_column(
                         select_header_visible,
                         ctx.is_selected,
@@ -1033,13 +725,8 @@ impl GenresPage {
 
         // Build artwork column — show parent genre art even when on a child album
         let centered_genre = center_index.and_then(|idx| match flattened.get(idx) {
-            Some(ThreeTierEntry::Parent(genre)) => Some(genre),
-            Some(ThreeTierEntry::Child(_, parent_id)) => genres.iter().find(|g| &g.id == parent_id),
-            Some(ThreeTierEntry::Grandchild(_, _)) => self
-                .expansion
-                .expanded_id
-                .as_ref()
-                .and_then(|id| genres.iter().find(|g| &g.id == id)),
+            Some(SlotListEntry::Parent(genre)) => Some(genre),
+            Some(SlotListEntry::Child(_, parent_id)) => genres.iter().find(|g| &g.id == parent_id),
             None => None,
         });
         let genre_id = centered_genre.map(|g| g.id.clone()).unwrap_or_default();
@@ -1233,6 +920,7 @@ impl GenresPage {
         stable_viewport: bool,
         open_menu: Option<&'a crate::app_message::OpenMenu>,
     ) -> Element<'a, GenresMessage> {
+        let navigate_msg = GenresMessage::NavigateAndExpandAlbum(album.id.clone());
         let album_el = super::expansion::render_child_album_row(
             album,
             ctx,
@@ -1246,8 +934,8 @@ impl GenresPage {
             },
             true, // show artist since genre groups albums from different artists
             Some(GenresMessage::ClickToggleStar(ctx.item_index)),
-            Some(GenresMessage::FocusAndExpandAlbum(ctx.item_index)),
-            Some(GenresMessage::FocusAndExpandAlbum(ctx.item_index)),
+            Some(navigate_msg.clone()),
+            Some(navigate_msg),
             Some(GenresMessage::NavigateAndExpandArtist(
                 album.artist_id.clone(),
             )),
@@ -1300,14 +988,10 @@ impl super::ViewPage for GenresPage {
     }
 
     fn is_expanded(&self) -> bool {
-        self.expansion.is_expanded() || self.sub_expansion.is_expanded()
+        self.expansion.is_expanded()
     }
     fn collapse_expansion_message(&self) -> Option<Message> {
-        if self.sub_expansion.is_expanded() {
-            Some(Message::Genres(GenresMessage::CollapseAlbumExpansion))
-        } else {
-            Some(Message::Genres(GenresMessage::CollapseExpansion))
-        }
+        Some(Message::Genres(GenresMessage::CollapseExpansion))
     }
 
     fn search_input_id(&self) -> &'static str {
@@ -1328,10 +1012,9 @@ impl super::ViewPage for GenresPage {
         Some(Message::Genres(GenresMessage::AddCenterToQueue))
     }
     fn expand_center_message(&self) -> Option<Message> {
-        // Always dispatch ExpandCenter; update() inspects the centered 3-tier
-        // entry and routes parent rows to outer-collapse and child/grandchild
-        // rows to the album sub-expansion handler. Mirrors Albums/Playlists
-        // toggle-on-self semantics.
+        // ExpandCenter on a 2nd-tier album row routes through `update()`'s
+        // pre-check to NavigateAndExpandAlbum (cross-view drill-down);
+        // parent rows toggle inline expansion via the macro.
         Some(Message::Genres(GenresMessage::ExpandCenter))
     }
     fn reload_message(&self) -> Option<Message> {

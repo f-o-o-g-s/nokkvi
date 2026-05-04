@@ -379,11 +379,10 @@ impl Nokkvi {
             )
             && let Some(idx) = self.library.artists.iter().position(|a| a.id == loaded_id)
         {
-            let total = crate::views::expansion::three_tier_flattened_len(
-                &self.library.artists,
-                &self.artists_page.expansion,
-                self.artists_page.sub_expansion.children.len(),
-            );
+            let total = self
+                .artists_page
+                .expansion
+                .flattened_len(&self.library.artists);
             self.artists_page.common.slot_list.set_selected(idx, total);
             self.pending_top_pin = None;
         }
@@ -553,55 +552,6 @@ impl Nokkvi {
 
                 return Task::batch([artwork_task, albums_task]);
             }
-            ArtistsAction::ExpandAlbum(album_id) => {
-                // Load tracks for the expanded album and send them back to the view
-                let id = album_id.clone();
-                return self.shell_task(
-                    move |shell| async move {
-                        let albums_vm = shell.albums().clone();
-                        let songs = albums_vm.load_album_songs(&id).await?;
-                        let ui_songs: Vec<nokkvi_data::backend::songs::SongUIViewData> = songs
-                            .into_iter()
-                            .map(nokkvi_data::backend::songs::SongUIViewData::from)
-                            .collect();
-                        Ok((album_id, ui_songs))
-                    },
-                    move |result: Result<
-                        (String, Vec<nokkvi_data::backend::songs::SongUIViewData>),
-                        anyhow::Error,
-                    >| match result {
-                        Ok((aid, songs)) => {
-                            Message::Artists(ArtistsMessage::TracksLoaded(aid, songs))
-                        }
-                        Err(e) => {
-                            tracing::error!(" Failed to load album tracks for artist: {}", e);
-                            Message::NoOp
-                        }
-                    },
-                );
-            }
-            ArtistsAction::PlayTrack(song_id) => {
-                if let Some(task) = self.guard_play_action() {
-                    return task;
-                }
-                // Find the song in sub_expansion children to get its album_id and build a single-song queue
-                if let Some(song) = self
-                    .artists_page
-                    .sub_expansion
-                    .children
-                    .iter()
-                    .find(|s| s.id == song_id)
-                    .cloned()
-                {
-                    let song_data: nokkvi_data::types::song::Song = song.into();
-                    self.clear_active_playlist();
-                    return self.shell_action_task(
-                        move |shell| async move { shell.play_songs(vec![song_data], 0).await },
-                        Message::SwitchView(View::Queue),
-                        "play track from artist expansion",
-                    );
-                }
-            }
             ArtistsAction::StarArtist(artist_id) => {
                 // Route through central update message for cross-view propagation
                 let optimistic_msg =
@@ -627,15 +577,6 @@ impl Nokkvi {
                         .iter()
                         .find(|a| a.id == item_id)
                         .and_then(|a| a.rating)
-                        .unwrap_or(0)
-                } else if item_type == "song" {
-                    // Song within sub-expanded album
-                    self.artists_page
-                        .sub_expansion
-                        .children
-                        .iter()
-                        .find(|s| s.id == item_id)
-                        .and_then(|s| s.rating)
                         .unwrap_or(0)
                 } else {
                     // Album within expanded artist

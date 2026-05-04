@@ -3,11 +3,7 @@
 use iced::Task;
 use tracing::{debug, error, info};
 
-use crate::{
-    Nokkvi, View,
-    app_message::Message,
-    views::expansion::{self, SlotListEntry, ThreeTierEntry},
-};
+use crate::{Nokkvi, View, app_message::Message, views::expansion::SlotListEntry};
 
 /// Info about the currently centered item in the slot list, used by star/rating hotkeys.
 pub(in crate::update) struct CenterItemInfo {
@@ -76,40 +72,28 @@ impl Nokkvi {
                     rating: song.rating.unwrap_or(0),
                     item_type: "song",
                 }),
-            View::Artists => expansion::resolve_three_tier_center(
-                &self.library.artists,
-                &self.artists_page.expansion,
-                &self.artists_page.sub_expansion,
-                &self.artists_page.common,
-                |a| &a.id,
-                |a| &a.id,
-            )
-            .map(|entry| match entry {
-                ThreeTierEntry::Grandchild(song, _) => CenterItemInfo {
-                    id: song.id.clone(),
-                    name: song.title.clone(),
-                    artist: song.artist.clone(),
-                    starred: song.is_starred,
-                    rating: song.rating.unwrap_or(0),
-                    item_type: "song",
-                },
-                ThreeTierEntry::Child(album, _) => CenterItemInfo {
-                    id: album.id.clone(),
-                    name: album.name.clone(),
-                    artist: album.artist.clone(),
-                    starred: album.is_starred,
-                    rating: album.rating.unwrap_or(0),
-                    item_type: "album",
-                },
-                ThreeTierEntry::Parent(artist) => CenterItemInfo {
-                    id: artist.id.clone(),
-                    name: artist.name.clone(),
-                    artist: String::new(),
-                    starred: artist.is_starred,
-                    rating: artist.rating.unwrap_or(0),
-                    item_type: "artist",
-                },
-            }),
+            View::Artists => self
+                .artists_page
+                .expansion
+                .resolve_center(&self.library.artists, &self.artists_page.common, |a| &a.id)
+                .map(|entry| match entry {
+                    SlotListEntry::Child(album, _) => CenterItemInfo {
+                        id: album.id.clone(),
+                        name: album.name.clone(),
+                        artist: album.artist.clone(),
+                        starred: album.is_starred,
+                        rating: album.rating.unwrap_or(0),
+                        item_type: "album",
+                    },
+                    SlotListEntry::Parent(artist) => CenterItemInfo {
+                        id: artist.id.clone(),
+                        name: artist.name.clone(),
+                        artist: String::new(),
+                        starred: artist.is_starred,
+                        rating: artist.rating.unwrap_or(0),
+                        item_type: "artist",
+                    },
+                }),
             View::Playlists => self
                 .playlists_page
                 .expansion
@@ -127,33 +111,21 @@ impl Nokkvi {
                     }),
                     SlotListEntry::Parent(_) => None, // playlists themselves can't be starred/rated
                 }),
-            View::Genres => expansion::resolve_three_tier_center(
-                &self.library.genres,
-                &self.genres_page.expansion,
-                &self.genres_page.sub_expansion,
-                &self.genres_page.common,
-                |g| &g.id,
-                |a| &a.id,
-            )
-            .and_then(|entry| match entry {
-                ThreeTierEntry::Grandchild(song, _) => Some(CenterItemInfo {
-                    id: song.id.clone(),
-                    name: song.title.clone(),
-                    artist: song.artist.clone(),
-                    starred: song.is_starred,
-                    rating: song.rating.unwrap_or(0),
-                    item_type: "song",
+            View::Genres => self
+                .genres_page
+                .expansion
+                .resolve_center(&self.library.genres, &self.genres_page.common, |g| &g.id)
+                .and_then(|entry| match entry {
+                    SlotListEntry::Child(album, _) => Some(CenterItemInfo {
+                        id: album.id.clone(),
+                        name: album.name.clone(),
+                        artist: album.artist.clone(),
+                        starred: album.is_starred,
+                        rating: album.rating.unwrap_or(0),
+                        item_type: "album",
+                    }),
+                    SlotListEntry::Parent(_) => None, // genres themselves can't be starred/rated
                 }),
-                ThreeTierEntry::Child(album, _) => Some(CenterItemInfo {
-                    id: album.id.clone(),
-                    name: album.name.clone(),
-                    artist: album.artist.clone(),
-                    starred: album.is_starred,
-                    rating: album.rating.unwrap_or(0),
-                    item_type: "album",
-                }),
-                ThreeTierEntry::Parent(_) => None, // genres themselves can't be starred/rated
-            }),
             _ => None,
         }
     }
@@ -293,25 +265,6 @@ impl Nokkvi {
         if let Some(track) = self
             .playlists_page
             .expansion
-            .children
-            .iter_mut()
-            .find(|t| t.id == song_id)
-        {
-            track.is_starred = new_starred_status;
-        }
-        // Update sub-expanded tracks in artists and genres views
-        if let Some(track) = self
-            .artists_page
-            .sub_expansion
-            .children
-            .iter_mut()
-            .find(|t| t.id == song_id)
-        {
-            track.is_starred = new_starred_status;
-        }
-        if let Some(track) = self
-            .genres_page
-            .sub_expansion
             .children
             .iter_mut()
             .find(|t| t.id == song_id)
@@ -581,25 +534,6 @@ impl Nokkvi {
         {
             track.rating = rating_opt;
         }
-        // Also update sub-expanded tracks in artists/genres views
-        if let Some(track) = self
-            .artists_page
-            .sub_expansion
-            .children
-            .iter_mut()
-            .find(|t| t.id == song_id)
-        {
-            track.rating = rating_opt;
-        }
-        if let Some(track) = self
-            .genres_page
-            .sub_expansion
-            .children
-            .iter_mut()
-            .find(|t| t.id == song_id)
-        {
-            track.rating = rating_opt;
-        }
         // Persist to queue storage
         let sid = song_id.clone();
         self.shell_task(
@@ -644,16 +578,6 @@ impl Nokkvi {
             &mut self.playlists_page.expansion.children,
             &song_id,
             "playlist track",
-        );
-        nokkvi_data::backend::increment_play_count_in_list(
-            &mut self.artists_page.sub_expansion.children,
-            &song_id,
-            "artist track",
-        );
-        nokkvi_data::backend::increment_play_count_in_list(
-            &mut self.genres_page.sub_expansion.children,
-            &song_id,
-            "genre track",
         );
 
         let sid = song_id.clone();

@@ -12,7 +12,7 @@ use iced::{
 };
 use nokkvi_data::backend::{albums::AlbumUIViewData, artists::ArtistUIViewData};
 
-use super::expansion::{ExpansionState, ThreeTierEntry};
+use super::expansion::{ExpansionState, SlotListEntry};
 use crate::{
     app_message::Message,
     widgets::{self, SlotListPageState, view_header::SortMode},
@@ -24,8 +24,6 @@ pub struct ArtistsPage {
     pub common: SlotListPageState,
     /// Inline expansion state (artist → albums)
     pub expansion: ExpansionState<AlbumUIViewData>,
-    /// Sub-expansion state (album → tracks)
-    pub sub_expansion: ExpansionState<nokkvi_data::backend::songs::SongUIViewData>,
     /// Per-column visibility toggles surfaced via the columns-cog dropdown.
     pub column_visibility: ArtistsColumnVisibility,
 }
@@ -166,19 +164,19 @@ pub enum ArtistsMessage {
     // Context menu
     ContextMenuAction(usize, crate::widgets::context_menu::LibraryContextEntry),
 
-    // Inline expansion — first level (Shift+Enter on artist)
+    // Inline expansion (Shift+Enter on artist)
     ExpandCenter,
     FocusAndExpand(usize), // Clicked 'X albums' — focus that row and expand it
     CollapseExpansion,
     /// Albums loaded for expanded artist (artist_id, albums)
     AlbumsLoaded(String, Vec<AlbumUIViewData>),
 
-    // Inline expansion — second level (Shift+Enter on child album)
-    ExpandAlbum,
-    FocusAndExpandAlbum(usize), // Clicked 'X songs' on child album — focus and expand tracks
-    CollapseAlbumExpansion,
-    /// Tracks loaded for expanded album (album_id, songs)
-    TracksLoaded(String, Vec<nokkvi_data::backend::songs::SongUIViewData>),
+    /// Click on a child album row's "X songs" / album-name link, or
+    /// Shift+Enter on a centered child album row. Bubbles up as
+    /// `ArtistsAction::NavigateAndExpandAlbum`, which the root translates
+    /// into a top- or browsing-pane Albums-view switch with the album
+    /// already primed for expansion.
+    NavigateAndExpandAlbum(String),
 
     // View header
     SortModeSelected(widgets::view_header::SortMode),
@@ -217,7 +215,6 @@ pub enum ArtistsAction {
     PlayArtist(String), // artist_id - clear queue and play all songs
     AddBatchToQueue(nokkvi_data::types::batch::BatchPayload),
     PlayAlbum(String),    // album_id - play child album
-    PlayTrack(String),    // song_id - play single expanded track
     StarArtist(String),   // artist_id - star the artist
     UnstarArtist(String), // artist_id - unstar the artist
     /// Set absolute rating on item (item_id, item_type, rating)
@@ -226,8 +223,9 @@ pub enum ArtistsAction {
     ToggleStar(String, &'static str, bool),
     /// Expand artist inline — root should load albums (artist_id)
     ExpandArtist(String),
-    /// Expand album inline — root should load tracks (album_id)
-    ExpandAlbum(String),
+    /// Switch to Albums view and prime the named album for inline expansion.
+    /// Carries the album id so the root can route to top vs browsing pane.
+    NavigateAndExpandAlbum(String),
     LoadPage(usize),       // offset - trigger fetch of next page
     SearchChanged(String), // trigger reload
     SortModeChanged(widgets::view_header::SortMode), // trigger reload
@@ -266,6 +264,9 @@ impl super::HasCommonAction for ArtistsAction {
             Self::NavigateAndFilter(v, f) => {
                 super::CommonViewAction::NavigateAndFilter(*v, f.clone())
             }
+            Self::NavigateAndExpandAlbum(id) => {
+                super::CommonViewAction::NavigateAndExpandAlbum(id.clone())
+            }
             Self::None => super::CommonViewAction::None,
             _ => super::CommonViewAction::ViewSpecific,
         }
@@ -280,7 +281,6 @@ impl Default for ArtistsPage {
                 true, // sort_ascending
             ),
             expansion: ExpansionState::default(),
-            sub_expansion: ExpansionState::default(),
             column_visibility: ArtistsColumnVisibility::default(),
         }
     }
@@ -306,40 +306,24 @@ impl ArtistsPage {
         total_items: usize,
         artists: &[ArtistUIViewData],
     ) -> (Task<ArtistsMessage>, ArtistsAction) {
-        // Shift+Enter routing for the 3-tier list. The macro's ExpandCenter
-        // handler operates on the 2-tier (parent + first-level children) view,
-        // which is wrong once a sub-expansion has injected grandchildren below
-        // a child album. Inspect the centered entry first and re-route:
-        //   * Child / Grandchild → ExpandAlbum (toggles the inner expansion)
-        //   * Parent (outer already expanded) → collapse outer + clear sub
-        //   * otherwise (no expansion) → fall through to macro to open it.
+        // Shift+Enter on a centered child album row: route to the
+        // cross-view "navigate to Albums + expand there" path instead of
+        // doing an inline 3rd-tier expansion. Parent rows keep the
+        // toggle-collapse behaviour the macro provides; child rows would
+        // otherwise just collapse the outer expansion (the 2-tier
+        // `handle_expand_center` semantics), which is the wrong choice
+        // here — we want drill-down, not collapse.
         if matches!(message, ArtistsMessage::ExpandCenter) && self.expansion.is_expanded() {
-            let total = super::expansion::three_tier_flattened_len(
-                artists,
-                &self.expansion,
-                self.sub_expansion.children.len(),
-            );
-            let entry = self.common.get_center_item_index(total).and_then(|idx| {
-                super::expansion::three_tier_get_entry_at(
-                    idx,
-                    artists,
-                    &self.expansion,
-                    &self.sub_expansion,
-                    |a| &a.id,
-                    |a| &a.id,
-                )
-            });
-            match entry {
-                Some(ThreeTierEntry::Child(_, _) | ThreeTierEntry::Grandchild(_, _)) => {
-                    return self.update(ArtistsMessage::ExpandAlbum, total_items, artists);
-                }
-                Some(ThreeTierEntry::Parent(_)) => {
-                    self.sub_expansion.clear();
-                    self.expansion
-                        .collapse(artists, |a| &a.id, &mut self.common);
-                    return (Task::none(), ArtistsAction::None);
-                }
-                None => {}
+            let total = self.expansion.flattened_len(artists);
+            let center = self
+                .common
+                .get_center_item_index(total)
+                .and_then(|idx| self.expansion.get_entry_at(idx, artists, |a| &a.id));
+            if let Some(SlotListEntry::Child(album, _)) = center {
+                return (
+                    Task::none(),
+                    ArtistsAction::NavigateAndExpandAlbum(album.id.clone()),
+                );
             }
         }
 
@@ -355,157 +339,41 @@ impl ArtistsPage {
             search_focused: ArtistsMessage::SearchFocused,
             action_none: ArtistsAction::None,
         ) {
-            Ok((task, action)) => {
-                // Clear sub_expansion when the outer expansion is collapsed or reloaded
-                if matches!(
-                    action,
-                    ArtistsAction::SortModeChanged(_)
-                        | ArtistsAction::SortOrderChanged(_)
-                        | ArtistsAction::SearchChanged(_)
-                ) {
-                    self.sub_expansion.clear();
-                }
-                (task, action)
-            }
+            Ok(result) => result,
             Err(msg) => match msg {
                 ArtistsMessage::FocusAndExpand(offset) => {
-                    let len = super::expansion::three_tier_flattened_len(
-                        artists,
-                        &self.expansion,
-                        self.sub_expansion.children.len(),
-                    );
+                    let len = self.expansion.flattened_len(artists);
                     self.common
                         .handle_slot_click(offset, len, Default::default());
-                    // Now expand the centered artist
                     if let Some(parent_id) =
                         self.expansion
                             .handle_expand_center(artists, |a| &a.id, &mut self.common)
                     {
-                        self.sub_expansion.clear();
                         (Task::none(), ArtistsAction::ExpandArtist(parent_id))
                     } else {
                         (Task::none(), ArtistsAction::None)
                     }
                 }
-                // CollapseExpansion handled by macro — clear sub_expansion too
-                ArtistsMessage::CollapseAlbumExpansion => {
-                    // Restore position to where user was when album was expanded
-                    let saved = self.sub_expansion.parent_offset;
-                    self.sub_expansion.clear();
-                    let total =
-                        super::expansion::three_tier_flattened_len(artists, &self.expansion, 0);
-                    self.common.handle_set_offset(saved, total);
-                    (Task::none(), ArtistsAction::None)
-                }
-                ArtistsMessage::FocusAndExpandAlbum(offset) => {
-                    // Clicked 'X songs' link on a child album — focus that row, then expand
-                    let len = super::expansion::three_tier_flattened_len(
-                        artists,
-                        &self.expansion,
-                        self.sub_expansion.children.len(),
-                    );
-                    self.common
-                        .handle_slot_click(offset, len, Default::default());
-                    // Delegate to the existing ExpandAlbum logic
-                    self.update(ArtistsMessage::ExpandAlbum, total_items, artists)
-                }
-                ArtistsMessage::ExpandAlbum => {
-                    // Shift+Enter on a child album row — expand its tracks
-                    let total = super::expansion::three_tier_flattened_len(
-                        artists,
-                        &self.expansion,
-                        self.sub_expansion.children.len(),
-                    );
-                    let center_idx = self.common.get_center_item_index(total);
-                    let action = center_idx.and_then(|idx| {
-                        super::expansion::three_tier_get_entry_at(
-                            idx,
-                            artists,
-                            &self.expansion,
-                            &self.sub_expansion,
-                            |a| &a.id,
-                            |a| &a.id,
-                        )
-                    });
-                    match action {
-                        Some(ThreeTierEntry::Child(album, _)) => {
-                            // Toggle: if already expanded, collapse
-                            let aid = album.id.clone();
-                            if self.sub_expansion.is_expanded_parent(&aid) {
-                                let saved = self.sub_expansion.parent_offset;
-                                self.sub_expansion.clear();
-                                let total = super::expansion::three_tier_flattened_len(
-                                    artists,
-                                    &self.expansion,
-                                    0,
-                                );
-                                self.common.handle_set_offset(saved, total);
-                                (Task::none(), ArtistsAction::None)
-                            } else {
-                                // Collapse any existing sub-expansion, start new one
-                                self.sub_expansion.clear();
-                                self.sub_expansion.parent_offset =
-                                    self.common.slot_list.viewport_offset;
-                                (Task::none(), ArtistsAction::ExpandAlbum(aid))
-                            }
-                        }
-                        Some(ThreeTierEntry::Grandchild(_, _)) => {
-                            // On a grandchild — collapse the album sub-expansion
-                            let saved = self.sub_expansion.parent_offset;
-                            self.sub_expansion.clear();
-                            let total = super::expansion::three_tier_flattened_len(
-                                artists,
-                                &self.expansion,
-                                0,
-                            );
-                            self.common.handle_set_offset(saved, total);
-                            (Task::none(), ArtistsAction::None)
-                        }
-                        _ => (Task::none(), ArtistsAction::None), // On parent or nothing
-                    }
-                }
-                ArtistsMessage::TracksLoaded(album_id, songs) => {
-                    self.sub_expansion.set_children(
-                        album_id,
-                        songs,
-                        &self.expansion.children,
-                        &mut self.common,
-                    );
-                    (Task::none(), ArtistsAction::None)
-                }
+                ArtistsMessage::NavigateAndExpandAlbum(album_id) => (
+                    Task::none(),
+                    ArtistsAction::NavigateAndExpandAlbum(album_id),
+                ),
                 ArtistsMessage::SlotListNavigateUp => {
-                    let len = super::expansion::three_tier_flattened_len(
-                        artists,
-                        &self.expansion,
-                        self.sub_expansion.children.len(),
-                    );
-                    self.common.handle_navigate_up(len);
+                    self.expansion.handle_navigate_up(artists, &mut self.common);
                     (Task::none(), ArtistsAction::LoadLargeArtwork)
                 }
                 ArtistsMessage::SlotListNavigateDown => {
-                    let len = super::expansion::three_tier_flattened_len(
-                        artists,
-                        &self.expansion,
-                        self.sub_expansion.children.len(),
-                    );
-                    self.common.handle_navigate_down(len);
+                    self.expansion
+                        .handle_navigate_down(artists, &mut self.common);
                     (Task::none(), ArtistsAction::LoadLargeArtwork)
                 }
                 ArtistsMessage::SlotListSetOffset(offset, modifiers) => {
-                    let len = super::expansion::three_tier_flattened_len(
-                        artists,
-                        &self.expansion,
-                        self.sub_expansion.children.len(),
-                    );
+                    let len = self.expansion.flattened_len(artists);
                     self.common.handle_slot_click(offset, len, modifiers);
                     (Task::none(), ArtistsAction::LoadLargeArtwork)
                 }
                 ArtistsMessage::SlotListScrollSeek(offset) => {
-                    let len = super::expansion::three_tier_flattened_len(
-                        artists,
-                        &self.expansion,
-                        self.sub_expansion.children.len(),
-                    );
+                    let len = self.expansion.flattened_len(artists);
                     self.common.handle_set_offset(offset, len);
                     // Mid-drag: update viewport offset only. Artwork +
                     // page-fetch deferred to the SeekSettled debounce, which
@@ -513,58 +381,29 @@ impl ArtistsPage {
                     (Task::none(), ArtistsAction::None)
                 }
                 ArtistsMessage::SlotListClickPlay(offset) => {
-                    let len = super::expansion::three_tier_flattened_len(
-                        artists,
-                        &self.expansion,
-                        self.sub_expansion.children.len(),
-                    );
+                    let len = self.expansion.flattened_len(artists);
                     self.common.handle_set_offset(offset, len);
                     self.update(ArtistsMessage::SlotListActivateCenter, total_items, artists)
                 }
                 ArtistsMessage::SlotListSelectionToggle(offset) => {
-                    // Three-tier flattened (artists + albums + tracks)
-                    // index space — `total_items` from the dispatcher is
-                    // the base artist count.
-                    let flattened = super::expansion::three_tier_flattened_len(
-                        artists,
-                        &self.expansion,
-                        self.sub_expansion.children.len(),
-                    );
+                    let flattened = self.expansion.flattened_len(artists);
                     self.common.handle_selection_toggle(offset, flattened);
                     (Task::none(), ArtistsAction::None)
                 }
                 ArtistsMessage::SlotListSelectAllToggle => {
-                    let flattened = super::expansion::three_tier_flattened_len(
-                        artists,
-                        &self.expansion,
-                        self.sub_expansion.children.len(),
-                    );
+                    let flattened = self.expansion.flattened_len(artists);
                     self.common.handle_select_all_toggle(flattened);
                     (Task::none(), ArtistsAction::None)
                 }
                 ArtistsMessage::SlotListActivateCenter => {
-                    let total = super::expansion::three_tier_flattened_len(
-                        artists,
-                        &self.expansion,
-                        self.sub_expansion.children.len(),
-                    );
+                    let total = self.expansion.flattened_len(artists);
                     if let Some(center_idx) = self.common.get_center_item_index(total) {
                         self.common.slot_list.flash_center();
-                        match super::expansion::three_tier_get_entry_at(
-                            center_idx,
-                            artists,
-                            &self.expansion,
-                            &self.sub_expansion,
-                            |a| &a.id,
-                            |a| &a.id,
-                        ) {
-                            Some(ThreeTierEntry::Grandchild(song, _)) => {
-                                (Task::none(), ArtistsAction::PlayTrack(song.id.clone()))
-                            }
-                            Some(ThreeTierEntry::Child(album, _)) => {
+                        match self.expansion.get_entry_at(center_idx, artists, |a| &a.id) {
+                            Some(SlotListEntry::Child(album, _)) => {
                                 (Task::none(), ArtistsAction::PlayAlbum(album.id.clone()))
                             }
-                            Some(ThreeTierEntry::Parent(_)) => (
+                            Some(SlotListEntry::Parent(_)) => (
                                 Task::none(),
                                 ArtistsAction::PlayArtist(center_idx.to_string()),
                             ),
@@ -576,11 +415,7 @@ impl ArtistsPage {
                 }
                 ArtistsMessage::AddCenterToQueue => {
                     use nokkvi_data::types::batch::BatchItem;
-                    let total = super::expansion::three_tier_flattened_len(
-                        artists,
-                        &self.expansion,
-                        self.sub_expansion.children.len(),
-                    );
+                    let total = self.expansion.flattened_len(artists);
 
                     let target_indices = self.common.get_queue_target_indices(total);
 
@@ -589,23 +424,12 @@ impl ArtistsPage {
                     }
 
                     let payload = super::expansion::build_batch_payload(target_indices, |i| {
-                        match super::expansion::three_tier_get_entry_at(
-                            i,
-                            artists,
-                            &self.expansion,
-                            &self.sub_expansion,
-                            |a| &a.id,
-                            |a| &a.id,
-                        ) {
-                            Some(ThreeTierEntry::Parent(artist)) => {
+                        match self.expansion.get_entry_at(i, artists, |a| &a.id) {
+                            Some(SlotListEntry::Parent(artist)) => {
                                 Some(BatchItem::Artist(artist.id.clone()))
                             }
-                            Some(ThreeTierEntry::Child(album, _)) => {
+                            Some(SlotListEntry::Child(album, _)) => {
                                 Some(BatchItem::Album(album.id.clone()))
-                            }
-                            Some(ThreeTierEntry::Grandchild(song, _)) => {
-                                let item: nokkvi_data::types::song::Song = song.clone().into();
-                                Some(BatchItem::Song(Box::new(item)))
                             }
                             None => None,
                         }
@@ -635,23 +459,8 @@ impl ArtistsPage {
                 }
                 ArtistsMessage::ClickSetRating(item_index, rating) => {
                     use nokkvi_data::utils::formatters::compute_rating_toggle;
-                    match super::expansion::three_tier_get_entry_at(
-                        item_index,
-                        artists,
-                        &self.expansion,
-                        &self.sub_expansion,
-                        |a| &a.id,
-                        |a| &a.id,
-                    ) {
-                        Some(ThreeTierEntry::Grandchild(song, _)) => {
-                            let current = song.rating.unwrap_or(0) as usize;
-                            let new_rating = compute_rating_toggle(current, rating);
-                            (
-                                Task::none(),
-                                ArtistsAction::SetRating(song.id.clone(), "song", new_rating),
-                            )
-                        }
-                        Some(ThreeTierEntry::Child(album, _)) => {
+                    match self.expansion.get_entry_at(item_index, artists, |a| &a.id) {
+                        Some(SlotListEntry::Child(album, _)) => {
                             let current = album.rating.unwrap_or(0) as usize;
                             let new_rating = compute_rating_toggle(current, rating);
                             (
@@ -659,7 +468,7 @@ impl ArtistsPage {
                                 ArtistsAction::SetRating(album.id.clone(), "album", new_rating),
                             )
                         }
-                        Some(ThreeTierEntry::Parent(artist)) => {
+                        Some(SlotListEntry::Parent(artist)) => {
                             let current = artist.rating.unwrap_or(0) as usize;
                             let new_rating = compute_rating_toggle(current, rating);
                             (
@@ -671,23 +480,12 @@ impl ArtistsPage {
                     }
                 }
                 ArtistsMessage::ClickToggleStar(item_index) => {
-                    match super::expansion::three_tier_get_entry_at(
-                        item_index,
-                        artists,
-                        &self.expansion,
-                        &self.sub_expansion,
-                        |a| &a.id,
-                        |a| &a.id,
-                    ) {
-                        Some(ThreeTierEntry::Grandchild(song, _)) => (
-                            Task::none(),
-                            ArtistsAction::ToggleStar(song.id.clone(), "song", !song.is_starred),
-                        ),
-                        Some(ThreeTierEntry::Child(album, _)) => (
+                    match self.expansion.get_entry_at(item_index, artists, |a| &a.id) {
+                        Some(SlotListEntry::Child(album, _)) => (
                             Task::none(),
                             ArtistsAction::ToggleStar(album.id.clone(), "album", !album.is_starred),
                         ),
-                        Some(ThreeTierEntry::Parent(artist)) => (
+                        Some(SlotListEntry::Parent(artist)) => (
                             Task::none(),
                             ArtistsAction::ToggleStar(
                                 artist.id.clone(),
@@ -706,30 +504,18 @@ impl ArtistsPage {
                     match entry {
                         LibraryContextEntry::AddToQueue | LibraryContextEntry::AddToPlaylist => {
                             let target_indices = self.common.get_batch_target_indices(clicked_idx);
-                            let payload =
-                                super::expansion::build_batch_payload(target_indices, |i| {
-                                    match super::expansion::three_tier_get_entry_at(
-                                        i,
-                                        artists,
-                                        &self.expansion,
-                                        &self.sub_expansion,
-                                        |a| &a.id,
-                                        |a| &a.id,
-                                    ) {
-                                        Some(ThreeTierEntry::Parent(artist)) => {
-                                            Some(BatchItem::Artist(artist.id.clone()))
-                                        }
-                                        Some(ThreeTierEntry::Child(album, _)) => {
-                                            Some(BatchItem::Album(album.id.clone()))
-                                        }
-                                        Some(ThreeTierEntry::Grandchild(song, _)) => {
-                                            let item: nokkvi_data::types::song::Song =
-                                                song.clone().into();
-                                            Some(BatchItem::Song(Box::new(item)))
-                                        }
-                                        None => None,
+                            let payload = super::expansion::build_batch_payload(
+                                target_indices,
+                                |i| match self.expansion.get_entry_at(i, artists, |a| &a.id) {
+                                    Some(SlotListEntry::Parent(artist)) => {
+                                        Some(BatchItem::Artist(artist.id.clone()))
                                     }
-                                });
+                                    Some(SlotListEntry::Child(album, _)) => {
+                                        Some(BatchItem::Album(album.id.clone()))
+                                    }
+                                    None => None,
+                                },
+                            );
 
                             match entry {
                                 LibraryContextEntry::AddToQueue => {
@@ -742,131 +528,96 @@ impl ArtistsPage {
                             }
                         }
                         // Non-batched actions (apply only to the clicked item)
-                        _ => {
-                            match super::expansion::three_tier_get_entry_at(
-                                clicked_idx,
-                                artists,
-                                &self.expansion,
-                                &self.sub_expansion,
-                                |a| &a.id,
-                                |a| &a.id,
-                            ) {
-                                Some(ThreeTierEntry::Parent(artist)) => match entry {
-                                    LibraryContextEntry::GetInfo => {
-                                        use nokkvi_data::types::info_modal::InfoModalItem;
-                                        let item = InfoModalItem::Artist {
-                                            name: artist.name.clone(),
-                                            song_count: Some(artist.song_count),
-                                            album_count: Some(artist.album_count),
-                                            is_starred: artist.is_starred,
-                                            rating: artist.rating,
-                                            play_count: artist.play_count,
-                                            play_date: artist.play_date.clone(),
-                                            size: artist.size,
-                                            mbz_artist_id: artist.mbz_artist_id.clone(),
-                                            biography: artist.biography.clone(),
-                                            external_url: artist.external_url.clone(),
-                                            id: artist.id.clone(),
-                                        };
-                                        (Task::none(), ArtistsAction::ShowInfo(Box::new(item)))
-                                    }
-                                    LibraryContextEntry::ShowInFolder
-                                    | LibraryContextEntry::Separator => {
-                                        (Task::none(), ArtistsAction::None)
-                                    }
-                                    LibraryContextEntry::FindSimilar => (
+                        _ => match self.expansion.get_entry_at(clicked_idx, artists, |a| &a.id) {
+                            Some(SlotListEntry::Parent(artist)) => match entry {
+                                LibraryContextEntry::GetInfo => {
+                                    use nokkvi_data::types::info_modal::InfoModalItem;
+                                    let item = InfoModalItem::Artist {
+                                        name: artist.name.clone(),
+                                        song_count: Some(artist.song_count),
+                                        album_count: Some(artist.album_count),
+                                        is_starred: artist.is_starred,
+                                        rating: artist.rating,
+                                        play_count: artist.play_count,
+                                        play_date: artist.play_date.clone(),
+                                        size: artist.size,
+                                        mbz_artist_id: artist.mbz_artist_id.clone(),
+                                        biography: artist.biography.clone(),
+                                        external_url: artist.external_url.clone(),
+                                        id: artist.id.clone(),
+                                    };
+                                    (Task::none(), ArtistsAction::ShowInfo(Box::new(item)))
+                                }
+                                LibraryContextEntry::ShowInFolder
+                                | LibraryContextEntry::Separator => {
+                                    (Task::none(), ArtistsAction::None)
+                                }
+                                LibraryContextEntry::FindSimilar => (
+                                    Task::none(),
+                                    ArtistsAction::FindSimilar(
+                                        artist.id.clone(),
+                                        format!("Similar to: {}", artist.name),
+                                    ),
+                                ),
+                                LibraryContextEntry::TopSongs => (
+                                    Task::none(),
+                                    ArtistsAction::TopSongs(
+                                        artist.name.clone(),
+                                        format!("Top Songs: {}", artist.name),
+                                    ),
+                                ),
+                                _ => (Task::none(), ArtistsAction::None),
+                            },
+                            Some(SlotListEntry::Child(album, _)) => match entry {
+                                LibraryContextEntry::GetInfo => {
+                                    use nokkvi_data::types::info_modal::InfoModalItem;
+                                    let item = InfoModalItem::Album {
+                                        name: album.name.clone(),
+                                        album_artist: Some(album.artist.clone()),
+                                        release_type: album.release_type.clone(),
+                                        genre: album.genre.clone(),
+                                        genres: album.genres.clone(),
+                                        duration: album.duration,
+                                        year: album.year,
+                                        song_count: Some(album.song_count),
+                                        compilation: album.compilation,
+                                        size: album.size,
+                                        is_starred: album.is_starred,
+                                        rating: album.rating,
+                                        play_count: album.play_count,
+                                        play_date: album.play_date.clone(),
+                                        updated_at: album.updated_at.clone(),
+                                        created_at: album.created_at.clone(),
+                                        mbz_album_id: album.mbz_album_id.clone(),
+                                        comment: album.comment.clone(),
+                                        id: album.id.clone(),
+                                        tags: album.tags.clone(),
+                                        participants: album.participants.clone(),
+                                        representative_path: None,
+                                    };
+                                    (Task::none(), ArtistsAction::ShowInfo(Box::new(item)))
+                                }
+                                LibraryContextEntry::ShowInFolder => (
+                                    Task::none(),
+                                    ArtistsAction::ShowAlbumInFolder(album.id.clone()),
+                                ),
+                                LibraryContextEntry::Separator => {
+                                    (Task::none(), ArtistsAction::None)
+                                }
+                                LibraryContextEntry::FindSimilar => {
+                                    let aid = album.artist.clone();
+                                    (
                                         Task::none(),
                                         ArtistsAction::FindSimilar(
-                                            artist.id.clone(),
-                                            format!("Similar to: {}", artist.name),
+                                            aid,
+                                            format!("Similar to: {}", album.name),
                                         ),
-                                    ),
-                                    LibraryContextEntry::TopSongs => (
-                                        Task::none(),
-                                        ArtistsAction::TopSongs(
-                                            artist.name.clone(),
-                                            format!("Top Songs: {}", artist.name),
-                                        ),
-                                    ),
-                                    _ => (Task::none(), ArtistsAction::None),
-                                },
-                                Some(ThreeTierEntry::Child(album, _)) => match entry {
-                                    LibraryContextEntry::GetInfo => {
-                                        use nokkvi_data::types::info_modal::InfoModalItem;
-                                        let item = InfoModalItem::Album {
-                                            name: album.name.clone(),
-                                            album_artist: Some(album.artist.clone()),
-                                            release_type: album.release_type.clone(),
-                                            genre: album.genre.clone(),
-                                            genres: album.genres.clone(),
-                                            duration: album.duration,
-                                            year: album.year,
-                                            song_count: Some(album.song_count),
-                                            compilation: album.compilation,
-                                            size: album.size,
-                                            is_starred: album.is_starred,
-                                            rating: album.rating,
-                                            play_count: album.play_count,
-                                            play_date: album.play_date.clone(),
-                                            updated_at: album.updated_at.clone(),
-                                            created_at: album.created_at.clone(),
-                                            mbz_album_id: album.mbz_album_id.clone(),
-                                            comment: album.comment.clone(),
-                                            id: album.id.clone(),
-                                            tags: album.tags.clone(),
-                                            participants: album.participants.clone(),
-                                            representative_path: self
-                                                .sub_expansion
-                                                .children
-                                                .first()
-                                                .map(|s| s.path.clone()),
-                                        };
-                                        (Task::none(), ArtistsAction::ShowInfo(Box::new(item)))
-                                    }
-                                    LibraryContextEntry::ShowInFolder => (
-                                        Task::none(),
-                                        ArtistsAction::ShowAlbumInFolder(album.id.clone()),
-                                    ),
-                                    LibraryContextEntry::Separator => {
-                                        (Task::none(), ArtistsAction::None)
-                                    }
-                                    LibraryContextEntry::FindSimilar => {
-                                        let aid = album.artist.clone();
-                                        (
-                                            Task::none(),
-                                            ArtistsAction::FindSimilar(
-                                                aid,
-                                                format!("Similar to: {}", album.name),
-                                            ),
-                                        )
-                                    }
-                                    _ => (Task::none(), ArtistsAction::None),
-                                },
-                                Some(ThreeTierEntry::Grandchild(song, _)) => match entry {
-                                    LibraryContextEntry::GetInfo => {
-                                        use nokkvi_data::types::info_modal::InfoModalItem;
-                                        let item = InfoModalItem::from_song_view_data(song);
-                                        (Task::none(), ArtistsAction::ShowInfo(Box::new(item)))
-                                    }
-                                    LibraryContextEntry::ShowInFolder => (
-                                        Task::none(),
-                                        ArtistsAction::ShowSongInFolder(song.path.clone()),
-                                    ),
-                                    LibraryContextEntry::Separator => {
-                                        (Task::none(), ArtistsAction::None)
-                                    }
-                                    LibraryContextEntry::FindSimilar => (
-                                        Task::none(),
-                                        ArtistsAction::FindSimilar(
-                                            song.id.clone(),
-                                            format!("Similar to: {}", song.title),
-                                        ),
-                                    ),
-                                    _ => (Task::none(), ArtistsAction::None),
-                                },
-                                None => (Task::none(), ArtistsAction::None),
-                            }
-                        }
+                                    )
+                                }
+                                _ => (Task::none(), ArtistsAction::None),
+                            },
+                            None => (Task::none(), ArtistsAction::None),
+                        },
                     }
                 }
                 // Common arms already handled by macro above
@@ -954,11 +705,7 @@ impl ArtistsPage {
         // multi-select column is on. Tri-state derives from the current
         // selection set against the *flattened* (visible) row count.
         let header = {
-            let flattened_len = super::expansion::three_tier_flattened_len(
-                data.artists,
-                &self.expansion,
-                self.sub_expansion.children.len(),
-            );
+            let flattened_len = self.expansion.flattened_len(data.artists);
             crate::widgets::slot_list::compose_header_with_select(
                 self.column_visibility.select,
                 self.common.select_all_state(flattened_len),
@@ -1005,14 +752,8 @@ impl ArtistsPage {
         let artist_art = data.artist_art;
         let open_menu_for_rows = data.open_menu;
 
-        // Build flattened list (artists + injected albums + injected tracks when expanded)
-        let flattened = super::expansion::build_three_tier_list(
-            artists,
-            &self.expansion,
-            &self.sub_expansion,
-            |a| &a.id,
-            |a| &a.id,
-        );
+        // Build flattened list (artists + injected albums when expanded)
+        let flattened = self.expansion.build_flattened_list(artists, |a| &a.id);
         let center_index = self.common.get_center_item_index(flattened.len());
 
         // Render slot list using generic component with item renderer closure
@@ -1027,7 +768,7 @@ impl ArtistsPage {
                 move |f| ArtistsMessage::SlotListScrollSeek((f * total as f32) as usize)
             },
             |entry, ctx| match entry {
-                ThreeTierEntry::Parent(artist) => {
+                SlotListEntry::Parent(artist) => {
                     let row = self.render_artist_row(
                         artist,
                         &ctx,
@@ -1043,7 +784,7 @@ impl ArtistsPage {
                         row,
                     )
                 }
-                ThreeTierEntry::Child(album, _parent_artist_id) => {
+                SlotListEntry::Child(album, _parent_artist_id) => {
                     let row = self.render_album_child_row(
                         album,
                         &ctx,
@@ -1051,58 +792,6 @@ impl ArtistsPage {
                         data.stable_viewport,
                         open_menu_for_rows,
                     );
-                    crate::widgets::slot_list::wrap_with_select_column(
-                        select_header_visible,
-                        ctx.is_selected,
-                        ctx.item_index,
-                        ArtistsMessage::SlotListSelectionToggle,
-                        row,
-                    )
-                }
-                ThreeTierEntry::Grandchild(song, _album_id) => {
-                    let track_el = super::expansion::render_child_track_row(
-                        song,
-                        &ctx,
-                        ArtistsMessage::SlotListActivateCenter,
-                        if data.stable_viewport {
-                            ArtistsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
-                        } else {
-                            ArtistsMessage::SlotListClickPlay(ctx.item_index)
-                        },
-                        Some(ArtistsMessage::ClickToggleStar(ctx.item_index)),
-                        None, // click artist - artist is already the parent anyway, so maybe None? Or wait, can click it to search artist in artists view? No, we are already in artists view.
-                        2,    // depth 2: grandchild tracks (artist → album → track)
-                    );
-                    use crate::widgets::context_menu::{
-                        context_menu, library_entry_view, open_state_for, song_entries_with_folder,
-                    };
-                    let item_idx = ctx.item_index;
-                    let cm_id = crate::app_message::ContextMenuId::LibraryRow {
-                        view: crate::View::Artists,
-                        item_index: item_idx,
-                    };
-                    let (cm_open, cm_position) = open_state_for(open_menu_for_rows, &cm_id);
-                    let row: Element<'_, ArtistsMessage> = context_menu(
-                        track_el,
-                        song_entries_with_folder(),
-                        move |entry, length| {
-                            library_entry_view(entry, length, |e| {
-                                ArtistsMessage::ContextMenuAction(item_idx, e)
-                            })
-                        },
-                        cm_open,
-                        cm_position,
-                        move |position| match position {
-                            Some(p) => ArtistsMessage::SetOpenMenu(Some(
-                                crate::app_message::OpenMenu::Context {
-                                    id: cm_id.clone(),
-                                    position: p,
-                                },
-                            )),
-                            None => ArtistsMessage::SetOpenMenu(None),
-                        },
-                    )
-                    .into();
                     crate::widgets::slot_list::wrap_with_select_column(
                         select_header_visible,
                         ctx.is_selected,
@@ -1120,21 +809,12 @@ impl ArtistsPage {
 
         use crate::widgets::base_slot_list_layout::single_artwork_panel_with_pill;
 
-        // Build artwork column — show parent artist art even when on a child or grandchild
+        // Build artwork column — show parent artist art even when on a child album row
         let centered_artist = center_index.and_then(|idx| match flattened.get(idx) {
-            Some(ThreeTierEntry::Parent(artist)) => {
+            Some(SlotListEntry::Parent(artist)) => {
                 Some(artists.iter().find(|a| a.id == artist.id)?)
             }
-            Some(ThreeTierEntry::Child(_, parent_id)) => {
-                artists.iter().find(|a| &a.id == parent_id)
-            }
-            Some(ThreeTierEntry::Grandchild(_, _)) => {
-                // grandchild: look up via sub_expansion parent (album) → outer expansion parent (artist)
-                self.expansion
-                    .expanded_id
-                    .as_ref()
-                    .and_then(|aid| artists.iter().find(|a| &a.id == aid))
-            }
+            Some(SlotListEntry::Child(_, parent_id)) => artists.iter().find(|a| &a.id == parent_id),
             None => None,
         });
 
@@ -1553,6 +1233,7 @@ impl ArtistsPage {
         stable_viewport: bool,
         open_menu: Option<&'a crate::app_message::OpenMenu>,
     ) -> Element<'a, ArtistsMessage> {
+        let navigate_msg = ArtistsMessage::NavigateAndExpandAlbum(album.id.clone());
         let album_el = super::expansion::render_child_album_row(
             album,
             ctx,
@@ -1566,8 +1247,8 @@ impl ArtistsPage {
             },
             false, // artist is already the parent row
             Some(ArtistsMessage::ClickToggleStar(ctx.item_index)),
-            Some(ArtistsMessage::FocusAndExpandAlbum(ctx.item_index)),
-            Some(ArtistsMessage::FocusAndExpandAlbum(ctx.item_index)),
+            Some(navigate_msg.clone()),
+            Some(navigate_msg),
             None, // artist click - artist is already the parent
             1,    // depth 1: child albums under artist
         );
@@ -1618,15 +1299,10 @@ impl super::ViewPage for ArtistsPage {
     }
 
     fn is_expanded(&self) -> bool {
-        self.expansion.is_expanded() || self.sub_expansion.is_expanded()
+        self.expansion.is_expanded()
     }
     fn collapse_expansion_message(&self) -> Option<Message> {
-        if self.sub_expansion.is_expanded() {
-            // Inner collapse first
-            Some(Message::Artists(ArtistsMessage::CollapseAlbumExpansion))
-        } else {
-            Some(Message::Artists(ArtistsMessage::CollapseExpansion))
-        }
+        Some(Message::Artists(ArtistsMessage::CollapseExpansion))
     }
 
     fn search_input_id(&self) -> &'static str {
@@ -1647,10 +1323,9 @@ impl super::ViewPage for ArtistsPage {
         Some(Message::Artists(ArtistsMessage::AddCenterToQueue))
     }
     fn expand_center_message(&self) -> Option<Message> {
-        // Always dispatch ExpandCenter; update() inspects the centered 3-tier
-        // entry and routes parent rows to outer-collapse and child/grandchild
-        // rows to the album sub-expansion handler. Mirrors Albums/Playlists
-        // toggle-on-self semantics.
+        // ExpandCenter on a 2nd-tier album row routes through `update()`'s
+        // pre-check to NavigateAndExpandAlbum (cross-view drill-down);
+        // parent rows toggle inline expansion via the macro.
         Some(Message::Artists(ArtistsMessage::ExpandCenter))
     }
     fn reload_message(&self) -> Option<Message> {

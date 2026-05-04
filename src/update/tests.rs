@@ -501,25 +501,9 @@ fn play_count_increment_propagates_to_expansion_children() {
     playlist_track.play_count = Some(7);
     app.playlists_page.expansion.children = vec![playlist_track];
 
-    let mut artist_track = make_song("s1", "Track", "Artist");
-    artist_track.play_count = Some(7);
-    app.artists_page.sub_expansion.children = vec![artist_track];
-
-    let mut genre_track = make_song("s1", "Track", "Artist");
-    genre_track.play_count = Some(7);
-    app.genres_page.sub_expansion.children = vec![genre_track];
-
     let _ = app.handle_song_play_count_incremented("s1".to_string());
     assert_eq!(app.albums_page.expansion.children[0].play_count, Some(8));
     assert_eq!(app.playlists_page.expansion.children[0].play_count, Some(8));
-    assert_eq!(
-        app.artists_page.sub_expansion.children[0].play_count,
-        Some(8)
-    );
-    assert_eq!(
-        app.genres_page.sub_expansion.children[0].play_count,
-        Some(8)
-    );
 }
 
 #[test]
@@ -964,36 +948,8 @@ fn playlists_loaded_error_clears_loading() {
 }
 
 // ============================================================================
-// Cross-View Star Sync — Sub-Expansion Gaps (star_rating.rs)
+// Cross-View Star Sync — Album-level expansion (star_rating.rs)
 // ============================================================================
-
-#[test]
-fn song_starred_propagates_to_artists_sub_expansion() {
-    let mut app = test_app();
-    let mut track = make_song("s1", "Sub Track", "Artist");
-    track.is_starred = false;
-    app.artists_page.sub_expansion.children = vec![track];
-
-    let _ = app.handle_song_starred_status_updated("s1".to_string(), true);
-    assert!(
-        app.artists_page.sub_expansion.children[0].is_starred,
-        "artists sub-expansion child should be starred"
-    );
-}
-
-#[test]
-fn song_starred_propagates_to_genres_sub_expansion() {
-    let mut app = test_app();
-    let mut track = make_song("s1", "Sub Track", "Artist");
-    track.is_starred = false;
-    app.genres_page.sub_expansion.children = vec![track];
-
-    let _ = app.handle_song_starred_status_updated("s1".to_string(), true);
-    assert!(
-        app.genres_page.sub_expansion.children[0].is_starred,
-        "genres sub-expansion child should be starred"
-    );
-}
 
 #[test]
 fn album_starred_propagates_to_artists_expansion() {
@@ -1020,40 +976,6 @@ fn album_starred_propagates_to_genres_expansion() {
     assert!(
         app.genres_page.expansion.children[0].is_starred,
         "genres expansion album should be starred"
-    );
-}
-
-// ============================================================================
-// Cross-View Rating Propagation — Sub-Expansion Gaps (star_rating.rs)
-// ============================================================================
-
-#[test]
-fn song_rating_updated_propagates_to_artists_sub_expansion() {
-    let mut app = test_app();
-    let mut track = make_song("s1", "Sub Track", "Artist");
-    track.rating = None;
-    app.artists_page.sub_expansion.children = vec![track];
-
-    let _ = app.handle_song_rating_updated("s1".to_string(), 4);
-    assert_eq!(
-        app.artists_page.sub_expansion.children[0].rating,
-        Some(4),
-        "artists sub-expansion child rating should be updated"
-    );
-}
-
-#[test]
-fn song_rating_updated_propagates_to_genres_sub_expansion() {
-    let mut app = test_app();
-    let mut track = make_song("s1", "Sub Track", "Artist");
-    track.rating = None;
-    app.genres_page.sub_expansion.children = vec![track];
-
-    let _ = app.handle_song_rating_updated("s1".to_string(), 2);
-    assert_eq!(
-        app.genres_page.sub_expansion.children[0].rating,
-        Some(2),
-        "genres sub-expansion child rating should be updated"
     );
 }
 
@@ -3301,84 +3223,14 @@ fn genres_context_menu_show_in_folder_on_child_album() {
     }
 }
 
-#[test]
-fn genres_context_menu_get_info_on_grandchild_song() {
-    let mut app = test_app();
-    let genres = vec![make_genre("g1", "Rock")];
-    app.library.genres.set_from_vec(genres.clone());
-
-    // Expand genre + sub-expand album so grandchild song is at index 2
-    let album = make_album("a1", "Album 1", "Artist A");
-    app.genres_page.expansion.expanded_id = Some("g1".to_string());
-    app.genres_page.expansion.parent_offset = 0;
-    app.genres_page.expansion.children = vec![album];
-
-    let song = make_song("s1", "Song One", "Artist A");
-    app.genres_page.sub_expansion.expanded_id = Some("a1".to_string());
-    app.genres_page.sub_expansion.parent_offset = 1;
-    app.genres_page.sub_expansion.children = vec![song];
-
-    let (_, action) = app.genres_page.update(
-        crate::views::GenresMessage::ContextMenuAction(
-            2, // grandchild song index
-            crate::widgets::context_menu::LibraryContextEntry::GetInfo,
-        ),
-        genres.len(),
-        &genres,
-    );
-    match action {
-        crate::views::GenresAction::ShowInfo(item) => match *item {
-            nokkvi_data::types::info_modal::InfoModalItem::Song { ref title, .. } => {
-                assert_eq!(title, "Song One");
-            }
-            _ => panic!("Expected InfoModalItem::Song"),
-        },
-        other => panic!("Expected ShowInfo action, got {other:?}"),
-    }
-}
-
-#[test]
-fn genres_context_menu_show_in_folder_on_grandchild_song() {
-    let mut app = test_app();
-    let genres = vec![make_genre("g1", "Rock")];
-    app.library.genres.set_from_vec(genres.clone());
-
-    let album = make_album("a1", "Album 1", "Artist A");
-    app.genres_page.expansion.expanded_id = Some("g1".to_string());
-    app.genres_page.expansion.parent_offset = 0;
-    app.genres_page.expansion.children = vec![album];
-
-    let song = make_song("s1", "Song One", "Artist A");
-    app.genres_page.sub_expansion.expanded_id = Some("a1".to_string());
-    app.genres_page.sub_expansion.parent_offset = 1;
-    app.genres_page.sub_expansion.children = vec![song];
-
-    let (_, action) = app.genres_page.update(
-        crate::views::GenresMessage::ContextMenuAction(
-            2, // grandchild song index
-            crate::widgets::context_menu::LibraryContextEntry::ShowInFolder,
-        ),
-        genres.len(),
-        &genres,
-    );
-    match action {
-        crate::views::GenresAction::ShowSongInFolder(path) => {
-            assert_eq!(path, "/music/s1.flac");
-        }
-        other => panic!("Expected ShowSongInFolder action, got {other:?}"),
-    }
-}
-
 // ============================================================================
-// Shift+Enter (ExpandCenter) Collapse Behavior — Artists & Genres (3-tier views)
+// Shift+Enter (ExpandCenter) Collapse Behavior — Artists & Genres (2-tier views)
 // ============================================================================
 //
-// PROMPT 11 — In Albums/Playlists, Shift+Enter on an already-expanded parent
-// row collapses it. In Artists/Genres the same input was a no-op because the
-// dispatcher routed to ExpandAlbum, which only acts on Child/Grandchild rows.
-// These tests pin down the corrected routing: the same ExpandCenter message
-// must close the outer expansion when the parent row is centered, while still
-// toggling the inner album expansion when a child/grandchild is centered.
+// In Albums/Playlists, Shift+Enter on an already-expanded parent row collapses
+// it. Artists/Genres now match: parent rows toggle the outer expansion;
+// centered child album rows route to NavigateAndExpandAlbum (cross-view drill
+// down) instead of opening a 3rd inline tier.
 
 #[test]
 fn artists_shift_enter_on_parent_collapses_outer_expansion() {
@@ -3406,7 +3258,7 @@ fn artists_shift_enter_on_parent_collapses_outer_expansion() {
 }
 
 #[test]
-fn artists_shift_enter_on_parent_clears_sub_expansion_too() {
+fn artists_shift_enter_on_child_album_routes_to_navigate_and_expand_album() {
     let mut app = test_app();
     let artists = vec![make_artist("ar1", "Artist 1")];
     app.library.artists.set_from_vec(artists.clone());
@@ -3416,42 +3268,7 @@ fn artists_shift_enter_on_parent_clears_sub_expansion_too() {
     app.artists_page.expansion.parent_offset = 0;
     app.artists_page.expansion.children = vec![album];
 
-    let song = make_song("s1", "Song 1", "Artist 1");
-    app.artists_page.sub_expansion.expanded_id = Some("a1".to_string());
-    app.artists_page.sub_expansion.parent_offset = 1;
-    app.artists_page.sub_expansion.children = vec![song];
-
-    // Center on the parent artist row.
-    app.artists_page.common.slot_list.selected_offset = Some(0);
-
-    let _ = app.artists_page.update(
-        crate::views::ArtistsMessage::ExpandCenter,
-        artists.len(),
-        &artists,
-    );
-
-    assert_eq!(
-        app.artists_page.expansion.expanded_id, None,
-        "outer expansion should collapse"
-    );
-    assert_eq!(
-        app.artists_page.sub_expansion.expanded_id, None,
-        "sub expansion should also be cleared"
-    );
-}
-
-#[test]
-fn artists_shift_enter_on_child_album_routes_to_expand_album() {
-    let mut app = test_app();
-    let artists = vec![make_artist("ar1", "Artist 1")];
-    app.library.artists.set_from_vec(artists.clone());
-
-    let album = make_album("a1", "Album 1", "Artist 1");
-    app.artists_page.expansion.expanded_id = Some("ar1".to_string());
-    app.artists_page.expansion.parent_offset = 0;
-    app.artists_page.expansion.children = vec![album];
-
-    // Center on the child album row (3-tier idx 1).
+    // Center on the child album row (flat idx 1).
     app.artists_page.common.slot_list.selected_offset = Some(1);
 
     let (_, action) = app.artists_page.update(
@@ -3461,85 +3278,13 @@ fn artists_shift_enter_on_child_album_routes_to_expand_album() {
     );
 
     match action {
-        crate::views::ArtistsAction::ExpandAlbum(id) => assert_eq!(id, "a1"),
-        other => panic!("Expected ArtistsAction::ExpandAlbum(\"a1\"), got {other:?}"),
+        crate::views::ArtistsAction::NavigateAndExpandAlbum(id) => assert_eq!(id, "a1"),
+        other => panic!("Expected ArtistsAction::NavigateAndExpandAlbum(\"a1\"), got {other:?}"),
     }
     assert_eq!(
         app.artists_page.expansion.expanded_id.as_deref(),
         Some("ar1"),
-        "outer expansion should remain open"
-    );
-}
-
-#[test]
-fn artists_shift_enter_on_already_sub_expanded_child_collapses_sub() {
-    let mut app = test_app();
-    let artists = vec![make_artist("ar1", "Artist 1")];
-    app.library.artists.set_from_vec(artists.clone());
-
-    let album = make_album("a1", "Album 1", "Artist 1");
-    app.artists_page.expansion.expanded_id = Some("ar1".to_string());
-    app.artists_page.expansion.parent_offset = 0;
-    app.artists_page.expansion.children = vec![album];
-
-    let song = make_song("s1", "Song 1", "Artist 1");
-    app.artists_page.sub_expansion.expanded_id = Some("a1".to_string());
-    app.artists_page.sub_expansion.parent_offset = 1;
-    app.artists_page.sub_expansion.children = vec![song];
-
-    // Center on the child album row (3-tier idx 1, the sub-expanded album).
-    app.artists_page.common.slot_list.selected_offset = Some(1);
-
-    let _ = app.artists_page.update(
-        crate::views::ArtistsMessage::ExpandCenter,
-        artists.len(),
-        &artists,
-    );
-
-    assert_eq!(
-        app.artists_page.sub_expansion.expanded_id, None,
-        "sub expansion should be cleared when ExpandCenter hits an already sub-expanded child"
-    );
-    assert_eq!(
-        app.artists_page.expansion.expanded_id.as_deref(),
-        Some("ar1"),
-        "outer expansion should remain open"
-    );
-}
-
-#[test]
-fn artists_shift_enter_on_grandchild_collapses_sub_expansion() {
-    let mut app = test_app();
-    let artists = vec![make_artist("ar1", "Artist 1")];
-    app.library.artists.set_from_vec(artists.clone());
-
-    let album = make_album("a1", "Album 1", "Artist 1");
-    app.artists_page.expansion.expanded_id = Some("ar1".to_string());
-    app.artists_page.expansion.parent_offset = 0;
-    app.artists_page.expansion.children = vec![album];
-
-    let song = make_song("s1", "Song 1", "Artist 1");
-    app.artists_page.sub_expansion.expanded_id = Some("a1".to_string());
-    app.artists_page.sub_expansion.parent_offset = 1;
-    app.artists_page.sub_expansion.children = vec![song];
-
-    // Center on the grandchild track (3-tier idx 2).
-    app.artists_page.common.slot_list.selected_offset = Some(2);
-
-    let _ = app.artists_page.update(
-        crate::views::ArtistsMessage::ExpandCenter,
-        artists.len(),
-        &artists,
-    );
-
-    assert_eq!(
-        app.artists_page.sub_expansion.expanded_id, None,
-        "sub expansion should be cleared when ExpandCenter hits a grandchild"
-    );
-    assert_eq!(
-        app.artists_page.expansion.expanded_id.as_deref(),
-        Some("ar1"),
-        "outer expansion should remain open"
+        "outer expansion should remain open — drill-down is cross-view, not a local mutation"
     );
 }
 
@@ -3589,35 +3334,7 @@ fn genres_shift_enter_on_parent_collapses_outer_expansion() {
 }
 
 #[test]
-fn genres_shift_enter_on_parent_clears_sub_expansion_too() {
-    let mut app = test_app();
-    let genres = vec![make_genre("g1", "Rock")];
-    app.library.genres.set_from_vec(genres.clone());
-
-    let album = make_album("a1", "Album 1", "Artist 1");
-    app.genres_page.expansion.expanded_id = Some("g1".to_string());
-    app.genres_page.expansion.parent_offset = 0;
-    app.genres_page.expansion.children = vec![album];
-
-    let song = make_song("s1", "Song 1", "Artist 1");
-    app.genres_page.sub_expansion.expanded_id = Some("a1".to_string());
-    app.genres_page.sub_expansion.parent_offset = 1;
-    app.genres_page.sub_expansion.children = vec![song];
-
-    app.genres_page.common.slot_list.selected_offset = Some(0);
-
-    let _ = app.genres_page.update(
-        crate::views::GenresMessage::ExpandCenter,
-        genres.len(),
-        &genres,
-    );
-
-    assert_eq!(app.genres_page.expansion.expanded_id, None);
-    assert_eq!(app.genres_page.sub_expansion.expanded_id, None);
-}
-
-#[test]
-fn genres_shift_enter_on_child_album_routes_to_expand_album() {
+fn genres_shift_enter_on_child_album_routes_to_navigate_and_expand_album() {
     let mut app = test_app();
     let genres = vec![make_genre("g1", "Rock")];
     app.library.genres.set_from_vec(genres.clone());
@@ -3636,37 +3353,9 @@ fn genres_shift_enter_on_child_album_routes_to_expand_album() {
     );
 
     match action {
-        crate::views::GenresAction::ExpandAlbum(id) => assert_eq!(id, "a1"),
-        other => panic!("Expected GenresAction::ExpandAlbum(\"a1\"), got {other:?}"),
+        crate::views::GenresAction::NavigateAndExpandAlbum(id) => assert_eq!(id, "a1"),
+        other => panic!("Expected GenresAction::NavigateAndExpandAlbum(\"a1\"), got {other:?}"),
     }
-    assert_eq!(app.genres_page.expansion.expanded_id.as_deref(), Some("g1"),);
-}
-
-#[test]
-fn genres_shift_enter_on_grandchild_collapses_sub_expansion() {
-    let mut app = test_app();
-    let genres = vec![make_genre("g1", "Rock")];
-    app.library.genres.set_from_vec(genres.clone());
-
-    let album = make_album("a1", "Album 1", "Artist 1");
-    app.genres_page.expansion.expanded_id = Some("g1".to_string());
-    app.genres_page.expansion.parent_offset = 0;
-    app.genres_page.expansion.children = vec![album];
-
-    let song = make_song("s1", "Song 1", "Artist 1");
-    app.genres_page.sub_expansion.expanded_id = Some("a1".to_string());
-    app.genres_page.sub_expansion.parent_offset = 1;
-    app.genres_page.sub_expansion.children = vec![song];
-
-    app.genres_page.common.slot_list.selected_offset = Some(2);
-
-    let _ = app.genres_page.update(
-        crate::views::GenresMessage::ExpandCenter,
-        genres.len(),
-        &genres,
-    );
-
-    assert_eq!(app.genres_page.sub_expansion.expanded_id, None);
     assert_eq!(app.genres_page.expansion.expanded_id.as_deref(), Some("g1"),);
 }
 
@@ -6070,38 +5759,6 @@ fn artists_selection_toggle_on_album_child_lands_in_selected_indices() {
             .selected_indices
             .contains(&2),
         "album child at flattened index 2 should be in selected_indices after toggle"
-    );
-}
-
-#[test]
-fn artists_selection_toggle_on_grandchild_track_lands_in_selected_indices() {
-    let mut app = test_app();
-    let artists = vec![make_artist("ar1", "Artist 1")];
-    app.library.artists.set_from_vec(artists.clone());
-
-    // Three-tier expansion: artist ar1 → 1 album → 2 tracks.
-    // Flattened: [ar1=0, a1=1, t1=2, t2=3].
-    app.artists_page.expansion.expanded_id = Some("ar1".to_string());
-    app.artists_page.expansion.children = vec![make_album("a1", "Album 1", "Artist 1")];
-    app.artists_page.sub_expansion.expanded_id = Some("a1".to_string());
-    app.artists_page.sub_expansion.children = vec![
-        make_song("t1", "Track 1", "Artist 1"),
-        make_song("t2", "Track 2", "Artist 1"),
-    ];
-
-    let (_, _action) = app.artists_page.update(
-        crate::views::ArtistsMessage::SlotListSelectionToggle(3),
-        artists.len(),
-        &artists,
-    );
-
-    assert!(
-        app.artists_page
-            .common
-            .slot_list
-            .selected_indices
-            .contains(&3),
-        "grandchild track at flattened index 3 should be in selected_indices after toggle"
     );
 }
 

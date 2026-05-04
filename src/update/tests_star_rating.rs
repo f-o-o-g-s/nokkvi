@@ -81,36 +81,6 @@ fn star_propagates_to_playlist_expansion_children() {
 }
 
 #[test]
-fn star_propagates_to_artist_sub_expansion() {
-    let mut app = test_app();
-    let mut track = make_song("s1", "Track 1", "Artist");
-    track.is_starred = false;
-    app.artists_page.sub_expansion.children = vec![track];
-    app.artists_page.sub_expansion.expanded_id = Some("album-1".to_string());
-
-    let _ = app.handle_song_starred_status_updated("s1".to_string(), true);
-    assert!(
-        app.artists_page.sub_expansion.children[0].is_starred,
-        "star must propagate to artist sub-expansion children"
-    );
-}
-
-#[test]
-fn star_propagates_to_genre_sub_expansion() {
-    let mut app = test_app();
-    let mut track = make_song("s1", "Track 1", "Artist");
-    track.is_starred = false;
-    app.genres_page.sub_expansion.children = vec![track];
-    app.genres_page.sub_expansion.expanded_id = Some("album-1".to_string());
-
-    let _ = app.handle_song_starred_status_updated("s1".to_string(), true);
-    assert!(
-        app.genres_page.sub_expansion.children[0].is_starred,
-        "star must propagate to genre sub-expansion children"
-    );
-}
-
-#[test]
 fn star_song_not_in_any_list_is_noop() {
     let mut app = test_app();
     app.library.queue_songs = vec![make_queue_song("s1", "Song A", "Artist", "Album")];
@@ -139,12 +109,9 @@ fn rating_propagates_to_all_song_views() {
     // Set up expansion children
     app.albums_page.expansion.children = vec![make_song("s1", "Song A", "Artist")];
     app.playlists_page.expansion.children = vec![make_song("s1", "Song A", "Artist")];
-    app.artists_page.sub_expansion.children = vec![make_song("s1", "Song A", "Artist")];
-    app.genres_page.sub_expansion.children = vec![make_song("s1", "Song A", "Artist")];
 
     let _ = app.handle_song_rating_updated("s1".to_string(), 4);
 
-    // Check all 6 views
     assert_eq!(app.library.queue_songs[0].rating, Some(4), "queue");
     assert_eq!(app.library.songs[0].rating, Some(4), "songs");
     assert_eq!(
@@ -156,16 +123,6 @@ fn rating_propagates_to_all_song_views() {
         app.playlists_page.expansion.children[0].rating,
         Some(4),
         "playlist expansion"
-    );
-    assert_eq!(
-        app.artists_page.sub_expansion.children[0].rating,
-        Some(4),
-        "artist sub-expansion"
-    );
-    assert_eq!(
-        app.genres_page.sub_expansion.children[0].rating,
-        Some(4),
-        "genre sub-expansion"
     );
 }
 

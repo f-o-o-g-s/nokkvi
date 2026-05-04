@@ -551,7 +551,6 @@ impl Nokkvi {
         self.genres_page.common.active_filter = None;
         self.genres_page.common.search_query.clear();
         self.genres_page.expansion.clear();
-        self.genres_page.sub_expansion.clear();
         self.genres_page.common.slot_list.viewport_offset = 0;
         self.genres_page.common.slot_list.selected_indices.clear();
         self.genres_page.common.slot_list.selected_offset = None;
@@ -673,7 +672,6 @@ impl Nokkvi {
         self.artists_page.common.active_filter = None;
         self.artists_page.common.search_query.clear();
         self.artists_page.expansion.clear();
-        self.artists_page.sub_expansion.clear();
         self.artists_page.common.slot_list.viewport_offset = 0;
         self.artists_page.common.slot_list.selected_indices.clear();
         self.artists_page.common.slot_list.selected_offset = None;

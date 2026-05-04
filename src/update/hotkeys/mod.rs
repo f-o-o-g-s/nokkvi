@@ -13,12 +13,7 @@ use iced::Task;
 use nokkvi_data::types::info_modal::InfoModalItem;
 use tracing::{debug, trace};
 
-use crate::{
-    Nokkvi, View,
-    app_message::Message,
-    views,
-    views::expansion::{self, SlotListEntry, ThreeTierEntry},
-};
+use crate::{Nokkvi, View, app_message::Message, views, views::expansion::SlotListEntry};
 
 impl Nokkvi {
     /// Get the current view as a `&dyn ViewPage` for trait-based dispatch.
@@ -194,19 +189,13 @@ impl Nokkvi {
                 }
             }
             View::Artists => {
-                if let Some(entry) = expansion::resolve_three_tier_center(
+                if let Some(entry) = self.artists_page.expansion.resolve_center(
                     &self.library.artists,
-                    &self.artists_page.expansion,
-                    &self.artists_page.sub_expansion,
                     &self.artists_page.common,
-                    |a| &a.id,
                     |a| &a.id,
                 ) {
                     let item = match entry {
-                        ThreeTierEntry::Grandchild(song, _) => {
-                            InfoModalItem::from_song_view_data(song)
-                        }
-                        ThreeTierEntry::Child(album, _) => InfoModalItem::Album {
+                        SlotListEntry::Child(album, _) => InfoModalItem::Album {
                             name: album.name.clone(),
                             album_artist: Some(album.artist.clone()),
                             release_type: album.release_type.clone(),
@@ -228,14 +217,9 @@ impl Nokkvi {
                             id: album.id.clone(),
                             tags: album.tags.clone(),
                             participants: album.participants.clone(),
-                            representative_path: self
-                                .artists_page
-                                .sub_expansion
-                                .children
-                                .first()
-                                .map(|s| s.path.clone()),
+                            representative_path: None,
                         },
-                        ThreeTierEntry::Parent(artist) => InfoModalItem::Artist {
+                        SlotListEntry::Parent(artist) => InfoModalItem::Artist {
                             name: artist.name.clone(),
                             song_count: Some(artist.song_count),
                             album_count: Some(artist.album_count),

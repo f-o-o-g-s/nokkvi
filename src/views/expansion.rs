@@ -14,19 +14,6 @@ pub enum SlotListEntry<P, C> {
     Child(C, String),
 }
 
-/// Three-tier slot list entry for views with two levels of inline expansion.
-///
-/// Used by Artists (artist → albums → tracks) and Genres (genre → albums → tracks).
-/// `parent_id` in `Child` is the grandparent's ID; `album_id` in `Grandchild` is the parent album's ID.
-#[derive(Debug, Clone)]
-pub(crate) enum ThreeTierEntry<P, C, G> {
-    Parent(P),
-    /// Child within an expanded parent (child data, grandparent_id)
-    Child(C, String),
-    /// Grandchild within an expanded child (grandchild data, album_id)
-    Grandchild(G, String),
-}
-
 /// Generic inline expansion state
 ///
 /// Tracks which parent is expanded, its loaded children, and the slot list offset
@@ -372,115 +359,6 @@ impl<C: Clone> ExpansionState<C> {
             _ => None,
         }
     }
-}
-
-// ── Three-tier flattening helpers ──────────────────────────────────────────
-
-/// Build a flat three-tier list: parents + album children + song grandchildren.
-///
-/// Used by Artists and Genres views for Artist→Album→Track / Genre→Album→Track expansion.
-/// `outer` is the parent→album expansion state; `inner` is the album→track sub-expansion state.
-pub(crate) fn build_three_tier_list<P: Clone, C: Clone, G: Clone>(
-    parents: &[P],
-    outer: &ExpansionState<C>,
-    inner: &ExpansionState<G>,
-    parent_id_fn: impl Fn(&P) -> &str,
-    child_id_fn: impl Fn(&C) -> &str,
-) -> Vec<ThreeTierEntry<P, C, G>> {
-    let cap = parents.len() + outer.children.len() + inner.children.len();
-    let mut entries = Vec::with_capacity(cap);
-    for parent in parents {
-        let pid = parent_id_fn(parent).to_string();
-        entries.push(ThreeTierEntry::Parent(parent.clone()));
-        if Some(&pid) == outer.expanded_id.as_ref() {
-            for child in &outer.children {
-                let cid = child_id_fn(child).to_string();
-                entries.push(ThreeTierEntry::Child(child.clone(), pid.clone()));
-                if Some(&cid) == inner.expanded_id.as_ref() {
-                    for grandchild in &inner.children {
-                        entries.push(ThreeTierEntry::Grandchild(grandchild.clone(), cid.clone()));
-                    }
-                }
-            }
-        }
-    }
-    entries
-}
-
-/// Total flattened length for a three-tier list (O(1)).
-pub(crate) fn three_tier_flattened_len<P, C: Clone>(
-    parents: &[P],
-    outer: &ExpansionState<C>,
-    inner_children_len: usize,
-) -> usize {
-    if outer.expanded_id.is_some() {
-        parents.len() + outer.children.len() + inner_children_len
-    } else {
-        parents.len()
-    }
-}
-
-/// Resolve the entry at the slot list's current center for a three-tier view.
-///
-/// Wraps the three-step lookup (`three_tier_flattened_len → get_center_item_index
-/// → three_tier_get_entry_at`) into a single call. Mirrors
-/// `ExpansionState::resolve_center` for the artist/genre views that have a
-/// second level of inline expansion.
-pub(crate) fn resolve_three_tier_center<'a, P, C: Clone, G: Clone>(
-    parents: &'a [P],
-    outer: &'a ExpansionState<C>,
-    inner: &'a ExpansionState<G>,
-    common: &SlotListPageState,
-    parent_id_fn: impl Fn(&P) -> &str,
-    child_id_fn: impl Fn(&C) -> &str,
-) -> Option<ThreeTierEntry<&'a P, &'a C, &'a G>> {
-    let total = three_tier_flattened_len(parents, outer, inner.children.len());
-    let idx = common.slot_list.get_center_item_index(total)?;
-    three_tier_get_entry_at(idx, parents, outer, inner, parent_id_fn, child_id_fn)
-}
-
-/// Get a single entry at a flat index in a three-tier list without allocating.
-///
-/// O(n_parents + n_children) walk.
-pub(crate) fn three_tier_get_entry_at<'a, P, C: Clone, G: Clone>(
-    idx: usize,
-    parents: &'a [P],
-    outer: &'a ExpansionState<C>,
-    inner: &'a ExpansionState<G>,
-    parent_id_fn: impl Fn(&P) -> &str,
-    child_id_fn: impl Fn(&C) -> &str,
-) -> Option<ThreeTierEntry<&'a P, &'a C, &'a G>> {
-    if !outer.is_expanded() {
-        return parents.get(idx).map(ThreeTierEntry::Parent);
-    }
-    let mut flat = 0usize;
-    for parent in parents {
-        if flat == idx {
-            return Some(ThreeTierEntry::Parent(parent));
-        }
-        flat += 1;
-        let pid = parent_id_fn(parent);
-        if Some(pid) == outer.expanded_id.as_deref() {
-            for child in &outer.children {
-                if flat == idx {
-                    return Some(ThreeTierEntry::Child(child, pid.to_string()));
-                }
-                flat += 1;
-                let cid = child_id_fn(child);
-                if Some(cid) == inner.expanded_id.as_deref() {
-                    let child_offset = idx.checked_sub(flat)?;
-                    if child_offset < inner.children.len() {
-                        return Some(ThreeTierEntry::Grandchild(
-                            &inner.children[child_offset],
-                            cid.to_string(),
-                        ));
-                    }
-                    flat += inner.children.len();
-                }
-            }
-        }
-    }
-    None
 }
 
 // ── Batch payload builder ───────────────────────────────────────────────────
