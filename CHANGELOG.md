@@ -6,9 +6,17 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Drop-anchor doodad on the surfing boat — every 45–120 s the boat anchors for 10–15 s, dropping a lucide-anchor icon to the bottom of the visualizer with a curved theme-colored rope back up to the boat. The rope sways with local wave amplitude, the anchor stays planted on the floor while the boat bobs above it, and tacks/wind shifts are paused for the duration.
+
 ### Changed
 
+- Surfing boat is now propelled entirely by the music — silence brings the boat to a stop, and tagged BPM + onset energy + a slow-window energy envelope together drive both the cruise speed and the velocity floor. Different songs now produce visibly different boat motion instead of every track looking the same.
+- Surfing boat now eases into and out of direction changes instead of snapping on a dime — sail thrust drops to zero at the moment of a tack and ramps back to full over four seconds, so the boat decelerates through zero and accelerates smoothly onto its new heading.
+- Surfing boat slope force now only resists motion — going up a wave still slows the boat, but going down a wave no longer accelerates it. A sailboat doesn't surf the way a board does.
+
 ### Fixed
+
+- Right-edge spacing on the Queue and Songs row text (duration or play count) when the Love column is toggled off — the trailing text was previously flush against the row's right edge instead of carrying the same padding it has when Love is on.
 
 ### Removed
 
