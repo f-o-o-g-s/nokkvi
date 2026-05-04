@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.3.12 — 2026-05-04
+
+### Added
+
 - Drop-anchor doodad on the surfing boat — every 45–120 s the boat anchors for 10–15 s, dropping a lucide-anchor icon to the bottom of the visualizer with a curved theme-colored rope back up to the boat. The rope sways with local wave amplitude, the anchor stays planted on the floor while the boat bobs above it, and tacks/wind shifts are paused for the duration.
 
 ### Changed
@@ -17,8 +27,6 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - Right-edge spacing on the Queue and Songs row text (duration or play count) when the Love column is toggled off — the trailing text was previously flush against the row's right edge instead of carrying the same padding it has when Love is on.
-
-### Removed
 
 ## v0.3.11 — 2026-05-03
 
