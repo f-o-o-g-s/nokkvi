@@ -290,7 +290,40 @@ pub(crate) struct VisualizerState {
     // === Visualization mode (for mode-specific smoothing) ===
     /// True when in lines mode — skips CPU-side smoothing (lines smooth in GPU shader)
     is_lines_mode: Arc<AtomicBool>,
+
+    // === Spectral flux / onset envelope ===
+    /// Fast smoothed spectral-flux envelope (`f32::to_bits()` packed
+    /// into a u32 for lock-free reads from the boat handler). Updated
+    /// each `tick()` after the FFT output is interpolated to the visual
+    /// bar count: flux = sum of positive bin-to-bin diffs vs. the
+    /// previous frame, then EMA-smoothed by `ONSET_ENVELOPE_ALPHA_FAST`.
+    /// Range is roughly `[0, 1]` for typical music — louder transients
+    /// push it up, decay is governed by `1 - ALPHA`.
+    onset_envelope: Arc<AtomicU32>,
+    /// Slow-decay envelope of the same flux signal — long-window EMA
+    /// with `ONSET_ENVELOPE_ALPHA_SLOW` for a ~10 s time constant.
+    /// Read by the boat handler as a song-level "energy" indicator
+    /// that drives baseline sail thrust on un-tagged tracks (where
+    /// BPM isn't available to set the cadence directly).
+    long_onset_envelope: Arc<AtomicU32>,
+    /// Previous `output` snapshot used for the spectral-flux delta.
+    /// Resized lazily on the first tick if the visual bar count
+    /// changes (e.g., resize debounce).
+    prev_flux_bars: Arc<Mutex<Vec<f64>>>,
 }
+
+/// EMA smoothing coefficient for the fast onset envelope. At 60 Hz tick
+/// rate, `α = 0.3` gives a ~50 ms time constant — fast enough that bass
+/// kicks produce a visible spike on the same beat, slow enough that the
+/// envelope doesn't twitch on individual FFT-frame jitter.
+const ONSET_ENVELOPE_ALPHA_FAST: f64 = 0.3;
+
+/// EMA smoothing coefficient for the slow onset envelope. At 60 Hz, an
+/// `α = 0.0056` setting gives ≈ 1/α / 60 ≈ 3 s time constant — averages
+/// out bar-to-bar transients and tracks the song's overall energy
+/// trajectory, but settles fast enough that switching songs produces a
+/// visibly different boat cruise speed within a few seconds.
+const ONSET_ENVELOPE_ALPHA_SLOW: f64 = 0.0056;
 
 impl VisualizerState {
     pub(crate) fn new(bar_count: usize, config: SharedVisualizerConfig) -> Self {
@@ -339,6 +372,10 @@ impl VisualizerState {
             fft_thread_handle,
             // Visualization mode
             is_lines_mode: Arc::new(AtomicBool::new(false)),
+            // Onset envelope
+            onset_envelope: Arc::new(AtomicU32::new(0_f32.to_bits())),
+            long_onset_envelope: Arc::new(AtomicU32::new(0_f32.to_bits())),
+            prev_flux_bars: Arc::new(Mutex::new(vec![0.0; bar_count])),
         };
 
         // Spawn the background FFT thread
@@ -537,6 +574,49 @@ impl VisualizerState {
                     };
                     display.bars = output.clone();
                     display.dirty = true;
+                }
+
+                // Spectral flux: positive bin-to-bin deltas vs. the last
+                // frame, EMA-smoothed into a single onset-envelope scalar.
+                // Standard "give me an energy proxy from STFT" formulation
+                // — Bello et al. 2005 onset detection survey, eq. (5).
+                // Cheap per tick (one subtract + max + accumulate per bar)
+                // and the boat handler reads it lock-free via
+                // `current_onset_energy()` to modulate sail thrust.
+                if let Some(mut prev) = self.prev_flux_bars.try_lock() {
+                    if prev.len() != output.len() {
+                        prev.resize(output.len(), 0.0);
+                    }
+                    let mut flux = 0.0_f64;
+                    for (cur, prev_val) in output.iter().zip(prev.iter()) {
+                        let diff = *cur - *prev_val;
+                        if diff > 0.0 {
+                            flux += diff;
+                        }
+                    }
+                    // Use raw-sum flux (no per-bar normalization) so the
+                    // signal has a meaningful dynamic range. Typical
+                    // music settles the slow EMA somewhere in 0.1–2.0;
+                    // boat physics scales by `LONG_ONSET_AMP` which is
+                    // tuned against this raw range. Per-bar averaging
+                    // would crush the signal toward zero on dense bar
+                    // counts and made the boat look constant across
+                    // songs.
+                    // EMA smooth (fast + slow) and stash both atomically.
+                    let prev_fast = f32::from_bits(self.onset_envelope.load(Ordering::Relaxed));
+                    let smoothed_fast = (ONSET_ENVELOPE_ALPHA_FAST * flux
+                        + (1.0 - ONSET_ENVELOPE_ALPHA_FAST) * prev_fast as f64)
+                        as f32;
+                    self.onset_envelope
+                        .store(smoothed_fast.to_bits(), Ordering::Relaxed);
+                    let prev_slow =
+                        f32::from_bits(self.long_onset_envelope.load(Ordering::Relaxed));
+                    let smoothed_slow = (ONSET_ENVELOPE_ALPHA_SLOW * flux
+                        + (1.0 - ONSET_ENVELOPE_ALPHA_SLOW) * prev_slow as f64)
+                        as f32;
+                    self.long_onset_envelope
+                        .store(smoothed_slow.to_bits(), Ordering::Relaxed);
+                    prev.copy_from_slice(&output);
                 }
 
                 // Update peaks
@@ -750,6 +830,34 @@ impl VisualizerState {
             return vec![0.0; display.bars.len()];
         }
         self.display.lock().bars.clone()
+    }
+
+    /// Fast smoothed spectral-flux envelope, in `[0, ~1]` for typical
+    /// music. Lock-free atomic read — safe to call every frame from
+    /// the boat handler. Returns `0.0` while the visualizer is
+    /// mid-clear so the boat doesn't surge on stale energy across
+    /// track changes.
+    pub(crate) fn current_onset_energy(&self) -> f32 {
+        if self.pending_clear.load(Ordering::SeqCst)
+            || self.rebuilding_after_clear.load(Ordering::SeqCst)
+        {
+            return 0.0;
+        }
+        f32::from_bits(self.onset_envelope.load(Ordering::Relaxed))
+    }
+
+    /// Slow-decay onset envelope (~10 s time constant) — a song-level
+    /// "average energy" indicator. The boat handler uses this to scale
+    /// baseline sail thrust on un-tagged tracks: bass-heavy songs
+    /// settle high → faster baseline, acoustic songs settle low →
+    /// slower baseline. Same mid-clear gating as the fast envelope.
+    pub(crate) fn current_long_onset_energy(&self) -> f32 {
+        if self.pending_clear.load(Ordering::SeqCst)
+            || self.rebuilding_after_clear.load(Ordering::SeqCst)
+        {
+            return 0.0;
+        }
+        f32::from_bits(self.long_onset_envelope.load(Ordering::Relaxed))
     }
 
     pub(crate) fn get_peak_bars(&self) -> Vec<f64> {

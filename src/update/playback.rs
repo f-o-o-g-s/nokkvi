@@ -129,15 +129,31 @@ impl Nokkvi {
 
                 let (random, repeat, repeat_queue, consume) = shell.get_modes().await;
 
-                // Convert from milliseconds to seconds for UI display
-                // If engine duration is 0 (unknown/garbage), use song's metadata duration as fallback
-                let dur_seconds = if dur == 0 {
-                    // Fallback to song metadata duration
+                // Convert from milliseconds to seconds for UI display.
+                // Lock the queue manager once and pull both the
+                // metadata-fallback duration AND the current song's
+                // tagged BPM (when present) — the boat handler reads
+                // BPM every tick to drive beat-locked sail thrust.
+                let (dur_seconds, bpm) = {
                     let qm = shell.queue().queue_manager();
                     let qm_guard = qm.lock().await;
-                    qm_guard.get_current_song().map_or(0, |s| s.duration)
-                } else {
-                    (dur / 1000) as u32
+                    let current = qm_guard.get_current_song();
+                    let dur = if dur == 0 {
+                        current.as_ref().map_or(0, |s| s.duration)
+                    } else {
+                        (dur / 1000) as u32
+                    };
+                    let song_id_for_log = current.as_ref().map(|s| s.id.clone());
+                    let title_for_log = current.as_ref().map(|s| s.title.clone());
+                    let bpm = current.and_then(|s| s.bpm);
+                    tracing::trace!(
+                        target: "nokkvi::boat::music",
+                        song_id = ?song_id_for_log,
+                        title = ?title_for_log,
+                        bpm = ?bpm,
+                        "queue current_song bpm read"
+                    );
+                    (dur, bpm)
                 };
 
                 crate::app_message::PlaybackStateUpdate {
@@ -159,6 +175,7 @@ impl Nokkvi {
                     sample_rate,
                     bitrate,
                     live_icy_metadata: engine_live_icy_metadata,
+                    bpm,
                 }
             },
             |update| Message::Playback(PlaybackMessage::PlaybackStateUpdated(Box::new(update))),
@@ -189,6 +206,7 @@ impl Nokkvi {
             sample_rate,
             bitrate,
             live_icy_metadata,
+            bpm,
         } = update;
 
         // Detect transition from playing to stopped (not paused)
@@ -250,6 +268,7 @@ impl Nokkvi {
         self.playback.format_suffix = format_suffix;
         self.playback.sample_rate = sample_rate;
         self.playback.bitrate = bitrate;
+        self.playback.bpm = bpm;
         self.modes.random = random;
         self.modes.repeat = repeat;
         self.modes.repeat_queue = repeat_queue;

@@ -79,6 +79,10 @@ pub struct PlaybackStateUpdate {
     pub bitrate: u32,
     /// Live ICY-metadata parsed by IcyMetadataReader
     pub live_icy_metadata: Option<String>,
+    /// Tagged BPM of the current song, if the file/server reports one.
+    /// Optional because not all music has BPM metadata; the boat
+    /// physics falls back to the spectral-flux envelope when absent.
+    pub bpm: Option<u32>,
 }
 
 /// Playback-related messages, namespaced under `Message::Playback(..)`

@@ -541,6 +541,7 @@ fn make_playback_update() -> PlaybackStateUpdate {
         sample_rate: 44100,
         bitrate: 1411,
         live_icy_metadata: None,
+        bpm: None,
     }
 }
 
@@ -5277,62 +5278,77 @@ mod boat_tests {
         enable_boat_in_config(&app, true);
         app.engine.visualization_mode = VisualizationMode::Lines;
 
-        // Seed phase at peak drive (sin(2π·0.25) = 1) and start with a
-        // non-zero velocity so the boat moves on the first integrating tick.
-        app.boat.phase = 0.25;
+        // The boat is purely propelled by music in the new model and
+        // `test_app()` has no visualizer / no BPM — so we seed a
+        // non-zero `x_velocity` and verify the integrator advances
+        // `x_ratio` from it. This pins "the handler actually ticks
+        // step()" without depending on the music pipeline.
         app.boat.x_velocity = 0.05;
+        app.boat.facing = 1.0;
 
         let t0 = Instant::now();
         let _ = app.update(Message::BoatTick(t0));
         let x0 = app.boat.x_ratio;
 
-        // Second tick 100 ms later — x_ratio must change under the integrated
-        // physics (small dt + a non-zero velocity → measurable position delta).
         let t1 = t0 + Duration::from_millis(100);
         let _ = app.update(Message::BoatTick(t1));
         let x1 = app.boat.x_ratio;
 
         assert_ne!(
             x0, x1,
-            "two ticks 100 ms apart in lines mode must move the boat (got x0={x0}, x1={x1})"
+            "two ticks 100 ms apart in lines mode must move the boat \
+             when seeded with non-zero velocity (got x0={x0}, x1={x1})"
         );
     }
 
     #[test]
-    fn boat_phase_resumes_after_mode_round_trip() {
+    fn boat_state_resumes_after_mode_round_trip() {
         let mut app = test_app();
         enable_boat_in_config(&app, true);
         app.engine.visualization_mode = VisualizationMode::Lines;
 
-        // Tick once to seat last_tick + advance phase a touch.
+        // Tick a couple of times to seat `last_tick`, advance physics,
+        // and let the tack countdown decrement.
         let t0 = Instant::now();
         let _ = app.update(Message::BoatTick(t0));
         let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(50)));
-        let saved_phase = app.boat.phase;
+        let saved_tack = app.boat.secs_until_next_tack;
+        let saved_x = app.boat.x_ratio;
         assert!(
-            saved_phase > 0.0,
-            "phase must have advanced (got {saved_phase})"
+            saved_tack > 0.0,
+            "tack countdown must have been seeded by the first integrating \
+             tick (got {saved_tack})"
         );
 
-        // Switch to Bars — boat hides, phase preserved.
+        // Switch to Bars — boat hides, physics fields preserved.
         app.engine.visualization_mode = VisualizationMode::Bars;
         let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
         assert!(!app.boat.visible);
         assert_eq!(
-            app.boat.phase,
-            saved_phase,
-            "phase must NOT advance while hidden (saved={saved_phase}, now={now})",
-            now = app.boat.phase
+            app.boat.secs_until_next_tack, saved_tack,
+            "tack countdown must NOT advance while hidden \
+             (saved={saved_tack}, now={})",
+            app.boat.secs_until_next_tack
+        );
+        assert_eq!(
+            app.boat.x_ratio, saved_x,
+            "x_ratio must NOT advance while hidden \
+             (saved={saved_x}, now={})",
+            app.boat.x_ratio
         );
 
-        // Back to Lines — phase resumes from where it left off.
+        // Back to Lines — state resumes from where it left off (the
+        // first re-show tick has dt=0 because last_tick was cleared).
         app.engine.visualization_mode = VisualizationMode::Lines;
         let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(150)));
         assert!(app.boat.visible);
         assert_eq!(
-            app.boat.phase, saved_phase,
-            "first tick after re-show must have dt=0 (last_tick was cleared) — \
-             phase preserved across the round trip"
+            app.boat.secs_until_next_tack, saved_tack,
+            "tack countdown preserved across the round trip"
+        );
+        assert_eq!(
+            app.boat.x_ratio, saved_x,
+            "x_ratio preserved across the round trip"
         );
     }
 
@@ -5358,22 +5374,21 @@ mod boat_tests {
 
     #[test]
     fn boat_freezes_while_audio_paused() {
-        // The visualizer waveform decays to silence when audio is paused
-        // (the FFT thread's sample buffer empties), so integrating the drive
-        // oscillator against a flat line walks the boat off the wave with
-        // no spring force to pull it back. Every dynamic physics field must
-        // hold while `playback.paused` is true.
+        // Audio pause: the visualizer waveform decays to silence (the FFT
+        // thread's sample buffer empties), so integrating sail thrust
+        // against a flat line still walks the boat across an empty wave.
+        // Every dynamic physics field must hold while `playback.paused`.
         let mut app = test_app();
         enable_boat_in_config(&app, true);
         app.engine.visualization_mode = VisualizationMode::Lines;
 
         // Seed non-default values so an accidental "field stayed at 0
         // because it was already 0" pass can't sneak through.
-        app.boat.phase = 0.25;
         app.boat.x_ratio = 0.6;
         app.boat.x_velocity = 0.05;
         app.boat.y_ratio = 0.7;
         app.boat.y_velocity = 0.02;
+        app.boat.facing = 1.0;
 
         // First tick seats `last_tick`; dt=0 keeps the snapshot intact.
         let t0 = Instant::now();
@@ -5381,11 +5396,10 @@ mod boat_tests {
         let snap = app.boat.clone();
 
         // Pause and tick after a long gap — under the bug the boat would
-        // integrate a half-second of drive against an empty bar buffer.
+        // integrate a half-second of sail thrust against an empty bar buffer.
         app.playback.paused = true;
         let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(500)));
 
-        assert_eq!(app.boat.phase, snap.phase, "phase must hold while paused");
         assert_eq!(
             app.boat.x_ratio, snap.x_ratio,
             "x_ratio must hold while paused"
@@ -5401,6 +5415,10 @@ mod boat_tests {
         assert_eq!(
             app.boat.y_velocity, snap.y_velocity,
             "y_velocity must hold while paused"
+        );
+        assert_eq!(
+            app.boat.secs_until_next_tack, snap.secs_until_next_tack,
+            "tack countdown must hold while paused"
         );
         assert!(
             app.boat.visible,
@@ -5421,23 +5439,23 @@ mod boat_tests {
         // someone copies the pause-fix's early-return and accidentally
         // freezes the boat the moment a track ends.
         //
-        // The y_ratio decay itself can't be observed at this surface
-        // (test_app's `visualizer` is None, so raw bars are already
-        // empty regardless of the gate). The widget-level integration
-        // test in widgets/boat.rs covers the gate's regression directly.
+        // Under the music-only-thrust model the boat doesn't move on
+        // silence, so we seed a non-zero `x_velocity` and verify it
+        // damps over the not-playing ticks. The handler IS running
+        // step() if velocity decays toward zero; if step() were
+        // skipped the velocity would persist verbatim.
         let mut app = test_app();
         enable_boat_in_config(&app, true);
         app.engine.visualization_mode = VisualizationMode::Lines;
         app.playback.playing = false;
         app.playback.paused = false;
 
-        // Seed phase + x_velocity so the integration step produces
-        // observable motion when it actually runs.
-        app.boat.phase = 0.25;
+        app.boat.facing = 1.0;
         app.boat.x_velocity = 0.05;
 
         let t0 = Instant::now();
         let _ = app.update(Message::BoatTick(t0));
+        let v_after_first = app.boat.x_velocity;
         let _ = app.update(Message::BoatTick(t0 + Duration::from_millis(100)));
 
         assert!(
@@ -5449,22 +5467,26 @@ mod boat_tests {
             "last_tick must update — physics still ticks when not-playing"
         );
         assert!(
-            app.boat.phase > 0.25,
-            "phase must advance during not-playing ticks (got {}); the silence \
-             override drops bars but does NOT skip step() the way pause does",
-            app.boat.phase
+            app.boat.x_velocity < v_after_first,
+            "x_velocity must decay between not-playing ticks (the \
+             silence override drops bars but does NOT skip step() the \
+             way pause does); got v_after_first = {v_after_first}, \
+             v_after_second = {}",
+            app.boat.x_velocity
         );
     }
 
     #[test]
     fn boat_resumes_motion_after_unpause() {
         // The pause freeze must not be sticky — once `paused` flips back to
-        // false, the next ticks integrate physics again.
+        // false, the next ticks integrate physics again. We seed an initial
+        // velocity so the boat has something to move with even without
+        // music signals, and verify x_ratio mutates after unpause.
         let mut app = test_app();
         enable_boat_in_config(&app, true);
         app.engine.visualization_mode = VisualizationMode::Lines;
-        app.boat.phase = 0.25;
-        app.boat.x_velocity = 0.05;
+        app.boat.facing = 1.0;
+        app.boat.x_velocity = 0.08;
 
         let t0 = Instant::now();
         let _ = app.update(Message::BoatTick(t0));

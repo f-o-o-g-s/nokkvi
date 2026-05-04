@@ -176,6 +176,58 @@ pub(crate) fn themed_boat_svg(angle_radians: f32, mirrored: bool) -> String {
     body
 }
 
+// ============================================================================
+// Themed Anchor SVG (drops-anchor doodad on the boat overlay)
+// ============================================================================
+
+/// Stroke width baked into the anchor SVG, in viewBox units. The viewBox
+/// is 24 units tall; the sprite renders at roughly 1/3 of the boat's
+/// height, so 1 viewBox unit ≈ 0.4 display pixels. Stroke-width 1.4
+/// lands at ~0.5 px — same visual weight as the boat outline.
+const ANCHOR_STROKE_WIDTH_SVG_UNITS: f32 = 1.4;
+
+/// Return the themed lucide-anchor body as standalone SVG, no rope.
+///
+/// The rope is rendered separately as a curved canvas path in
+/// `widgets/boat.rs` so it can sway naturally with the wave action; this
+/// helper provides only the static anchor sprite that hangs at the
+/// rope's bottom end.
+///
+/// Stroke uses the active visualizer theme's `border_color` /
+/// `border_opacity`, same source as the lines-mode wave outline and the
+/// boat outline, so every part of the doodad (boat, rope, anchor) shares
+/// one palette. Cache invalidation lives on `BoatState`, keyed against
+/// `theme_generation()` so a light/dark flip or palette swap rebuilds
+/// the handle on the next render.
+pub(crate) fn themed_anchor_svg() -> String {
+    let viz = crate::theme::get_visualizer_colors();
+    let stroke = viz.border_color;
+    let opacity = viz.border_opacity;
+    let stroke_w = ANCHOR_STROKE_WIDTH_SVG_UNITS;
+
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" \
+         fill=\"none\" stroke=\"{stroke}\" stroke-opacity=\"{opacity}\" \
+         stroke-width=\"{stroke_w}\" stroke-linecap=\"round\" stroke-linejoin=\"round\">\
+         <path d=\"M12 6v16\" />\
+         <path d=\"m19 13 2-1a9 9 0 0 1-18 0l2 1\" />\
+         <path d=\"M9 11h6\" />\
+         <circle cx=\"12\" cy=\"4\" r=\"2\" />\
+         </svg>"
+    )
+}
+
+/// Vertical fraction of the anchor sprite where the ring (rope
+/// attachment point) sits. The lucide anchor's ring is a small circle
+/// at viewBox y=4 with radius 2, so the top of the ring is at y=2 in
+/// the 24-unit viewBox. The rope canvas hooks its bottom endpoint to
+/// this fraction of the sprite's display height so the rope visually
+/// reaches the top of the ring, regardless of how the renderer sizes
+/// the sprite.
+pub(crate) fn anchor_svg_ring_top_fraction() -> f32 {
+    2.0 / 24.0
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
@@ -358,6 +410,64 @@ mod tests {
         assert!(
             !out.contains("rotate("),
             "zero rotation must not emit rotate(...)"
+        );
+    }
+
+    /// The themed anchor SVG must carry the active theme's border color
+    /// as the stroke on every anchor path. Same accessor as
+    /// `themed_boat_svg`, so a theme change picks both up uniformly.
+    #[test]
+    fn themed_anchor_svg_uses_theme_stroke() {
+        let viz = crate::theme::get_visualizer_colors();
+        let out = themed_anchor_svg();
+        assert!(
+            out.contains(&format!("stroke=\"{}\"", viz.border_color)),
+            "anchor stroke must come from the active theme's border_color \
+             (expected {}, got: {out})",
+            viz.border_color
+        );
+        assert!(
+            out.contains(&format!("stroke-opacity=\"{}\"", viz.border_opacity)),
+            "anchor must inherit the theme's border opacity"
+        );
+    }
+
+    /// The themed anchor SVG must include the four lucide-anchor sub-paths
+    /// (vertical shaft, curved hook, cross-bar, ring). Proves the lucide
+    /// anchor body was inlined fully and not truncated.
+    #[test]
+    fn themed_anchor_svg_includes_all_lucide_paths() {
+        let out = themed_anchor_svg();
+        assert!(
+            out.contains("M12 6v16"),
+            "anchor shaft path must be present"
+        );
+        assert!(
+            out.contains("a9 9 0 0 1-18 0"),
+            "anchor curved-hook path must be present"
+        );
+        assert!(out.contains("M9 11h6"), "anchor cross-bar must be present");
+        assert!(
+            out.contains("<circle"),
+            "anchor top ring (circle) must be present"
+        );
+    }
+
+    /// The renderer hooks the rope's bottom endpoint to the top of the
+    /// anchor's ring, derived from `anchor_svg_ring_top_fraction()`. The
+    /// fraction must place the rope at the top of the ring (y=2 in the
+    /// 24-unit viewBox) — neither at the ring's center nor at the top
+    /// of the viewBox.
+    #[test]
+    fn anchor_svg_ring_top_fraction_lands_at_ring_top() {
+        let f = anchor_svg_ring_top_fraction();
+        // Within the 24-unit viewBox, y=2 (top of the ring) corresponds
+        // to a fraction of 2/24 ≈ 0.0833. y=4 (ring center) would be
+        // 0.166; y=0 (top of viewBox) would be 0.0.
+        assert!(
+            (f - 2.0 / 24.0).abs() < 1e-6,
+            "ring-top fraction must be 2/24 (top of the ring circle), \
+             got {f}"
         );
     }
 

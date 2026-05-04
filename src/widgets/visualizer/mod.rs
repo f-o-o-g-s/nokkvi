@@ -365,6 +365,22 @@ impl Visualizer {
         self.state.get_bars()
     }
 
+    /// Fast smoothed spectral-flux onset envelope (`[0, ~1]`). The
+    /// boat handler reads this each tick to scale sail thrust by the
+    /// music's instantaneous energy — boat surges on hits, glides on
+    /// quiet passages. Lock-free atomic read.
+    pub(crate) fn current_onset_energy(&self) -> f32 {
+        self.state.current_onset_energy()
+    }
+
+    /// Slow-decay onset envelope (~10 s time constant). Used to scale
+    /// the boat's baseline sail thrust by the song's overall energy
+    /// level — energetic tracks make the boat sail noticeably faster
+    /// even between transients. Lock-free atomic read.
+    pub(crate) fn current_long_onset_energy(&self) -> f32 {
+        self.state.current_long_onset_energy()
+    }
+
     /// Reset the visualizer state for a new track
     /// This reinitializes the spectrum engine to reset autosensitivity calibration, preventing
     /// the 2-4 second pause when manually switching to a track with different loudness.

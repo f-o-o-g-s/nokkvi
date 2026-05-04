@@ -239,6 +239,11 @@ pub struct PlaybackState {
     pub pw_last_title: Option<String>,
     /// Shared EQ state — gains and enabled flag. Read by audio thread, written by UI.
     pub eq_state: nokkvi_data::audio::EqState,
+    /// Tagged BPM of the currently playing song, when the file/server
+    /// reports one. The boat handler reads this every tick to drive
+    /// beat-locked sail-thrust pulses; absence falls back to the
+    /// spectral-flux onset envelope.
+    pub bpm: Option<u32>,
 }
 
 impl PlaybackState {
@@ -265,6 +270,7 @@ impl Default for PlaybackState {
             volume_persist_throttle: None,
             pw_last_title: None,
             eq_state: nokkvi_data::audio::EqState::default(),
+            bpm: None,
         }
     }
 }

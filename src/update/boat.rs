@@ -14,7 +14,10 @@ use nokkvi_data::types::player_settings::VisualizationMode;
 use crate::{
     Nokkvi,
     app_message::Message,
-    widgets::{boat, visualizer::visualizer_area_height},
+    widgets::{
+        boat::{self, MusicSignals},
+        visualizer::visualizer_area_height,
+    },
 };
 
 /// Handle a per-frame boat tick. Visibility is derived; physics step runs
@@ -97,17 +100,40 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
         0.0
     };
 
-    boat::step(&mut app.boat, dt, bars, angular);
+    // Music signals: tagged BPM (when the current song reports one) +
+    // smoothed spectral-flux onset envelope (always). The boat physics
+    // composes these on top of the baseline `SAIL_THRUST` so the boat
+    // surges on hits and pulses to the beat. Both fall back to "no
+    // modulation" when their source isn't available — silence /
+    // un-tagged tracks behave like the pre-music constant-thrust model.
+    let music = MusicSignals {
+        bpm: app.playback.bpm,
+        onset_energy: app
+            .visualizer
+            .as_ref()
+            .map_or(0.0, |v| v.current_onset_energy()),
+        long_onset_energy: app
+            .visualizer
+            .as_ref()
+            .map_or(0.0, |v| v.current_long_onset_energy()),
+    };
+    boat::step(&mut app.boat, dt, bars, angular, music);
     app.boat.visible = true;
     // Pre-build (and cache) the SVG handle for the current quantized
     // tilt + facing so the immutable `view()` render path can clone it
     // cheaply. The cache is keyed by `(quantized_tilt_index, mirrored)`,
     // so each visibly-distinct orientation pays a one-time resvg cost
     // and every subsequent tick at that same quantized angle is a free
-    // hashmap lookup.
+    // hashmap lookup. While anchored, also prime the single themed
+    // anchor handle so the doodad's render path is the same cheap
+    // lookup (the anchor sprite doesn't rotate — the rope's swing
+    // lives in the canvas path, not in the SVG).
     let tilt = app.boat.tilt;
     let facing = app.boat.facing;
     let _ = app.boat.cache_handle_for(tilt, facing);
+    if app.boat.anchor_remaining_secs > 0.0 {
+        let _ = app.boat.cache_anchor_handle();
+    }
 
     Task::none()
 }
