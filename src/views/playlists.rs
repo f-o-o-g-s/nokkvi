@@ -425,11 +425,15 @@ impl PlaylistsPage {
                     )
                 }
                 PlaylistsMessage::SlotListSelectionToggle(offset) => {
-                    self.common.handle_selection_toggle(offset, total_items);
+                    // Flattened (parents + expansion children) index space —
+                    // `total_items` from the dispatcher is the base count.
+                    let flattened = self.expansion.flattened_len(playlists);
+                    self.common.handle_selection_toggle(offset, flattened);
                     (Task::none(), PlaylistsAction::None)
                 }
                 PlaylistsMessage::SlotListSelectAllToggle => {
-                    self.common.handle_select_all_toggle(total_items);
+                    let flattened = self.expansion.flattened_len(playlists);
+                    self.common.handle_select_all_toggle(flattened);
                     (Task::none(), PlaylistsAction::None)
                 }
                 PlaylistsMessage::SlotListActivateCenter => {

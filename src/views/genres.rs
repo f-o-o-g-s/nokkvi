@@ -510,11 +510,24 @@ impl GenresPage {
                     self.update(GenresMessage::SlotListActivateCenter, total_items, genres)
                 }
                 GenresMessage::SlotListSelectionToggle(offset) => {
-                    self.common.handle_selection_toggle(offset, total_items);
+                    // Three-tier flattened (genres + albums + tracks) index
+                    // space — `total_items` from the dispatcher is the
+                    // base genre count.
+                    let flattened = super::expansion::three_tier_flattened_len(
+                        genres,
+                        &self.expansion,
+                        self.sub_expansion.children.len(),
+                    );
+                    self.common.handle_selection_toggle(offset, flattened);
                     (Task::none(), GenresAction::None)
                 }
                 GenresMessage::SlotListSelectAllToggle => {
-                    self.common.handle_select_all_toggle(total_items);
+                    let flattened = super::expansion::three_tier_flattened_len(
+                        genres,
+                        &self.expansion,
+                        self.sub_expansion.children.len(),
+                    );
+                    self.common.handle_select_all_toggle(flattened);
                     (Task::none(), GenresAction::None)
                 }
                 GenresMessage::SlotListActivateCenter => {

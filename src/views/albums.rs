@@ -390,11 +390,17 @@ impl AlbumsPage {
                     self.update(AlbumsMessage::SlotListActivateCenter, total_items, albums)
                 }
                 AlbumsMessage::SlotListSelectionToggle(offset) => {
-                    self.common.handle_selection_toggle(offset, total_items);
+                    // Slot list indices are flattened (parents + expansion
+                    // children); `total_items` from the dispatcher is the
+                    // base buffer length. Use the flattened length so the
+                    // toggle's bounds check matches what the user sees.
+                    let flattened = self.expansion.flattened_len(albums);
+                    self.common.handle_selection_toggle(offset, flattened);
                     (Task::none(), AlbumsAction::None)
                 }
                 AlbumsMessage::SlotListSelectAllToggle => {
-                    self.common.handle_select_all_toggle(total_items);
+                    let flattened = self.expansion.flattened_len(albums);
+                    self.common.handle_select_all_toggle(flattened);
                     (Task::none(), AlbumsAction::None)
                 }
                 AlbumsMessage::SlotListActivateCenter => {

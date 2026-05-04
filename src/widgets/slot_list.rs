@@ -696,52 +696,79 @@ pub(crate) fn slot_list_index_column<'a, Message: 'a>(
 
 /// Render the leading multi-select checkbox column for a slot list row.
 ///
-/// The checkbox itself captures click events (publishes the toggle message
-/// and calls `shell.capture_event()`), so clicks on the checkbox don't
-/// propagate to the row's surrounding `mouse_area` play handler.
-pub(crate) fn slot_list_select_checkbox<'a, Message: 'a>(
+/// Built from a `mouse_area`-wrapped custom 16×16 box (matching the
+/// tri-state "select all" header bar) rather than `iced::widget::Checkbox`.
+/// `mouse_area::on_press` calls `shell.capture_event()` on left-click, so
+/// the click is consumed before the row's surrounding `button` (or any
+/// other sibling click handler) can react — even when the row is rendered
+/// inside the browsing-panel split-view, where the row's button dispatches
+/// `SlotListSetOffset(no_modifiers)` (which would otherwise call
+/// `clear_multi_selection` and erase every other selection).
+pub(crate) fn slot_list_select_checkbox<'a, Message: 'a + Clone>(
     is_checked: bool,
     item_index: usize,
     on_toggle: impl Fn(usize) -> Message + 'a,
 ) -> Element<'a, Message> {
-    use iced::widget::checkbox;
+    use iced::{
+        Alignment,
+        widget::{Space, mouse_area, svg},
+    };
 
-    let cb = checkbox::Checkbox::new(is_checked)
-        .size(16.0)
-        .spacing(0.0)
-        .on_toggle(move |_new_value| on_toggle(item_index))
-        .style(|_theme, status| {
-            let visually_checked = matches!(
-                status,
-                checkbox::Status::Active { is_checked: true }
-                    | checkbox::Status::Hovered { is_checked: true }
-                    | checkbox::Status::Disabled { is_checked: true }
-            );
-            checkbox::Style {
-                background: if visually_checked {
-                    theme::accent().into()
-                } else {
-                    theme::bg0_soft().into()
-                },
-                icon_color: theme::fg0(),
-                border: iced::Border {
-                    color: if visually_checked {
-                        theme::accent_bright()
-                    } else {
-                        theme::bg3()
-                    },
-                    width: 1.0,
-                    radius: theme::ui_border_radius(),
-                },
-                text_color: Some(theme::fg2()),
-            }
+    let bg_color = if is_checked {
+        theme::accent()
+    } else {
+        theme::bg0_soft()
+    };
+    let border_color = if is_checked {
+        theme::accent_bright()
+    } else {
+        theme::bg3()
+    };
+
+    let glyph: Element<'a, Message> = if is_checked {
+        crate::embedded_svg::svg_widget("assets/icons/check.svg")
+            .width(Length::Fixed(12.0))
+            .height(Length::Fixed(12.0))
+            .style(|_, _| svg::Style {
+                color: Some(theme::fg0()),
+            })
+            .into()
+    } else {
+        Space::new()
+            .width(Length::Fixed(0.0))
+            .height(Length::Fixed(0.0))
+            .into()
+    };
+
+    let box_visual = container(glyph)
+        .width(Length::Fixed(16.0))
+        .height(Length::Fixed(16.0))
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .style(move |_| container::Style {
+            background: Some(bg_color.into()),
+            border: iced::Border {
+                color: border_color,
+                width: 1.0,
+                radius: theme::ui_border_radius(),
+            },
+            ..Default::default()
         });
 
-    container(cb)
+    // Centre the visible 16×16 box inside a column-wide hit area, then
+    // wrap that whole area in `mouse_area` so the click target covers the
+    // entire 40 px column (including the empty padding around the box).
+    // Otherwise a click that lands on the column's padding would slip past
+    // the checkbox's bounds and propagate to the row's surrounding button.
+    let cell = container(box_visual)
         .width(Length::Fixed(SLOT_LIST_SELECT_WIDTH))
         .height(Length::Fill)
-        .align_x(iced::Alignment::Center)
-        .align_y(iced::Alignment::Center)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center);
+
+    mouse_area(cell)
+        .on_press(on_toggle(item_index))
+        .interaction(iced::mouse::Interaction::Pointer)
         .into()
 }
 
@@ -752,7 +779,7 @@ pub(crate) fn slot_list_select_checkbox<'a, Message: 'a>(
 /// The checkbox state mirrors `selected_indices` membership, regardless of
 /// how membership was set (ctrl/shift+click, the checkbox itself, or the
 /// header tri-state). Click on the checkbox dispatches `on_toggle(item_index)`.
-pub(crate) fn wrap_with_select_column<'a, Message: 'a>(
+pub(crate) fn wrap_with_select_column<'a, Message: 'a + Clone>(
     show: bool,
     is_selected: bool,
     item_index: usize,

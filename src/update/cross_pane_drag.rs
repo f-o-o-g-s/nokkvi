@@ -123,39 +123,21 @@ impl Nokkvi {
         };
         self.cross_pane_drag_pressed_item = Some(pressed_index);
 
-        // Determine if the pressed item is within an active multi-selection.
-        // If it is, the whole selection batch will be dragged.
-        // If it is NOT, clear the selection and drag only this item
-        // (same semantics as evaluate_context_menu).
-        let selection_count = match panel.active_view {
-            views::BrowsingView::Albums => &mut self.albums_page.common,
-            views::BrowsingView::Songs => &mut self.songs_page.common,
-            views::BrowsingView::Artists => &mut self.artists_page.common,
-            views::BrowsingView::Genres => &mut self.genres_page.common,
-            views::BrowsingView::Similar => &mut self.similar_page.common,
-        };
-        let count = if selection_count
-            .slot_list
-            .selected_indices
-            .contains(&pressed_index)
-        {
-            // Pressed item IS in the selection — drag the whole batch
-            selection_count.slot_list.selected_indices.len()
-        } else {
-            // Pressed item is NOT in the selection — clear and drag single
-            selection_count.clear_multi_selection();
-            selection_count
-                .slot_list
-                .selected_indices
-                .insert(pressed_index);
-            selection_count.slot_list.anchor_index = Some(pressed_index);
-            1
-        };
-        self.cross_pane_drag_selection_count = count;
+        // Selection mutation is deferred to `handle_cross_pane_drag_moved`
+        // once the drag threshold is exceeded. Mutating on press would
+        // race with the per-row checkbox toggle (which also fires on a
+        // left-click in the browser pane) — the toggle removes the index,
+        // this handler re-inserts it, and the user sees the just-clicked
+        // checkbox stay checked while every other selected one disappears.
+        //
+        // Plain clicks now leave selection untouched here; the row's
+        // button (`SlotListSetOffset` on release) and the checkbox's
+        // `SlotListSelectionToggle` retain full ownership of the
+        // click-to-select behaviour.
 
         debug!(
-            " [DRAG] Press on browser pane: slot={}, item_index={}, selection_count={} (viewport={})",
-            clicked_slot, pressed_index, count, viewport_offset
+            " [DRAG] Press on browser pane: slot={}, item_index={} (viewport={})",
+            clicked_slot, pressed_index, viewport_offset
         );
 
         Task::none()
@@ -179,14 +161,45 @@ impl Nokkvi {
                         origin.x, origin.y
                     );
 
-                    // Use the center index snapshotted at press time.
-                    // This is immune to any state changes since the press.
+                    // Determine the drag's selection batch *now* — only
+                    // when the gesture is firmly a drag, not on every
+                    // press. Press-time mutation conflicted with the
+                    // checkbox toggle.
+                    //
+                    // If the pressed item is already in the multi-
+                    // selection, the whole batch is dragged. Otherwise,
+                    // clear and select only the pressed item (matching
+                    // evaluate_context_menu semantics).
+                    let selection_count = if let (Some(panel), Some(pressed_index)) = (
+                        self.browsing_panel.as_ref().map(|p| p.active_view),
+                        self.cross_pane_drag_pressed_item,
+                    ) {
+                        let common: &mut crate::widgets::SlotListPageState = match panel {
+                            views::BrowsingView::Albums => &mut self.albums_page.common,
+                            views::BrowsingView::Songs => &mut self.songs_page.common,
+                            views::BrowsingView::Artists => &mut self.artists_page.common,
+                            views::BrowsingView::Genres => &mut self.genres_page.common,
+                            views::BrowsingView::Similar => &mut self.similar_page.common,
+                        };
+                        if common.slot_list.selected_indices.contains(&pressed_index) {
+                            common.slot_list.selected_indices.len()
+                        } else {
+                            common.clear_multi_selection();
+                            common.slot_list.selected_indices.insert(pressed_index);
+                            common.slot_list.anchor_index = Some(pressed_index);
+                            1
+                        }
+                    } else {
+                        1
+                    };
+                    self.cross_pane_drag_selection_count = selection_count;
+
                     self.cross_pane_drag = Some(CrossPaneDragState {
                         origin,
                         cursor: position,
                         center_index: self.cross_pane_drag_pressed_item,
                         drop_target_slot: None,
-                        selection_count: self.cross_pane_drag_selection_count,
+                        selection_count,
                     });
                 }
             } else if self.cross_pane_drag.is_some() {

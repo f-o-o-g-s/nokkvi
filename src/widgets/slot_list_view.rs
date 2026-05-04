@@ -161,13 +161,15 @@ impl SlotListView {
         if total_items == 0 {
             return;
         }
+        // Capture before take(): a Some value here means the single-item
+        // selection (if any) was set by `handle_slot_click` as a focus marker
+        // and should be dropped on scroll. Checkbox-driven selections leave
+        // `selected_offset` at None and survive.
+        let was_focus_marker = self.selected_offset.is_some();
         if let Some(sel) = self.selected_offset.take() {
             self.viewport_offset = sel;
         }
-        // A single-item selection is just a click-to-focus marker, not an
-        // intentional multi-selection. Clear it so `has_multi_selection`
-        // returns to false and the center slot highlight works normally.
-        if self.selected_indices.len() == 1 {
+        if was_focus_marker && self.selected_indices.len() == 1 {
             self.selected_indices.clear();
             self.anchor_index = None;
         }
@@ -182,11 +184,11 @@ impl SlotListView {
         if total_items == 0 {
             return;
         }
+        let was_focus_marker = self.selected_offset.is_some();
         if let Some(sel) = self.selected_offset.take() {
             self.viewport_offset = sel;
         }
-        // Clear single-item focus marker (see move_up comment).
-        if self.selected_indices.len() == 1 {
+        if was_focus_marker && self.selected_indices.len() == 1 {
             self.selected_indices.clear();
             self.anchor_index = None;
         }

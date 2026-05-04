@@ -522,11 +522,24 @@ impl ArtistsPage {
                     self.update(ArtistsMessage::SlotListActivateCenter, total_items, artists)
                 }
                 ArtistsMessage::SlotListSelectionToggle(offset) => {
-                    self.common.handle_selection_toggle(offset, total_items);
+                    // Three-tier flattened (artists + albums + tracks)
+                    // index space — `total_items` from the dispatcher is
+                    // the base artist count.
+                    let flattened = super::expansion::three_tier_flattened_len(
+                        artists,
+                        &self.expansion,
+                        self.sub_expansion.children.len(),
+                    );
+                    self.common.handle_selection_toggle(offset, flattened);
                     (Task::none(), ArtistsAction::None)
                 }
                 ArtistsMessage::SlotListSelectAllToggle => {
-                    self.common.handle_select_all_toggle(total_items);
+                    let flattened = super::expansion::three_tier_flattened_len(
+                        artists,
+                        &self.expansion,
+                        self.sub_expansion.children.len(),
+                    );
+                    self.common.handle_select_all_toggle(flattened);
                     (Task::none(), ArtistsAction::None)
                 }
                 ArtistsMessage::SlotListActivateCenter => {

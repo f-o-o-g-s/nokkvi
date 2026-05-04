@@ -168,22 +168,25 @@ impl SlotListPageState {
     /// per-row select checkbox column. Mirrors the ctrl+click path in
     /// `handle_slot_click` minus the modifier branch — caller is the checkbox,
     /// which is unconditionally a "toggle this row" affordance.
+    ///
+    /// Drops `selected_offset` (the click-to-focus marker that
+    /// `move_up`/`move_down` clear on scroll) so a leftover focus marker
+    /// from an earlier no-modifier click doesn't make `move_up`/`move_down`
+    /// treat the new checkbox-driven selection as a transient focus marker
+    /// and erase it on the next scroll.
     pub fn handle_selection_toggle(&mut self, offset: usize, total_items: usize) {
         if offset >= total_items {
             return;
         }
+        self.slot_list.selected_offset = None;
         if self.slot_list.selected_indices.contains(&offset) {
             self.slot_list.selected_indices.remove(&offset);
             if self.slot_list.anchor_index == Some(offset) {
                 self.slot_list.anchor_index = None;
             }
-            if self.slot_list.selected_indices.is_empty() {
-                self.slot_list.selected_offset = None;
-            }
         } else {
             self.slot_list.selected_indices.insert(offset);
             self.slot_list.anchor_index = Some(offset);
-            self.slot_list.selected_offset = Some(offset);
         }
     }
 
@@ -626,7 +629,9 @@ mod tests {
 
         assert!(state.slot_list.selected_indices.contains(&3));
         assert_eq!(state.slot_list.anchor_index, Some(3));
-        assert_eq!(state.slot_list.selected_offset, Some(3));
+        // The checkbox path stays out of the focus-marker channel so
+        // `move_up`/`move_down` won't drop it on scroll.
+        assert_eq!(state.slot_list.selected_offset, None);
     }
 
     #[test]
@@ -640,18 +645,28 @@ mod tests {
     }
 
     #[test]
-    fn selection_toggle_clears_selected_offset_when_empty() {
+    fn selection_toggle_clears_stale_focus_marker() {
+        // A leftover focus marker from a prior no-modifier click would, if
+        // preserved, make the next scroll think the new checkbox-driven
+        // selection is a transient focus marker. The toggle drops the
+        // marker so subsequent navigation behaves predictably.
         let mut state = SlotListPageState::default();
+        state.slot_list.selected_offset = Some(7);
+
         state.handle_selection_toggle(5, 10);
-        state.handle_selection_toggle(5, 10);
-        assert_eq!(
-            state.slot_list.selected_offset, None,
-            "selected_offset must be None when set empties via the checkbox toggle path"
-        );
+        assert_eq!(state.slot_list.selected_offset, None);
+        assert!(state.slot_list.selected_indices.contains(&5));
+
+        // Pretend a focus marker reappeared (e.g., another component set it),
+        // then remove via the same toggle — still cleared.
+        state.slot_list.selected_offset = Some(7);
+        state.handle_selection_toggle(5, 10); // remove
+        assert_eq!(state.slot_list.selected_offset, None);
+        assert!(state.slot_list.selected_indices.is_empty());
     }
 
     #[test]
-    fn selection_toggle_keeps_offset_when_remaining_items() {
+    fn selection_toggle_does_not_set_focus_marker() {
         let mut state = SlotListPageState::default();
         state.handle_selection_toggle(3, 10);
         state.handle_selection_toggle(5, 10);
@@ -659,7 +674,7 @@ mod tests {
 
         assert!(state.slot_list.selected_indices.contains(&5));
         assert!(!state.slot_list.selected_indices.contains(&3));
-        assert!(state.slot_list.selected_offset.is_some());
+        assert!(state.slot_list.selected_offset.is_none());
     }
 
     #[test]
@@ -668,6 +683,44 @@ mod tests {
         state.handle_selection_toggle(15, 10);
 
         assert!(state.slot_list.selected_indices.is_empty());
+        assert_eq!(state.slot_list.selected_offset, None);
+    }
+
+    #[test]
+    fn checkbox_selection_survives_scroll() {
+        // Regression: scroll-clearing of single-item focus markers must
+        // not eat checkbox-driven selections.
+        let mut state = SlotListPageState::default();
+        state.slot_list.set_offset(5, 20);
+        state.handle_selection_toggle(5, 20);
+
+        state.handle_navigate_down(20);
+        assert!(
+            state.slot_list.selected_indices.contains(&5),
+            "checkbox-toggle selection must survive scroll"
+        );
+
+        state.handle_navigate_up(20);
+        assert!(
+            state.slot_list.selected_indices.contains(&5),
+            "checkbox-toggle selection must survive reverse scroll"
+        );
+    }
+
+    #[test]
+    fn click_to_focus_selection_clears_on_scroll() {
+        // Counterpart: a no-modifier click (focus marker) is still cleared
+        // on scroll, the way it always was.
+        let mut state = SlotListPageState::default();
+        state.handle_slot_click(5, 20, iced::keyboard::Modifiers::empty());
+        assert_eq!(state.slot_list.selected_offset, Some(5));
+        assert!(state.slot_list.selected_indices.contains(&5));
+
+        state.handle_navigate_down(20);
+        assert!(
+            state.slot_list.selected_indices.is_empty(),
+            "no-modifier click should be cleared on scroll"
+        );
         assert_eq!(state.slot_list.selected_offset, None);
     }
 
