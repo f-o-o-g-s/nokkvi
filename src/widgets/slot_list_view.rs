@@ -14,11 +14,13 @@ pub struct SlotListView {
     pub selected_offset: Option<usize>,
     /// When true, `selected_offset` is a "top-pin" from find-and-expand (the
     /// viewport was positioned to place the pinned item near the top of the
-    /// visible list). Mouse-wheel and keyboard scrolls then advance the
-    /// viewport by 1 instead of snapping it to `selected_offset` — without
-    /// this flag, the first scroll would jump the viewport backward by
-    /// `center_slot - 1` rows and the highlight would visibly "warp" from
-    /// slot 0 to the visual center. Set by `pin_selected`; cleared by
+    /// visible list). Mouse-wheel and keyboard scrolls advance both the
+    /// viewport AND `selected_offset` by 1 in lockstep — the cursor walks
+    /// through subsequent rows row-by-row instead of being frozen on the
+    /// pinned target, which would otherwise leave no visible cursor between
+    /// the auto-pin and the user's first click. The non-snap behavior also
+    /// prevents the first scroll from jumping the viewport backward by
+    /// `center_slot - 1` rows. Set by `pin_selected`; cleared by
     /// `set_selected`, `set_offset`, and click-to-focus paths.
     pub selected_offset_pinned: bool,
     /// Current slot count (set during render by `build_slot_list_slots`).
@@ -167,14 +169,18 @@ impl SlotListView {
     /// If `selected_offset` is set (click-to-focus), snaps the viewport there
     /// first so scrolling continues from the clicked item rather than the old
     /// viewport position. When the selection is a top-pin
-    /// (`selected_offset_pinned`), the snap is skipped and the highlight
-    /// rides the target until it scrolls off-screen.
+    /// (`selected_offset_pinned`), the snap is skipped and `selected_offset`
+    /// advances together with the viewport so the cursor walks through
+    /// adjacent rows instead of staying frozen on the pinned target.
     pub fn move_up(&mut self, total_items: usize) {
         if total_items == 0 {
             return;
         }
         if self.selected_offset_pinned {
             self.viewport_offset = self.viewport_offset.saturating_sub(1);
+            if let Some(sel) = self.selected_offset {
+                self.selected_offset = Some(sel.saturating_sub(1));
+            }
             return;
         }
         // Capture before take(): a Some value here means the single-item
@@ -196,14 +202,19 @@ impl SlotListView {
     /// If `selected_offset` is set (click-to-focus), snaps the viewport there
     /// first so scrolling continues from the clicked item rather than the old
     /// viewport position. When the selection is a top-pin
-    /// (`selected_offset_pinned`), the snap is skipped and the highlight
-    /// rides the target until it scrolls off-screen.
+    /// (`selected_offset_pinned`), the snap is skipped and `selected_offset`
+    /// advances together with the viewport so the cursor walks through
+    /// adjacent rows instead of staying frozen on the pinned target.
     pub fn move_down(&mut self, total_items: usize) {
         if total_items == 0 {
             return;
         }
         if self.selected_offset_pinned {
-            self.viewport_offset = (self.viewport_offset + 1).min(total_items - 1);
+            let max_idx = total_items - 1;
+            self.viewport_offset = (self.viewport_offset + 1).min(max_idx);
+            if let Some(sel) = self.selected_offset {
+                self.selected_offset = Some((sel + 1).min(max_idx));
+            }
             return;
         }
         let was_focus_marker = self.selected_offset.is_some();
@@ -452,11 +463,13 @@ mod tests {
     }
 
     #[test]
-    fn test_pin_selected_does_not_snap_viewport_on_scroll() {
+    fn test_pin_selected_walks_cursor_with_viewport_on_scroll() {
         // Find-and-expand setup: viewport positions the target at slot 0,
         // and pin_selected marks the highlight as a top-pin (not a
         // click-to-focus marker). Mouse-wheel scrolls must advance the
-        // viewport by 1 row, not snap backward to the pinned index.
+        // viewport by 1 row (not snap backward to the pinned index) AND
+        // advance `selected_offset` in lockstep so a visible cursor walks
+        // through adjacent rows instead of staying frozen on the pin.
         let mut sl = SlotListView::new();
         sl.slot_count = 9;
         let target_idx = 200;
@@ -476,14 +489,56 @@ mod tests {
         );
         assert_eq!(
             sl.selected_offset,
-            Some(200),
-            "pinned selection should survive scroll so the highlight tracks the target"
+            Some(201),
+            "pinned cursor should walk forward so the user can see where their selection is"
         );
         assert!(sl.selected_offset_pinned);
 
         sl.move_up(total);
         assert_eq!(sl.viewport_offset, 204);
-        assert_eq!(sl.selected_offset, Some(200));
+        assert_eq!(
+            sl.selected_offset,
+            Some(200),
+            "scroll-up walks the cursor back in lockstep with the viewport"
+        );
+        assert!(sl.selected_offset_pinned);
+    }
+
+    #[test]
+    fn test_pin_selected_cursor_walks_multiple_steps() {
+        let mut sl = SlotListView::new();
+        sl.slot_count = 9;
+        let total = 1000;
+        sl.set_offset(204, total);
+        sl.pin_selected(200, total);
+
+        for i in 0..5 {
+            sl.move_down(total);
+            assert_eq!(sl.viewport_offset, 205 + i);
+            assert_eq!(sl.selected_offset, Some(201 + i));
+            assert!(sl.selected_offset_pinned, "pin survives lockstep scroll");
+        }
+    }
+
+    #[test]
+    fn test_pin_selected_clamps_at_boundaries() {
+        // Top boundary: both viewport and cursor should clamp at 0 instead
+        // of underflowing.
+        let mut sl = SlotListView::new();
+        sl.slot_count = 9;
+        let total = 10;
+        sl.set_offset(0, total);
+        sl.pin_selected(0, total);
+        sl.move_up(total);
+        assert_eq!(sl.viewport_offset, 0);
+        assert_eq!(sl.selected_offset, Some(0));
+
+        // Bottom boundary: both should clamp at total - 1.
+        sl.set_offset(total - 1, total);
+        sl.pin_selected(total - 1, total);
+        sl.move_down(total);
+        assert_eq!(sl.viewport_offset, total - 1);
+        assert_eq!(sl.selected_offset, Some(total - 1));
     }
 
     #[test]
