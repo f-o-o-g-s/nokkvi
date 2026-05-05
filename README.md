@@ -29,13 +29,13 @@ Things that shaped this project:
 
 ## Highlights
 
-- Native PipeWire audio engine with gapless playback, crossfade, EBU R128 normalization, and a 10-band EQ
+- Native PipeWire audio engine with gapless playback, crossfade, AGC + ReplayGain volume normalization, and a 10-band EQ
 - GPU-accelerated visualizer with `bars` and `lines` modes, gradient controls, and peak indicators
 - Browse albums, artists, songs, genres, playlists, internet radios, and similar artists; inline expansion and split-view browsing included
 - 21 built-in themes (Gruvbox, Catppuccin, Dracula, Nord, Tokyo Night, Kanagawa, Everforest, ...) with instant hot-reload; drop a `.toml` in `~/.config/nokkvi/themes/` to add your own
 - Persistent queue, multi-selection, drag-and-drop, star ratings, and scrobbling (Last.fm / ListenBrainz)
 - Fully keyboard-driven with configurable shortcuts, MPRIS, optional system tray icon, and right-click menus everywhere
-- Designed on a tiling WM — player bar folds controls into a kebab menu as width shrinks; library views use a **slot-paginated list** (the viewport is a fixed odd number of whole-row slots — 3, 5, 7, 9, 11, 13, or 15 — never partials) where the slot count adapts to window height and text, album artwork, and star icons scale with each slot
+- Designed on a tiling WM — player bar folds controls into a kebab menu as width shrinks; library views use a **slot-paginated list** (the viewport is a fixed odd number of whole-row slots — never partials) where the slot count adapts to window height (up to 29) and text, album artwork, and star icons scale with each slot
 
 Full feature tour and `config.toml` reference: [docs](https://f-o-o-g-s.github.io/nokkvi-docs/).
 
@@ -69,7 +69,7 @@ Runtime requirements: `pipewire` and `fontconfig` installed system-wide (Arch: `
 ## Quickstart (build from source)
 
 ```bash
-sudo pacman -S pipewire fontconfig pkg-config   # Arch system deps
+sudo pacman -S pipewire fontconfig pkgconf       # Arch system deps
 cargo build --release                           # build
 ./install.sh                                    # install binary, .desktop, icon
 ```

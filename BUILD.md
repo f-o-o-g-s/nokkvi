@@ -16,14 +16,14 @@ rustup toolchain install nightly   # only needed for cargo +nightly fmt
 ### 2. System Dependencies (Arch Linux)
 
 ```bash
-sudo pacman -S pipewire fontconfig pkg-config
+sudo pacman -S pipewire fontconfig pkgconf
 ```
 
 | Package | Purpose |
 |---------|---------|
 | `pipewire` | PipeWire development headers (native audio output via `libpipewire-0.3`) |
 | `fontconfig` | Font discovery for the system font picker (used by `font-kit`) |
-| `pkg-config` | Build-time dependency resolution for native libraries |
+| `pkgconf` | Build-time dependency resolution for native libraries (provides `pkg-config`) |
 
 > **Note:** Nokkvi uses a native PipeWire audio backend — it links directly against `libpipewire-0.3` at build time. A running PipeWire daemon is required for audio output.
 

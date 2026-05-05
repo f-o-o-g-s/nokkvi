@@ -15,7 +15,7 @@ Please read the [AI Disclosure](#ai-disclosure) section before diving in.
 ### Prerequisites
 
 - Rust toolchain via [rustup](https://rustup.rs/) (stable + nightly)
-- System dependencies (Arch Linux): `pacman -S pipewire fontconfig pkg-config`
+- System dependencies (Arch Linux): `pacman -S pipewire fontconfig pkgconf`
 
 ### Build & Test
 
