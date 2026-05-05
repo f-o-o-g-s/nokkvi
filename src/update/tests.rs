@@ -5812,3 +5812,50 @@ fn genres_selection_toggle_on_album_child_lands_in_selected_indices() {
         "album child at flattened index 2 should be in selected_indices after toggle"
     );
 }
+
+// ============================================================================
+// Resume-Session Backfill (navigation.rs)
+// ============================================================================
+
+#[test]
+fn resume_session_backfills_username_from_credential() {
+    use crate::state::StoredSession;
+
+    let mut app = test_app();
+    app.login_page.username = String::new();
+    app.stored_session = Some(StoredSession {
+        server_url: "http://localhost:4533".to_string(),
+        username: String::new(),
+        jwt_token: "fake.jwt.token".to_string(),
+        subsonic_credential: "u=foogs&s=salt&t=token".to_string(),
+    });
+
+    let _ = app.handle_resume_session();
+
+    assert_eq!(
+        app.login_page.username, "foogs",
+        "resume should backfill login_page.username from the credential's u= field \
+         so the next save_credentials closes the loop with a real value"
+    );
+}
+
+#[test]
+fn resume_session_does_not_clobber_when_credential_lacks_u() {
+    use crate::state::StoredSession;
+
+    let mut app = test_app();
+    app.login_page.username = "preexisting".to_string();
+    app.stored_session = Some(StoredSession {
+        server_url: "http://localhost:4533".to_string(),
+        username: "preexisting".to_string(),
+        jwt_token: "fake.jwt.token".to_string(),
+        subsonic_credential: "s=salt&t=token".to_string(),
+    });
+
+    let _ = app.handle_resume_session();
+
+    assert_eq!(
+        app.login_page.username, "preexisting",
+        "a malformed credential without u= should leave login_page.username untouched"
+    );
+}

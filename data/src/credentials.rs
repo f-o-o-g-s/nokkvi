@@ -103,6 +103,16 @@ pub fn save_credentials(server_url: &str, username: &str) -> Result<()> {
     Ok(())
 }
 
+// ── Subsonic credential parsing ─────────────────────────────────────────────
+
+/// Extract the username (`u=` field) from a stored Subsonic credential string.
+pub fn parse_username_from_credential(credential: &str) -> Option<&str> {
+    credential
+        .split('&')
+        .find_map(|p| p.strip_prefix("u="))
+        .filter(|s| !s.is_empty())
+}
+
 // ── Session (JWT + Subsonic credential) ─────────────────────────────────────
 
 /// Save JWT token and Subsonic credential to redb.
@@ -205,6 +215,31 @@ mod tests {
         assert!(jwt.unwrap().is_empty());
 
         std::fs::remove_file(db_path).unwrap();
+    }
+
+    #[test]
+    fn parse_username_extracts_u_field() {
+        let creds = "u=foogs&s=abc123&t=md5hash";
+        assert_eq!(parse_username_from_credential(creds), Some("foogs"));
+    }
+
+    #[test]
+    fn parse_username_returns_none_for_empty_u() {
+        let creds = "u=&s=abc123&t=md5hash";
+        assert_eq!(parse_username_from_credential(creds), None);
+    }
+
+    #[test]
+    fn parse_username_returns_none_when_u_missing() {
+        let creds = "s=abc123&t=md5hash";
+        assert_eq!(parse_username_from_credential(creds), None);
+    }
+
+    #[test]
+    fn parse_username_handles_u_not_first() {
+        // Defensive: don't assume u= is positionally first
+        let creds = "s=abc123&u=foogs&t=md5hash";
+        assert_eq!(parse_username_from_credential(creds), Some("foogs"));
     }
 
     #[test]

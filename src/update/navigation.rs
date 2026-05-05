@@ -226,6 +226,14 @@ impl Nokkvi {
 
         info!(target: "nokkvi::auth", "Resuming session for {username}@{server_url}");
 
+        // Re-source username from the credential's u= field — login_page.username
+        // can be empty when resuming a session predating save_credentials writes.
+        if let Some(parsed) =
+            nokkvi_data::credentials::parse_username_from_credential(&subsonic_credential)
+        {
+            self.login_page.username = parsed.to_string();
+        }
+
         // Take cached storage from previous logout (if any)
         let cached = self.cached_storage.take();
 
