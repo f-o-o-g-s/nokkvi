@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 
 - Surfing boat now moves on ambient and soundtrack tracks (sustained pads, drones, slow swells) that produce loud but slowly-changing spectra — these previously made the boat coast to a stop because the cruise signal listened only to spectral change.
 - Surfing boat's top speed now scales with the music's energy stack instead of pinning every percussive track at the same ceiling — energetic tracks (brick-walled, blast-beat, heavy-onset material) now read visibly faster than steady punchy tracks, and the baseline cruise speed is lifted across the board.
+- Username in config.toml is now populated automatically on auto-login resume — previously the field stayed empty whenever it was empty at startup, so the field never recovered without a manual logout/login.
 
 ### Removed
 
