@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 - Surfing boat sprite size is now clamped to a 48–160 px pixel range so it stays readable at any window size — the boat previously shrank to ~14 px on small/short windows and ballooned past 230 px on 4K. Rope thickness now scales with the boat (1.5–3.5 px) so it never looks hairline against a large boat or chunky against a small one, and the anchor inherits the new bounds automatically.
 - Queue's header shuffle button is now a Random sort mode in the sort dropdown — selecting Random shuffles the queue, and re-selecting it (or toggling the order arrow while Random is active) reshuffles. The mode isn't persisted to config, so a relaunch restores whichever deterministic sort was active before.
 - Shift+C (center on currently-playing) in Albums, Artists, Songs, and Genres views no longer overwrites the active search query with the playing item's title — when the item isn't already in view, the search clears and the library pages forward until the item appears, then centers it.
+- Library browser panel (Ctrl+E) view header no longer renders the Center on Playing button on Albums, Songs, Artists, and Genres tabs — the narrower 45% pane needs that space for sort/refresh/columns/search. The button is unchanged on the corresponding full-page views.
 
 ### Fixed
 
