@@ -34,6 +34,11 @@ const TOTAL_DURATION_MAX_MS: u64 = 5400;
 /// Floor on the eased main spin alone. Ensures even a long fake-out
 /// can't squeeze the visible deceleration below something legible.
 const MAIN_DURATION_FLOOR_MS: u64 = 2800;
+/// Cruise phase length — how long the wheel spins at constant velocity
+/// before deceleration begins. Jittered per spin so consecutive plays
+/// don't lock onto an identical "spin up, slow down" cadence.
+const CRUISE_DURATION_MIN_MS: u64 = 1300;
+const CRUISE_DURATION_MAX_MS: u64 = 1700;
 
 impl Nokkvi {
     pub(crate) fn handle_roulette_message(&mut self, msg: RouletteMessage) -> Task<Message> {
@@ -126,11 +131,13 @@ impl Nokkvi {
         let main_duration_ms = total_duration_ms
             .saturating_sub(fakeout_total_ms)
             .max(MAIN_DURATION_FLOOR_MS);
+        let cruise_duration_ms =
+            rng.range_inclusive(CRUISE_DURATION_MIN_MS, CRUISE_DURATION_MAX_MS);
 
         debug!(
             "Roulette start: view={:?} total_items={} target={} original_offset={} \
              revolutions={} main_spin_steps={} main_duration_ms={} \
-             fakeout_total_ms={} keyframes={:?}",
+             cruise_duration_ms={} fakeout_total_ms={} keyframes={:?}",
             view,
             total_items,
             target_idx,
@@ -138,6 +145,7 @@ impl Nokkvi {
             revolutions,
             main_spin_steps,
             main_duration_ms,
+            cruise_duration_ms,
             fakeout_total_ms,
             fakeout_keyframes
         );
@@ -148,6 +156,7 @@ impl Nokkvi {
             original_offset,
             target_idx,
             main_duration_ms,
+            cruise_duration_ms,
             main_spin_steps,
             fakeout_keyframes,
             start_time: Instant::now(),
@@ -528,6 +537,7 @@ mod tests {
             original_offset: original,
             target_idx: target,
             main_duration_ms: 4000,
+            cruise_duration_ms: 1500,
             main_spin_steps,
             fakeout_keyframes: vec![
                 FakeoutKeyframe {

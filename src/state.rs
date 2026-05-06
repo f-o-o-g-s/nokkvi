@@ -83,8 +83,9 @@ pub struct FakeoutKeyframe {
 /// Snapshotted at start so subsequent data churn (page loads, search edits,
 /// queue mutations) cannot drift the animation off the chosen target. The
 /// final position lands at `target_idx`; intermediate offsets are derived
-/// purely from `(start_time, main_duration_ms, main_spin_steps,
-/// fakeout_keyframes)` via an ease-out cubic for the main spin and a
+/// purely from `(start_time, main_duration_ms, cruise_duration_ms,
+/// main_spin_steps, fakeout_keyframes)` via a constant-velocity cruise
+/// followed by an `ease_out_quad` deceleration for the main spin and a
 /// keyframe walk for the fake-out, so a tick handler is stateless beyond
 /// bookkeeping.
 #[derive(Debug, Clone)]
@@ -102,6 +103,11 @@ pub struct RouletteState {
     /// the total roulette budget; longer fake-outs steal time back so the
     /// total feels roughly consistent.
     pub main_duration_ms: u64,
+    /// Cruise phase duration in milliseconds. The main spin runs at
+    /// constant velocity for this long before transitioning into the
+    /// `ease_out_quad` deceleration phase. Velocities are matched at the
+    /// handoff so there's no visible kink. Jittered per spin.
+    pub cruise_duration_ms: u64,
     /// Cumulative-index distance the eased main spin walks. Lands at the
     /// first fake-out keyframe, not directly at `target_idx`. Inflated by
     /// full-list revolutions so the wheel "spins" several times.
@@ -139,10 +145,32 @@ impl RouletteState {
         let main_d = std::time::Duration::from_millis(self.main_duration_ms);
 
         if elapsed < main_d {
-            // Eased spin from `original_offset` to the first fake-out keyframe.
-            let t = elapsed.as_secs_f32() / main_d.as_secs_f32();
-            let eased = ease_out_cubic(t);
-            let steps = (eased * self.main_spin_steps as f32) as usize;
+            // Two-phase profile: constant-velocity cruise, then ease-out-quad
+            // deceleration. Velocities match at the handoff so the wheel
+            // transitions smoothly from "spinning fast" into "slowing down"
+            // — a single eased curve from t=0 starts decelerating
+            // immediately and never feels like a real wheel.
+            //
+            // For continuous velocity at the cruise→decel handoff with
+            // ease_out_quad (whose initial derivative is 2):
+            //     v_cruise = S1 / cruise_d = 2 * S2 / decel_d
+            //   ⇒ S2 = S * decel_d / (decel_d + 2 * cruise_d)
+            let cruise_s =
+                ((self.cruise_duration_ms.min(self.main_duration_ms / 2)) as f32) / 1000.0;
+            let main_s = main_d.as_secs_f32();
+            let decel_s = (main_s - cruise_s).max(f32::EPSILON);
+            let total_steps = self.main_spin_steps as f32;
+            let s2 = total_steps * decel_s / (decel_s + 2.0 * cruise_s);
+            let s1 = total_steps - s2;
+
+            let elapsed_s = elapsed.as_secs_f32();
+            let progress = if elapsed_s < cruise_s {
+                (elapsed_s / cruise_s) * s1
+            } else {
+                let u = (elapsed_s - cruise_s) / decel_s;
+                s1 + ease_out_quad(u) * s2
+            };
+            let steps = progress as usize;
             return (self.offset_after_steps(steps), false);
         }
 
@@ -172,11 +200,13 @@ impl RouletteState {
     }
 }
 
-/// Ease-out cubic: fast start, slow end. Matches a slot-wheel deceleration.
-pub(crate) fn ease_out_cubic(t: f32) -> f32 {
+/// Ease-out quadratic: linear deceleration from initial velocity 2 to 0.
+/// Models a wheel slowing under roughly constant friction — which is what
+/// the roulette decel phase is meant to feel like once the cruise ends.
+pub(crate) fn ease_out_quad(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     let inv = 1.0 - t;
-    1.0 - inv * inv * inv
+    1.0 - inv * inv
 }
 
 // ============================================================================
