@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.3.13 — 2026-05-05
+
+### Added
+
 - Roulette pick mode in every slot-list view's sort dropdown — selects a random item, animates the slot list as a ~5-second slot-machine spin with ease-out deceleration plus a fake-out near the end, then auto-plays the landing item. Per-frame Tab nav SFX track the slowing wheel for the slot-machine click. Genres and Artists load all songs in the picked entity and start playback at a random song; Queue/Songs/Albums/Playlists/Radios use the view's normal play-from-here action. Press Escape during the spin (or switch views) to cancel — the original viewport is restored, no auto-play. Roulette is disabled in the browsing panel since play actions there route to add-to-queue instead.
 - Expanded child rows in Artists, Albums, Genres, and Playlists views now show a dotted-decimal sub-index (e.g. 236.1, 236.2) in their leading column with a slight indent — previously children had no index at all and sat less indented than their parent, leaving an unexplained gap in the parent-row index sequence.
 
@@ -24,8 +34,6 @@ All notable changes to this project will be documented in this file.
 - Surfing boat's top speed now scales with the music's energy stack instead of pinning every percussive track at the same ceiling — energetic tracks (brick-walled, blast-beat, heavy-onset material) now read visibly faster than steady punchy tracks, and the baseline cruise speed is lifted across the board.
 - Username in config.toml is now populated automatically on auto-login resume — previously the field stayed empty whenever it was empty at startup, so the field never recovered without a manual logout/login.
 - Scrolling or Tab-navigating after clicking a name link to inline-expand a target in another view now visibly walks the cursor highlight through adjacent rows instead of leaving no cursor visible until the next click — previously the cursor stayed frozen on the auto-pinned row even after that row scrolled off-screen.
-
-### Removed
 
 ## v0.3.12 — 2026-05-04
 

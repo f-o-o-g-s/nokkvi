@@ -48,7 +48,7 @@ unused_async = "deny"
 
 [package]
 name = "nokkvi"
-version = "0.3.12"
+version = "0.3.13"
 edition = "2024"
 description = "A fast and beautiful Rust/Iced desktop client for Navidrome"
 readme = "README.md"
