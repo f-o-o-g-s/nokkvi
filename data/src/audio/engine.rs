@@ -252,6 +252,111 @@ impl CustomAudioEngine {
         trace!(" AudioEngine: source set successfully");
     }
 
+    /// Clone the ICY-metadata Arc so a caller can build a fresh `AudioDecoder`
+    /// that writes ICY events into the engine's existing storage.
+    ///
+    /// Used by [`install_and_play`] to share the engine's ICY Arc with a
+    /// decoder constructed outside the engine lock.
+    pub fn live_icy_metadata_handle(&self) -> Arc<std::sync::RwLock<Option<String>>> {
+        self.live_icy_metadata.clone()
+    }
+
+    /// Reserve a `source_generation` claim for an upcoming source install.
+    ///
+    /// Resets live metadata (bitrate, sample-rate, codec, ICY) so the
+    /// upcoming `decoder.init()` populates fresh values, then bumps
+    /// `source_generation` and returns the new value. The caller passes
+    /// this back into [`install_initialized_source`] to detect supersedence
+    /// by a concurrent install.
+    ///
+    /// Caller must hold the engine lock for this call. The lock should be
+    /// released immediately after so `decoder.init()` runs unblocked.
+    pub fn begin_source_install(&mut self) -> u64 {
+        self.live_bitrate.store(0, Ordering::Relaxed);
+        self.live_sample_rate.store(0, Ordering::Relaxed);
+        self.decoder_eof.store(false, Ordering::Release);
+        if let Ok(mut guard) = self.live_icy_metadata.try_write() {
+            *guard = None;
+        }
+        if let Ok(mut guard) = self.live_codec_name.write() {
+            *guard = None;
+        }
+        self.source_generation.fetch_add(1, Ordering::AcqRel) + 1
+    }
+
+    /// Install an already-initialized decoder as the current source.
+    ///
+    /// Returns `true` if installed, `false` if a later [`begin_source_install`]
+    /// has superseded the claim (caller should drop the decoder and bail
+    /// without playing). Caller must hold the engine lock.
+    pub async fn install_initialized_source(
+        &mut self,
+        decoder: AudioDecoder,
+        source: String,
+        claimed_gen: u64,
+    ) -> bool {
+        let current = self.source_generation.load(Ordering::Acquire);
+        if current != claimed_gen {
+            debug!(
+                "🔁 [INSTALL] Superseded: claimed gen {}, current {}; dropping prepared decoder",
+                claimed_gen, current
+            );
+            return false;
+        }
+
+        if self.playing || self.paused {
+            self.stop().await;
+        }
+
+        self.duration = decoder.duration();
+        if let Ok(mut guard) = self.live_codec_name.write() {
+            *guard = decoder.live_codec();
+        }
+        self.position = 0;
+        self.decoder = Arc::new(tokio::sync::Mutex::new(decoder));
+        self.source = source;
+        true
+    }
+
+    /// Claim → init outside the engine lock → install → play.
+    ///
+    /// Replaces the legacy `engine.set_source(url).await; engine.play().await?`
+    /// pattern. Hoists the slow HTTP probe in `decoder.init()` out from under
+    /// the engine lock so concurrent UI subscriptions, MPRIS, mode toggles,
+    /// and visualizer reads stay responsive on slow networks.
+    ///
+    /// Race handling: if another `install_and_play` claim arrives between
+    /// this call's claim and install, the later claim wins and this call
+    /// returns `Ok(())` without playing.
+    pub async fn install_and_play(
+        engine_arc: &Arc<tokio::sync::Mutex<Self>>,
+        url: String,
+        replay_gain: Option<crate::types::song::ReplayGain>,
+    ) -> Result<()> {
+        if url.is_empty() {
+            anyhow::bail!("install_and_play: empty URL");
+        }
+
+        let (icy, claim) = {
+            let mut engine = engine_arc.lock().await;
+            engine.set_pending_replay_gain(replay_gain);
+            let icy = engine.live_icy_metadata_handle();
+            let claim = engine.begin_source_install();
+            (icy, claim)
+        };
+
+        let mut decoder = AudioDecoder::new(icy);
+        decoder.init(&url).await?;
+
+        let mut engine = engine_arc.lock().await;
+        let installed = engine.install_initialized_source(decoder, url, claim).await;
+        if !installed {
+            return Ok(());
+        }
+        engine.play().await?;
+        Ok(())
+    }
+
     /// Get current parsed ICY-metadata from the stream buffer
     pub fn live_icy_metadata(&self) -> Option<String> {
         self.live_icy_metadata
