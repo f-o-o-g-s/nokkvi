@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
 - Shift+C (center on currently-playing) in Albums, Artists, Songs, and Genres views no longer overwrites the active search query with the playing item's title — when the item isn't already in view, the search clears and the library pages forward until the item appears, then centers it.
 - Library browser panel (Ctrl+E) view header no longer renders the Center on Playing button on Albums, Songs, Artists, and Genres tabs — the narrower 45% pane needs that space for sort/refresh/columns/search. The button is unchanged on the corresponding full-page views.
 - Sort-mode dropdown in every view header now sizes itself to its widest option instead of always reserving a fixed 200 px — views with short sort lists (Radios's single Name, narrower picker sets) reclaim that space for the search field and the item count, and the open dropdown still spans the trigger so all options stay visible.
+- Roulette fake-out now varies per spin instead of always landing two short of the target and walking forward in two evenly-spaced ticks — each spin rolls a random pattern (none, single near-miss, two-step walk, overshoot bounce, or zigzag) plus a random direction, individually jitters every tick's hold duration, and splits a ~4.4–5.4 s total budget between the wobble and the main eased ramp. About one in five spins skips the fake-out entirely and decelerates straight onto the target, and the slot-machine ticks at the end no longer sound metronomic.
 
 ### Fixed
 
