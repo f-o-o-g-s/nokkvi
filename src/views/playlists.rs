@@ -775,7 +775,6 @@ impl PlaylistsPage {
             crate::views::PLAYLISTS_SEARCH_ID,
             PlaylistsMessage::SortModeSelected,
             Some(PlaylistsMessage::ToggleSortOrder),
-            None, // No shuffle button for playlists
             Some(PlaylistsMessage::RefreshViewData),
             None, // Playlists view doesn't need center on playing button
             Some(("New Playlist", PlaylistsMessage::OpenCreatePlaylistDialog)),

@@ -152,8 +152,6 @@ pub enum HotkeyMessage {
 
     /// Add centered album/song to queue (Shift+A)
     AddToQueue,
-    /// Shuffle the queue order
-    ShuffleQueue,
     SaveQueueAsPlaylist,
     /// Remove centered item from queue (Ctrl+D) - Queue view only
     RemoveFromQueue,

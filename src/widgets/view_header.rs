@@ -27,7 +27,6 @@ pub(crate) fn view_header<
     search_input_id: &'static str, // Unique ID for this view's search input (must be 'static)
     on_view_selected: impl Fn(V) -> Message + 'a,
     on_sort_toggle: Option<Message>,
-    on_shuffle: Option<Message>,             // Optional shuffle button
     on_refresh: Option<Message>,             // Optional refresh button
     on_center_on_playing: Option<Message>,   // Optional center button
     on_add: Option<(&'static str, Message)>, // Optional add button (tooltip, message)
@@ -132,11 +131,6 @@ pub(crate) fn view_header<
         header_icon_button("assets/icons/refresh-cw.svg", "Refresh Data", refresh_msg)
     });
 
-    // Optional shuffle button (only rendered if on_shuffle is provided)
-    let shuffle_button = on_shuffle.map(|shuffle_msg| {
-        header_icon_button("assets/icons/shuffle.svg", "Shuffle All", shuffle_msg)
-    });
-
     // Optional center on playing button
     let center_button = on_center_on_playing.map(|center_msg| {
         header_icon_button("assets/icons/locate.svg", "Center on Playing", center_msg)
@@ -183,9 +177,6 @@ pub(crate) fn view_header<
     }
     if let Some(refresh_btn) = refresh_button {
         header_row = header_row.push(refresh_btn);
-    }
-    if let Some(shuffle_btn) = shuffle_button {
-        header_row = header_row.push(shuffle_btn);
     }
     if let Some(center_btn) = center_button {
         header_row = header_row.push(center_btn);
@@ -275,8 +266,8 @@ mod tests {
     fn header_icon_button_produces_element() {
         // Characterization test: the extracted helper compiles and produces a valid Element.
         let _el: Element<'_, String> = header_icon_button(
-            "assets/icons/shuffle.svg",
-            "Shuffle All",
+            "assets/icons/locate.svg",
+            "Center on Playing",
             "test_press".to_string(),
         );
     }

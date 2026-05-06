@@ -280,9 +280,14 @@ impl QueueManager {
     /// Sort the queue by the given sort mode and direction.
     /// Physically reorders `queue.song_ids` so next/previous follows sorted order.
     /// Preserves the currently-playing song's position via `current_index` update.
+    /// `Random` delegates to `shuffle_queue` and ignores `ascending`.
     pub fn sort_queue(&mut self, mode: QueueSortMode, ascending: bool) -> Result<()> {
         if self.queue.song_ids.is_empty() {
             return Ok(());
+        }
+
+        if matches!(mode, QueueSortMode::Random) {
+            return self.shuffle_queue();
         }
 
         let current_song_id = self
@@ -317,6 +322,9 @@ impl QueueManager {
                         let b_count = b.play_count.unwrap_or(0);
                         b_count.cmp(&a_count)
                     }
+                    // Handled by the early-return above; keep the arm so the
+                    // exhaustiveness check passes if a future caller forgets.
+                    QueueSortMode::Random => std::cmp::Ordering::Equal,
                 },
                 _ => std::cmp::Ordering::Equal,
             };

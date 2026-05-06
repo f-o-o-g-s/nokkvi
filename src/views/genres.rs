@@ -603,7 +603,6 @@ impl GenresPage {
             crate::views::GENRES_SEARCH_ID,
             GenresMessage::SortModeSelected,
             Some(GenresMessage::ToggleSortOrder),
-            None, // No shuffle button for genres
             Some(GenresMessage::RefreshViewData),
             Some(GenresMessage::CenterOnPlaying),
             None,                  // on_add

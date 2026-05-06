@@ -596,7 +596,6 @@ impl SongsPage {
             crate::views::SONGS_SEARCH_ID,
             SongsMessage::SortModeSelected,
             Some(SongsMessage::ToggleSortOrder),
-            None, // No shuffle button for songs
             Some(SongsMessage::RefreshViewData),
             Some(SongsMessage::CenterOnPlaying),
             None,                  // on_add

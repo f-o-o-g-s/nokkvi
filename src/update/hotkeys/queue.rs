@@ -106,37 +106,6 @@ impl Nokkvi {
         )
     }
 
-    pub(crate) fn handle_shuffle_queue(&mut self) -> Task<Message> {
-        debug!(" ShuffleQueue button clicked");
-
-        self.toast_success("Queue shuffled");
-        self.shell_task(
-            move |shell| async move {
-                let queue_vm = shell.queue().clone();
-                // Call shuffle_queue on the queue manager
-                let binding = queue_vm.queue_manager();
-                let mut qm = binding.lock().await;
-                qm.shuffle_queue()?;
-                Ok::<_, anyhow::Error>(())
-            },
-            |result| match result {
-                Ok(()) => {
-                    info!(" Queue shuffled successfully");
-                    Message::LoadQueue
-                }
-                Err(e) => {
-                    error!(" Failed to shuffle queue: {}", e);
-                    Message::Toast(crate::app_message::ToastMessage::Push(
-                        nokkvi_data::types::toast::Toast::new(
-                            format!("Failed to shuffle queue: {e}"),
-                            nokkvi_data::types::toast::ToastLevel::Error,
-                        ),
-                    ))
-                }
-            },
-        )
-    }
-
     pub(crate) fn handle_save_queue_as_playlist(&mut self) -> Task<Message> {
         debug!(" SaveQueueAsPlaylist (Ctrl+S) hotkey pressed");
 

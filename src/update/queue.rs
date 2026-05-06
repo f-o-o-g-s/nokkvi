@@ -9,7 +9,7 @@ use tracing::{debug, error, trace};
 use super::components::prefetch_album_artwork_tasks;
 use crate::{
     Nokkvi, View,
-    app_message::{ArtworkMessage, HotkeyMessage, Message, PlaybackMessage},
+    app_message::{ArtworkMessage, Message, PlaybackMessage},
     views::{self, QueueAction, QueueMessage},
 };
 
@@ -202,6 +202,9 @@ impl Nokkvi {
             }
             QueueAction::SortModeChanged(sort_mode) => {
                 debug!(" Queue sort mode changed to: {:?}", sort_mode);
+                if matches!(sort_mode, QueueSortMode::Random) {
+                    return self.dispatch_random_queue_shuffle();
+                }
                 let ascending = self.queue_page.common.sort_ascending;
                 filtered_queue = self.apply_queue_sort(sort_mode, ascending).into_owned();
             }
@@ -211,6 +214,11 @@ impl Nokkvi {
                     if ascending { "ASC" } else { "DESC" }
                 );
                 let sort_mode = self.queue_page.queue_sort_mode;
+                if matches!(sort_mode, QueueSortMode::Random) {
+                    // Random treats the order toggle as a re-shuffle trigger,
+                    // mirroring how library views refresh their random sort.
+                    return self.dispatch_random_queue_shuffle();
+                }
                 filtered_queue = self.apply_queue_sort(sort_mode, ascending).into_owned();
             }
             QueueAction::SearchChanged(_query) => {
@@ -252,10 +260,6 @@ impl Nokkvi {
                         queue_index
                     );
                 }
-            }
-            QueueAction::ShuffleQueue => {
-                debug!(" Queue shuffle action bubbled up");
-                return Task::done(Message::Hotkey(HotkeyMessage::ShuffleQueue));
             }
             QueueAction::SetRating(song_id, new_rating) => {
                 let current = filtered_queue
@@ -729,6 +733,10 @@ impl Nokkvi {
 
     /// Sort the queue locally, re-filter, re-center on the playing song,
     /// and dispatch a backend reorder + persist task.
+    ///
+    /// Callers must route `QueueSortMode::Random` to
+    /// `dispatch_random_queue_shuffle` instead — this path's UI sort + backend
+    /// sort would each draw their own RNG and produce diverging orders.
     pub(crate) fn apply_queue_sort(
         &mut self,
         sort_mode: QueueSortMode,
@@ -765,6 +773,42 @@ impl Nokkvi {
             shell.settings().set_queue_prefs(sort_mode, ascending).await
         });
         std::borrow::Cow::Owned(filtered)
+    }
+
+    /// Re-shuffle the queue via the backend and reload the UI from the
+    /// freshly-shuffled order.
+    ///
+    /// `Random` is a refresh-style sort: re-selecting it (or toggling the
+    /// order button while it's the active mode) re-shuffles. Implemented
+    /// backend-first + `LoadQueue` rather than the synchronous-UI-sort path
+    /// in `apply_queue_sort` because each side draws its own RNG, so doing
+    /// both would produce diverging orders. The new mode is intentionally
+    /// not persisted to `config.toml` — the previously-saved deterministic
+    /// mode survives a relaunch.
+    pub(crate) fn dispatch_random_queue_shuffle(&mut self) -> Task<Message> {
+        // Drop multi-selection — indices won't survive the reorder.
+        self.queue_page.common.slot_list.selected_indices.clear();
+        self.queue_page.common.slot_list.anchor_index = None;
+        // The cached signature was keyed against the previous deterministic
+        // mode; clear it so the next deterministic pick actually re-sorts
+        // the now-randomized list.
+        self.queue_page.last_sort_signature = None;
+
+        self.shell_task(
+            |shell| async move {
+                let qm_arc = shell.queue().queue_manager();
+                let mut qm = qm_arc.lock().await;
+                qm.sort_queue(QueueSortMode::Random, true)?;
+                drop(qm);
+                shell.queue().refresh_from_queue().await?;
+                Ok::<_, anyhow::Error>(shell.queue().get_songs())
+            },
+            |result| {
+                Message::Queue(views::QueueMessage::QueueLoaded(
+                    result.map_err(|e| e.to_string()),
+                ))
+            },
+        )
     }
 
     /// Persist the user's queue column visibility toggle to config.toml +

@@ -416,7 +416,6 @@ impl SimilarPage {
             crate::views::SIMILAR_SEARCH_ID,
             |_| SimilarMessage::NoOp,
             None,                  // Hide sort button
-            None,                  // Hide shuffle button
             None,                  // Hide refresh
             None,                  // Hide center on playing
             None,                  // on_add

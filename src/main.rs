@@ -707,10 +707,17 @@ impl Nokkvi {
     /// applied signature — re-toggling the same sort with no length change is
     /// a no-op. String sorts use `sort_by_cached_key` so each item's
     /// lowercased key is built exactly once per sort instead of N×log(N) times.
+    ///
+    /// `QueueSortMode::Random` is dispatched separately via
+    /// `dispatch_random_queue_shuffle`; this method skips it so the cached
+    /// signature isn't tied to a non-deterministic order.
     pub fn sort_queue_songs(&mut self) {
         use views::QueueSortMode;
 
         let sort_mode = self.queue_page.queue_sort_mode;
+        if matches!(sort_mode, QueueSortMode::Random) {
+            return;
+        }
         let ascending = self.queue_page.common.sort_ascending;
         let len = self.library.queue_songs.len();
         let signature = (sort_mode, ascending, len);
@@ -768,6 +775,9 @@ impl Nokkvi {
                     self.library.queue_songs.reverse();
                 }
             }
+            // Random is handled by `dispatch_random_queue_shuffle` and
+            // early-returned at the top of this method.
+            QueueSortMode::Random => {}
         }
 
         self.queue_page.last_sort_signature = Some(signature);

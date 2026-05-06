@@ -244,7 +244,6 @@ pub enum QueueMessage {
     // View header interactions
     SortModeSelected(QueueSortMode),
     ToggleSortOrder,
-    ShuffleQueue,
     SearchQueryChanged(String),
     ToggleColumnVisible(QueueColumn),
 
@@ -286,7 +285,6 @@ pub enum QueueAction {
     FocusOnSong(usize, bool),       // queue index to scroll to (bubbles up to handler), flash
     SortModeChanged(QueueSortMode), // trigger reload/resort
     SortOrderChanged(bool),         // trigger resort
-    ShuffleQueue,                   // shuffle queue order
     SearchChanged(String),          // trigger filter
     SetRating(String, usize),       // (song_id, rating) - set absolute rating
     ToggleStar(String, bool),       // (song_id, new_starred) - toggle starred state
@@ -420,10 +418,6 @@ impl QueuePage {
                     Task::none(),
                     QueueAction::SortOrderChanged(self.common.sort_ascending),
                 )
-            }
-            QueueMessage::ShuffleQueue => {
-                // Bubble up to app layer to shuffle the queue
-                (Task::none(), QueueAction::ShuffleQueue)
             }
             QueueMessage::SearchQueryChanged(query) => {
                 self.common.search_query = query.clone();
@@ -640,6 +634,7 @@ impl QueuePage {
             QueueSortMode::Genre,
             QueueSortMode::Rating,
             QueueSortMode::MostPlayed,
+            QueueSortMode::Random,
         ];
 
         // Build the columns-visibility dropdown for the queue's view header.
@@ -714,8 +709,7 @@ impl QueuePage {
             crate::views::QUEUE_SEARCH_ID,
             QueueMessage::SortModeSelected,
             Some(QueueMessage::ToggleSortOrder),
-            Some(QueueMessage::ShuffleQueue), // Shuffle button for queue
-            None,                             // No refresh button for queue
+            None, // No refresh button for queue
             data.current_playing_queue_index
                 .map(|idx| QueueMessage::FocusCurrentPlaying(idx, true)),
             None,           // on_add

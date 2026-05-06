@@ -735,7 +735,6 @@ impl AlbumsPage {
             crate::views::ALBUMS_SEARCH_ID,
             AlbumsMessage::SortModeSelected,
             Some(AlbumsMessage::ToggleSortOrder),
-            None, // No shuffle button for albums
             Some(AlbumsMessage::RefreshViewData),
             Some(AlbumsMessage::CenterOnPlaying),
             None,                  // on_add

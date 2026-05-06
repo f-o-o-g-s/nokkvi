@@ -719,7 +719,6 @@ impl Nokkvi {
                     self.handle_artist_starred_status_updated(artist_id, new_starred_status)
                 }
                 HotkeyMessage::AddToQueue => self.handle_add_to_queue(),
-                HotkeyMessage::ShuffleQueue => self.handle_shuffle_queue(),
                 HotkeyMessage::SaveQueueAsPlaylist => self.handle_save_queue_as_playlist(),
                 HotkeyMessage::RemoveFromQueue => self.handle_remove_from_queue(),
                 HotkeyMessage::ClearQueue => self.handle_clear_queue(),

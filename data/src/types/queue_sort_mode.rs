@@ -1,7 +1,12 @@
 use serde::{Deserialize, Serialize};
 
 /// Queue sort modes — each mode is a one-shot action that physically reorders
-/// the queue.  Manual reorder (drag / hotkey) works from any mode.
+/// the queue. Manual reorder (drag / hotkey) works from any mode.
+///
+/// `Random` is a refresh-style mode: re-selecting it (or toggling the order
+/// button while it is the active mode) re-shuffles the queue. The UI never
+/// persists `Random` to `config.toml` — picking a deterministic mode again
+/// is what updates the saved preference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum QueueSortMode {
     Album,
@@ -11,6 +16,7 @@ pub enum QueueSortMode {
     Genre,
     Rating,
     MostPlayed,
+    Random,
 }
 
 impl QueueSortMode {
@@ -23,6 +29,7 @@ impl QueueSortMode {
             QueueSortMode::Genre,
             QueueSortMode::Rating,
             QueueSortMode::MostPlayed,
+            QueueSortMode::Random,
         ]
     }
 
@@ -36,6 +43,7 @@ impl QueueSortMode {
             QueueSortMode::Genre => "genre",
             QueueSortMode::Rating => "rating",
             QueueSortMode::MostPlayed => "most_played",
+            QueueSortMode::Random => "random",
         }
     }
 
@@ -49,6 +57,7 @@ impl QueueSortMode {
             "genre" => QueueSortMode::Genre,
             "rating" => QueueSortMode::Rating,
             "most_played" => QueueSortMode::MostPlayed,
+            "random" => QueueSortMode::Random,
             _ => QueueSortMode::Title,
         }
     }
@@ -64,6 +73,7 @@ impl std::fmt::Display for QueueSortMode {
             QueueSortMode::Genre => write!(f, "Genre"),
             QueueSortMode::Rating => write!(f, "Rating"),
             QueueSortMode::MostPlayed => write!(f, "Most Played"),
+            QueueSortMode::Random => write!(f, "Random"),
         }
     }
 }
@@ -86,5 +96,21 @@ mod tests {
     fn most_played_toml_key_roundtrips() {
         let key = QueueSortMode::MostPlayed.to_toml_key();
         assert_eq!(QueueSortMode::from_toml_key(key), QueueSortMode::MostPlayed);
+    }
+
+    #[test]
+    fn random_in_all_list() {
+        assert!(QueueSortMode::all().contains(&QueueSortMode::Random));
+    }
+
+    #[test]
+    fn random_display_label() {
+        assert_eq!(QueueSortMode::Random.to_string(), "Random");
+    }
+
+    #[test]
+    fn random_toml_key_roundtrips() {
+        let key = QueueSortMode::Random.to_toml_key();
+        assert_eq!(QueueSortMode::from_toml_key(key), QueueSortMode::Random);
     }
 }

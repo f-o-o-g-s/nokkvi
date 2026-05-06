@@ -692,7 +692,6 @@ impl ArtistsPage {
             crate::views::ARTISTS_SEARCH_ID,
             ArtistsMessage::SortModeSelected,
             Some(ArtistsMessage::ToggleSortOrder),
-            None, // No shuffle button for artists
             Some(ArtistsMessage::RefreshViewData),
             Some(ArtistsMessage::CenterOnPlaying),
             None,                  // on_add

@@ -261,7 +261,6 @@ impl RadiosPage {
             crate::views::RADIOS_SEARCH_ID,
             RadiosMessage::SortModeSelected,
             Some(RadiosMessage::ToggleSortOrder),
-            None, // No shuffle button
             Some(RadiosMessage::RefreshViewData),
             Some(RadiosMessage::CenterOnPlaying),
             Some(("Add Station", RadiosMessage::AddRadioStation)), // on_add
