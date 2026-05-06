@@ -6,7 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Ctrl+R hotkey for Roulette — spins the current view's wheel and auto-plays the landing item, equivalent to picking the Roulette entry in the sort dropdown. The binding is rebindable in Settings → Hotkeys (under Sort & View). The hotkey is a no-op in Settings, and in split-view it always rolls the main pane regardless of pane focus.
+
 ### Changed
+
+- Roulette main spin now cruises at constant speed for the first ~1.3–1.7 s before deceleration begins, then slows under linear-friction (`ease_out_quad`) for the remainder of the main duration — previously the eased curve started decelerating from t=0, so the wheel never felt like it was "spinning fast" first. Cruise and decel velocities are matched at the handoff so there's no visible kink, and the last main-spin tick gap shrinks from ~570 ms to ~130–200 ms, handing off naturally into the existing fake-out wobble instead of speeding back up before settling.
 
 ### Fixed
 
