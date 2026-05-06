@@ -699,9 +699,13 @@ impl GenresPage {
                     )
                 }
                 SlotListEntry::Child(album, _parent_genre_id) => {
+                    let sub_index_label =
+                        self.expansion
+                            .child_sub_index_label(ctx.item_index, genres, |g| &g.id);
                     let row = self.render_album_row(
                         album,
                         &ctx,
+                        &sub_index_label,
                         data.album_art,
                         data.stable_viewport,
                         open_menu_for_rows,
@@ -916,6 +920,7 @@ impl GenresPage {
         &self,
         album: &AlbumUIViewData,
         ctx: &crate::widgets::slot_list::SlotListRowContext,
+        sub_index_label: &str,
         album_art: &'a HashMap<String, image::Handle>,
         stable_viewport: bool,
         open_menu: Option<&'a crate::app_message::OpenMenu>,
@@ -924,6 +929,7 @@ impl GenresPage {
         let album_el = super::expansion::render_child_album_row(
             album,
             ctx,
+            sub_index_label,
             album_art.get(&album.id),
             self.column_visibility.thumbnail,
             GenresMessage::SlotListActivateCenter,

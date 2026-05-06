@@ -682,10 +682,22 @@ pub(crate) fn slot_list_index_column<'a, Message: 'a>(
     style: SlotListSlotStyle,
     opacity: f32,
 ) -> Element<'a, Message> {
+    slot_list_labeled_index_column(format!("{}", index + 1), font_size, style, opacity)
+}
+
+/// Render an index column with a free-form label (e.g. dotted decimal "236.1"
+/// for expanded child rows). Shares styling with `slot_list_index_column` so
+/// child sub-indices visually match parent indices in font, color, and width.
+pub(crate) fn slot_list_labeled_index_column<'a, Message: 'a>(
+    label: impl Into<String>,
+    font_size: f32,
+    style: SlotListSlotStyle,
+    opacity: f32,
+) -> Element<'a, Message> {
     use iced::Alignment;
 
     container(slot_list_text(
-        format!("{}", index + 1),
+        label.into(),
         font_size,
         if style.text_color == theme::bg0_hard() {
             theme::bg0_hard()

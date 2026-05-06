@@ -874,7 +874,11 @@ impl PlaylistsPage {
                     )
                 }
                 SlotListEntry::Child(song, _parent_playlist_id) => {
-                    let row = self.render_track_row(song, &ctx, data.stable_viewport);
+                    let sub_index_label =
+                        self.expansion
+                            .child_sub_index_label(ctx.item_index, playlists, |p| &p.id);
+                    let row =
+                        self.render_track_row(song, &ctx, &sub_index_label, data.stable_viewport);
                     crate::widgets::slot_list::wrap_with_select_column(
                         select_header_visible,
                         ctx.is_selected,
@@ -1243,11 +1247,13 @@ impl PlaylistsPage {
         &self,
         song: &SongUIViewData,
         ctx: &crate::widgets::slot_list::SlotListRowContext,
+        sub_index_label: &str,
         stable_viewport: bool,
     ) -> Element<'a, PlaylistsMessage> {
         super::expansion::render_child_track_row(
             song,
             ctx,
+            sub_index_label,
             PlaylistsMessage::SlotListActivateCenter,
             if stable_viewport {
                 PlaylistsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)

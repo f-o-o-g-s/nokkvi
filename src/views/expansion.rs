@@ -130,6 +130,26 @@ impl<C: Clone> ExpansionState<C> {
         0
     }
 
+    /// Build the dotted-decimal sub-index label for an expanded child row,
+    /// e.g. `"236.1"` for the first child of the parent displayed at index 236.
+    ///
+    /// `parents` is the un-flattened parent slice (artists, albums, …).
+    /// `flat_index` is the child's position in the flattened list. Returns
+    /// `"<parent_display_index>.<child_position>"` where both indices are
+    /// 1-based — matching the parent-row index column produced by
+    /// `slot_list_index_column`.
+    pub fn child_sub_index_label<P>(
+        &self,
+        flat_index: usize,
+        parents: &[P],
+        id_fn: impl Fn(&P) -> &str,
+    ) -> String {
+        let children_before = self.count_children_before(flat_index, parents, id_fn);
+        let parent_flat_idx = flat_index.saturating_sub(children_before).saturating_sub(1);
+        let child_position = children_before + 1;
+        format!("{}.{}", parent_flat_idx + 1, child_position)
+    }
+
     /// Resolve the entry at the slot list's current center, if any.
     ///
     /// Wraps the three-step lookup (`flattened_len → get_center_item_index →
@@ -392,8 +412,21 @@ use nokkvi_data::utils::formatters;
 
 use crate::widgets::slot_list::{
     SLOT_LIST_SLOT_PADDING, SlotListRowContext, SlotListSlotStyle, slot_list_favorite_icon,
-    slot_list_metadata_column, slot_list_text,
+    slot_list_labeled_index_column, slot_list_metadata_column, slot_list_text,
 };
+
+/// Slight leading indent placed before an expanded child's sub-index column,
+/// so children read as visually subordinate to the parent row above them.
+/// Each additional nesting level adds another 30px step (defensive — no
+/// callsite passes `depth > 1` today).
+fn child_leading_indent(depth: u8) -> f32 {
+    const BASE_INDENT: f32 = 15.0;
+    if depth <= 1 {
+        BASE_INDENT
+    } else {
+        BASE_INDENT + 30.0 * (depth as f32 - 1.0)
+    }
+}
 
 /// Wrap child row content in a clickable styled container + button.
 ///
@@ -430,9 +463,11 @@ fn child_clickable_button<'a, M: Clone + 'a>(
 /// Render a child **track** row (used by Albums → Tracks and Playlists → Tracks).
 ///
 /// Layout: `[indent] [track#] [title 60%] [artist 20%] [duration 12%] [star 5%]`
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn render_child_track_row<'a, M: Clone + 'a + 'static>(
     song: &nokkvi_data::backend::songs::SongUIViewData,
     ctx: &SlotListRowContext,
+    sub_index_label: &str,
     center_msg: M,
     offset_msg: M,
     on_star_click: Option<M>,
@@ -459,10 +494,11 @@ pub(crate) fn render_child_track_row<'a, M: Clone + 'a + 'static>(
         .map_or_else(|| "-".to_string(), |t| t.to_string());
     let duration_str = formatters::format_time(song.duration);
 
-    let indent_width = if depth > 0 { 30.0 * depth as f32 } else { 50.0 };
+    let leading_indent = child_leading_indent(depth);
 
     let content = row![
-        container(text("")).width(Length::Fixed(indent_width)),
+        container(text("")).width(Length::Fixed(leading_indent)),
+        slot_list_labeled_index_column(sub_index_label.to_string(), meta_size, style, ctx.opacity),
         container(slot_list_text(track_num, meta_size, style.subtext_color))
             .width(Length::Fixed(30.0))
             .height(Length::Fill)
@@ -527,6 +563,7 @@ pub(crate) fn render_child_track_row<'a, M: Clone + 'a + 'static>(
 pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
     album: &nokkvi_data::backend::albums::AlbumUIViewData,
     ctx: &SlotListRowContext,
+    sub_index_label: &str,
     artwork_handle: Option<&'a iced::widget::image::Handle>,
     show_artwork: bool,
     center_msg: M,
@@ -563,10 +600,16 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
     // Adjust album name width when artist column is shown
     let name_portion = if show_artist { 30 } else { 50 };
 
-    let indent_width = if depth > 0 { 30.0 * depth as f32 } else { 50.0 };
+    let leading_indent = child_leading_indent(depth);
 
-    let mut content =
-        iced::widget::Row::new().push(container(text("")).width(Length::Fixed(indent_width)));
+    let mut content = iced::widget::Row::new()
+        .push(container(text("")).width(Length::Fixed(leading_indent)))
+        .push(slot_list_labeled_index_column(
+            sub_index_label.to_string(),
+            meta_size,
+            style,
+            ctx.opacity,
+        ));
 
     if show_artwork {
         use crate::widgets::slot_list::slot_list_artwork_column;
