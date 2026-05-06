@@ -6068,7 +6068,16 @@ fn roulette_start_arms_state_when_library_has_items() {
     assert_eq!(state.total_items, 4);
     assert_eq!(state.original_offset, 1);
     assert!(state.target_idx < 4);
-    assert!(state.total_steps > 0);
+    assert!(state.main_spin_steps > 0);
+    assert!(
+        !state.fakeout_keyframes.is_empty(),
+        "fake-out keyframes must be pre-rolled"
+    );
+    assert_eq!(
+        state.fakeout_keyframes.last().map(|k| k.offset),
+        Some(state.target_idx),
+        "fake-out must terminate on target"
+    );
 }
 
 #[test]
