@@ -246,16 +246,20 @@ pub struct Nokkvi {
     /// Transient flag: suppress the next auto-center triggered by a track change.
     /// Set when a click-initiated play fires, cleared after consumption.
     pub suppress_next_auto_center: bool,
-    /// Pending CenterOnPlaying retry: set when the target item isn't in the
-    /// loaded PagedBuffer and a search-based reload was dispatched. When the
-    /// data-loaded handler fires, it re-dispatches CenterOnPlaying.
-    pub pending_center_on_playing: bool,
     /// In-flight find-and-expand target — at most one chain runs at a time
-    /// across album / artist / genre. Set by the matching
-    /// `handle_navigate_and_expand_*` and consumed by the matching
-    /// `try_resolve_pending_expand_*` after the load resolves (paginated
-    /// for album/artist, single-shot for genre).
+    /// across album / artist / genre / song. Set by the matching
+    /// `handle_navigate_and_expand_*` (click-driven) or by the
+    /// `handle_center_on_playing` fallback (Shift+C), and consumed by the
+    /// matching `try_resolve_pending_expand_*` after the load resolves
+    /// (paginated for album/artist/song, single-shot for genre).
     pub pending_expand: Option<crate::state::PendingExpand>,
+    /// When `true`, the active `pending_expand` chain was started by
+    /// CenterOnPlaying (Shift+C): `try_resolve_pending_expand_*` should
+    /// CENTER the target on the viewport (not pin it to slot 0) and skip
+    /// the `FocusAndExpand` dispatch so the row stays collapsed. Cleared
+    /// alongside `pending_expand` in `cancel_pending_expand` and in each
+    /// `try_resolve_*` once the target is resolved.
+    pub pending_expand_center_only: bool,
     /// Re-pin the highlight onto the find-chain target after `set_children`
     /// runs. Set by `try_resolve_pending_expand_*` once the target is
     /// found; consumed by the matching children-loaded handler
@@ -347,8 +351,8 @@ impl Default for Nokkvi {
             local_music_path: String::new(),
             library_page_size: nokkvi_data::types::player_settings::LibraryPageSize::Default,
             suppress_next_auto_center: false,
-            pending_center_on_playing: false,
             pending_expand: None,
+            pending_expand_center_only: false,
             pending_top_pin: None,
             default_playlist_id: None,
             default_playlist_name: String::new(),

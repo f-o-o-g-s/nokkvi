@@ -45,6 +45,17 @@ fn expand_genre_timeout_task(genre_id: String) -> Task<Message> {
     )
 }
 
+/// Song-side mirror — see `expand_album_timeout_task`. Songs only enter the
+/// find-and-expand chain via the CenterOnPlaying (Shift+C) fallback.
+fn expand_song_timeout_task(song_id: String) -> Task<Message> {
+    Task::perform(
+        async {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        },
+        move |()| Message::PendingExpandSongTimeout(song_id.clone()),
+    )
+}
+
 impl Nokkvi {
     pub(crate) fn handle_session_expired(&mut self) -> Task<Message> {
         info!(" [SESSION] Session expired (401 Unauthorized)");
@@ -512,6 +523,10 @@ impl Nokkvi {
         self.albums_page.common.slot_list.selected_indices.clear();
         self.albums_page.common.slot_list.selected_offset = None;
         self.library.albums.clear();
+        // Reset center-only mode — click-driven callers want the default
+        // (top-pin + FocusAndExpand). `start_center_on_playing_album_chain`
+        // re-arms it explicitly after this returns.
+        self.pending_expand_center_only = false;
         self.pending_expand = Some(crate::state::PendingExpand::Album {
             album_id,
             for_browsing_pane,
@@ -527,6 +542,7 @@ impl Nokkvi {
     pub(crate) fn cancel_pending_expand(&mut self) {
         self.pending_expand = None;
         self.pending_top_pin = None;
+        self.pending_expand_center_only = false;
     }
 
     /// Genre-side mirror of `handle_navigate_and_expand_album`. The find
@@ -563,6 +579,7 @@ impl Nokkvi {
         self.genres_page.common.slot_list.selected_indices.clear();
         self.genres_page.common.slot_list.selected_offset = None;
         self.library.genres.clear();
+        self.pending_expand_center_only = false;
         self.pending_expand = Some(crate::state::PendingExpand::Genre {
             genre_id,
             for_browsing_pane,
@@ -611,22 +628,38 @@ impl Nokkvi {
             .enumerate()
             .find_map(|(i, g)| (g.name == target_id).then(|| (i, g.id.clone())));
         if let Some((idx, resolved_id)) = found {
+            let center_only = self.pending_expand_center_only;
             debug!(
-                " [EXPAND] Found genre '{}' at index {} (id={}) — scrolling + dispatching FocusAndExpand",
-                target_id, idx, resolved_id
+                " [EXPAND] Found genre '{}' at index {} (id={}) — {}",
+                target_id,
+                idx,
+                resolved_id,
+                if center_only {
+                    "centering (CenterOnPlaying)"
+                } else {
+                    "scrolling + dispatching FocusAndExpand"
+                }
             );
             self.pending_expand = None;
+            self.pending_expand_center_only = false;
             let total = self.library.genres.len();
-            let center_slot = self.genres_page.common.slot_list.slot_count.max(2) / 2;
-            let target_offset = idx.saturating_add(center_slot).min(total.saturating_sub(1));
+            let target_offset = if center_only {
+                idx
+            } else {
+                let center_slot = self.genres_page.common.slot_list.slot_count.max(2) / 2;
+                idx.saturating_add(center_slot).min(total.saturating_sub(1))
+            };
             self.genres_page
                 .common
                 .slot_list
                 .set_offset(target_offset, total);
             self.genres_page.common.slot_list.pin_selected(idx, total);
             self.genres_page.common.slot_list.flash_center();
-            self.pending_top_pin = Some(crate::state::PendingTopPin::Genre(resolved_id));
             let prefetch_task = self.prefetch_viewport_artwork();
+            if center_only {
+                return Some(prefetch_task);
+            }
+            self.pending_top_pin = Some(crate::state::PendingTopPin::Genre(resolved_id));
             return Some(Task::batch([
                 prefetch_task,
                 Task::done(Message::Genres(views::GenresMessage::FocusAndExpand(idx))),
@@ -645,6 +678,7 @@ impl Nokkvi {
         );
         self.toast_warn("Genre not found in library");
         self.pending_expand = None;
+        self.pending_expand_center_only = false;
         Some(Task::none())
     }
 
@@ -684,6 +718,7 @@ impl Nokkvi {
         self.artists_page.common.slot_list.selected_indices.clear();
         self.artists_page.common.slot_list.selected_offset = None;
         self.library.artists.clear();
+        self.pending_expand_center_only = false;
         self.pending_expand = Some(crate::state::PendingExpand::Artist {
             artist_id,
             for_browsing_pane,
@@ -716,25 +751,40 @@ impl Nokkvi {
         };
 
         if let Some(idx) = self.library.artists.iter().position(|a| a.id == target_id) {
+            let center_only = self.pending_expand_center_only;
             debug!(
-                " [EXPAND] Found artist '{}' at index {} — scrolling + dispatching FocusAndExpand",
-                target_id, idx
+                " [EXPAND] Found artist '{}' at index {} — {}",
+                target_id,
+                idx,
+                if center_only {
+                    "centering (CenterOnPlaying)"
+                } else {
+                    "scrolling + dispatching FocusAndExpand"
+                }
             );
             self.pending_expand = None;
+            self.pending_expand_center_only = false;
             let total = self.library.artists.len();
-            let center_slot = self.artists_page.common.slot_list.slot_count.max(2) / 2;
-            let target_offset = idx.saturating_add(center_slot).min(total.saturating_sub(1));
+            let target_offset = if center_only {
+                idx
+            } else {
+                let center_slot = self.artists_page.common.slot_list.slot_count.max(2) / 2;
+                idx.saturating_add(center_slot).min(total.saturating_sub(1))
+            };
             self.artists_page
                 .common
                 .slot_list
                 .set_offset(target_offset, total);
             self.artists_page.common.slot_list.pin_selected(idx, total);
             self.artists_page.common.slot_list.flash_center();
+            let prefetch_task = self.prefetch_viewport_artwork();
+            if center_only {
+                return Some(prefetch_task);
+            }
             // Pin the highlight onto the target so it survives `set_children`
             // when albums land — handle_artists' AlbumsLoaded post-hook
             // re-runs set_selected for this id.
             self.pending_top_pin = Some(crate::state::PendingTopPin::Artist(target_id.clone()));
-            let prefetch_task = self.prefetch_viewport_artwork();
             return Some(Task::batch([
                 prefetch_task,
                 Task::done(Message::Artists(views::ArtistsMessage::FocusAndExpand(idx))),
@@ -748,6 +798,7 @@ impl Nokkvi {
             );
             self.toast_warn("Artist not found in library");
             self.pending_expand = None;
+            self.pending_expand_center_only = false;
             return Some(Task::none());
         }
 
@@ -774,21 +825,31 @@ impl Nokkvi {
         };
 
         if let Some(idx) = self.library.albums.iter().position(|a| a.id == target_id) {
+            let center_only = self.pending_expand_center_only;
             debug!(
-                " [EXPAND] Found album '{}' at index {} — scrolling + dispatching FocusAndExpand",
-                target_id, idx
+                " [EXPAND] Found album '{}' at index {} — {}",
+                target_id,
+                idx,
+                if center_only {
+                    "centering (CenterOnPlaying)"
+                } else {
+                    "scrolling + dispatching FocusAndExpand"
+                }
             );
             self.pending_expand = None;
-            // Position the target at slot 0 (top of the visible list) — fewer
-            // distractions above the expansion, and most visible rows are
-            // tracks instead of unrelated albums. viewport_offset is the
-            // index of the item rendered at the *center slot*, so adding
-            // center_slot shifts the displayed window down by that many
-            // positions, leaving the target at slot 0. Falls back to
-            // (total-1) when target is near the end of the library.
+            self.pending_expand_center_only = false;
             let total = self.library.albums.len();
-            let center_slot = self.albums_page.common.slot_list.slot_count.max(2) / 2;
-            let target_offset = idx.saturating_add(center_slot).min(total.saturating_sub(1));
+            // Click chain pins to slot 0 (so the expanded tracks fill the
+            // viewport below); CenterOnPlaying centers the row instead and
+            // skips expansion. viewport_offset is the index rendered at the
+            // *center slot*, so `idx + center_slot` shifts the window down
+            // by `center_slot`, leaving the target at slot 0.
+            let target_offset = if center_only {
+                idx
+            } else {
+                let center_slot = self.albums_page.common.slot_list.slot_count.max(2) / 2;
+                idx.saturating_add(center_slot).min(total.saturating_sub(1))
+            };
             self.albums_page
                 .common
                 .slot_list
@@ -800,15 +861,18 @@ impl Nokkvi {
             // backward to `idx`.
             self.albums_page.common.slot_list.pin_selected(idx, total);
             self.albums_page.common.slot_list.flash_center();
-            // Pin the highlight onto the target so it survives `set_children`
-            // when tracks land — handle_albums' TracksLoaded post-hook
-            // re-runs set_selected for this id.
-            self.pending_top_pin = Some(crate::state::PendingTopPin::Album(target_id.clone()));
             // Mini-artwork prefetch follows the viewport. The page-load
             // prefetch ran for viewport=0 (and page-2/3 loads don't prefetch
             // at all), so the rows around the new viewport would render
             // as empty placeholders without an explicit kick here.
             let prefetch_task = self.prefetch_viewport_artwork();
+            if center_only {
+                return Some(prefetch_task);
+            }
+            // Pin the highlight onto the target so it survives `set_children`
+            // when tracks land — handle_albums' TracksLoaded post-hook
+            // re-runs set_selected for this id.
+            self.pending_top_pin = Some(crate::state::PendingTopPin::Album(target_id.clone()));
             return Some(Task::batch([
                 prefetch_task,
                 Task::done(Message::Albums(views::AlbumsMessage::FocusAndExpand(idx))),
@@ -822,6 +886,7 @@ impl Nokkvi {
             );
             self.toast_warn("Album not found in library");
             self.pending_expand = None;
+            self.pending_expand_center_only = false;
             return Some(Task::none());
         }
 
@@ -852,6 +917,139 @@ impl Nokkvi {
             self.toast_info("Finding album…");
         }
         Task::none()
+    }
+
+    /// Songs-side mirror of `prime_expand_album_target`. Songs aren't
+    /// expandable, so this is only used by the CenterOnPlaying (Shift+C)
+    /// fallback — never by a click. The corresponding `try_resolve_*` is
+    /// implicitly center-only (skips FocusAndExpand).
+    fn prime_expand_song_target(&mut self, song_id: String, for_browsing_pane: bool) {
+        self.songs_page.common.search_input_focused = false;
+        self.songs_page.common.active_filter = None;
+        self.songs_page.common.search_query.clear();
+        self.songs_page.common.slot_list.viewport_offset = 0;
+        self.songs_page.common.slot_list.selected_indices.clear();
+        self.songs_page.common.slot_list.selected_offset = None;
+        self.library.songs.clear();
+        self.pending_expand_center_only = false;
+        self.pending_expand = Some(crate::state::PendingExpand::Song {
+            song_id,
+            for_browsing_pane,
+        });
+    }
+
+    /// Song-side mirror of `handle_pending_expand_album_timeout`.
+    pub(crate) fn handle_pending_expand_song_timeout(&mut self, song_id: String) -> Task<Message> {
+        if matches!(
+            &self.pending_expand,
+            Some(crate::state::PendingExpand::Song { song_id: pending, .. }) if pending == &song_id
+        ) {
+            self.toast_info("Finding song…");
+        }
+        Task::none()
+    }
+
+    /// Song-side mirror of `try_resolve_pending_expand_album`. Songs aren't
+    /// expandable, so this always centers and never dispatches a
+    /// `FocusAndExpand` — `pending_expand_center_only` is implicit here.
+    pub(crate) fn try_resolve_pending_expand_song(&mut self) -> Option<Task<Message>> {
+        let target_id = match &self.pending_expand {
+            Some(crate::state::PendingExpand::Song { song_id, .. }) => song_id.clone(),
+            _ => return None,
+        };
+
+        if let Some(idx) = self.library.songs.iter().position(|s| s.id == target_id) {
+            debug!(
+                " [EXPAND] Found song '{}' at index {} — centering (CenterOnPlaying)",
+                target_id, idx
+            );
+            self.pending_expand = None;
+            self.pending_expand_center_only = false;
+            let total = self.library.songs.len();
+            // Center mode: viewport_offset is the center-slot index, so
+            // setting it to `idx` puts the target at center.
+            self.songs_page.common.slot_list.set_offset(idx, total);
+            self.songs_page.common.slot_list.pin_selected(idx, total);
+            self.songs_page.common.slot_list.flash_center();
+            return Some(self.prefetch_viewport_artwork());
+        }
+
+        if self.library.songs.fully_loaded() {
+            warn!(
+                " [EXPAND] Song '{}' not found after full load — clearing target",
+                target_id
+            );
+            self.toast_warn("Song not found in library");
+            self.pending_expand = None;
+            self.pending_expand_center_only = false;
+            return Some(Task::none());
+        }
+
+        if self.library.songs.is_loading() {
+            return None;
+        }
+
+        let next_offset = self.library.songs.loaded_count();
+        debug!(
+            " [EXPAND] Song '{}' not in buffer — force-fetching next page at offset {}",
+            target_id, next_offset
+        );
+        Some(self.force_load_songs_page(next_offset))
+    }
+
+    /// CenterOnPlaying (Shift+C) fallback for the Albums view: clear search
+    /// and any filter, drop the loaded buffer, install a center-only
+    /// pending-expand target, and kick the find chain. The chain
+    /// force-loads pages until the playing album appears, then centers it
+    /// without dispatching FocusAndExpand.
+    pub(crate) fn start_center_on_playing_album_chain(
+        &mut self,
+        album_id: String,
+    ) -> Task<Message> {
+        self.prime_expand_album_target(album_id.clone(), false);
+        self.pending_expand_center_only = true;
+        Task::batch([
+            Task::done(Message::LoadAlbums),
+            expand_album_timeout_task(album_id),
+        ])
+    }
+
+    /// Artists-view mirror of `start_center_on_playing_album_chain`.
+    pub(crate) fn start_center_on_playing_artist_chain(
+        &mut self,
+        artist_id: String,
+    ) -> Task<Message> {
+        self.prime_expand_artist_target(artist_id.clone(), false);
+        self.pending_expand_center_only = true;
+        Task::batch([
+            Task::done(Message::LoadArtists),
+            expand_artist_timeout_task(artist_id),
+        ])
+    }
+
+    /// Genres-view mirror of `start_center_on_playing_album_chain`. Single-
+    /// shot under the hood (genres don't paginate).
+    pub(crate) fn start_center_on_playing_genre_chain(
+        &mut self,
+        genre_id: String,
+    ) -> Task<Message> {
+        self.prime_expand_genre_target(genre_id.clone(), false);
+        self.pending_expand_center_only = true;
+        Task::batch([
+            Task::done(Message::LoadGenres),
+            expand_genre_timeout_task(genre_id),
+        ])
+    }
+
+    /// Songs-view mirror of `start_center_on_playing_album_chain`. Songs
+    /// aren't expandable so the resolved row is always just centered.
+    pub(crate) fn start_center_on_playing_song_chain(&mut self, song_id: String) -> Task<Message> {
+        self.prime_expand_song_target(song_id.clone(), false);
+        self.pending_expand_center_only = true;
+        Task::batch([
+            Task::done(Message::LoadSongs),
+            expand_song_timeout_task(song_id),
+        ])
     }
 
     /// Handles cross-view navigation specifically intercepted from within the right-side browsing pane.

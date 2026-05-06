@@ -121,12 +121,10 @@ impl Nokkvi {
         })
     }
 
-    /// Handle a subsequent page of albums being loaded (appends to buffer)
-    ///
-    /// Inlines the body that the `impl_page_loaded_handler!` macro generates
-    /// for songs/artists so we can drive the album-find-and-expand chain
-    /// from the same hook (the macro's tail is `Task::none()`, with no seam
-    /// for a post-success callback).
+    /// Handle a subsequent page of albums being loaded (appends to buffer).
+    /// Drives `try_resolve_pending_expand_album` after the append so the
+    /// album-find-and-expand chain (and Shift+C center-only fallback) can
+    /// advance once the new page lands.
     pub(crate) fn handle_albums_page_loaded(
         &mut self,
         result: Result<Vec<AlbumUIViewData>, String>,
@@ -243,18 +241,10 @@ impl Nokkvi {
                     ))));
                 }
 
-                // If CenterOnPlaying triggered this reload (item wasn't in buffer),
-                // re-dispatch so the item can be found in the search results.
-                if self.pending_center_on_playing {
-                    self.pending_center_on_playing = false;
-                    tasks.push(Task::done(Message::Hotkey(
-                        crate::app_message::HotkeyMessage::CenterOnPlaying,
-                    )));
-                }
-
-                // If a NavigateAndExpandAlbum is in flight, see whether the
-                // first page already contains the target — found → dispatch
-                // FocusAndExpand; not found → kick the next page or warn.
+                // If a NavigateAndExpandAlbum or CenterOnPlaying chain is in
+                // flight, see whether the first page already contains the
+                // target — found → center (or dispatch FocusAndExpand);
+                // not found → kick the next page or warn.
                 if let Some(task) = self.try_resolve_pending_expand_album() {
                     tasks.push(task);
                 }

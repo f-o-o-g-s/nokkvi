@@ -88,6 +88,15 @@ pub enum PendingExpand {
         genre_id: String,
         for_browsing_pane: bool,
     },
+    /// Songs aren't expandable, so this variant exists solely to support the
+    /// CenterOnPlaying (Shift+C) fallback in the Songs view: clear search,
+    /// paginate forward until the playing track appears, and center on it
+    /// without dispatching a FocusAndExpand. The `pending_expand_center_only`
+    /// flag is implicit for this variant.
+    Song {
+        song_id: String,
+        for_browsing_pane: bool,
+    },
 }
 
 impl PendingExpand {
@@ -106,10 +115,15 @@ impl PendingExpand {
             | Self::Genre {
                 for_browsing_pane: true,
                 ..
+            }
+            | Self::Song {
+                for_browsing_pane: true,
+                ..
             } => crate::View::Queue,
             Self::Album { .. } => crate::View::Albums,
             Self::Artist { .. } => crate::View::Artists,
             Self::Genre { .. } => crate::View::Genres,
+            Self::Song { .. } => crate::View::Songs,
         }
     }
 }

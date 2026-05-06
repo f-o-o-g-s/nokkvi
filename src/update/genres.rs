@@ -148,16 +148,8 @@ impl Nokkvi {
                     )));
                 }
 
-                // If CenterOnPlaying triggered this reload, re-dispatch.
-                if self.pending_center_on_playing {
-                    self.pending_center_on_playing = false;
-                    tasks.push(Task::done(Message::Hotkey(
-                        crate::app_message::HotkeyMessage::CenterOnPlaying,
-                    )));
-                }
-
-                // Drive the genre find-and-expand chain forward when a click
-                // navigated here with a pending target.
+                // Drive the genre find-and-expand chain forward (click-driven
+                // NavigateAndExpandGenre, or Shift+C CenterOnPlaying fallback).
                 if let Some(task) = self.try_resolve_pending_expand_genre() {
                     tasks.push(task);
                 }

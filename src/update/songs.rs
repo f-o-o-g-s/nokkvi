@@ -97,13 +97,92 @@ impl Nokkvi {
         })
     }
 
-    /// Handle a subsequent page of songs being loaded (appends to buffer)
+    /// Force-load a songs page regardless of the scroll-edge `needs_fetch`
+    /// gate. Used by `try_resolve_pending_expand_song` to walk the full
+    /// library while the viewport stays at 0 (the user pressed Shift+C and
+    /// the playing track isn't in the loaded buffer yet).
+    pub(crate) fn force_load_songs_page(&mut self, offset: usize) -> Task<Message> {
+        let page_size = self.library_page_size.to_usize();
+        let params = PaginatedFetch::from_common(
+            &self.songs_page.common,
+            views::SongsPage::sort_mode_to_api_string,
+            offset,
+            page_size,
+        );
+        debug!(
+            " ForceLoadSongs: offset={}, page_size={}, view={}, sort={}, search={:?}",
+            params.offset,
+            params.page_size,
+            params.view_str,
+            params.sort_order,
+            params.search_query,
+        );
+        self.library.songs.set_loading(true);
+        self.shell_task(
+            move |shell| async move {
+                let songs_vm = shell.songs().clone();
+                match songs_vm
+                    .load_raw_songs_page(
+                        Some(params.view_str),
+                        Some(params.sort_order),
+                        params.search_query.as_deref(),
+                        params.filter.as_ref(),
+                        params.offset,
+                        params.page_size,
+                    )
+                    .await
+                {
+                    Ok(songs) => {
+                        let ui_songs: Vec<SongUIViewData> =
+                            songs.into_iter().map(SongUIViewData::from).collect();
+                        (Ok(ui_songs), songs_vm.get_total_count() as usize)
+                    }
+                    Err(e) => (Err(format!("{e:#}")), 0),
+                }
+            },
+            |(result, total_count)| {
+                Message::Songs(SongsMessage::SongsPageLoaded(result, total_count))
+            },
+        )
+    }
+
+    /// Handle a subsequent page of songs being loaded (appends to buffer).
+    /// Mirror of `handle_albums_page_loaded` — drives
+    /// `try_resolve_pending_expand_song` after the append so the Shift+C
+    /// center-only find chain can advance once the new page lands.
     pub(crate) fn handle_songs_page_loaded(
         &mut self,
         result: Result<Vec<SongUIViewData>, String>,
         total_count: usize,
     ) -> Task<Message> {
-        impl_page_loaded_handler!(self, songs, "Songs", result, total_count)
+        match result {
+            Ok(new_items) => {
+                let count = new_items.len();
+                let loaded_before = self.library.songs.loaded_count();
+                self.library.songs.append_page(new_items, total_count);
+                debug!(
+                    "📄 Songs page loaded: {} new items ({}→{} of {})",
+                    count,
+                    loaded_before,
+                    self.library.songs.loaded_count(),
+                    total_count,
+                );
+                if let Some(task) = self.try_resolve_pending_expand_song() {
+                    return task;
+                }
+            }
+            Err(e) => {
+                if e.contains("Unauthorized") {
+                    self.library.songs.set_loading(false);
+                    return self.handle_session_expired();
+                }
+                error!("Error loading Songs page: {}", e);
+                self.library.songs.set_loading(false);
+                self.cancel_pending_expand();
+                self.toast_error(format!("Failed to load Songs: {e}"));
+            }
+        }
+        Task::none()
     }
 
     pub(crate) fn handle_songs_loaded(
@@ -195,12 +274,10 @@ impl Nokkvi {
                     ))));
                 }
 
-                // If CenterOnPlaying triggered this reload, re-dispatch.
-                if self.pending_center_on_playing {
-                    self.pending_center_on_playing = false;
-                    tasks.push(Task::done(Message::Hotkey(
-                        crate::app_message::HotkeyMessage::CenterOnPlaying,
-                    )));
+                // Drive the song find-and-center chain forward (Shift+C
+                // landed here with a pending target).
+                if let Some(task) = self.try_resolve_pending_expand_song() {
+                    tasks.push(task);
                 }
 
                 if !tasks.is_empty() {

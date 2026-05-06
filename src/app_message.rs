@@ -375,6 +375,10 @@ pub enum Message {
     },
     /// Internal 2s "Finding genre…" toast trigger.
     PendingExpandGenreTimeout(String),
+    /// Internal 2s "Finding song…" toast trigger. Songs only enter the
+    /// find-and-expand chain via the CenterOnPlaying (Shift+C) fallback —
+    /// there is no click-driven navigate-and-expand for songs.
+    PendingExpandSongTimeout(String),
     /// Track info strip was clicked — dispatch depends on strip_click_action setting
     StripClicked,
     /// Track info strip right-click context menu action

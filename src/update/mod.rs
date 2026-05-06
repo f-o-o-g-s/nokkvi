@@ -3,38 +3,6 @@
 //! Contains the central message handler and helper functions.
 //! Message handlers are organized into submodules by domain.
 
-/// DRY macro for `handle_*_page_loaded` handlers. Songs, albums, and artists
-/// all follow the exact same pattern: append to paged buffer on Ok, log on Err.
-macro_rules! impl_page_loaded_handler {
-    ($self:ident, $field:ident, $label:expr, $result:expr, $total_count:expr) => {{
-        match $result {
-            Ok(new_items) => {
-                let count = new_items.len();
-                let loaded_before = $self.library.$field.loaded_count();
-                $self.library.$field.append_page(new_items, $total_count);
-                tracing::debug!(
-                    "📄 {} page loaded: {} new items ({}→{} of {})",
-                    $label,
-                    count,
-                    loaded_before,
-                    $self.library.$field.loaded_count(),
-                    $total_count,
-                );
-            }
-            Err(e) => {
-                if e.contains("Unauthorized") {
-                    $self.library.$field.set_loading(false);
-                    return $self.handle_session_expired();
-                }
-                tracing::error!("Error loading {} page: {}", $label, e);
-                $self.library.$field.set_loading(false);
-                $self.toast_error(format!("Failed to load {}: {}", $label, e));
-            }
-        }
-        iced::Task::none()
-    }};
-}
-
 /// DRY macro for view message dispatch with scroll-seek timer injection.
 /// All non-Queue slot list views share the same pattern: check if the message
 /// is a `SlotListScrollSeek`, call the handler, then append scrollbar fade
@@ -199,6 +167,9 @@ impl Nokkvi {
             }
             Message::PendingExpandGenreTimeout(genre_id) => {
                 self.handle_pending_expand_genre_timeout(genre_id)
+            }
+            Message::PendingExpandSongTimeout(song_id) => {
+                self.handle_pending_expand_song_timeout(song_id)
             }
             Message::StripClicked => {
                 use nokkvi_data::types::player_settings::StripClickAction;

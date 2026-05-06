@@ -199,9 +199,10 @@ impl Nokkvi {
     }
 
     /// Handle a subsequent page of artists being loaded (appends to buffer).
-    /// Mirror of the inlined `handle_albums_page_loaded` so the find chain
-    /// can drive `try_resolve_pending_expand_artist` after the macro's
-    /// terminal `Task::none()` would otherwise stop the chain.
+    /// Mirror of `handle_albums_page_loaded` — drives
+    /// `try_resolve_pending_expand_artist` after the append so the
+    /// artist-find-and-expand chain (and Shift+C center-only fallback) can
+    /// advance once the new page lands.
     pub(crate) fn handle_artists_page_loaded(
         &mut self,
         result: Result<Vec<ArtistUIViewData>, String>,
@@ -299,16 +300,8 @@ impl Nokkvi {
                     }
                 }
 
-                // If CenterOnPlaying triggered this reload, re-dispatch.
-                if self.pending_center_on_playing {
-                    self.pending_center_on_playing = false;
-                    tasks.push(Task::done(Message::Hotkey(
-                        crate::app_message::HotkeyMessage::CenterOnPlaying,
-                    )));
-                }
-
-                // Drive the artist find-and-expand chain forward when a click
-                // navigated here with a pending target.
+                // Drive the artist find-and-expand chain forward (click-driven
+                // NavigateAndExpandArtist, or Shift+C CenterOnPlaying fallback).
                 if let Some(task) = self.try_resolve_pending_expand_artist() {
                     tasks.push(task);
                 }

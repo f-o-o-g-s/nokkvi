@@ -5859,3 +5859,196 @@ fn resume_session_does_not_clobber_when_credential_lacks_u() {
         "a malformed credential without u= should leave login_page.username untouched"
     );
 }
+
+// ============================================================================
+// CenterOnPlaying (Shift+C) center-only find chain
+// ============================================================================
+
+#[test]
+fn start_center_on_playing_album_chain_clears_search_and_arms_center_only() {
+    let mut app = test_app();
+    app.albums_page.common.search_query = "user typed query".to_string();
+    app.albums_page.common.search_input_focused = true;
+    app.library
+        .albums
+        .set_from_vec(vec![make_album("stale", "Stale", "Artist")]);
+
+    let _ = app.start_center_on_playing_album_chain("a42".to_string());
+
+    assert!(
+        app.albums_page.common.search_query.is_empty(),
+        "Shift+C must clear the active search query rather than overwriting it"
+    );
+    assert!(!app.albums_page.common.search_input_focused);
+    assert!(app.albums_page.common.active_filter.is_none());
+    assert!(
+        app.library.albums.is_empty(),
+        "buffer must be reset so pagination restarts from offset 0"
+    );
+    assert!(
+        matches!(
+            app.pending_expand,
+            Some(crate::state::PendingExpand::Album { ref album_id, for_browsing_pane: false })
+                if album_id == "a42"
+        ),
+        "expected PendingExpand::Album {{ a42, top-pane }}, got {:?}",
+        app.pending_expand
+    );
+    assert!(
+        app.pending_expand_center_only,
+        "Shift+C chain must arm center-only mode so try_resolve skips FocusAndExpand"
+    );
+}
+
+#[test]
+fn start_center_on_playing_song_chain_installs_song_target() {
+    let mut app = test_app();
+    app.songs_page.common.search_query = "filter".to_string();
+
+    let _ = app.start_center_on_playing_song_chain("s99".to_string());
+
+    assert!(app.songs_page.common.search_query.is_empty());
+    assert!(
+        matches!(
+            app.pending_expand,
+            Some(crate::state::PendingExpand::Song { ref song_id, for_browsing_pane: false })
+                if song_id == "s99"
+        ),
+        "expected PendingExpand::Song {{ s99 }}, got {:?}",
+        app.pending_expand
+    );
+    assert!(app.pending_expand_center_only);
+}
+
+#[test]
+fn try_resolve_pending_expand_album_center_only_centers_without_top_pin() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
+        album_id: "a320".to_string(),
+        for_browsing_pane: false,
+    });
+    app.pending_expand_center_only = true;
+    let albums: Vec<_> = (0..1343)
+        .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
+        .collect();
+    app.library.albums.set_from_vec(albums);
+
+    let task = app.try_resolve_pending_expand_album();
+    assert!(task.is_some());
+
+    assert_eq!(
+        app.albums_page.common.slot_list.viewport_offset, 320,
+        "center-only mode must place viewport_offset = idx (NOT idx+center_slot) \
+         so the target appears at the center slot, not slot 0"
+    );
+    assert_eq!(app.albums_page.common.slot_list.selected_offset, Some(320));
+    assert!(
+        app.pending_top_pin.is_none(),
+        "center-only mode must NOT set pending_top_pin — there's no FocusAndExpand \
+         re-render to survive, and a stray pin would interfere with later clicks"
+    );
+    assert!(
+        !app.pending_expand_center_only,
+        "flag must be cleared once the target resolves so the next chain starts clean"
+    );
+}
+
+#[test]
+fn try_resolve_pending_expand_song_centers_target() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Song {
+        song_id: "s50".to_string(),
+        for_browsing_pane: false,
+    });
+    app.pending_expand_center_only = true;
+    let songs: Vec<_> = (0..200)
+        .map(|i| make_song(&format!("s{i}"), &format!("Song {i}"), "Artist"))
+        .collect();
+    app.library.songs.set_from_vec(songs);
+
+    let task = app.try_resolve_pending_expand_song();
+    assert!(task.is_some(), "found song should produce a task");
+
+    assert!(app.pending_expand.is_none());
+    assert!(!app.pending_expand_center_only);
+    assert_eq!(
+        app.songs_page.common.slot_list.viewport_offset, 50,
+        "song must land at the center slot"
+    );
+    assert_eq!(app.songs_page.common.slot_list.selected_offset, Some(50));
+}
+
+#[test]
+fn try_resolve_pending_expand_song_force_loads_when_idle_and_more_remain() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Song {
+        song_id: "s999".to_string(),
+        for_browsing_pane: false,
+    });
+    app.pending_expand_center_only = true;
+    // 1 loaded of 100 known total, idle → should request next page
+    app.library
+        .songs
+        .set_first_page(vec![make_song("s1", "Song One", "Artist")], 100);
+
+    let task = app.try_resolve_pending_expand_song();
+
+    assert!(task.is_some(), "idle + more pages should kick a force-load");
+    assert!(
+        app.pending_expand.is_some(),
+        "target must persist across the force-load — the next page-loaded handler will retry"
+    );
+    assert!(app.pending_expand_center_only);
+}
+
+#[test]
+fn try_resolve_pending_expand_song_clears_when_fully_loaded_and_missing() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Song {
+        song_id: "missing".to_string(),
+        for_browsing_pane: false,
+    });
+    app.pending_expand_center_only = true;
+    app.library
+        .songs
+        .set_from_vec(vec![make_song("s1", "Song One", "Artist")]);
+
+    let task = app.try_resolve_pending_expand_song();
+
+    assert!(task.is_some());
+    assert!(app.pending_expand.is_none());
+    assert!(!app.pending_expand_center_only);
+}
+
+#[test]
+fn cancel_pending_expand_also_clears_center_only_flag() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
+        album_id: "a1".to_string(),
+        for_browsing_pane: false,
+    });
+    app.pending_expand_center_only = true;
+
+    app.cancel_pending_expand();
+
+    assert!(app.pending_expand.is_none());
+    assert!(!app.pending_expand_center_only);
+}
+
+#[test]
+fn click_navigate_and_expand_album_keeps_center_only_off_for_top_pin_layout() {
+    // Regression guard: a click-driven NavigateAndExpand chain must NOT leak
+    // center-only mode (which would suppress FocusAndExpand and put the row
+    // at the center slot instead of slot 0). This ensures the two chains
+    // share state cleanly.
+    let mut app = test_app();
+    app.pending_expand_center_only = true; // simulate a stale flag
+
+    let _ = app.handle_navigate_and_expand_album("a1".to_string());
+
+    assert!(
+        !app.pending_expand_center_only,
+        "starting a click-driven find chain must reset center_only — \
+         otherwise the click would get the Shift+C layout"
+    );
+}

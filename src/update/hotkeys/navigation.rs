@@ -305,37 +305,25 @@ impl Nokkvi {
                 _ => Task::none(),
             }
         } else {
-            // Item not in loaded buffer — fall back to server-side search.
-            // Fill the search bar with the relevant text so the reload returns
-            // results containing the target, then re-dispatch CenterOnPlaying.
-            if let Some(qs) = current_queue_song {
-                let (search_term, reload_msg) = match self.current_view {
-                    View::Albums => {
-                        self.albums_page.common.search_query = qs.album.clone();
-                        (qs.album.clone(), Message::LoadAlbums)
-                    }
-                    View::Artists => {
-                        self.artists_page.common.search_query = qs.artist.clone();
-                        (qs.artist.clone(), Message::LoadArtists)
-                    }
-                    View::Songs => {
-                        self.songs_page.common.search_query = qs.title.clone();
-                        (qs.title.clone(), Message::LoadSongs)
-                    }
-                    View::Genres => {
-                        self.genres_page.common.search_query = qs.genre.clone();
-                        (qs.genre.clone(), Message::LoadGenres)
-                    }
-                    _ => return Task::none(),
-                };
-                debug!(
-                    " CenterOnPlaying: item not in loaded buffer, searching for \"{}\"",
-                    search_term
-                );
-                self.pending_center_on_playing = true;
-                Task::done(reload_msg)
-            } else {
-                Task::none()
+            // Item not in loaded buffer — start a center-only find chain that
+            // clears the active search, restarts pagination from offset 0,
+            // and walks the library until the playing item appears, then
+            // centers it without dispatching FocusAndExpand. This avoids
+            // overwriting the user's search query (the previous fallback
+            // typed the item title into the search box).
+            let Some(qs) = current_queue_song else {
+                return Task::none();
+            };
+            debug!(
+                " CenterOnPlaying: item not in loaded {:?} buffer — starting center-only find chain",
+                self.current_view
+            );
+            match self.current_view {
+                View::Albums => self.start_center_on_playing_album_chain(qs.album_id.clone()),
+                View::Artists => self.start_center_on_playing_artist_chain(qs.artist_id.clone()),
+                View::Songs => self.start_center_on_playing_song_chain(song_id.to_string()),
+                View::Genres => self.start_center_on_playing_genre_chain(qs.genre.clone()),
+                _ => Task::none(),
             }
         }
     }
