@@ -125,6 +125,10 @@ pub struct AlbumsViewData<'a> {
     pub total_album_count: usize,
     pub loading: bool,
     pub stable_viewport: bool,
+    /// True when this view is rendered inside the library browsing panel
+    /// (split-view, right pane). Used to suppress chrome that doesn't fit
+    /// the narrower pane — e.g. the "Center on Playing" header button.
+    pub in_browsing_panel: bool,
     /// Whether the column-visibility checkbox dropdown is open. Driven by
     /// `Nokkvi.open_menu` so a single root-level state enforces mutual
     /// exclusion with other overlay menus.
@@ -736,7 +740,14 @@ impl AlbumsPage {
             AlbumsMessage::SortModeSelected,
             Some(AlbumsMessage::ToggleSortOrder),
             Some(AlbumsMessage::RefreshViewData),
-            Some(AlbumsMessage::CenterOnPlaying),
+            // Hidden in the browsing panel — the narrower pane needs the
+            // header space for sort/refresh/columns/search, and the user
+            // already has the main-pane button when they want to center.
+            if data.in_browsing_panel {
+                None
+            } else {
+                Some(AlbumsMessage::CenterOnPlaying)
+            },
             None,                  // on_add
             Some(column_dropdown), // trailing_button
             true,                  // show_search

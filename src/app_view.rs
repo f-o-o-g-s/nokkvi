@@ -848,6 +848,7 @@ impl Nokkvi {
                             total_album_count: self.library.counts.albums,
                             loading: self.library.albums.is_loading(),
                             stable_viewport: true, // Browser pane: click to highlight, not play
+                            in_browsing_panel: true,
                             // The browsing panel only renders while the main
                             // pane is on Queue, so there is no main-pane
                             // Albums dropdown to compete with — claim the
@@ -873,6 +874,7 @@ impl Nokkvi {
                             total_song_count: self.library.counts.songs,
                             loading: self.library.songs.is_loading(),
                             stable_viewport: true, // Browser pane: click to highlight, not play
+                            in_browsing_panel: true,
                             column_dropdown_open,
                             column_dropdown_trigger_bounds,
                             open_menu: self.open_menu.as_ref(),
@@ -895,6 +897,7 @@ impl Nokkvi {
                             total_artist_count: self.library.counts.artists,
                             loading: self.library.artists.is_loading(),
                             stable_viewport: true, // Browser pane: click to highlight, not play
+                            in_browsing_panel: true,
                             column_dropdown_open,
                             column_dropdown_trigger_bounds,
                             open_menu: self.open_menu.as_ref(),
@@ -916,6 +919,7 @@ impl Nokkvi {
                             total_genre_count: self.library.counts.genres,
                             loading: self.library.genres.is_loading(),
                             stable_viewport: true, // Browser pane: click to highlight, not play
+                            in_browsing_panel: true,
                             column_dropdown_open,
                             column_dropdown_trigger_bounds,
                             open_menu: self.open_menu.as_ref(),
@@ -983,6 +987,7 @@ impl Nokkvi {
                     total_album_count: self.library.counts.albums,
                     loading: self.library.albums.is_loading(),
                     stable_viewport: self.stable_viewport,
+                    in_browsing_panel: false,
                     column_dropdown_open,
                     column_dropdown_trigger_bounds,
                     open_menu: self.open_menu.as_ref(),
@@ -1038,6 +1043,7 @@ impl Nokkvi {
                     total_artist_count: self.library.counts.artists,
                     loading: self.library.artists.is_loading(),
                     stable_viewport: self.stable_viewport,
+                    in_browsing_panel: false,
                     column_dropdown_open,
                     column_dropdown_trigger_bounds,
                     open_menu: self.open_menu.as_ref(),
@@ -1059,6 +1065,7 @@ impl Nokkvi {
                     total_song_count: self.library.counts.songs,
                     loading: self.library.songs.is_loading(),
                     stable_viewport: self.stable_viewport,
+                    in_browsing_panel: false,
                     column_dropdown_open,
                     column_dropdown_trigger_bounds,
                     open_menu: self.open_menu.as_ref(),
@@ -1080,6 +1087,7 @@ impl Nokkvi {
                     total_genre_count: self.library.counts.genres,
                     loading: self.library.genres.is_loading(),
                     stable_viewport: self.stable_viewport,
+                    in_browsing_panel: false,
                     column_dropdown_open,
                     column_dropdown_trigger_bounds,
                     open_menu: self.open_menu.as_ref(),
