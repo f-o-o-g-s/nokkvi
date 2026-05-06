@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Expanded child rows in Artists, Albums, Genres, and Playlists views now show a dotted-decimal sub-index (e.g. 236.1, 236.2) in their leading column with a slight indent — previously children had no index at all and sat less indented than their parent, leaving an unexplained gap in the parent-row index sequence.
+
 ### Changed
 
 - Surfing boat sprite size is now clamped to a 48–160 px pixel range so it stays readable at any window size — the boat previously shrank to ~14 px on small/short windows and ballooned past 230 px on 4K. Rope thickness now scales with the boat (1.5–3.5 px) so it never looks hairline against a large boat or chunky against a small one, and the anchor inherits the new bounds automatically.
@@ -15,6 +17,7 @@ All notable changes to this project will be documented in this file.
 - Surfing boat now moves on ambient and soundtrack tracks (sustained pads, drones, slow swells) that produce loud but slowly-changing spectra — these previously made the boat coast to a stop because the cruise signal listened only to spectral change.
 - Surfing boat's top speed now scales with the music's energy stack instead of pinning every percussive track at the same ceiling — energetic tracks (brick-walled, blast-beat, heavy-onset material) now read visibly faster than steady punchy tracks, and the baseline cruise speed is lifted across the board.
 - Username in config.toml is now populated automatically on auto-login resume — previously the field stayed empty whenever it was empty at startup, so the field never recovered without a manual logout/login.
+- Scrolling or Tab-navigating after clicking a name link to inline-expand a target in another view now visibly walks the cursor highlight through adjacent rows instead of leaving no cursor visible until the next click — previously the cursor stayed frozen on the auto-pinned row even after that row scrolled off-screen.
 
 ### Removed
 
