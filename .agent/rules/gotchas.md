@@ -76,7 +76,7 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 ## Misc
 
 - **CenterOnPlaying (Shift+C)**: call `handle_set_offset()` directly. Dispatching `SlotListMessage::SetOffset` routes through the click-to-highlight path.
-- **Expansion sort state**: when expansion is active, sort/search may target the expansion. Check `expansion.is_expanded()`. Artists/Genres are 2-tier — Shift+Enter on a centered child album row routes through `NavigateAndExpandAlbum` to the Albums view, not an inline 3rd-tier drill.
+- **Expansion sort state**: when expansion is active, sort/search may target the expansion. Check `expansion.is_expanded()`. Shift+Enter on Artists/Genres collapses the outer expansion.
 - **Pending find-and-expand chain**: at most one `Nokkvi.pending_expand` runs at a time. Starting a new chain (or any user-driven view change matching `PendingExpand::host_view()`) supersedes the previous one. `PendingTopPin` re-pins the highlight after `set_children` lands.
 - **Expansion artwork retry**: artwork fetches dispatched from inline expansions retry on transient failure and reject empty-bytes responses, so a flaky first request doesn't leave a permanent empty cell.
 - **Playlist edit guard**: `guard_play_action()` at the top of every play handler.

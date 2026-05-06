@@ -750,12 +750,8 @@ impl VisualizerState {
         const SHIMMER_CHANCE_SCALE: f64 = 0.25;
         const SPIKE_THRESHOLD: f64 = 0.12;
 
-        let Some(mut display) = self.display.try_lock() else {
-            return;
-        };
-        let Some(mut effects) = self.effects.try_lock() else {
-            return;
-        };
+        let mut display = self.display.lock();
+        let mut effects = self.effects.lock();
 
         if display.flash_intensities.len() != bar_count {
             display.flash_intensities = vec![0.0; bar_count];

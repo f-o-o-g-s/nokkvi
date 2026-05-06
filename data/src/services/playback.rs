@@ -209,16 +209,14 @@ impl QueueNavigator {
     /// directly so the outer `nav` mutex is dropped before engine I/O.
     pub async fn on_track_finished(
         &self,
-        engine_arc: &Arc<Mutex<CustomAudioEngine>>,
+        engine: &mut CustomAudioEngine,
         server_url: &str,
         subsonic_credential: &str,
     ) -> Result<Option<(Song, String)>> {
-        let plan = {
-            let mut engine = engine_arc.lock().await;
-            self.decide_transition(&mut engine, server_url, subsonic_credential)
-                .await
-        };
-        Self::execute_transition(plan, engine_arc).await
+        let plan = self
+            .decide_transition(engine, server_url, subsonic_credential)
+            .await;
+        Self::execute_transition(plan, engine).await
     }
 
     /// Decide what should happen at the engine layer for the next track.
@@ -375,15 +373,14 @@ impl QueueNavigator {
     /// network-bound `play()` work.
     pub async fn execute_transition(
         plan: TrackTransitionPlan,
-        engine_arc: &Arc<Mutex<CustomAudioEngine>>,
+        engine: &mut CustomAudioEngine,
     ) -> Result<Option<(Song, String)>> {
         match plan {
             TrackTransitionPlan::Stop => {
-                engine_arc.lock().await.stop().await;
+                engine.stop().await;
                 Ok(None)
             }
             TrackTransitionPlan::PlayPrepared { song, reason } => {
-                let mut engine = engine_arc.lock().await;
                 if !engine.immediate_playing() {
                     engine.play().await?;
                 }
@@ -394,12 +391,9 @@ impl QueueNavigator {
                 song,
                 reason,
             } => {
-                CustomAudioEngine::install_and_play(
-                    engine_arc,
-                    stream_url,
-                    song.replay_gain.clone(),
-                )
-                .await?;
+                engine.set_pending_replay_gain(song.replay_gain.clone());
+                engine.load_track(&stream_url).await;
+                engine.play().await?;
                 Ok(Some((song, reason)))
             }
         }
@@ -417,7 +411,7 @@ impl QueueNavigator {
     /// with duplicate tracks.
     pub async fn play_song_direct(
         &self,
-        engine_arc: &Arc<Mutex<CustomAudioEngine>>,
+        engine: &mut CustomAudioEngine,
         song: &Song,
         server_url: &str,
         subsonic_credential: &str,
@@ -431,13 +425,17 @@ impl QueueNavigator {
 
         *self.current_song_id.lock().await = Some(song.id.clone());
 
-        CustomAudioEngine::install_and_play(engine_arc, stream_url, song.replay_gain.clone()).await
+        engine.set_pending_replay_gain(song.replay_gain.clone());
+        engine.load_track(&stream_url).await;
+        engine.play().await?;
+
+        Ok(())
     }
 
     /// Play next song (manual skip via button/hotkey/MPRIS).
     pub async fn play_next(
         &self,
-        engine_arc: &Arc<Mutex<CustomAudioEngine>>,
+        engine: &mut CustomAudioEngine,
         server_url: &str,
         subsonic_credential: &str,
     ) -> Result<Option<(Song, String)>> {
@@ -459,7 +457,7 @@ impl QueueNavigator {
         };
         drop(queue_manager);
 
-        self.play_song_direct(engine_arc, &result.song, server_url, subsonic_credential)
+        self.play_song_direct(engine, &result.song, server_url, subsonic_credential)
             .await?;
 
         // Consume: remove the previously played song after starting the next.
@@ -475,7 +473,7 @@ impl QueueNavigator {
     /// Play previous song (manual skip via button/hotkey/MPRIS).
     pub async fn play_previous(
         &self,
-        engine_arc: &Arc<Mutex<CustomAudioEngine>>,
+        engine: &mut CustomAudioEngine,
         server_url: &str,
         subsonic_credential: &str,
     ) -> Result<Option<(Song, String)>> {
@@ -494,7 +492,7 @@ impl QueueNavigator {
                 *self.current_song_id.lock().await = Some(song.id.clone());
                 drop(queue_manager);
 
-                self.play_song_direct(engine_arc, &song, server_url, subsonic_credential)
+                self.play_song_direct(engine, &song, server_url, subsonic_credential)
                     .await?;
 
                 // Consume: remove the previously played song after starting prev
@@ -519,7 +517,7 @@ impl QueueNavigator {
                 *self.current_song_id.lock().await = Some(song.id.clone());
                 drop(queue_manager);
 
-                self.play_song_direct(engine_arc, &song, server_url, subsonic_credential)
+                self.play_song_direct(engine, &song, server_url, subsonic_credential)
                     .await?;
 
                 debug!(
@@ -614,11 +612,11 @@ mod tests {
         // Simulate that "only" is currently playing.
         nav.set_current_song_id(Some("only".to_string())).await;
 
-        let engine = Arc::new(Mutex::new(CustomAudioEngine::new()));
+        let mut engine = CustomAudioEngine::new();
         // Engine is in default Stopped state — `immediate_playing` is false,
         // `load_prepared_track` returns Err (no prepared decoder), `stop` early-returns.
         let result = nav
-            .on_track_finished(&engine, "http://example", "u=test&p=test")
+            .on_track_finished(&mut engine, "http://example", "u=test&p=test")
             .await
             .expect("no error from path 3 empty queue");
 

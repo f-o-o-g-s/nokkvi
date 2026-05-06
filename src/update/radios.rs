@@ -158,12 +158,9 @@ impl Nokkvi {
                     move |shell| async move {
                         shell.playback().stop().await?;
                         let engine_arc = shell.playback().audio_engine();
-                        nokkvi_data::audio::engine::CustomAudioEngine::install_and_play(
-                            &engine_arc,
-                            stream_url,
-                            None,
-                        )
-                        .await?;
+                        let mut engine = engine_arc.lock().await;
+                        engine.set_source(stream_url).await;
+                        engine.play().await?;
                         Ok(())
                     },
                     Message::NoOp,

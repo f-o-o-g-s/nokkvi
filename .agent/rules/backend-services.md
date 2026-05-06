@@ -83,7 +83,7 @@ Iced-free. Key types:
 - `PagedBuffer<T>` — replaces `Vec<T>` for library data. `Deref<Target=[T]>`. **`generation()`** monotonic counter bumps on every mutation (use for `(query, generation)` filter-cache keys)
 - `HotkeyConfig` — HashMap with O(1) lookup
 - `PlayerSettings`, `TomlSettings`, `TomlViewPreferences`
-- `Queue`, `QueueSortMode` (physical sort: Album/Artist/Title/Duration/Genre/Rating/MostPlayed/Random — `Random` re-shuffles on re-select / order-button toggle and is never persisted)
+- `Queue`, `QueueSortMode` (physical sort: Album/Artist/Title/Duration/Genre/Rating/MostPlayed)
 - `SongPool`, `BatchPayload` / `BatchItem`
 - `LibraryFilter` — ID-based cross-view navigation filter
 - `PlaylistEditState` — dirty detection

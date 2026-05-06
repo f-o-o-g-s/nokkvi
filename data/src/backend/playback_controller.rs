@@ -98,25 +98,26 @@ impl PlaybackController {
                         debug!(" [COMPLETION] No server config, cannot auto-advance");
                         return Ok::<_, anyhow::Error>(());
                     }
-                    // Lock briefly for the decision (queries engine state, no I/O).
-                    // Drop both locks before `execute_transition` so its
-                    // `install_and_play` path can release the engine lock during
-                    // the slow HTTP probe — concurrent UI subscriptions, MPRIS,
-                    // and mode toggles stay responsive.
+                    let mut engine = ea.lock().await;
+                    // Phase 1 lock-discipline: hold the outer `nav` mutex only
+                    // for the queue-mutation half of the work. Drop it before
+                    // running the engine ops so concurrent navigator calls
+                    // (e.g. hotkey-triggered `play_next`) aren't blocked
+                    // behind `engine.play()`'s network probe + prebuffer.
                     let plan = {
-                        let mut engine = ea.lock().await;
                         let nav_guard = nav.lock().await;
                         nav_guard
                             .decide_transition(&mut engine, &url, &cred)
                             .await
                     };
-                    match QueueNavigator::execute_transition(plan, &ea).await {
+                    match QueueNavigator::execute_transition(plan, &mut engine).await {
                         Ok(Some((song, reason))) => {
                             debug!(
                                 " [COMPLETION] Auto-advanced to: {} - {} ({})",
                                 song.title, song.artist, reason
                             );
                             let song_id = song.id.clone();
+                            drop(engine);
                             let _ = qvm.refresh_from_queue().await;
                             // Signal the UI that queue state has changed (post-consume)
                             let _ = queue_tx.send(());
@@ -132,6 +133,7 @@ impl PlaybackController {
                         }
                         Ok(None) => {
                             debug!(" [COMPLETION] No next track, playback stopped");
+                            drop(engine);
                             // Refresh queue view so UI shows the consumed state
                             let _ = qvm.refresh_from_queue().await;
                             let _ = queue_tx.send(());
@@ -222,8 +224,9 @@ impl PlaybackController {
                     // Load and play the track
                     let rg = song.replay_gain.clone();
                     drop(queue_manager);
-                    drop(audio);
-                    CustomAudioEngine::install_and_play(&self.audio_engine, stream_url, rg).await?;
+                    audio.set_pending_replay_gain(rg);
+                    audio.load_track(&stream_url).await;
+                    audio.play().await?;
                     return Ok(());
                 }
             }
@@ -278,13 +281,9 @@ impl PlaybackController {
                 self.queue_service.refresh_from_queue().await?;
 
                 // Load and play the track
-                drop(audio);
-                CustomAudioEngine::install_and_play(
-                    &self.audio_engine,
-                    stream_url,
-                    song.replay_gain.clone(),
-                )
-                .await?;
+                audio.set_pending_replay_gain(song.replay_gain.clone());
+                audio.load_track(&stream_url).await;
+                audio.play().await?;
 
                 // Update navigator's current_song_id so consume/gapless knows what's playing
                 let queue_navigator = self.queue_navigator.lock().await;
@@ -324,21 +323,24 @@ impl PlaybackController {
             return Ok(false);
         }
 
+        let mut engine = self.audio_engine.lock().await;
         let queue_navigator = self.queue_navigator.lock().await;
 
         match queue_navigator
-            .play_next(&self.audio_engine, &server_url, &subsonic_credential)
+            .play_next(&mut engine, &server_url, &subsonic_credential)
             .await
         {
             Ok(result) => {
                 let advanced = result.is_some();
                 drop(queue_navigator);
+                drop(engine);
                 // Sync reactive current_index for UI highlighting
                 self.queue_service.refresh_from_queue().await?;
                 Ok(advanced)
             }
             Err(e) => {
                 drop(queue_navigator);
+                drop(engine);
                 Err(e)
             }
         }
@@ -351,20 +353,23 @@ impl PlaybackController {
             return Ok(());
         }
 
+        let mut engine = self.audio_engine.lock().await;
         let queue_navigator = self.queue_navigator.lock().await;
 
         match queue_navigator
-            .play_previous(&self.audio_engine, &server_url, &subsonic_credential)
+            .play_previous(&mut engine, &server_url, &subsonic_credential)
             .await
         {
             Ok(_) => {
                 drop(queue_navigator);
+                drop(engine);
                 // Sync reactive current_index for UI highlighting
                 self.queue_service.refresh_from_queue().await?;
                 Ok(())
             }
             Err(e) => {
                 drop(queue_navigator);
+                drop(engine);
                 Err(e)
             }
         }
@@ -623,12 +628,11 @@ impl PlaybackController {
         }
 
         // 3. Load and play
-        CustomAudioEngine::install_and_play(
-            &self.audio_engine,
-            stream_url,
-            song.replay_gain.clone(),
-        )
-        .await?;
+        let mut engine = self.audio_engine.lock().await;
+        engine.set_pending_replay_gain(song.replay_gain.clone());
+        engine.set_source(stream_url).await;
+        engine.play().await?;
+        drop(engine);
 
         // 4. Update navigator's current_song_id so consume mode knows what's playing
         let queue_navigator = self.queue_navigator.lock().await;
@@ -682,7 +686,11 @@ impl PlaybackController {
             qm.get_song(song_id).and_then(|s| s.replay_gain.clone())
         };
 
-        CustomAudioEngine::install_and_play(&self.audio_engine, stream_url, rg).await?;
+        let mut engine = self.audio_engine.lock().await;
+        engine.set_pending_replay_gain(rg);
+        engine.set_source(stream_url).await;
+        engine.play().await?;
+        drop(engine);
 
         // Update navigator's current_song_id so consume mode knows what's playing
         let queue_navigator = self.queue_navigator.lock().await;
@@ -756,8 +764,12 @@ impl PlaybackController {
                     ));
                 }
 
-                CustomAudioEngine::install_and_play(&self.audio_engine, stream_url, replay_gain)
-                    .await?;
+                {
+                    let mut engine = self.audio_engine.lock().await;
+                    engine.set_pending_replay_gain(replay_gain);
+                    engine.set_source(stream_url).await;
+                    engine.play().await?;
+                }
 
                 self.queue_navigator
                     .lock()
