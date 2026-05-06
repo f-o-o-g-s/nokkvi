@@ -246,6 +246,9 @@ pub enum QueueMessage {
     ToggleSortOrder,
     SearchQueryChanged(String),
     ToggleColumnVisible(QueueColumn),
+    /// Sort dropdown's "Roulette" entry was selected — intercepted at the
+    /// root handler before the page's `update` runs.
+    Roulette,
 
     // Playlist edit mode
     SavePlaylist,
@@ -438,6 +441,7 @@ impl QueuePage {
             // Routed up to root in `handle_queue` before this match runs;
             // arm exists only for exhaustiveness.
             QueueMessage::SetOpenMenu(_) => (Task::none(), QueueAction::None),
+            QueueMessage::Roulette => (Task::none(), QueueAction::None),
             QueueMessage::ArtworkColumnDrag(_) => {
                 // Intercepted at root before reaching this update; never reached.
                 (Task::none(), QueueAction::None)
@@ -716,6 +720,7 @@ impl QueuePage {
             Some(trailing), // trailing_button
             true,           // show_search
             QueueMessage::SearchQueryChanged,
+            Some(QueueMessage::Roulette),
         );
 
         // Build final header: regular header + optional edit mode bar

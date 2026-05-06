@@ -251,6 +251,21 @@ pub enum SlotListMessage {
     SeekSettled(View, u64),
 }
 
+/// Roulette (slot-machine random pick) messages, namespaced under
+/// `Message::Roulette(..)`. The animation lives entirely on the UI side —
+/// no shell calls — and dispatches a normal play action on settle.
+#[derive(Debug, Clone)]
+pub enum RouletteMessage {
+    /// User selected the "Roulette" entry from a view's sort dropdown.
+    /// Snapshots item count, picks a target, and arms the spin subscription.
+    Start(View),
+    /// Animation tick from the per-frame subscription.
+    Tick(std::time::Instant),
+    /// Escape / view change / explicit cancel — restore the original
+    /// viewport offset, clear state, no auto-play.
+    Cancel,
+}
+
 /// Toast notification messages, namespaced under `Message::Toast(..)`
 #[derive(Debug, Clone)]
 pub enum ToastMessage {
@@ -532,6 +547,9 @@ pub enum Message {
 
     // --- Toast Notifications ---
     Toast(ToastMessage),
+
+    // --- Roulette (slot-machine random pick) ---
+    Roulette(RouletteMessage),
 
     // --- Task Manager Notifications ---
     TaskStatusChanged(

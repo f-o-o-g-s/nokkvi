@@ -97,6 +97,23 @@ impl Nokkvi {
         // Close any open overlay menu — its anchor (cursor position, trigger
         // bounds) is tied to the previous view's layout.
         self.open_menu = None;
+
+        // Cancel any in-progress roulette when leaving its host view —
+        // continuing the spin on a different view's slot list would scroll
+        // through unrelated rows and dispatch a play action against an
+        // index that no longer corresponds to anything visible.
+        if let Some(state) = self.roulette.as_ref()
+            && state.view != view
+        {
+            // Restore the original viewport before clearing state so the
+            // user lands back where they started rather than mid-spin.
+            let prev = state.view;
+            let original = state.original_offset;
+            let total = state.total_items;
+            self.roulette = None;
+            self.roulette_apply_offset(prev, original, total);
+            self.sfx_engine.play(audio::SfxType::Escape);
+        }
         // Save current view before entering Settings so we can restore it on close
         if view == View::Settings && self.current_view != View::Settings {
             self.pre_settings_view = self.current_view;

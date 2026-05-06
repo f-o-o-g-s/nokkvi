@@ -60,6 +60,11 @@ impl Nokkvi {
         if let RadiosMessage::SetOpenMenu(next) = msg {
             return Task::done(Message::SetOpenMenu(next));
         }
+        if matches!(msg, RadiosMessage::Roulette) {
+            return Task::done(Message::Roulette(
+                crate::app_message::RouletteMessage::Start(crate::View::Radios),
+            ));
+        }
         self.play_view_sfx(
             matches!(
                 msg,

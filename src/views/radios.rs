@@ -66,6 +66,9 @@ pub enum RadiosMessage {
     SearchFocused(bool),
     RefreshViewData,
     CenterOnPlaying,
+    /// Sort dropdown's "Roulette" entry was selected — intercepted at the
+    /// root handler before the page's `update` runs.
+    Roulette,
 
     // Data loading
     RadioStationsLoaded(Result<Vec<RadioStation>, String>),
@@ -241,6 +244,7 @@ impl RadiosPage {
             // Routed up to root in `handle_radios` before this match runs;
             // arm exists only for exhaustiveness.
             RadiosMessage::SetOpenMenu(_) => (Task::none(), RadiosAction::None),
+            RadiosMessage::Roulette => (Task::none(), RadiosAction::None),
         }
     }
 
@@ -267,6 +271,7 @@ impl RadiosPage {
             None,                                                  // trailing_button
             true,                                                  // show_search
             RadiosMessage::SearchQueryChanged,
+            Some(RadiosMessage::Roulette),
         );
 
         use crate::widgets::base_slot_list_layout::BaseSlotListLayoutConfig;

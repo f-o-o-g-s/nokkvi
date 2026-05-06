@@ -284,6 +284,13 @@ pub struct Nokkvi {
     // Progress Tracking (polled from Tick for live toast updates)
     // -------------------------------------------------------------------------
     pub active_progress: Vec<nokkvi_data::types::progress::ProgressHandle>,
+
+    // -------------------------------------------------------------------------
+    // Roulette (slot-machine random pick across slot-list views)
+    // -------------------------------------------------------------------------
+    /// In-progress roulette spin, if any. Drives the dedicated tick
+    /// subscription in `subscription()`.
+    pub roulette: Option<crate::state::RouletteState>,
 }
 
 // ============================================================================
@@ -399,6 +406,7 @@ impl Default for Nokkvi {
             default_playlist_picker: None,
             open_menu: None,
             active_progress: Vec::new(),
+            roulette: None,
         }
     }
 }
@@ -576,6 +584,16 @@ impl Nokkvi {
         // when the feature is off.
         let boat_frames = iced::window::frames().map(Message::BoatTick);
 
+        // Roulette spin tick — only armed while a spin is active. Iced
+        // tears down the subscription as soon as the batch no longer
+        // contains it, so the timer naturally goes dormant on settle/cancel.
+        let roulette_tick = if self.roulette.is_some() {
+            time::every(Duration::from_millis(16))
+                .map(|now| Message::Roulette(app_message::RouletteMessage::Tick(now)))
+        } else {
+            iced::Subscription::none()
+        };
+
         iced::Subscription::batch(vec![
             tick,
             keyboard,
@@ -591,6 +609,7 @@ impl Nokkvi {
             sse_sub,
             task_status_sub,
             boat_frames,
+            roulette_tick,
         ])
     }
 }

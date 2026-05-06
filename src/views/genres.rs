@@ -157,6 +157,9 @@ pub enum GenresMessage {
     SearchFocused(bool),
     RefreshViewData,
     CenterOnPlaying,
+    /// Sort dropdown's "Roulette" entry was selected — intercepted at the
+    /// root handler before the page's `update` runs.
+    Roulette,
 
     // Data loading (moved from root Message enum)
     GenresLoaded(Result<Vec<GenreUIViewData>, String>, usize), // result, total_count
@@ -436,6 +439,7 @@ impl GenresPage {
                 // Routed up to root in `handle_genres` before this match runs;
                 // arm exists only for exhaustiveness.
                 GenresMessage::SetOpenMenu(_) => (Task::none(), GenresAction::None),
+                GenresMessage::Roulette => (Task::none(), GenresAction::None),
                 GenresMessage::RefreshViewData => (Task::none(), GenresAction::RefreshViewData),
                 GenresMessage::CenterOnPlaying => (Task::none(), GenresAction::CenterOnPlaying),
                 GenresMessage::NavigateAndFilter(view, filter) => {
@@ -620,6 +624,12 @@ impl GenresPage {
             Some(column_dropdown), // trailing_button
             true,                  // show_search
             GenresMessage::SearchQueryChanged,
+            // Roulette is main-pane only — see Albums view for rationale.
+            if data.in_browsing_panel {
+                None
+            } else {
+                Some(GenresMessage::Roulette)
+            },
         );
 
         // Compose with the tri-state "select all" header bar when the

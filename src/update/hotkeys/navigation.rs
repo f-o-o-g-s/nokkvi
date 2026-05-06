@@ -9,6 +9,16 @@ use crate::{Nokkvi, View, app_message::Message, views, widgets};
 impl Nokkvi {
     pub(crate) fn handle_clear_search(&mut self) -> Task<Message> {
         trace!(" ClearSearch (Escape) hotkey pressed - unfocusing search");
+
+        // Roulette spin has highest priority — Escape during a spin
+        // restores the original viewport without auto-playing. The cancel
+        // handler fires its own Escape SFX so we don't play it twice.
+        if self.roulette.is_some() {
+            return Task::done(Message::Roulette(
+                crate::app_message::RouletteMessage::Cancel,
+            ));
+        }
+
         // Play escape sound
         self.sfx_engine.play(audio::SfxType::Escape);
 

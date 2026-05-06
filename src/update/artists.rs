@@ -328,6 +328,11 @@ impl Nokkvi {
         if let ArtistsMessage::SetOpenMenu(next) = msg {
             return Task::done(Message::SetOpenMenu(next));
         }
+        if matches!(msg, ArtistsMessage::Roulette) {
+            return Task::done(Message::Roulette(
+                crate::app_message::RouletteMessage::Start(crate::View::Artists),
+            ));
+        }
         if let ArtistsMessage::OpenExternalUrl(url) = msg {
             if let Err(e) = std::process::Command::new("xdg-open").arg(&url).spawn() {
                 tracing::warn!("Failed to open URL '{}': {}", url, e);

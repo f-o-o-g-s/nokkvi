@@ -244,6 +244,9 @@ pub enum PlaylistsMessage {
     SearchQueryChanged(String),
     SearchFocused(bool),
     RefreshViewData,
+    /// Sort dropdown's "Roulette" entry was selected — intercepted at the
+    /// root handler before the page's `update` runs.
+    Roulette,
 
     // Data loading (moved from root Message enum)
     PlaylistsLoaded(Result<Vec<PlaylistUIViewData>, String>, usize), // result, total_count
@@ -522,6 +525,7 @@ impl PlaylistsPage {
                 // Routed up to root in `handle_playlists` before this match
                 // runs; arm exists only for exhaustiveness.
                 PlaylistsMessage::SetOpenMenu(_) => (Task::none(), PlaylistsAction::None),
+                PlaylistsMessage::Roulette => (Task::none(), PlaylistsAction::None),
                 PlaylistsMessage::RefreshViewData => {
                     (Task::none(), PlaylistsAction::RefreshViewData)
                 }
@@ -781,6 +785,7 @@ impl PlaylistsPage {
             Some(trailing), // chip + columns-cog dropdown
             true,           // show_search
             PlaylistsMessage::SearchQueryChanged,
+            Some(PlaylistsMessage::Roulette),
         );
 
         // Compose with the tri-state "select all" header bar when the

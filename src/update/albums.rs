@@ -496,6 +496,11 @@ impl Nokkvi {
         if let AlbumsMessage::SetOpenMenu(next) = msg {
             return Task::done(Message::SetOpenMenu(next));
         }
+        if matches!(msg, AlbumsMessage::Roulette) {
+            return Task::done(Message::Roulette(
+                crate::app_message::RouletteMessage::Start(crate::View::Albums),
+            ));
+        }
         self.play_view_sfx(
             matches!(
                 msg,

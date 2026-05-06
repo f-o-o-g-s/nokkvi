@@ -47,6 +47,7 @@ mod playlists;
 mod progressive_queue;
 mod queue;
 mod radios;
+mod roulette;
 mod scrobbling;
 mod settings;
 mod similar;
@@ -209,6 +210,7 @@ impl Nokkvi {
                 }
             }
             Message::SetOpenMenu(next) => self.handle_set_open_menu(next),
+            Message::Roulette(msg) => self.handle_roulette_message(msg),
             Message::Login(msg) => self.handle_login(msg),
             Message::LoginResult(res) => self.handle_login_result(res),
             Message::ResumeSession => self.handle_resume_session(),

@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use iced::{
     Alignment, Element, Length,
     font::{Font, Weight},
@@ -8,6 +10,29 @@ pub(crate) use nokkvi_data::types::sort_mode::SortMode;
 
 use super::hover_overlay::HoverOverlay;
 use crate::theme;
+
+/// Wrapper used internally by `view_header` to splice a "Roulette" entry
+/// into the sort dropdown without polluting any per-view sort enum. The
+/// `current_view` is always `Mode(_)`; `Roulette` only appears in the
+/// option list and is intercepted by the `pick_list` select handler so it
+/// never becomes the persisted sort.
+#[derive(Debug, Clone, PartialEq)]
+enum SortPickerEntry<V> {
+    Mode(V),
+    Roulette,
+}
+
+impl<V: std::fmt::Display> std::fmt::Display for SortPickerEntry<V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Mode(v) => v.fmt(f),
+            // Plain text — `pick_list` items render through `text(...)`
+            // which has no inline SVG support; a dice icon would need a
+            // separate header button rather than dropdown decoration.
+            Self::Roulette => f.write_str("Roulette"),
+        }
+    }
+}
 
 /// ViewHeader component - horizontal bar with view selector, sort, search, and count
 /// Generic over sort mode V to support different view enums (Albums, Queue, etc.)
@@ -35,6 +60,11 @@ pub(crate) fn view_header<
     trailing_button: Option<Element<'a, Message>>,
     show_search: bool,
     on_search_change: impl Fn(String) -> Message + 'a,
+    // When `Some`, appends a "Roulette" action entry to the sort dropdown
+    // that emits this message on selection. The dropdown's persisted sort
+    // is left untouched — the entry is intercepted before reaching the
+    // standard `on_view_selected` path.
+    on_roulette: Option<Message>,
 ) -> Element<'a, Message> {
     let view_selector = if view_options.is_empty() {
         // Render a static pill matching the pick_list styling
@@ -65,49 +95,72 @@ pub(crate) fn view_header<
             .height(Length::Fixed(40.0)),
         )
     } else {
+        // Wrap V into SortPickerEntry so we can splice a trailing
+        // "Roulette" action without polluting the per-view sort enum.
+        let mut entries: Vec<SortPickerEntry<V>> = view_options
+            .iter()
+            .cloned()
+            .map(SortPickerEntry::Mode)
+            .collect();
+        if on_roulette.is_some() {
+            entries.push(SortPickerEntry::Roulette);
+        }
+
+        let on_roulette_owned = on_roulette;
+        let select_handler = move |entry: SortPickerEntry<V>| match entry {
+            SortPickerEntry::Mode(v) => on_view_selected(v),
+            SortPickerEntry::Roulette => on_roulette_owned
+                .clone()
+                .expect("Roulette entry only present when on_roulette is Some"),
+        };
+
         Some(
             container(
-                pick_list(Some(current_view), view_options, |v: &V| v.to_string())
-                    .on_select(on_view_selected)
-                    .width(Length::Shrink)
-                    .text_size(12.0) // Match QML font size
-                    .font(Font {
-                        weight: Weight::Medium,
-                        ..theme::ui_font()
-                    })
-                    .padding([10, 8]) // Increased vertical padding to fill 40px height
-                    .style(move |_theme, status| pick_list::Style {
+                pick_list(
+                    Some(SortPickerEntry::Mode(current_view)),
+                    Cow::<'a, [SortPickerEntry<V>]>::Owned(entries),
+                    |entry: &SortPickerEntry<V>| entry.to_string(),
+                )
+                .on_select(select_handler)
+                .width(Length::Shrink)
+                .text_size(12.0) // Match QML font size
+                .font(Font {
+                    weight: Weight::Medium,
+                    ..theme::ui_font()
+                })
+                .padding([10, 8]) // Increased vertical padding to fill 40px height
+                .style(move |_theme, status| pick_list::Style {
+                    text_color: theme::fg0(),
+                    placeholder_color: theme::fg4(),
+                    handle_color: theme::fg4(),
+                    background: (theme::bg0_soft()).into(),
+                    border: iced::Border {
+                        color: match status {
+                            pick_list::Status::Active | pick_list::Status::Disabled => {
+                                iced::Color::TRANSPARENT
+                            }
+                            pick_list::Status::Hovered => theme::accent_bright(),
+                            pick_list::Status::Opened { .. } => theme::accent_bright(),
+                        },
+                        width: 2.0,
+                        radius: theme::ui_border_radius(),
+                    },
+                })
+                .menu_style(move |_theme| {
+                    // Style for the dropdown menu overlay
+                    iced::widget::overlay::menu::Style {
                         text_color: theme::fg0(),
-                        placeholder_color: theme::fg4(),
-                        handle_color: theme::fg4(),
-                        background: (theme::bg0_soft()).into(),
+                        background: (theme::bg1()).into(),
                         border: iced::Border {
-                            color: match status {
-                                pick_list::Status::Active | pick_list::Status::Disabled => {
-                                    iced::Color::TRANSPARENT
-                                }
-                                pick_list::Status::Hovered => theme::accent_bright(),
-                                pick_list::Status::Opened { .. } => theme::accent_bright(),
-                            },
+                            color: theme::accent_bright(),
                             width: 2.0,
                             radius: theme::ui_border_radius(),
                         },
-                    })
-                    .menu_style(move |_theme| {
-                        // Style for the dropdown menu overlay
-                        iced::widget::overlay::menu::Style {
-                            text_color: theme::fg0(),
-                            background: (theme::bg1()).into(),
-                            border: iced::Border {
-                                color: theme::accent_bright(),
-                                width: 2.0,
-                                radius: theme::ui_border_radius(),
-                            },
-                            selected_text_color: theme::bg0_hard(),
-                            selected_background: (theme::accent_bright()).into(),
-                            shadow: iced::Shadow::default(),
-                        }
-                    }),
+                        selected_text_color: theme::bg0_hard(),
+                        selected_background: (theme::accent_bright()).into(),
+                        shadow: iced::Shadow::default(),
+                    }
+                }),
             )
             .height(Length::Fixed(40.0)),
         ) // Match button and search field height

@@ -182,6 +182,10 @@ pub enum AlbumsMessage {
     SearchQueryChanged(String),
     SearchFocused(bool),
     RefreshViewData,
+    /// Sort dropdown's "Roulette" entry was selected — intercepted at the
+    /// root handler before the page's `update` runs, so the page never
+    /// sees this and no per-view state changes here.
+    Roulette,
 
     // Data loading (moved from root Message enum)
     AlbumsLoaded {
@@ -494,6 +498,7 @@ impl AlbumsPage {
                 // Routed up to root in `handle_albums` before this match runs;
                 // arm exists only for exhaustiveness.
                 AlbumsMessage::SetOpenMenu(_) => (Task::none(), AlbumsAction::None),
+                AlbumsMessage::Roulette => (Task::none(), AlbumsAction::None),
                 AlbumsMessage::RefreshViewData => (Task::none(), AlbumsAction::RefreshViewData),
                 AlbumsMessage::RefreshArtwork(album_id) => {
                     (Task::none(), AlbumsAction::RefreshArtwork(album_id))
@@ -752,6 +757,14 @@ impl AlbumsPage {
             Some(column_dropdown), // trailing_button
             true,                  // show_search
             AlbumsMessage::SearchQueryChanged,
+            // Roulette lives on the main pane only — browsing-panel
+            // dispatch routes plays through add-to-queue, which would
+            // turn the slot-machine "play this" into a silent append.
+            if data.in_browsing_panel {
+                None
+            } else {
+                Some(AlbumsMessage::Roulette)
+            },
         );
 
         // Compose with the tri-state "select all" header bar when the

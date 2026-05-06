@@ -422,6 +422,7 @@ impl SimilarPage {
             Some(column_dropdown), // trailing_button
             false,                 // Hide search
             |_| SimilarMessage::NoOp,
+            None, // Similar lives only in the browsing panel — no roulette
         );
 
         // Compose with the tri-state "select all" header bar when the

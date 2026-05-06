@@ -190,6 +190,9 @@ pub enum ArtistsMessage {
     RefreshViewData,
     CenterOnPlaying,
     ToggleColumnVisible(ArtistsColumn),
+    /// Sort dropdown's "Roulette" entry was selected — intercepted at the
+    /// root handler before the page's `update` runs.
+    Roulette,
 
     // Data loading (moved from root Message enum)
     ArtistsLoaded {
@@ -448,6 +451,7 @@ impl ArtistsPage {
                 // Routed up to root in `handle_artists` before this match runs;
                 // arm exists only for exhaustiveness.
                 ArtistsMessage::SetOpenMenu(_) => (Task::none(), ArtistsAction::None),
+                ArtistsMessage::Roulette => (Task::none(), ArtistsAction::None),
                 ArtistsMessage::RefreshViewData => (Task::none(), ArtistsAction::RefreshViewData),
                 ArtistsMessage::CenterOnPlaying => (Task::none(), ArtistsAction::CenterOnPlaying),
                 ArtistsMessage::NavigateAndFilter(view, filter) => {
@@ -709,6 +713,12 @@ impl ArtistsPage {
             Some(column_dropdown), // trailing_button
             true,                  // show_search
             ArtistsMessage::SearchQueryChanged,
+            // Roulette is main-pane only — see Albums view for rationale.
+            if data.in_browsing_panel {
+                None
+            } else {
+                Some(ArtistsMessage::Roulette)
+            },
         );
 
         // Compose with the tri-state "select all" header bar when the

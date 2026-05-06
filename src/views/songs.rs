@@ -175,6 +175,9 @@ pub enum SongsMessage {
 
     RefreshViewData,
     CenterOnPlaying,
+    /// Sort dropdown's "Roulette" entry was selected — intercepted at the
+    /// root handler before the page's `update` runs.
+    Roulette,
 
     // Data loading (moved from root Message enum)
     SongsLoaded {
@@ -505,6 +508,7 @@ impl SongsPage {
             // Routed up to root in `handle_songs` before this match runs;
             // arm exists only for exhaustiveness.
             SongsMessage::SetOpenMenu(_) => (Task::none(), SongsAction::None),
+            SongsMessage::Roulette => (Task::none(), SongsAction::None),
             SongsMessage::ArtworkColumnDrag(_) => {
                 // Intercepted at root before reaching this update; never reached.
                 (Task::none(), SongsAction::None)
@@ -613,6 +617,12 @@ impl SongsPage {
             Some(column_dropdown), // trailing_button
             true,                  // show_search
             SongsMessage::SearchQueryChanged,
+            // Roulette is main-pane only — see Albums view for rationale.
+            if data.in_browsing_panel {
+                None
+            } else {
+                Some(SongsMessage::Roulette)
+            },
         );
 
         // Compose with the tri-state "select all" header bar when the

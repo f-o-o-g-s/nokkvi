@@ -176,6 +176,11 @@ impl Nokkvi {
         if let GenresMessage::SetOpenMenu(next) = msg {
             return Task::done(Message::SetOpenMenu(next));
         }
+        if matches!(msg, GenresMessage::Roulette) {
+            return Task::done(Message::Roulette(
+                crate::app_message::RouletteMessage::Start(crate::View::Genres),
+            ));
+        }
         self.play_view_sfx(
             matches!(
                 msg,

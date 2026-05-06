@@ -110,6 +110,11 @@ impl Nokkvi {
         if let QueueMessage::SetOpenMenu(next) = msg {
             return Task::done(Message::SetOpenMenu(next));
         }
+        if matches!(msg, QueueMessage::Roulette) {
+            return Task::done(Message::Roulette(
+                crate::app_message::RouletteMessage::Start(crate::View::Queue),
+            ));
+        }
         // ── Fast path for scrollbar seek ──
         // During a scrollbar drag, CursorMoved fires on_seek hundreds of times
         // per second. The normal path clones the entire queue (O(n)) for

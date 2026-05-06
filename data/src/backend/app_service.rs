@@ -284,6 +284,29 @@ impl AppService {
         self.playback.play_songs_from_index(songs, 0).await
     }
 
+    /// Roulette variant of [`Self::play_genre`]: load all genre songs, then
+    /// start playback from a random index. Used by the slot-machine
+    /// roulette pick on the Genres view.
+    pub async fn play_genre_random(&self, genre_name: &str) -> Result<()> {
+        let songs = self.load_genre_songs(genre_name).await?;
+        if songs.is_empty() {
+            return Err(anyhow::anyhow!("No songs found in genre"));
+        }
+        let start = rand::random_range(0..songs.len());
+        self.playback.play_songs_from_index(songs, start).await
+    }
+
+    /// Roulette variant of [`Self::play_artist`]: load all artist songs,
+    /// then start playback from a random index.
+    pub async fn play_artist_random(&self, artist_id: &str) -> Result<()> {
+        let songs = self.artists_service.load_artist_songs(artist_id).await?;
+        if songs.is_empty() {
+            return Err(anyhow::anyhow!("No songs found for artist"));
+        }
+        let start = rand::random_range(0..songs.len());
+        self.playback.play_songs_from_index(songs, start).await
+    }
+
     /// Play all songs in a playlist.
     ///
     /// Loads all songs in this playlist, sets queue, and starts playback.

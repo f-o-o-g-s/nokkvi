@@ -61,6 +61,109 @@ pub struct CrossPaneDragState {
 }
 
 // ============================================================================
+// Roulette (slot-machine random pick across slot-list views)
+// ============================================================================
+
+/// Time-driven state for an in-progress "Roulette" pick.
+///
+/// Snapshotted at start so subsequent data churn (page loads, search edits,
+/// queue mutations) cannot drift the animation off the chosen target. The
+/// final position lands at `target_idx`; intermediate offsets are derived
+/// purely from `(start_time, total_steps, total_items)` via an ease-out
+/// cubic, so a tick handler is stateless beyond bookkeeping.
+#[derive(Debug, Clone)]
+pub struct RouletteState {
+    /// Slot-list view this roulette runs in.
+    pub view: crate::View,
+    /// Snapshotted item count — frozen so live mutations don't drift the math.
+    pub total_items: usize,
+    /// Viewport offset captured at start; restored on cancel.
+    pub original_offset: usize,
+    /// Pre-rolled landing index. The animation always settles here.
+    pub target_idx: usize,
+    /// Total cumulative-index distance from `original_offset` to `target_idx`,
+    /// inflated by full-list revolutions so the wheel "spins" several times
+    /// before settling.
+    pub total_steps: usize,
+    /// Animation start timestamp.
+    pub start_time: std::time::Instant,
+    /// Last offset actually applied to the slot list. Tick handlers compare
+    /// against the freshly-computed offset to decide whether to fire a Tab
+    /// SFX / record_scroll().
+    pub last_offset: usize,
+    /// Last time a Tab SFX was fired. Throttled to one per ~30 ms so the
+    /// fastest spin frames sound like a rattle rather than a buzz.
+    pub last_sfx_at: Option<std::time::Instant>,
+}
+
+impl RouletteState {
+    /// Main "spin" duration before the fake-out micro-pause kicks in.
+    pub const MAIN_DURATION_MS: u64 = 4000;
+    /// Hold duration after the main spin lands two short of the target.
+    pub const FAKEOUT_PAUSE_MS: u64 = 250;
+    /// First near-miss tick (target - 1).
+    pub const FAKEOUT_TICK1_MS: u64 = 180;
+    /// Second near-miss tick (target). After this, the state is settled.
+    pub const FAKEOUT_TICK2_MS: u64 = 220;
+    /// Minimum spacing between Tab SFX plays during the spin.
+    pub const SFX_MIN_INTERVAL_MS: u64 = 30;
+
+    /// Compute the eased viewport offset at `now`, plus whether the
+    /// animation has fully settled. Pure function of stored state.
+    pub fn position_at(&self, now: std::time::Instant) -> (usize, bool) {
+        if self.total_items == 0 {
+            return (self.original_offset, true);
+        }
+
+        let elapsed = now.saturating_duration_since(self.start_time);
+        let main_d = std::time::Duration::from_millis(Self::MAIN_DURATION_MS);
+        let pause_d = std::time::Duration::from_millis(Self::FAKEOUT_PAUSE_MS);
+        let tick1_d = std::time::Duration::from_millis(Self::FAKEOUT_TICK1_MS);
+        let tick2_d = std::time::Duration::from_millis(Self::FAKEOUT_TICK2_MS);
+
+        // Land two short of the final target during the main spin so the
+        // fake-out has somewhere to walk forward to.
+        let near_miss_steps = self.total_steps.saturating_sub(2);
+
+        if elapsed < main_d {
+            let t = elapsed.as_secs_f32() / main_d.as_secs_f32();
+            let eased = ease_out_cubic(t);
+            let steps = (eased * near_miss_steps as f32) as usize;
+            return (self.offset_after_steps(steps), false);
+        }
+        let after_main = elapsed - main_d;
+        if after_main < pause_d {
+            return (self.offset_after_steps(near_miss_steps), false);
+        }
+        let after_pause = after_main - pause_d;
+        if after_pause < tick1_d {
+            return (self.offset_after_steps(near_miss_steps), false);
+        }
+        if after_pause < tick1_d + tick2_d {
+            return (
+                self.offset_after_steps(self.total_steps.saturating_sub(1)),
+                false,
+            );
+        }
+        (self.offset_after_steps(self.total_steps), true)
+    }
+
+    fn offset_after_steps(&self, steps: usize) -> usize {
+        if self.total_items == 0 {
+            return self.original_offset;
+        }
+        (self.original_offset + steps) % self.total_items
+    }
+}
+
+/// Ease-out cubic: fast start, slow end. Matches a slot-wheel deceleration.
+pub(crate) fn ease_out_cubic(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    let inv = 1.0 - t;
+    1.0 - inv * inv * inv
+}
+
+// ============================================================================
 // Pending Find-and-Expand (album / artist / genre)
 // ============================================================================
 

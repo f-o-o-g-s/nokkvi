@@ -125,6 +125,11 @@ impl Nokkvi {
         if let PlaylistsMessage::SetOpenMenu(next) = msg {
             return Task::done(Message::SetOpenMenu(next));
         }
+        if matches!(msg, PlaylistsMessage::Roulette) {
+            return Task::done(Message::Roulette(
+                crate::app_message::RouletteMessage::Start(crate::View::Playlists),
+            ));
+        }
         self.play_view_sfx(
             matches!(
                 msg,

@@ -313,6 +313,11 @@ impl Nokkvi {
         if let SongsMessage::SetOpenMenu(next) = msg {
             return Task::done(Message::SetOpenMenu(next));
         }
+        if matches!(msg, SongsMessage::Roulette) {
+            return Task::done(Message::Roulette(
+                crate::app_message::RouletteMessage::Start(crate::View::Songs),
+            ));
+        }
         self.play_view_sfx(
             matches!(
                 msg,
