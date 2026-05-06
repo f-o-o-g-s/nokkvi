@@ -46,9 +46,9 @@ trigger: always_on
 ## Dependencies
 
 Discuss before adding new crates. Existing workspace runtime deps:
-- **UI crate** (`Cargo.toml`): `iced` (forked), `nokkvi-data`, `tokio`, `tracing` (+ `tracing-subscriber`), `parking_lot`, `arc-swap`, `futures`, `anyhow`, `image`, `notify`, `mpris-server`, `ksni`, `reqwest`, `serde` (+ `serde_json`), `toml` (+ `toml_edit`), `lru`, `bytemuck`, `tempfile`
+- **UI crate** (`Cargo.toml`): `iced` (forked), `nokkvi-data`, `tokio`, `tracing` (+ `tracing-subscriber`), `parking_lot`, `arc-swap`, `futures`, `anyhow`, `image`, `notify`, `mpris-server`, `ksni`, `reqwest`, `serde`, `toml` (+ `toml_edit`), `lru`, `bytemuck`
 - **Data crate** (`data/Cargo.toml`): `tokio` (+ `tokio-util`), `parking_lot`, `futures`, `anyhow`, `thiserror`, `image`, `color-thief`, `reqwest`, `serde` (+ `serde_json`), `toml` (+ `toml_edit`), `bincode-next`, `redb`, `chrono`, `directories`, `url`, `httpdate`, `rand`, `font-kit`, `rodio`, `ringbuf`, `rustfft`, `num-complex`, `biquad`, `bytemuck`, `symphonia`, `icy-metadata`, `pipewire` (linux-only)
-- **Test-only `[dev-dependencies]`**: `proptest`, `tempfile`
+- **Test-only `[dev-dependencies]`**: `proptest` (data crate), `tempfile` (both crates)
 
 ## Formatting
 
@@ -82,7 +82,7 @@ cargo build --release                        # release build
 | Store | What | How |
 |-------|------|-----|
 | `config.toml` | User preferences (general, interface, playback, hotkeys, views, visualizer behavior, font, artwork resolution, library page size, normalization, tray, etc.) | Hot-reloadable via `SettingsManager` + `config_writer.rs`. `verbose_config` writes all defaults |
-| Theme files | Named `.toml` in `~/.config/nokkvi/themes/` | Palette + visualizer colors. **22 built-in**. `config.toml` stores `theme = "name"` |
+| Theme files | Named `.toml` in `~/.config/nokkvi/themes/` | Palette + visualizer colors. **21 built-in** (compiled via `include_str!`, seeded on first run; `everforest` is the first-run default). `config.toml` stores `theme = "name"` |
 | redb | Queue, session tokens (JWT, Subsonic), encrypted password | Via `state_storage.rs`, `services/queue/`, `credentials.rs` |
 | Credentials | Server URL, username | In `config.toml`. Password is **not** stored on disk in plaintext |
 

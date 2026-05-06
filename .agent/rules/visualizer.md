@@ -33,7 +33,16 @@ Catmull-Rom spline (`smooth`) or straight segments (`angular`). 6-instance rende
 
 Gradient modes: `breathing`, `static`, `position`, `height`, `gradient`. Reuses bar gradient palette.
 
-Key settings: `point_count` (8–512), `line_thickness`, `outline_thickness`, `fill_opacity`, `mirror`, `style`, `boat` (toggle the surfing-boat overlay; `widgets/boat.rs`, CPU-only, themed via `embedded_svg::themed_boat_svg()` using `border_color`).
+Key settings: `point_count` (8–512), `line_thickness`, `outline_thickness`, `fill_opacity`, `mirror`, `style`, `boat` (toggle the surfing-boat overlay; `widgets/boat.rs`, CPU-only).
+
+### Boat overlay (lines mode only)
+
+`widgets/boat.rs` — surfboat sprite that physically rides the line waveform. Themed via `embedded_svg::themed_boat_svg(angle_radians, mirrored)` using the active visualizer `border_color`; tilt key is quantized so cached SVGs are reusable across frames.
+
+- **Physics is music-driven**: cruise speed scales with spectrum presence (raised top speed); `boat_thrust` stacks on top of saturating cruise so fast tracks aren't pinned at the cap. When the spectrum drops to silence the boat decelerates and an anchor doodad (`themed_anchor_svg`) drops.
+- **Heading + tilt**: tilt follows the local wave slope clamped to ±`MAX_TILT (≈17°)` with spring damping; the SVG mirrors when facing reverses, so the same tilt sign reads correctly in either direction.
+- **Wrap, not bounce**: the boat wraps through an off-screen margin past both edges (asymmetric wander prevented). The viewBox is padded so a `MAX_TILT` rotation doesn't clip the corners.
+- **Sprite size** is centralized + clamped to a sane pixel range so the sprite stays legible across window sizes.
 
 ## Configuration
 

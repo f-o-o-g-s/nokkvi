@@ -15,7 +15,7 @@ globs: src/widgets/**
 
 ## Single-Active Overlay Menu (`Nokkvi.open_menu`)
 
-Hamburger, player-bar kebab, view-header `checkbox_dropdown`, and right-click context menus are all **controlled** widgets — no local `is_open` state. Each widget bubbles `Message::SetOpenMenu(Option<OpenMenu>)` to root, which atomically replaces the current menu (so opening one closes any other). `OpenMenu` variants: `Hamburger`, `PlayerModes`, `CheckboxDropdown { view, trigger_bounds }`, `Context { id, position }`. Auto-closes on `SwitchView` and `WindowResized`.
+Hamburger, player-bar kebab, view-header `checkbox_dropdown`, and right-click context menus are all **controlled** widgets — no local `is_open` state. Each widget bubbles `Message::SetOpenMenu(Option<OpenMenu>)` to root, which atomically replaces the current menu (so opening one closes any other). `OpenMenu` variants: `Hamburger`, `PlayerModes`, `CheckboxDropdown { view, trigger_bounds }`, `CheckboxDropdownSimilar { trigger_bounds }` (Similar lives in the browsing panel only and lacks a `View::Similar`), `Context { id: ContextMenuId, position }`. Auto-closes on `SwitchView` and `WindowResized`.
 
 ## Player Bar (`player_bar.rs`)
 
@@ -39,7 +39,7 @@ Custom `iced::advanced` seekable widget. `Vec<OverlaySegment>` for scrolling col
 | Track Info Strip | `track_info_strip.rs` | Now-playing metadata (player bar + top bar + progress-track overlay). All three renderers share the `MetadataSegment` builder + `MetadataSegmentKind` enum |
 | Marquee Text | `marquee_text.rs` | Scrolling overflow text, generic over message type |
 | Hover Indicator | `hover_indicator.rs` | Canvas hover underline, `HoverExpand` for hot-zone expansion |
-| Context Menu | `context_menu.rs` | Right-click menu. `LibraryContextEntry` / `QueueContextEntry` / `StripContextEntry` |
+| Context Menu | `context_menu.rs` | Right-click menu widget + `LibraryContextEntry` and `StripContextEntry`. `QueueContextEntry` lives in `views/queue.rs` because its variants are queue-specific |
 | Checkbox Dropdown | `checkbox_dropdown.rs` | Multi-checkbox column-visibility dropdown, generic over `Key` (controlled via `OpenMenu::CheckboxDropdown`) |
 | Info Modal | `info_modal.rs` | Two-column property table for Get Info. `InfoModalItem` enum |
 | Text Input Dialog | `text_input_dialog.rs` | Modal text input or confirmation. Save Queue uses `combo_box` |
@@ -54,7 +54,7 @@ Custom `iced::advanced` seekable widget. `Vec<OverlaySegment>` for scrolling col
 | Artwork Split Handle | `artwork_split_handle.rs` | Draggable separator for artwork-column width |
 | Default Playlist Chip | `default_playlist_chip.rs` | Pin-icon button in the Playlists/Queue header — opens the picker |
 | Default Playlist Picker | `default_playlist_picker.rs` | Modal overlay (font-picker pattern) to pick the default playlist; state lives on `Nokkvi.default_playlist_picker` |
-| Boat | `boat.rs` | Surfing-boat overlay for lines-mode visualizer. CPU-only — reads the shared bar buffer the shader already consumes |
+| Boat | `boat.rs` | Surfing-boat overlay for lines-mode visualizer. CPU-only — reads the shared bar buffer the shader already consumes. Physics is music-driven (cruise scales with spectrum presence, thrust stacks above cruise, anchor doodad drops on silence). Sprite + anchor are themed via `embedded_svg::themed_boat_svg` / `themed_anchor_svg` using the active visualizer `border_color` |
 
 ## 3D Buttons
 

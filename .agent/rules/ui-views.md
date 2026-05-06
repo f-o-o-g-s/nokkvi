@@ -34,9 +34,11 @@ Shared by every slot-list view: search query, scroll position, focus index. Visi
 
 ## Inline Expansion
 
-Generic `ExpansionState<C>` + `SlotListEntry<P, C>`. When active, sort/search may target the expansion — check `expansion.is_expanded()`. Center-entry resolution is centralized in `views/expansion.rs`. Shift+Enter on Artists/Genres collapses the outer expansion.
+Generic `ExpansionState<C>` + `SlotListEntry<P, C>`. When active, sort/search may target the expansion — check `expansion.is_expanded()`. Center-entry resolution is centralized in `views/expansion.rs`. Artists / Genres are uniformly **2-tier** (parent → albums); Shift+Enter on a centered child album row routes through `NavigateAndExpandAlbum` to the Albums view's tracks expansion instead of expanding inline, and the per-row "X songs" link does the same. Plain Enter / body click on a child album row still plays.
 
-**Find-and-expand** (clicking an inline album/artist/genre link): the chain runs through a single `Nokkvi.pending_expand: Option<state::PendingExpand>` (variants `Album { album_id, for_browsing_pane }`, `Artist { ... }`, `Genre { ... }`). Per-view `try_resolve_pending_expand_*` consume it once the target appears in its library buffer; `PendingTopPin` re-pins the highlight after the matching `set_children` lands. `for_browsing_pane = true` routes the final `FocusAndExpand` into the browsing-panel tab instead of the top pane. `PendingExpand::host_view()` drives the cancel-on-navigation check in `handle_switch_view`.
+Expansion children render with a dotted-decimal sub-index column (`{parent_index}.{child_index}`) so users can refer to a specific child slot when the parent index is visible.
+
+**Find-and-expand** (clicking an inline album/artist/genre link): the chain runs through a single `Nokkvi.pending_expand: Option<state::PendingExpand>` (variants `Album`, `Artist`, `Genre`, `Song`, each with `for_browsing_pane: bool`). Per-view `try_resolve_pending_expand_*` consume it once the target appears in its library buffer; `PendingTopPin` re-pins the highlight after the matching `set_children` lands. `for_browsing_pane = true` routes the final `FocusAndExpand` into the browsing-panel tab instead of the top pane. The `Song` variant has no expansion — it powers Songs-view CenterOnPlaying (Shift+C) by paginating forward until the playing track appears and centering on it. `PendingExpand::host_view()` drives the cancel-on-navigation check in `handle_switch_view`.
 
 ## Column Visibility (Albums / Artists / Genres / Playlists / Queue / Songs / Similar)
 
@@ -64,7 +66,7 @@ Toggled via Ctrl+E from Queue. `BrowsingView` enum: `Songs`, `Albums`, `Artists`
 
 ## Queue Sort
 
-Physical sort via `QueueManager::sort_queue()`, persists to redb. `QueueSortMode`: Album, Artist, Title, Duration, Genre, Rating, MostPlayed. Album column visible across all sort modes; stars use responsive hide. Sort signature is cached and `sort_by_cached_key` avoids re-keying when the signature is unchanged.
+Physical sort via `QueueManager::sort_queue()`, persists to redb (deterministic modes only). `QueueSortMode`: Album, Artist, Title, Duration, Genre, Rating, MostPlayed, Random. `Random` is a refresh-style mode — picking it (or toggling the order button while it is active) re-shuffles the queue, and the chosen mode is never written back to `config.toml`. Album column visible across all sort modes; stars use responsive hide. Sort signature is cached and `sort_by_cached_key` avoids re-keying when the signature is unchanged.
 
 ## Queue Shuffle
 

@@ -41,6 +41,7 @@ views/settings/
 | `ToggleSet` | Multi-select badges. ←/→ moves cursor, Enter toggles, ↑/↓ sets on/off |
 | `HexColor` | Direct hex input. `HEX_EDITOR_INPUT_ID` + `FocusHexInput` action for auto-focus |
 | `ColorArray` | Opens a sub-slot-list for gradient editing |
+| `Text` | Free-form string entry (e.g. metadata strip separator) |
 | `Hotkey` | Badge display + key capture mode (Esc cancels, Delete resets, steal-on-conflict) |
 
 ## Key Patterns
@@ -50,10 +51,11 @@ views/settings/
   - `ConfigKey::Theme` / `ThemeArrayEntry` → active theme file
   - The dispatch handler matches on the variant — never sniff key prefixes
 - **`verbose_config` toggle**: combined persist + TOML rewrite in a single async task to avoid races
-- **Strip visibility toggles** (Metadata Strip section): mirror to the progress-track overlay; `ToggleSetToggle` flips cached entry then emits `WriteGeneralSetting`
+- **Strip visibility toggles** (Metadata Strip section): mirror to the progress-track overlay; `ToggleSetToggle` flips cached entry then emits `WriteGeneralSetting`. `strip_show_labels` toggles the prefix labels and `strip_separator` is a `Text` entry for the field separator
 - **Artwork Column** (Interface tab): mode (`Off` / `OnSplit` / `AlwaysStretched`) + stretch fit + draggable width pct. Width drag persists via `WriteGeneralSetting`
 - **System Tray** (General tab): `show_tray_icon` + `close_to_tray`. Live-toggle starts/stops the StatusNotifierItem subscription without restart
 - **Font picker**: modal overlay sub-slot-list (not drill-down). System fonts via `font-kit`, `LazyLock`-cached
 - **Theme picker**: modal sub-slot-list. Switching rewrites `theme = "name"` in `config.toml` and triggers hot-reload
+- **Default-playlist picker**: opens from the Playback → Playlists settings entry (and the Playlists/Queue header chip). State on `Nokkvi.default_playlist_picker`; persists `default_playlist_id` / `_name` to `config.toml`
 - **Search pitfall**: `SlotListDown` must navigate within `cached_entries` — only `SearchChanged` rebuilds entries
 - **Icons**: `SettingItem` and `SettingsEntry::Header` carry an icon path. SVGs in `assets/icons/` are auto-registered by `build.rs`; unknown paths fall back to `play.svg` with a warn log
