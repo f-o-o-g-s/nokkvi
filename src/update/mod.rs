@@ -726,6 +726,9 @@ impl Nokkvi {
                     crate::View::Radios => Task::done(Message::LoadRadioStations),
                     crate::View::Queue | crate::View::Settings => Task::none(),
                 },
+                HotkeyMessage::StartRoulette => Task::done(Message::Roulette(
+                    crate::app_message::RouletteMessage::Start(self.current_view),
+                )),
             },
 
             // -----------------------------------------------------------------

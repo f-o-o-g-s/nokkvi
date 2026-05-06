@@ -134,6 +134,7 @@ fn action_to_message(action: HotkeyAction) -> Message {
         HotkeyAction::NextSortMode => Message::Hotkey(HotkeyMessage::CycleSortMode(true)),
         HotkeyAction::ToggleSortOrder => Message::SlotList(SlotListMessage::ToggleSortOrder),
         HotkeyAction::RefreshView => Message::Hotkey(HotkeyMessage::RefreshView),
+        HotkeyAction::Roulette => Message::Hotkey(HotkeyMessage::StartRoulette),
         // Settings edit
         HotkeyAction::EditUp => Message::Hotkey(HotkeyMessage::EditValue(true)),
         HotkeyAction::EditDown => Message::Hotkey(HotkeyMessage::EditValue(false)),

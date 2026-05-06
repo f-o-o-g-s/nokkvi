@@ -185,6 +185,10 @@ pub enum HotkeyMessage {
     EditValue(bool),
     /// Refresh data for the current active view (except Queue/Settings)
     RefreshView,
+    /// Start a Roulette spin on the current pane's view (Ctrl+R).
+    /// Resolves the target view at dispatch time, then forwards to
+    /// `RouletteMessage::Start`. Settings is a natural no-op (zero items).
+    StartRoulette,
 }
 
 /// Discriminant for genre vs playlist collage artwork pipelines
