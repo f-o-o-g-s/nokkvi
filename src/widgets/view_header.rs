@@ -69,7 +69,7 @@ pub(crate) fn view_header<
             container(
                 pick_list(Some(current_view), view_options, |v: &V| v.to_string())
                     .on_select(on_view_selected)
-                    .width(Length::Fixed(200.0))
+                    .width(Length::Shrink)
                     .text_size(12.0) // Match QML font size
                     .font(Font {
                         weight: Weight::Medium,
