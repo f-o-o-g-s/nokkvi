@@ -75,6 +75,7 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 
 ## Misc
 
+- **MPRIS multi-instance bus name**: nokkvi suffixes its bus name with `instance{pid}` (per the MPRIS spec) so two running instances don't silently fight over `org.mpris.MediaPlayer2.nokkvi` — without the suffix the loser of the race ends up with no MPRIS at all and nothing logs it. Don't drop the suffix.
 - **CenterOnPlaying (Shift+C)**: call `handle_set_offset()` directly. Dispatching `SlotListMessage::SetOffset` routes through the click-to-highlight path.
 - **Expansion sort state**: when expansion is active, sort/search may target the expansion. Check `expansion.is_expanded()`. Shift+Enter on Artists/Genres collapses the outer expansion.
 - **Pending find-and-expand chain**: at most one `Nokkvi.pending_expand` runs at a time. Starting a new chain (or any user-driven view change matching `PendingExpand::host_view()`) supersedes the previous one. `PendingTopPin` re-pins the highlight after `set_children` lands.

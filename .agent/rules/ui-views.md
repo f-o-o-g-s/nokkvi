@@ -70,6 +70,10 @@ Physical sort via `QueueManager::sort_queue()`, persists to redb. `QueueSortMode
 
 Re-shuffles the order array when a shuffled queue with repeat-playlist wraps back to the start, instead of replaying the same shuffle sequence.
 
+## Roulette (slot-machine random pick)
+
+Available on every slot-list view via the "Roulette" entry in the sort dropdown or the `Roulette` hotkey (default `Ctrl+R`). State on `Nokkvi.roulette: Option<state::RouletteState>` is snapshotted at start so live data churn (page loads, search edits, queue mutations) cannot drift the landing target. Tick handlers in `update/roulette.rs` derive the offset purely from elapsed time via a constant-velocity cruise → ease-out-quad deceleration → keyframe fake-out walk. Cancelled by view change or activating a slot.
+
 ## Update Handler Pattern
 
 Root dispatch in `update/mod.rs`. `ls src/update/` for handler files. The async-bridge helpers `shell_task` / `shell_spawn` are methods on `Nokkvi` (`src/main.rs`). Cross-cutting helpers in `update/components.rs`:
@@ -83,7 +87,7 @@ Root dispatch in `update/mod.rs`. `ls src/update/` for handler files. The async-
 
 ## View Data Refresh
 
-- **Manual**: header Refresh button / hotkeys (F5 / Ctrl+R) → `set_needs_fetch()` on `PagedBuffer`
+- **Manual**: header Refresh button or the `RefreshView` hotkey (default `R`) → `set_needs_fetch()` on `PagedBuffer`
 - **Automatic**: Navidrome SSE → `update/library_refresh.rs` → ID-anchored background reload that preserves scroll position. The `background: true` flag on loaded messages prevents scroll jumps. Suppressed by `suppress_library_refresh_toasts`.
 
 ## Modals
