@@ -1,453 +1,439 @@
-//! `HotkeyAction` — every bindable action and its metadata (display name,
-//! description, category, default binding, TOML key).
+//! `HotkeyAction` — every bindable action.
+//!
+//! All per-variant metadata (display name, description, category, default
+//! binding, TOML storage key) is declared once via the `define_hotkey_actions!`
+//! macro. Adding a hotkey is a single-site edit.
 
 use serde::{Deserialize, Serialize};
 
 use super::{KeyCode, KeyCombo};
 
-/// Every action that can be bound to a hotkey.
-/// Variants are organized by functional category.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum HotkeyAction {
-    // --- Navigation ---
-    SwitchToQueue,
-    SwitchToAlbums,
-    SwitchToArtists,
-    SwitchToSongs,
-    SwitchToGenres,
-    SwitchToPlaylists,
-    SwitchToRadios,
-    SwitchToSettings,
+/// Generates [`HotkeyAction`] and its metadata methods from a single declarative
+/// table. The macro emits:
+///
+/// - the `pub enum HotkeyAction { … }` definition
+/// - `HotkeyAction::ALL` (configurable variants in declaration order)
+/// - `HotkeyAction::RESERVED` (reserved variants — fixed bindings, hidden from
+///   the settings editor)
+/// - `display_name()`, `description()`, `category()`, `default_binding()`,
+///   `to_toml_key()`, `from_toml_key()` — each delegated to per-variant data
+///
+/// Reserved variants always report `"Global"` as their category. Compiler
+/// exhaustiveness on every match arm catches missing variants at build time;
+/// `from_toml_key` returns `None` for unknown strings.
+macro_rules! define_hotkey_actions {
+    (
+        configurable: [
+            $($variant:ident {
+                display: $display:literal,
+                description: $description:literal,
+                category: $category:literal,
+                toml_key: $toml_key:literal,
+                default: $default:expr,
+            }),* $(,)?
+        ],
+        reserved: [
+            $($reserved:ident {
+                display: $r_display:literal,
+                description: $r_description:literal,
+                toml_key: $r_toml_key:literal,
+                default: $r_default:expr,
+            }),* $(,)?
+        ]
+        $(,)?
+    ) => {
+        /// Every action that can be bound to a hotkey.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        pub enum HotkeyAction {
+            $($variant,)*
+            $($reserved,)*
+        }
 
-    // --- Playback ---
-    TogglePlay,
-    ToggleRandom,
-    ToggleRepeat,
-    ToggleConsume,
-    ToggleSoundEffects,
-    CycleVisualization,
-    ToggleEqModal,
-    ToggleCrossfade,
+        impl HotkeyAction {
+            /// All user-configurable variants in display order.
+            pub const ALL: &'static [HotkeyAction] = &[$(HotkeyAction::$variant,)*];
 
-    // --- Slot list navigation ---
-    SlotListUp,
-    SlotListDown,
-    Activate,
-    ExpandCenter,
+            /// Reserved actions that are NOT user-configurable but still need
+            /// bindings for `lookup()` to find them. These are excluded from
+            /// `ALL` so they don't appear in the settings hotkey editor, but
+            /// they must be present in the `HotkeyConfig::bindings` map.
+            pub const RESERVED: &'static [HotkeyAction] = &[$(HotkeyAction::$reserved,)*];
 
-    // --- Browse actions ---
-    ToggleBrowsingPanel,
-    CenterOnPlaying,
-    ToggleStar,
-    AddToQueue,
-    RemoveFromQueue,
-    ClearQueue,
-    FocusSearch,
-    IncreaseRating,
-    DecreaseRating,
-    GetInfo,
-    FindSimilar,
-    FindTopSongs,
+            /// Human-readable name for display in settings UI.
+            pub fn display_name(&self) -> &'static str {
+                match self {
+                    $(HotkeyAction::$variant => $display,)*
+                    $(HotkeyAction::$reserved => $r_display,)*
+                }
+            }
 
-    // --- Queue reorder ---
-    MoveTrackUp,
-    MoveTrackDown,
+            /// Brief description of what this action does (shown as subtext in settings).
+            pub fn description(&self) -> &'static str {
+                match self {
+                    $(HotkeyAction::$variant => $description,)*
+                    $(HotkeyAction::$reserved => $r_description,)*
+                }
+            }
 
-    // --- Queue actions ---
-    SaveQueueAsPlaylist,
+            /// Category label for grouping in the settings slot list.
+            /// Reserved actions always report `"Global"`.
+            pub fn category(&self) -> &'static str {
+                match self {
+                    $(HotkeyAction::$variant => $category,)*
+                    $(HotkeyAction::$reserved => "Global",)*
+                }
+            }
 
-    // --- Sort & view ---
-    PrevSortMode,
-    NextSortMode,
-    ToggleSortOrder,
-    RefreshView,
-    Roulette,
+            /// Default key binding for this action.
+            pub fn default_binding(&self) -> KeyCombo {
+                match self {
+                    $(HotkeyAction::$variant => $default,)*
+                    $(HotkeyAction::$reserved => $r_default,)*
+                }
+            }
 
-    // --- Settings edit (vertical) ---
-    EditUp,
-    EditDown,
+            /// Convert to a snake_case TOML key string.
+            pub fn to_toml_key(self) -> &'static str {
+                match self {
+                    $(HotkeyAction::$variant => $toml_key,)*
+                    $(HotkeyAction::$reserved => $r_toml_key,)*
+                }
+            }
 
-    // --- Global ---
-    Escape,
-    ResetToDefault,
+            /// Parse from a snake_case TOML key string. Returns None for unknown keys.
+            pub fn from_toml_key(s: &str) -> Option<HotkeyAction> {
+                Some(match s {
+                    $($toml_key => HotkeyAction::$variant,)*
+                    $($r_toml_key => HotkeyAction::$reserved,)*
+                    _ => return None,
+                })
+            }
+        }
+    };
 }
 
-impl HotkeyAction {
-    /// All variants in display order.
-    pub const ALL: &'static [HotkeyAction] = &[
-        // Navigation
-        HotkeyAction::SwitchToQueue,
-        HotkeyAction::SwitchToAlbums,
-        HotkeyAction::SwitchToArtists,
-        HotkeyAction::SwitchToSongs,
-        HotkeyAction::SwitchToGenres,
-        HotkeyAction::SwitchToPlaylists,
-        HotkeyAction::SwitchToRadios,
-        HotkeyAction::SwitchToSettings,
-        // Playback
-        HotkeyAction::TogglePlay,
-        HotkeyAction::ToggleRandom,
-        HotkeyAction::ToggleRepeat,
-        HotkeyAction::ToggleConsume,
-        HotkeyAction::ToggleSoundEffects,
-        HotkeyAction::CycleVisualization,
-        HotkeyAction::ToggleEqModal,
-        HotkeyAction::ToggleCrossfade,
-        // Slot List
-        HotkeyAction::SlotListUp,
-        HotkeyAction::SlotListDown,
-        HotkeyAction::Activate,
-        HotkeyAction::ExpandCenter,
-        // Browse
-        HotkeyAction::ToggleBrowsingPanel,
-        HotkeyAction::CenterOnPlaying,
-        HotkeyAction::ToggleStar,
-        HotkeyAction::AddToQueue,
-        HotkeyAction::RemoveFromQueue,
-        HotkeyAction::ClearQueue,
-        HotkeyAction::FocusSearch,
-        HotkeyAction::IncreaseRating,
-        HotkeyAction::DecreaseRating,
-        HotkeyAction::GetInfo,
-        HotkeyAction::FindSimilar,
-        HotkeyAction::FindTopSongs,
-        // Queue reorder
-        HotkeyAction::MoveTrackUp,
-        HotkeyAction::MoveTrackDown,
-        // Queue actions
-        HotkeyAction::SaveQueueAsPlaylist,
-        // Sort & view
-        HotkeyAction::PrevSortMode,
-        HotkeyAction::NextSortMode,
-        HotkeyAction::ToggleSortOrder,
-        HotkeyAction::RefreshView,
-        HotkeyAction::Roulette,
-        // Settings edit
-        HotkeyAction::EditUp,
-        HotkeyAction::EditDown,
-        // Escape and Delete excluded — reserved, not configurable
-    ];
+define_hotkey_actions! {
+    configurable: [
+        // --- Views ---
+        SwitchToQueue {
+            display: "Queue",
+            description: "Switch to the queue view",
+            category: "Views",
+            toml_key: "switch_to_queue",
+            default: KeyCombo::key(KeyCode::Char('1')),
+        },
+        SwitchToAlbums {
+            display: "Albums",
+            description: "Switch to the albums view",
+            category: "Views",
+            toml_key: "switch_to_albums",
+            default: KeyCombo::key(KeyCode::Char('2')),
+        },
+        SwitchToArtists {
+            display: "Artists",
+            description: "Switch to the artists view",
+            category: "Views",
+            toml_key: "switch_to_artists",
+            default: KeyCombo::key(KeyCode::Char('3')),
+        },
+        SwitchToSongs {
+            display: "Songs",
+            description: "Switch to the songs view",
+            category: "Views",
+            toml_key: "switch_to_songs",
+            default: KeyCombo::key(KeyCode::Char('4')),
+        },
+        SwitchToGenres {
+            display: "Genres",
+            description: "Switch to the genres view",
+            category: "Views",
+            toml_key: "switch_to_genres",
+            default: KeyCombo::key(KeyCode::Char('5')),
+        },
+        SwitchToPlaylists {
+            display: "Playlists",
+            description: "Switch to the playlists view",
+            category: "Views",
+            toml_key: "switch_to_playlists",
+            default: KeyCombo::key(KeyCode::Char('6')),
+        },
+        SwitchToRadios {
+            display: "Radios",
+            description: "Switch to the internet radios view",
+            category: "Views",
+            toml_key: "switch_to_radios",
+            default: KeyCombo::key(KeyCode::Char('7')),
+        },
+        SwitchToSettings {
+            display: "Settings",
+            description: "Open the settings panel",
+            category: "Views",
+            toml_key: "switch_to_settings",
+            default: KeyCombo::key(KeyCode::Char('`')),
+        },
 
-    /// Reserved actions that are NOT user-configurable but still need bindings
-    /// for `lookup()` to find them. These are excluded from `ALL` so they don't
-    /// appear in the settings hotkey editor, but they must be present in the
-    /// `HotkeyConfig::bindings` map.
-    pub const RESERVED: &'static [HotkeyAction] =
-        &[HotkeyAction::Escape, HotkeyAction::ResetToDefault];
+        // --- Playback ---
+        TogglePlay {
+            display: "Play / Pause",
+            description: "Play or pause the current track",
+            category: "Playback",
+            toml_key: "toggle_play",
+            default: KeyCombo::key(KeyCode::Space),
+        },
+        ToggleRandom {
+            display: "Toggle Random",
+            description: "Toggle random/shuffle mode",
+            category: "Playback",
+            toml_key: "toggle_random",
+            default: KeyCombo::key(KeyCode::Char('x')),
+        },
+        ToggleRepeat {
+            display: "Toggle Repeat",
+            description: "Cycle repeat mode (off → one → queue)",
+            category: "Playback",
+            toml_key: "toggle_repeat",
+            default: KeyCombo::key(KeyCode::Char('z')),
+        },
+        ToggleConsume {
+            display: "Toggle Consume",
+            description: "Toggle consume mode (remove after play)",
+            category: "Playback",
+            toml_key: "toggle_consume",
+            default: KeyCombo::key(KeyCode::Char('c')),
+        },
+        ToggleSoundEffects {
+            display: "Toggle SFX",
+            description: "Enable or disable sound effects",
+            category: "Playback",
+            toml_key: "toggle_sound_effects",
+            default: KeyCombo::key(KeyCode::Char('s')),
+        },
+        CycleVisualization {
+            display: "Cycle Visualizer",
+            description: "Cycle visualizer (off → bars → lines)",
+            category: "Playback",
+            toml_key: "cycle_visualization",
+            default: KeyCombo::key(KeyCode::Char('v')),
+        },
+        ToggleEqModal {
+            display: "Toggle Equalizer",
+            description: "Open or close the 10-band graphic equalizer",
+            category: "Playback",
+            toml_key: "toggle_eq_modal",
+            default: KeyCombo::key(KeyCode::Char('q')),
+        },
+        ToggleCrossfade {
+            display: "Toggle Crossfade",
+            description: "Enable or disable gapless crossfading",
+            category: "Playback",
+            toml_key: "toggle_crossfade",
+            default: KeyCombo::key(KeyCode::Char('f')),
+        },
 
-    /// Human-readable name for display in settings UI.
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            HotkeyAction::SwitchToQueue => "Queue",
-            HotkeyAction::SwitchToAlbums => "Albums",
-            HotkeyAction::SwitchToArtists => "Artists",
-            HotkeyAction::SwitchToSongs => "Songs",
-            HotkeyAction::SwitchToGenres => "Genres",
-            HotkeyAction::SwitchToPlaylists => "Playlists",
-            HotkeyAction::SwitchToRadios => "Radios",
-            HotkeyAction::SwitchToSettings => "Settings",
-            HotkeyAction::TogglePlay => "Play / Pause",
-            HotkeyAction::ToggleRandom => "Toggle Random",
-            HotkeyAction::ToggleRepeat => "Toggle Repeat",
-            HotkeyAction::ToggleConsume => "Toggle Consume",
-            HotkeyAction::ToggleSoundEffects => "Toggle SFX",
-            HotkeyAction::CycleVisualization => "Cycle Visualizer",
-            HotkeyAction::ToggleEqModal => "Toggle Equalizer",
-            HotkeyAction::ToggleCrossfade => "Toggle Crossfade",
-            HotkeyAction::SlotListUp => "Slot List Up",
-            HotkeyAction::SlotListDown => "Slot List Down",
-            HotkeyAction::Activate => "Activate / Enter",
-            HotkeyAction::ExpandCenter => "Expand / Collapse",
-            HotkeyAction::ToggleBrowsingPanel => "Library Browser",
-            HotkeyAction::CenterOnPlaying => "Center on Playing",
-            HotkeyAction::ToggleStar => "Toggle Love",
-            HotkeyAction::AddToQueue => "Add to Queue",
-            HotkeyAction::RemoveFromQueue => "Remove from Queue",
-            HotkeyAction::ClearQueue => "Clear Queue",
-            HotkeyAction::FocusSearch => "Search",
-            HotkeyAction::IncreaseRating => "Increase Rating",
-            HotkeyAction::DecreaseRating => "Decrease Rating",
-            HotkeyAction::GetInfo => "Get Info",
-            HotkeyAction::FindSimilar => "Find Similar",
-            HotkeyAction::FindTopSongs => "Top Songs",
-            HotkeyAction::MoveTrackUp => "Move Track Up",
-            HotkeyAction::MoveTrackDown => "Move Track Down",
-            HotkeyAction::SaveQueueAsPlaylist => "Save Queue as Playlist",
-            HotkeyAction::PrevSortMode => "Previous Sort Mode",
-            HotkeyAction::NextSortMode => "Next Sort Mode",
-            HotkeyAction::ToggleSortOrder => "Sort Asc / Desc",
-            HotkeyAction::RefreshView => "Refresh View",
-            HotkeyAction::Roulette => "Roulette",
-            HotkeyAction::EditUp => "Edit Value Up",
-            HotkeyAction::EditDown => "Edit Value Down",
-            HotkeyAction::Escape => "Escape / Back",
-            HotkeyAction::ResetToDefault => "Reset to Default",
-        }
-    }
+        // --- Slot list navigation (category: "Navigation") ---
+        SlotListUp {
+            display: "Slot List Up",
+            description: "Navigate up in the slot list",
+            category: "Navigation",
+            toml_key: "slot_list_up",
+            default: KeyCombo::key(KeyCode::Backspace),
+        },
+        SlotListDown {
+            display: "Slot List Down",
+            description: "Navigate down in the slot list",
+            category: "Navigation",
+            toml_key: "slot_list_down",
+            default: KeyCombo::key(KeyCode::Tab),
+        },
+        Activate {
+            display: "Activate / Enter",
+            description: "Activate the focused item",
+            category: "Navigation",
+            toml_key: "activate",
+            default: KeyCombo::key(KeyCode::Enter),
+        },
+        ExpandCenter {
+            display: "Expand / Collapse",
+            description: "Expand/collapse item. Works in albums/artists/playlists/genres only.",
+            category: "Navigation",
+            toml_key: "expand_center",
+            default: KeyCombo::shift(KeyCode::Enter),
+        },
 
-    /// Brief description of what this action does (shown as subtext in settings).
-    pub fn description(&self) -> &'static str {
-        match self {
-            HotkeyAction::SwitchToQueue => "Switch to the queue view",
-            HotkeyAction::SwitchToAlbums => "Switch to the albums view",
-            HotkeyAction::SwitchToArtists => "Switch to the artists view",
-            HotkeyAction::SwitchToSongs => "Switch to the songs view",
-            HotkeyAction::SwitchToGenres => "Switch to the genres view",
-            HotkeyAction::SwitchToPlaylists => "Switch to the playlists view",
-            HotkeyAction::SwitchToRadios => "Switch to the internet radios view",
-            HotkeyAction::SwitchToSettings => "Open the settings panel",
-            HotkeyAction::TogglePlay => "Play or pause the current track",
-            HotkeyAction::ToggleRandom => "Toggle random/shuffle mode",
-            HotkeyAction::ToggleRepeat => "Cycle repeat mode (off → one → queue)",
-            HotkeyAction::ToggleConsume => "Toggle consume mode (remove after play)",
-            HotkeyAction::ToggleSoundEffects => "Enable or disable sound effects",
-            HotkeyAction::CycleVisualization => "Cycle visualizer (off → bars → lines)",
-            HotkeyAction::ToggleEqModal => "Open or close the 10-band graphic equalizer",
-            HotkeyAction::ToggleCrossfade => "Enable or disable gapless crossfading",
-            HotkeyAction::SlotListUp => "Navigate up in the slot list",
-            HotkeyAction::SlotListDown => "Navigate down in the slot list",
-            HotkeyAction::Activate => "Activate the focused item",
-            HotkeyAction::ExpandCenter => {
-                "Expand/collapse item. Works in albums/artists/playlists/genres only."
-            }
-            HotkeyAction::ToggleBrowsingPanel => "Toggle library browser beside queue",
-            HotkeyAction::CenterOnPlaying => "Scroll to the currently playing track",
-            HotkeyAction::ToggleStar => "Love/unlove · Navidrome star API",
-            HotkeyAction::AddToQueue => "Add focused album/song to the queue",
-            HotkeyAction::RemoveFromQueue => "Remove focused item from the queue",
-            HotkeyAction::ClearQueue => "Clear the entire queue",
-            HotkeyAction::FocusSearch => "Focus the search input field",
-            HotkeyAction::IncreaseRating => "Increase rating by one star",
-            HotkeyAction::DecreaseRating => "Decrease rating by one star",
-            HotkeyAction::GetInfo => "Show info for the focused item",
-            HotkeyAction::FindSimilar => "Find similar songs for the playing track",
-            HotkeyAction::FindTopSongs => "Show top songs for the playing track's artist",
-            HotkeyAction::MoveTrackUp => "Move centered track up in queue",
-            HotkeyAction::MoveTrackDown => "Move centered track down in queue",
-            HotkeyAction::SaveQueueAsPlaylist => "Open save-as-playlist dialog for the queue",
-            HotkeyAction::PrevSortMode => "Cycle sort mode backward",
-            HotkeyAction::NextSortMode => "Cycle sort mode forward",
-            HotkeyAction::ToggleSortOrder => "Toggle ascending/descending sort",
-            HotkeyAction::RefreshView => "Reload current view data from the server",
-            HotkeyAction::Roulette => "Spin the wheel and play a random item from the current view",
-            HotkeyAction::EditUp => "Toggle setting on · enable field",
-            HotkeyAction::EditDown => "Toggle setting off · disable field",
-            HotkeyAction::Escape => "Close overlay, clear search, or go back",
-            HotkeyAction::ResetToDefault => "Reset focused setting to its default value",
-        }
-    }
+        // --- Browse / panel actions (category: "Navigation") ---
+        ToggleBrowsingPanel {
+            display: "Library Browser",
+            description: "Toggle library browser beside queue",
+            category: "Navigation",
+            toml_key: "toggle_browsing_panel",
+            default: KeyCombo::ctrl(KeyCode::Char('e')),
+        },
+        CenterOnPlaying {
+            display: "Center on Playing",
+            description: "Scroll to the currently playing track",
+            category: "Navigation",
+            toml_key: "center_on_playing",
+            default: KeyCombo::shift(KeyCode::Char('c')),
+        },
+        FocusSearch {
+            display: "Search",
+            description: "Focus the search input field",
+            category: "Navigation",
+            toml_key: "focus_search",
+            default: KeyCombo::key(KeyCode::Char('/')),
+        },
 
-    /// Category label for grouping in the settings slot list.
-    pub fn category(&self) -> &'static str {
-        match self {
-            HotkeyAction::SwitchToQueue
-            | HotkeyAction::SwitchToAlbums
-            | HotkeyAction::SwitchToArtists
-            | HotkeyAction::SwitchToSongs
-            | HotkeyAction::SwitchToGenres
-            | HotkeyAction::SwitchToPlaylists
-            | HotkeyAction::SwitchToRadios
-            | HotkeyAction::SwitchToSettings => "Views",
+        // --- Item actions ---
+        ToggleStar {
+            display: "Toggle Love",
+            description: "Love/unlove · Navidrome star API",
+            category: "Item Actions",
+            toml_key: "toggle_star",
+            default: KeyCombo::shift(KeyCode::Char('l')),
+        },
+        AddToQueue {
+            display: "Add to Queue",
+            description: "Add focused album/song to the queue",
+            category: "Item Actions",
+            toml_key: "add_to_queue",
+            default: KeyCombo::shift(KeyCode::Char('a')),
+        },
+        RemoveFromQueue {
+            display: "Remove from Queue",
+            description: "Remove focused item from the queue",
+            category: "Item Actions",
+            toml_key: "remove_from_queue",
+            default: KeyCombo::ctrl(KeyCode::Char('d')),
+        },
+        ClearQueue {
+            display: "Clear Queue",
+            description: "Clear the entire queue",
+            category: "Item Actions",
+            toml_key: "clear_queue",
+            default: KeyCombo::shift(KeyCode::Char('d')),
+        },
+        IncreaseRating {
+            display: "Increase Rating",
+            description: "Increase rating by one star",
+            category: "Item Actions",
+            toml_key: "increase_rating",
+            default: KeyCombo::key(KeyCode::Char('=')),
+        },
+        DecreaseRating {
+            display: "Decrease Rating",
+            description: "Decrease rating by one star",
+            category: "Item Actions",
+            toml_key: "decrease_rating",
+            default: KeyCombo::key(KeyCode::Char('-')),
+        },
+        GetInfo {
+            display: "Get Info",
+            description: "Show info for the focused item",
+            category: "Item Actions",
+            toml_key: "get_info",
+            default: KeyCombo::shift(KeyCode::Char('i')),
+        },
+        FindSimilar {
+            display: "Find Similar",
+            description: "Find similar songs for the playing track",
+            category: "Item Actions",
+            toml_key: "find_similar",
+            default: KeyCombo::shift(KeyCode::Char('s')),
+        },
+        FindTopSongs {
+            display: "Top Songs",
+            description: "Show top songs for the playing track's artist",
+            category: "Item Actions",
+            toml_key: "find_top_songs",
+            default: KeyCombo::shift(KeyCode::Char('t')),
+        },
+        MoveTrackUp {
+            display: "Move Track Up",
+            description: "Move centered track up in queue",
+            category: "Item Actions",
+            toml_key: "move_track_up",
+            default: KeyCombo::shift(KeyCode::ArrowUp),
+        },
+        MoveTrackDown {
+            display: "Move Track Down",
+            description: "Move centered track down in queue",
+            category: "Item Actions",
+            toml_key: "move_track_down",
+            default: KeyCombo::shift(KeyCode::ArrowDown),
+        },
+        SaveQueueAsPlaylist {
+            display: "Save Queue as Playlist",
+            description: "Open save-as-playlist dialog for the queue",
+            category: "Item Actions",
+            toml_key: "save_queue_as_playlist",
+            default: KeyCombo::ctrl(KeyCode::Char('s')),
+        },
 
-            HotkeyAction::TogglePlay
-            | HotkeyAction::ToggleRandom
-            | HotkeyAction::ToggleRepeat
-            | HotkeyAction::ToggleConsume
-            | HotkeyAction::ToggleSoundEffects
-            | HotkeyAction::CycleVisualization
-            | HotkeyAction::ToggleEqModal
-            | HotkeyAction::ToggleCrossfade => "Playback",
+        // --- Sort & view ---
+        PrevSortMode {
+            display: "Previous Sort Mode",
+            description: "Cycle sort mode backward",
+            category: "Sort & View",
+            toml_key: "prev_sort_mode",
+            default: KeyCombo::key(KeyCode::ArrowLeft),
+        },
+        NextSortMode {
+            display: "Next Sort Mode",
+            description: "Cycle sort mode forward",
+            category: "Sort & View",
+            toml_key: "next_sort_mode",
+            default: KeyCombo::key(KeyCode::ArrowRight),
+        },
+        ToggleSortOrder {
+            display: "Sort Asc / Desc",
+            description: "Toggle ascending/descending sort",
+            category: "Sort & View",
+            toml_key: "toggle_sort_order",
+            default: KeyCombo::key(KeyCode::PageUp),
+        },
+        RefreshView {
+            display: "Refresh View",
+            description: "Reload current view data from the server",
+            category: "Sort & View",
+            toml_key: "refresh_view",
+            default: KeyCombo::key(KeyCode::Char('r')),
+        },
+        Roulette {
+            display: "Roulette",
+            description: "Spin the wheel and play a random item from the current view",
+            category: "Sort & View",
+            toml_key: "roulette",
+            default: KeyCombo::ctrl(KeyCode::Char('r')),
+        },
 
-            HotkeyAction::SlotListUp
-            | HotkeyAction::SlotListDown
-            | HotkeyAction::Activate
-            | HotkeyAction::ExpandCenter
-            | HotkeyAction::FocusSearch
-            | HotkeyAction::CenterOnPlaying
-            | HotkeyAction::ToggleBrowsingPanel => "Navigation",
-
-            HotkeyAction::ToggleStar
-            | HotkeyAction::IncreaseRating
-            | HotkeyAction::DecreaseRating
-            | HotkeyAction::GetInfo
-            | HotkeyAction::FindSimilar
-            | HotkeyAction::FindTopSongs
-            | HotkeyAction::AddToQueue
-            | HotkeyAction::RemoveFromQueue
-            | HotkeyAction::ClearQueue
-            | HotkeyAction::MoveTrackUp
-            | HotkeyAction::MoveTrackDown
-            | HotkeyAction::SaveQueueAsPlaylist => "Item Actions",
-
-            HotkeyAction::PrevSortMode
-            | HotkeyAction::NextSortMode
-            | HotkeyAction::ToggleSortOrder
-            | HotkeyAction::RefreshView
-            | HotkeyAction::Roulette => "Sort & View",
-
-            HotkeyAction::EditUp | HotkeyAction::EditDown => "Settings Edit",
-
-            HotkeyAction::Escape | HotkeyAction::ResetToDefault => "Global",
-        }
-    }
-
-    /// Default key binding for this action (matches current hardcoded bindings).
-    pub fn default_binding(&self) -> KeyCombo {
-        match self {
-            // Navigation
-            HotkeyAction::SwitchToQueue => KeyCombo::key(KeyCode::Char('1')),
-            HotkeyAction::SwitchToAlbums => KeyCombo::key(KeyCode::Char('2')),
-            HotkeyAction::SwitchToArtists => KeyCombo::key(KeyCode::Char('3')),
-            HotkeyAction::SwitchToSongs => KeyCombo::key(KeyCode::Char('4')),
-            HotkeyAction::SwitchToGenres => KeyCombo::key(KeyCode::Char('5')),
-            HotkeyAction::SwitchToPlaylists => KeyCombo::key(KeyCode::Char('6')),
-            HotkeyAction::SwitchToRadios => KeyCombo::key(KeyCode::Char('7')),
-            HotkeyAction::SwitchToSettings => KeyCombo::key(KeyCode::Char('`')),
-            // Playback
-            HotkeyAction::TogglePlay => KeyCombo::key(KeyCode::Space),
-            HotkeyAction::ToggleRandom => KeyCombo::key(KeyCode::Char('x')),
-            HotkeyAction::ToggleRepeat => KeyCombo::key(KeyCode::Char('z')),
-            HotkeyAction::ToggleConsume => KeyCombo::key(KeyCode::Char('c')),
-            HotkeyAction::ToggleSoundEffects => KeyCombo::key(KeyCode::Char('s')),
-            HotkeyAction::CycleVisualization => KeyCombo::key(KeyCode::Char('v')),
-            HotkeyAction::ToggleEqModal => KeyCombo::key(KeyCode::Char('q')),
-            HotkeyAction::ToggleCrossfade => KeyCombo::key(KeyCode::Char('f')),
-            // Slot list navigation
-            HotkeyAction::SlotListUp => KeyCombo::key(KeyCode::Backspace),
-            HotkeyAction::SlotListDown => KeyCombo::key(KeyCode::Tab),
-            HotkeyAction::Activate => KeyCombo::key(KeyCode::Enter),
-            HotkeyAction::ExpandCenter => KeyCombo::shift(KeyCode::Enter),
-            // Browse actions
-            HotkeyAction::ToggleBrowsingPanel => KeyCombo::ctrl(KeyCode::Char('e')),
-            HotkeyAction::CenterOnPlaying => KeyCombo::shift(KeyCode::Char('c')),
-            HotkeyAction::ToggleStar => KeyCombo::shift(KeyCode::Char('l')),
-            HotkeyAction::AddToQueue => KeyCombo::shift(KeyCode::Char('a')),
-            HotkeyAction::RemoveFromQueue => KeyCombo::ctrl(KeyCode::Char('d')),
-            HotkeyAction::ClearQueue => KeyCombo::shift(KeyCode::Char('d')),
-            HotkeyAction::FocusSearch => KeyCombo::key(KeyCode::Char('/')),
-            HotkeyAction::IncreaseRating => KeyCombo::key(KeyCode::Char('=')),
-            HotkeyAction::DecreaseRating => KeyCombo::key(KeyCode::Char('-')),
-            HotkeyAction::GetInfo => KeyCombo::shift(KeyCode::Char('i')),
-            HotkeyAction::FindSimilar => KeyCombo::shift(KeyCode::Char('s')),
-            HotkeyAction::FindTopSongs => KeyCombo::shift(KeyCode::Char('t')),
-            // Queue reorder
-            HotkeyAction::MoveTrackUp => KeyCombo::shift(KeyCode::ArrowUp),
-            HotkeyAction::MoveTrackDown => KeyCombo::shift(KeyCode::ArrowDown),
-            // Queue actions
-            HotkeyAction::SaveQueueAsPlaylist => KeyCombo::ctrl(KeyCode::Char('s')),
-            // Sort & view
-            HotkeyAction::PrevSortMode => KeyCombo::key(KeyCode::ArrowLeft),
-            HotkeyAction::NextSortMode => KeyCombo::key(KeyCode::ArrowRight),
-            HotkeyAction::ToggleSortOrder => KeyCombo::key(KeyCode::PageUp),
-            HotkeyAction::RefreshView => KeyCombo::key(KeyCode::Char('r')),
-            HotkeyAction::Roulette => KeyCombo::ctrl(KeyCode::Char('r')),
-            // Settings edit
-            HotkeyAction::EditUp => KeyCombo::key(KeyCode::ArrowUp),
-            HotkeyAction::EditDown => KeyCombo::key(KeyCode::ArrowDown),
-            // Global
-            HotkeyAction::Escape => KeyCombo::key(KeyCode::Escape),
-            HotkeyAction::ResetToDefault => KeyCombo::key(KeyCode::Delete),
-        }
-    }
-
-    /// Convert to a snake_case TOML key string.
-    pub fn to_toml_key(self) -> &'static str {
-        match self {
-            HotkeyAction::SwitchToQueue => "switch_to_queue",
-            HotkeyAction::SwitchToAlbums => "switch_to_albums",
-            HotkeyAction::SwitchToArtists => "switch_to_artists",
-            HotkeyAction::SwitchToSongs => "switch_to_songs",
-            HotkeyAction::SwitchToGenres => "switch_to_genres",
-            HotkeyAction::SwitchToPlaylists => "switch_to_playlists",
-            HotkeyAction::SwitchToRadios => "switch_to_radios",
-            HotkeyAction::SwitchToSettings => "switch_to_settings",
-            HotkeyAction::TogglePlay => "toggle_play",
-            HotkeyAction::ToggleRandom => "toggle_random",
-            HotkeyAction::ToggleRepeat => "toggle_repeat",
-            HotkeyAction::ToggleConsume => "toggle_consume",
-            HotkeyAction::ToggleSoundEffects => "toggle_sound_effects",
-            HotkeyAction::CycleVisualization => "cycle_visualization",
-            HotkeyAction::ToggleEqModal => "toggle_eq_modal",
-            HotkeyAction::ToggleCrossfade => "toggle_crossfade",
-            HotkeyAction::SlotListUp => "slot_list_up",
-            HotkeyAction::SlotListDown => "slot_list_down",
-            HotkeyAction::Activate => "activate",
-            HotkeyAction::ExpandCenter => "expand_center",
-            HotkeyAction::ToggleBrowsingPanel => "toggle_browsing_panel",
-            HotkeyAction::CenterOnPlaying => "center_on_playing",
-            HotkeyAction::ToggleStar => "toggle_star",
-            HotkeyAction::AddToQueue => "add_to_queue",
-            HotkeyAction::RemoveFromQueue => "remove_from_queue",
-            HotkeyAction::ClearQueue => "clear_queue",
-            HotkeyAction::FocusSearch => "focus_search",
-            HotkeyAction::IncreaseRating => "increase_rating",
-            HotkeyAction::DecreaseRating => "decrease_rating",
-            HotkeyAction::GetInfo => "get_info",
-            HotkeyAction::FindSimilar => "find_similar",
-            HotkeyAction::FindTopSongs => "find_top_songs",
-            HotkeyAction::MoveTrackUp => "move_track_up",
-            HotkeyAction::MoveTrackDown => "move_track_down",
-            HotkeyAction::SaveQueueAsPlaylist => "save_queue_as_playlist",
-            HotkeyAction::PrevSortMode => "prev_sort_mode",
-            HotkeyAction::NextSortMode => "next_sort_mode",
-            HotkeyAction::ToggleSortOrder => "toggle_sort_order",
-            HotkeyAction::RefreshView => "refresh_view",
-            HotkeyAction::Roulette => "roulette",
-            HotkeyAction::EditUp => "edit_up",
-            HotkeyAction::EditDown => "edit_down",
-            HotkeyAction::Escape => "escape",
-            HotkeyAction::ResetToDefault => "reset_to_default",
-        }
-    }
-
-    /// Parse from a snake_case TOML key string. Returns None for unknown keys.
-    pub fn from_toml_key(s: &str) -> Option<HotkeyAction> {
-        Some(match s {
-            "switch_to_queue" => HotkeyAction::SwitchToQueue,
-            "switch_to_albums" => HotkeyAction::SwitchToAlbums,
-            "switch_to_artists" => HotkeyAction::SwitchToArtists,
-            "switch_to_songs" => HotkeyAction::SwitchToSongs,
-            "switch_to_genres" => HotkeyAction::SwitchToGenres,
-            "switch_to_playlists" => HotkeyAction::SwitchToPlaylists,
-            "switch_to_radios" => HotkeyAction::SwitchToRadios,
-            "switch_to_settings" => HotkeyAction::SwitchToSettings,
-            "toggle_play" => HotkeyAction::TogglePlay,
-            "toggle_random" => HotkeyAction::ToggleRandom,
-            "toggle_repeat" => HotkeyAction::ToggleRepeat,
-            "toggle_consume" => HotkeyAction::ToggleConsume,
-            "toggle_sound_effects" => HotkeyAction::ToggleSoundEffects,
-            "cycle_visualization" => HotkeyAction::CycleVisualization,
-            "toggle_eq_modal" => HotkeyAction::ToggleEqModal,
-            "toggle_crossfade" => HotkeyAction::ToggleCrossfade,
-            "slot_list_up" => HotkeyAction::SlotListUp,
-            "slot_list_down" => HotkeyAction::SlotListDown,
-            "activate" => HotkeyAction::Activate,
-            "expand_center" => HotkeyAction::ExpandCenter,
-            "toggle_browsing_panel" => HotkeyAction::ToggleBrowsingPanel,
-            "center_on_playing" => HotkeyAction::CenterOnPlaying,
-            "toggle_star" => HotkeyAction::ToggleStar,
-            "add_to_queue" => HotkeyAction::AddToQueue,
-            "remove_from_queue" => HotkeyAction::RemoveFromQueue,
-            "clear_queue" => HotkeyAction::ClearQueue,
-            "focus_search" => HotkeyAction::FocusSearch,
-            "increase_rating" => HotkeyAction::IncreaseRating,
-            "decrease_rating" => HotkeyAction::DecreaseRating,
-            "get_info" => HotkeyAction::GetInfo,
-            "find_similar" => HotkeyAction::FindSimilar,
-            "find_top_songs" => HotkeyAction::FindTopSongs,
-            "move_track_up" => HotkeyAction::MoveTrackUp,
-            "move_track_down" => HotkeyAction::MoveTrackDown,
-            "save_queue_as_playlist" => HotkeyAction::SaveQueueAsPlaylist,
-            "prev_sort_mode" => HotkeyAction::PrevSortMode,
-            "next_sort_mode" => HotkeyAction::NextSortMode,
-            "toggle_sort_order" => HotkeyAction::ToggleSortOrder,
-            "refresh_view" => HotkeyAction::RefreshView,
-            "roulette" => HotkeyAction::Roulette,
-            "edit_up" => HotkeyAction::EditUp,
-            "edit_down" => HotkeyAction::EditDown,
-            "escape" => HotkeyAction::Escape,
-            "reset_to_default" => HotkeyAction::ResetToDefault,
-            _ => return None,
-        })
-    }
+        // --- Settings edit ---
+        EditUp {
+            display: "Edit Value Up",
+            description: "Toggle setting on · enable field",
+            category: "Settings Edit",
+            toml_key: "edit_up",
+            default: KeyCombo::key(KeyCode::ArrowUp),
+        },
+        EditDown {
+            display: "Edit Value Down",
+            description: "Toggle setting off · disable field",
+            category: "Settings Edit",
+            toml_key: "edit_down",
+            default: KeyCombo::key(KeyCode::ArrowDown),
+        },
+    ],
+    reserved: [
+        Escape {
+            display: "Escape / Back",
+            description: "Close overlay, clear search, or go back",
+            toml_key: "escape",
+            default: KeyCombo::key(KeyCode::Escape),
+        },
+        ResetToDefault {
+            display: "Reset to Default",
+            description: "Reset focused setting to its default value",
+            toml_key: "reset_to_default",
+            default: KeyCombo::key(KeyCode::Delete),
+        },
+    ]
 }
