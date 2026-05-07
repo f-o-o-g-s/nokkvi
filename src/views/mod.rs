@@ -280,3 +280,265 @@ pub(crate) const SIMILAR_SEARCH_ID: &str = "similar_search_input";
 
 /// Search input ID for Radios view
 pub(crate) const RADIOS_SEARCH_ID: &str = "radios_search_input";
+
+// ============================================================================
+// define_view_columns! macro — generates a paired `{Name}Column` enum and
+// `{Name}ColumnVisibility` struct (with `Default`, `get`, and `set`) from a
+// single declaration. Eliminates the 4-site drift surface where each view
+// duplicates the variant list across enum / struct / Default / get-match /
+// set-match.
+// ============================================================================
+
+/// Generate a paired `{Name}Column` enum and `{Name}ColumnVisibility` struct
+/// from a single declaration.
+///
+/// Each entry has the form `Variant: field_name = default_value`. The macro
+/// emits the enum variant, the bool struct field, the `Default` impl entry,
+/// and the `get` / `set` match arms in lockstep, so adding or renaming a
+/// column is a one-site edit.
+///
+/// # Usage
+/// ```ignore
+/// define_view_columns! {
+///     GenresColumn => GenresColumnVisibility {
+///         Select: select = false,
+///         Index: index = true,
+///         Thumbnail: thumbnail = true,
+///         AlbumCount: albumcount = true,
+///         SongCount: songcount = true,
+///     }
+/// }
+/// ```
+#[allow(unused_macros)]
+macro_rules! define_view_columns {
+    (
+        $col_enum:ident => $vis_struct:ident {
+            $( $variant:ident : $field:ident = $default:expr ),* $(,)?
+        }
+    ) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum $col_enum {
+            $( $variant ),*
+        }
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub struct $vis_struct {
+            $( pub $field: bool ),*
+        }
+
+        impl Default for $vis_struct {
+            fn default() -> Self {
+                Self { $( $field: $default ),* }
+            }
+        }
+
+        impl $vis_struct {
+            pub fn get(&self, col: $col_enum) -> bool {
+                match col {
+                    $( $col_enum::$variant => self.$field ),*
+                }
+            }
+
+            pub fn set(&mut self, col: $col_enum, value: bool) {
+                match col {
+                    $( $col_enum::$variant => self.$field = value ),*
+                }
+            }
+        }
+    };
+}
+
+#[allow(unused_imports)]
+pub(crate) use define_view_columns;
+
+// ============================================================================
+// impl_has_common_action! macro — implements `HasCommonAction` for a view's
+// Action enum. Bakes in the always-present arms (SearchChanged,
+// SortModeChanged, SortOrderChanged, RefreshViewData, NavigateAndFilter, None,
+// catch-all `_ => ViewSpecific`) and accepts a declarative list of
+// `NavigateAndExpand*` variants the enum carries. Pass `, no_center` to skip
+// the `CenterOnPlaying` arm for views (e.g. Playlists) without that variant.
+// ============================================================================
+
+/// Implement `HasCommonAction` for a view's Action enum.
+///
+/// The always-present arms (SearchChanged, SortModeChanged, SortOrderChanged,
+/// RefreshViewData, NavigateAndFilter, None, plus a catch-all
+/// `_ => ViewSpecific`) are emitted unconditionally. `CenterOnPlaying` is
+/// emitted by default; pass `, no_center` to skip it. The variadic list adds
+/// one match arm per `NavigateAndExpand*` variant the action carries — each
+/// such variant must follow the `Variant(String)` shape and have a matching
+/// variant on `CommonViewAction`.
+///
+/// # Usage
+/// ```ignore
+/// impl_has_common_action!(GenresAction { NavigateAndExpandArtist, NavigateAndExpandAlbum });
+/// impl_has_common_action!(PlaylistsAction, no_center { NavigateAndExpandArtist });
+/// ```
+#[allow(unused_macros)]
+macro_rules! impl_has_common_action {
+    ($action:ident { $( $variant:ident ),* $(,)? }) => {
+        impl $crate::views::HasCommonAction for $action {
+            fn as_common(&self) -> $crate::views::CommonViewAction {
+                match self {
+                    Self::SearchChanged(_) => $crate::views::CommonViewAction::SearchChanged,
+                    Self::SortModeChanged(m) => $crate::views::CommonViewAction::SortModeChanged(*m),
+                    Self::SortOrderChanged(a) => $crate::views::CommonViewAction::SortOrderChanged(*a),
+                    Self::RefreshViewData => $crate::views::CommonViewAction::RefreshViewData,
+                    Self::CenterOnPlaying => $crate::views::CommonViewAction::CenterOnPlaying,
+                    Self::NavigateAndFilter(v, f) => {
+                        $crate::views::CommonViewAction::NavigateAndFilter(*v, f.clone())
+                    }
+                    $( Self::$variant(id) => $crate::views::CommonViewAction::$variant(id.clone()), )*
+                    Self::None => $crate::views::CommonViewAction::None,
+                    _ => $crate::views::CommonViewAction::ViewSpecific,
+                }
+            }
+        }
+    };
+    ($action:ident, no_center { $( $variant:ident ),* $(,)? }) => {
+        impl $crate::views::HasCommonAction for $action {
+            fn as_common(&self) -> $crate::views::CommonViewAction {
+                match self {
+                    Self::SearchChanged(_) => $crate::views::CommonViewAction::SearchChanged,
+                    Self::SortModeChanged(m) => $crate::views::CommonViewAction::SortModeChanged(*m),
+                    Self::SortOrderChanged(a) => $crate::views::CommonViewAction::SortOrderChanged(*a),
+                    Self::RefreshViewData => $crate::views::CommonViewAction::RefreshViewData,
+                    Self::NavigateAndFilter(v, f) => {
+                        $crate::views::CommonViewAction::NavigateAndFilter(*v, f.clone())
+                    }
+                    $( Self::$variant(id) => $crate::views::CommonViewAction::$variant(id.clone()), )*
+                    Self::None => $crate::views::CommonViewAction::None,
+                    _ => $crate::views::CommonViewAction::ViewSpecific,
+                }
+            }
+        }
+    };
+}
+
+#[allow(unused_imports)]
+pub(crate) use impl_has_common_action;
+
+#[cfg(test)]
+#[allow(unreachable_pub, dead_code)]
+mod tests {
+    use super::*;
+
+    define_view_columns! {
+        TestColumn => TestColumnVisibility {
+            Foo: foo = false,
+            Bar: bar = true,
+            BazQux: bazqux = true,
+        }
+    }
+
+    #[test]
+    fn columns_default_matches_declaration() {
+        let v = TestColumnVisibility::default();
+        assert!(!v.foo);
+        assert!(v.bar);
+        assert!(v.bazqux);
+    }
+
+    #[test]
+    fn columns_get_returns_field() {
+        let v = TestColumnVisibility::default();
+        assert!(!v.get(TestColumn::Foo));
+        assert!(v.get(TestColumn::Bar));
+        assert!(v.get(TestColumn::BazQux));
+    }
+
+    #[test]
+    fn columns_set_mutates_field() {
+        let mut v = TestColumnVisibility::default();
+        v.set(TestColumn::Foo, true);
+        assert!(v.foo);
+        v.set(TestColumn::Bar, false);
+        assert!(!v.bar);
+        v.set(TestColumn::BazQux, false);
+        assert!(!v.bazqux);
+    }
+
+    #[derive(Debug, Clone)]
+    enum TestAction {
+        SearchChanged(String),
+        SortModeChanged(crate::widgets::view_header::SortMode),
+        SortOrderChanged(bool),
+        RefreshViewData,
+        CenterOnPlaying,
+        NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
+        NavigateAndExpandArtist(String),
+        ViewSpecificDoNotMatch,
+        None,
+    }
+
+    impl_has_common_action!(TestAction {
+        NavigateAndExpandArtist
+    });
+
+    #[test]
+    fn has_common_action_search_changed_maps() {
+        let a = TestAction::SearchChanged("q".to_string());
+        assert!(matches!(a.as_common(), CommonViewAction::SearchChanged));
+    }
+
+    #[test]
+    fn has_common_action_center_on_playing_maps_when_present() {
+        let a = TestAction::CenterOnPlaying;
+        assert!(matches!(a.as_common(), CommonViewAction::CenterOnPlaying));
+    }
+
+    #[test]
+    fn has_common_action_navigate_and_expand_artist_maps_with_id() {
+        let a = TestAction::NavigateAndExpandArtist("artist-id".to_string());
+        match a.as_common() {
+            CommonViewAction::NavigateAndExpandArtist(id) => assert_eq!(id, "artist-id"),
+            _ => panic!("expected NavigateAndExpandArtist"),
+        }
+    }
+
+    #[test]
+    fn has_common_action_unknown_variant_falls_through_to_view_specific() {
+        let a = TestAction::ViewSpecificDoNotMatch;
+        assert!(matches!(a.as_common(), CommonViewAction::ViewSpecific));
+    }
+
+    #[test]
+    fn has_common_action_none_maps() {
+        let a = TestAction::None;
+        assert!(matches!(a.as_common(), CommonViewAction::None));
+    }
+
+    #[derive(Debug, Clone)]
+    enum TestActionNoCenter {
+        SearchChanged(String),
+        SortModeChanged(crate::widgets::view_header::SortMode),
+        SortOrderChanged(bool),
+        RefreshViewData,
+        NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter),
+        NavigateAndExpandArtist(String),
+        ViewSpecificDoNotMatch,
+        None,
+    }
+
+    impl_has_common_action!(
+        TestActionNoCenter,
+        no_center {
+            NavigateAndExpandArtist
+        }
+    );
+
+    #[test]
+    fn has_common_action_no_center_compiles_and_maps_basics() {
+        let a = TestActionNoCenter::SearchChanged("q".to_string());
+        assert!(matches!(a.as_common(), CommonViewAction::SearchChanged));
+        let b = TestActionNoCenter::None;
+        assert!(matches!(b.as_common(), CommonViewAction::None));
+    }
+
+    #[test]
+    fn has_common_action_no_center_falls_through_for_view_specific() {
+        let a = TestActionNoCenter::ViewSpecificDoNotMatch;
+        assert!(matches!(a.as_common(), CommonViewAction::ViewSpecific));
+    }
+}
