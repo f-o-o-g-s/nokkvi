@@ -1,7 +1,9 @@
 //! MPRIS D-Bus service for Linux desktop media player integration.
 //!
 //! Uses `mpris-server` with the ready-made `Player` API to expose the app
-//! as `org.mpris.MediaPlayer2.nokkvi` on the session bus.
+//! as `org.mpris.MediaPlayer2.nokkvi.instance<pid>` on the session bus.
+//! The per-pid suffix follows the MPRIS spec for multi-instance apps and
+//! avoids silent name-claim contention when multiple nokkvi binaries run.
 //!
 //! Since `Player` uses `LocalServer` (not Send), the MPRIS server runs on a
 //! dedicated thread with its own tokio runtime. Communication happens via
@@ -189,8 +191,13 @@ fn run_mpris_thread(
     let local = tokio::task::LocalSet::new();
 
     local.block_on(&rt, async move {
-        // Build the MPRIS player
-        let player = match Player::builder("nokkvi")
+        // Per the MPRIS spec, multi-instance apps must suffix the bus name with a
+        // unique identifier so concurrent launches don't fight over the same
+        // well-known name. zbus's default `RequestName` flags allow a contended
+        // claim to silently land in the queue (`Ok(InQueue)`), which previously
+        // left nokkvi running with no MPRIS visibility on the bus.
+        let bus_suffix = format!("nokkvi.instance{}", std::process::id());
+        let player = match Player::builder(&bus_suffix)
             .identity("Nokkvi")
             .desktop_entry("org.nokkvi.nokkvi")
             .can_play(true)
@@ -209,7 +216,7 @@ fn run_mpris_thread(
             }
         };
 
-        debug!(" MPRIS server started: org.mpris.MediaPlayer2.nokkvi");
+        debug!(" MPRIS server started: org.mpris.MediaPlayer2.{bus_suffix}");
 
         // Set up callbacks for MPRIS method calls
         {
