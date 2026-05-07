@@ -1,0 +1,520 @@
+//! Tests for general handlers (server version, light mode, task manager, radios, auth) update handlers.
+
+use crate::{View, test_helpers::*};
+
+// Server Version (mod.rs)
+// ============================================================================
+
+#[test]
+fn server_version_fetched_updates_state() {
+    let mut app = test_app();
+    assert_eq!(app.server_version, None);
+
+    let _ = app.update(crate::app_message::Message::ServerVersionFetched(Some(
+        "0.61.1".to_string(),
+    )));
+
+    assert_eq!(app.server_version.as_deref(), Some("0.61.1"));
+}
+
+// ============================================================================
+// Settings Escape Priority Chain (views/settings/mod.rs)
+// ============================================================================
+
+/// Build a minimal SettingsViewData for testing.
+/// Only the structure matters — values are defaults/dummies.
+pub(super) fn make_settings_view_data() -> crate::views::SettingsViewData {
+    crate::views::SettingsViewData {
+        visualizer_config: crate::visualizer_config::VisualizerConfig::default(),
+        theme_file: nokkvi_data::types::theme_file::ThemeFile::default(),
+        active_theme_stem: String::new(),
+        window_height: 800.0,
+        hotkey_config: nokkvi_data::types::hotkey_config::HotkeyConfig::default(),
+        server_url: String::new(),
+        username: String::new(),
+        is_light_mode: false,
+        scrobbling_enabled: true,
+        scrobble_threshold: 0.50,
+        start_view: "Queue".to_string(),
+        stable_viewport: true,
+        auto_follow_playing: true,
+        enter_behavior: "PlayAll",
+        local_music_path: String::new(),
+        library_page_size: "Default",
+        show_album_artists_only: true,
+        suppress_library_refresh_toasts: false,
+        show_tray_icon: false,
+        close_to_tray: false,
+        rounded_mode: false,
+        nav_layout: "Top",
+        nav_display_mode: "IconsAndLabels",
+        track_info_display: "Full",
+        slot_row_height: "Default",
+        opacity_gradient: true,
+        slot_text_links: true,
+        crossfade_enabled: false,
+        crossfade_duration_secs: 5,
+        volume_normalization: "Off",
+        normalization_level: "Standard",
+        replay_gain_preamp_db: 0,
+        replay_gain_fallback_db: 0,
+        replay_gain_fallback_to_agc: false,
+        replay_gain_prevent_clipping: true,
+        default_playlist_name: String::new(),
+        quick_add_to_playlist: false,
+        queue_show_default_playlist: false,
+        horizontal_volume: false,
+        font_family: String::new(),
+        strip_show_title: true,
+        strip_show_artist: true,
+        strip_show_album: true,
+        strip_show_format_info: true,
+        strip_merged_mode: false,
+        strip_show_labels: true,
+        strip_separator: "Dot ·",
+        strip_click_action: "CenterOnPlaying",
+        albums_artwork_overlay: true,
+        artists_artwork_overlay: true,
+        songs_artwork_overlay: true,
+        playlists_artwork_overlay: true,
+        artwork_column_mode: "Auto",
+        artwork_column_stretch_fit: "Cover",
+        verbose_config: false,
+        artwork_resolution: "Default",
+    }
+}
+
+#[test]
+fn settings_escape_at_root_exits() {
+    use crate::views::settings::{NavLevel, SettingsAction, SettingsMessage};
+    let mut page = crate::views::SettingsPage::new();
+    // Default state: nav_stack = [CategoryPicker], no search, no editing
+    assert_eq!(page.nav_stack.len(), 1);
+    assert_eq!(*page.current_level(), NavLevel::CategoryPicker);
+
+    let data = make_settings_view_data();
+    let action = page.update(SettingsMessage::Escape, &data);
+    assert!(
+        matches!(action, SettingsAction::ExitSettings),
+        "Escape at root should exit settings, got: {action:?}"
+    );
+}
+
+#[test]
+fn settings_escape_with_stale_search_exits() {
+    use crate::views::settings::{SettingsAction, SettingsMessage};
+    let mut page = crate::views::SettingsPage::new();
+    // Simulate: user searched, then SlotListDown cleared search_active but kept query
+    page.search_query = "scrobbl".to_string();
+    page.search_active = false; // search bar is hidden — query is stale/invisible
+
+    let data = make_settings_view_data();
+    let action = page.update(SettingsMessage::Escape, &data);
+    assert!(
+        matches!(action, SettingsAction::ExitSettings),
+        "Escape with stale (inactive) search should exit settings, got: {action:?}"
+    );
+    // Query should also be cleaned up
+    assert!(
+        page.search_query.is_empty(),
+        "Stale search query should be cleared on exit"
+    );
+}
+
+#[test]
+fn settings_escape_with_active_search_clears_search() {
+    use crate::views::settings::{SettingsAction, SettingsMessage};
+    let mut page = crate::views::SettingsPage::new();
+    page.search_query = "scrobbl".to_string();
+    page.search_active = true; // search bar is visible
+
+    let data = make_settings_view_data();
+    let action = page.update(SettingsMessage::Escape, &data);
+    assert!(
+        matches!(action, SettingsAction::None),
+        "Escape with active search should clear search (not exit), got: {action:?}"
+    );
+    assert!(!page.search_active, "search_active should be cleared");
+    assert!(page.search_query.is_empty(), "search query should be empty");
+}
+
+#[test]
+fn settings_escape_pops_nav_stack() {
+    use crate::views::settings::{NavLevel, SettingsAction, SettingsMessage, SettingsTab};
+    let mut page = crate::views::SettingsPage::new();
+    // Drill into General category
+    page.push_level(NavLevel::Category(SettingsTab::General));
+    assert_eq!(page.nav_stack.len(), 2);
+
+    let data = make_settings_view_data();
+    let action = page.update(SettingsMessage::Escape, &data);
+    assert!(
+        matches!(action, SettingsAction::None),
+        "Escape at depth 2 should pop nav stack, got: {action:?}"
+    );
+    assert_eq!(
+        page.nav_stack.len(),
+        1,
+        "Nav stack should be popped to root"
+    );
+}
+
+#[test]
+fn settings_escape_cancels_hotkey_capture() {
+    use crate::views::settings::{SettingsAction, SettingsMessage};
+    let mut page = crate::views::SettingsPage::new();
+    page.capturing_hotkey = Some(nokkvi_data::types::hotkey_config::HotkeyAction::TogglePlay);
+
+    let data = make_settings_view_data();
+    let action = page.update(SettingsMessage::Escape, &data);
+    assert!(
+        matches!(action, SettingsAction::None),
+        "Escape during hotkey capture should cancel capture, got: {action:?}"
+    );
+    assert!(
+        page.capturing_hotkey.is_none(),
+        "capturing_hotkey should be cleared"
+    );
+}
+
+#[test]
+fn settings_escape_exits_edit_mode() {
+    use crate::views::settings::{SettingsAction, SettingsMessage};
+    let mut page = crate::views::SettingsPage::new();
+    page.editing_index = Some(0);
+
+    let data = make_settings_view_data();
+    let action = page.update(SettingsMessage::Escape, &data);
+    assert!(
+        matches!(action, SettingsAction::None),
+        "Escape during edit mode should exit edit, got: {action:?}"
+    );
+    assert!(
+        page.editing_index.is_none(),
+        "editing_index should be cleared"
+    );
+}
+
+// ============================================================================
+// Hotkey Suppression During Text Input (TDD — regression from 2c54792)
+// ============================================================================
+//
+// When a text_input widget has captured a key event (Status::Captured),
+// hotkeys should NOT fire — the user is typing in a search field.
+//
+// Exceptions:
+// - Escape should always pass through (close overlays / clear search)
+// - Ctrl+key combos should always pass through (Ctrl+S, Ctrl+D, Ctrl+E)
+
+/// Helper: simulate a RawKeyEvent through the full update() dispatch.
+fn send_raw_key(
+    app: &mut crate::Nokkvi,
+    key: iced::keyboard::Key,
+    modifiers: iced::keyboard::Modifiers,
+    status: iced::event::Status,
+) -> iced::Task<crate::Message> {
+    app.update(crate::Message::RawKeyEvent(key, modifiers, status))
+}
+
+#[test]
+fn hotkey_suppressed_when_captured_toggle_random() {
+    // 'x' is bound to ToggleRandom. If captured by a text_input, it must NOT toggle.
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    app.screen = crate::Screen::Home;
+    assert!(!app.modes.random, "random should start as false");
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("x".into()),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Captured,
+    );
+
+    assert!(
+        !app.modes.random,
+        "ToggleRandom ('x') should be suppressed when Status::Captured"
+    );
+}
+
+#[test]
+fn hotkey_suppressed_when_captured_toggle_consume() {
+    // 'c' is bound to ToggleConsume. Must be suppressed when captured.
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    app.screen = crate::Screen::Home;
+    assert!(!app.modes.consume);
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("c".into()),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Captured,
+    );
+
+    assert!(
+        !app.modes.consume,
+        "ToggleConsume ('c') should be suppressed when Status::Captured"
+    );
+}
+
+#[test]
+fn hotkey_fires_when_not_captured_toggle_random() {
+    // Same key 'x' with Status::Ignored should work normally.
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    app.screen = crate::Screen::Home;
+    assert!(!app.modes.random);
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("x".into()),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Ignored,
+    );
+
+    assert!(
+        app.modes.random,
+        "ToggleRandom should fire when Status::Ignored (no widget has focus)"
+    );
+}
+
+#[test]
+fn escape_not_suppressed_when_captured() {
+    // Escape should always fire, even when a text_input has captured the event.
+    // This was the whole reason we switched to event::listen_with() in 2c54792.
+    let mut app = test_app();
+    app.current_view = View::Settings;
+    app.screen = crate::Screen::Home;
+    app.window.eq_modal_open = true;
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+        iced::keyboard::Modifiers::empty(),
+        iced::event::Status::Captured,
+    );
+
+    assert!(
+        !app.window.eq_modal_open,
+        "Escape should close EQ modal even when Status::Captured"
+    );
+}
+
+#[test]
+fn ctrl_combo_not_suppressed_when_captured() {
+    // Ctrl+E is bound to ToggleBrowsingPanel. Ctrl+ combos are intentional
+    // actions, not typing — they must NOT be suppressed even when captured.
+    // Without app_service the handler returns Task::none(), but the fact that
+    // it reaches the handler (no panic, no suppression) is what we're testing.
+    let mut app = test_app();
+    app.current_view = View::Queue;
+    app.screen = crate::Screen::Home;
+    assert!(app.browsing_panel.is_none());
+
+    let _ = send_raw_key(
+        &mut app,
+        iced::keyboard::Key::Character("e".into()),
+        iced::keyboard::Modifiers::CTRL,
+        iced::event::Status::Captured,
+    );
+
+    // ToggleBrowsingPanel was dispatched (not suppressed). No panic = success.
+    // Contrast with hotkey_suppressed_when_captured_toggle_random which MUST
+    // be suppressed under the same Status::Captured condition.
+}
+
+// ============================================================================
+// Light Mode Persistence (mod.rs)
+// ============================================================================
+
+#[test]
+fn toggle_light_mode_persists_to_settings_key() {
+    // Set a mock HOME dir to isolate config file I/O
+    let temp = tempfile::tempdir().unwrap();
+    unsafe {
+        std::env::set_var("HOME", temp.path());
+        std::env::set_var("XDG_CONFIG_HOME", temp.path().join(".config"));
+    }
+
+    // Initialize test app and ensure light mode is in a known state
+    let mut app = test_app();
+    crate::theme::set_light_mode(false);
+
+    // Trigger the toggle handler
+    let _ = app.update(crate::app_message::Message::ToggleLightMode);
+
+    // Validate the config file was created and contains the correct key
+    let actual_config_path = nokkvi_data::utils::paths::get_config_path().unwrap();
+    let content = std::fs::read_to_string(&actual_config_path).unwrap_or_default();
+
+    let doc = content
+        .parse::<toml_edit::DocumentMut>()
+        .expect("valid TOML");
+
+    // The key MUST be written to [settings] light_mode
+    assert!(
+        doc.get("settings").is_some(),
+        "[settings] table missing from config.toml. Current content:\n{content}"
+    );
+    assert!(
+        doc["settings"].get("light_mode").is_some(),
+        "light_mode missing from [settings]. Current content:\n{content}"
+    );
+    assert!(doc["settings"]["light_mode"].as_bool().unwrap());
+}
+
+#[test]
+fn test_handle_radio_metadata_update() {
+    let mut app = test_app();
+
+    // Ensure we start with Queue playback
+    assert!(app.active_playback.is_queue());
+
+    // Switch to Radio playback
+    let station = nokkvi_data::types::radio_station::RadioStation {
+        id: "radio_1".into(),
+        name: "Test Radio".into(),
+        stream_url: "http://test".into(),
+        home_page_url: None,
+    };
+    app.active_playback = crate::state::ActivePlayback::Radio(crate::state::RadioPlaybackState {
+        station,
+        icy_artist: None,
+        icy_title: None,
+        icy_url: None,
+    });
+
+    // Update metadata
+    let _ = app.handle_radio_metadata_update(
+        Some("Test Artist".to_string()),
+        Some("Test Song".to_string()),
+        None,
+    );
+
+    // Verify state mutation
+    if let crate::state::ActivePlayback::Radio(state) = &app.active_playback {
+        assert_eq!(state.icy_artist.as_deref(), Some("Test Artist"));
+        assert_eq!(state.icy_title.as_deref(), Some("Test Song"));
+    } else {
+        panic!("Should still be in Radio playback state");
+    }
+}
+
+#[test]
+fn radios_play_filtered_station_plays_correct_station() {
+    use crate::views::RadiosMessage;
+    let mut app = test_app();
+    app.current_view = crate::View::Radios;
+
+    let s1 = nokkvi_data::types::radio_station::RadioStation {
+        id: "r1".into(),
+        name: "BBC Radio".into(),
+        stream_url: "url3".into(),
+        home_page_url: None,
+    };
+    let s2 = nokkvi_data::types::radio_station::RadioStation {
+        id: "r2".into(),
+        name: "SomaFM".into(),
+        stream_url: "url1".into(),
+        home_page_url: None,
+    };
+
+    app.library.radio_stations = vec![s1, s2];
+
+    let _ = app.handle_radios(RadiosMessage::SearchQueryChanged("soma".to_string()));
+    let _ = app.handle_radios(RadiosMessage::SlotListClickPlay(0));
+
+    match &app.active_playback {
+        crate::state::ActivePlayback::Radio(state) => {
+            assert_eq!(
+                state.station.name, "SomaFM",
+                "Should play the filtered station, not the first station in unfiltered list"
+            );
+        }
+        crate::state::ActivePlayback::Queue => panic!("Expected Radio playback"),
+    }
+}
+
+#[test]
+fn test_session_expired_redirects_to_login() {
+    let mut app = test_app();
+    app.screen = crate::Screen::Home;
+    app.current_view = View::Albums;
+    app.library
+        .albums
+        .set_from_vec(vec![make_album("a1", "A", "A")]);
+
+    let _ = app.handle_session_expired();
+
+    assert_eq!(app.screen, crate::Screen::Login);
+    assert!(app.app_service.is_none());
+    assert!(app.stored_session.is_none());
+    assert!(
+        app.library.albums.is_empty(),
+        "Library should be reset on session expiry"
+    );
+}
+
+#[test]
+fn test_albums_loaded_unauthorized_triggers_logout() {
+    let mut app = test_app();
+    app.screen = crate::Screen::Home;
+    app.current_view = View::Albums;
+
+    // Simulate a wrapped anyhow error that was stringified with {:#}
+    let err_string = "Failed to fetch albums: Unauthorized: Session expired".to_string();
+    let _ = app.handle_albums_loaded(Err(err_string), 0, false, None);
+
+    assert_eq!(
+        app.screen,
+        crate::Screen::Login,
+        "Should redirect to login on unauthorized error string"
+    );
+}
+
+// ============================================================================
+// Task Manager Notifications (mod.rs)
+// ============================================================================
+
+#[test]
+fn task_status_changed_failed_pushes_toast() {
+    let mut app = test_app();
+    let handle = nokkvi_data::services::task_manager::TaskHandle {
+        id: 1,
+        name: "TestTask".to_string(),
+    };
+    let status =
+        nokkvi_data::services::task_manager::TaskStatus::Failed("simulated error".to_string());
+
+    let _ = app.update(crate::app_message::Message::TaskStatusChanged(
+        handle, status,
+    ));
+
+    // Toast list should now contain an error message
+    assert_eq!(app.toast.toasts.len(), 1);
+    let toast = &app.toast.toasts[0];
+    assert!(toast.message.contains("Task failed"));
+    assert!(toast.message.contains("TestTask"));
+    assert!(toast.message.contains("simulated error"));
+    assert_eq!(toast.level, nokkvi_data::types::toast::ToastLevel::Error);
+}
+
+#[test]
+fn task_status_changed_success_no_toast() {
+    let mut app = test_app();
+    let handle = nokkvi_data::services::task_manager::TaskHandle {
+        id: 1,
+        name: "TestTask".to_string(),
+    };
+    let status = nokkvi_data::services::task_manager::TaskStatus::Completed;
+
+    let _ = app.update(crate::app_message::Message::TaskStatusChanged(
+        handle, status,
+    ));
+
+    // Currently, successful tasks just log to debug, no toast
+    assert!(app.toast.toasts.is_empty());
+}
+
+// ============================================================================

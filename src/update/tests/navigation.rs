@@ -1,0 +1,2037 @@
+//! Tests for view switching, focus search, and find-and-expand update handlers.
+
+use crate::{View, test_helpers::*};
+
+// ============================================================================
+// View Switching (navigation.rs)
+// ============================================================================
+
+#[test]
+fn switch_view_updates_current_view() {
+    let mut app = test_app();
+    assert_eq!(app.current_view, View::Queue); // default
+
+    let _ = app.handle_switch_view(View::Albums);
+    assert_eq!(app.current_view, View::Albums);
+
+    let _ = app.handle_switch_view(View::Artists);
+    assert_eq!(app.current_view, View::Artists);
+
+    let _ = app.handle_switch_view(View::Songs);
+    assert_eq!(app.current_view, View::Songs);
+
+    let _ = app.handle_switch_view(View::Genres);
+    assert_eq!(app.current_view, View::Genres);
+
+    let _ = app.handle_switch_view(View::Playlists);
+    assert_eq!(app.current_view, View::Playlists);
+}
+
+// ============================================================================
+// FocusSearch routing with browsing panel open (navigation.rs)
+// ============================================================================
+//
+// When current_view == Settings and the browsing panel is open with browser
+// focus, FocusSearch (/) must route to the Settings search handler — NOT to
+// the browsing panel's active page.
+
+#[test]
+fn focus_search_on_settings_ignores_browsing_panel() {
+    // Setup: Settings view, browsing panel open with browser focus on Songs tab
+    let mut app = test_app();
+    app.current_view = View::Settings;
+    app.screen = crate::Screen::Home;
+    app.browsing_panel = Some(crate::views::BrowsingPanel::new()); // default: Songs tab
+    app.pane_focus = crate::state::PaneFocus::Browser;
+
+    // Pre-condition: songs page search is not focused
+    assert!(
+        !app.songs_page.common.search_input_focused,
+        "songs_page search should start unfocused"
+    );
+
+    // Act: trigger FocusSearch hotkey
+    let _ = app.handle_focus_search();
+
+    // Assert: songs_page must NOT have been touched — we're on Settings
+    assert!(
+        !app.songs_page.common.search_input_focused,
+        "FocusSearch on Settings should NOT focus the browsing panel's search field"
+    );
+}
+
+#[test]
+fn focus_search_on_settings_without_panel_works() {
+    // Baseline: Settings view, no browsing panel — should not panic or
+    // accidentally set any page's search_input_focused.
+    let mut app = test_app();
+    app.current_view = View::Settings;
+    app.screen = crate::Screen::Home;
+
+    let _ = app.handle_focus_search();
+
+    // No ViewPage search should be focused
+    assert!(!app.songs_page.common.search_input_focused);
+    assert!(!app.albums_page.common.search_input_focused);
+    assert!(!app.queue_page.common.search_input_focused);
+}
+
+// ============================================================================
+// Playlist Mutation → Queue Header (update/mod.rs)
+// ============================================================================
+
+#[test]
+fn playlist_created_from_queue_sets_active_playlist_info() {
+    let mut app = test_app();
+    assert!(app.active_playlist_info.is_none());
+
+    let _ = app.update(crate::app_message::Message::PlaylistMutated(
+        crate::app_message::PlaylistMutation::Created(
+            "My Queue Playlist".to_string(),
+            Some("pl-123".to_string()),
+        ),
+    ));
+
+    let info = app
+        .active_playlist_info
+        .as_ref()
+        .expect("active_playlist_info should be set after Created with ID");
+    assert_eq!(info.id, "pl-123", "playlist ID should match");
+    assert_eq!(info.name, "My Queue Playlist", "playlist name should match");
+    assert_eq!(
+        info.comment, "",
+        "comment should be empty for new playlists"
+    );
+}
+
+#[test]
+fn playlist_overwritten_from_queue_sets_active_playlist_info() {
+    let mut app = test_app();
+    assert!(app.active_playlist_info.is_none());
+
+    let _ = app.update(crate::app_message::Message::PlaylistMutated(
+        crate::app_message::PlaylistMutation::Overwritten(
+            "Overwritten Playlist".to_string(),
+            Some("pl-456".to_string()),
+        ),
+    ));
+
+    let info = app
+        .active_playlist_info
+        .as_ref()
+        .expect("active_playlist_info should be set after Overwritten with ID");
+    assert_eq!(info.id, "pl-456");
+    assert_eq!(info.name, "Overwritten Playlist");
+}
+
+#[test]
+fn playlist_created_without_id_does_not_set_active_playlist_info() {
+    let mut app = test_app();
+    assert!(app.active_playlist_info.is_none());
+
+    // Created from a non-queue context (e.g. "Add to Playlist" dialog) — no ID
+    let _ = app.update(crate::app_message::Message::PlaylistMutated(
+        crate::app_message::PlaylistMutation::Created("From Songs View".to_string(), None),
+    ));
+
+    assert!(
+        app.active_playlist_info.is_none(),
+        "active_playlist_info should NOT be set when Created has no playlist ID"
+    );
+}
+
+#[test]
+fn playlist_deleted_does_not_set_active_playlist_info() {
+    let mut app = test_app();
+    assert!(app.active_playlist_info.is_none());
+
+    let _ = app.update(crate::app_message::Message::PlaylistMutated(
+        crate::app_message::PlaylistMutation::Deleted("Deleted Playlist".to_string()),
+    ));
+
+    assert!(
+        app.active_playlist_info.is_none(),
+        "active_playlist_info should NOT be set for Delete mutations"
+    );
+}
+
+// ============================================================================
+// Dominant Color State (albums view overlay)
+// ============================================================================
+
+#[test]
+fn dominant_color_calculated_updates_global_snapshot() {
+    let mut app = test_app();
+    assert!(
+        app.artwork.album_dominant_colors_snapshot.is_empty(),
+        "dominant_color snapshot should start empty"
+    );
+
+    // Simulate receiving a calculated dominant color
+    let color = iced::Color::from_rgb(0.5, 0.3, 0.2);
+    let _ = app.update(crate::app_message::Message::Artwork(
+        crate::app_message::ArtworkMessage::DominantColorCalculated("dummy".to_string(), color),
+    ));
+
+    assert!(
+        app.artwork
+            .album_dominant_colors_snapshot
+            .contains_key("dummy"),
+        "dominant_color snapshot should be set after DominantColorCalculated"
+    );
+    let stored = *app
+        .artwork
+        .album_dominant_colors_snapshot
+        .get("dummy")
+        .unwrap();
+    assert!((stored.r - 0.5).abs() < 0.01);
+    assert!((stored.g - 0.3).abs() < 0.01);
+    assert!((stored.b - 0.2).abs() < 0.01);
+}
+
+// ============================================================================
+// Navigate and Search Handlers
+// ============================================================================
+
+#[test]
+fn handle_navigate_and_filter_updates_view_and_defocuses() {
+    let mut app = test_app();
+    app.current_view = View::Queue; // Start at Queue
+    app.artists_page.common.search_input_focused = true;
+
+    let _ = app.handle_navigate_and_filter(
+        View::Artists,
+        nokkvi_data::types::filter::LibraryFilter::ArtistId {
+            id: "The Beatles".to_string(),
+            name: "The Beatles".to_string(),
+        },
+    );
+
+    assert_eq!(app.current_view, View::Artists);
+    // search_input_focused is cleared synchronously; the actual query is set
+    // asynchronously by the batched SearchQueryChanged task.
+    assert!(!app.artists_page.common.search_input_focused);
+}
+
+#[test]
+fn handle_navigate_and_filter_updates_queue_properly() {
+    let mut app = test_app();
+    app.current_view = View::Songs; // Start at Songs
+    app.queue_page.common.search_input_focused = true;
+
+    let _ = app.handle_navigate_and_filter(
+        View::Queue,
+        nokkvi_data::types::filter::LibraryFilter::AlbumId {
+            id: "Master".to_string(),
+            title: "Master".to_string(),
+        },
+    );
+
+    assert_eq!(app.current_view, View::Queue);
+    assert!(!app.queue_page.common.search_input_focused);
+}
+
+#[test]
+fn queue_page_navigate_and_filter_returns_action() {
+    let mut app = test_app();
+    let (_, action) = app.queue_page.update(
+        crate::views::QueueMessage::NavigateAndFilter(
+            View::Albums,
+            nokkvi_data::types::filter::LibraryFilter::AlbumId {
+                id: "Daft Punk".to_string(),
+                title: "Daft Punk".to_string(),
+            },
+        ),
+        &[],
+    );
+    match action {
+        crate::views::QueueAction::NavigateAndFilter(v, f) => {
+            assert_eq!(v, View::Albums);
+            assert!(matches!(
+                f,
+                nokkvi_data::types::filter::LibraryFilter::AlbumId { .. }
+            ));
+        }
+        _ => panic!("Expected NavigateAndFilter action"),
+    }
+}
+
+#[test]
+fn songs_page_navigate_and_filter_returns_action() {
+    let mut app = test_app();
+    let (_, action) = app.songs_page.update(
+        crate::views::SongsMessage::NavigateAndFilter(
+            View::Artists,
+            nokkvi_data::types::filter::LibraryFilter::ArtistId {
+                id: "Pink".to_string(),
+                name: "Pink".to_string(),
+            },
+        ),
+        &[],
+    );
+    match action {
+        crate::views::SongsAction::NavigateAndFilter(v, f) => {
+            assert_eq!(v, View::Artists);
+            assert!(matches!(
+                f,
+                nokkvi_data::types::filter::LibraryFilter::ArtistId { .. }
+            ));
+        }
+        _ => panic!("Expected NavigateAndFilter action"),
+    }
+}
+
+#[test]
+fn albums_page_navigate_and_filter_returns_action() {
+    let mut app = test_app();
+    let (_, action) = app.albums_page.update(
+        crate::views::AlbumsMessage::NavigateAndFilter(
+            View::Songs,
+            nokkvi_data::types::filter::LibraryFilter::AlbumId {
+                id: "Get Lucky".to_string(),
+                title: "Get Lucky".to_string(),
+            },
+        ),
+        0,
+        &[],
+    );
+    match action {
+        crate::views::AlbumsAction::NavigateAndFilter(v, f) => {
+            assert_eq!(v, View::Songs);
+            assert!(matches!(
+                f,
+                nokkvi_data::types::filter::LibraryFilter::AlbumId { .. }
+            ));
+        }
+        _ => panic!("Expected NavigateAndFilter action"),
+    }
+}
+
+// ============================================================================
+// Navigate-and-Expand-Album (album-text click → Albums view + auto-expand)
+// ============================================================================
+
+#[test]
+fn navigate_and_expand_album_clears_search_filter_and_sets_target() {
+    let mut app = test_app();
+    app.current_view = View::Songs;
+    app.albums_page.common.active_filter =
+        Some(nokkvi_data::types::filter::LibraryFilter::AlbumId {
+            id: "old".to_string(),
+            title: "Old Album".to_string(),
+        });
+    app.albums_page.common.search_query = "old".to_string();
+    app.albums_page.common.search_input_focused = true;
+
+    let _ = app.handle_navigate_and_expand_album("a1".to_string());
+
+    assert_eq!(app.current_view, View::Albums);
+    assert!(app.albums_page.common.active_filter.is_none());
+    assert!(app.albums_page.common.search_query.is_empty());
+    assert!(!app.albums_page.common.search_input_focused);
+    assert!(
+        matches!(
+            app.pending_expand,
+            Some(crate::state::PendingExpand::Album { ref album_id, for_browsing_pane: false }) if album_id == "a1"
+        ),
+        "expected pending_expand = Album {{ a1, top-pane }}, got {:?}",
+        app.pending_expand
+    );
+}
+
+#[test]
+fn navigate_and_expand_album_collapses_existing_albums_expansion() {
+    let mut app = test_app();
+    app.current_view = View::Songs;
+    app.albums_page.expansion.expanded_id = Some("other".to_string());
+    app.albums_page.expansion.children = vec![make_song("s1", "Song", "Artist")];
+
+    let _ = app.handle_navigate_and_expand_album("a1".to_string());
+
+    assert!(app.albums_page.expansion.expanded_id.is_none());
+    assert!(app.albums_page.expansion.children.is_empty());
+}
+
+#[test]
+fn browser_pane_navigate_and_expand_album_sets_browsing_flag() {
+    let mut app = test_app();
+
+    let _ = app.handle_browser_pane_navigate_and_expand_album("a1".to_string());
+
+    assert!(
+        matches!(
+            app.pending_expand,
+            Some(crate::state::PendingExpand::Album { ref album_id, for_browsing_pane: true }) if album_id == "a1"
+        ),
+        "expected pending_expand = Album {{ a1, browsing-pane }}, got {:?}",
+        app.pending_expand
+    );
+}
+
+#[test]
+fn pending_expand_album_target_cleared_on_switch_view_away() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
+        album_id: "a1".to_string(),
+        for_browsing_pane: false,
+    });
+
+    let _ = app.handle_switch_view(View::Songs);
+
+    assert!(app.pending_expand.is_none());
+}
+
+#[test]
+fn pending_expand_album_target_persists_on_switch_view_to_albums() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
+        album_id: "a1".to_string(),
+        for_browsing_pane: false,
+    });
+
+    let _ = app.handle_switch_view(View::Albums);
+
+    assert!(
+        app.pending_expand.is_some(),
+        "switching to Albums should not cancel the in-flight find chain"
+    );
+}
+
+#[test]
+fn pending_expand_album_target_cleared_on_navigate_and_filter() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
+        album_id: "a1".to_string(),
+        for_browsing_pane: false,
+    });
+
+    let _ = app.handle_navigate_and_filter(
+        View::Artists,
+        nokkvi_data::types::filter::LibraryFilter::ArtistId {
+            id: "ar1".to_string(),
+            name: "Artist".to_string(),
+        },
+    );
+
+    assert!(app.pending_expand.is_none());
+}
+
+#[test]
+fn try_resolve_pending_expand_finds_loaded_album_and_takes_target() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
+        album_id: "a2".to_string(),
+        for_browsing_pane: false,
+    });
+    app.library.albums.set_from_vec(vec![
+        make_album("a1", "Album One", "Artist"),
+        make_album("a2", "Album Two", "Artist"),
+        make_album("a3", "Album Three", "Artist"),
+    ]);
+
+    let task = app.try_resolve_pending_expand_album();
+
+    assert!(task.is_some(), "found target should produce a task");
+    assert!(
+        app.pending_expand.is_none(),
+        "target should be taken once dispatched"
+    );
+    // For a 3-album library with default slot_count=9 (center_slot=4), the
+    // computed top-placement offset (idx+4 = 5) clamps to total-1 = 2.
+    // Whole list top-packs in render, so the visual position is fine.
+    assert_eq!(
+        app.albums_page.common.slot_list.viewport_offset, 2,
+        "viewport_offset must be set to scroll the target into view"
+    );
+    assert_eq!(
+        app.albums_page.common.slot_list.selected_offset,
+        Some(1),
+        "target must be marked as the highlighted slot via selected_offset"
+    );
+}
+
+#[test]
+fn try_resolve_pending_expand_places_target_at_top_slot() {
+    // Long-library case: target should land at slot 0, not the center.
+    // viewport_offset is the index of the item shown at the center slot
+    // (slot_count/2), so to put the target at slot 0 we set
+    // viewport_offset = target_idx + center_slot. With slot_count=9
+    // (default), center_slot=4, so target_idx=320 → viewport_offset=324.
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
+        album_id: "a320".to_string(),
+        for_browsing_pane: false,
+    });
+    let albums: Vec<_> = (0..1343)
+        .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
+        .collect();
+    app.library.albums.set_from_vec(albums);
+
+    let task = app.try_resolve_pending_expand_album();
+    assert!(task.is_some(), "found target should dispatch a task");
+
+    let center_slot = app.albums_page.common.slot_list.slot_count / 2;
+    assert_eq!(
+        app.albums_page.common.slot_list.viewport_offset,
+        320 + center_slot,
+        "viewport_offset must place the target at slot 0 (top), not at the \
+         center slot — otherwise the user sees ~7 albums above the expansion"
+    );
+    assert_eq!(
+        app.albums_page.common.slot_list.selected_offset,
+        Some(320),
+        "target must keep the highlighted-slot marker even after viewport shift"
+    );
+}
+
+#[test]
+fn try_resolve_pending_expand_clears_when_fully_loaded_and_missing() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
+        album_id: "missing".to_string(),
+        for_browsing_pane: false,
+    });
+    // set_from_vec sets total_count = items.len(), so fully_loaded() is true
+    app.library
+        .albums
+        .set_from_vec(vec![make_album("a1", "Album One", "Artist")]);
+
+    let task = app.try_resolve_pending_expand_album();
+
+    assert!(task.is_some(), "fully-loaded miss should produce a task");
+    assert!(
+        app.pending_expand.is_none(),
+        "target should be cleared when known-not-in-library"
+    );
+}
+
+#[test]
+fn try_resolve_pending_expand_returns_none_when_loading() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
+        album_id: "a2".to_string(),
+        for_browsing_pane: false,
+    });
+    app.library
+        .albums
+        .set_first_page(vec![make_album("a1", "Album One", "Artist")], 100);
+    app.library.albums.set_loading(true);
+
+    let task = app.try_resolve_pending_expand_album();
+
+    assert!(task.is_none(), "should wait while a page is in flight");
+    assert!(
+        app.pending_expand.is_some(),
+        "target preserved while loading"
+    );
+}
+
+#[test]
+fn try_resolve_pending_expand_kicks_next_page_when_idle_and_more_remain() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
+        album_id: "a999".to_string(),
+        for_browsing_pane: false,
+    });
+    // 1 loaded of 100 known total, idle → should request next page
+    app.library
+        .albums
+        .set_first_page(vec![make_album("a1", "Album One", "Artist")], 100);
+
+    let task = app.try_resolve_pending_expand_album();
+
+    assert!(task.is_some(), "should dispatch next-page load");
+    assert!(
+        app.pending_expand.is_some(),
+        "target preserved while still hunting"
+    );
+}
+
+#[test]
+fn try_resolve_pending_expand_bypasses_scroll_edge_gate_when_paging() {
+    // Bug regression: `handle_albums_load_page` has a defensive gate that
+    // bails when `viewport_offset + threshold < loaded` (i.e. the user
+    // isn't near the loaded edge). The find chain leaves viewport_offset
+    // at 0 while paging through the full library, so without bypass the
+    // chain stalls after the first page lands.
+    //
+    // `set_loading(true)` is the proxy: load_albums_internal calls it
+    // BEFORE shell_task, but only AFTER the gate. If the gate bails,
+    // is_loading() stays false. (shell_task itself returns Task::none()
+    // in tests because app_service is None — the gate behavior is what
+    // we're verifying.)
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
+        album_id: "missing".to_string(),
+        for_browsing_pane: false,
+    });
+    // 200 loaded of 1000 total. With page_size=500 the threshold is 100,
+    // so viewport=0 + 100 < loaded=200 — the unfortified gate bails.
+    let albums: Vec<_> = (0..200)
+        .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
+        .collect();
+    app.library.albums.set_first_page(albums, 1000);
+    assert!(!app.library.albums.is_loading(), "precondition: idle");
+
+    let task = app.try_resolve_pending_expand_album();
+    assert!(task.is_some(), "should produce a load task");
+    assert!(
+        app.library.albums.is_loading(),
+        "next-page fetch must actually start (set_loading=true) — \
+         the scroll-edge gate must be bypassed during find-and-expand"
+    );
+}
+
+#[test]
+fn pending_timeout_does_not_toast_when_target_already_resolved() {
+    let mut app = test_app();
+    assert!(app.pending_expand.is_none());
+
+    let _ = app.handle_pending_expand_album_timeout("a1".to_string());
+
+    assert!(
+        app.toast.toasts.is_empty(),
+        "no toast when target already gone"
+    );
+}
+
+#[test]
+fn pending_timeout_does_not_toast_for_stale_album_id() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
+        album_id: "newer".to_string(),
+        for_browsing_pane: false,
+    });
+
+    let _ = app.handle_pending_expand_album_timeout("older".to_string());
+
+    assert!(
+        app.toast.toasts.is_empty(),
+        "stale timeout (different album_id) should not toast"
+    );
+}
+
+#[test]
+fn pending_timeout_toasts_when_target_still_in_flight() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
+        album_id: "a1".to_string(),
+        for_browsing_pane: false,
+    });
+
+    let _ = app.handle_pending_expand_album_timeout("a1".to_string());
+
+    assert_eq!(app.toast.toasts.len(), 1);
+}
+
+#[test]
+fn songs_page_navigate_and_expand_album_returns_action() {
+    let mut app = test_app();
+    let (_, action) = app.songs_page.update(
+        crate::views::SongsMessage::NavigateAndExpandAlbum("a1".to_string()),
+        &[],
+    );
+    assert!(matches!(
+        action,
+        crate::views::SongsAction::NavigateAndExpandAlbum(ref id) if id == "a1"
+    ));
+}
+
+#[test]
+fn queue_page_navigate_and_expand_album_returns_action() {
+    let mut app = test_app();
+    let (_, action) = app.queue_page.update(
+        crate::views::QueueMessage::NavigateAndExpandAlbum("a1".to_string()),
+        &[],
+    );
+    assert!(matches!(
+        action,
+        crate::views::QueueAction::NavigateAndExpandAlbum(ref id) if id == "a1"
+    ));
+}
+
+// ============================================================================
+// Navigate-and-Expand-Artist (mirror of album navigate-and-expand for artists)
+// ============================================================================
+
+#[test]
+fn navigate_and_expand_artist_clears_search_filter_and_sets_target() {
+    let mut app = test_app();
+    app.current_view = View::Songs;
+    app.artists_page.common.active_filter =
+        Some(nokkvi_data::types::filter::LibraryFilter::ArtistId {
+            id: "old".to_string(),
+            name: "Old Artist".to_string(),
+        });
+    app.artists_page.common.search_query = "old".to_string();
+    app.artists_page.common.search_input_focused = true;
+
+    let _ = app.handle_navigate_and_expand_artist("ar1".to_string());
+
+    assert_eq!(app.current_view, View::Artists);
+    assert!(app.artists_page.common.active_filter.is_none());
+    assert!(app.artists_page.common.search_query.is_empty());
+    assert!(!app.artists_page.common.search_input_focused);
+    assert!(
+        matches!(
+            app.pending_expand,
+            Some(crate::state::PendingExpand::Artist { ref artist_id, for_browsing_pane: false }) if artist_id == "ar1"
+        ),
+        "expected pending_expand = Artist {{ ar1, top-pane }}, got {:?}",
+        app.pending_expand
+    );
+}
+
+#[test]
+fn navigate_and_expand_artist_collapses_existing_artists_expansion() {
+    let mut app = test_app();
+    app.current_view = View::Songs;
+    app.artists_page.expansion.expanded_id = Some("other".to_string());
+    app.artists_page.expansion.children = vec![make_album("a1", "Album", "Artist")];
+
+    let _ = app.handle_navigate_and_expand_artist("ar1".to_string());
+
+    assert!(app.artists_page.expansion.expanded_id.is_none());
+    assert!(app.artists_page.expansion.children.is_empty());
+}
+
+#[test]
+fn browser_pane_navigate_and_expand_artist_sets_browsing_flag() {
+    let mut app = test_app();
+
+    let _ = app.handle_browser_pane_navigate_and_expand_artist("ar1".to_string());
+
+    assert!(
+        matches!(
+            app.pending_expand,
+            Some(crate::state::PendingExpand::Artist { ref artist_id, for_browsing_pane: true }) if artist_id == "ar1"
+        ),
+        "expected pending_expand = Artist {{ ar1, browsing-pane }}, got {:?}",
+        app.pending_expand
+    );
+}
+
+#[test]
+fn pending_expand_artist_target_cleared_on_switch_view_away() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
+        artist_id: "ar1".to_string(),
+        for_browsing_pane: false,
+    });
+
+    let _ = app.handle_switch_view(View::Songs);
+
+    assert!(app.pending_expand.is_none());
+}
+
+#[test]
+fn pending_expand_artist_target_persists_on_switch_view_to_artists() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
+        artist_id: "ar1".to_string(),
+        for_browsing_pane: false,
+    });
+
+    let _ = app.handle_switch_view(View::Artists);
+
+    assert!(app.pending_expand.is_some());
+}
+
+#[test]
+fn pending_expand_artist_target_cleared_on_navigate_and_filter() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
+        artist_id: "ar1".to_string(),
+        for_browsing_pane: false,
+    });
+
+    let _ = app.handle_navigate_and_filter(
+        View::Albums,
+        nokkvi_data::types::filter::LibraryFilter::AlbumId {
+            id: "al1".to_string(),
+            title: "Album".to_string(),
+        },
+    );
+
+    assert!(app.pending_expand.is_none());
+}
+
+#[test]
+fn try_resolve_pending_expand_artist_finds_loaded_and_takes_target() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
+        artist_id: "ar2".to_string(),
+        for_browsing_pane: false,
+    });
+    app.library.artists.set_from_vec(vec![
+        make_artist("ar1", "Artist One"),
+        make_artist("ar2", "Artist Two"),
+        make_artist("ar3", "Artist Three"),
+    ]);
+
+    let task = app.try_resolve_pending_expand_artist();
+
+    assert!(task.is_some(), "found target should produce a task");
+    assert!(
+        app.pending_expand.is_none(),
+        "target should be taken once dispatched"
+    );
+    assert_eq!(
+        app.artists_page.common.slot_list.viewport_offset, 2,
+        "viewport_offset must be set so target is visible"
+    );
+    assert_eq!(
+        app.artists_page.common.slot_list.selected_offset,
+        Some(1),
+        "target must keep highlight via selected_offset"
+    );
+}
+
+#[test]
+fn try_resolve_pending_expand_artist_places_target_at_top_slot() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
+        artist_id: "ar320".to_string(),
+        for_browsing_pane: false,
+    });
+    let artists: Vec<_> = (0..1000)
+        .map(|i| make_artist(&format!("ar{i}"), &format!("Artist {i}")))
+        .collect();
+    app.library.artists.set_from_vec(artists);
+
+    let task = app.try_resolve_pending_expand_artist();
+    assert!(task.is_some(), "found target should dispatch a task");
+
+    let center_slot = app.artists_page.common.slot_list.slot_count / 2;
+    assert_eq!(
+        app.artists_page.common.slot_list.viewport_offset,
+        320 + center_slot,
+        "target must land at slot 0 (top), not the center"
+    );
+    assert_eq!(
+        app.artists_page.common.slot_list.selected_offset,
+        Some(320),
+        "highlight must follow target"
+    );
+}
+
+#[test]
+fn try_resolve_pending_expand_artist_clears_when_fully_loaded_and_missing() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
+        artist_id: "missing".to_string(),
+        for_browsing_pane: false,
+    });
+    app.library
+        .artists
+        .set_from_vec(vec![make_artist("ar1", "Artist One")]);
+
+    let task = app.try_resolve_pending_expand_artist();
+
+    assert!(task.is_some(), "fully-loaded miss should produce a task");
+    assert!(
+        app.pending_expand.is_none(),
+        "target should be cleared when known-not-in-library"
+    );
+}
+
+#[test]
+fn try_resolve_pending_expand_artist_returns_none_when_loading() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
+        artist_id: "ar2".to_string(),
+        for_browsing_pane: false,
+    });
+    app.library
+        .artists
+        .set_first_page(vec![make_artist("ar1", "Artist One")], 100);
+    app.library.artists.set_loading(true);
+
+    let task = app.try_resolve_pending_expand_artist();
+
+    assert!(task.is_none(), "should wait while a page is in flight");
+    assert!(app.pending_expand.is_some());
+}
+
+#[test]
+fn try_resolve_pending_expand_artist_kicks_next_page_when_idle() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
+        artist_id: "ar999".to_string(),
+        for_browsing_pane: false,
+    });
+    app.library
+        .artists
+        .set_first_page(vec![make_artist("ar1", "Artist One")], 100);
+
+    let task = app.try_resolve_pending_expand_artist();
+
+    assert!(task.is_some());
+    assert!(app.pending_expand.is_some());
+}
+
+#[test]
+fn try_resolve_pending_expand_artist_bypasses_scroll_edge_gate_when_paging() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
+        artist_id: "missing".to_string(),
+        for_browsing_pane: false,
+    });
+    let artists: Vec<_> = (0..200)
+        .map(|i| make_artist(&format!("ar{i}"), &format!("Artist {i}")))
+        .collect();
+    app.library.artists.set_first_page(artists, 1000);
+    assert!(!app.library.artists.is_loading(), "precondition: idle");
+
+    let task = app.try_resolve_pending_expand_artist();
+    assert!(task.is_some());
+    assert!(
+        app.library.artists.is_loading(),
+        "next-page fetch must actually start — scroll-edge gate must be bypassed"
+    );
+}
+
+#[test]
+fn pending_artist_timeout_does_not_toast_when_target_already_resolved() {
+    let mut app = test_app();
+    let _ = app.handle_pending_expand_artist_timeout("ar1".to_string());
+    assert!(app.toast.toasts.is_empty());
+}
+
+#[test]
+fn pending_artist_timeout_does_not_toast_for_stale_id() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
+        artist_id: "newer".to_string(),
+        for_browsing_pane: false,
+    });
+    let _ = app.handle_pending_expand_artist_timeout("older".to_string());
+    assert!(app.toast.toasts.is_empty());
+}
+
+#[test]
+fn pending_artist_timeout_toasts_when_target_still_in_flight() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
+        artist_id: "ar1".to_string(),
+        for_browsing_pane: false,
+    });
+    let _ = app.handle_pending_expand_artist_timeout("ar1".to_string());
+    assert_eq!(app.toast.toasts.len(), 1);
+}
+
+#[test]
+fn songs_page_navigate_and_expand_artist_returns_action() {
+    let mut app = test_app();
+    let (_, action) = app.songs_page.update(
+        crate::views::SongsMessage::NavigateAndExpandArtist("ar1".to_string()),
+        &[],
+    );
+    assert!(matches!(
+        action,
+        crate::views::SongsAction::NavigateAndExpandArtist(ref id) if id == "ar1"
+    ));
+}
+
+#[test]
+fn queue_page_navigate_and_expand_artist_returns_action() {
+    let mut app = test_app();
+    let (_, action) = app.queue_page.update(
+        crate::views::QueueMessage::NavigateAndExpandArtist("ar1".to_string()),
+        &[],
+    );
+    assert!(matches!(
+        action,
+        crate::views::QueueAction::NavigateAndExpandArtist(ref id) if id == "ar1"
+    ));
+}
+
+#[test]
+fn albums_page_navigate_and_expand_artist_returns_action() {
+    let mut app = test_app();
+    let (_, action) = app.albums_page.update(
+        crate::views::AlbumsMessage::NavigateAndExpandArtist("ar1".to_string()),
+        0,
+        &[],
+    );
+    assert!(matches!(
+        action,
+        crate::views::AlbumsAction::NavigateAndExpandArtist(ref id) if id == "ar1"
+    ));
+}
+
+// ============================================================================
+// Highlight pin (selected_offset stays on the focused item after expansion)
+// ============================================================================
+
+#[test]
+fn try_resolve_album_sets_top_pin_when_target_found() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
+        album_id: "a2".to_string(),
+        for_browsing_pane: false,
+    });
+    app.library.albums.set_from_vec(vec![
+        make_album("a1", "Album One", "Artist"),
+        make_album("a2", "Album Two", "Artist"),
+        make_album("a3", "Album Three", "Artist"),
+    ]);
+
+    let _ = app.try_resolve_pending_expand_album();
+
+    match app.pending_top_pin.as_ref() {
+        Some(crate::state::PendingTopPin::Album(id)) => assert_eq!(id, "a2"),
+        other => panic!("expected pending_top_pin = Album(a2), got {other:?}"),
+    }
+}
+
+#[test]
+fn try_resolve_artist_sets_top_pin_when_target_found() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
+        artist_id: "ar2".to_string(),
+        for_browsing_pane: false,
+    });
+    app.library.artists.set_from_vec(vec![
+        make_artist("ar1", "Artist One"),
+        make_artist("ar2", "Artist Two"),
+        make_artist("ar3", "Artist Three"),
+    ]);
+
+    let _ = app.try_resolve_pending_expand_artist();
+
+    match app.pending_top_pin.as_ref() {
+        Some(crate::state::PendingTopPin::Artist(id)) => assert_eq!(id, "ar2"),
+        other => panic!("expected pending_top_pin = Artist(ar2), got {other:?}"),
+    }
+}
+
+#[test]
+fn tracks_loaded_re_pins_selected_offset_for_album() {
+    let mut app = test_app();
+    app.library.albums.set_from_vec(vec![
+        make_album("a1", "Album One", "Artist"),
+        make_album("a2", "Album Two", "Artist"),
+        make_album("a3", "Album Three", "Artist"),
+    ]);
+    // Simulate the post-find state: highlight on target, pin set.
+    app.albums_page
+        .common
+        .slot_list
+        .set_selected(1, app.library.albums.len());
+    app.pending_top_pin = Some(crate::state::PendingTopPin::Album("a2".to_string()));
+
+    // TracksLoaded fires for the pinned album — set_children inside the
+    // page update clears selected_offset, then the handler should re-pin.
+    let _ = app.handle_albums(crate::views::AlbumsMessage::TracksLoaded(
+        "a2".to_string(),
+        vec![make_song("s1", "Song", "Artist")],
+    ));
+
+    assert_eq!(
+        app.albums_page.common.slot_list.selected_offset,
+        Some(1),
+        "highlight must follow the target album after expansion completes"
+    );
+    assert!(
+        app.pending_top_pin.is_none(),
+        "pin should be consumed once applied"
+    );
+}
+
+#[test]
+fn albums_loaded_re_pins_selected_offset_for_artist() {
+    let mut app = test_app();
+    app.library.artists.set_from_vec(vec![
+        make_artist("ar1", "Artist One"),
+        make_artist("ar2", "Artist Two"),
+        make_artist("ar3", "Artist Three"),
+    ]);
+    app.artists_page
+        .common
+        .slot_list
+        .set_selected(1, app.library.artists.len());
+    app.pending_top_pin = Some(crate::state::PendingTopPin::Artist("ar2".to_string()));
+
+    let _ = app.handle_artists(crate::views::ArtistsMessage::AlbumsLoaded(
+        "ar2".to_string(),
+        vec![make_album("a1", "Album One", "Artist Two")],
+    ));
+
+    assert_eq!(
+        app.artists_page.common.slot_list.selected_offset,
+        Some(1),
+        "highlight must follow the target artist after expansion completes"
+    );
+    assert!(app.pending_top_pin.is_none());
+}
+
+#[test]
+fn tracks_loaded_for_unrelated_album_does_not_re_pin() {
+    // User clicked album a2 → pin = Album(a2). Then user (somehow) triggers
+    // expansion of a different album a3 — the children-load for a3 must
+    // not steal the highlight from a2's pin.
+    let mut app = test_app();
+    app.library.albums.set_from_vec(vec![
+        make_album("a1", "Album One", "Artist"),
+        make_album("a2", "Album Two", "Artist"),
+        make_album("a3", "Album Three", "Artist"),
+    ]);
+    app.pending_top_pin = Some(crate::state::PendingTopPin::Album("a2".to_string()));
+
+    let _ = app.handle_albums(crate::views::AlbumsMessage::TracksLoaded(
+        "a3".to_string(),
+        vec![make_song("s1", "Song", "Artist")],
+    ));
+
+    assert!(
+        matches!(
+            app.pending_top_pin,
+            Some(crate::state::PendingTopPin::Album(ref id)) if id == "a2"
+        ),
+        "pin must not be consumed by an unrelated TracksLoaded"
+    );
+}
+
+#[test]
+fn pending_top_pin_cleared_on_search_in_albums() {
+    let mut app = test_app();
+    app.pending_top_pin = Some(crate::state::PendingTopPin::Album("a1".to_string()));
+
+    let _ = app.handle_albums(crate::views::AlbumsMessage::SearchQueryChanged(
+        "foo".to_string(),
+    ));
+
+    assert!(
+        app.pending_top_pin.is_none(),
+        "user-driven search supersedes the find chain — pin should clear"
+    );
+}
+
+#[test]
+fn pending_top_pin_cleared_on_switch_view_away() {
+    let mut app = test_app();
+    app.pending_top_pin = Some(crate::state::PendingTopPin::Album("a1".to_string()));
+
+    let _ = app.handle_switch_view(View::Songs);
+
+    assert!(app.pending_top_pin.is_none());
+}
+
+#[test]
+fn pending_top_pin_cleared_on_navigate_and_filter() {
+    let mut app = test_app();
+    app.pending_top_pin = Some(crate::state::PendingTopPin::Artist("ar1".to_string()));
+
+    let _ = app.handle_navigate_and_filter(
+        View::Songs,
+        nokkvi_data::types::filter::LibraryFilter::ArtistId {
+            id: "ar1".to_string(),
+            name: "Artist".to_string(),
+        },
+    );
+
+    assert!(app.pending_top_pin.is_none());
+}
+
+// ============================================================================
+// Navigate-and-Expand-Genre (single-shot mirror — genres don't paginate)
+// ============================================================================
+
+#[test]
+fn navigate_and_expand_genre_clears_search_filter_and_sets_target() {
+    let mut app = test_app();
+    app.current_view = View::Songs;
+    app.genres_page.common.active_filter =
+        Some(nokkvi_data::types::filter::LibraryFilter::GenreId {
+            id: "Old".to_string(),
+            name: "Old".to_string(),
+        });
+    app.genres_page.common.search_query = "old".to_string();
+    app.genres_page.common.search_input_focused = true;
+
+    let _ = app.handle_navigate_and_expand_genre("Rock".to_string());
+
+    assert_eq!(app.current_view, View::Genres);
+    assert!(app.genres_page.common.active_filter.is_none());
+    assert!(app.genres_page.common.search_query.is_empty());
+    assert!(!app.genres_page.common.search_input_focused);
+    assert!(
+        matches!(
+            app.pending_expand,
+            Some(crate::state::PendingExpand::Genre { ref genre_id, for_browsing_pane: false }) if genre_id == "Rock"
+        ),
+        "expected pending_expand = Genre {{ Rock, top-pane }}, got {:?}",
+        app.pending_expand
+    );
+}
+
+#[test]
+fn navigate_and_expand_genre_collapses_existing_genres_expansion() {
+    let mut app = test_app();
+    app.genres_page.expansion.expanded_id = Some("other".to_string());
+    app.genres_page.expansion.children = vec![make_album("a1", "Album", "Artist")];
+
+    let _ = app.handle_navigate_and_expand_genre("Rock".to_string());
+
+    assert!(app.genres_page.expansion.expanded_id.is_none());
+    assert!(app.genres_page.expansion.children.is_empty());
+}
+
+#[test]
+fn browser_pane_navigate_and_expand_genre_sets_browsing_flag() {
+    let mut app = test_app();
+
+    let _ = app.handle_browser_pane_navigate_and_expand_genre("Rock".to_string());
+
+    assert!(
+        matches!(
+            app.pending_expand,
+            Some(crate::state::PendingExpand::Genre {
+                for_browsing_pane: true,
+                ..
+            })
+        ),
+        "expected pending_expand = Genre {{ browsing-pane }}, got {:?}",
+        app.pending_expand
+    );
+}
+
+#[test]
+fn pending_expand_genre_target_cleared_on_switch_view_away() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Genre {
+        genre_id: "Rock".to_string(),
+        for_browsing_pane: false,
+    });
+
+    let _ = app.handle_switch_view(View::Songs);
+
+    assert!(app.pending_expand.is_none());
+}
+
+#[test]
+fn pending_expand_genre_target_persists_on_switch_view_to_genres() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Genre {
+        genre_id: "Rock".to_string(),
+        for_browsing_pane: false,
+    });
+
+    let _ = app.handle_switch_view(View::Genres);
+
+    assert!(app.pending_expand.is_some());
+}
+
+#[test]
+fn pending_expand_genre_target_cleared_on_navigate_and_filter() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Genre {
+        genre_id: "Rock".to_string(),
+        for_browsing_pane: false,
+    });
+
+    let _ = app.handle_navigate_and_filter(
+        View::Albums,
+        nokkvi_data::types::filter::LibraryFilter::AlbumId {
+            id: "al1".to_string(),
+            title: "Album".to_string(),
+        },
+    );
+
+    assert!(app.pending_expand.is_none());
+}
+
+#[test]
+fn try_resolve_pending_expand_genre_matches_by_name_not_internal_id() {
+    // Regression: Navidrome's /api/genre returns genres with proper IDs
+    // (UUIDs) that differ from their display names, but the click sites
+    // dispatch the displayed name (`extra_value` / `genre` in the slot).
+    // The lookup must therefore match against `g.name`, not `g.id`, or
+    // every click toasts "Genre not found in library".
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Genre {
+        genre_id: "Black Metal".to_string(), // the displayed name, not an internal id
+        for_browsing_pane: false,
+    });
+    app.library.genres.set_from_vec(vec![
+        make_genre("uuid-rock-123", "Rock"),
+        make_genre("uuid-blackmetal-456", "Black Metal"),
+        make_genre("uuid-ambient-789", "Ambient"),
+    ]);
+
+    let _ = app.try_resolve_pending_expand_genre();
+
+    // Side-effects only on the found-path: viewport scroll + highlight pin.
+    // The pin stores the resolved internal id (the uuid we look up in
+    // library.genres), not the display name we matched on, because that's
+    // what downstream `GenresMessage::AlbumsLoaded(genre_id, _)` will carry.
+    assert!(
+        matches!(
+            app.pending_top_pin,
+            Some(crate::state::PendingTopPin::Genre(ref id)) if id == "uuid-blackmetal-456"
+        ),
+        "found-path must set pending_top_pin to the resolved internal id (got {:?})",
+        app.pending_top_pin
+    );
+    assert!(
+        app.toast.toasts.is_empty(),
+        "found-path must not push the 'Genre not found in library' warn toast"
+    );
+}
+
+#[test]
+fn try_resolve_pending_expand_genre_finds_loaded_and_takes_target() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Genre {
+        genre_id: "Jazz".to_string(),
+        for_browsing_pane: false,
+    });
+    app.library.genres.set_from_vec(vec![
+        make_genre("Rock", "Rock"),
+        make_genre("Jazz", "Jazz"),
+        make_genre("Classical", "Classical"),
+    ]);
+
+    let task = app.try_resolve_pending_expand_genre();
+
+    assert!(task.is_some(), "found target should produce a task");
+    assert!(
+        app.pending_expand.is_none(),
+        "target should be taken once dispatched"
+    );
+    assert_eq!(
+        app.genres_page.common.slot_list.viewport_offset, 2,
+        "viewport_offset must be set so target is visible"
+    );
+    assert_eq!(
+        app.genres_page.common.slot_list.selected_offset,
+        Some(1),
+        "target must keep highlight via selected_offset"
+    );
+    match app.pending_top_pin.as_ref() {
+        Some(crate::state::PendingTopPin::Genre(id)) => assert_eq!(id, "Jazz"),
+        other => panic!("expected pending_top_pin = Genre(Jazz), got {other:?}"),
+    }
+}
+
+#[test]
+fn try_resolve_pending_expand_genre_places_target_at_top_slot() {
+    let mut app = test_app();
+    // Click sites dispatch the display name, not the internal id.
+    app.pending_expand = Some(crate::state::PendingExpand::Genre {
+        genre_id: "Genre 50".to_string(),
+        for_browsing_pane: false,
+    });
+    let genres: Vec<_> = (0..200)
+        .map(|i| make_genre(&format!("uuid-{i}"), &format!("Genre {i}")))
+        .collect();
+    app.library.genres.set_from_vec(genres);
+
+    let task = app.try_resolve_pending_expand_genre();
+    assert!(task.is_some());
+
+    let center_slot = app.genres_page.common.slot_list.slot_count / 2;
+    assert_eq!(
+        app.genres_page.common.slot_list.viewport_offset,
+        50 + center_slot,
+        "target must land at slot 0 (top), not the center"
+    );
+    assert_eq!(
+        app.genres_page.common.slot_list.selected_offset,
+        Some(50),
+        "highlight must follow target"
+    );
+}
+
+#[test]
+fn try_resolve_pending_expand_genre_clears_when_idle_and_missing() {
+    // Genres are single-shot: if not loading and target absent, it really
+    // isn't in the library — no further pages to wait for.
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Genre {
+        genre_id: "Missing".to_string(),
+        for_browsing_pane: false,
+    });
+    app.library
+        .genres
+        .set_from_vec(vec![make_genre("Rock", "Rock")]);
+    assert!(!app.library.genres.is_loading());
+
+    let task = app.try_resolve_pending_expand_genre();
+
+    assert!(task.is_some(), "missing target should produce a task");
+    assert!(
+        app.pending_expand.is_none(),
+        "target should be cleared when known-not-in-library"
+    );
+}
+
+#[test]
+fn try_resolve_pending_expand_genre_returns_none_when_loading() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Genre {
+        genre_id: "Rock".to_string(),
+        for_browsing_pane: false,
+    });
+    app.library.genres.set_loading(true);
+
+    let task = app.try_resolve_pending_expand_genre();
+
+    assert!(task.is_none(), "should wait while load is in flight");
+    assert!(app.pending_expand.is_some());
+}
+
+#[test]
+fn pending_genre_timeout_does_not_toast_when_target_already_resolved() {
+    let mut app = test_app();
+    let _ = app.handle_pending_expand_genre_timeout("Rock".to_string());
+    assert!(app.toast.toasts.is_empty());
+}
+
+#[test]
+fn pending_genre_timeout_toasts_when_target_still_in_flight() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Genre {
+        genre_id: "Rock".to_string(),
+        for_browsing_pane: false,
+    });
+    let _ = app.handle_pending_expand_genre_timeout("Rock".to_string());
+    assert_eq!(app.toast.toasts.len(), 1);
+}
+
+#[test]
+fn songs_page_navigate_and_expand_genre_returns_action() {
+    let mut app = test_app();
+    let (_, action) = app.songs_page.update(
+        crate::views::SongsMessage::NavigateAndExpandGenre("Rock".to_string()),
+        &[],
+    );
+    assert!(matches!(
+        action,
+        crate::views::SongsAction::NavigateAndExpandGenre(ref id) if id == "Rock"
+    ));
+}
+
+#[test]
+fn albums_page_navigate_and_expand_genre_returns_action() {
+    let mut app = test_app();
+    let (_, action) = app.albums_page.update(
+        crate::views::AlbumsMessage::NavigateAndExpandGenre("Rock".to_string()),
+        0,
+        &[],
+    );
+    assert!(matches!(
+        action,
+        crate::views::AlbumsAction::NavigateAndExpandGenre(ref id) if id == "Rock"
+    ));
+}
+
+#[test]
+fn queue_page_navigate_and_expand_genre_returns_action() {
+    let mut app = test_app();
+    let (_, action) = app.queue_page.update(
+        crate::views::QueueMessage::NavigateAndExpandGenre("Rock".to_string()),
+        &[],
+    );
+    assert!(matches!(
+        action,
+        crate::views::QueueAction::NavigateAndExpandGenre(ref id) if id == "Rock"
+    ));
+}
+
+#[test]
+fn albums_loaded_re_pins_selected_offset_for_genre() {
+    let mut app = test_app();
+    app.library.genres.set_from_vec(vec![
+        make_genre("Rock", "Rock"),
+        make_genre("Jazz", "Jazz"),
+        make_genre("Classical", "Classical"),
+    ]);
+    app.genres_page
+        .common
+        .slot_list
+        .set_selected(1, app.library.genres.len());
+    app.pending_top_pin = Some(crate::state::PendingTopPin::Genre("Jazz".to_string()));
+
+    let _ = app.handle_genres(crate::views::GenresMessage::AlbumsLoaded(
+        "Jazz".to_string(),
+        vec![make_album("a1", "Album One", "Artist")],
+    ));
+
+    assert_eq!(
+        app.genres_page.common.slot_list.selected_offset,
+        Some(1),
+        "highlight must follow the target genre after expansion completes"
+    );
+    assert!(app.pending_top_pin.is_none());
+}
+
+// ============================================================================
+// Sort Mode: Most Played (PROMPT 6)
+// ============================================================================
+
+#[test]
+fn albums_sort_mode_most_played_updates_state_and_emits_action() {
+    use crate::widgets::view_header::SortMode;
+    let mut app = test_app();
+
+    let (_, action) = app.albums_page.update(
+        crate::views::AlbumsMessage::SortModeSelected(SortMode::MostPlayed),
+        0,
+        &[],
+    );
+
+    assert_eq!(
+        app.albums_page.common.current_sort_mode,
+        SortMode::MostPlayed
+    );
+    assert!(matches!(
+        action,
+        crate::views::AlbumsAction::SortModeChanged(SortMode::MostPlayed)
+    ));
+}
+
+#[test]
+fn songs_sort_mode_most_played_updates_state_and_emits_action() {
+    use crate::widgets::view_header::SortMode;
+    let mut app = test_app();
+
+    let (_, action) = app.songs_page.update(
+        crate::views::SongsMessage::SortModeSelected(SortMode::MostPlayed),
+        &[],
+    );
+
+    assert_eq!(
+        app.songs_page.common.current_sort_mode,
+        SortMode::MostPlayed
+    );
+    assert!(matches!(
+        action,
+        crate::views::SongsAction::SortModeChanged(SortMode::MostPlayed)
+    ));
+}
+
+#[test]
+fn artists_sort_mode_most_played_updates_state_and_emits_action() {
+    use crate::widgets::view_header::SortMode;
+    let mut app = test_app();
+
+    let (_, action) = app.artists_page.update(
+        crate::views::ArtistsMessage::SortModeSelected(SortMode::MostPlayed),
+        0,
+        &[],
+    );
+
+    assert_eq!(
+        app.artists_page.common.current_sort_mode,
+        SortMode::MostPlayed
+    );
+    assert!(matches!(
+        action,
+        crate::views::ArtistsAction::SortModeChanged(SortMode::MostPlayed)
+    ));
+}
+
+// ============================================================================
+// Genres Context Menu — Child/Grandchild GetInfo + ShowInFolder
+// ============================================================================
+
+#[test]
+fn genres_context_menu_get_info_on_child_album() {
+    let mut app = test_app();
+    let genres = vec![make_genre("g1", "Rock")];
+    app.library.genres.set_from_vec(genres.clone());
+
+    // Expand genre so child album is at index 1
+    let album = make_album("a1", "Album 1", "Artist A");
+    app.genres_page.expansion.expanded_id = Some("g1".to_string());
+    app.genres_page.expansion.parent_offset = 0;
+    app.genres_page.expansion.children = vec![album];
+
+    let (_, action) = app.genres_page.update(
+        crate::views::GenresMessage::ContextMenuAction(
+            1, // child album index
+            crate::widgets::context_menu::LibraryContextEntry::GetInfo,
+        ),
+        genres.len(),
+        &genres,
+    );
+    match action {
+        crate::views::GenresAction::ShowInfo(item) => match *item {
+            nokkvi_data::types::info_modal::InfoModalItem::Album { ref name, .. } => {
+                assert_eq!(name, "Album 1");
+            }
+            _ => panic!("Expected InfoModalItem::Album"),
+        },
+        other => panic!("Expected ShowInfo action, got {other:?}"),
+    }
+}
+
+#[test]
+fn genres_context_menu_show_in_folder_on_child_album() {
+    let mut app = test_app();
+    let genres = vec![make_genre("g1", "Rock")];
+    app.library.genres.set_from_vec(genres.clone());
+
+    let album = make_album("a1", "Album 1", "Artist A");
+    app.genres_page.expansion.expanded_id = Some("g1".to_string());
+    app.genres_page.expansion.parent_offset = 0;
+    app.genres_page.expansion.children = vec![album];
+
+    let (_, action) = app.genres_page.update(
+        crate::views::GenresMessage::ContextMenuAction(
+            1, // child album index
+            crate::widgets::context_menu::LibraryContextEntry::ShowInFolder,
+        ),
+        genres.len(),
+        &genres,
+    );
+    match action {
+        crate::views::GenresAction::ShowAlbumInFolder(album_id) => {
+            assert_eq!(album_id, "a1");
+        }
+        other => panic!("Expected ShowAlbumInFolder action, got {other:?}"),
+    }
+}
+
+// ============================================================================
+// Shift+Enter (ExpandCenter) Collapse Behavior — Artists & Genres (2-tier views)
+// ============================================================================
+//
+// In Albums/Playlists, Shift+Enter on an already-expanded parent row collapses
+// it. Artists/Genres now match: parent rows toggle the outer expansion;
+// centered child album rows route to NavigateAndExpandAlbum (cross-view drill
+// down) instead of opening a 3rd inline tier.
+
+#[test]
+fn artists_shift_enter_on_parent_collapses_outer_expansion() {
+    let mut app = test_app();
+    let artists = vec![make_artist("ar1", "Artist 1")];
+    app.library.artists.set_from_vec(artists.clone());
+
+    // Outer expansion open on ar1; viewport centered on parent (idx 0).
+    let album = make_album("a1", "Album 1", "Artist 1");
+    app.artists_page.expansion.expanded_id = Some("ar1".to_string());
+    app.artists_page.expansion.parent_offset = 0;
+    app.artists_page.expansion.children = vec![album];
+    app.artists_page.common.slot_list.selected_offset = Some(0);
+
+    let (_, _action) = app.artists_page.update(
+        crate::views::ArtistsMessage::ExpandCenter,
+        artists.len(),
+        &artists,
+    );
+
+    assert_eq!(
+        app.artists_page.expansion.expanded_id, None,
+        "outer expansion should be collapsed when ExpandCenter fires on the parent row"
+    );
+}
+
+#[test]
+fn artists_shift_enter_on_child_album_routes_to_navigate_and_expand_album() {
+    let mut app = test_app();
+    let artists = vec![make_artist("ar1", "Artist 1")];
+    app.library.artists.set_from_vec(artists.clone());
+
+    let album = make_album("a1", "Album 1", "Artist 1");
+    app.artists_page.expansion.expanded_id = Some("ar1".to_string());
+    app.artists_page.expansion.parent_offset = 0;
+    app.artists_page.expansion.children = vec![album];
+
+    // Center on the child album row (flat idx 1).
+    app.artists_page.common.slot_list.selected_offset = Some(1);
+
+    let (_, action) = app.artists_page.update(
+        crate::views::ArtistsMessage::ExpandCenter,
+        artists.len(),
+        &artists,
+    );
+
+    match action {
+        crate::views::ArtistsAction::NavigateAndExpandAlbum(id) => assert_eq!(id, "a1"),
+        other => panic!("Expected ArtistsAction::NavigateAndExpandAlbum(\"a1\"), got {other:?}"),
+    }
+    assert_eq!(
+        app.artists_page.expansion.expanded_id.as_deref(),
+        Some("ar1"),
+        "outer expansion should remain open — drill-down is cross-view, not a local mutation"
+    );
+}
+
+#[test]
+fn artists_shift_enter_on_unexpanded_parent_opens_expansion() {
+    let mut app = test_app();
+    let artists = vec![make_artist("ar1", "Artist 1")];
+    app.library.artists.set_from_vec(artists.clone());
+
+    // No expansion. Center on the parent row.
+    app.artists_page.common.slot_list.selected_offset = Some(0);
+
+    let (_, action) = app.artists_page.update(
+        crate::views::ArtistsMessage::ExpandCenter,
+        artists.len(),
+        &artists,
+    );
+
+    match action {
+        crate::views::ArtistsAction::ExpandArtist(id) => assert_eq!(id, "ar1"),
+        other => panic!("Expected ArtistsAction::ExpandArtist(\"ar1\"), got {other:?}"),
+    }
+}
+
+#[test]
+fn genres_shift_enter_on_parent_collapses_outer_expansion() {
+    let mut app = test_app();
+    let genres = vec![make_genre("g1", "Rock")];
+    app.library.genres.set_from_vec(genres.clone());
+
+    let album = make_album("a1", "Album 1", "Artist 1");
+    app.genres_page.expansion.expanded_id = Some("g1".to_string());
+    app.genres_page.expansion.parent_offset = 0;
+    app.genres_page.expansion.children = vec![album];
+    app.genres_page.common.slot_list.selected_offset = Some(0);
+
+    let _ = app.genres_page.update(
+        crate::views::GenresMessage::ExpandCenter,
+        genres.len(),
+        &genres,
+    );
+
+    assert_eq!(
+        app.genres_page.expansion.expanded_id, None,
+        "outer expansion should be collapsed when ExpandCenter fires on the parent row"
+    );
+}
+
+#[test]
+fn genres_shift_enter_on_child_album_routes_to_navigate_and_expand_album() {
+    let mut app = test_app();
+    let genres = vec![make_genre("g1", "Rock")];
+    app.library.genres.set_from_vec(genres.clone());
+
+    let album = make_album("a1", "Album 1", "Artist 1");
+    app.genres_page.expansion.expanded_id = Some("g1".to_string());
+    app.genres_page.expansion.parent_offset = 0;
+    app.genres_page.expansion.children = vec![album];
+
+    app.genres_page.common.slot_list.selected_offset = Some(1);
+
+    let (_, action) = app.genres_page.update(
+        crate::views::GenresMessage::ExpandCenter,
+        genres.len(),
+        &genres,
+    );
+
+    match action {
+        crate::views::GenresAction::NavigateAndExpandAlbum(id) => assert_eq!(id, "a1"),
+        other => panic!("Expected GenresAction::NavigateAndExpandAlbum(\"a1\"), got {other:?}"),
+    }
+    assert_eq!(app.genres_page.expansion.expanded_id.as_deref(), Some("g1"),);
+}
+
+#[test]
+fn genres_shift_enter_on_unexpanded_parent_opens_expansion() {
+    let mut app = test_app();
+    let genres = vec![make_genre("g1", "Rock")];
+    app.library.genres.set_from_vec(genres.clone());
+
+    app.genres_page.common.slot_list.selected_offset = Some(0);
+
+    let (_, action) = app.genres_page.update(
+        crate::views::GenresMessage::ExpandCenter,
+        genres.len(),
+        &genres,
+    );
+
+    match action {
+        crate::views::GenresAction::ExpandGenre(_, id) => assert_eq!(id, "g1"),
+        other => panic!("Expected GenresAction::ExpandGenre(_, \"g1\"), got {other:?}"),
+    }
+}
+
+// ============================================================================
+// Focus and Expand Artwork Fetching Bug (albums.rs / etc)
+// ============================================================================
+
+#[test]
+fn album_focus_and_expand_triggers_large_artwork_load() {
+    let mut app = test_app();
+    app.current_view = View::Albums;
+    app.library
+        .albums
+        .set_from_vec(vec![make_album("a1", "Album", "Artist")]);
+
+    // Act: Focus and expand the first item
+    let _ = app.handle_albums(crate::views::AlbumsMessage::FocusAndExpand(0));
+
+    // Assert: It should schedule loading the large artwork so the background updates
+    assert_eq!(
+        app.artwork.loading_large_artwork.as_deref(),
+        Some("a1"),
+        "LoadLargeArtwork should be dispatched so the new dominant color can be fetched"
+    );
+}
+
+// Only AlbumsPage uses the dominant_color overlay logic which requires LoadLargeArtwork
+// to be triggered when expanding via click.
+
+#[test]
+fn artist_focus_and_expand_triggers_large_artwork_load() {
+    let mut app = test_app();
+    app.current_view = View::Artists;
+    app.library
+        .artists
+        .set_from_vec(vec![make_artist("ar1", "Artist 1")]);
+
+    let _ = app.handle_artists(crate::views::ArtistsMessage::FocusAndExpand(0));
+
+    assert_eq!(
+        app.artwork.loading_large_artwork.as_deref(),
+        Some("ar1"),
+        "FocusAndExpand on an artist should kick off a large-artwork fetch \
+         so the artwork column populates without a scroll round-trip"
+    );
+}
+
+#[test]
+fn genre_focus_and_expand_triggers_collage_load() {
+    let mut app = test_app();
+    app.current_view = View::Genres;
+    app.library
+        .genres
+        .set_from_vec(vec![make_genre("g1", "Rock")]);
+
+    let _ = app.handle_genres(crate::views::GenresMessage::FocusAndExpand(0));
+
+    assert!(
+        app.artwork.genre.pending.contains("g1"),
+        "FocusAndExpand on a genre should mark its collage as pending so the \
+         3x3 artwork column populates without a scroll round-trip"
+    );
+}
+
+// ============================================================================
+// Resume-Session Backfill (navigation.rs)
+// ============================================================================
+
+#[test]
+fn resume_session_backfills_username_from_credential() {
+    use crate::state::StoredSession;
+
+    let mut app = test_app();
+    app.login_page.username = String::new();
+    app.stored_session = Some(StoredSession {
+        server_url: "http://localhost:4533".to_string(),
+        username: String::new(),
+        jwt_token: "fake.jwt.token".to_string(),
+        subsonic_credential: "u=foogs&s=salt&t=token".to_string(),
+    });
+
+    let _ = app.handle_resume_session();
+
+    assert_eq!(
+        app.login_page.username, "foogs",
+        "resume should backfill login_page.username from the credential's u= field \
+         so the next save_credentials closes the loop with a real value"
+    );
+}
+
+#[test]
+fn resume_session_does_not_clobber_when_credential_lacks_u() {
+    use crate::state::StoredSession;
+
+    let mut app = test_app();
+    app.login_page.username = "preexisting".to_string();
+    app.stored_session = Some(StoredSession {
+        server_url: "http://localhost:4533".to_string(),
+        username: "preexisting".to_string(),
+        jwt_token: "fake.jwt.token".to_string(),
+        subsonic_credential: "s=salt&t=token".to_string(),
+    });
+
+    let _ = app.handle_resume_session();
+
+    assert_eq!(
+        app.login_page.username, "preexisting",
+        "a malformed credential without u= should leave login_page.username untouched"
+    );
+}
+
+// ============================================================================
+// CenterOnPlaying (Shift+C) center-only find chain
+// ============================================================================
+
+#[test]
+fn start_center_on_playing_album_chain_clears_search_and_arms_center_only() {
+    let mut app = test_app();
+    app.albums_page.common.search_query = "user typed query".to_string();
+    app.albums_page.common.search_input_focused = true;
+    app.library
+        .albums
+        .set_from_vec(vec![make_album("stale", "Stale", "Artist")]);
+
+    let _ = app.start_center_on_playing_album_chain("a42".to_string());
+
+    assert!(
+        app.albums_page.common.search_query.is_empty(),
+        "Shift+C must clear the active search query rather than overwriting it"
+    );
+    assert!(!app.albums_page.common.search_input_focused);
+    assert!(app.albums_page.common.active_filter.is_none());
+    assert!(
+        app.library.albums.is_empty(),
+        "buffer must be reset so pagination restarts from offset 0"
+    );
+    assert!(
+        matches!(
+            app.pending_expand,
+            Some(crate::state::PendingExpand::Album { ref album_id, for_browsing_pane: false })
+                if album_id == "a42"
+        ),
+        "expected PendingExpand::Album {{ a42, top-pane }}, got {:?}",
+        app.pending_expand
+    );
+    assert!(
+        app.pending_expand_center_only,
+        "Shift+C chain must arm center-only mode so try_resolve skips FocusAndExpand"
+    );
+}
+
+#[test]
+fn start_center_on_playing_song_chain_installs_song_target() {
+    let mut app = test_app();
+    app.songs_page.common.search_query = "filter".to_string();
+
+    let _ = app.start_center_on_playing_song_chain("s99".to_string());
+
+    assert!(app.songs_page.common.search_query.is_empty());
+    assert!(
+        matches!(
+            app.pending_expand,
+            Some(crate::state::PendingExpand::Song { ref song_id, for_browsing_pane: false })
+                if song_id == "s99"
+        ),
+        "expected PendingExpand::Song {{ s99 }}, got {:?}",
+        app.pending_expand
+    );
+    assert!(app.pending_expand_center_only);
+}
+
+#[test]
+fn try_resolve_pending_expand_album_center_only_centers_without_top_pin() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
+        album_id: "a320".to_string(),
+        for_browsing_pane: false,
+    });
+    app.pending_expand_center_only = true;
+    let albums: Vec<_> = (0..1343)
+        .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
+        .collect();
+    app.library.albums.set_from_vec(albums);
+
+    let task = app.try_resolve_pending_expand_album();
+    assert!(task.is_some());
+
+    assert_eq!(
+        app.albums_page.common.slot_list.viewport_offset, 320,
+        "center-only mode must place viewport_offset = idx (NOT idx+center_slot) \
+         so the target appears at the center slot, not slot 0"
+    );
+    assert_eq!(app.albums_page.common.slot_list.selected_offset, Some(320));
+    assert!(
+        app.pending_top_pin.is_none(),
+        "center-only mode must NOT set pending_top_pin — there's no FocusAndExpand \
+         re-render to survive, and a stray pin would interfere with later clicks"
+    );
+    assert!(
+        !app.pending_expand_center_only,
+        "flag must be cleared once the target resolves so the next chain starts clean"
+    );
+}
+
+#[test]
+fn try_resolve_pending_expand_song_centers_target() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Song {
+        song_id: "s50".to_string(),
+        for_browsing_pane: false,
+    });
+    app.pending_expand_center_only = true;
+    let songs: Vec<_> = (0..200)
+        .map(|i| make_song(&format!("s{i}"), &format!("Song {i}"), "Artist"))
+        .collect();
+    app.library.songs.set_from_vec(songs);
+
+    let task = app.try_resolve_pending_expand_song();
+    assert!(task.is_some(), "found song should produce a task");
+
+    assert!(app.pending_expand.is_none());
+    assert!(!app.pending_expand_center_only);
+    assert_eq!(
+        app.songs_page.common.slot_list.viewport_offset, 50,
+        "song must land at the center slot"
+    );
+    assert_eq!(app.songs_page.common.slot_list.selected_offset, Some(50));
+}
+
+#[test]
+fn try_resolve_pending_expand_song_force_loads_when_idle_and_more_remain() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Song {
+        song_id: "s999".to_string(),
+        for_browsing_pane: false,
+    });
+    app.pending_expand_center_only = true;
+    // 1 loaded of 100 known total, idle → should request next page
+    app.library
+        .songs
+        .set_first_page(vec![make_song("s1", "Song One", "Artist")], 100);
+
+    let task = app.try_resolve_pending_expand_song();
+
+    assert!(task.is_some(), "idle + more pages should kick a force-load");
+    assert!(
+        app.pending_expand.is_some(),
+        "target must persist across the force-load — the next page-loaded handler will retry"
+    );
+    assert!(app.pending_expand_center_only);
+}
+
+#[test]
+fn try_resolve_pending_expand_song_clears_when_fully_loaded_and_missing() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Song {
+        song_id: "missing".to_string(),
+        for_browsing_pane: false,
+    });
+    app.pending_expand_center_only = true;
+    app.library
+        .songs
+        .set_from_vec(vec![make_song("s1", "Song One", "Artist")]);
+
+    let task = app.try_resolve_pending_expand_song();
+
+    assert!(task.is_some());
+    assert!(app.pending_expand.is_none());
+    assert!(!app.pending_expand_center_only);
+}
+
+#[test]
+fn cancel_pending_expand_also_clears_center_only_flag() {
+    let mut app = test_app();
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
+        album_id: "a1".to_string(),
+        for_browsing_pane: false,
+    });
+    app.pending_expand_center_only = true;
+
+    app.cancel_pending_expand();
+
+    assert!(app.pending_expand.is_none());
+    assert!(!app.pending_expand_center_only);
+}
+
+// ============================================================================
