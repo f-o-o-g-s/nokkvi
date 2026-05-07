@@ -14,6 +14,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Nokkvi now reliably registers as an MPRIS player on the user's session bus after launch — previously, if another nokkvi process was alive at startup (a second build under test, or an instance kicked to the login screen by Navidrome's session lock that the user hadn't closed yet), the newly launched instance silently got queued for the bus name and stayed invisible to `playerctl`, KDE Connect, GNOME media keys, and other MPRIS clients. The bus name now includes the process ID (`org.mpris.MediaPlayer2.nokkvi.instance<pid>`) per the MPRIS spec; `playerctl -p nokkvi` still matches via prefix, so existing keybinds are unaffected.
+
 ### Removed
 
 ## v0.3.13 — 2026-05-05
