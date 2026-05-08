@@ -173,4 +173,21 @@ impl Nokkvi {
 
         Task::batch(vec![submit_task, now_playing_task])
     }
+
+    /// Dispatch a `ScrobbleMessage` to its handler.
+    pub(super) fn dispatch_scrobble(&mut self, msg: ScrobbleMessage) -> Task<Message> {
+        match msg {
+            ScrobbleMessage::NowPlaying(timer_id, song_id) => {
+                self.handle_scrobble_now_playing(timer_id, song_id)
+            }
+            ScrobbleMessage::Submit(song_id) => self.handle_scrobble_submit(song_id),
+            ScrobbleMessage::SubmissionResult(result) => {
+                self.handle_scrobble_submission_result(result)
+            }
+            ScrobbleMessage::NowPlayingResult(result) => {
+                self.handle_scrobble_now_playing_result(result)
+            }
+            ScrobbleMessage::TrackLooped(song_id) => self.handle_scrobble_track_looped(song_id),
+        }
+    }
 }

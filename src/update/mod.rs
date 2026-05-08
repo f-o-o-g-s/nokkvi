@@ -70,7 +70,7 @@ use tracing::debug;
 
 use crate::{
     Nokkvi, View,
-    app_message::{Message, PlaybackMessage, ScrobbleMessage},
+    app_message::{Message, PlaybackMessage},
 };
 
 impl Nokkvi {
@@ -356,19 +356,7 @@ impl Nokkvi {
             // -----------------------------------------------------------------
             // Scrobbling (namespaced)
             // -----------------------------------------------------------------
-            Message::Scrobble(msg) => match msg {
-                ScrobbleMessage::NowPlaying(timer_id, song_id) => {
-                    self.handle_scrobble_now_playing(timer_id, song_id)
-                }
-                ScrobbleMessage::Submit(song_id) => self.handle_scrobble_submit(song_id),
-                ScrobbleMessage::SubmissionResult(result) => {
-                    self.handle_scrobble_submission_result(result)
-                }
-                ScrobbleMessage::NowPlayingResult(result) => {
-                    self.handle_scrobble_now_playing_result(result)
-                }
-                ScrobbleMessage::TrackLooped(song_id) => self.handle_scrobble_track_looped(song_id),
-            },
+            Message::Scrobble(msg) => self.dispatch_scrobble(msg),
 
             // -----------------------------------------------------------------
             // Hotkey Actions (namespaced)
