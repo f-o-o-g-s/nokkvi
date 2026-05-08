@@ -1016,22 +1016,8 @@ fn apply_toml_settings_to_internal(
     p.local_music_path = ts.local_music_path.clone();
     p.light_mode = ts.light_mode;
     p.rounded_mode = ts.rounded_mode;
-    p.nav_layout = ts.nav_layout;
-    p.nav_display_mode = ts.nav_display_mode;
-    p.track_info_display = ts.track_info_display;
-    p.slot_row_height = ts.slot_row_height;
     p.opacity_gradient = ts.opacity_gradient;
-    p.slot_text_links = ts.slot_text_links;
-    p.horizontal_volume = ts.horizontal_volume;
     p.font_family = ts.font_family.clone();
-    p.strip_show_title = ts.strip_show_title;
-    p.strip_show_artist = ts.strip_show_artist;
-    p.strip_show_album = ts.strip_show_album;
-    p.strip_show_format_info = ts.strip_show_format_info;
-    p.strip_merged_mode = ts.strip_merged_mode;
-    p.strip_click_action = ts.strip_click_action;
-    p.strip_show_labels = ts.strip_show_labels;
-    p.strip_separator = ts.strip_separator;
     p.crossfade_enabled = ts.crossfade_enabled;
     p.crossfade_duration_secs = ts.crossfade_duration_secs;
     p.volume_normalization = ts.volume_normalization;
@@ -1101,12 +1087,6 @@ fn apply_toml_settings_to_internal(
     p.similar_show_duration = ts.similar_show_duration;
     p.similar_show_love = ts.similar_show_love;
     p.similar_show_select = ts.similar_show_select;
-    p.albums_artwork_overlay = ts.albums_artwork_overlay;
-    p.artists_artwork_overlay = ts.artists_artwork_overlay;
-    p.songs_artwork_overlay = ts.songs_artwork_overlay;
-    p.playlists_artwork_overlay = ts.playlists_artwork_overlay;
-    p.artwork_column_mode = ts.artwork_column_mode;
-    p.artwork_column_stretch_fit = ts.artwork_column_stretch_fit;
     p.artwork_column_width_pct = ts.artwork_column_width_pct;
 }
 
