@@ -163,8 +163,6 @@ pub enum QueueMessage {
     EditPlaylist,      // Enter edit mode for the currently-playing playlist
     QuickSavePlaylist, // Save current queue back to the active playlist without entering edit mode
 
-    // Data loading (moved from root Message enum)
-    QueueLoaded(Result<Vec<QueueSongUIViewData>, String>), // queue_songs
     /// Refresh artwork for a specific album (album_id)
     RefreshArtwork(String),
     /// Navigate to a view and apply an ID filter

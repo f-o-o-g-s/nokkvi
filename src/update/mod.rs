@@ -201,11 +201,12 @@ impl Nokkvi {
             Message::LoadAlbums => self.handle_load_albums(false, None),
             // -----------------------------------------------------------------
             // Data Loading: Queue
+            //
+            // Note: the loader-result variant has migrated to
+            // `Message::QueueLoader(QueueLoaderMessage::Loaded(...))`,
+            // routed in the "Loader Results" block below.
             // -----------------------------------------------------------------
             Message::LoadQueue => self.handle_load_queue(),
-            Message::Queue(crate::views::QueueMessage::QueueLoaded(result)) => {
-                self.handle_queue_loaded(result)
-            }
             Message::ProgressiveQueueAppendPage {
                 sort_mode,
                 sort_order,

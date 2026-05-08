@@ -23,7 +23,7 @@ impl Nokkvi {
                     Err(e) => Err(e.to_string()),
                 }
             },
-            |result| Message::Queue(views::QueueMessage::QueueLoaded(result)),
+            |result| Message::QueueLoader(crate::app_message::QueueLoaderMessage::Loaded(result)),
         )
     }
 
@@ -809,7 +809,7 @@ impl Nokkvi {
                 Ok::<_, anyhow::Error>(shell.queue().get_songs())
             },
             |result| {
-                Message::Queue(views::QueueMessage::QueueLoaded(
+                Message::QueueLoader(crate::app_message::QueueLoaderMessage::Loaded(
                     result.map_err(|e| e.to_string()),
                 ))
             },
@@ -874,28 +874,18 @@ impl Nokkvi {
         Task::none()
     }
 
-    /// Phase 1 scaffolding stub for `Message::QueueLoader(...)`.
-    ///
-    /// Wired in `update/mod.rs` so the per-domain `*LoaderMessage` enums
-    /// compile end-to-end alongside the Genres prototype. Currently
-    /// unreachable: no fire site constructs `Message::QueueLoader(...)` —
-    /// the existing `Message::Queue(QueueMessage::QueueLoaded(..))` path is
-    /// still live.
-    ///
-    /// Phase 2 implementer for Queue: replace the body to route
-    /// `QueueLoaderMessage::Loaded(..)` → `handle_queue_loaded(...)`,
-    /// then update the fire sites in this file (lines ~26 and ~812) and
-    /// remove the per-view loader special-case in `update/mod.rs` plus the
-    /// dead variant in `views/queue/mod.rs` and `views/queue/update.rs`.
-    /// See the Genres migration for the exact pattern.
+    /// Routes `Message::QueueLoader(...)` arrivals to the existing
+    /// `handle_queue_loaded` handler. Queue is single-shot (the queue *is*
+    /// the entire dataset, not paged), so there's only one variant — but
+    /// keeping the dispatcher's match shape mirrors the paged domains' and
+    /// keeps the per-domain template uniform.
     pub(crate) fn dispatch_queue_loader(
         &mut self,
-        _msg: crate::app_message::QueueLoaderMessage,
+        msg: crate::app_message::QueueLoaderMessage,
     ) -> Task<Message> {
-        panic!(
-            "Phase 2 (Queue): dispatch_queue_loader is a Phase 1 scaffolding \
-             stub — wire QueueLoaderMessage::Loaded to handle_queue_loaded \
-             before constructing Message::QueueLoader(...)"
-        )
+        use crate::app_message::QueueLoaderMessage;
+        match msg {
+            QueueLoaderMessage::Loaded(result) => self.handle_queue_loaded(result),
+        }
     }
 }

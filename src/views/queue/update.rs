@@ -108,8 +108,6 @@ impl QueuePage {
                 )
             }
 
-            // Data loading messages (handled at root level, no action needed here)
-            QueueMessage::QueueLoaded(_) => (Task::none(), QueueAction::None),
             // Routed up to root in `handle_queue` before this match runs;
             // arm exists only for exhaustiveness.
             QueueMessage::SetOpenMenu(_) => (Task::none(), QueueAction::None),
