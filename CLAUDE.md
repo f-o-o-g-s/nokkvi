@@ -156,6 +156,8 @@ For the full set of rules and patterns, see `.agent/rules/` (loaded contextually
 
 Workflows in `.agent/workflows/` (`build-test.md`, `commit.md`, `new-view.md`, `package.md`, `sync-rules.md`) document concrete procedures.
 
+`.agent/audit-progress.md` tracks completion status of the 2026-05-07 audit (`~/nokkvi-audit-results/_SYNTHESIS.md`). Read it before starting any item from §3/§4/§5/§7 — the source reports describe the world at audit time, the progress doc describes the world now.
+
 ## Commit conventions
 
 Conventional Commits: `type(scope): description` (lowercase, imperative, no trailing period). Types: `feat`, `fix`, `refactor`, `perf`, `style`, `chore`, `docs`, `test`, `ci`. Common scopes: `audio`, `queue`, `ui`, `api`, `settings`, `theme`, `visualizer`, `playback`, `scrobble`, `widgets`, `views`, `hotkeys`, `mpris`, `artwork`, `deps`. Breaking changes use `type(scope)!: ...`. The `.githooks/pre-commit` script auto-updates the Navidrome/PipeWire version pins in `README.md`.
