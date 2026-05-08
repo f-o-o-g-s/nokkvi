@@ -501,15 +501,21 @@ impl Nokkvi {
         key: String,
         value: crate::views::settings::items::SettingValue,
     ) -> Task<Message> {
-        // Strangler-fig: keys declared via `define_settings!` in
-        // `nokkvi_data::services::settings_tables` are owned by the macro-
-        // generated dispatch chain. We lock the manager mutex synchronously
-        // (`blocking_lock`) and dispatch + sync the UI cache on this same
-        // frame so the toggle/arrow input gives immediate visual feedback —
-        // the legacy match arms mutated `Nokkvi.<field>` synchronously and
-        // any async hop showed one frame of stale state, which read as
-        // "the click did nothing." The setters and `save()` are fast (redb
-        // write); the UI thread blocks for sub-millisecond at most.
+        // Every general/interface/playback key is now declared via
+        // `define_settings!` in `nokkvi_data::services::settings_tables`. We
+        // lock the manager mutex synchronously (`blocking_lock`) and
+        // dispatch + sync the UI cache on this same frame so the
+        // toggle/arrow input gives immediate visual feedback — the legacy
+        // match arms mutated `Nokkvi.<field>` synchronously and any async
+        // hop showed one frame of stale state, which read as "the click did
+        // nothing." The setters and `save()` are fast (redb write); the UI
+        // thread blocks for sub-millisecond at most. Setters that need
+        // iced-aware follow-up work (toasts, atomic flips, follow-up
+        // `Message` dispatch, the verbose-config writer chain) declare an
+        // `on_dispatch:` closure that returns a `SettingsSideEffect`; the
+        // UI handler maps that to a `Task<Message>` and `Task::batch`es it
+        // alongside `handle_player_settings_loaded` so both effects land in
+        // the same frame.
         //
         // WATCHPOINT — sync setter contract.
         // Every `SettingsManager::set_*` reachable via the dispatch chain stays
@@ -519,150 +525,118 @@ impl Nokkvi {
         // test in `data/src/services/settings_tables/lock_watchpoint_test.rs`
         // greps the `SettingsManager` source and fails the build if a
         // `pub async fn set_` slips in — when that test trips, audit this
-        // strangler-fig block before relaxing it.
-        if nokkvi_data::services::settings_tables::any_tab_contains(&key) {
-            let Some(shell) = self.app_service.as_ref() else {
-                return Task::none();
-            };
-            let mgr_arc = shell.settings().settings_manager();
-            let result = {
-                let mut mgr = mgr_arc.blocking_lock();
-                nokkvi_data::services::settings_tables::dispatch_general_tab_setting(
+        // dispatch block before relaxing it.
+        let Some(shell) = self.app_service.as_ref() else {
+            return Task::none();
+        };
+        let mgr_arc = shell.settings().settings_manager();
+        let result = {
+            let mut mgr = mgr_arc.blocking_lock();
+            nokkvi_data::services::settings_tables::dispatch_general_tab_setting(
+                &key,
+                value.clone(),
+                &mut mgr,
+            )
+            .or_else(|| {
+                nokkvi_data::services::settings_tables::dispatch_interface_tab_setting(
                     &key,
                     value.clone(),
                     &mut mgr,
                 )
-                .or_else(|| {
-                    nokkvi_data::services::settings_tables::dispatch_interface_tab_setting(
-                        &key,
-                        value.clone(),
-                        &mut mgr,
-                    )
-                })
-                .or_else(|| {
-                    nokkvi_data::services::settings_tables::dispatch_playback_tab_setting(
-                        &key, value, &mut mgr,
-                    )
-                })
-                // The dispatcher now returns `SettingsSideEffect`; no
-                // migrated entry currently emits a non-`None` variant, so
-                // we ignore the effect and only carry the refreshed
-                // `PlayerSettings` through to the loader. The follow-up
-                // commits that fold the legacy match arms into the macro
-                // will introduce a side-effect dispatcher that consumes
-                // this value.
-                .map(|res| res.map(|_effect| mgr.get_player_settings()))
-            };
-            return match result {
-                Some(Ok(p)) => self.handle_player_settings_loaded(p),
-                Some(Err(e)) => {
-                    tracing::warn!(" [SETTINGS] Macro dispatch failed for {key}: {e:#}");
-                    Task::none()
-                }
-                None => {
-                    tracing::warn!(
-                        " [SETTINGS] any_tab_contains was true for {key} but no dispatcher claimed it"
-                    );
-                    Task::none()
-                }
-            };
+            })
+            .or_else(|| {
+                nokkvi_data::services::settings_tables::dispatch_playback_tab_setting(
+                    &key, value, &mut mgr,
+                )
+            })
+            .map(|res| res.map(|effect| (effect, mgr.get_player_settings())))
+        };
+        match result {
+            Some(Ok((effect, p))) => {
+                let state_task = self.handle_player_settings_loaded(p);
+                let side_task = self.dispatch_settings_side_effect(effect);
+                Task::batch([state_task, side_task])
+            }
+            Some(Err(e)) => {
+                tracing::warn!(" [SETTINGS] Macro dispatch failed for {key}: {e:#}");
+                Task::none()
+            }
+            None => {
+                tracing::warn!(" [SETTINGS] Unhandled general setting key: {key}");
+                Task::none()
+            }
         }
+    }
 
-        match key.as_str() {
-            "general.light_mode" => {
-                let new_state = matches!(value, crate::views::settings::items::SettingValue::Enum { ref val, .. } if val == "Light");
-                crate::theme::set_light_mode(new_state);
+    /// Run the iced-side follow-up work that a setting's `on_dispatch:`
+    /// hook requested. Returning `Task::none()` for [`SettingsSideEffect::None`]
+    /// is the common case — only the legacy strangler-fig keys
+    /// (`light_mode`, `show_album_artists_only`, `artwork_resolution`,
+    /// `verbose_config`) emit non-`None` variants today. Visible to
+    /// `crate::update::tests::settings` for direct unit coverage of the
+    /// toast / light-mode / `LoadArtists` / verbose-config routing without
+    /// having to stand up a full `AppService`.
+    pub(crate) fn dispatch_settings_side_effect(
+        &mut self,
+        effect: nokkvi_data::services::settings_tables::SettingsSideEffect,
+    ) -> Task<Message> {
+        use nokkvi_data::{
+            services::settings_tables::SettingsSideEffect, types::toast::ToastLevel,
+        };
+
+        match effect {
+            SettingsSideEffect::None => Task::none(),
+            SettingsSideEffect::SetLightModeAtomic(on) => {
+                crate::theme::set_light_mode(on);
                 if let Err(e) = crate::config_writer::update_config_value(
                     "settings.light_mode",
-                    &crate::views::settings::items::SettingValue::Bool(new_state),
+                    &crate::views::settings::items::SettingValue::Bool(on),
                     None,
                 ) {
                     tracing::warn!(" [SETTINGS] Failed to write light_mode to config.toml: {e}");
                 }
                 Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
             }
-            "general.local_music_path" => {
-                if let crate::views::settings::items::SettingValue::Text(ref path) = value {
-                    let path = path.trim().to_string();
-                    self.local_music_path = path.clone();
-                    self.shell_spawn("persist_local_music_path", move |shell| async move {
-                        shell.settings().set_local_music_path(path).await?;
-                        Ok(())
-                    });
+            SettingsSideEffect::Toast { level, message } => {
+                match level {
+                    ToastLevel::Info => self.toast_info(message),
+                    ToastLevel::Success => self.toast_success(message),
+                    ToastLevel::Warning => self.toast_warn(message),
+                    ToastLevel::Error => self.toast_error(message),
                 }
                 Task::none()
             }
-            "general.show_album_artists_only" => {
-                if let crate::views::settings::items::SettingValue::Bool(enabled) = value {
-                    self.show_album_artists_only = enabled;
-                    self.shell_spawn("persist_show_album_artists_only", move |shell| async move {
-                        shell
-                            .settings()
-                            .set_show_album_artists_only(enabled)
-                            .await?;
-                        Ok(())
-                    });
-                    return Task::done(Message::LoadArtists);
-                }
-                Task::none()
-            }
-            "general.artwork_resolution" => {
-                if let crate::views::settings::items::SettingValue::Enum { ref val, .. } = value {
-                    let res =
-                        nokkvi_data::types::player_settings::ArtworkResolution::from_label(val);
-                    self.artwork_resolution = res;
-                    self.shell_spawn("persist_artwork_resolution", move |shell| async move {
-                        shell.settings().set_artwork_resolution(res).await?;
-                        Ok(())
-                    });
-                    self.toast_info("Artwork resolution changed — rebuild artwork cache to apply");
-                }
-                Task::none()
-            }
-            "general.verbose_config" => {
-                if let crate::views::settings::items::SettingValue::Bool(enabled) = value {
-                    self.verbose_config = enabled;
-
-                    // Write [visualizer] synchronously (doesn't need settings_manager)
-                    if enabled {
-                        let viz_config = self.visualizer_config.read().clone();
-                        if let Err(e) = crate::config_writer::write_full_visualizer(&viz_config) {
-                            tracing::warn!(" [SETTINGS] Failed to write full config: {e}");
-                            self.toast_warn(format!("Failed to write verbose config: {e}"));
-                        } else {
-                            self.toast_success(
-                                "Config expanded — all defaults written".to_string(),
-                            );
-                        }
+            SettingsSideEffect::LoadArtists => Task::done(Message::LoadArtists),
+            SettingsSideEffect::WriteVerboseConfig { enabled } => {
+                // The redb side has already been persisted by the macro's
+                // setter (`set_verbose_config` → `save_redb_only`). We only
+                // own the synchronous TOML write/strip + the deferred
+                // `write_all_toml_public` flush.
+                if enabled {
+                    let viz_config = self.visualizer_config.read().clone();
+                    if let Err(e) = crate::config_writer::write_full_visualizer(&viz_config) {
+                        tracing::warn!(" [SETTINGS] Failed to write full config: {e}");
+                        self.toast_warn(format!("Failed to write verbose config: {e}"));
                     } else {
-                        // Strip default values from theme + visualizer sections
-                        if let Err(e) = crate::config_writer::strip_to_sparse() {
-                            tracing::warn!(" [SETTINGS] Failed to strip config: {e}");
-                            self.toast_warn(format!("Failed to strip config: {e}"));
-                        } else {
-                            self.toast_success(
-                                "Config stripped — only non-default values remain".to_string(),
-                            );
-                        }
+                        self.toast_success("Config expanded — all defaults written".to_string());
                     }
-
-                    // Single async task: persist to redb THEN write all TOML sections.
-                    // Must be one task so the verbose flag is set before write_all_toml
-                    // reads it via is_verbose_config().
-                    self.shell_spawn(
-                        "persist_and_write_verbose_config",
-                        move |shell| async move {
-                            shell.settings().set_verbose_config(enabled).await?;
-                            let mgr = shell.settings().settings_manager();
-                            let sm = mgr.lock().await;
-                            sm.write_all_toml_public()
-                        },
+                } else if let Err(e) = crate::config_writer::strip_to_sparse() {
+                    tracing::warn!(" [SETTINGS] Failed to strip config: {e}");
+                    self.toast_warn(format!("Failed to strip config: {e}"));
+                } else {
+                    self.toast_success(
+                        "Config stripped — only non-default values remain".to_string(),
                     );
                 }
-                Task::none()
-            }
-            other => {
-                tracing::warn!(" [SETTINGS] Unhandled general setting key: {other}");
+
+                self.shell_spawn(
+                    "write_all_toml_after_verbose_toggle",
+                    move |shell| async move {
+                        let mgr = shell.settings().settings_manager();
+                        let sm = mgr.lock().await;
+                        sm.write_all_toml_public()
+                    },
+                );
                 Task::none()
             }
         }

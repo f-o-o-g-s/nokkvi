@@ -1,26 +1,25 @@
 //! General-tab settings table.
 //!
 //! Migrated keys: Application (start_view, enter_behavior, library_page_size,
-//! suppress_library_refresh_toasts), Mouse Behavior (stable_viewport,
-//! auto_follow_playing), System Tray (show_tray_icon, close_to_tray).
-//!
-//! Deferred — kept in the legacy `match` arm because of UI side effects beyond
-//! a plain setter call:
-//!
-//! - `general.local_music_path` — trims input before persisting.
-//! - `general.artwork_resolution` — emits a toast prompting cache rebuild.
-//! - `general.show_album_artists_only` — additionally dispatches `LoadArtists`.
-//! - `general.verbose_config` — writes/strips the full TOML config and emits
-//!   toasts.
+//! suppress_library_refresh_toasts, artwork_resolution, show_album_artists_only,
+//! local_music_path, verbose_config), Mouse Behavior (stable_viewport,
+//! auto_follow_playing), System Tray (show_tray_icon, close_to_tray), and the
+//! Theme-tab `light_mode` toggle (its persistence is config-file-only — the
+//! macro's `on_dispatch:` hook routes the actual write through the UI crate).
 //!
 //! `general.server_url` and `general.username` are read-only login mirrors
 //! with no setter or dispatch arm; they have no migration to perform.
+//! `general.default_playlist_name` opens a picker dialog and is dispatched
+//! via [`crate::types::settings_side_effect`] — see the lane brief for why
+//! it is left on the bespoke action path.
 
 use crate::{
     define_settings,
     types::{
-        player_settings::{EnterBehavior, LibraryPageSize},
+        player_settings::{ArtworkResolution, EnterBehavior, LibraryPageSize},
         setting_def::Tab,
+        settings_side_effect::SettingsSideEffect,
+        toast::ToastLevel,
     },
 };
 
@@ -88,6 +87,59 @@ define_settings! {
             toml_apply: |ts, p| p.close_to_tray = ts.close_to_tray,
             read: |src, out| out.close_to_tray = src.close_to_tray,
         },
+        // -- Migrated from the legacy `match key.as_str()` arm via on_dispatch ----
+        // `general.light_mode` has no redb persistence path — it lives in
+        // the theme module's atomic + `config.toml` only. The setter is a
+        // deliberate no-op; `on_dispatch:` returns the bool the UI handler
+        // then writes to both. Note: `apply_toml_settings_to_internal` still
+        // copies `p.light_mode = ts.light_mode` directly; the duplicated
+        // assignment here is idempotent and lives next to the dispatch entry
+        // for discoverability.
+        LightMode {
+            key: "general.light_mode",
+            value_type: Enum,
+            setter: |_mgr, _v: String| Ok(()),
+            toml_apply: |ts, p| p.light_mode = ts.light_mode,
+            on_dispatch: |v: String| SettingsSideEffect::SetLightModeAtomic(v == "Light"),
+        },
+        // The setter trims user-typed leading/trailing whitespace before
+        // persisting, matching the legacy arm. The UI `local_music_path`
+        // mirror on `Nokkvi` is repopulated by `handle_player_settings_loaded`
+        // after the round-trip, so no explicit `on_dispatch` is needed.
+        LocalMusicPath {
+            key: "general.local_music_path",
+            value_type: Text,
+            setter: |mgr, v: String| mgr.set_local_music_path(v.trim().to_string()),
+            toml_apply: |ts, p| p.local_music_path = ts.local_music_path.clone(),
+        },
+        ShowAlbumArtistsOnly {
+            key: "general.show_album_artists_only",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_show_album_artists_only(v),
+            toml_apply: |ts, p| p.show_album_artists_only = ts.show_album_artists_only,
+            on_dispatch: |_v: bool| SettingsSideEffect::LoadArtists,
+        },
+        ArtworkResolutionKey {
+            key: "general.artwork_resolution",
+            value_type: Enum,
+            setter: |mgr, v: String| mgr.set_artwork_resolution(ArtworkResolution::from_label(&v)),
+            toml_apply: |ts, p| p.artwork_resolution = ts.artwork_resolution,
+            on_dispatch: |_v: String| SettingsSideEffect::Toast {
+                level: ToastLevel::Info,
+                message: "Artwork resolution changed — rebuild artwork cache to apply".to_string(),
+            },
+        },
+        // The setter writes only redb (via `save_redb_only`); the UI handler
+        // owns the synchronous TOML write/strip and the follow-up
+        // `write_all_toml_public` flush. See
+        // `dispatch_settings_side_effect` in `update/settings.rs`.
+        VerboseConfig {
+            key: "general.verbose_config",
+            value_type: Bool,
+            setter: |mgr, v: bool| mgr.set_verbose_config(v),
+            toml_apply: |ts, p| p.verbose_config = ts.verbose_config,
+            on_dispatch: |v: bool| SettingsSideEffect::WriteVerboseConfig { enabled: v },
+        },
     ]
 }
 
@@ -125,12 +177,7 @@ mod tests {
             &mut mgr,
         );
 
-        assert!(matches!(
-            result,
-            Some(Ok(
-                crate::types::settings_side_effect::SettingsSideEffect::None
-            ))
-        ));
+        assert!(matches!(result, Some(Ok(SettingsSideEffect::None))));
         assert!(!mgr.get_player_settings().stable_viewport);
     }
 
@@ -181,8 +228,11 @@ mod tests {
         assert!(tab_general_contains("general.auto_follow_playing"));
         assert!(tab_general_contains("general.show_tray_icon"));
         assert!(tab_general_contains("general.close_to_tray"));
-        assert!(!tab_general_contains("general.local_music_path")); // deferred
-        assert!(!tab_general_contains("general.verbose_config")); // deferred
+        assert!(tab_general_contains("general.light_mode"));
+        assert!(tab_general_contains("general.local_music_path"));
+        assert!(tab_general_contains("general.show_album_artists_only"));
+        assert!(tab_general_contains("general.artwork_resolution"));
+        assert!(tab_general_contains("general.verbose_config"));
         assert!(!tab_general_contains("nonexistent.key"));
     }
 
@@ -197,11 +247,7 @@ mod tests {
 
     // -------------------------------------------------------------------------
     // Round-trip coverage: one Bool, one Enum, one Text family member touched
-    // by this slice. The Text family has no migrated keys yet (local_music_path
-    // is deferred), so it's exercised via the type-mismatch path on an existing
-    // Bool entry — the macro's Text arm is already covered by the foundation's
-    // dispatch_general_returns_err_on_type_mismatch when expanded for any
-    // declared key, but we add a direct assertion below for clarity.
+    // by this slice.
     // -------------------------------------------------------------------------
 
     #[test]
@@ -216,12 +262,7 @@ mod tests {
             SettingValue::Bool(false),
             &mut mgr,
         );
-        assert!(matches!(
-            result,
-            Some(Ok(
-                crate::types::settings_side_effect::SettingsSideEffect::None
-            ))
-        ));
+        assert!(matches!(result, Some(Ok(SettingsSideEffect::None))));
         assert!(!mgr.get_player_settings().auto_follow_playing);
 
         let result = dispatch_general_tab_setting(
@@ -229,12 +270,7 @@ mod tests {
             SettingValue::Bool(true),
             &mut mgr,
         );
-        assert!(matches!(
-            result,
-            Some(Ok(
-                crate::types::settings_side_effect::SettingsSideEffect::None
-            ))
-        ));
+        assert!(matches!(result, Some(Ok(SettingsSideEffect::None))));
         assert!(mgr.get_player_settings().auto_follow_playing);
     }
 
@@ -249,12 +285,7 @@ mod tests {
             },
             &mut mgr,
         );
-        assert!(matches!(
-            result,
-            Some(Ok(
-                crate::types::settings_side_effect::SettingsSideEffect::None
-            ))
-        ));
+        assert!(matches!(result, Some(Ok(SettingsSideEffect::None))));
         assert_eq!(
             mgr.get_player_settings().enter_behavior,
             EnterBehavior::AppendAndPlay
@@ -272,12 +303,7 @@ mod tests {
             },
             &mut mgr,
         );
-        assert!(matches!(
-            result,
-            Some(Ok(
-                crate::types::settings_side_effect::SettingsSideEffect::None
-            ))
-        ));
+        assert!(matches!(result, Some(Ok(SettingsSideEffect::None))));
         assert_eq!(mgr.get_player_settings().start_view, "Albums");
     }
 
@@ -337,5 +363,135 @@ mod tests {
         assert!(ui.suppress_library_refresh_toasts);
         assert!(ui.show_tray_icon);
         assert!(ui.close_to_tray);
+    }
+
+    // -------------------------------------------------------------------------
+    // Side-effect coverage: each migrated legacy arm has a distinct
+    // `SettingsSideEffect` variant. Verify the dispatcher emits the right
+    // variant *and* that the redb-backed setter still round-trips when one
+    // exists. `light_mode` deliberately has no redb path; its truth lives in
+    // the UI handler that consumes `SetLightModeAtomic`.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn dispatch_general_light_mode_emits_atomic_side_effect() {
+        let (mut mgr, _tmp) = make_test_manager();
+
+        let result = dispatch_general_tab_setting(
+            "general.light_mode",
+            SettingValue::Enum {
+                val: "Light".to_string(),
+                options: vec![],
+            },
+            &mut mgr,
+        );
+        match result {
+            Some(Ok(SettingsSideEffect::SetLightModeAtomic(true))) => {}
+            other => panic!("expected SetLightModeAtomic(true), got {other:?}"),
+        }
+
+        let result = dispatch_general_tab_setting(
+            "general.light_mode",
+            SettingValue::Enum {
+                val: "Dark".to_string(),
+                options: vec![],
+            },
+            &mut mgr,
+        );
+        match result {
+            Some(Ok(SettingsSideEffect::SetLightModeAtomic(false))) => {}
+            other => panic!("expected SetLightModeAtomic(false), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dispatch_general_local_music_path_trims_before_persist() {
+        let (mut mgr, _tmp) = make_test_manager();
+
+        let result = dispatch_general_tab_setting(
+            "general.local_music_path",
+            SettingValue::Text("  /music/Library  ".to_string()),
+            &mut mgr,
+        );
+
+        assert!(matches!(result, Some(Ok(SettingsSideEffect::None))));
+        assert_eq!(
+            mgr.get_player_settings().local_music_path,
+            "/music/Library",
+            "leading + trailing whitespace must be trimmed before persisting"
+        );
+    }
+
+    #[test]
+    fn dispatch_general_show_album_artists_only_emits_load_artists() {
+        let (mut mgr, _tmp) = make_test_manager();
+        // Default is `true`; flip to `false` and confirm both the redb side
+        // and the side-effect emission.
+        assert!(mgr.get_player_settings().show_album_artists_only);
+
+        let result = dispatch_general_tab_setting(
+            "general.show_album_artists_only",
+            SettingValue::Bool(false),
+            &mut mgr,
+        );
+
+        match result {
+            Some(Ok(SettingsSideEffect::LoadArtists)) => {}
+            other => panic!("expected LoadArtists, got {other:?}"),
+        }
+        assert!(!mgr.get_player_settings().show_album_artists_only);
+    }
+
+    #[test]
+    fn dispatch_general_artwork_resolution_emits_info_toast() {
+        let (mut mgr, _tmp) = make_test_manager();
+
+        let result = dispatch_general_tab_setting(
+            "general.artwork_resolution",
+            SettingValue::Enum {
+                val: "Ultra".to_string(),
+                options: vec![],
+            },
+            &mut mgr,
+        );
+
+        match result {
+            Some(Ok(SettingsSideEffect::Toast {
+                level: ToastLevel::Info,
+                ref message,
+            })) => {
+                assert!(
+                    message.contains("rebuild artwork cache"),
+                    "toast message should mention cache rebuild, got: {message}"
+                );
+            }
+            ref other => panic!("expected Toast{{ Info, … }}, got {other:?}"),
+        }
+        assert_eq!(
+            mgr.get_player_settings().artwork_resolution,
+            ArtworkResolution::from_label("Ultra"),
+            "redb side-effect of the setter must still run"
+        );
+    }
+
+    #[test]
+    fn dispatch_general_verbose_config_emits_write_side_effect() {
+        let (mut mgr, _tmp) = make_test_manager();
+        assert!(!mgr.get_player_settings().verbose_config);
+
+        let result = dispatch_general_tab_setting(
+            "general.verbose_config",
+            SettingValue::Bool(true),
+            &mut mgr,
+        );
+
+        match result {
+            Some(Ok(SettingsSideEffect::WriteVerboseConfig { enabled: true })) => {}
+            other => panic!("expected WriteVerboseConfig {{ enabled: true }}, got {other:?}"),
+        }
+        assert!(
+            mgr.get_player_settings().verbose_config,
+            "setter must run synchronously even though the TOML write defers to the UI handler"
+        );
     }
 }
