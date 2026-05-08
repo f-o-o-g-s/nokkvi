@@ -30,54 +30,63 @@ define_settings! {
     contains_fn: tab_general_contains,
     dispatch_fn: dispatch_general_tab_setting,
     apply_fn: apply_toml_general_tab,
+    dump_fn: dump_general_tab_player_settings,
     settings: [
         StableViewport {
             key: "general.stable_viewport",
             value_type: Bool,
             setter: |mgr, v: bool| mgr.set_stable_viewport(v),
             toml_apply: |ts, p| p.stable_viewport = ts.stable_viewport,
+            read: |src, out| out.stable_viewport = src.stable_viewport,
         },
         StartView {
             key: "general.start_view",
             value_type: Enum,
             setter: |mgr, v: String| mgr.set_start_view(&v),
             toml_apply: |ts, p| p.start_view = ts.start_view.clone(),
+            read: |src, out| out.start_view = src.start_view.clone(),
         },
         EnterBehavior {
             key: "general.enter_behavior",
             value_type: Enum,
             setter: |mgr, v: String| mgr.set_enter_behavior(EnterBehavior::from_label(&v)),
             toml_apply: |ts, p| p.enter_behavior = ts.enter_behavior,
+            read: |src, out| out.enter_behavior = src.enter_behavior,
         },
         LibraryPageSize {
             key: "general.library_page_size",
             value_type: Enum,
             setter: |mgr, v: String| mgr.set_library_page_size(LibraryPageSize::from_label(&v)),
             toml_apply: |ts, p| p.library_page_size = ts.library_page_size,
+            read: |src, out| out.library_page_size = src.library_page_size,
         },
         SuppressLibraryRefreshToasts {
             key: "general.suppress_library_refresh_toasts",
             value_type: Bool,
             setter: |mgr, v: bool| mgr.set_suppress_library_refresh_toasts(v),
             toml_apply: |ts, p| p.suppress_library_refresh_toasts = ts.suppress_library_refresh_toasts,
+            read: |src, out| out.suppress_library_refresh_toasts = src.suppress_library_refresh_toasts,
         },
         AutoFollowPlaying {
             key: "general.auto_follow_playing",
             value_type: Bool,
             setter: |mgr, v: bool| mgr.set_auto_follow_playing(v),
             toml_apply: |ts, p| p.auto_follow_playing = ts.auto_follow_playing,
+            read: |src, out| out.auto_follow_playing = src.auto_follow_playing,
         },
         ShowTrayIcon {
             key: "general.show_tray_icon",
             value_type: Bool,
             setter: |mgr, v: bool| mgr.set_show_tray_icon(v),
             toml_apply: |ts, p| p.show_tray_icon = ts.show_tray_icon,
+            read: |src, out| out.show_tray_icon = src.show_tray_icon,
         },
         CloseToTray {
             key: "general.close_to_tray",
             value_type: Bool,
             setter: |mgr, v: bool| mgr.set_close_to_tray(v),
             toml_apply: |ts, p| p.close_to_tray = ts.close_to_tray,
+            read: |src, out| out.close_to_tray = src.close_to_tray,
         },
     ]
 }
