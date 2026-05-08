@@ -197,8 +197,6 @@ impl AlbumsPage {
                     (Task::none(), AlbumsAction::AddBatchToQueue(payload))
                 }
                 // Data loading messages (handled at root level, no action needed here)
-                AlbumsMessage::AlbumsLoaded { .. } => (Task::none(), AlbumsAction::None),
-                AlbumsMessage::AlbumsPageLoaded(_, _) => (Task::none(), AlbumsAction::None),
                 AlbumsMessage::ArtworkLoaded(_, _) => (Task::none(), AlbumsAction::None),
                 AlbumsMessage::LargeArtworkLoaded(_, _) => (Task::none(), AlbumsAction::None),
                 // Routed up to root in `handle_albums` before this match runs;

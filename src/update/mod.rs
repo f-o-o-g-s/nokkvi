@@ -199,15 +199,6 @@ impl Nokkvi {
             // Data Loading: Albums
             // -----------------------------------------------------------------
             Message::LoadAlbums => self.handle_load_albums(false, None),
-            Message::Albums(crate::views::AlbumsMessage::AlbumsLoaded {
-                result,
-                total_count,
-                background,
-                anchor_id,
-            }) => self.handle_albums_loaded(result, total_count, background, anchor_id),
-            Message::Albums(crate::views::AlbumsMessage::AlbumsPageLoaded(result, total_count)) => {
-                self.handle_albums_page_loaded(result, total_count)
-            }
             // -----------------------------------------------------------------
             // Data Loading: Queue
             // -----------------------------------------------------------------

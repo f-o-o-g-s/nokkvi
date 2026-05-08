@@ -135,15 +135,6 @@ pub enum AlbumsMessage {
     /// sees this and no per-view state changes here.
     Roulette,
 
-    // Data loading (moved from root Message enum)
-    AlbumsLoaded {
-        result: Result<Vec<AlbumUIViewData>, String>,
-        total_count: usize,
-        background: bool,
-        anchor_id: Option<String>,
-    },
-    AlbumsPageLoaded(Result<Vec<AlbumUIViewData>, String>, usize), // result, total_count (subsequent page)
-
     // Artwork loading (moved from root Message enum)
     /// Album artwork loaded (album_id, handle)
     ArtworkLoaded(String, Option<image::Handle>),
