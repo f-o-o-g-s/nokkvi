@@ -53,7 +53,7 @@ impl Nokkvi {
                 }
             },
             |(result, total_count)| {
-                Message::Playlists(views::PlaylistsMessage::PlaylistsLoaded(
+                Message::PlaylistsLoader(crate::app_message::PlaylistsLoaderMessage::Loaded(
                     result,
                     total_count,
                 ))
@@ -522,28 +522,18 @@ impl Nokkvi {
         Task::none()
     }
 
-    /// Phase 1 scaffolding stub for `Message::PlaylistsLoader(...)`.
-    ///
-    /// Wired in `update/mod.rs` so the per-domain `*LoaderMessage` enums
-    /// compile end-to-end alongside the Genres prototype. Currently
-    /// unreachable: no fire site constructs `Message::PlaylistsLoader(...)` —
-    /// the existing `Message::Playlists(PlaylistsMessage::PlaylistsLoaded(...))`
-    /// path is still live.
-    ///
-    /// Phase 2 implementer for Playlists: replace the body to route
-    /// `PlaylistsLoaderMessage::Loaded(..)` → `handle_playlists_loaded(...)`,
-    /// then update the fire site in this file and remove the per-view loader
-    /// special-case in `update/mod.rs` plus the dead variant in
-    /// `views/playlists/mod.rs` and `views/playlists/update.rs`. See the
-    /// Genres migration for the exact pattern.
+    /// Routes `Message::PlaylistsLoader(...)` arrivals to the existing
+    /// `handle_playlists_loaded` handler. Playlists is single-shot (not
+    /// paged), so there's only one variant — same shape as Genres.
     pub(crate) fn dispatch_playlists_loader(
         &mut self,
-        _msg: crate::app_message::PlaylistsLoaderMessage,
+        msg: crate::app_message::PlaylistsLoaderMessage,
     ) -> Task<Message> {
-        panic!(
-            "Phase 2 (Playlists): dispatch_playlists_loader is a Phase 1 scaffolding \
-             stub — wire PlaylistsLoaderMessage::Loaded to handle_playlists_loaded \
-             before constructing Message::PlaylistsLoader(...)"
-        )
+        use crate::app_message::PlaylistsLoaderMessage;
+        match msg {
+            PlaylistsLoaderMessage::Loaded(result, total_count) => {
+                self.handle_playlists_loaded(result, total_count)
+            }
+        }
     }
 }

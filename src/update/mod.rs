@@ -331,10 +331,6 @@ impl Nokkvi {
                     .open_add_to_playlist(&playlists, song_ids);
                 Task::none()
             }
-            Message::Playlists(crate::views::PlaylistsMessage::PlaylistsLoaded(
-                result,
-                total_count,
-            )) => self.handle_playlists_loaded(result, total_count),
 
             // -----------------------------------------------------------------
             // Artwork Pipeline (namespaced)
