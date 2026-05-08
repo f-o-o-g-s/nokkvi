@@ -544,7 +544,14 @@ impl Nokkvi {
                         &key, value, &mut mgr,
                     )
                 })
-                .map(|res| res.map(|()| mgr.get_player_settings()))
+                // The dispatcher now returns `SettingsSideEffect`; no
+                // migrated entry currently emits a non-`None` variant, so
+                // we ignore the effect and only carry the refreshed
+                // `PlayerSettings` through to the loader. The follow-up
+                // commits that fold the legacy match arms into the macro
+                // will introduce a side-effect dispatcher that consumes
+                // this value.
+                .map(|res| res.map(|_effect| mgr.get_player_settings()))
             };
             return match result {
                 Some(Ok(p)) => self.handle_player_settings_loaded(p),

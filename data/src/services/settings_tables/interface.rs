@@ -211,7 +211,12 @@ mod tests {
             &mut mgr,
         );
 
-        assert!(matches!(result, Some(Ok(()))));
+        assert!(matches!(
+            result,
+            Some(Ok(
+                crate::types::settings_side_effect::SettingsSideEffect::None
+            ))
+        ));
         assert_eq!(mgr.get_player_settings().nav_layout, NavLayout::Side);
     }
 
@@ -227,7 +232,12 @@ mod tests {
             &mut mgr,
         );
 
-        assert!(matches!(result, Some(Ok(()))));
+        assert!(matches!(
+            result,
+            Some(Ok(
+                crate::types::settings_side_effect::SettingsSideEffect::None
+            ))
+        ));
         assert!(!mgr.get_player_settings().strip_show_title);
     }
 
@@ -248,7 +258,12 @@ mod tests {
             &mut mgr,
         );
 
-        assert!(matches!(result, Some(Ok(()))));
+        assert!(matches!(
+            result,
+            Some(Ok(
+                crate::types::settings_side_effect::SettingsSideEffect::None
+            ))
+        ));
         assert_eq!(
             mgr.get_player_settings().artwork_column_mode,
             ArtworkColumnMode::from_label("Always (Stretched)")

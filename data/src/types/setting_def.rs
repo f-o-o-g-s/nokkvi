@@ -6,12 +6,15 @@
 //!
 //! - `pub const TAB_<TAB>_SETTINGS: &[SettingDef]` — table of declared keys
 //!   for future items-builder migration.
-//! - `pub fn dispatch_<tab>_tab_setting(key, value, mgr) -> Option<Result<()>>`
+//! - `pub fn dispatch_<tab>_tab_setting(key, value, mgr) -> Option<Result<SettingsSideEffect>>`
 //!   — sync persistence dispatcher. Returns `None` for keys not declared in
-//!   this tab; `Some(Ok(()))` on success; `Some(Err(_))` on type mismatch or
-//!   setter failure. Caller chains all three tab dispatchers; a `None` from
-//!   every tab means the key is still owned by the legacy hand-written
-//!   `match key.as_str()` arm in the UI crate.
+//!   this tab; `Some(Ok(SettingsSideEffect::None))` on a setter-only success;
+//!   `Some(Ok(SettingsSideEffect::<variant>(...)))` when the setting also
+//!   declared an `on_dispatch:` hook (e.g. emit a toast, kick a follow-up
+//!   load); `Some(Err(_))` on type mismatch or setter failure. Caller chains
+//!   all three tab dispatchers; a `None` from every tab means the key is
+//!   still owned by the legacy hand-written `match key.as_str()` arm in the
+//!   UI crate.
 //! - `pub fn apply_toml_<tab>_tab(ts, p)` — runs the per-setting
 //!   `toml_apply` closures. Called from `apply_toml_settings_to_internal`.
 //! - `pub fn dump_<tab>_tab_player_settings(src, out)` — runs the per-setting
@@ -22,7 +25,10 @@
 //! The dispatcher takes `&mut SettingsManager` (sync). The UI handler in
 //! `update/settings.rs` locks the manager mutex inside an async task before
 //! calling the dispatcher chain, mirroring the pattern of the existing
-//! `shell.settings().set_X(v).await` calls.
+//! `shell.settings().set_X(v).await` calls. After the dispatcher returns,
+//! the UI handler maps the `SettingsSideEffect` to a follow-up
+//! `Task<Message>` (toast push, `LoadArtists`, light-mode atomic + Tick,
+//! verbose-config writer chain) so the data crate never imports `iced`.
 
 /// Which settings tab a key belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,7 +52,9 @@ pub struct SettingDef {
 ///
 /// See the module-level docs for the artifacts emitted. Adding a setting is a
 /// single declarative entry; the compiler enforces that `setter`, `toml_apply`,
-/// and `read` are all declared (no silent omission).
+/// and `read` are all declared (no silent omission). `on_dispatch:` is
+/// optional — entries that omit it default to
+/// [`SettingsSideEffect::None`][crate::types::settings_side_effect::SettingsSideEffect::None].
 ///
 /// # Example
 ///
@@ -66,6 +74,14 @@ pub struct SettingDef {
 ///             toml_apply: |ts, p| p.stable_viewport = ts.stable_viewport,
 ///             read: |src, out| out.stable_viewport = src.stable_viewport,
 ///         },
+///         ShowAlbumArtistsOnly {
+///             key: "general.show_album_artists_only",
+///             value_type: Bool,
+///             setter: |mgr, v: bool| mgr.set_show_album_artists_only(v),
+///             toml_apply: |ts, p| p.show_album_artists_only = ts.show_album_artists_only,
+///             read: |src, out| out.show_album_artists_only = src.show_album_artists_only,
+///             on_dispatch: |_v: bool| SettingsSideEffect::LoadArtists,
+///         },
 ///     ]
 /// }
 /// ```
@@ -80,6 +96,12 @@ pub struct SettingDef {
 /// redb-stored internal `PlayerSettings` value onto the UI-facing struct
 /// (e.g. `out.scrobble_threshold = src.scrobble_threshold as f32` or
 /// `out.start_view = src.start_view.clone()`).
+///
+/// `on_dispatch` (when supplied) receives the same unpacked payload — for
+/// `Text` and `Enum` keys the macro hands it a clone so the setter can still
+/// move the original — and returns a
+/// [`SettingsSideEffect`][crate::types::settings_side_effect::SettingsSideEffect]
+/// the UI handler runs after `handle_player_settings_loaded`.
 #[macro_export]
 macro_rules! define_settings {
     (
@@ -96,7 +118,9 @@ macro_rules! define_settings {
                     value_type: $vtype:ident,
                     setter: |$smgr:ident, $sval:ident : $sty:ty| $sbody:expr,
                     toml_apply: |$ats:ident, $ap:ident| $abody:expr,
-                    read: |$rsrc:ident, $rout:ident| $rbody:expr $(,)?
+                    read: |$rsrc:ident, $rout:ident| $rbody:expr
+                    $(, on_dispatch: |$dval:ident : $dty:ty| $dbody:expr)?
+                    $(,)?
                 }
             ),* $(,)?
         ] $(,)?
@@ -126,7 +150,9 @@ macro_rules! define_settings {
             key: &str,
             value: $crate::types::setting_value::SettingValue,
             mgr: &mut $crate::services::settings::SettingsManager,
-        ) -> ::core::option::Option<::anyhow::Result<()>> {
+        ) -> ::core::option::Option<
+            ::anyhow::Result<$crate::types::settings_side_effect::SettingsSideEffect>,
+        > {
             $(
                 if key == $key {
                     return ::core::option::Option::Some(
@@ -134,6 +160,7 @@ macro_rules! define_settings {
                             value, $vtype,
                             |$smgr, $sval: $sty| $sbody,
                             mgr, $key
+                            $(, on_dispatch: |$dval: $dty| $dbody)?
                         )
                     );
                 }
@@ -174,15 +201,33 @@ macro_rules! define_settings {
 /// Internal helper used by [`define_settings!`] to extract the typed inner
 /// payload from a [`SettingValue`] variant before invoking the setter
 /// closure. Type mismatches yield `Err(anyhow::Error)`.
+///
+/// When the entry declares an `on_dispatch:` hook, the unpacked payload is
+/// also bound to the hook's parameter (cloned for `Text`/`Enum` so the
+/// setter still owns the original) and the hook expression supplies the
+/// returned [`SettingsSideEffect`][crate::types::settings_side_effect::SettingsSideEffect].
+/// Otherwise the arm returns `SettingsSideEffect::None`.
 #[macro_export]
 #[doc(hidden)]
 macro_rules! define_settings_dispatch_arm {
-    ($value:ident, Bool, |$smgr:ident, $sval:ident : $sty:ty| $sbody:expr, $mgr:ident, $key:expr) => {{
+    ($value:ident, Bool,
+     |$smgr:ident, $sval:ident : $sty:ty| $sbody:expr,
+     $mgr:ident, $key:expr
+     $(, on_dispatch: |$dval:ident : $dty:ty| $dbody:expr)?
+    ) => {{
         match $value {
             $crate::types::setting_value::SettingValue::Bool(v) => {
+                $( let $dval: $dty = v; )?
                 let $smgr = $mgr;
                 let $sval: $sty = v;
-                $sbody
+                let setter_result: ::anyhow::Result<()> = $sbody;
+                setter_result.map(|()| {
+                    #[allow(unused_mut, unused_assignments)]
+                    let mut __effect =
+                        $crate::types::settings_side_effect::SettingsSideEffect::None;
+                    $( __effect = $dbody; )?
+                    __effect
+                })
             }
             other => ::core::result::Result::Err(::anyhow::anyhow!(
                 "type mismatch for setting {}: expected Bool, got {:?}",
@@ -191,12 +236,24 @@ macro_rules! define_settings_dispatch_arm {
             )),
         }
     }};
-    ($value:ident, Int, |$smgr:ident, $sval:ident : $sty:ty| $sbody:expr, $mgr:ident, $key:expr) => {{
+    ($value:ident, Int,
+     |$smgr:ident, $sval:ident : $sty:ty| $sbody:expr,
+     $mgr:ident, $key:expr
+     $(, on_dispatch: |$dval:ident : $dty:ty| $dbody:expr)?
+    ) => {{
         match $value {
             $crate::types::setting_value::SettingValue::Int { val, .. } => {
+                $( let $dval: $dty = val; )?
                 let $smgr = $mgr;
                 let $sval: $sty = val;
-                $sbody
+                let setter_result: ::anyhow::Result<()> = $sbody;
+                setter_result.map(|()| {
+                    #[allow(unused_mut, unused_assignments)]
+                    let mut __effect =
+                        $crate::types::settings_side_effect::SettingsSideEffect::None;
+                    $( __effect = $dbody; )?
+                    __effect
+                })
             }
             other => ::core::result::Result::Err(::anyhow::anyhow!(
                 "type mismatch for setting {}: expected Int, got {:?}",
@@ -205,12 +262,24 @@ macro_rules! define_settings_dispatch_arm {
             )),
         }
     }};
-    ($value:ident, Float, |$smgr:ident, $sval:ident : $sty:ty| $sbody:expr, $mgr:ident, $key:expr) => {{
+    ($value:ident, Float,
+     |$smgr:ident, $sval:ident : $sty:ty| $sbody:expr,
+     $mgr:ident, $key:expr
+     $(, on_dispatch: |$dval:ident : $dty:ty| $dbody:expr)?
+    ) => {{
         match $value {
             $crate::types::setting_value::SettingValue::Float { val, .. } => {
+                $( let $dval: $dty = val; )?
                 let $smgr = $mgr;
                 let $sval: $sty = val;
-                $sbody
+                let setter_result: ::anyhow::Result<()> = $sbody;
+                setter_result.map(|()| {
+                    #[allow(unused_mut, unused_assignments)]
+                    let mut __effect =
+                        $crate::types::settings_side_effect::SettingsSideEffect::None;
+                    $( __effect = $dbody; )?
+                    __effect
+                })
             }
             other => ::core::result::Result::Err(::anyhow::anyhow!(
                 "type mismatch for setting {}: expected Float, got {:?}",
@@ -219,12 +288,24 @@ macro_rules! define_settings_dispatch_arm {
             )),
         }
     }};
-    ($value:ident, Enum, |$smgr:ident, $sval:ident : $sty:ty| $sbody:expr, $mgr:ident, $key:expr) => {{
+    ($value:ident, Enum,
+     |$smgr:ident, $sval:ident : $sty:ty| $sbody:expr,
+     $mgr:ident, $key:expr
+     $(, on_dispatch: |$dval:ident : $dty:ty| $dbody:expr)?
+    ) => {{
         match $value {
             $crate::types::setting_value::SettingValue::Enum { val, .. } => {
+                $( let $dval: $dty = val.clone(); )?
                 let $smgr = $mgr;
                 let $sval: $sty = val;
-                $sbody
+                let setter_result: ::anyhow::Result<()> = $sbody;
+                setter_result.map(|()| {
+                    #[allow(unused_mut, unused_assignments)]
+                    let mut __effect =
+                        $crate::types::settings_side_effect::SettingsSideEffect::None;
+                    $( __effect = $dbody; )?
+                    __effect
+                })
             }
             other => ::core::result::Result::Err(::anyhow::anyhow!(
                 "type mismatch for setting {}: expected Enum, got {:?}",
@@ -233,12 +314,24 @@ macro_rules! define_settings_dispatch_arm {
             )),
         }
     }};
-    ($value:ident, Text, |$smgr:ident, $sval:ident : $sty:ty| $sbody:expr, $mgr:ident, $key:expr) => {{
+    ($value:ident, Text,
+     |$smgr:ident, $sval:ident : $sty:ty| $sbody:expr,
+     $mgr:ident, $key:expr
+     $(, on_dispatch: |$dval:ident : $dty:ty| $dbody:expr)?
+    ) => {{
         match $value {
             $crate::types::setting_value::SettingValue::Text(s) => {
+                $( let $dval: $dty = s.clone(); )?
                 let $smgr = $mgr;
                 let $sval: $sty = s;
-                $sbody
+                let setter_result: ::anyhow::Result<()> = $sbody;
+                setter_result.map(|()| {
+                    #[allow(unused_mut, unused_assignments)]
+                    let mut __effect =
+                        $crate::types::settings_side_effect::SettingsSideEffect::None;
+                    $( __effect = $dbody; )?
+                    __effect
+                })
             }
             other => ::core::result::Result::Err(::anyhow::anyhow!(
                 "type mismatch for setting {}: expected Text, got {:?}",

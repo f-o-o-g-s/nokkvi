@@ -125,7 +125,12 @@ mod tests {
             &mut mgr,
         );
 
-        assert!(matches!(result, Some(Ok(()))));
+        assert!(matches!(
+            result,
+            Some(Ok(
+                crate::types::settings_side_effect::SettingsSideEffect::None
+            ))
+        ));
         assert!(!mgr.get_player_settings().stable_viewport);
     }
 
@@ -211,7 +216,12 @@ mod tests {
             SettingValue::Bool(false),
             &mut mgr,
         );
-        assert!(matches!(result, Some(Ok(()))));
+        assert!(matches!(
+            result,
+            Some(Ok(
+                crate::types::settings_side_effect::SettingsSideEffect::None
+            ))
+        ));
         assert!(!mgr.get_player_settings().auto_follow_playing);
 
         let result = dispatch_general_tab_setting(
@@ -219,7 +229,12 @@ mod tests {
             SettingValue::Bool(true),
             &mut mgr,
         );
-        assert!(matches!(result, Some(Ok(()))));
+        assert!(matches!(
+            result,
+            Some(Ok(
+                crate::types::settings_side_effect::SettingsSideEffect::None
+            ))
+        ));
         assert!(mgr.get_player_settings().auto_follow_playing);
     }
 
@@ -234,7 +249,12 @@ mod tests {
             },
             &mut mgr,
         );
-        assert!(matches!(result, Some(Ok(()))));
+        assert!(matches!(
+            result,
+            Some(Ok(
+                crate::types::settings_side_effect::SettingsSideEffect::None
+            ))
+        ));
         assert_eq!(
             mgr.get_player_settings().enter_behavior,
             EnterBehavior::AppendAndPlay
@@ -252,7 +272,12 @@ mod tests {
             },
             &mut mgr,
         );
-        assert!(matches!(result, Some(Ok(()))));
+        assert!(matches!(
+            result,
+            Some(Ok(
+                crate::types::settings_side_effect::SettingsSideEffect::None
+            ))
+        ));
         assert_eq!(mgr.get_player_settings().start_view, "Albums");
     }
 

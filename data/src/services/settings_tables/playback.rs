@@ -237,7 +237,12 @@ mod tests {
             &mut mgr,
         );
 
-        assert!(matches!(result, Some(Ok(()))));
+        assert!(matches!(
+            result,
+            Some(Ok(
+                crate::types::settings_side_effect::SettingsSideEffect::None
+            ))
+        ));
         assert!(mgr.get_player_settings().crossfade_enabled);
     }
 
@@ -261,7 +266,12 @@ mod tests {
             &mut mgr,
         );
 
-        assert!(matches!(result, Some(Ok(()))));
+        assert!(matches!(
+            result,
+            Some(Ok(
+                crate::types::settings_side_effect::SettingsSideEffect::None
+            ))
+        ));
         assert_eq!(mgr.get_player_settings().replay_gain_preamp_db, 6.0_f32);
     }
 
@@ -285,7 +295,12 @@ mod tests {
             &mut mgr,
         );
 
-        assert!(matches!(result, Some(Ok(()))));
+        assert!(matches!(
+            result,
+            Some(Ok(
+                crate::types::settings_side_effect::SettingsSideEffect::None
+            ))
+        ));
         assert_eq!(
             mgr.get_player_settings().volume_normalization,
             VolumeNormalizationMode::ReplayGainTrack
@@ -323,7 +338,12 @@ mod tests {
             &mut mgr,
         );
 
-        assert!(matches!(result, Some(Ok(()))));
+        assert!(matches!(
+            result,
+            Some(Ok(
+                crate::types::settings_side_effect::SettingsSideEffect::None
+            ))
+        ));
         let p = mgr.get_player_settings();
         assert!((p.scrobble_threshold - 0.75_f32).abs() < f32::EPSILON);
     }

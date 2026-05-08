@@ -24,6 +24,7 @@ pub mod reactive;
 pub mod setting_def;
 pub mod setting_value;
 pub mod settings;
+pub mod settings_side_effect;
 pub mod song;
 pub mod song_pool;
 pub mod sort_mode;

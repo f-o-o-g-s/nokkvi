@@ -13,7 +13,9 @@
 //! - `dump_<tab>_tab_player_settings(src, out)` — internal→UI-facing
 //!   `PlayerSettings` copy step (drives `Message::PlayerSettingsLoaded`).
 //!
-//! See [`crate::types::setting_def`] for the macro and supporting types.
+//! See [`crate::types::setting_def`] for the macro and supporting types and
+//! [`crate::types::settings_side_effect`] for the typed side-effect enum the
+//! `on_dispatch:` hook returns.
 
 pub mod general;
 pub mod interface;
@@ -34,6 +36,8 @@ pub use playback::{
     TAB_PLAYBACK_SETTINGS, apply_toml_playback_tab, dispatch_playback_tab_setting,
     dump_playback_tab_player_settings, tab_playback_contains,
 };
+
+pub use crate::types::settings_side_effect::SettingsSideEffect;
 
 /// Returns true if any per-tab dispatcher claims `key`. The strangler-fig
 /// caller in `update/settings.rs` uses this as a sync pre-check before
