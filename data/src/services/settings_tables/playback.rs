@@ -358,4 +358,39 @@ mod tests {
         assert!(p.rounded_mode);
         assert!(!p.queue_show_stars);
     }
+
+    /// Read-side: `dump_playback_tab_player_settings` mirrors migrated fields
+    /// onto the UI-facing struct. Includes the f64→f32 narrowing on
+    /// `scrobble_threshold` — the only non-trivial cast on this tab.
+    #[test]
+    fn dump_playback_round_trip_copies_migrated_fields() {
+        let (mgr, _tmp) = make_test_manager();
+        let mut ui = mgr.get_player_settings();
+
+        let mut src = PlayerSettings::default();
+        src.crossfade_enabled = true;
+        src.crossfade_duration_secs = 9;
+        src.replay_gain_preamp_db = 4.0;
+        src.volume_normalization = VolumeNormalizationMode::ReplayGainAlbum;
+        src.normalization_level = NormalizationLevel::Loud;
+        src.opacity_gradient = false;
+        src.rounded_mode = true;
+        src.queue_show_stars = false;
+        src.scrobble_threshold = 0.75;
+
+        dump_playback_tab_player_settings(&src, &mut ui);
+
+        assert!(ui.crossfade_enabled);
+        assert_eq!(ui.crossfade_duration_secs, 9);
+        assert_eq!(ui.replay_gain_preamp_db, 4.0);
+        assert_eq!(
+            ui.volume_normalization,
+            VolumeNormalizationMode::ReplayGainAlbum
+        );
+        assert_eq!(ui.normalization_level, NormalizationLevel::Loud);
+        assert!(!ui.opacity_gradient);
+        assert!(ui.rounded_mode);
+        assert!(!ui.queue_show_stars);
+        assert!((ui.scrobble_threshold - 0.75_f32).abs() < f32::EPSILON);
+    }
 }
