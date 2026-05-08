@@ -165,8 +165,14 @@ impl SettingsPage {
     }
 
     /// Filter entries by search query. Matches against:
-    /// - Item labels and categories (subtitle text)
-    /// - Section header labels (e.g. "Playback", "Item Actions", tab names)
+    /// - Item labels (e.g. "Stable Viewport").
+    /// - Item categories — section names like "Mouse Behavior".
+    /// - Item subtitles — description text shown in the footer.
+    /// - Section header labels (e.g. "Playback", "Item Actions", tab names).
+    ///
+    /// `subtitle` matching keeps description-text search working after the
+    /// `define_settings!`-driven items split moved description text from
+    /// the (formerly mis-named) `category` slot into `subtitle:`.
     ///
     /// When a header matches, all its child items are included.
     /// When query is empty, returns the input unchanged.
@@ -188,9 +194,13 @@ impl SettingsPage {
                     pending_header = Some(entry);
                 }
                 SettingsEntry::Item(item) => {
+                    let subtitle_matches = item
+                        .subtitle
+                        .is_some_and(|s| s.to_lowercase().contains(&query_lower));
                     let item_matches = header_matches
                         || item.label.to_lowercase().contains(&query_lower)
-                        || item.category.to_lowercase().contains(&query_lower);
+                        || item.category.to_lowercase().contains(&query_lower)
+                        || subtitle_matches;
 
                     if item_matches {
                         // Emit the pending header if we haven't yet
