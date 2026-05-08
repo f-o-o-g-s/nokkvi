@@ -9,7 +9,9 @@
 //!   strangler-fig caller before locking the manager mutex).
 //! - `dispatch_<tab>_tab_setting(key, value, &mut SettingsManager)` — sync
 //!   persistence dispatcher.
-//! - `apply_toml_<tab>_tab(ts, p)` — TOML→PlayerSettings copy step.
+//! - `apply_toml_<tab>_tab(ts, p)` — TOML→internal `PlayerSettings` copy step.
+//! - `dump_<tab>_tab_player_settings(src, out)` — internal→UI-facing
+//!   `PlayerSettings` copy step (drives `Message::PlayerSettingsLoaded`).
 //!
 //! See [`crate::types::setting_def`] for the macro and supporting types.
 
@@ -19,15 +21,15 @@ pub mod playback;
 
 pub use general::{
     TAB_GENERAL_SETTINGS, apply_toml_general_tab, dispatch_general_tab_setting,
-    tab_general_contains,
+    dump_general_tab_player_settings, tab_general_contains,
 };
 pub use interface::{
     TAB_INTERFACE_SETTINGS, apply_toml_interface_tab, dispatch_interface_tab_setting,
-    tab_interface_contains,
+    dump_interface_tab_player_settings, tab_interface_contains,
 };
 pub use playback::{
     TAB_PLAYBACK_SETTINGS, apply_toml_playback_tab, dispatch_playback_tab_setting,
-    tab_playback_contains,
+    dump_playback_tab_player_settings, tab_playback_contains,
 };
 
 /// Returns true if any per-tab dispatcher claims `key`. The strangler-fig

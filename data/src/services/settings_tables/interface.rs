@@ -26,6 +26,7 @@ define_settings! {
     contains_fn: tab_interface_contains,
     dispatch_fn: dispatch_interface_tab_setting,
     apply_fn: apply_toml_interface_tab,
+    dump_fn: dump_interface_tab_player_settings,
     settings: [
         // --- Layout ---
         NavLayoutSetting {
@@ -33,30 +34,35 @@ define_settings! {
             value_type: Enum,
             setter: |mgr, v: String| mgr.set_nav_layout(NavLayout::from_label(&v)),
             toml_apply: |ts, p| p.nav_layout = ts.nav_layout,
+            read: |src, out| out.nav_layout = src.nav_layout,
         },
         NavDisplayModeSetting {
             key: "general.nav_display_mode",
             value_type: Enum,
             setter: |mgr, v: String| mgr.set_nav_display_mode(NavDisplayMode::from_label(&v)),
             toml_apply: |ts, p| p.nav_display_mode = ts.nav_display_mode,
+            read: |src, out| out.nav_display_mode = src.nav_display_mode,
         },
         TrackInfoDisplaySetting {
             key: "general.track_info_display",
             value_type: Enum,
             setter: |mgr, v: String| mgr.set_track_info_display(TrackInfoDisplay::from_label(&v)),
             toml_apply: |ts, p| p.track_info_display = ts.track_info_display,
+            read: |src, out| out.track_info_display = src.track_info_display,
         },
         SlotRowHeightSetting {
             key: "general.slot_row_height",
             value_type: Enum,
             setter: |mgr, v: String| mgr.set_slot_row_height(SlotRowHeight::from_label(&v)),
             toml_apply: |ts, p| p.slot_row_height = ts.slot_row_height,
+            read: |src, out| out.slot_row_height = src.slot_row_height,
         },
         HorizontalVolume {
             key: "general.horizontal_volume",
             value_type: Bool,
             setter: |mgr, v: bool| mgr.set_horizontal_volume(v),
             toml_apply: |ts, p| p.horizontal_volume = ts.horizontal_volume,
+            read: |src, out| out.horizontal_volume = src.horizontal_volume,
         },
         // --- Views ---
         SlotTextLinks {
@@ -64,30 +70,35 @@ define_settings! {
             value_type: Bool,
             setter: |mgr, v: bool| mgr.set_slot_text_links(v),
             toml_apply: |ts, p| p.slot_text_links = ts.slot_text_links,
+            read: |src, out| out.slot_text_links = src.slot_text_links,
         },
         AlbumsArtworkOverlay {
             key: "general.albums_artwork_overlay",
             value_type: Bool,
             setter: |mgr, v: bool| mgr.set_albums_artwork_overlay(v),
             toml_apply: |ts, p| p.albums_artwork_overlay = ts.albums_artwork_overlay,
+            read: |src, out| out.albums_artwork_overlay = src.albums_artwork_overlay,
         },
         ArtistsArtworkOverlay {
             key: "general.artists_artwork_overlay",
             value_type: Bool,
             setter: |mgr, v: bool| mgr.set_artists_artwork_overlay(v),
             toml_apply: |ts, p| p.artists_artwork_overlay = ts.artists_artwork_overlay,
+            read: |src, out| out.artists_artwork_overlay = src.artists_artwork_overlay,
         },
         SongsArtworkOverlay {
             key: "general.songs_artwork_overlay",
             value_type: Bool,
             setter: |mgr, v: bool| mgr.set_songs_artwork_overlay(v),
             toml_apply: |ts, p| p.songs_artwork_overlay = ts.songs_artwork_overlay,
+            read: |src, out| out.songs_artwork_overlay = src.songs_artwork_overlay,
         },
         PlaylistsArtworkOverlay {
             key: "general.playlists_artwork_overlay",
             value_type: Bool,
             setter: |mgr, v: bool| mgr.set_playlists_artwork_overlay(v),
             toml_apply: |ts, p| p.playlists_artwork_overlay = ts.playlists_artwork_overlay,
+            read: |src, out| out.playlists_artwork_overlay = src.playlists_artwork_overlay,
         },
         // --- Strip ---
         StripShowTitle {
@@ -95,48 +106,56 @@ define_settings! {
             value_type: Bool,
             setter: |mgr, v: bool| mgr.set_strip_show_title(v),
             toml_apply: |ts, p| p.strip_show_title = ts.strip_show_title,
+            read: |src, out| out.strip_show_title = src.strip_show_title,
         },
         StripShowArtist {
             key: "general.strip_show_artist",
             value_type: Bool,
             setter: |mgr, v: bool| mgr.set_strip_show_artist(v),
             toml_apply: |ts, p| p.strip_show_artist = ts.strip_show_artist,
+            read: |src, out| out.strip_show_artist = src.strip_show_artist,
         },
         StripShowAlbum {
             key: "general.strip_show_album",
             value_type: Bool,
             setter: |mgr, v: bool| mgr.set_strip_show_album(v),
             toml_apply: |ts, p| p.strip_show_album = ts.strip_show_album,
+            read: |src, out| out.strip_show_album = src.strip_show_album,
         },
         StripShowFormatInfo {
             key: "general.strip_show_format_info",
             value_type: Bool,
             setter: |mgr, v: bool| mgr.set_strip_show_format_info(v),
             toml_apply: |ts, p| p.strip_show_format_info = ts.strip_show_format_info,
+            read: |src, out| out.strip_show_format_info = src.strip_show_format_info,
         },
         StripMergedMode {
             key: "general.strip_merged_mode",
             value_type: Bool,
             setter: |mgr, v: bool| mgr.set_strip_merged_mode(v),
             toml_apply: |ts, p| p.strip_merged_mode = ts.strip_merged_mode,
+            read: |src, out| out.strip_merged_mode = src.strip_merged_mode,
         },
         StripShowLabels {
             key: "general.strip_show_labels",
             value_type: Bool,
             setter: |mgr, v: bool| mgr.set_strip_show_labels(v),
             toml_apply: |ts, p| p.strip_show_labels = ts.strip_show_labels,
+            read: |src, out| out.strip_show_labels = src.strip_show_labels,
         },
         StripSeparatorSetting {
             key: "general.strip_separator",
             value_type: Enum,
             setter: |mgr, v: String| mgr.set_strip_separator(StripSeparator::from_label(&v)),
             toml_apply: |ts, p| p.strip_separator = ts.strip_separator,
+            read: |src, out| out.strip_separator = src.strip_separator,
         },
         StripClickActionSetting {
             key: "general.strip_click_action",
             value_type: Enum,
             setter: |mgr, v: String| mgr.set_strip_click_action(StripClickAction::from_label(&v)),
             toml_apply: |ts, p| p.strip_click_action = ts.strip_click_action,
+            read: |src, out| out.strip_click_action = src.strip_click_action,
         },
         // --- Artwork Column ---
         ArtworkColumnModeSetting {
@@ -144,6 +163,7 @@ define_settings! {
             value_type: Enum,
             setter: |mgr, v: String| mgr.set_artwork_column_mode(ArtworkColumnMode::from_label(&v)),
             toml_apply: |ts, p| p.artwork_column_mode = ts.artwork_column_mode,
+            read: |src, out| out.artwork_column_mode = src.artwork_column_mode,
         },
         ArtworkColumnStretchFitSetting {
             key: "general.artwork_column_stretch_fit",
@@ -152,6 +172,7 @@ define_settings! {
                 mgr.set_artwork_column_stretch_fit(ArtworkStretchFit::from_label(&v))
             },
             toml_apply: |ts, p| p.artwork_column_stretch_fit = ts.artwork_column_stretch_fit,
+            read: |src, out| out.artwork_column_stretch_fit = src.artwork_column_stretch_fit,
         },
     ]
 }

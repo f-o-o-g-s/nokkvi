@@ -1,7 +1,7 @@
 //! Settings macro foundation — `define_settings!` plus its supporting types.
 //!
 //! Each settings tab declares its keys via [`define_settings!`] in
-//! `data/src/services/settings_tables/<tab>.rs`. The macro emits three
+//! `data/src/services/settings_tables/<tab>.rs`. The macro emits four
 //! artifacts per tab:
 //!
 //! - `pub const TAB_<TAB>_SETTINGS: &[SettingDef]` — table of declared keys
@@ -14,6 +14,10 @@
 //!   `match key.as_str()` arm in the UI crate.
 //! - `pub fn apply_toml_<tab>_tab(ts, p)` — runs the per-setting
 //!   `toml_apply` closures. Called from `apply_toml_settings_to_internal`.
+//! - `pub fn dump_<tab>_tab_player_settings(src, out)` — runs the per-setting
+//!   `read` closures, copying the redb-backed internal `PlayerSettings` into
+//!   the UI-facing `PlayerSettings` consumed by `Message::PlayerSettingsLoaded`.
+//!   Called from `SettingsManager::get_player_settings`.
 //!
 //! The dispatcher takes `&mut SettingsManager` (sync). The UI handler in
 //! `update/settings.rs` locks the manager mutex inside an async task before
@@ -41,8 +45,8 @@ pub struct SettingDef {
 /// Declarative table of settings for a single tab.
 ///
 /// See the module-level docs for the artifacts emitted. Adding a setting is a
-/// single declarative entry; the compiler enforces that `setter` and
-/// `toml_apply` are both declared (no silent omission).
+/// single declarative entry; the compiler enforces that `setter`, `toml_apply`,
+/// and `read` are all declared (no silent omission).
 ///
 /// # Example
 ///
@@ -53,12 +57,14 @@ pub struct SettingDef {
 ///     contains_fn: tab_general_contains,
 ///     dispatch_fn: dispatch_general_tab_setting,
 ///     apply_fn: apply_toml_general_tab,
+///     dump_fn: dump_general_tab_player_settings,
 ///     settings: [
 ///         StableViewport {
 ///             key: "general.stable_viewport",
 ///             value_type: Bool,
 ///             setter: |mgr, v: bool| mgr.set_stable_viewport(v),
 ///             toml_apply: |ts, p| p.stable_viewport = ts.stable_viewport,
+///             read: |src, out| out.stable_viewport = src.stable_viewport,
 ///         },
 ///     ]
 /// }
@@ -69,6 +75,11 @@ pub struct SettingDef {
 /// `Text`. The setter receives the inner payload typed as the closure
 /// signature requests; type-mismatch at runtime returns
 /// `Some(Err(anyhow::Error))`.
+///
+/// `read` carries the per-field cast/clone semantics needed to land the
+/// redb-stored internal `PlayerSettings` value onto the UI-facing struct
+/// (e.g. `out.scrobble_threshold = src.scrobble_threshold as f32` or
+/// `out.start_view = src.start_view.clone()`).
 #[macro_export]
 macro_rules! define_settings {
     (
@@ -77,13 +88,15 @@ macro_rules! define_settings {
         contains_fn: $contains_fn:ident,
         dispatch_fn: $dispatch_fn:ident,
         apply_fn: $apply_fn:ident,
+        dump_fn: $dump_fn:ident,
         settings: [
             $(
                 $variant:ident {
                     key: $key:literal,
                     value_type: $vtype:ident,
                     setter: |$smgr:ident, $sval:ident : $sty:ty| $sbody:expr,
-                    toml_apply: |$ats:ident, $ap:ident| $abody:expr $(,)?
+                    toml_apply: |$ats:ident, $ap:ident| $abody:expr,
+                    read: |$rsrc:ident, $rout:ident| $rbody:expr $(,)?
                 }
             ),* $(,)?
         ] $(,)?
@@ -105,8 +118,9 @@ macro_rules! define_settings {
 
         // Allows: empty-tab variants (no declared settings) leave `key`,
         // `value`, and `mgr` unbound — same goes for `ts` / `p` in
-        // `$apply_fn`. Once the per-tab follow-ups land entries here,
-        // every binding is consumed by the generated arms.
+        // `$apply_fn` and `src` / `out` in `$dump_fn`. Once the per-tab
+        // follow-ups land entries here, every binding is consumed by the
+        // generated arms.
         #[allow(unused_variables)]
         pub fn $dispatch_fn(
             key: &str,
@@ -137,6 +151,20 @@ macro_rules! define_settings {
                     let $ats: &$crate::types::toml_settings::TomlSettings = ts;
                     let $ap: &mut $crate::types::settings::PlayerSettings = p;
                     $abody;
+                }
+            )*
+        }
+
+        #[allow(unused_variables)]
+        pub fn $dump_fn(
+            src: &$crate::types::settings::PlayerSettings,
+            out: &mut $crate::types::player_settings::PlayerSettings,
+        ) {
+            $(
+                {
+                    let $rsrc: &$crate::types::settings::PlayerSettings = src;
+                    let $rout: &mut $crate::types::player_settings::PlayerSettings = out;
+                    $rbody;
                 }
             )*
         }
