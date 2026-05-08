@@ -111,7 +111,7 @@ impl Nokkvi {
         anchor_id: Option<String>,
     ) -> Task<Message> {
         self.load_artists_internal(0, false, move |(result, total_count)| {
-            Message::Artists(ArtistsMessage::ArtistsLoaded {
+            Message::ArtistsLoader(crate::app_message::ArtistsLoaderMessage::Loaded {
                 result,
                 total_count,
                 background,
@@ -123,7 +123,10 @@ impl Nokkvi {
     /// Load a subsequent page of artists (triggered by scroll near edge of loaded data)
     pub(crate) fn handle_artists_load_page(&mut self, offset: usize) -> Task<Message> {
         self.load_artists_internal(offset, false, |(result, total_count)| {
-            Message::Artists(ArtistsMessage::ArtistsPageLoaded(result, total_count))
+            Message::ArtistsLoader(crate::app_message::ArtistsLoaderMessage::PageLoaded(
+                result,
+                total_count,
+            ))
         })
     }
 
@@ -131,7 +134,10 @@ impl Nokkvi {
     /// by `try_resolve_pending_expand_artist` to walk the full library.
     pub(crate) fn force_load_artists_page(&mut self, offset: usize) -> Task<Message> {
         self.load_artists_internal(offset, true, |(result, total_count)| {
-            Message::Artists(ArtistsMessage::ArtistsPageLoaded(result, total_count))
+            Message::ArtistsLoader(crate::app_message::ArtistsLoaderMessage::PageLoaded(
+                result,
+                total_count,
+            ))
         })
     }
 
@@ -748,29 +754,25 @@ impl Nokkvi {
         Task::none()
     }
 
-    /// Phase 1 scaffolding stub for `Message::ArtistsLoader(...)`.
-    ///
-    /// Wired in `update/mod.rs` so the per-domain `*LoaderMessage` enums
-    /// compile end-to-end alongside the Genres prototype. Currently
-    /// unreachable: no fire site constructs `Message::ArtistsLoader(...)` —
-    /// the existing `Message::Artists(ArtistsMessage::ArtistsLoaded { .. })`
-    /// path is still live.
-    ///
-    /// Phase 2 implementer for Artists: replace the body to route
-    /// `ArtistsLoaderMessage::Loaded { .. }` → `handle_artists_loaded(...)`
-    /// and `ArtistsLoaderMessage::PageLoaded(..)` → `handle_artists_page_loaded(...)`,
-    /// then update the fire sites in this file and remove the per-view
-    /// loader special-cases in `update/mod.rs` plus the dead variants in
-    /// `views/artists/mod.rs` and `views/artists/update.rs`. See the Genres
-    /// migration for the exact pattern.
+    /// Routes `Message::ArtistsLoader(...)` arrivals to the existing
+    /// `handle_artists_loaded` / `handle_artists_page_loaded` handlers.
+    /// Mirrors `dispatch_genres_loader` — the per-domain dispatcher pattern
+    /// keeps the loader-result routing co-located with its handlers.
     pub(crate) fn dispatch_artists_loader(
         &mut self,
-        _msg: crate::app_message::ArtistsLoaderMessage,
+        msg: crate::app_message::ArtistsLoaderMessage,
     ) -> Task<Message> {
-        panic!(
-            "Phase 2 (Artists): dispatch_artists_loader is a Phase 1 scaffolding \
-             stub — wire ArtistsLoaderMessage variants to handle_artists_loaded \
-             / handle_artists_page_loaded before constructing Message::ArtistsLoader(...)"
-        )
+        use crate::app_message::ArtistsLoaderMessage;
+        match msg {
+            ArtistsLoaderMessage::Loaded {
+                result,
+                total_count,
+                background,
+                anchor_id,
+            } => self.handle_artists_loaded(result, total_count, background, anchor_id),
+            ArtistsLoaderMessage::PageLoaded(result, total_count) => {
+                self.handle_artists_page_loaded(result, total_count)
+            }
+        }
     }
 }

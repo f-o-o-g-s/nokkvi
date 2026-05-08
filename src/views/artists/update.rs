@@ -149,9 +149,6 @@ impl ArtistsPage {
                     (Task::none(), ArtistsAction::AddBatchToQueue(payload))
                 }
 
-                // Data loading messages (handled at root level, no action needed here)
-                ArtistsMessage::ArtistsLoaded { .. } => (Task::none(), ArtistsAction::None),
-                ArtistsMessage::ArtistsPageLoaded(_, _) => (Task::none(), ArtistsAction::None),
                 // Routed up to root in `handle_artists` before this match runs;
                 // arm exists only for exhaustiveness.
                 ArtistsMessage::SetOpenMenu(_) => (Task::none(), ArtistsAction::None),

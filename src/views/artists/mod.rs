@@ -138,15 +138,6 @@ pub enum ArtistsMessage {
     /// root handler before the page's `update` runs.
     Roulette,
 
-    // Data loading (moved from root Message enum)
-    ArtistsLoaded {
-        result: Result<Vec<ArtistUIViewData>, String>,
-        total_count: usize,
-        background: bool,
-        anchor_id: Option<String>,
-    },
-    ArtistsPageLoaded(Result<Vec<ArtistUIViewData>, String>, usize), // result, total_count (subsequent page)
-
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
 
     // Open external URL

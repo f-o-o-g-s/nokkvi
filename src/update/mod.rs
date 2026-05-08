@@ -245,18 +245,12 @@ impl Nokkvi {
 
             // -----------------------------------------------------------------
             // Data Loading: Artists
+            //
+            // Note: the loader-result variants have migrated to
+            // `Message::ArtistsLoader(ArtistsLoaderMessage::{Loaded,PageLoaded})`,
+            // routed in the "Loader Results" block above.
             // -----------------------------------------------------------------
             Message::LoadArtists => self.handle_load_artists(false, None),
-            Message::Artists(crate::views::ArtistsMessage::ArtistsLoaded {
-                result,
-                total_count,
-                background,
-                anchor_id,
-            }) => self.handle_artists_loaded(result, total_count, background, anchor_id),
-            Message::Artists(crate::views::ArtistsMessage::ArtistsPageLoaded(
-                result,
-                total_count,
-            )) => self.handle_artists_page_loaded(result, total_count),
 
             // -----------------------------------------------------------------
             // Data Loading: Songs
