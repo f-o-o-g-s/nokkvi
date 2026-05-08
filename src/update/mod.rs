@@ -32,6 +32,7 @@ mod boat;
 mod browsing_panel;
 mod collage;
 mod components;
+mod config;
 mod cross_pane_drag;
 mod default_playlist_picker;
 mod eq_modal;
@@ -68,10 +69,7 @@ mod window;
 use iced::Task;
 use tracing::debug;
 
-use crate::{
-    Nokkvi, View,
-    app_message::{Message, PlaybackMessage},
-};
+use crate::{Nokkvi, View, app_message::Message};
 
 impl Nokkvi {
     /// Central message handler
@@ -344,11 +342,7 @@ impl Nokkvi {
             Message::ScaleFactorChanged(scale_factor) => {
                 self.handle_scale_factor_changed(scale_factor)
             }
-            Message::HotkeyConfigUpdated(config) => {
-                tracing::info!(" [SETTINGS] Hotkey config hot-reloaded");
-                self.hotkey_config = config;
-                Task::none()
-            }
+            Message::HotkeyConfigUpdated(config) => self.handle_hotkey_config_updated(config),
             Message::NoOp => Task::none(),
             Message::QuitApp => iced::exit(),
             Message::PlaySfx(sfx_type) => self.handle_play_sfx(sfx_type),
@@ -372,23 +366,7 @@ impl Nokkvi {
                 // SwitchView -> Message::SwitchView, ToggleLightMode -> Message::ToggleLightMode, etc.
                 Task::none()
             }
-            Message::ToggleLightMode => {
-                // Toggle light mode: write to config.toml (single source of truth)
-                let new_state = !crate::theme::is_light_mode();
-                crate::theme::set_light_mode(new_state);
-                debug!(" Light mode set to: {}", new_state);
-                // Persist to config.toml — the config file watcher will pick this up
-                // and ThemeConfigReloaded will read the correct value
-                if let Err(e) = crate::config_writer::update_config_value(
-                    "settings.light_mode",
-                    &crate::views::settings::items::SettingValue::Bool(new_state),
-                    None,
-                ) {
-                    tracing::warn!(" Failed to write light_mode to config.toml: {e}");
-                }
-                // Force UI refresh
-                Task::done(Message::Playback(PlaybackMessage::Tick))
-            }
+            Message::ToggleLightMode => self.handle_toggle_light_mode(),
             Message::Albums(crate::views::AlbumsMessage::ArtworkColumnDrag(ev)) => {
                 self.handle_artwork_column_drag(ev)
             }
@@ -477,95 +455,15 @@ impl Nokkvi {
             Message::WindowCloseRequested(id) => self.handle_window_close_requested(id),
 
             // -----------------------------------------------------------------
-            // Visualizer Hot-Reload
+            // Visualizer / Theme / Settings Hot-Reload (see update/config.rs)
             // -----------------------------------------------------------------
             Message::VisualizerConfigChanged(config) => {
-                // Update shared config state
-                {
-                    let mut cfg = self.visualizer_config.write();
-                    debug!(
-                        " Applying new visualizer config: noise_reduction={:.2}, waves={}, bar_spacing={:.1}",
-                        config.noise_reduction, config.waves, config.bars.bar_spacing
-                    );
-                    *cfg = config;
-                }
-                // Apply config to visualizer (reinitializes spectrum engine with new params)
-                if let Some(ref vis) = self.visualizer {
-                    vis.apply_config();
-                }
-                // Mark settings dirty so entries show updated values
-                self.settings_page.config_dirty = true;
-                Task::none()
+                self.handle_visualizer_config_changed(config)
             }
-
-            // -----------------------------------------------------------------
-            // Theme Hot-Reload
-            // -----------------------------------------------------------------
-            Message::ThemeConfigReloaded => {
-                // Reload theme colors from config.toml
-                crate::theme::reload_theme();
-                // Also apply light_mode from config — this is for script-driven
-                // demos (visualizer_showcase.py --both-modes), not user-facing config.
-                // The in-app toggle + redb is the intended user mechanism.
-                let config_light_mode = crate::theme_config::load_light_mode_from_config();
-                if config_light_mode != crate::theme::is_light_mode() {
-                    crate::theme::set_light_mode(config_light_mode);
-                    debug!(" Light mode set to {} from config.toml", config_light_mode);
-                }
-                // Force UI refresh so all widgets pick up new colors
-                self.settings_page.config_dirty = true;
-                if self.current_view == View::Settings {
-                    let new_data = self.build_settings_view_data();
-                    self.settings_page.refresh_entries(&new_data);
-                    self.settings_page.config_dirty = false;
-                }
-                Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
-            }
-
-            // -----------------------------------------------------------------
-            // Settings Hot-Reload
-            // -----------------------------------------------------------------
-            Message::SettingsConfigReloaded => {
-                tracing::info!(" [SETTINGS] Config file modified, reloading settings");
-                self.shell_task(
-                    |shell| async move {
-                        shell.settings().reload_from_toml().await;
-                        let vp = shell.settings().get_view_preferences().await;
-                        let hotkeys = shell
-                            .settings()
-                            .settings_manager()
-                            .lock()
-                            .await
-                            .get_hotkey_config_owned();
-                        let settings = shell
-                            .settings()
-                            .settings_manager()
-                            .lock()
-                            .await
-                            .get_player_settings();
-                        Ok((vp, hotkeys, settings))
-                    },
-                    |result: Result<_, anyhow::Error>| match result {
-                        Ok((vp, hotkeys, settings)) => {
-                            Message::SettingsReloadDataLoaded(vp, hotkeys, Box::new(settings))
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to reload settings: {}", e);
-                            Message::NoOp
-                        }
-                    },
-                )
-            }
+            Message::ThemeConfigReloaded => self.handle_theme_config_reloaded(),
+            Message::SettingsConfigReloaded => self.handle_settings_config_reloaded(),
             Message::SettingsReloadDataLoaded(vp, hotkeys, settings) => {
-                // Settings loaded from TOML re-apply to the UI
-                self.settings_page.config_dirty = true;
-                Task::batch([
-                    self.handle_view_preferences_loaded(vp),
-                    self.update(Message::HotkeyConfigUpdated(hotkeys)),
-                    self.update(Message::Playback(
-                        crate::app_message::PlaybackMessage::PlayerSettingsLoaded(settings),
-                    )),
-                ])
+                self.handle_settings_reload_data_loaded(vp, hotkeys, settings)
             }
 
             // -----------------------------------------------------------------
