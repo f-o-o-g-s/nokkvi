@@ -22,6 +22,7 @@ pub mod queue_sort_mode;
 pub mod radio_station;
 pub mod reactive;
 pub mod setting_def;
+pub mod setting_item;
 pub mod setting_value;
 pub mod settings;
 pub mod settings_data;
