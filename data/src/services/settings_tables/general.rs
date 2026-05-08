@@ -133,7 +133,8 @@ define_settings! {
             read: |src, out| out.artwork_resolution = src.artwork_resolution,
             on_dispatch: |_v: String| SettingsSideEffect::Toast {
                 level: ToastLevel::Info,
-                message: "Artwork resolution changed — rebuild artwork cache to apply".to_string(),
+                message: "Artwork resolution changed — new artwork will fetch at this size"
+                    .to_string(),
             },
         },
         // The setter writes only redb (via `save_redb_only`); the UI handler
@@ -469,8 +470,8 @@ mod tests {
                 ref message,
             })) => {
                 assert!(
-                    message.contains("rebuild artwork cache"),
-                    "toast message should mention cache rebuild, got: {message}"
+                    message.contains("fetch at this size"),
+                    "toast message should mention new fetches at the new size, got: {message}"
                 );
             }
             ref other => panic!("expected Toast{{ Info, … }}, got {other:?}"),
