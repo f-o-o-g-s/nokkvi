@@ -1013,10 +1013,7 @@ fn apply_toml_settings_to_internal(
     crate::services::settings_tables::apply_toml_interface_tab(ts, p);
     crate::services::settings_tables::apply_toml_playback_tab(ts, p);
 
-    p.start_view = ts.start_view.clone();
-    p.enter_behavior = ts.enter_behavior;
     p.local_music_path = ts.local_music_path.clone();
-    p.auto_follow_playing = ts.auto_follow_playing;
     p.light_mode = ts.light_mode;
     p.rounded_mode = ts.rounded_mode;
     p.nav_layout = ts.nav_layout;
@@ -1054,10 +1051,8 @@ fn apply_toml_settings_to_internal(
     p.eq_gains = ts.eq_gains;
     p.custom_eq_presets = ts.custom_eq_presets.clone();
     p.verbose_config = ts.verbose_config;
-    p.library_page_size = ts.library_page_size;
     p.artwork_resolution = ts.artwork_resolution;
     p.show_album_artists_only = ts.show_album_artists_only;
-    p.suppress_library_refresh_toasts = ts.suppress_library_refresh_toasts;
     p.queue_show_stars = ts.queue_show_stars;
     p.queue_show_album = ts.queue_show_album;
     p.queue_show_duration = ts.queue_show_duration;
@@ -1113,8 +1108,6 @@ fn apply_toml_settings_to_internal(
     p.artwork_column_mode = ts.artwork_column_mode;
     p.artwork_column_stretch_fit = ts.artwork_column_stretch_fit;
     p.artwork_column_width_pct = ts.artwork_column_width_pct;
-    p.show_tray_icon = ts.show_tray_icon;
-    p.close_to_tray = ts.close_to_tray;
 }
 
 /// Convert `AllViewPreferences` into the internal `ViewPreferences` for redb storage.

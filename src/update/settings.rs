@@ -626,16 +626,6 @@ impl Nokkvi {
                 }
                 Task::none()
             }
-            "general.start_view" => {
-                if let crate::views::settings::items::SettingValue::Enum { ref val, .. } = value {
-                    self.start_view = val.clone();
-                    let view_name = val.clone();
-                    self.shell_spawn("persist_start_view", move |shell| async move {
-                        shell.settings().set_start_view(&view_name).await
-                    });
-                }
-                Task::none()
-            }
             "general.rounded_mode" => self.persist_bool_setting(
                 &value,
                 "persist_rounded_mode",
@@ -664,45 +654,12 @@ impl Nokkvi {
                 }
                 Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
             }
-            "general.auto_follow_playing" => {
-                self.persist_bool_setting(
-                    &value,
-                    "persist_auto_follow_playing",
-                    |s, v| s.auto_follow_playing = v,
-                    |shell: AppService, v| async move {
-                        shell.settings().set_auto_follow_playing(v).await
-                    },
-                    false,
-                )
-            }
-            "general.enter_behavior" => {
-                if let crate::views::settings::items::SettingValue::Enum { ref val, .. } = value {
-                    let behavior =
-                        nokkvi_data::types::player_settings::EnterBehavior::from_label(val);
-                    self.enter_behavior = behavior;
-                    self.shell_spawn("persist_enter_behavior", move |shell| async move {
-                        shell.settings().set_enter_behavior(behavior).await
-                    });
-                }
-                Task::none()
-            }
             "general.local_music_path" => {
                 if let crate::views::settings::items::SettingValue::Text(ref path) = value {
                     let path = path.trim().to_string();
                     self.local_music_path = path.clone();
                     self.shell_spawn("persist_local_music_path", move |shell| async move {
                         shell.settings().set_local_music_path(path).await?;
-                        Ok(())
-                    });
-                }
-                Task::none()
-            }
-            "general.library_page_size" => {
-                if let crate::views::settings::items::SettingValue::Enum { ref val, .. } = value {
-                    let size = nokkvi_data::types::player_settings::LibraryPageSize::from_label(val);
-                    self.library_page_size = size;
-                    self.shell_spawn("persist_library_page_size", move |shell| async move {
-                        shell.settings().set_library_page_size(size).await?;
                         Ok(())
                     });
                 }
@@ -719,29 +676,6 @@ impl Nokkvi {
                 }
                 Task::none()
             }
-            "general.suppress_library_refresh_toasts" => self.persist_bool_setting(
-                &value,
-                "persist_suppress_library_refresh_toasts",
-                |s, v| s.suppress_library_refresh_toasts = v,
-                |shell: AppService, v| async move {
-                    shell.settings().set_suppress_library_refresh_toasts(v).await
-                },
-                false,
-            ),
-            "general.show_tray_icon" => self.persist_bool_setting(
-                &value,
-                "persist_show_tray_icon",
-                |s, v| s.show_tray_icon = v,
-                |shell: AppService, v| async move { shell.settings().set_show_tray_icon(v).await },
-                false,
-            ),
-            "general.close_to_tray" => self.persist_bool_setting(
-                &value,
-                "persist_close_to_tray",
-                |s, v| s.close_to_tray = v,
-                |shell: AppService, v| async move { shell.settings().set_close_to_tray(v).await },
-                false,
-            ),
             "general.artwork_resolution" => {
                 if let crate::views::settings::items::SettingValue::Enum { ref val, .. } = value {
                     let res =
