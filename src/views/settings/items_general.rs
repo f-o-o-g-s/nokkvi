@@ -1,14 +1,22 @@
-//! General tab setting entries
+//! General tab setting entries.
+//!
+//! 12 of the 15 visible rows come from `define_settings!` via the
+//! macro-emitted `build_general_tab_settings_items` helper. Section headers
+//! and the read-only Account section (server URL, username, logout dialog
+//! sentinel) stay hand-written here — the dialog row uses the special
+//! `__action_logout` key and the read-only mirrors are not first-class
+//! settings.
 
 // `GeneralSettingsData` lives in the data crate so the macro-emitted
 // `build_general_tab_settings_items` (also in the data crate) can read its
 // fields. Re-exported here so existing `crate::views::settings::items_general::
 // GeneralSettingsData` import paths keep resolving.
+use nokkvi_data::services::settings_tables::general::build_general_tab_settings_items;
 pub(crate) use nokkvi_data::types::settings_data::GeneralSettingsData;
 
 use super::items::{SettingItem, SettingsEntry};
 
-/// Build settings entries for the General tab
+/// Build settings entries for the General tab.
 pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEntry> {
     const APP: &str = "assets/icons/monitor.svg";
     const MOUSE: &str = "assets/icons/mouse-pointer.svg";
@@ -16,141 +24,46 @@ pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEnt
     const LOGOUT: &str = "assets/icons/log-out.svg";
     const TRAY: &str = "assets/icons/panels-top-left.svg";
 
+    // Drain the macro-emitted rows by key so the explicit UI display order
+    // below is decoupled from the macro entry order in `define_settings!`.
+    let mut macro_rows = build_general_tab_settings_items(data);
+    let mut take = |key: &str| -> SettingsEntry {
+        let pos = macro_rows
+            .iter()
+            .position(|e| matches!(e, SettingsEntry::Item(it) if it.key.as_ref() == key))
+            .unwrap_or_else(|| panic!("missing macro row for {key}"));
+        macro_rows.remove(pos)
+    };
+
     vec![
         // --- Application ---
         SettingsEntry::Header {
             label: "Application",
             icon: APP,
         },
-        SettingItem::enum_val(
-            meta!("general.start_view", "Start View", "View shown after login"),
-            data.start_view,
-            "Queue",
-            vec!["Queue", "Albums", "Artists", "Songs", "Genres", "Playlists"],
-        ),
-        SettingItem::enum_val(
-            meta!(
-                "general.enter_behavior",
-                "Enter Behavior",
-                "Action when pressing Enter on items (all views except Queue)"
-            ),
-            data.enter_behavior,
-            "Play All",
-            vec!["Play All", "Play Single", "Append & Play"],
-        ),
-        SettingItem::text(
-            meta!(
-                "general.local_music_path",
-                "Local Music Path",
-                "Path to music on this machine for 'Open in File Manager' · press Enter to edit"
-            ),
-            data.local_music_path,
-            "",
-        ),
-        SettingItem::enum_val(
-            meta!(
-                "general.library_page_size",
-                "Library Page Size",
-                "Items fetched per API request · larger = fewer loads, more memory"
-            ),
-            data.library_page_size,
-            "Default (500)",
-            vec![
-                "Small (100)",
-                "Default (500)",
-                "Large (1,000)",
-                "Massive (5,000)",
-            ],
-        ),
-        SettingItem::enum_val(
-            meta!(
-                "general.artwork_resolution",
-                "Artwork Resolution",
-                "Panel image quality · higher = sharper on HiDPI, larger cache"
-            ),
-            data.artwork_resolution,
-            "Default (1000px)",
-            vec![
-                "Default (1000px)",
-                "High (1500px)",
-                "Ultra (2000px)",
-                "Original (Full Size)",
-            ],
-        ),
-        SettingItem::bool_val(
-            meta!(
-                "general.show_album_artists_only",
-                "Album Artists Only",
-                "Only show artists that have explicitly released albums, hiding compilation/guest artists"
-            ),
-            data.show_album_artists_only,
-            true,
-        ),
-        SettingItem::bool_val(
-            meta!(
-                "general.suppress_library_refresh_toasts",
-                "Suppress Library Refresh Toasts",
-                "Hide the notification shown when the server reports a library refresh"
-            ),
-            data.suppress_library_refresh_toasts,
-            false,
-        ),
-        SettingItem::bool_val(
-            meta!(
-                "general.verbose_config",
-                "Verbose Config",
-                "Write all settings to config.toml, including unchanged defaults"
-            ),
-            data.verbose_config,
-            false,
-        ),
+        take("general.start_view"),
+        take("general.enter_behavior"),
+        take("general.local_music_path"),
+        take("general.library_page_size"),
+        take("general.artwork_resolution"),
+        take("general.show_album_artists_only"),
+        take("general.suppress_library_refresh_toasts"),
+        take("general.verbose_config"),
         // --- Mouse Behavior ---
         SettingsEntry::Header {
             label: "Mouse Behavior",
             icon: MOUSE,
         },
-        SettingItem::bool_val(
-            meta!(
-                "general.stable_viewport",
-                "Stable Viewport",
-                "Click highlights in-place without scrolling"
-            ),
-            data.stable_viewport,
-            true,
-        ),
-        SettingItem::bool_val(
-            meta!(
-                "general.auto_follow_playing",
-                "Auto-Follow Playing Track",
-                "Scroll to current track on track changes"
-            ),
-            data.auto_follow_playing,
-            true,
-        ),
+        take("general.stable_viewport"),
+        take("general.auto_follow_playing"),
         // --- System Tray ---
         SettingsEntry::Header {
             label: "System Tray",
             icon: TRAY,
         },
-        SettingItem::bool_val(
-            meta!(
-                "general.show_tray_icon",
-                "Show Tray Icon",
-                "Register a system tray icon · requires a status bar with tray support (e.g. waybar with the `tray` module on Hyprland)"
-            ),
-            data.show_tray_icon,
-            false,
-        ),
-        SettingItem::bool_val(
-            meta!(
-                "general.close_to_tray",
-                "Close to Tray",
-                "X button hides the window into the tray instead of quitting · requires Show Tray Icon"
-            ),
-            data.close_to_tray,
-            false,
-        ),
-        // --- Account ---
+        take("general.show_tray_icon"),
+        take("general.close_to_tray"),
+        // --- Account (hand-written: read-only mirrors + logout dialog sentinel) ---
         SettingsEntry::Header {
             label: "Account",
             icon: ACC,
