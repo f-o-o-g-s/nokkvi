@@ -18,6 +18,7 @@ use crate::{
     types::{
         player_settings::{ArtworkResolution, EnterBehavior, LibraryPageSize},
         setting_def::Tab,
+        settings_data::GeneralSettingsData,
         settings_side_effect::SettingsSideEffect,
         toast::ToastLevel,
     },
@@ -25,6 +26,8 @@ use crate::{
 
 define_settings! {
     tab: Tab::General,
+    data_type: GeneralSettingsData<'_>,
+    items_fn: build_general_tab_settings_items,
     settings_const: TAB_GENERAL_SETTINGS,
     contains_fn: tab_general_contains,
     dispatch_fn: dispatch_general_tab_setting,

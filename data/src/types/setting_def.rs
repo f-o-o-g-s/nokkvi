@@ -56,11 +56,21 @@ pub struct SettingDef {
 /// optional — entries that omit it default to
 /// [`SettingsSideEffect::None`][crate::types::settings_side_effect::SettingsSideEffect::None].
 ///
+/// `ui_meta:` is also optional. When supplied, the macro additionally emits
+/// `$items_fn(data: &$data_type) -> Vec<SettingsEntry>` containing a row per
+/// entry that has a `ui_meta:` cluster. Entries without `ui_meta:` (e.g.
+/// `general.light_mode`, the queue-column-visibility booleans, the four
+/// ToggleSet sub-keys) participate in dispatch/apply/dump as before but emit
+/// no UI row — the items file in the UI crate stitches their UI elsewhere
+/// (a `toggle_set` parent, a separate tab, the queue header, …).
+///
 /// # Example
 ///
 /// ```ignore
 /// nokkvi_data::define_settings! {
 ///     tab: nokkvi_data::types::setting_def::Tab::General,
+///     data_type: nokkvi_data::types::settings_data::GeneralSettingsData<'_>,
+///     items_fn: build_general_tab_settings_items,
 ///     settings_const: TAB_GENERAL_SETTINGS,
 ///     contains_fn: tab_general_contains,
 ///     dispatch_fn: dispatch_general_tab_setting,
@@ -73,14 +83,22 @@ pub struct SettingDef {
 ///             setter: |mgr, v: bool| mgr.set_stable_viewport(v),
 ///             toml_apply: |ts, p| p.stable_viewport = ts.stable_viewport,
 ///             read: |src, out| out.stable_viewport = src.stable_viewport,
+///             ui_meta: {
+///                 label: "Stable Viewport",
+///                 category: "Mouse Behavior",
+///                 subtitle: Some("Click highlights in-place without scrolling"),
+///                 default: true,
+///                 read_field: |d| d.stable_viewport,
+///             },
 ///         },
-///         ShowAlbumArtistsOnly {
-///             key: "general.show_album_artists_only",
-///             value_type: Bool,
-///             setter: |mgr, v: bool| mgr.set_show_album_artists_only(v),
-///             toml_apply: |ts, p| p.show_album_artists_only = ts.show_album_artists_only,
-///             read: |src, out| out.show_album_artists_only = src.show_album_artists_only,
-///             on_dispatch: |_v: bool| SettingsSideEffect::LoadArtists,
+///         LightMode {
+///             // No ui_meta — light_mode renders on the Theme tab, not General.
+///             key: "general.light_mode",
+///             value_type: Enum,
+///             setter: |_mgr, _v: String| Ok(()),
+///             toml_apply: |ts, p| p.light_mode = ts.light_mode,
+///             read: |_src, _out| {},
+///             on_dispatch: |v: String| SettingsSideEffect::SetLightModeAtomic(v == "Light"),
 ///         },
 ///     ]
 /// }
@@ -102,10 +120,27 @@ pub struct SettingDef {
 /// move the original — and returns a
 /// [`SettingsSideEffect`][crate::types::settings_side_effect::SettingsSideEffect]
 /// the UI handler runs after `handle_player_settings_loaded`.
+///
+/// `ui_meta:` carries the UI-row payload used by `$items_fn`. Field shape:
+///
+/// - `label: &'static str` — human-readable row label.
+/// - `category: &'static str` — section header label (matches the surrounding
+///   `SettingsEntry::Header.label` in the UI crate's items builder).
+/// - `subtitle: Option<&'static str>` — description text shown in the footer.
+/// - `default: <typed>` — default value the row resets to.
+/// - `options: &[&'static str]` — required for `Enum` entries, a list of
+///   selectable labels.
+/// - `min`/`max`/`step`/`unit:` — required for `Int`/`Float` entries.
+/// - `read_field: |d| <expr>` — closure body that reads the current value
+///   from the per-tab `data_type`. The macro evaluates this expression with
+///   `d` bound to the data borrow and passes the result to the right
+///   `SettingItem::*` constructor based on `value_type`.
 #[macro_export]
 macro_rules! define_settings {
     (
         tab: $tab:expr,
+        data_type: $data_type:ty,
+        items_fn: $items_fn:ident,
         settings_const: $settings_const:ident,
         contains_fn: $contains_fn:ident,
         dispatch_fn: $dispatch_fn:ident,
@@ -120,6 +155,16 @@ macro_rules! define_settings {
                     toml_apply: |$ats:ident, $ap:ident| $abody:expr,
                     read: |$rsrc:ident, $rout:ident| $rbody:expr
                     $(, on_dispatch: |$dval:ident : $dty:ty| $dbody:expr)?
+                    $(, ui_meta: {
+                        label: $label:literal,
+                        category: $cat:literal,
+                        subtitle: $sub:expr,
+                        default: $default:expr
+                        $(, options: $options:expr)?
+                        $(, min: $min:expr, max: $max:expr, step: $step:expr, unit: $unit:literal)?
+                        , read_field: |$rfd:ident| $rfbody:expr
+                        $(,)?
+                    })?
                     $(,)?
                 }
             ),* $(,)?
@@ -194,6 +239,35 @@ macro_rules! define_settings {
                     $rbody;
                 }
             )*
+        }
+
+        /// Macro-emitted flat-row builder. Returns one `SettingsEntry::Item`
+        /// per entry that declared `ui_meta:`. Section headers, conditional
+        /// rows, ToggleSet rows, and dialog sentinel rows stay hand-written
+        /// in the UI crate's `items_<tab>.rs` builder, which interleaves them
+        /// with the rows returned here.
+        #[allow(dead_code, unused_variables, unused_mut)]
+        pub fn $items_fn(
+            data: &$data_type,
+        ) -> ::std::vec::Vec<$crate::types::setting_item::SettingsEntry> {
+            let mut out: ::std::vec::Vec<$crate::types::setting_item::SettingsEntry> =
+                ::std::vec::Vec::new();
+            $(
+                $(
+                    {
+                        let $rfd: &$data_type = data;
+                        let __value = $rfbody;
+                        out.push($crate::define_settings_build_item_arm!(
+                            $vtype,
+                            $key, $label, $cat, $sub,
+                            __value, $default
+                            $(, options: $options)?
+                            $(, min: $min, max: $max, step: $step, unit: $unit)?
+                        ));
+                    }
+                )?
+            )*
+            out
         }
     };
 }
@@ -340,4 +414,90 @@ macro_rules! define_settings_dispatch_arm {
             )),
         }
     }};
+}
+
+/// Internal helper used by [`define_settings!`] to build one
+/// `SettingsEntry::Item` from a `ui_meta:` cluster. Dispatches on the
+/// `value_type` ident so the right `SettingItem::*` constructor receives the
+/// right typed payload.
+///
+/// Each arm constructs a `SettingMeta` literal (the data-crate-side analog of
+/// the UI-crate `meta!()` macro) and forwards `(val, default, [knobs])` to
+/// the matching constructor. `Enum` arms additionally clone the `options`
+/// slice into a `Vec` since `enum_val` takes ownership of the option list.
+#[macro_export]
+#[doc(hidden)]
+macro_rules! define_settings_build_item_arm {
+    (Bool, $key:expr, $label:expr, $cat:expr, $sub:expr, $val:expr, $default:expr) => {
+        $crate::types::setting_item::SettingItem::bool_val(
+            $crate::types::setting_item::SettingMeta {
+                key: ::std::borrow::Cow::Borrowed($key),
+                label: $label,
+                category: $cat,
+                subtitle: $sub,
+            },
+            $val,
+            $default,
+        )
+    };
+    (Int, $key:expr, $label:expr, $cat:expr, $sub:expr, $val:expr, $default:expr,
+     min: $min:expr, max: $max:expr, step: $step:expr, unit: $unit:literal) => {
+        $crate::types::setting_item::SettingItem::int(
+            $crate::types::setting_item::SettingMeta {
+                key: ::std::borrow::Cow::Borrowed($key),
+                label: $label,
+                category: $cat,
+                subtitle: $sub,
+            },
+            $val,
+            $default,
+            $min,
+            $max,
+            $step,
+            $unit,
+        )
+    };
+    (Float, $key:expr, $label:expr, $cat:expr, $sub:expr, $val:expr, $default:expr,
+     min: $min:expr, max: $max:expr, step: $step:expr, unit: $unit:literal) => {
+        $crate::types::setting_item::SettingItem::float(
+            $crate::types::setting_item::SettingMeta {
+                key: ::std::borrow::Cow::Borrowed($key),
+                label: $label,
+                category: $cat,
+                subtitle: $sub,
+            },
+            $val,
+            $default,
+            $min,
+            $max,
+            $step,
+            $unit,
+        )
+    };
+    (Enum, $key:expr, $label:expr, $cat:expr, $sub:expr, $val:expr, $default:expr,
+     options: $options:expr) => {
+        $crate::types::setting_item::SettingItem::enum_val(
+            $crate::types::setting_item::SettingMeta {
+                key: ::std::borrow::Cow::Borrowed($key),
+                label: $label,
+                category: $cat,
+                subtitle: $sub,
+            },
+            $val,
+            $default,
+            ($options).to_vec(),
+        )
+    };
+    (Text, $key:expr, $label:expr, $cat:expr, $sub:expr, $val:expr, $default:expr) => {
+        $crate::types::setting_item::SettingItem::text(
+            $crate::types::setting_item::SettingMeta {
+                key: ::std::borrow::Cow::Borrowed($key),
+                label: $label,
+                category: $cat,
+                subtitle: $sub,
+            },
+            $val,
+            $default,
+        )
+    };
 }

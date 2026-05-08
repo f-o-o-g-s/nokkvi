@@ -17,11 +17,14 @@ use crate::{
             StripClickAction, StripSeparator, TrackInfoDisplay,
         },
         setting_def::Tab,
+        settings_data::InterfaceSettingsData,
     },
 };
 
 define_settings! {
     tab: Tab::Interface,
+    data_type: InterfaceSettingsData<'_>,
+    items_fn: build_interface_tab_settings_items,
     settings_const: TAB_INTERFACE_SETTINGS,
     contains_fn: tab_interface_contains,
     dispatch_fn: dispatch_interface_tab_setting,

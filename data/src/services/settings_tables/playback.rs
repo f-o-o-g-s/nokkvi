@@ -20,11 +20,16 @@
 
 use crate::{
     define_settings,
-    types::player_settings::{NormalizationLevel, VolumeNormalizationMode},
+    types::{
+        player_settings::{NormalizationLevel, VolumeNormalizationMode},
+        settings_data::PlaybackSettingsData,
+    },
 };
 
 define_settings! {
     tab: crate::types::setting_def::Tab::Playback,
+    data_type: PlaybackSettingsData<'_>,
+    items_fn: build_playback_tab_settings_items,
     settings_const: TAB_PLAYBACK_SETTINGS,
     contains_fn: tab_playback_contains,
     dispatch_fn: dispatch_playback_tab_setting,
