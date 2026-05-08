@@ -503,60 +503,52 @@ impl Nokkvi {
     ) -> Task<Message> {
         // Strangler-fig: keys declared via `define_settings!` in
         // `nokkvi_data::services::settings_tables` are owned by the macro-
-        // generated dispatch chain. Lock the manager mutex inside an async
-        // task, walk the per-tab dispatchers in order, and bounce the
-        // refreshed `PlayerSettings` through `PlayerSettingsLoaded` so every
-        // UI mirror (Nokkvi fields, theme atomics, audio engine config)
-        // re-syncs from the new persisted state. Unmigrated keys fall
-        // through to the legacy `match key.as_str()` below.
+        // generated dispatch chain. We lock the manager mutex synchronously
+        // (`blocking_lock`) and dispatch + sync the UI cache on this same
+        // frame so the toggle/arrow input gives immediate visual feedback —
+        // the legacy match arms mutated `Nokkvi.<field>` synchronously and
+        // any async hop showed one frame of stale state, which read as
+        // "the click did nothing." The setters and `save()` are fast (redb
+        // write); the UI thread blocks for sub-millisecond at most.
         if nokkvi_data::services::settings_tables::any_tab_contains(&key) {
-            let key_owned = key.clone();
-            let value_owned = value.clone();
-            return self.shell_task(
-                move |shell| async move {
-                    let mgr_arc = shell.settings().settings_manager();
-                    let mut mgr = mgr_arc.lock().await;
-                    let result =
-                        nokkvi_data::services::settings_tables::dispatch_general_tab_setting(
-                            &key_owned,
-                            value_owned.clone(),
-                            &mut mgr,
-                        )
-                        .or_else(|| {
-                            nokkvi_data::services::settings_tables::dispatch_interface_tab_setting(
-                                &key_owned,
-                                value_owned.clone(),
-                                &mut mgr,
-                            )
-                        })
-                        .or_else(|| {
-                            nokkvi_data::services::settings_tables::dispatch_playback_tab_setting(
-                                &key_owned,
-                                value_owned,
-                                &mut mgr,
-                            )
-                        });
-                    match result {
-                        Some(Ok(())) => Ok(Box::new(mgr.get_player_settings())),
-                        Some(Err(e)) => Err((key_owned, e)),
-                        None => Err((
-                            key_owned,
-                            anyhow::anyhow!(
-                                "any_tab_contains was true but no dispatcher claimed the key"
-                            ),
-                        )),
-                    }
-                },
-                |result| match result {
-                    Ok(p) => Message::Playback(
-                        crate::app_message::PlaybackMessage::PlayerSettingsLoaded(p),
-                    ),
-                    Err((k, e)) => {
-                        tracing::warn!(" [SETTINGS] Macro dispatch failed for {k}: {e:#}");
-                        Message::NoOp
-                    }
-                },
-            );
+            let Some(shell) = self.app_service.as_ref() else {
+                return Task::none();
+            };
+            let mgr_arc = shell.settings().settings_manager();
+            let result = {
+                let mut mgr = mgr_arc.blocking_lock();
+                nokkvi_data::services::settings_tables::dispatch_general_tab_setting(
+                    &key,
+                    value.clone(),
+                    &mut mgr,
+                )
+                .or_else(|| {
+                    nokkvi_data::services::settings_tables::dispatch_interface_tab_setting(
+                        &key,
+                        value.clone(),
+                        &mut mgr,
+                    )
+                })
+                .or_else(|| {
+                    nokkvi_data::services::settings_tables::dispatch_playback_tab_setting(
+                        &key, value, &mut mgr,
+                    )
+                })
+                .map(|res| res.map(|()| mgr.get_player_settings()))
+            };
+            return match result {
+                Some(Ok(p)) => self.handle_player_settings_loaded(p),
+                Some(Err(e)) => {
+                    tracing::warn!(" [SETTINGS] Macro dispatch failed for {key}: {e:#}");
+                    Task::none()
+                }
+                None => {
+                    tracing::warn!(
+                        " [SETTINGS] any_tab_contains was true for {key} but no dispatcher claimed it"
+                    );
+                    Task::none()
+                }
+            };
         }
 
         match key.as_str() {
