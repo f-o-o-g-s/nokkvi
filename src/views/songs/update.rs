@@ -231,10 +231,6 @@ impl SongsPage {
                 }
             }
 
-            // Data loading messages (handled at root level, no action needed here)
-            SongsMessage::SongsLoaded { .. } | SongsMessage::SongsPageLoaded(_, _) => {
-                (Task::none(), SongsAction::None)
-            }
             // Routed up to root in `handle_songs` before this match runs;
             // arm exists only for exhaustiveness.
             SongsMessage::SetOpenMenu(_) => (Task::none(), SongsAction::None),

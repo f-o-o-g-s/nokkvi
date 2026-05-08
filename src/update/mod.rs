@@ -255,17 +255,12 @@ impl Nokkvi {
 
             // -----------------------------------------------------------------
             // Data Loading: Songs
+            //
+            // Note: the loader-result variants have migrated to
+            // `Message::SongsLoader(SongsLoaderMessage::{Loaded,PageLoaded}(...))`,
+            // routed in the "Loader Results" block above.
             // -----------------------------------------------------------------
             Message::LoadSongs => self.handle_load_songs(false, None),
-            Message::Songs(crate::views::SongsMessage::SongsLoaded {
-                result,
-                total_count,
-                background,
-                anchor_id,
-            }) => self.handle_songs_loaded(result, total_count, background, anchor_id),
-            Message::Songs(crate::views::SongsMessage::SongsPageLoaded(result, total_count)) => {
-                self.handle_songs_page_loaded(result, total_count)
-            }
 
             // -----------------------------------------------------------------
             // Data Loading: Genres

@@ -81,7 +81,7 @@ impl Nokkvi {
         anchor_id: Option<String>,
     ) -> Task<Message> {
         self.load_songs_internal(0, move |(result, total_count)| {
-            Message::Songs(SongsMessage::SongsLoaded {
+            Message::SongsLoader(crate::app_message::SongsLoaderMessage::Loaded {
                 result,
                 total_count,
                 background,
@@ -93,7 +93,10 @@ impl Nokkvi {
     /// Load a subsequent page of songs (triggered by scroll near edge of loaded data)
     pub(crate) fn handle_songs_load_page(&mut self, offset: usize) -> Task<Message> {
         self.load_songs_internal(offset, |(result, total_count)| {
-            Message::Songs(SongsMessage::SongsPageLoaded(result, total_count))
+            Message::SongsLoader(crate::app_message::SongsLoaderMessage::PageLoaded(
+                result,
+                total_count,
+            ))
         })
     }
 
@@ -141,7 +144,10 @@ impl Nokkvi {
                 }
             },
             |(result, total_count)| {
-                Message::Songs(SongsMessage::SongsPageLoaded(result, total_count))
+                Message::SongsLoader(crate::app_message::SongsLoaderMessage::PageLoaded(
+                    result,
+                    total_count,
+                ))
             },
         )
     }
@@ -683,29 +689,23 @@ impl Nokkvi {
         Task::none()
     }
 
-    /// Phase 1 scaffolding stub for `Message::SongsLoader(...)`.
-    ///
-    /// Wired in `update/mod.rs` so the per-domain `*LoaderMessage` enums
-    /// compile end-to-end alongside the Genres prototype. Currently
-    /// unreachable: no fire site constructs `Message::SongsLoader(...)` —
-    /// the existing `Message::Songs(SongsMessage::SongsLoaded { .. })`
-    /// path is still live.
-    ///
-    /// Phase 2 implementer for Songs: replace the body to route
-    /// `SongsLoaderMessage::Loaded { .. }` → `handle_songs_loaded(...)`
-    /// and `SongsLoaderMessage::PageLoaded(..)` → `handle_songs_page_loaded(...)`,
-    /// then update the fire sites in this file and remove the per-view
-    /// loader special-cases in `update/mod.rs` plus the dead variants in
-    /// `views/songs/mod.rs` and `views/songs/update.rs`. See the Genres
-    /// migration for the exact pattern.
+    /// Routes `Message::SongsLoader(...)` arrivals to the existing
+    /// `handle_songs_loaded` / `handle_songs_page_loaded` handlers.
     pub(crate) fn dispatch_songs_loader(
         &mut self,
-        _msg: crate::app_message::SongsLoaderMessage,
+        msg: crate::app_message::SongsLoaderMessage,
     ) -> Task<Message> {
-        panic!(
-            "Phase 2 (Songs): dispatch_songs_loader is a Phase 1 scaffolding \
-             stub — wire SongsLoaderMessage variants to handle_songs_loaded \
-             / handle_songs_page_loaded before constructing Message::SongsLoader(...)"
-        )
+        use crate::app_message::SongsLoaderMessage;
+        match msg {
+            SongsLoaderMessage::Loaded {
+                result,
+                total_count,
+                background,
+                anchor_id,
+            } => self.handle_songs_loaded(result, total_count, background, anchor_id),
+            SongsLoaderMessage::PageLoaded(result, total_count) => {
+                self.handle_songs_page_loaded(result, total_count)
+            }
+        }
     }
 }

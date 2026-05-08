@@ -123,14 +123,6 @@ pub enum SongsMessage {
     /// root handler before the page's `update` runs.
     Roulette,
 
-    // Data loading (moved from root Message enum)
-    SongsLoaded {
-        result: Result<Vec<SongUIViewData>, String>,
-        total_count: usize,
-        background: bool,
-        anchor_id: Option<String>,
-    },
-    SongsPageLoaded(Result<Vec<SongUIViewData>, String>, usize), // result, total_count (subsequent page)
     /// Refresh artwork for a specific album (album_id)
     RefreshArtwork(String),
     /// Navigate to a view and apply an ID filter
