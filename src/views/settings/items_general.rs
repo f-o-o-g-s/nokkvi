@@ -1,24 +1,12 @@
 //! General tab setting entries
 
-use super::items::{SettingItem, SettingsEntry};
+// `GeneralSettingsData` lives in the data crate so the macro-emitted
+// `build_general_tab_settings_items` (also in the data crate) can read its
+// fields. Re-exported here so existing `crate::views::settings::items_general::
+// GeneralSettingsData` import paths keep resolving.
+pub(crate) use nokkvi_data::types::settings_data::GeneralSettingsData;
 
-/// Data needed by the General tab builder
-pub(crate) struct GeneralSettingsData<'a> {
-    pub server_url: &'a str,
-    pub username: &'a str,
-    pub start_view: &'a str,
-    pub stable_viewport: bool,
-    pub auto_follow_playing: bool,
-    pub enter_behavior: &'a str,
-    pub local_music_path: &'a str,
-    pub verbose_config: bool,
-    pub library_page_size: &'a str,
-    pub artwork_resolution: &'a str,
-    pub show_album_artists_only: bool,
-    pub suppress_library_refresh_toasts: bool,
-    pub show_tray_icon: bool,
-    pub close_to_tray: bool,
-}
+use super::items::{SettingItem, SettingsEntry};
 
 /// Build settings entries for the General tab
 pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEntry> {

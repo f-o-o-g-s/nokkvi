@@ -1,33 +1,9 @@
 //! Interface tab setting entries — layout, display, and metadata strip
 
-use super::items::{SettingItem, SettingsEntry};
+// See `items_general.rs` for why the data struct lives in the data crate.
+pub(crate) use nokkvi_data::types::settings_data::InterfaceSettingsData;
 
-/// Data needed by the Interface tab builder
-pub(crate) struct InterfaceSettingsData<'a> {
-    pub nav_layout: &'a str,
-    pub nav_display_mode: &'a str,
-    pub track_info_display: &'a str,
-    pub slot_row_height: &'a str,
-    pub horizontal_volume: bool,
-    pub slot_text_links: bool,
-    pub font_family: &'a str,
-    pub strip_show_title: bool,
-    pub strip_show_artist: bool,
-    pub strip_show_album: bool,
-    pub strip_show_format_info: bool,
-    pub strip_merged_mode: bool,
-    pub strip_show_labels: bool,
-    pub strip_separator: &'a str,
-    pub strip_click_action: &'a str,
-    pub albums_artwork_overlay: bool,
-    pub artists_artwork_overlay: bool,
-    pub songs_artwork_overlay: bool,
-    pub playlists_artwork_overlay: bool,
-    /// Artwork column display mode label (Auto / Always (Native) / Always (Stretched) / Never)
-    pub artwork_column_mode: &'a str,
-    /// Artwork column stretch fit label (Cover / Fill) — only consumed when mode is stretched.
-    pub artwork_column_stretch_fit: &'a str,
-}
+use super::items::{SettingItem, SettingsEntry};
 
 /// Build settings entries for the Interface tab
 pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<SettingsEntry> {

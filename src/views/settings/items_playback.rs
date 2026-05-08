@@ -3,30 +3,10 @@
 //! Contains: Playback (crossfade), Scrobbling, and Playlists sections.
 //! Migrated from the General tab to reduce clutter.
 
-use super::items::{SettingItem, SettingsEntry};
+// See `items_general.rs` for why the data struct lives in the data crate.
+pub(crate) use nokkvi_data::types::settings_data::PlaybackSettingsData;
 
-/// Data needed by the Playback tab builder
-pub(crate) struct PlaybackSettingsData<'a> {
-    pub crossfade_enabled: bool,
-    pub crossfade_duration_secs: i64,
-    /// Volume-normalization mode label ("Off" / "AGC" / "ReplayGain (Track)" / "ReplayGain (Album)")
-    pub volume_normalization: &'a str,
-    pub normalization_level: &'a str,
-    /// Pre-amp dB applied on top of resolved ReplayGain (rounded to int for UI).
-    pub replay_gain_preamp_db: i64,
-    /// Fallback dB for tracks with no ReplayGain tags.
-    pub replay_gain_fallback_db: i64,
-    /// Whether untagged tracks fall through to AGC.
-    pub replay_gain_fallback_to_agc: bool,
-    /// Whether the resolver clamps gain so peak·gain ≤ 1.0.
-    pub replay_gain_prevent_clipping: bool,
-    pub scrobbling_enabled: bool,
-    /// Scrobble threshold as a fraction (0.25–0.90)
-    pub scrobble_threshold: f64,
-    pub quick_add_to_playlist: bool,
-    pub default_playlist_name: &'a str,
-    pub queue_show_default_playlist: bool,
-}
+use super::items::{SettingItem, SettingsEntry};
 
 /// Build settings entries for the Playback tab
 pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsEntry> {
