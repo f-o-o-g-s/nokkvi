@@ -467,46 +467,12 @@ impl Nokkvi {
             }
 
             // -----------------------------------------------------------------
-            // Raw Keyboard Events → HotkeyConfig dispatch
+            // Raw Keyboard Events → HotkeyConfig dispatch (see hotkeys/mod.rs)
             // -----------------------------------------------------------------
             Message::RawKeyEvent(key, modifiers, status) => {
-                // If settings is in hotkey capture mode, forward the raw event there
-                // instead of dispatching it as a normal hotkey action
-                if self.settings_page.capturing_hotkey.is_some() {
-                    return self.handle_settings(crate::views::SettingsMessage::HotkeyCaptured(
-                        key, modifiers,
-                    ));
-                }
-
-                // When a widget (e.g. text_input search bar) has captured the
-                // key event, suppress hotkey dispatch to avoid triggering actions
-                // while the user is typing. Exceptions:
-                //   - Escape: always allowed (close overlays, clear search)
-                //   - Ctrl+key: always allowed (intentional shortcuts like Ctrl+S)
-                if status == iced::event::Status::Captured {
-                    let is_escape = matches!(
-                        key,
-                        iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape)
-                    );
-                    let is_tab = matches!(
-                        key,
-                        iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab)
-                    );
-                    if !is_escape && !is_tab && !modifiers.control() {
-                        return Task::none();
-                    }
-                }
-
-                // Look up the key event against the user's hotkey config
-                match crate::hotkeys::handle_hotkey(key, modifiers, &self.hotkey_config) {
-                    Some(msg) => self.update(msg),
-                    None => Task::none(),
-                }
+                self.handle_raw_key_event(key, modifiers, status)
             }
-            Message::ModifiersChanged(modifiers) => {
-                self.window.keyboard_modifiers = modifiers;
-                Task::none()
-            }
+            Message::ModifiersChanged(modifiers) => self.handle_modifiers_changed(modifiers),
 
             // -----------------------------------------------------------------
             // Toast Notifications

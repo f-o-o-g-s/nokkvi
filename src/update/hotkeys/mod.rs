@@ -416,4 +416,58 @@ impl Nokkvi {
             )),
         }
     }
+
+    /// Translate a raw keyboard event into a hotkey action via the user's
+    /// `HotkeyConfig`, or forward it to settings when hotkey-capture mode
+    /// is active. Suppresses dispatch when a widget has captured the key
+    /// event (typing into a text input), with Escape/Tab/Ctrl+key exceptions.
+    pub(super) fn handle_raw_key_event(
+        &mut self,
+        key: iced::keyboard::Key,
+        modifiers: iced::keyboard::Modifiers,
+        status: iced::event::Status,
+    ) -> Task<Message> {
+        // If settings is in hotkey capture mode, forward the raw event there
+        // instead of dispatching it as a normal hotkey action
+        if self.settings_page.capturing_hotkey.is_some() {
+            return self.handle_settings(crate::views::SettingsMessage::HotkeyCaptured(
+                key, modifiers,
+            ));
+        }
+
+        // When a widget (e.g. text_input search bar) has captured the
+        // key event, suppress hotkey dispatch to avoid triggering actions
+        // while the user is typing. Exceptions:
+        //   - Escape: always allowed (close overlays, clear search)
+        //   - Ctrl+key: always allowed (intentional shortcuts like Ctrl+S)
+        if status == iced::event::Status::Captured {
+            let is_escape = matches!(
+                key,
+                iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape)
+            );
+            let is_tab = matches!(
+                key,
+                iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab)
+            );
+            if !is_escape && !is_tab && !modifiers.control() {
+                return Task::none();
+            }
+        }
+
+        // Look up the key event against the user's hotkey config
+        match crate::hotkeys::handle_hotkey(key, modifiers, &self.hotkey_config) {
+            Some(msg) => self.update(msg),
+            None => Task::none(),
+        }
+    }
+
+    /// Track the current keyboard modifier state so views can read it
+    /// without subscribing to per-event updates themselves.
+    pub(super) fn handle_modifiers_changed(
+        &mut self,
+        modifiers: iced::keyboard::Modifiers,
+    ) -> Task<Message> {
+        self.window.keyboard_modifiers = modifiers;
+        Task::none()
+    }
 }
