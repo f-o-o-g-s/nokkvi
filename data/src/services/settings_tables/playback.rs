@@ -43,6 +43,13 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_crossfade_enabled(v),
             toml_apply: |ts, p| p.crossfade_enabled = ts.crossfade_enabled,
             read: |src, out| out.crossfade_enabled = src.crossfade_enabled,
+            ui_meta: {
+                label: "Crossfade",
+                category: "Playback",
+                subtitle: Some("Fade between tracks instead of gapless transitions"),
+                default: false,
+                read_field: |d| d.crossfade_enabled,
+            },
         },
         CrossfadeDuration {
             key: "general.crossfade_duration",
@@ -50,6 +57,17 @@ define_settings! {
             setter: |mgr, v: i64| mgr.set_crossfade_duration(v as u32),
             toml_apply: |ts, p| p.crossfade_duration_secs = ts.crossfade_duration_secs,
             read: |src, out| out.crossfade_duration_secs = src.crossfade_duration_secs,
+            ui_meta: {
+                label: "Crossfade Duration",
+                category: "Playback",
+                subtitle: Some("Duration of crossfade between tracks"),
+                default: 5_i64,
+                min: 1_i64,
+                max: 15_i64,
+                step: 1_i64,
+                unit: "s",
+                read_field: |d| d.crossfade_duration_secs,
+            },
         },
         VolumeNormalization {
             key: "general.volume_normalization",
@@ -59,6 +77,14 @@ define_settings! {
             },
             toml_apply: |ts, p| p.volume_normalization = ts.volume_normalization,
             read: |src, out| out.volume_normalization = src.volume_normalization,
+            ui_meta: {
+                label: "Volume Normalization",
+                category: "Playback",
+                subtitle: Some("Off · ReplayGain (track or album) · AGC (real-time)"),
+                default: "Off",
+                options: &["Off", "ReplayGain (Track)", "ReplayGain (Album)", "AGC"],
+                read_field: |d| d.volume_normalization,
+            },
         },
         NormalizationLevelKey {
             key: "general.normalization_level",
@@ -105,16 +131,35 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_scrobbling_enabled(v),
             toml_apply: |ts, p| p.scrobbling_enabled = ts.scrobbling_enabled,
             read: |src, out| out.scrobbling_enabled = src.scrobbling_enabled,
+            ui_meta: {
+                label: "Scrobbling Enabled",
+                category: "Scrobbling",
+                subtitle: Some("Report listening activity to server"),
+                default: true,
+                read_field: |d| d.scrobbling_enabled,
+            },
         },
         // UI sends the threshold as a 25-90 integer percentage; the setter
         // stores it as a 0.25-0.90 fraction (and clamps). Internal storage is
-        // f64; the UI-facing struct narrows back to f32.
+        // f64; the UI-facing struct narrows back to f32. The `read_field`
+        // mirrors the legacy items_playback.rs conversion (fraction → pct int).
         ScrobbleThreshold {
             key: "general.scrobble_threshold",
             value_type: Int,
             setter: |mgr, v: i64| mgr.set_scrobble_threshold(v as f64 / 100.0),
             toml_apply: |ts, p| p.scrobble_threshold = ts.scrobble_threshold as f64,
             read: |src, out| out.scrobble_threshold = src.scrobble_threshold as f32,
+            ui_meta: {
+                label: "Scrobble Threshold",
+                category: "Scrobbling",
+                subtitle: Some("% of track duration needed to scrobble"),
+                default: 50_i64,
+                min: 25_i64,
+                max: 90_i64,
+                step: 5_i64,
+                unit: "%",
+                read_field: |d| (d.scrobble_threshold * 100.0).round() as i64,
+            },
         },
 
         // -- Playlists --------------------------------------------------------
@@ -124,6 +169,13 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_quick_add_to_playlist(v),
             toml_apply: |ts, p| p.quick_add_to_playlist = ts.quick_add_to_playlist,
             read: |src, out| out.quick_add_to_playlist = src.quick_add_to_playlist,
+            ui_meta: {
+                label: "Quick Add to Playlist",
+                category: "Playlists",
+                subtitle: Some("Skip the playlist picker dialog · uses default playlist"),
+                default: false,
+                read_field: |d| d.quick_add_to_playlist,
+            },
         },
         QueueShowDefaultPlaylist {
             key: "general.queue_show_default_playlist",
@@ -131,6 +183,15 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_queue_show_default_playlist(v),
             toml_apply: |ts, p| p.queue_show_default_playlist = ts.queue_show_default_playlist,
             read: |src, out| out.queue_show_default_playlist = src.queue_show_default_playlist,
+            ui_meta: {
+                label: "Default Playlist Chip in Queue",
+                category: "Playlists",
+                subtitle: Some(
+                    "Display the default playlist chip in the queue view's header",
+                ),
+                default: false,
+                read_field: |d| d.queue_show_default_playlist,
+            },
         },
 
         // -- Queue column visibility -----------------------------------------
@@ -194,8 +255,10 @@ mod tests {
         services::{settings::SettingsManager, state_storage::StateStorage},
         types::{
             player_settings::{NormalizationLevel, VolumeNormalizationMode},
+            setting_item::SettingsEntry,
             setting_value::SettingValue,
             settings::PlayerSettings,
+            settings_data::PlaybackSettingsData,
             toml_settings::TomlSettings,
         },
     };
@@ -205,6 +268,61 @@ mod tests {
         let path = tmp.path().join("test_settings.redb");
         let storage = StateStorage::new(path).expect("StateStorage::new");
         (SettingsManager::for_test(storage), tmp)
+    }
+
+    fn default_playback_data() -> PlaybackSettingsData<'static> {
+        PlaybackSettingsData {
+            crossfade_enabled: false,
+            crossfade_duration_secs: 5,
+            volume_normalization: "Off",
+            normalization_level: "Normal",
+            replay_gain_preamp_db: 0,
+            replay_gain_fallback_db: 0,
+            replay_gain_fallback_to_agc: false,
+            replay_gain_prevent_clipping: true,
+            scrobbling_enabled: true,
+            scrobble_threshold: 0.50,
+            quick_add_to_playlist: false,
+            default_playlist_name: "",
+            queue_show_default_playlist: false,
+        }
+    }
+
+    /// 7 entries get ui_meta — 3 unconditional Playback rows + 2 Scrobbling
+    /// + 2 Playlists. The 5 conditional AGC/RG knobs and the
+    /// `default_playlist_name` dialog row stay hand-written, plus the 6
+    /// lifecycle-only entries (queue column visibility, opacity_gradient,
+    /// rounded_mode) emit nothing here.
+    #[test]
+    fn build_playback_tab_settings_items_emits_seven_rows() {
+        let data = default_playback_data();
+        let entries = build_playback_tab_settings_items(&data);
+        assert_eq!(entries.len(), 7);
+        for e in &entries {
+            assert!(matches!(e, SettingsEntry::Item(_)));
+        }
+    }
+
+    /// `scrobble_threshold` reads `f64 → i64` percent in `read_field`. Verify
+    /// 0.75 → 75 reaches the row's `Int { val }`.
+    #[test]
+    fn build_playback_scrobble_threshold_reads_fraction_as_percent() {
+        let mut data = default_playback_data();
+        data.scrobble_threshold = 0.75;
+        let entries = build_playback_tab_settings_items(&data);
+        let row = entries
+            .iter()
+            .find_map(|e| match e {
+                SettingsEntry::Item(item) if item.key.as_ref() == "general.scrobble_threshold" => {
+                    Some(item)
+                }
+                _ => None,
+            })
+            .expect("scrobble_threshold row");
+        match &row.value {
+            SettingValue::Int { val, .. } => assert_eq!(*val, 75),
+            other => panic!("expected Int, got {other:?}"),
+        }
     }
 
     #[test]

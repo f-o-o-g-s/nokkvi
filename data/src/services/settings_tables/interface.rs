@@ -38,6 +38,14 @@ define_settings! {
             setter: |mgr, v: String| mgr.set_nav_layout(NavLayout::from_label(&v)),
             toml_apply: |ts, p| p.nav_layout = ts.nav_layout,
             read: |src, out| out.nav_layout = src.nav_layout,
+            ui_meta: {
+                label: "Navigation Layout",
+                category: "Layout",
+                subtitle: Some("Top bar tabs, vertical sidebar, or no navigation chrome"),
+                default: "Top",
+                options: &["Top", "Side", "None"],
+                read_field: |d| d.nav_layout,
+            },
         },
         NavDisplayModeSetting {
             key: "general.nav_display_mode",
@@ -45,6 +53,14 @@ define_settings! {
             setter: |mgr, v: String| mgr.set_nav_display_mode(NavDisplayMode::from_label(&v)),
             toml_apply: |ts, p| p.nav_display_mode = ts.nav_display_mode,
             read: |src, out| out.nav_display_mode = src.nav_display_mode,
+            ui_meta: {
+                label: "Nav Display",
+                category: "Layout",
+                subtitle: Some("Show text, icons, or both in navigation tabs"),
+                default: "Text Only",
+                options: &["Text Only", "Text + Icons", "Icons Only"],
+                read_field: |d| d.nav_display_mode,
+            },
         },
         TrackInfoDisplaySetting {
             key: "general.track_info_display",
@@ -52,6 +68,14 @@ define_settings! {
             setter: |mgr, v: String| mgr.set_track_info_display(TrackInfoDisplay::from_label(&v)),
             toml_apply: |ts, p| p.track_info_display = ts.track_info_display,
             read: |src, out| out.track_info_display = src.track_info_display,
+            ui_meta: {
+                label: "Metadata Strip",
+                category: "Layout",
+                subtitle: Some("Where to show the now-playing metadata strip"),
+                default: "Off",
+                options: &["Off", "Player Bar", "Top Bar", "Progress Track"],
+                read_field: |d| d.track_info_display,
+            },
         },
         SlotRowHeightSetting {
             key: "general.slot_row_height",
@@ -59,6 +83,16 @@ define_settings! {
             setter: |mgr, v: String| mgr.set_slot_row_height(SlotRowHeight::from_label(&v)),
             toml_apply: |ts, p| p.slot_row_height = ts.slot_row_height,
             read: |src, out| out.slot_row_height = src.slot_row_height,
+            ui_meta: {
+                label: "Row Density",
+                category: "Layout",
+                subtitle: Some(
+                    "Controls how many rows are visible · fewer rows = larger artwork & text",
+                ),
+                default: "Default",
+                options: &["Compact", "Default", "Comfortable", "Spacious"],
+                read_field: |d| d.slot_row_height,
+            },
         },
         HorizontalVolume {
             key: "general.horizontal_volume",
@@ -66,6 +100,13 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_horizontal_volume(v),
             toml_apply: |ts, p| p.horizontal_volume = ts.horizontal_volume,
             read: |src, out| out.horizontal_volume = src.horizontal_volume,
+            ui_meta: {
+                label: "Horizontal Volume Controls",
+                category: "Layout",
+                subtitle: Some("Stack volume sliders horizontally in the player bar"),
+                default: false,
+                read_field: |d| d.horizontal_volume,
+            },
         },
         // --- Views ---
         SlotTextLinks {
@@ -74,6 +115,15 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_slot_text_links(v),
             toml_apply: |ts, p| p.slot_text_links = ts.slot_text_links,
             read: |src, out| out.slot_text_links = src.slot_text_links,
+            ui_meta: {
+                label: "Slot Text Links",
+                category: "Views",
+                subtitle: Some(
+                    "Make title and artist text clickable to navigate to albums and artists",
+                ),
+                default: true,
+                read_field: |d| d.slot_text_links,
+            },
         },
         AlbumsArtworkOverlay {
             key: "general.albums_artwork_overlay",
@@ -138,6 +188,16 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_strip_merged_mode(v),
             toml_apply: |ts, p| p.strip_merged_mode = ts.strip_merged_mode,
             read: |src, out| out.strip_merged_mode = src.strip_merged_mode,
+            ui_meta: {
+                label: "Merged Mode",
+                category: "Metadata Strip",
+                subtitle: Some(
+                    "Render artist/album/title as a single scrolling unit \
+                     with one set of bookends",
+                ),
+                default: false,
+                read_field: |d| d.strip_merged_mode,
+            },
         },
         StripShowLabels {
             key: "general.strip_show_labels",
@@ -145,6 +205,15 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_strip_show_labels(v),
             toml_apply: |ts, p| p.strip_show_labels = ts.strip_show_labels,
             read: |src, out| out.strip_show_labels = src.strip_show_labels,
+            ui_meta: {
+                label: "Show Labels",
+                category: "Metadata Strip",
+                subtitle: Some(
+                    "Prefix each field with its name (title:, artist:, album:)",
+                ),
+                default: true,
+                read_field: |d| d.strip_show_labels,
+            },
         },
         StripSeparatorSetting {
             key: "general.strip_separator",
@@ -152,6 +221,21 @@ define_settings! {
             setter: |mgr, v: String| mgr.set_strip_separator(StripSeparator::from_label(&v)),
             toml_apply: |ts, p| p.strip_separator = ts.strip_separator,
             read: |src, out| out.strip_separator = src.strip_separator,
+            ui_meta: {
+                label: "Field Separator",
+                category: "Metadata Strip",
+                subtitle: Some("Character used to join fields in merged mode"),
+                default: "Dot ·",
+                options: &[
+                    "Dot ·",
+                    "Bullet •",
+                    "Pipe |",
+                    "Em dash —",
+                    "Slash /",
+                    "Bar │",
+                ],
+                read_field: |d| d.strip_separator,
+            },
         },
         StripClickActionSetting {
             key: "general.strip_click_action",
@@ -159,6 +243,23 @@ define_settings! {
             setter: |mgr, v: String| mgr.set_strip_click_action(StripClickAction::from_label(&v)),
             toml_apply: |ts, p| p.strip_click_action = ts.strip_click_action,
             read: |src, out| out.strip_click_action = src.strip_click_action,
+            ui_meta: {
+                label: "Click Action",
+                category: "Metadata Strip",
+                subtitle: Some(
+                    "What happens when you click the track info strip · \
+                     no effect in Progress Track mode",
+                ),
+                default: "Go to Queue",
+                options: &[
+                    "Go to Queue",
+                    "Go to Album",
+                    "Go to Artist",
+                    "Copy Track Info",
+                    "Do Nothing",
+                ],
+                read_field: |d| d.strip_click_action,
+            },
         },
         // --- Artwork Column ---
         ArtworkColumnModeSetting {
@@ -167,7 +268,22 @@ define_settings! {
             setter: |mgr, v: String| mgr.set_artwork_column_mode(ArtworkColumnMode::from_label(&v)),
             toml_apply: |ts, p| p.artwork_column_mode = ts.artwork_column_mode,
             read: |src, out| out.artwork_column_mode = src.artwork_column_mode,
+            ui_meta: {
+                label: "Display Mode",
+                category: "Artwork Column",
+                subtitle: Some(
+                    "Auto: hides on narrow windows · Always: drag the handle to resize · \
+                     Never: hidden everywhere",
+                ),
+                default: "Auto",
+                options: &["Auto", "Always (Native)", "Always (Stretched)", "Never"],
+                read_field: |d| d.artwork_column_mode,
+            },
         },
+        // The stretch-fit knob is conditional (only when artwork_column_mode
+        // is "Always (Stretched)"); it stays hand-written in the UI items
+        // builder so the if-check is colocated with the row construction.
+        // No ui_meta here — the macro skips it.
         ArtworkColumnStretchFitSetting {
             key: "general.artwork_column_stretch_fit",
             value_type: Enum,
@@ -188,7 +304,8 @@ mod tests {
     use crate::{
         services::{settings::SettingsManager, state_storage::StateStorage},
         types::{
-            setting_value::SettingValue, settings::PlayerSettings, toml_settings::TomlSettings,
+            setting_item::SettingsEntry, setting_value::SettingValue, settings::PlayerSettings,
+            settings_data::InterfaceSettingsData, toml_settings::TomlSettings,
         },
     };
 
@@ -197,6 +314,46 @@ mod tests {
         let path = tmp.path().join("test_settings.redb");
         let storage = StateStorage::new(path).expect("StateStorage::new");
         (SettingsManager::for_test(storage), tmp)
+    }
+
+    fn default_interface_data() -> InterfaceSettingsData<'static> {
+        InterfaceSettingsData {
+            nav_layout: "Top",
+            nav_display_mode: "Text Only",
+            track_info_display: "Off",
+            slot_row_height: "Default",
+            horizontal_volume: false,
+            slot_text_links: true,
+            font_family: "",
+            strip_show_title: true,
+            strip_show_artist: true,
+            strip_show_album: true,
+            strip_show_format_info: true,
+            strip_merged_mode: false,
+            strip_show_labels: true,
+            strip_separator: "Dot ·",
+            strip_click_action: "Go to Queue",
+            albums_artwork_overlay: true,
+            artists_artwork_overlay: true,
+            songs_artwork_overlay: true,
+            playlists_artwork_overlay: true,
+            artwork_column_mode: "Auto",
+            artwork_column_stretch_fit: "Cover",
+        }
+    }
+
+    /// 11 entries get ui_meta — 5 Layout + 1 Views + 4 Metadata Strip + 1
+    /// Artwork Column. The 8 ToggleSet sub-keys (`strip_show_*`,
+    /// `*_artwork_overlay`) and the conditional `artwork_column_stretch_fit`
+    /// stay hand-written in the UI items builder.
+    #[test]
+    fn build_interface_tab_settings_items_emits_eleven_rows() {
+        let data = default_interface_data();
+        let entries = build_interface_tab_settings_items(&data);
+        assert_eq!(entries.len(), 11);
+        for e in &entries {
+            assert!(matches!(e, SettingsEntry::Item(_)));
+        }
     }
 
     #[test]

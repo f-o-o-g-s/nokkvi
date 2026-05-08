@@ -40,6 +40,13 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_stable_viewport(v),
             toml_apply: |ts, p| p.stable_viewport = ts.stable_viewport,
             read: |src, out| out.stable_viewport = src.stable_viewport,
+            ui_meta: {
+                label: "Stable Viewport",
+                category: "Mouse Behavior",
+                subtitle: Some("Click highlights in-place without scrolling"),
+                default: true,
+                read_field: |d| d.stable_viewport,
+            },
         },
         StartView {
             key: "general.start_view",
@@ -47,6 +54,14 @@ define_settings! {
             setter: |mgr, v: String| mgr.set_start_view(&v),
             toml_apply: |ts, p| p.start_view = ts.start_view.clone(),
             read: |src, out| out.start_view = src.start_view.clone(),
+            ui_meta: {
+                label: "Start View",
+                category: "Application",
+                subtitle: Some("View shown after login"),
+                default: "Queue",
+                options: &["Queue", "Albums", "Artists", "Songs", "Genres", "Playlists"],
+                read_field: |d| d.start_view,
+            },
         },
         EnterBehavior {
             key: "general.enter_behavior",
@@ -54,6 +69,16 @@ define_settings! {
             setter: |mgr, v: String| mgr.set_enter_behavior(EnterBehavior::from_label(&v)),
             toml_apply: |ts, p| p.enter_behavior = ts.enter_behavior,
             read: |src, out| out.enter_behavior = src.enter_behavior,
+            ui_meta: {
+                label: "Enter Behavior",
+                category: "Application",
+                subtitle: Some(
+                    "Action when pressing Enter on items (all views except Queue)",
+                ),
+                default: "Play All",
+                options: &["Play All", "Play Single", "Append & Play"],
+                read_field: |d| d.enter_behavior,
+            },
         },
         LibraryPageSize {
             key: "general.library_page_size",
@@ -61,6 +86,21 @@ define_settings! {
             setter: |mgr, v: String| mgr.set_library_page_size(LibraryPageSize::from_label(&v)),
             toml_apply: |ts, p| p.library_page_size = ts.library_page_size,
             read: |src, out| out.library_page_size = src.library_page_size,
+            ui_meta: {
+                label: "Library Page Size",
+                category: "Application",
+                subtitle: Some(
+                    "Items fetched per API request · larger = fewer loads, more memory",
+                ),
+                default: "Default (500)",
+                options: &[
+                    "Small (100)",
+                    "Default (500)",
+                    "Large (1,000)",
+                    "Massive (5,000)",
+                ],
+                read_field: |d| d.library_page_size,
+            },
         },
         SuppressLibraryRefreshToasts {
             key: "general.suppress_library_refresh_toasts",
@@ -68,6 +108,13 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_suppress_library_refresh_toasts(v),
             toml_apply: |ts, p| p.suppress_library_refresh_toasts = ts.suppress_library_refresh_toasts,
             read: |src, out| out.suppress_library_refresh_toasts = src.suppress_library_refresh_toasts,
+            ui_meta: {
+                label: "Suppress Library Refresh Toasts",
+                category: "Application",
+                subtitle: Some("Hide the notification shown when the server reports a library refresh"),
+                default: false,
+                read_field: |d| d.suppress_library_refresh_toasts,
+            },
         },
         AutoFollowPlaying {
             key: "general.auto_follow_playing",
@@ -75,6 +122,13 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_auto_follow_playing(v),
             toml_apply: |ts, p| p.auto_follow_playing = ts.auto_follow_playing,
             read: |src, out| out.auto_follow_playing = src.auto_follow_playing,
+            ui_meta: {
+                label: "Auto-Follow Playing Track",
+                category: "Mouse Behavior",
+                subtitle: Some("Scroll to current track on track changes"),
+                default: true,
+                read_field: |d| d.auto_follow_playing,
+            },
         },
         ShowTrayIcon {
             key: "general.show_tray_icon",
@@ -82,6 +136,16 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_show_tray_icon(v),
             toml_apply: |ts, p| p.show_tray_icon = ts.show_tray_icon,
             read: |src, out| out.show_tray_icon = src.show_tray_icon,
+            ui_meta: {
+                label: "Show Tray Icon",
+                category: "System Tray",
+                subtitle: Some(
+                    "Register a system tray icon · requires a status bar with tray support \
+                     (e.g. waybar with the `tray` module on Hyprland)",
+                ),
+                default: false,
+                read_field: |d| d.show_tray_icon,
+            },
         },
         CloseToTray {
             key: "general.close_to_tray",
@@ -89,6 +153,16 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_close_to_tray(v),
             toml_apply: |ts, p| p.close_to_tray = ts.close_to_tray,
             read: |src, out| out.close_to_tray = src.close_to_tray,
+            ui_meta: {
+                label: "Close to Tray",
+                category: "System Tray",
+                subtitle: Some(
+                    "X button hides the window into the tray instead of quitting · \
+                     requires Show Tray Icon",
+                ),
+                default: false,
+                read_field: |d| d.close_to_tray,
+            },
         },
         // -- Migrated from the legacy `match key.as_str()` arm via on_dispatch ----
         // `general.light_mode` has no redb persistence path — it lives in
@@ -119,6 +193,16 @@ define_settings! {
             setter: |mgr, v: String| mgr.set_local_music_path(v.trim().to_string()),
             toml_apply: |ts, p| p.local_music_path = ts.local_music_path.clone(),
             read: |src, out| out.local_music_path = src.local_music_path.clone(),
+            ui_meta: {
+                label: "Local Music Path",
+                category: "Application",
+                subtitle: Some(
+                    "Path to music on this machine for 'Open in File Manager' · \
+                     press Enter to edit",
+                ),
+                default: "",
+                read_field: |d| d.local_music_path,
+            },
         },
         ShowAlbumArtistsOnly {
             key: "general.show_album_artists_only",
@@ -127,6 +211,16 @@ define_settings! {
             toml_apply: |ts, p| p.show_album_artists_only = ts.show_album_artists_only,
             read: |src, out| out.show_album_artists_only = src.show_album_artists_only,
             on_dispatch: |_v: bool| SettingsSideEffect::LoadArtists,
+            ui_meta: {
+                label: "Album Artists Only",
+                category: "Application",
+                subtitle: Some(
+                    "Only show artists that have explicitly released albums, \
+                     hiding compilation/guest artists",
+                ),
+                default: true,
+                read_field: |d| d.show_album_artists_only,
+            },
         },
         ArtworkResolutionKey {
             key: "general.artwork_resolution",
@@ -138,6 +232,21 @@ define_settings! {
                 level: ToastLevel::Info,
                 message: "Artwork resolution changed — new artwork will fetch at this size"
                     .to_string(),
+            },
+            ui_meta: {
+                label: "Artwork Resolution",
+                category: "Application",
+                subtitle: Some(
+                    "Panel image quality · higher = sharper on HiDPI, larger cache",
+                ),
+                default: "Default (1000px)",
+                options: &[
+                    "Default (1000px)",
+                    "High (1500px)",
+                    "Ultra (2000px)",
+                    "Original (Full Size)",
+                ],
+                read_field: |d| d.artwork_resolution,
             },
         },
         // The setter writes only redb (via `save_redb_only`); the UI handler
@@ -151,6 +260,15 @@ define_settings! {
             toml_apply: |ts, p| p.verbose_config = ts.verbose_config,
             read: |src, out| out.verbose_config = src.verbose_config,
             on_dispatch: |v: bool| SettingsSideEffect::WriteVerboseConfig { enabled: v },
+            ui_meta: {
+                label: "Verbose Config",
+                category: "Application",
+                subtitle: Some(
+                    "Write all settings to config.toml, including unchanged defaults",
+                ),
+                default: false,
+                read_field: |d| d.verbose_config,
+            },
         },
     ]
 }
@@ -163,7 +281,8 @@ mod tests {
     use crate::{
         services::{settings::SettingsManager, state_storage::StateStorage},
         types::{
-            setting_value::SettingValue, settings::PlayerSettings, toml_settings::TomlSettings,
+            setting_item::SettingsEntry, setting_value::SettingValue, settings::PlayerSettings,
+            settings_data::GeneralSettingsData, toml_settings::TomlSettings,
         },
     };
 
@@ -484,6 +603,78 @@ mod tests {
             ArtworkResolution::from_label("Ultra"),
             "redb side-effect of the setter must still run"
         );
+    }
+
+    /// Sample borrow-shaped data with all defaults, used to exercise the
+    /// macro-emitted items helper.
+    fn default_general_data() -> GeneralSettingsData<'static> {
+        GeneralSettingsData {
+            server_url: "http://localhost:4533",
+            username: "admin",
+            start_view: "Queue",
+            stable_viewport: true,
+            auto_follow_playing: true,
+            enter_behavior: "Play All",
+            local_music_path: "",
+            verbose_config: false,
+            library_page_size: "Default (500)",
+            artwork_resolution: "Default (1000px)",
+            show_album_artists_only: true,
+            suppress_library_refresh_toasts: false,
+            show_tray_icon: false,
+            close_to_tray: false,
+        }
+    }
+
+    /// Macro-emitted helper returns one entry per ui_meta-bearing setting.
+    /// 12 of the 13 declared keys carry ui_meta — light_mode does not (it
+    /// renders on the Theme tab, not General), so the helper emits 12 rows.
+    #[test]
+    fn build_general_tab_settings_items_emits_one_row_per_ui_meta_entry() {
+        let data = default_general_data();
+        let entries = build_general_tab_settings_items(&data);
+        assert_eq!(entries.len(), 12);
+        // Every emitted entry is a Item, never a Header — section headers
+        // live in the UI crate's hand-written builder.
+        for e in &entries {
+            assert!(matches!(e, SettingsEntry::Item(_)));
+        }
+    }
+
+    /// `read_field` reads from the live data borrow so flipping a value
+    /// reaches the emitted row.
+    #[test]
+    fn build_general_tab_settings_items_uses_data_for_values() {
+        let mut data = default_general_data();
+        data.stable_viewport = false;
+        data.start_view = "Albums";
+        let entries = build_general_tab_settings_items(&data);
+        let stable = entries
+            .iter()
+            .find_map(|e| match e {
+                SettingsEntry::Item(item) if item.key.as_ref() == "general.stable_viewport" => {
+                    Some(item)
+                }
+                _ => None,
+            })
+            .expect("stable_viewport row");
+        match &stable.value {
+            SettingValue::Bool(v) => assert!(!v),
+            other => panic!("expected Bool, got {other:?}"),
+        }
+        let start = entries
+            .iter()
+            .find_map(|e| match e {
+                SettingsEntry::Item(item) if item.key.as_ref() == "general.start_view" => {
+                    Some(item)
+                }
+                _ => None,
+            })
+            .expect("start_view row");
+        match &start.value {
+            SettingValue::Enum { val, .. } => assert_eq!(val, "Albums"),
+            other => panic!("expected Enum, got {other:?}"),
+        }
     }
 
     #[test]
