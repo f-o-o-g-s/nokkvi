@@ -280,4 +280,37 @@ mod tests {
         assert!(p.show_tray_icon);
         assert!(p.close_to_tray);
     }
+
+    /// Read-side: `dump_general_tab_player_settings` copies the migrated
+    /// fields from the redb-backed internal `PlayerSettings` onto the
+    /// UI-facing struct consumed by `Message::PlayerSettingsLoaded`. Set every
+    /// migrated field on the source to a non-default value, dump, and confirm
+    /// the destination received each one — including the `String` clone for
+    /// `start_view`.
+    #[test]
+    fn dump_general_round_trip_copies_migrated_fields() {
+        let (mgr, _tmp) = make_test_manager();
+        let mut ui = mgr.get_player_settings();
+
+        let mut src = PlayerSettings::default();
+        src.stable_viewport = false;
+        src.start_view = "Songs".to_string();
+        src.enter_behavior = EnterBehavior::PlaySingle;
+        src.library_page_size = LibraryPageSize::Large;
+        src.auto_follow_playing = false;
+        src.suppress_library_refresh_toasts = true;
+        src.show_tray_icon = true;
+        src.close_to_tray = true;
+
+        dump_general_tab_player_settings(&src, &mut ui);
+
+        assert!(!ui.stable_viewport);
+        assert_eq!(ui.start_view, "Songs");
+        assert_eq!(ui.enter_behavior, EnterBehavior::PlaySingle);
+        assert_eq!(ui.library_page_size, LibraryPageSize::Large);
+        assert!(!ui.auto_follow_playing);
+        assert!(ui.suppress_library_refresh_toasts);
+        assert!(ui.show_tray_icon);
+        assert!(ui.close_to_tray);
+    }
 }

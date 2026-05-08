@@ -324,4 +324,30 @@ mod tests {
         assert!(keys.contains(&"general.playlists_artwork_overlay"));
         assert_eq!(keys.len(), 20);
     }
+
+    /// Read-side: `dump_interface_tab_player_settings` copies the migrated
+    /// fields onto the UI-facing struct. Spot-check one Layout enum, one
+    /// Strip bool, one Artwork-overlay bool, and the artwork-column-mode
+    /// enum — covers the three field-shape clusters owned by this tab.
+    #[test]
+    fn dump_interface_round_trip_copies_migrated_fields() {
+        let (mgr, _tmp) = make_test_manager();
+        let mut ui = mgr.get_player_settings();
+
+        let mut src = PlayerSettings::default();
+        src.nav_layout = NavLayout::Side;
+        src.strip_show_title = false;
+        src.albums_artwork_overlay = false;
+        src.artwork_column_mode = ArtworkColumnMode::from_label("Never");
+
+        dump_interface_tab_player_settings(&src, &mut ui);
+
+        assert_eq!(ui.nav_layout, NavLayout::Side);
+        assert!(!ui.strip_show_title);
+        assert!(!ui.albums_artwork_overlay);
+        assert_eq!(
+            ui.artwork_column_mode,
+            ArtworkColumnMode::from_label("Never")
+        );
+    }
 }
