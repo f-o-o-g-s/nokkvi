@@ -7,6 +7,18 @@
 /// All non-Queue slot list views share the same pattern: check if the message
 /// is a `SlotListScrollSeek`, call the handler, then append scrollbar fade
 /// and seek-settled timers when it was a seek event.
+///
+/// **Why this lives in `mod.rs` rather than getting per-view
+/// `dispatch_<view>` extractions.** The other domain dispatchers (Artwork,
+/// Playback, Hotkey, Scrobble) live in their own files because each
+/// encapsulates a 14–25-arm nested match whose arms gain real locality
+/// from sitting next to their domain handlers. The slot-list views are
+/// different: each per-view dispatch is *already* a single line through
+/// this macro, and the per-view handler bodies (`handle_albums`,
+/// `handle_artists`, …) already live in their own files. Wrapping each
+/// in a `dispatch_<view>` method would just indirect through this macro
+/// one extra layer with no co-location win — strictly more files for
+/// strictly less leverage.
 macro_rules! dispatch_view_with_seek {
     ($self:ident, $msg:ident, $handler:ident, $seek_pat:pat, $view:expr) => {{
         let is_seek = matches!($msg, $seek_pat);
