@@ -865,20 +865,18 @@ impl SettingsManager {
     ///
     /// Strangler-fig: per-tab `dump_<tab>_tab_player_settings` calls
     /// (macro-emitted from `services/settings_tables/`) own the keys that
-    /// have been migrated to `define_settings!`. The hand-written tail below
-    /// owns the residual fields; adding a `read:` closure to a per-tab entry
-    /// removes its corresponding line here.
+    /// have been migrated to `define_settings!`. The struct expression below
+    /// hand-writes only the residual fields; everything else falls through
+    /// `..Default::default()` and is then overwritten by the dumpers. Adding
+    /// a `read:` closure to a per-tab entry shifts a field from "residual"
+    /// to "macro-owned" — drop the matching line here when you do.
     pub fn get_player_settings(&self) -> crate::types::player_settings::PlayerSettings {
         let p = &self.settings.player;
         let mut out = crate::types::player_settings::PlayerSettings {
-            // -- Residual: fields not yet migrated to `define_settings!`.
-            // Adding a per-tab entry with a `read:` closure removes the
-            // matching line here.
             volume: p.volume as f32,
             sfx_volume: p.sfx_volume as f32,
             sound_effects_enabled: p.sound_effects_enabled,
             visualization_mode: p.visualization_mode,
-            local_music_path: p.local_music_path.clone(),
             default_playlist_id: p.default_playlist_id.clone(),
             default_playlist_name: p.default_playlist_name.clone(),
             font_family: p.font_family.clone(),
@@ -888,9 +886,6 @@ impl SettingsManager {
             eq_enabled: p.eq_enabled,
             eq_gains: p.eq_gains,
             custom_eq_presets: p.custom_eq_presets.clone(),
-            verbose_config: p.verbose_config,
-            artwork_resolution: p.artwork_resolution,
-            show_album_artists_only: p.show_album_artists_only,
             queue_show_plays: p.queue_show_plays,
             queue_show_index: p.queue_show_index,
             queue_show_thumbnail: p.queue_show_thumbnail,
@@ -938,57 +933,7 @@ impl SettingsManager {
             similar_show_love: p.similar_show_love,
             similar_show_select: p.similar_show_select,
             artwork_column_width_pct: p.artwork_column_width_pct,
-
-            // -- Macro-owned: overwritten by the per-tab dumpers below. The
-            // values here are placeholders; the compiler enforces struct
-            // completeness, and the dumpers run before this binding is
-            // observed.
-            scrobbling_enabled: p.scrobbling_enabled,
-            scrobble_threshold: 0.0,
-            start_view: String::new(),
-            stable_viewport: false,
-            auto_follow_playing: false,
-            enter_behavior: EnterBehavior::default(),
-            library_page_size: Default::default(),
-            rounded_mode: false,
-            nav_layout: NavLayout::default(),
-            nav_display_mode: NavDisplayMode::default(),
-            track_info_display: TrackInfoDisplay::default(),
-            slot_row_height: SlotRowHeight::default(),
-            opacity_gradient: false,
-            slot_text_links: false,
-            crossfade_enabled: false,
-            crossfade_duration_secs: 0,
-            quick_add_to_playlist: false,
-            queue_show_default_playlist: false,
-            horizontal_volume: false,
-            volume_normalization: VolumeNormalizationMode::default(),
-            normalization_level: NormalizationLevel::default(),
-            replay_gain_preamp_db: 0.0,
-            replay_gain_fallback_db: 0.0,
-            replay_gain_fallback_to_agc: false,
-            replay_gain_prevent_clipping: false,
-            strip_show_title: false,
-            strip_show_artist: false,
-            strip_show_album: false,
-            strip_show_format_info: false,
-            strip_merged_mode: false,
-            strip_click_action: StripClickAction::default(),
-            strip_show_labels: false,
-            strip_separator: Default::default(),
-            suppress_library_refresh_toasts: false,
-            queue_show_stars: false,
-            queue_show_album: false,
-            queue_show_duration: false,
-            queue_show_love: false,
-            albums_artwork_overlay: false,
-            artists_artwork_overlay: false,
-            songs_artwork_overlay: false,
-            playlists_artwork_overlay: false,
-            artwork_column_mode: ArtworkColumnMode::default(),
-            artwork_column_stretch_fit: ArtworkStretchFit::default(),
-            show_tray_icon: false,
-            close_to_tray: false,
+            ..Default::default()
         };
 
         crate::services::settings_tables::dump_general_tab_player_settings(p, &mut out);

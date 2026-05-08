@@ -100,6 +100,10 @@ define_settings! {
             value_type: Enum,
             setter: |_mgr, _v: String| Ok(()),
             toml_apply: |ts, p| p.light_mode = ts.light_mode,
+            // `light_mode` lives in the theme atomic + config.toml, not on the
+            // UI-facing `PlayerSettings` (see player_settings/mod.rs:25). The
+            // dump is intentionally a no-op; on_dispatch carries the truth.
+            read: |_src, _out| {},
             on_dispatch: |v: String| SettingsSideEffect::SetLightModeAtomic(v == "Light"),
         },
         // The setter trims user-typed leading/trailing whitespace before
@@ -111,12 +115,14 @@ define_settings! {
             value_type: Text,
             setter: |mgr, v: String| mgr.set_local_music_path(v.trim().to_string()),
             toml_apply: |ts, p| p.local_music_path = ts.local_music_path.clone(),
+            read: |src, out| out.local_music_path = src.local_music_path.clone(),
         },
         ShowAlbumArtistsOnly {
             key: "general.show_album_artists_only",
             value_type: Bool,
             setter: |mgr, v: bool| mgr.set_show_album_artists_only(v),
             toml_apply: |ts, p| p.show_album_artists_only = ts.show_album_artists_only,
+            read: |src, out| out.show_album_artists_only = src.show_album_artists_only,
             on_dispatch: |_v: bool| SettingsSideEffect::LoadArtists,
         },
         ArtworkResolutionKey {
@@ -124,6 +130,7 @@ define_settings! {
             value_type: Enum,
             setter: |mgr, v: String| mgr.set_artwork_resolution(ArtworkResolution::from_label(&v)),
             toml_apply: |ts, p| p.artwork_resolution = ts.artwork_resolution,
+            read: |src, out| out.artwork_resolution = src.artwork_resolution,
             on_dispatch: |_v: String| SettingsSideEffect::Toast {
                 level: ToastLevel::Info,
                 message: "Artwork resolution changed — rebuild artwork cache to apply".to_string(),
@@ -138,6 +145,7 @@ define_settings! {
             value_type: Bool,
             setter: |mgr, v: bool| mgr.set_verbose_config(v),
             toml_apply: |ts, p| p.verbose_config = ts.verbose_config,
+            read: |src, out| out.verbose_config = src.verbose_config,
             on_dispatch: |v: bool| SettingsSideEffect::WriteVerboseConfig { enabled: v },
         },
     ]

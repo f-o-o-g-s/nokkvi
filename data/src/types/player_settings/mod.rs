@@ -24,7 +24,7 @@ pub use visualizer::*;
 ///
 /// Note: `light_mode` is stored in config.toml, not redb.
 /// See `theme_config::load_light_mode_from_config()`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PlayerSettings {
     pub volume: f32,
     pub sfx_volume: f32,
