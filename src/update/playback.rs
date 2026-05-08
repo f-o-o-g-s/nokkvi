@@ -1386,4 +1386,128 @@ impl Nokkvi {
         }
         Task::none()
     }
+
+    /// Dispatch a `PlaybackMessage` to its handler.
+    ///
+    /// `PlaybackMessage::Tick` carries pre-handler housekeeping (stale-loading
+    /// watchdog + active-progress toast polling) inline because it is
+    /// strictly per-tick state-poll work that has no other natural home.
+    pub(super) fn dispatch_playback(&mut self, msg: PlaybackMessage) -> Task<Message> {
+        match msg {
+            PlaybackMessage::Tick => {
+                // ── Stale-loading watchdog ──────────────────────────────
+                // Safety net: if a buffer has been in "loading" state for
+                // more than 30 seconds, something went wrong (network
+                // timeout, dropped task, etc). Auto-clear so the view is
+                // usable and warn so the root cause can be investigated.
+                let stale_timeout = std::time::Duration::from_secs(30);
+                let stale_views: Vec<&str> = [
+                    (
+                        "albums",
+                        self.library.albums.is_stale_loading(stale_timeout),
+                    ),
+                    (
+                        "artists",
+                        self.library.artists.is_stale_loading(stale_timeout),
+                    ),
+                    ("songs", self.library.songs.is_stale_loading(stale_timeout)),
+                    (
+                        "genres",
+                        self.library.genres.is_stale_loading(stale_timeout),
+                    ),
+                    (
+                        "playlists",
+                        self.library.playlists.is_stale_loading(stale_timeout),
+                    ),
+                ]
+                .iter()
+                .filter(|(_, stale)| *stale)
+                .map(|(name, _)| *name)
+                .collect();
+
+                for view_name in &stale_views {
+                    tracing::warn!(
+                        "⚠️ Stale loading state detected for {} (loading for >30s), auto-clearing",
+                        view_name
+                    );
+                }
+                if !stale_views.is_empty() {
+                    // Clear all stale buffers
+                    self.library.albums.set_loading(false);
+                    self.library.artists.set_loading(false);
+                    self.library.songs.set_loading(false);
+                    self.library.genres.set_loading(false);
+                    self.library.playlists.set_loading(false);
+                    self.toast_warn(format!(
+                        "Loading timed out for: {}. Please retry.",
+                        stale_views.join(", ")
+                    ));
+                }
+
+                // Poll active progress handles and update sticky toasts.
+                // Collect snapshots first to avoid borrow conflicts with self.
+                let snapshots: Vec<_> = self
+                    .active_progress
+                    .iter()
+                    .map(|h| (h.toast_key(), h.snapshot()))
+                    .collect();
+
+                let mut completed_indices = Vec::new();
+                for (i, (toast_key, snap)) in snapshots.iter().enumerate() {
+                    if snap.done {
+                        self.toast.dismiss_key(toast_key);
+                        self.toast_success(format!("{} ✓", snap.label));
+                        completed_indices.push(i);
+                    } else if snap.total > 0 {
+                        let pct = snap.percent();
+                        let msg = format!("{}… {}%", snap.label, pct);
+                        self.toast.push(nokkvi_data::types::toast::Toast::keyed(
+                            toast_key.clone(),
+                            msg,
+                            nokkvi_data::types::toast::ToastLevel::Info,
+                        ));
+                    }
+                }
+                // Remove completed handles (iterate in reverse to preserve indices)
+                for i in completed_indices.into_iter().rev() {
+                    self.active_progress.remove(i);
+                }
+
+                self.handle_tick()
+            }
+            PlaybackMessage::PlaybackStateUpdated(update) => {
+                self.handle_playback_state_updated(*update)
+            }
+            PlaybackMessage::TogglePlay => self.handle_toggle_play(),
+            PlaybackMessage::Play => self.handle_play(),
+            PlaybackMessage::Pause => self.handle_pause(),
+            PlaybackMessage::Stop => self.handle_stop(),
+            PlaybackMessage::NextTrack => self.handle_next_track(),
+            PlaybackMessage::PrevTrack => self.handle_prev_track(),
+            PlaybackMessage::ToggleRandom => self.handle_toggle_random(),
+            PlaybackMessage::RandomToggled(random) => self.handle_random_toggled(random),
+            PlaybackMessage::ToggleRepeat => self.handle_toggle_repeat(),
+            PlaybackMessage::RepeatToggled(repeat, repeat_queue) => {
+                self.handle_repeat_toggled(repeat, repeat_queue)
+            }
+            PlaybackMessage::ToggleConsume => self.handle_toggle_consume(),
+            PlaybackMessage::ConsumeToggled(consume) => self.handle_consume_toggled(consume),
+            PlaybackMessage::ToggleSoundEffects => self.handle_toggle_sound_effects(),
+            PlaybackMessage::SfxVolumeChanged(vol) => self.handle_sfx_volume_changed(vol),
+            PlaybackMessage::CycleVisualization => self.handle_cycle_visualization(),
+            PlaybackMessage::ToggleCrossfade => self.handle_toggle_crossfade(),
+            PlaybackMessage::Seek(val) => self.handle_seek(val),
+            PlaybackMessage::VolumeChanged(val) => self.handle_volume_changed(val),
+            PlaybackMessage::PrepareNextForGapless => self.handle_prepare_next_for_gapless(),
+            PlaybackMessage::PlayerSettingsLoaded(settings) => {
+                self.handle_player_settings_loaded(*settings)
+            }
+            PlaybackMessage::InitializeScrobbleState(song_id) => {
+                self.handle_initialize_scrobble_state(song_id)
+            }
+            PlaybackMessage::RadioMetadataUpdate(artist, title) => {
+                self.handle_radio_metadata_update(artist, title, None)
+            }
+        }
+    }
 }
