@@ -8,7 +8,6 @@
 //! - System actions: artwork rebuild, logout
 
 use iced::Task;
-use nokkvi_data::backend::app_service::AppService;
 
 use crate::{Nokkvi, app_message::Message};
 
@@ -80,38 +79,6 @@ impl Nokkvi {
             artwork_column_stretch_fit: crate::theme::artwork_column_stretch_fit().as_label(),
             verbose_config: self.verbose_config,
             artwork_resolution: self.artwork_resolution.as_label(),
-        }
-    }
-
-    /// Helper for boolean settings that follow the pattern:
-    /// extract Bool → optionally mutate local state → persist via shell_spawn → optionally force UI tick.
-    ///
-    /// `apply` is called with the extracted value to perform any local/theme mutations.
-    /// `persist` receives `(AppService, bool)` and returns a future that persists the value.
-    /// Returns a `Tick` task when `force_refresh` is true, `Task::none()` otherwise.
-    fn persist_bool_setting<F, Fut>(
-        &mut self,
-        value: &crate::views::settings::items::SettingValue,
-        name: &'static str,
-        apply: impl FnOnce(&mut Self, bool),
-        persist: F,
-        force_refresh: bool,
-    ) -> Task<Message>
-    where
-        F: FnOnce(AppService, bool) -> Fut + Send + 'static,
-        Fut: std::future::Future<Output = anyhow::Result<()>> + Send,
-    {
-        if let crate::views::settings::items::SettingValue::Bool(enabled) = *value {
-            apply(self, enabled);
-            self.shell_spawn(
-                name,
-                move |shell| async move { persist(shell, enabled).await },
-            );
-        }
-        if force_refresh {
-            Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))
-        } else {
-            Task::none()
         }
     }
 
@@ -620,7 +587,10 @@ impl Nokkvi {
                 if let crate::views::settings::items::SettingValue::Bool(enabled) = value {
                     self.show_album_artists_only = enabled;
                     self.shell_spawn("persist_show_album_artists_only", move |shell| async move {
-                        shell.settings().set_show_album_artists_only(enabled).await?;
+                        shell
+                            .settings()
+                            .set_show_album_artists_only(enabled)
+                            .await?;
                         Ok(())
                     });
                     return Task::done(Message::LoadArtists);
@@ -636,9 +606,7 @@ impl Nokkvi {
                         shell.settings().set_artwork_resolution(res).await?;
                         Ok(())
                     });
-                    self.toast_info(
-                        "Artwork resolution changed — rebuild artwork cache to apply",
-                    );
+                    self.toast_info("Artwork resolution changed — rebuild artwork cache to apply");
                 }
                 Task::none()
             }
@@ -649,8 +617,7 @@ impl Nokkvi {
                     // Write [visualizer] synchronously (doesn't need settings_manager)
                     if enabled {
                         let viz_config = self.visualizer_config.read().clone();
-                        if let Err(e) =
-                            crate::config_writer::write_full_visualizer(&viz_config) {
+                        if let Err(e) = crate::config_writer::write_full_visualizer(&viz_config) {
                             tracing::warn!(" [SETTINGS] Failed to write full config: {e}");
                             self.toast_warn(format!("Failed to write verbose config: {e}"));
                         } else {
