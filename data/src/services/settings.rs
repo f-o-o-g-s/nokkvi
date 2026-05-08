@@ -861,51 +861,27 @@ impl SettingsManager {
     // Getters
     // -------------------------------------------------------------------------
 
-    /// Get player settings for Message::PlayerSettingsLoaded
+    /// Get player settings for Message::PlayerSettingsLoaded.
+    ///
+    /// Strangler-fig: per-tab `dump_<tab>_tab_player_settings` calls
+    /// (macro-emitted from `services/settings_tables/`) own the keys that
+    /// have been migrated to `define_settings!`. The hand-written tail below
+    /// owns the residual fields; adding a `read:` closure to a per-tab entry
+    /// removes its corresponding line here.
     pub fn get_player_settings(&self) -> crate::types::player_settings::PlayerSettings {
         let p = &self.settings.player;
-        crate::types::player_settings::PlayerSettings {
+        let mut out = crate::types::player_settings::PlayerSettings {
+            // -- Residual: fields not yet migrated to `define_settings!`.
+            // Adding a per-tab entry with a `read:` closure removes the
+            // matching line here.
             volume: p.volume as f32,
             sfx_volume: p.sfx_volume as f32,
             sound_effects_enabled: p.sound_effects_enabled,
             visualization_mode: p.visualization_mode,
-            scrobbling_enabled: p.scrobbling_enabled,
-            scrobble_threshold: p.scrobble_threshold as f32,
-            start_view: p.start_view.clone(),
-            stable_viewport: p.stable_viewport,
-            auto_follow_playing: p.auto_follow_playing,
-            enter_behavior: p.enter_behavior,
             local_music_path: p.local_music_path.clone(),
-            library_page_size: p.library_page_size,
-            rounded_mode: p.rounded_mode,
-            nav_layout: p.nav_layout,
-            nav_display_mode: p.nav_display_mode,
-            track_info_display: p.track_info_display,
-            slot_row_height: p.slot_row_height,
-            opacity_gradient: p.opacity_gradient,
-            slot_text_links: p.slot_text_links,
-            crossfade_enabled: p.crossfade_enabled,
-            crossfade_duration_secs: p.crossfade_duration_secs,
             default_playlist_id: p.default_playlist_id.clone(),
             default_playlist_name: p.default_playlist_name.clone(),
-            quick_add_to_playlist: p.quick_add_to_playlist,
-            queue_show_default_playlist: p.queue_show_default_playlist,
-            horizontal_volume: p.horizontal_volume,
             font_family: p.font_family.clone(),
-            volume_normalization: p.volume_normalization,
-            normalization_level: p.normalization_level,
-            replay_gain_preamp_db: p.replay_gain_preamp_db,
-            replay_gain_fallback_db: p.replay_gain_fallback_db,
-            replay_gain_fallback_to_agc: p.replay_gain_fallback_to_agc,
-            replay_gain_prevent_clipping: p.replay_gain_prevent_clipping,
-            strip_show_title: p.strip_show_title,
-            strip_show_artist: p.strip_show_artist,
-            strip_show_album: p.strip_show_album,
-            strip_show_format_info: p.strip_show_format_info,
-            strip_merged_mode: p.strip_merged_mode,
-            strip_click_action: p.strip_click_action,
-            strip_show_labels: p.strip_show_labels,
-            strip_separator: p.strip_separator,
             active_playlist_id: p.active_playlist_id.clone(),
             active_playlist_name: p.active_playlist_name.clone(),
             active_playlist_comment: p.active_playlist_comment.clone(),
@@ -915,11 +891,6 @@ impl SettingsManager {
             verbose_config: p.verbose_config,
             artwork_resolution: p.artwork_resolution,
             show_album_artists_only: p.show_album_artists_only,
-            suppress_library_refresh_toasts: p.suppress_library_refresh_toasts,
-            queue_show_stars: p.queue_show_stars,
-            queue_show_album: p.queue_show_album,
-            queue_show_duration: p.queue_show_duration,
-            queue_show_love: p.queue_show_love,
             queue_show_plays: p.queue_show_plays,
             queue_show_index: p.queue_show_index,
             queue_show_thumbnail: p.queue_show_thumbnail,
@@ -966,16 +937,65 @@ impl SettingsManager {
             similar_show_duration: p.similar_show_duration,
             similar_show_love: p.similar_show_love,
             similar_show_select: p.similar_show_select,
-            albums_artwork_overlay: p.albums_artwork_overlay,
-            artists_artwork_overlay: p.artists_artwork_overlay,
-            songs_artwork_overlay: p.songs_artwork_overlay,
-            playlists_artwork_overlay: p.playlists_artwork_overlay,
-            artwork_column_mode: p.artwork_column_mode,
-            artwork_column_stretch_fit: p.artwork_column_stretch_fit,
             artwork_column_width_pct: p.artwork_column_width_pct,
-            show_tray_icon: p.show_tray_icon,
-            close_to_tray: p.close_to_tray,
-        }
+
+            // -- Macro-owned: overwritten by the per-tab dumpers below. The
+            // values here are placeholders; the compiler enforces struct
+            // completeness, and the dumpers run before this binding is
+            // observed.
+            scrobbling_enabled: p.scrobbling_enabled,
+            scrobble_threshold: 0.0,
+            start_view: String::new(),
+            stable_viewport: false,
+            auto_follow_playing: false,
+            enter_behavior: EnterBehavior::default(),
+            library_page_size: Default::default(),
+            rounded_mode: false,
+            nav_layout: NavLayout::default(),
+            nav_display_mode: NavDisplayMode::default(),
+            track_info_display: TrackInfoDisplay::default(),
+            slot_row_height: SlotRowHeight::default(),
+            opacity_gradient: false,
+            slot_text_links: false,
+            crossfade_enabled: false,
+            crossfade_duration_secs: 0,
+            quick_add_to_playlist: false,
+            queue_show_default_playlist: false,
+            horizontal_volume: false,
+            volume_normalization: VolumeNormalizationMode::default(),
+            normalization_level: NormalizationLevel::default(),
+            replay_gain_preamp_db: 0.0,
+            replay_gain_fallback_db: 0.0,
+            replay_gain_fallback_to_agc: false,
+            replay_gain_prevent_clipping: false,
+            strip_show_title: false,
+            strip_show_artist: false,
+            strip_show_album: false,
+            strip_show_format_info: false,
+            strip_merged_mode: false,
+            strip_click_action: StripClickAction::default(),
+            strip_show_labels: false,
+            strip_separator: Default::default(),
+            suppress_library_refresh_toasts: false,
+            queue_show_stars: false,
+            queue_show_album: false,
+            queue_show_duration: false,
+            queue_show_love: false,
+            albums_artwork_overlay: false,
+            artists_artwork_overlay: false,
+            songs_artwork_overlay: false,
+            playlists_artwork_overlay: false,
+            artwork_column_mode: ArtworkColumnMode::default(),
+            artwork_column_stretch_fit: ArtworkStretchFit::default(),
+            show_tray_icon: false,
+            close_to_tray: false,
+        };
+
+        crate::services::settings_tables::dump_general_tab_player_settings(p, &mut out);
+        crate::services::settings_tables::dump_interface_tab_player_settings(p, &mut out);
+        crate::services::settings_tables::dump_playback_tab_player_settings(p, &mut out);
+
+        out
     }
 
     /// Get all view preferences
