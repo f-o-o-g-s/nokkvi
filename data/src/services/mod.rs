@@ -11,6 +11,7 @@ pub mod navidrome_events;
 pub mod playback;
 pub mod queue;
 pub mod settings;
+pub mod settings_tables;
 pub mod state_storage;
 pub mod task_manager;
 pub mod theme_loader;

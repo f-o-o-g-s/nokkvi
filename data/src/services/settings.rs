@@ -36,6 +36,11 @@ use crate::{
 pub struct SettingsManager {
     settings: UserSettings,
     storage: StateStorage,
+    /// When true, `save()` skips writing `config.toml`. Test-only knob — keeps
+    /// `cargo test` from clobbering the developer's real settings file when
+    /// exercising setters that go through `save()`. Production paths always
+    /// take the default `false`.
+    skip_toml_writes: bool,
 }
 
 impl std::fmt::Debug for SettingsManager {
@@ -97,7 +102,11 @@ impl SettingsManager {
             settings.views = tv.to_all_view_prefs().into();
         }
 
-        let manager = Self { settings, storage };
+        let manager = Self {
+            settings,
+            storage,
+            skip_toml_writes: false,
+        };
 
         // Phase 4: Migration — if config.toml had no [settings], export redb values
         if !has_toml {
@@ -110,12 +119,26 @@ impl SettingsManager {
         Ok(manager)
     }
 
+    /// Test-only constructor — uses defaults for `UserSettings`, an
+    /// in-memory `StateStorage`, and skips `config.toml` writes so unit
+    /// tests don't trample the developer's real settings file.
+    #[cfg(test)]
+    pub(crate) fn for_test(storage: StateStorage) -> Self {
+        Self {
+            settings: UserSettings::default(),
+            storage,
+            skip_toml_writes: true,
+        }
+    }
+
     /// Save to redb (always) + config.toml sections (for user-facing settings).
     fn save(&self) -> Result<()> {
         // 1. Always write to redb (volume, playlist IDs, backward compat)
         self.storage.save("user_settings", &self.settings)?;
-        // 2. Write user-facing settings to config.toml
-        self.write_settings_toml()?;
+        // 2. Write user-facing settings to config.toml (skipped in unit tests)
+        if !self.skip_toml_writes {
+            self.write_settings_toml()?;
+        }
         Ok(())
     }
 
@@ -977,14 +1000,22 @@ impl SettingsManager {
 ///
 /// Only overwrites user-facing preference fields — volume, playlist IDs, and
 /// other runtime state are left untouched.
+///
+/// Strangler-fig: per-tab `apply_toml_*_tab` calls (macro-generated from
+/// `services/settings_tables/`) own keys that have been migrated to
+/// `define_settings!` declarations. Keys still in the hand-written body
+/// below are pending migration via per-tab follow-up commits.
 fn apply_toml_settings_to_internal(
     ts: &TomlSettings,
     p: &mut crate::types::settings::PlayerSettings,
 ) {
+    crate::services::settings_tables::apply_toml_general_tab(ts, p);
+    crate::services::settings_tables::apply_toml_interface_tab(ts, p);
+    crate::services::settings_tables::apply_toml_playback_tab(ts, p);
+
     p.start_view = ts.start_view.clone();
     p.enter_behavior = ts.enter_behavior;
     p.local_music_path = ts.local_music_path.clone();
-    p.stable_viewport = ts.stable_viewport;
     p.auto_follow_playing = ts.auto_follow_playing;
     p.light_mode = ts.light_mode;
     p.rounded_mode = ts.rounded_mode;
