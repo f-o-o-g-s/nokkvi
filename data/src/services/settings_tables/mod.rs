@@ -17,6 +17,9 @@ pub mod general;
 pub mod interface;
 pub mod playback;
 
+#[cfg(test)]
+mod lock_watchpoint_test;
+
 pub use general::{
     TAB_GENERAL_SETTINGS, apply_toml_general_tab, dispatch_general_tab_setting,
     tab_general_contains,

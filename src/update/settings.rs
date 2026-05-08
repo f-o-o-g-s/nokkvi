@@ -510,6 +510,16 @@ impl Nokkvi {
         // any async hop showed one frame of stale state, which read as
         // "the click did nothing." The setters and `save()` are fast (redb
         // write); the UI thread blocks for sub-millisecond at most.
+        //
+        // WATCHPOINT — sync setter contract.
+        // Every `SettingsManager::set_*` reachable via the dispatch chain stays
+        // synchronous so this `blocking_lock()` finishes in sub-ms. Adding
+        // `.await` inside a setter would jank the iced UI thread for the
+        // duration of that work. The `sync_setters_only_under_blocking_lock`
+        // test in `data/src/services/settings_tables/lock_watchpoint_test.rs`
+        // greps the `SettingsManager` source and fails the build if a
+        // `pub async fn set_` slips in — when that test trips, audit this
+        // strangler-fig block before relaxing it.
         if nokkvi_data::services::settings_tables::any_tab_contains(&key) {
             let Some(shell) = self.app_service.as_ref() else {
                 return Task::none();
