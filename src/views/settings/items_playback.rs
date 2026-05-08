@@ -1,21 +1,33 @@
-//! Playback tab setting entries
+//! Playback tab setting entries.
 //!
-//! Contains: Playback (crossfade), Scrobbling, and Playlists sections.
-//! Migrated from the General tab to reduce clutter.
+//! Contains: Playback (crossfade + volume normalization), Scrobbling, and
+//! Playlists sections. 7 flat rows come from `define_settings!` via
+//! `build_playback_tab_settings_items`. The conditional AGC target-level
+//! knob, the four ReplayGain knobs (only shown in RG modes), and the
+//! `default_playlist_name` dialog sentinel row stay hand-written so the
+//! mode-conditional logic and the picker dialog construction live next to
+//! each other.
 
 // See `items_general.rs` for why the data struct lives in the data crate.
+use nokkvi_data::services::settings_tables::playback::build_playback_tab_settings_items;
 pub(crate) use nokkvi_data::types::settings_data::PlaybackSettingsData;
 
 use super::items::{SettingItem, SettingsEntry};
 
-/// Build settings entries for the Playback tab
+/// Build settings entries for the Playback tab.
 pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsEntry> {
     const PLAY: &str = "assets/icons/circle-play.svg";
     const SCR: &str = "assets/icons/radio-tower.svg";
     const LIST: &str = "assets/icons/list-music.svg";
 
-    // Map scrobble threshold fraction to percentage integer (e.g. 0.50 -> 50)
-    let threshold_pct = (data.scrobble_threshold * 100.0).round() as i64;
+    let mut macro_rows = build_playback_tab_settings_items(data);
+    let mut take = |key: &str| -> SettingsEntry {
+        let pos = macro_rows
+            .iter()
+            .position(|e| matches!(e, SettingsEntry::Item(it) if it.key.as_ref() == key))
+            .unwrap_or_else(|| panic!("missing macro row for {key}"));
+        macro_rows.remove(pos)
+    };
 
     let mut items: Vec<SettingsEntry> = vec![
         // --- Playback ---
@@ -23,38 +35,9 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             label: "Playback",
             icon: PLAY,
         },
-        SettingItem::bool_val(
-            meta!(
-                "general.crossfade_enabled",
-                "Crossfade",
-                "Fade between tracks instead of gapless transitions"
-            ),
-            data.crossfade_enabled,
-            false,
-        ),
-        SettingItem::int(
-            meta!(
-                "general.crossfade_duration",
-                "Crossfade Duration",
-                "Duration of crossfade between tracks"
-            ),
-            data.crossfade_duration_secs,
-            5,
-            1,
-            15,
-            1,
-            "s",
-        ),
-        SettingItem::enum_val(
-            meta!(
-                "general.volume_normalization",
-                "Volume Normalization",
-                "Off · ReplayGain (track or album) · AGC (real-time)"
-            ),
-            data.volume_normalization,
-            "Off",
-            vec!["Off", "ReplayGain (Track)", "ReplayGain (Album)", "AGC"],
-        ),
+        take("general.crossfade_enabled"),
+        take("general.crossfade_duration"),
+        take("general.volume_normalization"),
     ];
 
     // AGC-only knob: target loudness applies only when AGC is selected.
@@ -129,42 +112,17 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             label: "Scrobbling",
             icon: SCR,
         },
-        SettingItem::bool_val(
-            meta!(
-                "general.scrobbling_enabled",
-                "Scrobbling Enabled",
-                "Report listening activity to server"
-            ),
-            data.scrobbling_enabled,
-            true,
-        ),
-        SettingItem::int(
-            meta!(
-                "general.scrobble_threshold",
-                "Scrobble Threshold",
-                "% of track duration needed to scrobble"
-            ),
-            threshold_pct,
-            50,
-            25,
-            90,
-            5,
-            "%",
-        ),
+        take("general.scrobbling_enabled"),
+        take("general.scrobble_threshold"),
         // --- Playlists ---
         SettingsEntry::Header {
             label: "Playlists",
             icon: LIST,
         },
-        SettingItem::bool_val(
-            meta!(
-                "general.quick_add_to_playlist",
-                "Quick Add to Playlist",
-                "Skip the playlist picker dialog · uses default playlist"
-            ),
-            data.quick_add_to_playlist,
-            false,
-        ),
+        take("general.quick_add_to_playlist"),
+        // `general.default_playlist_name` opens a picker dialog (sentinel
+        // path); kept hand-written so the empty/Not-set fallback lives at
+        // the row construction site.
         SettingItem::text(
             meta!(
                 "general.default_playlist_name",
@@ -178,15 +136,7 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             },
             "Not set",
         ),
-        SettingItem::bool_val(
-            meta!(
-                "general.queue_show_default_playlist",
-                "Default Playlist Chip in Queue",
-                "Display the default playlist chip in the queue view's header"
-            ),
-            data.queue_show_default_playlist,
-            false,
-        ),
+        take("general.queue_show_default_playlist"),
     ]);
 
     items

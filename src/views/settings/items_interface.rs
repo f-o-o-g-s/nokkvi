@@ -1,11 +1,19 @@
-//! Interface tab setting entries — layout, display, and metadata strip
+//! Interface tab setting entries — layout, display, and metadata strip.
+//!
+//! 11 flat rows come from `define_settings!` via
+//! `build_interface_tab_settings_items`. Section headers, the two ToggleSet
+//! rows (`__toggle_artwork_overlays`, `__toggle_strip_fields`), the
+//! theme-routed `font_family` text row, and the conditional
+//! `general.artwork_column_stretch_fit` knob (only shown when
+//! `artwork_column_mode == "Always (Stretched)"`) stay hand-written.
 
 // See `items_general.rs` for why the data struct lives in the data crate.
+use nokkvi_data::services::settings_tables::interface::build_interface_tab_settings_items;
 pub(crate) use nokkvi_data::types::settings_data::InterfaceSettingsData;
 
 use super::items::{SettingItem, SettingsEntry};
 
-/// Build settings entries for the Interface tab
+/// Build settings entries for the Interface tab.
 pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<SettingsEntry> {
     const LAYOUT: &str = "assets/icons/panels-top-left.svg";
     const VIEWS: &str = "assets/icons/layout-grid.svg";
@@ -19,61 +27,26 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
         data.font_family
     };
 
+    let mut macro_rows = build_interface_tab_settings_items(data);
+    let mut take = |key: &str| -> SettingsEntry {
+        let pos = macro_rows
+            .iter()
+            .position(|e| matches!(e, SettingsEntry::Item(it) if it.key.as_ref() == key))
+            .unwrap_or_else(|| panic!("missing macro row for {key}"));
+        macro_rows.remove(pos)
+    };
+
     let mut items: Vec<SettingsEntry> = vec![
         // --- Layout ---
         SettingsEntry::Header {
             label: "Layout",
             icon: LAYOUT,
         },
-        SettingItem::enum_val(
-            meta!(
-                "general.nav_layout",
-                "Navigation Layout",
-                "Top bar tabs, vertical sidebar, or no navigation chrome"
-            ),
-            data.nav_layout,
-            "Top",
-            vec!["Top", "Side", "None"],
-        ),
-        SettingItem::enum_val(
-            meta!(
-                "general.nav_display_mode",
-                "Nav Display",
-                "Show text, icons, or both in navigation tabs"
-            ),
-            data.nav_display_mode,
-            "Text Only",
-            vec!["Text Only", "Text + Icons", "Icons Only"],
-        ),
-        SettingItem::enum_val(
-            meta!(
-                "general.track_info_display",
-                "Metadata Strip",
-                "Where to show the now-playing metadata strip"
-            ),
-            data.track_info_display,
-            "Off",
-            vec!["Off", "Player Bar", "Top Bar", "Progress Track"],
-        ),
-        SettingItem::enum_val(
-            meta!(
-                "general.slot_row_height",
-                "Row Density",
-                "Controls how many rows are visible · fewer rows = larger artwork & text"
-            ),
-            data.slot_row_height,
-            "Default",
-            vec!["Compact", "Default", "Comfortable", "Spacious"],
-        ),
-        SettingItem::bool_val(
-            meta!(
-                "general.horizontal_volume",
-                "Horizontal Volume Controls",
-                "Stack volume sliders horizontally in the player bar"
-            ),
-            data.horizontal_volume,
-            false,
-        ),
+        take("general.nav_layout"),
+        take("general.nav_display_mode"),
+        take("general.track_info_display"),
+        take("general.slot_row_height"),
+        take("general.horizontal_volume"),
         // --- Views ---
         SettingsEntry::Header {
             label: "Views",
@@ -108,16 +81,8 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
                 ),
             ],
         ),
-        SettingItem::bool_val(
-            meta!(
-                "general.slot_text_links",
-                "Slot Text Links",
-                "Make title and artist text clickable to navigate to albums and artists"
-            ),
-            data.slot_text_links,
-            true,
-        ),
-        // --- Font ---
+        take("general.slot_text_links"),
+        // --- Font (theme-routed; hand-written) ---
         SettingsEntry::Header {
             label: "Font",
             icon: FONT,
@@ -166,72 +131,16 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
                 ),
             ],
         ),
-        SettingItem::bool_val(
-            meta!(
-                "general.strip_merged_mode",
-                "Merged Mode",
-                "Render artist/album/title as a single scrolling unit with one set of bookends"
-            ),
-            data.strip_merged_mode,
-            false,
-        ),
-        SettingItem::bool_val(
-            meta!(
-                "general.strip_show_labels",
-                "Show Labels",
-                "Prefix each field with its name (title:, artist:, album:)"
-            ),
-            data.strip_show_labels,
-            true,
-        ),
-        SettingItem::enum_val(
-            meta!(
-                "general.strip_separator",
-                "Field Separator",
-                "Character used to join fields in merged mode"
-            ),
-            data.strip_separator,
-            "Dot ·",
-            vec![
-                "Dot ·",
-                "Bullet •",
-                "Pipe |",
-                "Em dash —",
-                "Slash /",
-                "Bar │",
-            ],
-        ),
-        SettingItem::enum_val(
-            meta!(
-                "general.strip_click_action",
-                "Click Action",
-                "What happens when you click the track info strip · no effect in Progress Track mode"
-            ),
-            data.strip_click_action,
-            "Go to Queue",
-            vec![
-                "Go to Queue",
-                "Go to Album",
-                "Go to Artist",
-                "Copy Track Info",
-                "Do Nothing",
-            ],
-        ),
+        take("general.strip_merged_mode"),
+        take("general.strip_show_labels"),
+        take("general.strip_separator"),
+        take("general.strip_click_action"),
         // --- Artwork Column ---
         SettingsEntry::Header {
             label: "Artwork Column",
             icon: ARTWORK_COL,
         },
-        SettingItem::enum_val(
-            meta!(
-                "general.artwork_column_mode",
-                "Display Mode",
-                "Auto: hides on narrow windows · Always: drag the handle to resize · Never: hidden everywhere"
-            ),
-            data.artwork_column_mode,
-            "Auto",
-            vec!["Auto", "Always (Native)", "Always (Stretched)", "Never"],
-        ),
+        take("general.artwork_column_mode"),
     ];
 
     // Stretched-only knob: image fit applies only when the column is stretched.
