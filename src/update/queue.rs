@@ -873,4 +873,29 @@ impl Nokkvi {
         }
         Task::none()
     }
+
+    /// Phase 1 scaffolding stub for `Message::QueueLoader(...)`.
+    ///
+    /// Wired in `update/mod.rs` so the per-domain `*LoaderMessage` enums
+    /// compile end-to-end alongside the Genres prototype. Currently
+    /// unreachable: no fire site constructs `Message::QueueLoader(...)` —
+    /// the existing `Message::Queue(QueueMessage::QueueLoaded(..))` path is
+    /// still live.
+    ///
+    /// Phase 2 implementer for Queue: replace the body to route
+    /// `QueueLoaderMessage::Loaded(..)` → `handle_queue_loaded(...)`,
+    /// then update the fire sites in this file (lines ~26 and ~812) and
+    /// remove the per-view loader special-case in `update/mod.rs` plus the
+    /// dead variant in `views/queue/mod.rs` and `views/queue/update.rs`.
+    /// See the Genres migration for the exact pattern.
+    pub(crate) fn dispatch_queue_loader(
+        &mut self,
+        _msg: crate::app_message::QueueLoaderMessage,
+    ) -> Task<Message> {
+        panic!(
+            "Phase 2 (Queue): dispatch_queue_loader is a Phase 1 scaffolding \
+             stub — wire QueueLoaderMessage::Loaded to handle_queue_loaded \
+             before constructing Message::QueueLoader(...)"
+        )
+    }
 }

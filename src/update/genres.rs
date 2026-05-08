@@ -50,7 +50,10 @@ impl Nokkvi {
                 }
             },
             |(result, total_count)| {
-                Message::Genres(views::GenresMessage::GenresLoaded(result, total_count))
+                Message::GenresLoader(crate::app_message::GenresLoaderMessage::Loaded(
+                    result,
+                    total_count,
+                ))
             },
         )
     }
@@ -573,5 +576,22 @@ impl Nokkvi {
             }
         }
         Task::none()
+    }
+
+    /// Routes `Message::GenresLoader(...)` arrivals to the existing
+    /// `handle_genres_loaded` handler. Genres is single-shot (not paged),
+    /// so there's only one variant — but keeping the dispatcher's match
+    /// shape mirrors the paged domains' dispatchers and lets Phase 2 follow
+    /// the same template.
+    pub(crate) fn dispatch_genres_loader(
+        &mut self,
+        msg: crate::app_message::GenresLoaderMessage,
+    ) -> Task<Message> {
+        use crate::app_message::GenresLoaderMessage;
+        match msg {
+            GenresLoaderMessage::Loaded(result, total_count) => {
+                self.handle_genres_loaded(result, total_count)
+            }
+        }
     }
 }

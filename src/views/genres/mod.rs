@@ -123,9 +123,6 @@ pub enum GenresMessage {
     /// root handler before the page's `update` runs.
     Roulette,
 
-    // Data loading (moved from root Message enum)
-    GenresLoaded(Result<Vec<GenreUIViewData>, String>, usize), // result, total_count
-
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     /// Navigate to Artists and auto-expand the artist with this id (no filter set).
     NavigateAndExpandArtist(String),

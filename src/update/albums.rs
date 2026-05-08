@@ -897,4 +897,30 @@ impl Nokkvi {
         }
         Task::none()
     }
+
+    /// Phase 1 scaffolding stub for `Message::AlbumsLoader(...)`.
+    ///
+    /// Wired in `update/mod.rs` so the per-domain `*LoaderMessage` enums
+    /// compile end-to-end alongside the Genres prototype. Currently
+    /// unreachable: no fire site constructs `Message::AlbumsLoader(...)` —
+    /// the existing `Message::Albums(AlbumsMessage::AlbumsLoaded { .. })`
+    /// path is still live.
+    ///
+    /// Phase 2 implementer for Albums: replace the body to route
+    /// `AlbumsLoaderMessage::Loaded { .. }` → `handle_albums_loaded(...)`
+    /// and `AlbumsLoaderMessage::PageLoaded(..)` → `handle_albums_page_loaded(...)`,
+    /// then update the fire sites in this file (lines ~98, ~110, ~120) and
+    /// remove the per-view loader special-cases in `update/mod.rs` plus the
+    /// dead variants in `views/albums/mod.rs` and `views/albums/update.rs`.
+    /// See the Genres migration for the exact pattern.
+    pub(crate) fn dispatch_albums_loader(
+        &mut self,
+        _msg: crate::app_message::AlbumsLoaderMessage,
+    ) -> Task<Message> {
+        panic!(
+            "Phase 2 (Albums): dispatch_albums_loader is a Phase 1 scaffolding \
+             stub — wire AlbumsLoaderMessage variants to handle_albums_loaded \
+             / handle_albums_page_loaded before constructing Message::AlbumsLoader(...)"
+        )
+    }
 }

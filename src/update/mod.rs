@@ -236,6 +236,23 @@ impl Nokkvi {
             }
 
             // -----------------------------------------------------------------
+            // Loader Results (per-domain *LoaderMessage)
+            //
+            // These route to per-domain `dispatch_<domain>_loader` helpers in
+            // `update/<domain>.rs`. Phase 1 wires all six; Genres is the
+            // proof-of-concept and is fully migrated. The other five are stubs
+            // (`unimplemented!()`) until Phase 2 fills them in — currently
+            // unreachable because no fire site constructs the new variants
+            // for those domains.
+            // -----------------------------------------------------------------
+            Message::AlbumsLoader(msg) => self.dispatch_albums_loader(msg),
+            Message::ArtistsLoader(msg) => self.dispatch_artists_loader(msg),
+            Message::SongsLoader(msg) => self.dispatch_songs_loader(msg),
+            Message::GenresLoader(msg) => self.dispatch_genres_loader(msg),
+            Message::PlaylistsLoader(msg) => self.dispatch_playlists_loader(msg),
+            Message::QueueLoader(msg) => self.dispatch_queue_loader(msg),
+
+            // -----------------------------------------------------------------
             // Data Loading: Artists
             // -----------------------------------------------------------------
             Message::LoadArtists => self.handle_load_artists(false, None),
@@ -266,11 +283,14 @@ impl Nokkvi {
 
             // -----------------------------------------------------------------
             // Data Loading: Genres
+            //
+            // Note: the loader-result variant has migrated to
+            // `Message::GenresLoader(GenresLoaderMessage::Loaded(...))`,
+            // routed in the "Loader Results" block above. Genres is the
+            // proof-of-concept for the per-domain *LoaderMessage refactor;
+            // see plan §3 Phase 1 and §11 prototype notes.
             // -----------------------------------------------------------------
             Message::LoadGenres => self.handle_load_genres(),
-            Message::Genres(crate::views::GenresMessage::GenresLoaded(result, total_count)) => {
-                self.handle_genres_loaded(result, total_count)
-            }
 
             // -----------------------------------------------------------------
             // Data Loading: Playlists

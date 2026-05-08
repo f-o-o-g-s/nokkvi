@@ -283,6 +283,117 @@ pub enum ToastMessage {
     DismissKey(String),
 }
 
+// ============================================================================
+// Loader Result Messages — backend data-loading results, namespaced per domain.
+// ============================================================================
+//
+// Each per-view `*Message` enum (in `views/*/mod.rs`) carries view-interaction
+// variants only; backend data-load results live in their own `*LoaderMessage`
+// so the dispatcher in `update/mod.rs` can route them with a single arm and
+// the per-view `update()` doesn't need to carry no-op exhaustiveness arms.
+//
+// Variant shape per the plan §2.4:
+//   - Paged domains: `Loaded { result, total_count, background, anchor_id }`
+//                  + `PageLoaded(result, total_count)`
+//   - Single-shot domains: `Loaded(result, total_count)` (or `Loaded(result)`
+//                          for Queue, which has no separate `total_count`).
+//
+// Each enum is in its own block with a comment header so Phase 2 implementers
+// (one per domain) can edit disjoint regions without conflict.
+
+// --- Albums Loader ---------------------------------------------------------
+
+/// Albums loader results — paged backend responses for the Albums view.
+///
+/// `Loaded` is the first-page response (or background reload via SSE);
+/// `background` and `anchor_id` drive the SSE-refresh re-anchor path.
+/// `PageLoaded` is a subsequent paged-scroll response and is appended to the
+/// existing `PagedBuffer<AlbumUIViewData>`.
+#[derive(Debug, Clone)]
+pub enum AlbumsLoaderMessage {
+    Loaded {
+        result: Result<Vec<nokkvi_data::backend::albums::AlbumUIViewData>, String>,
+        total_count: usize,
+        background: bool,
+        anchor_id: Option<String>,
+    },
+    PageLoaded(
+        Result<Vec<nokkvi_data::backend::albums::AlbumUIViewData>, String>,
+        usize,
+    ),
+}
+
+// --- Artists Loader --------------------------------------------------------
+
+/// Artists loader results — paged backend responses for the Artists view.
+/// Mirrors `AlbumsLoaderMessage`; same `background` / `anchor_id` semantics.
+#[derive(Debug, Clone)]
+pub enum ArtistsLoaderMessage {
+    Loaded {
+        result: Result<Vec<nokkvi_data::backend::artists::ArtistUIViewData>, String>,
+        total_count: usize,
+        background: bool,
+        anchor_id: Option<String>,
+    },
+    PageLoaded(
+        Result<Vec<nokkvi_data::backend::artists::ArtistUIViewData>, String>,
+        usize,
+    ),
+}
+
+// --- Songs Loader ----------------------------------------------------------
+
+/// Songs loader results — paged backend responses for the Songs view.
+/// Mirrors `AlbumsLoaderMessage`; same `background` / `anchor_id` semantics.
+#[derive(Debug, Clone)]
+pub enum SongsLoaderMessage {
+    Loaded {
+        result: Result<Vec<nokkvi_data::backend::songs::SongUIViewData>, String>,
+        total_count: usize,
+        background: bool,
+        anchor_id: Option<String>,
+    },
+    PageLoaded(
+        Result<Vec<nokkvi_data::backend::songs::SongUIViewData>, String>,
+        usize,
+    ),
+}
+
+// --- Genres Loader ---------------------------------------------------------
+
+/// Genres loader results — single-shot full-list response (genres are not
+/// paged). Tuple shape `(result, total_count)` matches the existing fire site.
+#[derive(Debug, Clone)]
+pub enum GenresLoaderMessage {
+    Loaded(
+        Result<Vec<nokkvi_data::backend::genres::GenreUIViewData>, String>,
+        usize,
+    ),
+}
+
+// --- Playlists Loader ------------------------------------------------------
+
+/// Playlists loader results — single-shot full-list response (playlists are
+/// not paged). Tuple shape `(result, total_count)` matches the existing
+/// fire site.
+#[derive(Debug, Clone)]
+pub enum PlaylistsLoaderMessage {
+    Loaded(
+        Result<Vec<nokkvi_data::backend::playlists::PlaylistUIViewData>, String>,
+        usize,
+    ),
+}
+
+// --- Queue Loader ----------------------------------------------------------
+
+/// Queue loader results — single-shot full-queue response. No `total_count`
+/// because the queue *is* the entire dataset (not paged); the caller consumes
+/// `Vec::len()` directly.
+#[derive(Debug, Clone)]
+pub enum QueueLoaderMessage {
+    Loaded(Result<Vec<nokkvi_data::backend::queue::QueueSongUIViewData>, String>),
+}
+
 /// Identifies the single overlay menu that may be open across the app.
 ///
 /// Only one of these can be active at a time; opening any new menu replaces the
@@ -456,6 +567,17 @@ pub enum Message {
     /// All pages of a progressive queue chain have been loaded.
     /// Clears `queue_loading_target` so the header shows the actual count.
     ProgressiveQueueDone,
+
+    // --- Loader Results (per-domain *LoaderMessage) ---
+    // Backend data-load responses are routed via `dispatch_<domain>_loader`
+    // helpers in `update/<domain>.rs`. The corresponding *trigger* messages
+    // (`LoadAlbums`, `LoadGenres`, …) live in the Data Loading block above.
+    AlbumsLoader(AlbumsLoaderMessage),
+    ArtistsLoader(ArtistsLoaderMessage),
+    SongsLoader(SongsLoaderMessage),
+    GenresLoader(GenresLoaderMessage),
+    PlaylistsLoader(PlaylistsLoaderMessage),
+    QueueLoader(QueueLoaderMessage),
 
     // --- Artwork Pipeline (namespaced) ---
     Artwork(ArtworkMessage),

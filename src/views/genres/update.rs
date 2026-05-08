@@ -186,8 +186,6 @@ impl GenresPage {
                         None => (Task::none(), GenresAction::None),
                     }
                 }
-                // Data loading messages (handled at root level, no action needed here)
-                GenresMessage::GenresLoaded(_, _) => (Task::none(), GenresAction::None),
                 // Routed up to root in `handle_genres` before this match runs;
                 // arm exists only for exhaustiveness.
                 GenresMessage::SetOpenMenu(_) => (Task::none(), GenresAction::None),
