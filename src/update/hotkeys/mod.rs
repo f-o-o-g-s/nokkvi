@@ -13,7 +13,12 @@ use iced::Task;
 use nokkvi_data::types::info_modal::InfoModalItem;
 use tracing::{debug, trace};
 
-use crate::{Nokkvi, View, app_message::Message, views, views::expansion::SlotListEntry};
+use crate::{
+    Nokkvi, View,
+    app_message::{HotkeyMessage, Message},
+    views,
+    views::expansion::SlotListEntry,
+};
 
 impl Nokkvi {
     /// Get the current view as a `&dyn ViewPage` for trait-based dispatch.
@@ -332,5 +337,83 @@ impl Nokkvi {
             return Task::done(msg);
         }
         Task::none()
+    }
+
+    /// Dispatch a `HotkeyMessage` to its handler.
+    ///
+    /// `ClearSearch` runs inline modal-close logic before delegating, since
+    /// Escape's job-cascade (close modal first, then clear search) is part
+    /// of the dispatch decision rather than belonging to a single handler.
+    pub(super) fn dispatch_hotkey(&mut self, msg: HotkeyMessage) -> Task<Message> {
+        match msg {
+            HotkeyMessage::ClearSearch => {
+                // If EQ modal is visible, Escape closes it first
+                if self.window.eq_modal_open {
+                    self.window.eq_modal_open = false;
+                    return Task::none();
+                }
+                // If about modal is visible, Escape closes it first
+                if self.about_modal.visible {
+                    self.about_modal.close();
+                    return Task::none();
+                }
+                // If info modal is visible, Escape closes it first
+                if self.info_modal.visible {
+                    self.info_modal.close();
+                    return Task::none();
+                }
+                self.handle_clear_search()
+            }
+            HotkeyMessage::CycleSortMode(forward) => self.handle_cycle_sort_mode(forward),
+            HotkeyMessage::CenterOnPlaying => self.handle_center_on_playing(),
+            HotkeyMessage::ToggleStar => self.handle_toggle_star(),
+            HotkeyMessage::SongStarredStatusUpdated(song_id, new_starred_status) => {
+                self.handle_song_starred_status_updated(song_id, new_starred_status)
+            }
+            HotkeyMessage::AlbumStarredStatusUpdated(album_id, new_starred_status) => {
+                self.handle_album_starred_status_updated(album_id, new_starred_status)
+            }
+            HotkeyMessage::ArtistStarredStatusUpdated(artist_id, new_starred_status) => {
+                self.handle_artist_starred_status_updated(artist_id, new_starred_status)
+            }
+            HotkeyMessage::AddToQueue => self.handle_add_to_queue(),
+            HotkeyMessage::SaveQueueAsPlaylist => self.handle_save_queue_as_playlist(),
+            HotkeyMessage::RemoveFromQueue => self.handle_remove_from_queue(),
+            HotkeyMessage::ClearQueue => self.handle_clear_queue(),
+            HotkeyMessage::FocusSearch => self.handle_focus_search(),
+            HotkeyMessage::IncreaseRating => self.handle_increase_rating(),
+            HotkeyMessage::DecreaseRating => self.handle_decrease_rating(),
+            HotkeyMessage::SongRatingUpdated(song_id, new_rating) => {
+                self.handle_song_rating_updated(song_id, new_rating)
+            }
+            HotkeyMessage::SongPlayCountIncremented(song_id) => {
+                self.handle_song_play_count_incremented(song_id)
+            }
+            HotkeyMessage::AlbumRatingUpdated(album_id, new_rating) => {
+                self.handle_album_rating_updated(album_id, new_rating)
+            }
+            HotkeyMessage::ArtistRatingUpdated(artist_id, new_rating) => {
+                self.handle_artist_rating_updated(artist_id, new_rating)
+            }
+            HotkeyMessage::ExpandCenter => self.handle_expand_center(),
+            HotkeyMessage::MoveTrackUp => self.handle_move_track(true),
+            HotkeyMessage::MoveTrackDown => self.handle_move_track(false),
+            HotkeyMessage::GetInfo => self.handle_get_info(),
+            HotkeyMessage::FindSimilar => self.handle_find_similar_for_playing_track(),
+            HotkeyMessage::FindTopSongs => self.handle_find_top_songs_for_playing_track(),
+            HotkeyMessage::EditValue(up) => self.handle_edit_value(up),
+            HotkeyMessage::RefreshView => match self.current_view {
+                crate::View::Albums => Task::done(Message::LoadAlbums),
+                crate::View::Artists => Task::done(Message::LoadArtists),
+                crate::View::Songs => Task::done(Message::LoadSongs),
+                crate::View::Genres => Task::done(Message::LoadGenres),
+                crate::View::Playlists => Task::done(Message::LoadPlaylists),
+                crate::View::Radios => Task::done(Message::LoadRadioStations),
+                crate::View::Queue | crate::View::Settings => Task::none(),
+            },
+            HotkeyMessage::StartRoulette => Task::done(Message::Roulette(
+                crate::app_message::RouletteMessage::Start(self.current_view),
+            )),
+        }
     }
 }
