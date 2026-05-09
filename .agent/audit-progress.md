@@ -28,7 +28,7 @@ When you complete an item, append the commit ref(s) and flip the status. Keep th
 | 3 | Extend `define_view_columns!` to emit `persist_*_column_visibility` | ❌ open | 7 hand-written `persist_*_column_visibility` functions still live in `src/update/`. |
 | 4 | Migrate `hotkeys/star_rating.rs` to `star_item_task`/`set_item_rating_task` | ❓ stale path | `src/hotkeys/star_rating.rs` does not exist. Only `global.rs` and `mod.rs` live in `src/hotkeys/`. The inline-rebuild pattern (if still present) is somewhere else; locate before starting. |
 | 5 | `enum ItemKind` to replace `item_type: &str` | ❌ open | 7 sites still pass `item_type: &str` (e.g. `src/update/components.rs:783-806`). No `enum ItemKind` defined. |
-| 6 | `update/navigation.rs` pending-expand dedup + paired tests/navigation.rs macro | ❌ open | `src/update/navigation.rs` is still 1134 LOC with 4 hand-written pending-expand functions. |
+| 6 | `update/navigation.rs` pending-expand dedup + paired tests/navigation.rs macro | 🟡 partial | Lane A (resolvers) complete from `.agent/plans/pending-expand-dedup.md` (2026-05-09): `22c0871` (ResolveSpec trait + 4 zero-sized specs in `src/update/pending_expand_resolve.rs` + generic `try_resolve_pending_expand_with::<S>` body), `5599c87` (album wrapper migrated), `8137cbf` (artist), `6d38511` (genre — also reordered `is_loading()` before `fully_loaded()` in the generic body to handle Genre's empty single-shot buffer), `3ea4a69` (song). Four resolver wrappers now 1-line dispatches; per-entity quirks (genre name-vs-id match, song center-only / no-FocusAndExpand) encoded as typed data on the per-spec impls. Lane B (priming/handlers) and Lane C (test mirror macro) still pending. |
 | 7 | AppService `LibraryOrchestrator` + `QueueOrchestrator` split | ❌ open | 4 `play_X` + 4 `add_X_to_queue` + matching `play_next_X` / `insert_X_at_position` still hand-written on `AppService`. No `LibraryOrchestrator` / `QueueOrchestrator` types. No `enum SongSource`. |
 | 8 | Loader-result `LoaderTarget` trait | ❌ open | The `*LoaderMessage` Phase 1+2 scaffolding landed pre-audit (commits `171c053..bc53b17`) but the unifying `LoaderTarget` trait was not introduced. The 5 `handle_*_loaded` bodies are still parallel. |
 | 9 | Move slot_list + roulette per-`View` dispatch onto `ViewPage` trait | 🟡 partial | `pub(crate) trait ViewPage` exists at `src/views/mod.rs:55` with rich API (search_input_id, sort_mode_options, toggle_sort_order_message, etc.). BUT `src/update/slot_list.rs:115-158` still has 8 `View::X` match arms; the migration onto the trait is not done. |
@@ -83,7 +83,7 @@ When you complete an item, append the commit ref(s) and flip the status. Keep th
 
 | # | Item | Status | Evidence |
 |---:|---|---|---|
-| 1 | Pending-expand × {Album, Artist, Genre, Song} dedup | ❌ open | Same as §7 #6. |
+| 1 | Pending-expand × {Album, Artist, Genre, Song} dedup | 🟡 partial | Same as §7 #6 — Lane A (resolvers) complete; Lane B (priming/handlers) + Lane C (test mirror macro) pending. |
 | 2 | `handle_*_loaded` LoaderTarget trait | ❌ open | Same as §7 #8. |
 | 3 | Per-view column-visibility persisters | ❌ open | Same as §7 #3. |
 | 4 | AppService entity × verb matrix | ❌ open | Same as §7 #7. |
