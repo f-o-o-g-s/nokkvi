@@ -168,7 +168,12 @@ impl Nokkvi {
             View::Settings => Task::none(),                // Settings don't need data loading
             // Data already loaded — re-prefetch artwork for the current slot_count
             // in case the window was resized since the data was first loaded.
-            _ => self.prefetch_viewport_artwork(),
+            View::Albums
+            | View::Artists
+            | View::Songs
+            | View::Genres
+            | View::Playlists
+            | View::Radios => self.prefetch_viewport_artwork(),
         }
     }
 
@@ -481,7 +486,7 @@ impl Nokkvi {
                 self.genres_page.common.active_filter = Some(filter);
                 self.genres_page.common.search_query = display;
             }
-            _ => {}
+            View::Queue | View::Playlists | View::Radios | View::Settings => {}
         }
 
         // Trigger a data reload with the active filter
@@ -490,7 +495,7 @@ impl Nokkvi {
             View::Songs => Task::done(Message::LoadSongs),
             View::Artists => Task::done(Message::LoadArtists),
             View::Genres => Task::done(Message::LoadGenres),
-            _ => Task::none(),
+            View::Queue | View::Playlists | View::Radios | View::Settings => Task::none(),
         };
 
         Task::batch([switch_task, load_task])
@@ -1083,7 +1088,7 @@ impl Nokkvi {
             View::Songs => Some(crate::views::BrowsingView::Songs),
             View::Artists => Some(crate::views::BrowsingView::Artists),
             View::Genres => Some(crate::views::BrowsingView::Genres),
-            _ => None,
+            View::Queue | View::Playlists | View::Radios | View::Settings => None,
         };
 
         let Some(bv) = browse_view else {
@@ -1117,7 +1122,7 @@ impl Nokkvi {
                 self.genres_page.common.active_filter = Some(filter);
                 self.genres_page.common.search_query = display;
             }
-            _ => {}
+            View::Queue | View::Playlists | View::Radios | View::Settings => {}
         }
 
         // Trigger a data reload with the active filter
@@ -1126,7 +1131,7 @@ impl Nokkvi {
             View::Songs => Task::done(Message::LoadSongs),
             View::Artists => Task::done(Message::LoadArtists),
             View::Genres => Task::done(Message::LoadGenres),
-            _ => Task::none(),
+            View::Queue | View::Playlists | View::Radios | View::Settings => Task::none(),
         };
 
         Task::batch([switch_task, load_task])
