@@ -401,10 +401,6 @@ impl QueueManager {
         &self.queue
     }
 
-    pub fn get_queue_mut(&mut self) -> &mut Queue {
-        &mut self.queue
-    }
-
     /// Set the current playback position. Always syncs `current_order` and
     /// clears `queued` so the order array stays consistent.
     /// Use this instead of setting `queue.current_index` directly.
@@ -497,27 +493,20 @@ impl QueueManager {
         Ok(())
     }
 
-    /// Insert a song at a specific index in the queue.
-    /// Used to re-insert songs from history that were removed (consume mode).
-    pub fn insert_song_at(&mut self, index: usize, song: Song) -> Result<()> {
+    /// Insert a song at `index` and set it as the currently-playing song.
+    /// Used to re-insert songs from history (consume mode).
+    pub fn insert_song_and_make_current(&mut self, index: usize, song: Song) -> Result<()> {
         let clamped = index.min(self.queue.song_ids.len());
-        self.queue.song_ids.insert(clamped, song.id.clone());
-        self.pool.insert(song);
-
-        // Update order array for the insertion
-        self.insert_into_order(clamped, 1);
-
-        self.queue.current_index = Some(clamped);
-        self.sync_current_order_to_index();
-        self.clear_queued();
-        self.save_all()?;
-        Ok(())
+        self.insert_songs_at(clamped, vec![song])?;
+        self.set_current_index(Some(clamped));
+        self.save_order()
     }
 
     /// Insert multiple songs at a specific index in the queue.
     /// Used for cross-pane drag-and-drop (browsing panel → queue at drop position).
     /// Does NOT change `current_index` to point at the inserted songs, but adjusts
     /// it forward if the insertion point is before the currently-playing song.
+    /// See `insert_song_and_make_current` for the singular variant that sets the playhead.
     pub fn insert_songs_at(&mut self, index: usize, mut songs: Vec<Song>) -> Result<()> {
         if songs.is_empty() {
             return Ok(());

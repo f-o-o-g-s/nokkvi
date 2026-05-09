@@ -512,7 +512,7 @@ impl QueueNavigator {
                 );
 
                 let insert_idx = current_index.unwrap_or(0);
-                queue_manager.insert_song_at(insert_idx, song.clone())?;
+                queue_manager.insert_song_and_make_current(insert_idx, song.clone())?;
 
                 *self.current_song_id.lock().await = Some(song.id.clone());
                 drop(queue_manager);
