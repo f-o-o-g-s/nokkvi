@@ -9,6 +9,7 @@
 
 mod navigation;
 mod order;
+mod write_guard;
 
 use anyhow::Result;
 pub use navigation::{NextSongResult, PreviousSongResult, TransitionResult};
@@ -128,20 +129,19 @@ impl QueueManager {
 
     pub fn add_songs(&mut self, mut songs: Vec<Song>) -> Result<()> {
         self.assign_original_positions(&mut songs);
-        let start_idx = self.queue.song_ids.len();
+        let mut tx = self.write();
+        let start_idx = tx.queue.song_ids.len();
         let count = songs.len();
 
         // Add IDs to ordering, songs to pool
         for song in &songs {
-            self.queue.song_ids.push(song.id.clone());
+            tx.queue.song_ids.push(song.id.clone());
         }
-        self.pool.insert_many(songs);
+        tx.pool.insert_many(songs);
 
         // Extend order array with new indices
-        self.extend_order(start_idx..start_idx + count);
-        self.clear_queued();
-        self.save_all()?;
-        Ok(())
+        tx.extend_order(start_idx..start_idx + count);
+        tx.commit_save_all()
     }
 
     pub fn set_queue(&mut self, mut songs: Vec<Song>, current_index: Option<usize>) -> Result<()> {
@@ -229,19 +229,18 @@ impl QueueManager {
     }
 
     pub fn toggle_shuffle(&mut self) -> Result<()> {
-        self.queue.shuffle = !self.queue.shuffle;
+        let mut tx = self.write();
+        tx.queue.shuffle = !tx.queue.shuffle;
         debug!(
             " [SHUFFLE] Shuffle mode: {}",
-            if self.queue.shuffle { "ON" } else { "OFF" }
+            if tx.queue.shuffle { "ON" } else { "OFF" }
         );
-        if self.queue.shuffle {
-            self.shuffle_order();
+        if tx.queue.shuffle {
+            tx.shuffle_order();
         } else {
-            self.unshuffle_order();
+            tx.unshuffle_order();
         }
-        self.clear_queued();
-        self.save_order()?;
-        Ok(())
+        tx.commit_save_order()
     }
 
     /// Shuffle the queue order randomly.
@@ -409,9 +408,10 @@ impl QueueManager {
     /// clears `queued` so the order array stays consistent.
     /// Use this instead of setting `queue.current_index` directly.
     pub fn set_current_index(&mut self, index: Option<usize>) {
-        self.queue.current_index = index;
-        self.sync_current_order_to_index();
-        self.clear_queued();
+        let mut tx = self.write();
+        tx.queue.current_index = index;
+        tx.sync_current_order_to_index();
+        tx.commit_no_save();
     }
 
     // ══════════════════════════════════════════════════════════════════════
