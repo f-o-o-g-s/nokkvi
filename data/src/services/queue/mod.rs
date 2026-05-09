@@ -467,53 +467,51 @@ impl QueueManager {
     /// If nothing is playing, appends to the end.
     /// Does NOT change `current_index` — the currently playing song stays the same.
     pub fn insert_after_current(&mut self, mut songs: Vec<Song>) -> Result<()> {
-        let insert_pos = self
+        self.assign_original_positions(&mut songs);
+
+        let mut tx = self.write();
+        let insert_pos = tx
             .queue
             .current_index
-            .map_or(self.queue.song_ids.len(), |idx| idx + 1);
+            .map_or(tx.queue.song_ids.len(), |idx| idx + 1);
 
-        let clamped = insert_pos.min(self.queue.song_ids.len());
+        let clamped = insert_pos.min(tx.queue.song_ids.len());
         let count = songs.len();
-
-        self.assign_original_positions(&mut songs);
 
         // Insert IDs in reverse so they end up in order, and add to pool
         for song in songs.into_iter().rev() {
-            self.queue.song_ids.insert(clamped, song.id.clone());
-            self.pool.insert(song);
+            tx.queue.song_ids.insert(clamped, song.id.clone());
+            tx.pool.insert(song);
         }
 
         // Update order array for the insertion
-        self.insert_into_order(clamped, count);
+        tx.insert_into_order(clamped, count);
 
         // Adjust current_index for songs inserted before it
-        if let Some(cur) = self.queue.current_index
+        if let Some(cur) = tx.queue.current_index
             && clamped <= cur
         {
-            self.queue.current_index = Some(cur + count);
+            tx.queue.current_index = Some(cur + count);
         }
 
-        self.clear_queued();
         debug!("📦 [QUEUE] Inserted songs after current (pos {})", clamped);
-        self.save_all()?;
-        Ok(())
+        tx.commit_save_all()
     }
 
     /// Insert a song at a specific index in the queue.
     /// Used to re-insert songs from history that were removed (consume mode).
     pub fn insert_song_at(&mut self, index: usize, song: Song) -> Result<()> {
-        let clamped = index.min(self.queue.song_ids.len());
-        self.queue.song_ids.insert(clamped, song.id.clone());
-        self.pool.insert(song);
+        let mut tx = self.write();
+        let clamped = index.min(tx.queue.song_ids.len());
+        tx.queue.song_ids.insert(clamped, song.id.clone());
+        tx.pool.insert(song);
 
         // Update order array for the insertion
-        self.insert_into_order(clamped, 1);
+        tx.insert_into_order(clamped, 1);
 
-        self.queue.current_index = Some(clamped);
-        self.sync_current_order_to_index();
-        self.clear_queued();
-        self.save_all()?;
-        Ok(())
+        tx.queue.current_index = Some(clamped);
+        tx.sync_current_order_to_index();
+        tx.commit_save_all()
     }
 
     /// Insert multiple songs at a specific index in the queue.
@@ -524,34 +522,33 @@ impl QueueManager {
         if songs.is_empty() {
             return Ok(());
         }
-        let clamped = index.min(self.queue.song_ids.len());
-        let count = songs.len();
-
         self.assign_original_positions(&mut songs);
+
+        let mut tx = self.write();
+        let clamped = index.min(tx.queue.song_ids.len());
+        let count = songs.len();
 
         // Insert in reverse so they end up in order at `clamped`
         for song in songs.into_iter().rev() {
-            self.queue.song_ids.insert(clamped, song.id.clone());
-            self.pool.insert(song);
+            tx.queue.song_ids.insert(clamped, song.id.clone());
+            tx.pool.insert(song);
         }
 
         // Update order array for the insertion
-        self.insert_into_order(clamped, count);
+        tx.insert_into_order(clamped, count);
 
         // Adjust current_index: if inserting before the playing song, shift it forward
-        if let Some(cur) = self.queue.current_index
+        if let Some(cur) = tx.queue.current_index
             && clamped <= cur
         {
-            self.queue.current_index = Some(cur + count);
+            tx.queue.current_index = Some(cur + count);
         }
 
-        self.clear_queued();
         debug!(
             "📦 [QUEUE] Inserted {} songs at position {}",
             count, clamped
         );
-        self.save_all()?;
-        Ok(())
+        tx.commit_save_all()
     }
 
     /// Update the rating for a song in the persisted queue by song ID (O(1)).
