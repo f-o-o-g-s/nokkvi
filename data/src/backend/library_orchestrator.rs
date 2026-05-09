@@ -13,12 +13,18 @@
 //! mirrors the existing `AppService::songs_api()` / `playlists_api()`
 //! factories (app_service.rs:619-676) so the auth dance stays consistent.
 
+use std::collections::HashSet;
+
 use anyhow::Result;
 
 use crate::{
     backend::{albums::AlbumsService, artists::ArtistsService, auth::AuthGateway},
     services::api::{playlists::PlaylistsApiService, songs::SongsApiService},
-    types::{song::Song, song_source::SongSource},
+    types::{
+        batch::{BatchItem, BatchPayload},
+        song::Song,
+        song_source::SongSource,
+    },
 };
 
 pub struct LibraryOrchestrator<'a> {
@@ -52,6 +58,7 @@ impl<'a> LibraryOrchestrator<'a> {
             SongSource::Genre(name) => self.resolve_genre(&name).await,
             SongSource::Playlist(id) => self.resolve_playlist(&id).await,
             SongSource::Preloaded(songs) => Ok(songs),
+            SongSource::Batch(payload) => self.resolve_batch(payload).await,
         }
     }
 
@@ -92,6 +99,43 @@ impl<'a> LibraryOrchestrator<'a> {
         let playlists_api =
             PlaylistsApiService::new_with_client(client, server_url, subsonic_credential);
         playlists_api.load_playlist_songs(playlist_id).await
+    }
+
+    /// Flatten + dedup a `BatchPayload` to `Vec<Song>`. Per-item dispatch goes
+    /// through the per-entity `resolve_*` methods so the entity quirks (genre's
+    /// name-not-id, playlist's on-demand API construction) stay encapsulated.
+    ///
+    /// Skip-on-fail: items that error are logged at `warn!` and dropped — matches
+    /// today's `AppService::resolve_batch` behavior. Empty result is a hard error.
+    pub async fn resolve_batch(&self, batch: BatchPayload) -> Result<Vec<Song>> {
+        let mut resolved = Vec::new();
+        let mut seen = HashSet::new();
+
+        for item in batch.items {
+            let songs_result = match item {
+                BatchItem::Song(song) => Ok(vec![*song]),
+                BatchItem::Album(id) => self.resolve_album(&id).await,
+                BatchItem::Artist(id) => self.resolve_artist(&id).await,
+                BatchItem::Genre(name) => self.resolve_genre(&name).await,
+                BatchItem::Playlist(id) => self.resolve_playlist(&id).await,
+            };
+            match songs_result {
+                Ok(songs) => {
+                    for song in songs {
+                        if seen.insert(song.id.clone()) {
+                            resolved.push(song);
+                        }
+                    }
+                }
+                Err(e) => tracing::warn!("Batch item resolution failed, skipping: {e}"),
+            }
+        }
+
+        if resolved.is_empty() {
+            Err(anyhow::anyhow!("No songs found in batch payload"))
+        } else {
+            Ok(resolved)
+        }
     }
 }
 
@@ -201,5 +245,46 @@ mod tests {
             err.to_string().contains("Not authenticated"),
             "expected auth-check error, got: {err}"
         );
+    }
+
+    /// Empty `BatchPayload` must hit the "no songs found" hard-error branch
+    /// after the per-item loop yields nothing — mirrors today's
+    /// `AppService::resolve_batch` empty-result contract.
+    #[tokio::test]
+    async fn resolve_batch_empty_payload_errors() {
+        let (auth, albums, artists) = make_orchestrator_fixtures();
+        let orch = LibraryOrchestrator::new(&auth, &albums, &artists);
+
+        let err = orch
+            .resolve_batch(BatchPayload::new())
+            .await
+            .expect_err("empty batch must error");
+        assert!(
+            err.to_string().contains("No songs found in batch payload"),
+            "expected empty-batch error, got: {err}"
+        );
+    }
+
+    /// Pre-resolved `BatchItem::Song` entries skip the network and dedup by id.
+    /// Three input items with two duplicate ids → two unique resolved songs.
+    #[tokio::test]
+    async fn resolve_batch_dedups_song_items_by_id() {
+        let (auth, albums, artists) = make_orchestrator_fixtures();
+        let orch = LibraryOrchestrator::new(&auth, &albums, &artists);
+
+        let payload = BatchPayload::new()
+            .with_item(BatchItem::Song(Box::new(Song::test_default("a", "Song A"))))
+            .with_item(BatchItem::Song(Box::new(Song::test_default("b", "Song B"))))
+            .with_item(BatchItem::Song(Box::new(Song::test_default(
+                "a",
+                "Song A duplicate",
+            ))));
+
+        let out = orch
+            .resolve_batch(payload)
+            .await
+            .expect("song-only batch resolves");
+        let ids: Vec<String> = out.iter().map(|s| s.id.clone()).collect();
+        assert_eq!(ids, vec!["a".to_string(), "b".to_string()]);
     }
 }

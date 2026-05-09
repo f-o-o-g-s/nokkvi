@@ -9,7 +9,7 @@
 //! dispatch over trait + ZST. 5 actions × 1 dispatch = 5 methods. Caller
 //! writes `app.play(SongSource::Album(id)).await?`.
 
-use crate::types::song::Song;
+use crate::types::{batch::BatchPayload, song::Song};
 
 #[derive(Debug, Clone)]
 pub enum SongSource {
@@ -24,4 +24,8 @@ pub enum SongSource {
     Playlist(String),
     /// Already-resolved songs — skip the load step entirely.
     Preloaded(Vec<Song>),
+    /// Multi-selection or context-menu batch. Resolved via
+    /// `LibraryOrchestrator::resolve_batch` — flattens + dedups across
+    /// per-item dispatch.
+    Batch(BatchPayload),
 }
