@@ -5,8 +5,8 @@
 
 use nokkvi_data::{
     backend::{
-        albums::AlbumUIViewData, artists::ArtistUIViewData, queue::QueueSongUIViewData,
-        songs::SongUIViewData,
+        albums::AlbumUIViewData, artists::ArtistUIViewData, genres::GenreUIViewData,
+        queue::QueueSongUIViewData, songs::SongUIViewData,
     },
     utils::search::build_searchable_lower,
 };
@@ -192,6 +192,108 @@ pub(crate) fn make_radio_station(
         stream_url: stream_url.to_string(),
         home_page_url: None,
     }
+}
+
+// ============================================================================
+// Bulk fixtures for the album/artist/genre/song tri-mirror tests
+// ============================================================================
+//
+// These pair with `for_each_expandable_entity!` in tests/navigation.rs and
+// dedup the inline `(0..N).map(make_X)` / `pending_expand = Some(...)` /
+// `library.X.set_from_vec(...)` sites that recur ~38× across navigation.rs
+// and ~11× across library_refresh.rs. See `~/nokkvi-audit-results/dry-tests.md`
+// §3 for the call-site survey.
+
+/// `n` indexed albums with ids `a0..a{n-1}` and names `Album 0..Album {n-1}`.
+#[allow(dead_code)]
+pub(crate) fn albums_indexed(n: usize) -> Vec<AlbumUIViewData> {
+    (0..n)
+        .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
+        .collect()
+}
+
+/// Arm `pending_expand` for an Album target (top-pane, not browsing).
+#[allow(dead_code)]
+pub(crate) fn arm_pending_album(app: &mut Nokkvi, id: &str) {
+    app.pending_expand = Some(crate::state::PendingExpand::Album {
+        album_id: id.to_string(),
+        for_browsing_pane: false,
+    });
+}
+
+/// Arm `pending_expand` for an Artist target (top-pane, not browsing).
+#[allow(dead_code)]
+pub(crate) fn arm_pending_artist(app: &mut Nokkvi, id: &str) {
+    app.pending_expand = Some(crate::state::PendingExpand::Artist {
+        artist_id: id.to_string(),
+        for_browsing_pane: false,
+    });
+}
+
+/// Arm `pending_expand` for a Genre target (top-pane, not browsing).
+#[allow(dead_code)]
+pub(crate) fn arm_pending_genre(app: &mut Nokkvi, id: &str) {
+    app.pending_expand = Some(crate::state::PendingExpand::Genre {
+        genre_id: id.to_string(),
+        for_browsing_pane: false,
+    });
+}
+
+/// Arm `pending_expand` for a Song target (top-pane, not browsing).
+#[allow(dead_code)]
+pub(crate) fn arm_pending_song(app: &mut Nokkvi, id: &str) {
+    app.pending_expand = Some(crate::state::PendingExpand::Song {
+        song_id: id.to_string(),
+        for_browsing_pane: false,
+    });
+}
+
+/// `n` indexed artists with ids `ar0..ar{n-1}` and names `Artist 0..Artist {n-1}`.
+#[allow(dead_code)]
+pub(crate) fn artists_indexed(n: usize) -> Vec<ArtistUIViewData> {
+    (0..n)
+        .map(|i| make_artist(&format!("ar{i}"), &format!("Artist {i}")))
+        .collect()
+}
+
+/// `n` indexed genres with ids `uuid-0..uuid-{n-1}` and names `Genre 0..Genre {n-1}`.
+#[allow(dead_code)]
+pub(crate) fn genres_indexed(n: usize) -> Vec<GenreUIViewData> {
+    (0..n)
+        .map(|i| make_genre(&format!("uuid-{i}"), &format!("Genre {i}")))
+        .collect()
+}
+
+/// Replace the entire albums library buffer (sets `total_count = items.len()`).
+#[allow(dead_code)]
+pub(crate) fn seed_albums(app: &mut Nokkvi, items: Vec<AlbumUIViewData>) {
+    app.library.albums.set_from_vec(items);
+}
+
+/// Replace the entire artists library buffer (sets `total_count = items.len()`).
+#[allow(dead_code)]
+pub(crate) fn seed_artists(app: &mut Nokkvi, items: Vec<ArtistUIViewData>) {
+    app.library.artists.set_from_vec(items);
+}
+
+/// Replace the entire genres library buffer (sets `total_count = items.len()`).
+#[allow(dead_code)]
+pub(crate) fn seed_genres(app: &mut Nokkvi, items: Vec<GenreUIViewData>) {
+    app.library.genres.set_from_vec(items);
+}
+
+/// Replace the entire songs library buffer (sets `total_count = items.len()`).
+#[allow(dead_code)]
+pub(crate) fn seed_songs(app: &mut Nokkvi, items: Vec<SongUIViewData>) {
+    app.library.songs.set_from_vec(items);
+}
+
+/// `n` indexed songs with ids `s0..s{n-1}` and titles `Song 0..Song {n-1}`.
+#[allow(dead_code)]
+pub(crate) fn songs_indexed(n: usize) -> Vec<SongUIViewData> {
+    (0..n)
+        .map(|i| make_song(&format!("s{i}"), &format!("Song {i}"), "Artist"))
+        .collect()
 }
 
 #[cfg(test)]
