@@ -26,7 +26,7 @@ use crate::theme;
 // ============================================================================
 
 /// Actions that the menu can emit
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum MenuAction {
     ToggleLightMode,
     ToggleSoundEffects,
@@ -311,9 +311,23 @@ const MENU_PADDING: f32 = 4.0;
 const MENU_TEXT_SIZE: f32 = 13.0;
 const MENU_TEXT_PADDING_LEFT: f32 = 10.0;
 
+/// Click-dispatch order for hamburger menu items. Index is the visual
+/// position; `SEPARATOR_INDEX` is the position before which the divider
+/// is drawn. Reordering this slice is the only way to reorder the menu.
+const MENU_ITEMS: &[MenuAction] = &[
+    MenuAction::ToggleLightMode,
+    MenuAction::ToggleSoundEffects,
+    MenuAction::OpenSettings,
+    MenuAction::About,
+    MenuAction::Quit,
+];
+
 /// Number of menu items (3 settings + separator + quit)
-const MENU_ITEM_COUNT: usize = 5;
+const MENU_ITEM_COUNT: usize = MENU_ITEMS.len();
 const SEPARATOR_INDEX: usize = 4; // Separator drawn before this item
+
+const _: () = assert!(SEPARATOR_INDEX < MENU_ITEM_COUNT);
+const _: () = assert!(matches!(MENU_ITEMS[MENU_ITEM_COUNT - 1], MenuAction::Quit));
 
 impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'_, Message> {
     fn layout(&mut self, _renderer: &iced::Renderer, bounds: Size) -> layout::Node {
@@ -398,14 +412,7 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
                     }
                     let item_index = (relative_y / MENU_ITEM_HEIGHT) as usize;
 
-                    let action = match item_index {
-                        0 => Some(MenuAction::ToggleLightMode),
-                        1 => Some(MenuAction::ToggleSoundEffects),
-                        2 => Some(MenuAction::OpenSettings),
-                        3 => Some(MenuAction::About),
-                        4 => Some(MenuAction::Quit),
-                        _ => None,
-                    };
+                    let action = MENU_ITEMS.get(item_index).copied();
 
                     if let Some(action) = action {
                         shell.publish((self.on_action)(action));
@@ -474,6 +481,11 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
             ("About", true),
             ("Quit", true),
         ];
+        debug_assert_eq!(
+            items.len(),
+            MENU_ITEM_COUNT,
+            "labels array out of sync with MENU_ITEMS"
+        );
 
         let cursor_pos = cursor.position();
 
