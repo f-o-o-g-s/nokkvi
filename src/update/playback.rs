@@ -1206,7 +1206,8 @@ impl Nokkvi {
                 crate::View::Songs => Task::done(Message::LoadSongs),
                 crate::View::Genres => Task::done(Message::LoadGenres),
                 crate::View::Playlists => Task::done(Message::LoadPlaylists),
-                _ => Task::none(), // Queue always loaded in handle_login_result
+                // Queue always loaded in handle_login_result
+                crate::View::Queue | crate::View::Radios | crate::View::Settings => Task::none(),
             };
         }
 

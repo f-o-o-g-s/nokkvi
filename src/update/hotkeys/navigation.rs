@@ -312,7 +312,7 @@ impl Nokkvi {
                         iced::keyboard::Modifiers::default(),
                     )))
                 }
-                _ => Task::none(),
+                View::Playlists | View::Settings => Task::none(),
             }
         } else {
             // Item not in loaded buffer — start a center-only find chain that
@@ -333,7 +333,7 @@ impl Nokkvi {
                 View::Artists => self.start_center_on_playing_artist_chain(qs.artist_id.clone()),
                 View::Songs => self.start_center_on_playing_song_chain(song_id.to_string()),
                 View::Genres => self.start_center_on_playing_genre_chain(qs.genre.clone()),
-                _ => Task::none(),
+                View::Queue | View::Playlists | View::Radios | View::Settings => Task::none(),
             }
         }
     }

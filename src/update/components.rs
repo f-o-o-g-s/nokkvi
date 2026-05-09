@@ -678,7 +678,10 @@ impl Nokkvi {
                         crate::View::Songs => Some(crate::views::BrowsingView::Songs),
                         crate::View::Artists => Some(crate::views::BrowsingView::Artists),
                         crate::View::Genres => Some(crate::views::BrowsingView::Genres),
-                        _ => None,
+                        crate::View::Queue
+                        | crate::View::Playlists
+                        | crate::View::Radios
+                        | crate::View::Settings => None,
                     };
                     if browse_view.is_some() {
                         return Some(Task::done(Message::BrowserPaneNavigateAndFilter(

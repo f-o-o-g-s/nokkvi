@@ -112,7 +112,7 @@ impl Nokkvi {
                     ),
                 ))
             }
-            _ => Task::none(),
+            View::Genres | View::Playlists | View::Radios | View::Settings => Task::none(),
         }
     }
 

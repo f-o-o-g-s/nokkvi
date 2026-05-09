@@ -76,9 +76,9 @@ pub(crate) fn sort_mode_to_api_string(view: View, sort_mode: SortMode) -> &'stat
         (V::Playlists, S::UpdatedAt) => "updatedAt",
         (V::Playlists, _) => "name",
 
-        // Other views (Queue, Radios, Settings, Login) do not query the
-        // server's sort API. Returning a benign default keeps the type total.
-        (_, _) => "name",
+        // Other views (Queue, Radios, Settings) do not query the server's
+        // sort API. Returning a benign default keeps the type total.
+        (V::Queue | V::Radios | V::Settings, _) => "name",
     }
 }
 
