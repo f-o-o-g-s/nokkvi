@@ -556,13 +556,13 @@ pub(crate) fn info_modal_overlay<'a>(
             let rail = scrollable::Rail {
                 background: Some(theme::bg2().into()),
                 border: iced::Border {
-                    radius: 4.0.into(),
+                    radius: theme::ui_border_radius(),
                     ..Default::default()
                 },
                 scroller: scrollable::Scroller {
                     background: theme::fg4().into(),
                     border: iced::Border {
-                        radius: 4.0.into(),
+                        radius: theme::ui_border_radius(),
                         ..Default::default()
                     },
                 },

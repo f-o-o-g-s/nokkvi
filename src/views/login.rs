@@ -223,7 +223,7 @@ impl LoginPage {
                             border: iced::Border {
                                 color: border_color,
                                 width: 1.0,
-                                radius: 4.0.into(),
+                                radius: theme::ui_border_radius(),
                             },
                             icon: theme::fg1(),
                             placeholder: theme::fg4(),
@@ -250,7 +250,7 @@ impl LoginPage {
                             border: iced::Border {
                                 color: border_color,
                                 width: 1.0,
-                                radius: 4.0.into(),
+                                radius: theme::ui_border_radius(),
                             },
                             icon: theme::fg1(),
                             placeholder: theme::fg4(),
@@ -279,7 +279,7 @@ impl LoginPage {
                             border: iced::Border {
                                 color: border_color,
                                 width: 1.0,
-                                radius: 4.0.into(),
+                                radius: theme::ui_border_radius(),
                             },
                             icon: theme::fg1(),
                             placeholder: theme::fg4(),
