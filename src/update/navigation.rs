@@ -41,6 +41,42 @@ pub(crate) fn pending_expand_timeout_task(pending: crate::state::PendingExpand) 
     )
 }
 
+/// Toast a "Finding {entity}…" notification iff `expected` still matches the
+/// active pending-expand target (same variant + same id; `for_browsing_pane`
+/// is ignored). Called by the four `handle_pending_expand_*_timeout`
+/// dispatchers — superseded clicks stay silent because the active target
+/// has already been replaced or cleared.
+fn pending_expand_timeout_toast(app: &mut Nokkvi, expected: &crate::state::PendingExpand) {
+    let id_matches = match (&app.pending_expand, expected) {
+        (
+            Some(crate::state::PendingExpand::Album { album_id: a, .. }),
+            crate::state::PendingExpand::Album { album_id: b, .. },
+        ) => a == b,
+        (
+            Some(crate::state::PendingExpand::Artist { artist_id: a, .. }),
+            crate::state::PendingExpand::Artist { artist_id: b, .. },
+        ) => a == b,
+        (
+            Some(crate::state::PendingExpand::Genre { genre_id: a, .. }),
+            crate::state::PendingExpand::Genre { genre_id: b, .. },
+        ) => a == b,
+        (
+            Some(crate::state::PendingExpand::Song { song_id: a, .. }),
+            crate::state::PendingExpand::Song { song_id: b, .. },
+        ) => a == b,
+        _ => false,
+    };
+    if id_matches {
+        let label = match expected {
+            crate::state::PendingExpand::Album { .. } => "Finding album…",
+            crate::state::PendingExpand::Artist { .. } => "Finding artist…",
+            crate::state::PendingExpand::Genre { .. } => "Finding genre…",
+            crate::state::PendingExpand::Song { .. } => "Finding song…",
+        };
+        app.toast_info(label);
+    }
+}
+
 /// Single source of truth for the find-and-expand priming reset. Called by
 /// every `handle_navigate_and_expand_*`, `handle_browser_pane_navigate_and_expand_*`,
 /// and `start_center_on_playing_*_chain` site after the caller decides which
@@ -657,12 +693,13 @@ impl Nokkvi {
         &mut self,
         genre_id: String,
     ) -> Task<Message> {
-        if matches!(
-            &self.pending_expand,
-            Some(crate::state::PendingExpand::Genre { genre_id: pending, .. }) if pending == &genre_id
-        ) {
-            self.toast_info("Finding genre…");
-        }
+        pending_expand_timeout_toast(
+            self,
+            &crate::state::PendingExpand::Genre {
+                genre_id,
+                for_browsing_pane: false,
+            },
+        );
         Task::none()
     }
 
@@ -736,12 +773,13 @@ impl Nokkvi {
         &mut self,
         artist_id: String,
     ) -> Task<Message> {
-        if matches!(
-            &self.pending_expand,
-            Some(crate::state::PendingExpand::Artist { artist_id: pending, .. }) if pending == &artist_id
-        ) {
-            self.toast_info("Finding artist…");
-        }
+        pending_expand_timeout_toast(
+            self,
+            &crate::state::PendingExpand::Artist {
+                artist_id,
+                for_browsing_pane: false,
+            },
+        );
         Task::none()
     }
 
@@ -772,12 +810,13 @@ impl Nokkvi {
         &mut self,
         album_id: String,
     ) -> Task<Message> {
-        if matches!(
-            &self.pending_expand,
-            Some(crate::state::PendingExpand::Album { album_id: pending, .. }) if pending == &album_id
-        ) {
-            self.toast_info("Finding album…");
-        }
+        pending_expand_timeout_toast(
+            self,
+            &crate::state::PendingExpand::Album {
+                album_id,
+                for_browsing_pane: false,
+            },
+        );
         Task::none()
     }
 
@@ -798,12 +837,13 @@ impl Nokkvi {
 
     /// Song-side mirror of `handle_pending_expand_album_timeout`.
     pub(crate) fn handle_pending_expand_song_timeout(&mut self, song_id: String) -> Task<Message> {
-        if matches!(
-            &self.pending_expand,
-            Some(crate::state::PendingExpand::Song { song_id: pending, .. }) if pending == &song_id
-        ) {
-            self.toast_info("Finding song…");
-        }
+        pending_expand_timeout_toast(
+            self,
+            &crate::state::PendingExpand::Song {
+                song_id,
+                for_browsing_pane: false,
+            },
+        );
         Task::none()
     }
 
