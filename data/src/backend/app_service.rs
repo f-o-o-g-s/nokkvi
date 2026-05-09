@@ -354,7 +354,10 @@ impl AppService {
     /// valid here (e.g. the create-new-playlist flow) — the queue is cleared
     /// so the user can populate it from the browsing panel.
     pub async fn load_playlist_into_queue(&self, playlist_id: &str) -> Result<()> {
-        let songs = self.load_playlist_songs(playlist_id).await?;
+        let songs = self
+            .library_orchestrator()
+            .resolve_playlist(playlist_id)
+            .await?;
         let cursor = if songs.is_empty() { None } else { Some(0) };
         self.queue_service.set_queue(songs, cursor).await?;
         debug!(
