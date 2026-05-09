@@ -487,110 +487,12 @@ fn pending_top_pin_cleared_on_navigate_and_filter() {
 // ============================================================================
 // Navigate-and-Expand-Genre (single-shot mirror — genres don't paginate)
 // ============================================================================
-
-#[test]
-fn navigate_and_expand_genre_clears_search_filter_and_sets_target() {
-    let mut app = test_app();
-    app.current_view = View::Songs;
-    app.genres_page.common.active_filter =
-        Some(nokkvi_data::types::filter::LibraryFilter::GenreId {
-            id: "Old".to_string(),
-            name: "Old".to_string(),
-        });
-    app.genres_page.common.search_query = "old".to_string();
-    app.genres_page.common.search_input_focused = true;
-
-    let _ = app.handle_navigate_and_expand_genre("Rock".to_string());
-
-    assert_eq!(app.current_view, View::Genres);
-    assert!(app.genres_page.common.active_filter.is_none());
-    assert!(app.genres_page.common.search_query.is_empty());
-    assert!(!app.genres_page.common.search_input_focused);
-    assert!(
-        matches!(
-            app.pending_expand,
-            Some(crate::state::PendingExpand::Genre { ref genre_id, for_browsing_pane: false }) if genre_id == "Rock"
-        ),
-        "expected pending_expand = Genre {{ Rock, top-pane }}, got {:?}",
-        app.pending_expand
-    );
-}
-
-#[test]
-fn navigate_and_expand_genre_collapses_existing_genres_expansion() {
-    let mut app = test_app();
-    app.genres_page.expansion.expanded_id = Some("other".to_string());
-    app.genres_page.expansion.children = vec![make_album("a1", "Album", "Artist")];
-
-    let _ = app.handle_navigate_and_expand_genre("Rock".to_string());
-
-    assert!(app.genres_page.expansion.expanded_id.is_none());
-    assert!(app.genres_page.expansion.children.is_empty());
-}
-
-#[test]
-fn browser_pane_navigate_and_expand_genre_sets_browsing_flag() {
-    let mut app = test_app();
-
-    let _ = app.handle_browser_pane_navigate_and_expand_genre("Rock".to_string());
-
-    assert!(
-        matches!(
-            app.pending_expand,
-            Some(crate::state::PendingExpand::Genre {
-                for_browsing_pane: true,
-                ..
-            })
-        ),
-        "expected pending_expand = Genre {{ browsing-pane }}, got {:?}",
-        app.pending_expand
-    );
-}
-
-#[test]
-fn pending_expand_genre_target_cleared_on_switch_view_away() {
-    let mut app = test_app();
-    app.pending_expand = Some(crate::state::PendingExpand::Genre {
-        genre_id: "Rock".to_string(),
-        for_browsing_pane: false,
-    });
-
-    let _ = app.handle_switch_view(View::Songs);
-
-    assert!(app.pending_expand.is_none());
-}
-
-#[test]
-fn pending_expand_genre_target_persists_on_switch_view_to_genres() {
-    let mut app = test_app();
-    app.pending_expand = Some(crate::state::PendingExpand::Genre {
-        genre_id: "Rock".to_string(),
-        for_browsing_pane: false,
-    });
-
-    let _ = app.handle_switch_view(View::Genres);
-
-    assert!(app.pending_expand.is_some());
-}
-
-#[test]
-fn pending_expand_genre_target_cleared_on_navigate_and_filter() {
-    let mut app = test_app();
-    app.pending_expand = Some(crate::state::PendingExpand::Genre {
-        genre_id: "Rock".to_string(),
-        for_browsing_pane: false,
-    });
-
-    let _ = app.handle_navigate_and_filter(
-        View::Albums,
-        nokkvi_data::types::filter::LibraryFilter::AlbumId {
-            id: "al1".to_string(),
-            title: "Album".to_string(),
-        },
-    );
-
-    assert!(app.pending_expand.is_none());
-}
+//
+// See `mod genre` (macro-expanded by `for_each_expandable_entity!` at the top
+// of this file) for the genre expand chain. Two genre quirks stay bespoke:
+// the name-vs-id lookup (Navidrome returns UUIDs but click sites dispatch
+// display names), and the single-shot `clears_when_idle_and_missing` variant
+// (no pagination → idle-and-missing means really missing).
 
 #[test]
 fn try_resolve_pending_expand_genre_matches_by_name_not_internal_id() {
@@ -631,70 +533,6 @@ fn try_resolve_pending_expand_genre_matches_by_name_not_internal_id() {
 }
 
 #[test]
-fn try_resolve_pending_expand_genre_finds_loaded_and_takes_target() {
-    let mut app = test_app();
-    app.pending_expand = Some(crate::state::PendingExpand::Genre {
-        genre_id: "Jazz".to_string(),
-        for_browsing_pane: false,
-    });
-    app.library.genres.set_from_vec(vec![
-        make_genre("Rock", "Rock"),
-        make_genre("Jazz", "Jazz"),
-        make_genre("Classical", "Classical"),
-    ]);
-
-    let task = app.try_resolve_pending_expand_genre();
-
-    assert!(task.is_some(), "found target should produce a task");
-    assert!(
-        app.pending_expand.is_none(),
-        "target should be taken once dispatched"
-    );
-    assert_eq!(
-        app.genres_page.common.slot_list.viewport_offset, 2,
-        "viewport_offset must be set so target is visible"
-    );
-    assert_eq!(
-        app.genres_page.common.slot_list.selected_offset,
-        Some(1),
-        "target must keep highlight via selected_offset"
-    );
-    match app.pending_top_pin.as_ref() {
-        Some(crate::state::PendingTopPin::Genre(id)) => assert_eq!(id, "Jazz"),
-        other => panic!("expected pending_top_pin = Genre(Jazz), got {other:?}"),
-    }
-}
-
-#[test]
-fn try_resolve_pending_expand_genre_places_target_at_top_slot() {
-    let mut app = test_app();
-    // Click sites dispatch the display name, not the internal id.
-    app.pending_expand = Some(crate::state::PendingExpand::Genre {
-        genre_id: "Genre 50".to_string(),
-        for_browsing_pane: false,
-    });
-    let genres: Vec<_> = (0..200)
-        .map(|i| make_genre(&format!("uuid-{i}"), &format!("Genre {i}")))
-        .collect();
-    app.library.genres.set_from_vec(genres);
-
-    let task = app.try_resolve_pending_expand_genre();
-    assert!(task.is_some());
-
-    let center_slot = app.genres_page.common.slot_list.slot_count / 2;
-    assert_eq!(
-        app.genres_page.common.slot_list.viewport_offset,
-        50 + center_slot,
-        "target must land at slot 0 (top), not the center"
-    );
-    assert_eq!(
-        app.genres_page.common.slot_list.selected_offset,
-        Some(50),
-        "highlight must follow target"
-    );
-}
-
-#[test]
 fn try_resolve_pending_expand_genre_clears_when_idle_and_missing() {
     // Genres are single-shot: if not loading and target absent, it really
     // isn't in the library — no further pages to wait for.
@@ -715,39 +553,6 @@ fn try_resolve_pending_expand_genre_clears_when_idle_and_missing() {
         app.pending_expand.is_none(),
         "target should be cleared when known-not-in-library"
     );
-}
-
-#[test]
-fn try_resolve_pending_expand_genre_returns_none_when_loading() {
-    let mut app = test_app();
-    app.pending_expand = Some(crate::state::PendingExpand::Genre {
-        genre_id: "Rock".to_string(),
-        for_browsing_pane: false,
-    });
-    app.library.genres.set_loading(true);
-
-    let task = app.try_resolve_pending_expand_genre();
-
-    assert!(task.is_none(), "should wait while load is in flight");
-    assert!(app.pending_expand.is_some());
-}
-
-#[test]
-fn pending_genre_timeout_does_not_toast_when_target_already_resolved() {
-    let mut app = test_app();
-    let _ = app.handle_pending_expand_genre_timeout("Rock".to_string());
-    assert!(app.toast.toasts.is_empty());
-}
-
-#[test]
-fn pending_genre_timeout_toasts_when_target_still_in_flight() {
-    let mut app = test_app();
-    app.pending_expand = Some(crate::state::PendingExpand::Genre {
-        genre_id: "Rock".to_string(),
-        for_browsing_pane: false,
-    });
-    let _ = app.handle_pending_expand_genre_timeout("Rock".to_string());
-    assert_eq!(app.toast.toasts.len(), 1);
 }
 
 #[test]
@@ -788,33 +593,6 @@ fn queue_page_navigate_and_expand_genre_returns_action() {
         action,
         crate::views::QueueAction::NavigateAndExpandGenre(ref id) if id == "Rock"
     ));
-}
-
-#[test]
-fn albums_loaded_re_pins_selected_offset_for_genre() {
-    let mut app = test_app();
-    app.library.genres.set_from_vec(vec![
-        make_genre("Rock", "Rock"),
-        make_genre("Jazz", "Jazz"),
-        make_genre("Classical", "Classical"),
-    ]);
-    app.genres_page
-        .common
-        .slot_list
-        .set_selected(1, app.library.genres.len());
-    app.pending_top_pin = Some(crate::state::PendingTopPin::Genre("Jazz".to_string()));
-
-    let _ = app.handle_genres(crate::views::GenresMessage::AlbumsLoaded(
-        "Jazz".to_string(),
-        vec![make_album("a1", "Album One", "Artist")],
-    ));
-
-    assert_eq!(
-        app.genres_page.common.slot_list.selected_offset,
-        Some(1),
-        "highlight must follow the target genre after expansion completes"
-    );
-    assert!(app.pending_top_pin.is_none());
 }
 
 // ============================================================================
