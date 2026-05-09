@@ -224,8 +224,7 @@ impl PlaybackController {
                     // Load and play the track
                     let rg = song.replay_gain.clone();
                     drop(queue_manager);
-                    audio.set_pending_replay_gain(rg);
-                    audio.load_track(&stream_url).await;
+                    audio.load_track_with_rg(&stream_url, rg).await;
                     audio.play().await?;
                     return Ok(());
                 }
@@ -281,8 +280,9 @@ impl PlaybackController {
                 self.queue_service.refresh_from_queue().await?;
 
                 // Load and play the track
-                audio.set_pending_replay_gain(song.replay_gain.clone());
-                audio.load_track(&stream_url).await;
+                audio
+                    .load_track_with_rg(&stream_url, song.replay_gain.clone())
+                    .await;
                 audio.play().await?;
 
                 // Update navigator's current_song_id so consume/gapless knows what's playing
@@ -627,8 +627,9 @@ impl PlaybackController {
 
         // 3. Load and play
         let mut engine = self.audio_engine.lock().await;
-        engine.set_pending_replay_gain(song.replay_gain.clone());
-        engine.set_source(stream_url).await;
+        engine
+            .load_track_with_rg(&stream_url, song.replay_gain.clone())
+            .await;
         engine.play().await?;
         drop(engine);
 
@@ -685,8 +686,7 @@ impl PlaybackController {
         };
 
         let mut engine = self.audio_engine.lock().await;
-        engine.set_pending_replay_gain(rg);
-        engine.set_source(stream_url).await;
+        engine.load_track_with_rg(&stream_url, rg).await;
         engine.play().await?;
         drop(engine);
 
@@ -764,8 +764,7 @@ impl PlaybackController {
 
                 {
                     let mut engine = self.audio_engine.lock().await;
-                    engine.set_pending_replay_gain(replay_gain);
-                    engine.set_source(stream_url).await;
+                    engine.load_track_with_rg(&stream_url, replay_gain).await;
                     engine.play().await?;
                 }
 
