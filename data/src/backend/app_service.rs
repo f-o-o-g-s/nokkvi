@@ -256,16 +256,17 @@ impl AppService {
     ///
     /// Loads all songs in the album, sets queue, and starts playback.
     pub async fn play_album(&self, album_id: &str) -> Result<()> {
-        let songs = self.albums_service.load_album_songs(album_id).await?;
-        self.playback.play_songs_from_index(songs, 0).await
+        let songs = self.library_orchestrator().resolve_album(album_id).await?;
+        self.queue_orchestrator().play(songs, 0).await
     }
 
     /// Play an album starting from a specific track index.
     ///
     /// Loads all songs in the album, sets queue, and starts playback from `track_idx`.
     pub async fn play_album_from_track(&self, album_id: &str, track_idx: usize) -> Result<()> {
-        let songs = self.albums_service.load_album_songs(album_id).await?;
-        self.playback.play_songs_from_index(songs, track_idx).await
+        let songs = self.library_orchestrator().resolve_album(album_id).await?;
+        let start = track_idx.min(songs.len().saturating_sub(1));
+        self.queue_orchestrator().play(songs, start).await
     }
 
     /// Play all songs by an artist.
