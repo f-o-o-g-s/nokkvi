@@ -696,7 +696,8 @@ mod tests {
     async fn decide_path3_repeat_track_returns_load_fresh_with_repeat_reason() {
         let songs = vec![make_song("a")];
         let mut qm = manager_with_songs(songs, Some(0));
-        qm.set_repeat(crate::types::queue::RepeatMode::Track)
+        let _ = qm
+            .set_repeat(crate::types::queue::RepeatMode::Track)
             .expect("set repeat");
 
         let qm = Arc::new(Mutex::new(qm));

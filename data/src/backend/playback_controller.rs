@@ -407,7 +407,7 @@ impl PlaybackController {
     pub async fn toggle_random(&self) -> Result<bool> {
         let queue_manager_arc = self.queue_service.queue_manager();
         let mut queue_manager = queue_manager_arc.lock().await;
-        queue_manager.toggle_shuffle()?;
+        let _ = queue_manager.toggle_shuffle()?;
         let is_random = queue_manager.get_queue().shuffle;
         drop(queue_manager);
 
@@ -435,7 +435,7 @@ impl PlaybackController {
             RepeatMode::Playlist => RepeatMode::None,
         };
 
-        queue_manager.set_repeat(next_repeat)?;
+        let _ = queue_manager.set_repeat(next_repeat)?;
         queue_manager.clear_queued();
         queue_manager.save_order()?;
         drop(queue_manager);
@@ -456,7 +456,7 @@ impl PlaybackController {
     pub async fn toggle_consume(&self) -> Result<bool> {
         let queue_manager_arc = self.queue_service.queue_manager();
         let mut queue_manager = queue_manager_arc.lock().await;
-        queue_manager.toggle_consume()?;
+        let _ = queue_manager.toggle_consume()?;
         let consume = queue_manager.get_queue().consume;
         drop(queue_manager);
 

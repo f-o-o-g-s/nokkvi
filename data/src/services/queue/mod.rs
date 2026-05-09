@@ -19,6 +19,7 @@ use tracing::{debug, warn};
 use crate::{
     services::state_storage::StateStorage,
     types::{
+        ModeToggleEffect,
         queue::{Queue, RepeatMode},
         queue_sort_mode::QueueSortMode,
         song::Song,
@@ -228,7 +229,7 @@ impl QueueManager {
         Ok(())
     }
 
-    pub fn toggle_shuffle(&mut self) -> Result<()> {
+    pub fn toggle_shuffle(&mut self) -> Result<ModeToggleEffect> {
         let mut tx = self.write();
         tx.queue.shuffle = !tx.queue.shuffle;
         debug!(
@@ -240,7 +241,8 @@ impl QueueManager {
         } else {
             tx.unshuffle_order();
         }
-        tx.commit_save_order()
+        tx.commit_save_order()?;
+        Ok(ModeToggleEffect::new())
     }
 
     /// Shuffle the queue order randomly.
@@ -353,16 +355,18 @@ impl QueueManager {
         tx.commit_save_order()
     }
 
-    pub fn set_repeat(&mut self, mode: RepeatMode) -> Result<()> {
+    pub fn set_repeat(&mut self, mode: RepeatMode) -> Result<ModeToggleEffect> {
         let mut tx = self.write();
         tx.queue.repeat = mode;
-        tx.commit_save_order()
+        tx.commit_save_order()?;
+        Ok(ModeToggleEffect::new())
     }
 
-    pub fn toggle_consume(&mut self) -> Result<()> {
+    pub fn toggle_consume(&mut self) -> Result<ModeToggleEffect> {
         let mut tx = self.write();
         tx.queue.consume = !tx.queue.consume;
-        tx.commit_save_order()
+        tx.commit_save_order()?;
+        Ok(ModeToggleEffect::new())
     }
 
     pub fn get_current_song(&self) -> Option<Song> {
@@ -831,7 +835,7 @@ pub(crate) mod tests {
         let (mut qm, _temp) = make_test_manager(songs, Some(3));
 
         // Toggle shuffle on
-        qm.toggle_shuffle().unwrap();
+        let _ = qm.toggle_shuffle().unwrap();
 
         // current_order should point to the same song
         let cur_order = qm.queue.current_order.unwrap();
@@ -861,7 +865,7 @@ pub(crate) mod tests {
         let songs: Vec<Song> = (0..10).map(|i| make_test_song(&i.to_string())).collect();
         let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
-        qm.toggle_shuffle().unwrap();
+        let _ = qm.toggle_shuffle().unwrap();
 
         // Capture expected index BEFORE peek to avoid the guard's borrow on qm.
         let expected_idx = qm.queue.order[1];
@@ -936,7 +940,7 @@ pub(crate) mod tests {
         qm.queue.queued = Some(1);
         assert!(qm.queue.queued.is_some());
 
-        qm.set_repeat(RepeatMode::Track).unwrap();
+        let _ = qm.set_repeat(RepeatMode::Track).unwrap();
         assert!(
             qm.queue.queued.is_none(),
             "set_repeat must clear queued (IG-5)"
@@ -957,7 +961,7 @@ pub(crate) mod tests {
         qm.queue.queued = Some(1);
         assert!(qm.queue.queued.is_some());
 
-        qm.toggle_consume().unwrap();
+        let _ = qm.toggle_consume().unwrap();
         assert!(
             qm.queue.queued.is_none(),
             "toggle_consume must clear queued (IG-5)"
@@ -1006,11 +1010,11 @@ pub(crate) mod tests {
         let (mut qm, _temp) = make_test_manager(songs, Some(3));
 
         // Shuffle
-        qm.toggle_shuffle().unwrap();
+        let _ = qm.toggle_shuffle().unwrap();
         assert!(qm.queue.shuffle);
 
         // Unshuffle
-        qm.toggle_shuffle().unwrap();
+        let _ = qm.toggle_shuffle().unwrap();
         assert!(!qm.queue.shuffle);
         assert_eq!(qm.queue.order, (0..10).collect::<Vec<_>>());
     }

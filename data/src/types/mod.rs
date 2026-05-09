@@ -12,6 +12,7 @@ pub mod filter;
 pub mod genre;
 pub mod hotkey_config;
 pub mod info_modal;
+pub mod mode_toggle;
 pub mod paged_buffer;
 pub mod player_settings;
 pub mod playlist;
@@ -35,6 +36,8 @@ pub mod toast;
 pub mod toml_settings;
 pub mod toml_views;
 pub mod view_preferences;
+
+pub use mode_toggle::ModeToggleEffect;
 
 pub fn deserialize_starred<'de, D>(deserializer: D) -> Result<bool, D::Error>
 where
