@@ -202,7 +202,7 @@ impl QueueNavigator {
     /// 2. Prepared track available → gapless load
     /// 3. Normal → need to load a new track
     ///
-    /// In ALL cases, the queue transition uses `transition_to_queued()`.
+    /// In ALL cases, the queue transition uses `PeekedQueue::transition()`.
     ///
     /// This is a thin wrapper around [`decide_transition`] + [`execute_transition`].
     /// The completion callback in `playback_controller.rs` calls those two halves
@@ -313,20 +313,18 @@ impl QueueNavigator {
             return TrackTransitionPlan::Stop;
         }
 
-        // Transition: update current_index/current_order, consume queued.
-        // If `queued` was cleared by a concurrent queue mutation (add_songs/remove_song
-        // calling clear_queued()) between gapless prep and this callback, re-peek now.
-        // This is critical for paths 1/2 where the engine is already playing the next
-        // track — stopping it would kill a successful gapless transition.
-        if queue_manager.get_queue().queued.is_none() && !needs_load {
-            debug!(" [TRACK FINISHED] queued was cleared (concurrent queue mutation), re-peeking");
-            queue_manager.peek_next_song();
-        }
-        let Some(transition) = queue_manager.transition_to_queued() else {
+        // Transition: peek (re-peek subsumes the previous defense against
+        // concurrent queue mutations clearing `queued` between gapless prep
+        // and this callback), then consume the guard via `transition()` to
+        // update current_index/current_order. This is critical for paths
+        // 1/2 where the engine is already playing the next track — stopping
+        // it would kill a successful gapless transition.
+        let Some(peeked) = queue_manager.peek_next_song() else {
             drop(queue_manager);
             debug!(" No queued song to transition to");
             return TrackTransitionPlan::Stop;
         };
+        let transition = peeked.transition();
 
         let song = transition.song.clone();
         let reason = if queue_manager.get_queue().shuffle {

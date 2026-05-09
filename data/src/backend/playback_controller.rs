@@ -518,19 +518,17 @@ impl PlaybackController {
             let repeat_track =
                 queue_manager.get_queue().repeat == crate::types::queue::RepeatMode::Track;
 
-            if let Some(ref next_result) = queue_manager.peek_next_song() {
+            if let Some(peeked) = queue_manager.peek_next_song() {
+                let next_song = peeked.song().clone();
+                drop(peeked); // explicit: clears queued; gapless prep proceeds with the captured data
                 let url = format!(
                     "{}/rest/stream?id={}&{}&f=json&v=1.8.0&c=nokkvi&_={}",
                     server_url,
-                    next_result.song.id,
+                    next_song.id,
                     subsonic_credential,
                     chrono::Utc::now().timestamp_millis()
                 );
-                (
-                    Some(url),
-                    next_result.song.replay_gain.clone(),
-                    repeat_track,
-                )
+                (Some(url), next_song.replay_gain.clone(), repeat_track)
             } else {
                 (None, None, repeat_track)
             }
