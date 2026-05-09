@@ -24,15 +24,50 @@ pub enum PlaybackState {
     Paused,
 }
 
-/// Crossfade transition phase
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Crossfade transition phase.
+///
+/// Variants carry the crossfade decoder + incoming source URL — these
+/// fields used to live as parallel `Arc<Mutex<Option<AudioDecoder>>>` /
+/// `String` on `CustomAudioEngine`, where every transition reset them
+/// in lockstep with the phase flag. Now the data lives WITH the phase
+/// so transitions are one `mem::replace` and impossible states are
+/// unrepresentable (e.g. `Idle` carries no decoder; `Active` has it).
 pub enum CrossfadePhase {
-    /// Normal single-track playback
+    /// Normal single-track playback.
     Idle,
-    /// Two decoders active, blending audio in renderer
-    Active,
-    /// Outgoing decoder finished, incoming still draining
-    OutgoingFinished,
+    /// Two decoders active, blending audio in renderer.
+    Active {
+        decoder: Arc<tokio::sync::Mutex<Option<AudioDecoder>>>,
+        incoming_source: String,
+    },
+    /// Outgoing decoder finished, incoming still draining.
+    OutgoingFinished {
+        decoder: Arc<tokio::sync::Mutex<Option<AudioDecoder>>>,
+        incoming_source: String,
+    },
+}
+
+impl CrossfadePhase {
+    pub fn is_idle(&self) -> bool {
+        matches!(self, CrossfadePhase::Idle)
+    }
+
+    pub fn is_active_or_finished(&self) -> bool {
+        matches!(
+            self,
+            CrossfadePhase::Active { .. } | CrossfadePhase::OutgoingFinished { .. }
+        )
+    }
+
+    /// Short label for diagnostic logs (the variants' inner `Mutex`
+    /// makes a derived `Debug` impl impractical).
+    fn label(&self) -> &'static str {
+        match self {
+            CrossfadePhase::Idle => "idle",
+            CrossfadePhase::Active { .. } => "active",
+            CrossfadePhase::OutgoingFinished { .. } => "outgoing_finished",
+        }
+    }
 }
 
 /// Info about a gapless transition that occurred in the decode loop.
@@ -141,16 +176,13 @@ pub struct CustomAudioEngine {
     crossfade_duration_shared: Arc<AtomicU64>,
 
     // ---- Crossfade state ----
-    /// Current crossfade phase
+    /// Current crossfade phase + per-phase data (decoder + incoming source
+    /// live inside `Active` / `OutgoingFinished` variants).
     crossfade_phase: CrossfadePhase,
     /// Whether crossfade is enabled (from settings)
     crossfade_enabled: bool,
     /// Crossfade duration in milliseconds (from settings)
     crossfade_duration_ms: u64,
-    /// Decoder for the incoming crossfade track
-    crossfade_decoder: Arc<tokio::sync::Mutex<Option<AudioDecoder>>>,
-    /// Source URL of the crossfade incoming track
-    crossfade_incoming_source: String,
 
     // ---- Gapless transition state ----
     /// Transition info written by the decode loop, consumed by the engine.
@@ -198,8 +230,6 @@ impl CustomAudioEngine {
             crossfade_phase: CrossfadePhase::Idle,
             crossfade_enabled: false,
             crossfade_duration_ms: 5000,
-            crossfade_decoder: Arc::new(tokio::sync::Mutex::new(None)),
-            crossfade_incoming_source: String::new(),
             gapless_transition_info: Arc::new(tokio::sync::Mutex::new(None)),
             next_source_shared: Arc::new(tokio::sync::Mutex::new(String::new())),
             live_icy_metadata,
@@ -1295,15 +1325,20 @@ impl CustomAudioEngine {
         renderer.set_eq_state(state);
     }
 
-    /// Current crossfade phase
-    pub fn crossfade_phase(&self) -> CrossfadePhase {
-        self.crossfade_phase
+    /// Whether the engine is in the `Idle` crossfade phase.
+    pub fn crossfade_is_idle(&self) -> bool {
+        self.crossfade_phase.is_idle()
+    }
+
+    /// Whether the engine is mid-crossfade (`Active` or `OutgoingFinished`).
+    pub fn crossfade_is_active_or_finished(&self) -> bool {
+        self.crossfade_phase.is_active_or_finished()
     }
 
     /// Start a crossfade transition using the prepared next decoder.
     /// Returns `true` if crossfade was started successfully.
     pub async fn start_crossfade(&mut self) -> bool {
-        if self.crossfade_phase != CrossfadePhase::Idle {
+        if !self.crossfade_phase.is_idle() {
             debug!("🔀 [CROSSFADE] Already active, skipping");
             return false;
         }
@@ -1328,16 +1363,19 @@ impl CustomAudioEngine {
 
         let incoming_format = next_decoder.format().clone();
         let duration_ms = self.crossfade_duration_ms;
+        let incoming_source = self.next_source.clone();
+        self.next_source.clear();
 
         debug!(
             "🔀 [CROSSFADE] Starting: outgoing={:?}, incoming={:?}, duration={}ms",
             self.current_format, incoming_format, duration_ms
         );
 
-        // Store the incoming decoder
-        *self.crossfade_decoder.lock().await = Some(next_decoder);
-        self.crossfade_incoming_source = self.next_source.clone();
-        self.next_source.clear();
+        // Wrap the decoder in a shared Arc<Mutex<Option<...>>> — this same Arc
+        // is stored inside the `Active` variant AND captured by the spawned
+        // decode loop. The loop watches its inner `Option` for `None` as the
+        // signal to exit (see `cancel_crossfade` / `finalize_crossfade_engine`).
+        let decoder_arc = Arc::new(tokio::sync::Mutex::new(Some(next_decoder)));
 
         // Only tell the renderer to start crossfade if it hasn't already
         // been activated synchronously by the renderer's queue-threshold
@@ -1350,49 +1388,64 @@ impl CustomAudioEngine {
             }
         }
 
-        self.crossfade_phase = CrossfadePhase::Active;
+        self.crossfade_phase = CrossfadePhase::Active {
+            decoder: decoder_arc.clone(),
+            incoming_source,
+        };
 
         // Start a decode loop for the incoming track
-        self.start_crossfade_decode_loop();
+        self.start_crossfade_decode_loop(decoder_arc);
 
         true
     }
 
     /// Cancel an active crossfade (e.g., on skip, seek, or stop).
     pub async fn cancel_crossfade(&mut self) {
-        if self.crossfade_phase == CrossfadePhase::Idle {
-            return;
-        }
+        let phase = std::mem::replace(&mut self.crossfade_phase, CrossfadePhase::Idle);
+        let decoder = match phase {
+            CrossfadePhase::Idle => return,
+            CrossfadePhase::Active { decoder, .. }
+            | CrossfadePhase::OutgoingFinished { decoder, .. } => decoder,
+        };
         debug!("🔀 [CROSSFADE] Cancelling");
-        self.crossfade_phase = CrossfadePhase::Idle;
-        *self.crossfade_decoder.lock().await = None;
-        self.crossfade_incoming_source.clear();
-        {
-            let mut renderer = self.renderer.lock();
-            renderer.cancel_crossfade();
-            renderer.disarm_crossfade();
-        }
+        // Signal the spawned decode loop to exit by clearing its inner Option.
+        *decoder.lock().await = None;
+        let mut renderer = self.renderer.lock();
+        renderer.cancel_crossfade();
+        renderer.disarm_crossfade();
     }
 
     /// Finalize crossfade: promote the incoming track to become the current track.
     /// Called when the renderer finishes mixing (crossfade progress reaches 1.0)
     /// or when the outgoing decoder's buffers are fully consumed.
     pub async fn finalize_crossfade_engine(&mut self) {
+        let phase = std::mem::replace(&mut self.crossfade_phase, CrossfadePhase::Idle);
+        let (decoder_arc, incoming_source) = match phase {
+            CrossfadePhase::Idle => return,
+            CrossfadePhase::Active {
+                decoder,
+                incoming_source,
+            }
+            | CrossfadePhase::OutgoingFinished {
+                decoder,
+                incoming_source,
+            } => (decoder, incoming_source),
+        };
+
         debug!("🔀 [CROSSFADE] Finalizing — incoming becomes current");
 
         // Stop outgoing decode loop by advancing generation
         self.decode_loop.supersede();
 
         // Take the crossfade decoder and make it the primary
-        let crossfade_dec = self.crossfade_decoder.lock().await.take();
+        let crossfade_dec = decoder_arc.lock().await.take();
         if let Some(decoder) = crossfade_dec {
             // Swap decoders
             *self.decoder.lock().await = decoder;
             let dec = self.decoder.lock().await;
 
             // Update engine state to reflect the incoming track
-            self.source = self.crossfade_incoming_source.clone();
-            self.crossfade_incoming_source.clear();
+            self.source = incoming_source;
             self.current_format = dec.format().clone();
             self.live_sample_rate
                 .store(self.current_format.sample_rate(), Ordering::Relaxed);
@@ -1436,8 +1489,6 @@ impl CustomAudioEngine {
             self.start_decoding_loop();
         }
 
-        self.crossfade_phase = CrossfadePhase::Idle;
-
         // Notify completion callback (gapless-style: a new track started)
         if let Some(callback) = &self.completion_callback {
             callback(false);
@@ -1446,8 +1497,16 @@ impl CustomAudioEngine {
 
     /// Start a decode loop for the incoming crossfade track.
     /// Similar to `start_decoding_loop` but writes to the renderer's crossfade buffer queue.
-    fn start_crossfade_decode_loop(&mut self) {
-        let decoder = self.crossfade_decoder.clone();
+    ///
+    /// `decoder_arc` is the same Arc stored inside `CrossfadePhase::Active.decoder`
+    /// — the spawned loop watches its inner `Option` and exits when it
+    /// becomes `None` (which `cancel_crossfade` / `finalize_crossfade_engine`
+    /// trigger by clearing or taking the decoder respectively).
+    fn start_crossfade_decode_loop(
+        &mut self,
+        decoder_arc: Arc<tokio::sync::Mutex<Option<AudioDecoder>>>,
+    ) {
+        let decoder = decoder_arc;
         let renderer = self.renderer.clone();
         let crossfade_duration_shared = self.crossfade_duration_shared.clone();
 
@@ -1762,15 +1821,15 @@ impl CustomAudioEngine {
     /// - `OutgoingFinished`: decoder already signaled EOF, queue drained after
     async fn try_finalize_crossfade(&mut self, is_eof: bool) -> bool {
         let should_finalize = matches!(
-            self.crossfade_phase,
-            CrossfadePhase::Active | CrossfadePhase::OutgoingFinished
-        ) && (self.crossfade_phase == CrossfadePhase::OutgoingFinished
-            || is_eof);
+            (&self.crossfade_phase, is_eof),
+            (CrossfadePhase::OutgoingFinished { .. }, _) | (CrossfadePhase::Active { .. }, true)
+        );
 
         if should_finalize {
             debug!(
-                "🔀 [RENDERER FINISHED] Outgoing queue drained during crossfade (phase={:?}, eof={}) — finalizing",
-                self.crossfade_phase, is_eof
+                "🔀 [RENDERER FINISHED] Outgoing queue drained during crossfade (phase={}, eof={}) — finalizing",
+                self.crossfade_phase.label(),
+                is_eof
             );
             self.finalize_crossfade_engine().await;
         }
@@ -1787,7 +1846,7 @@ impl CustomAudioEngine {
     /// NOTE: Does NOT gate on is_eof — the position-based trigger fires
     /// intentionally BEFORE EOF so both tracks can overlap during the fade.
     async fn try_start_crossfade_transition(&mut self, is_eof: bool) -> bool {
-        if self.crossfade_phase != CrossfadePhase::Idle
+        if !self.crossfade_phase.is_idle()
             || !self.crossfade_enabled
             || self.crossfade_duration_ms == 0
         {
@@ -1841,8 +1900,11 @@ impl CustomAudioEngine {
     /// Handle decoder finished (track completed)
     async fn on_decoder_finished(&mut self) {
         debug!(
-            "🎵 [DECODER FINISHED] source={}, crossfade_phase={:?}, playing={}, paused={}",
-            self.source, self.crossfade_phase, self.playing, self.paused
+            "🎵 [DECODER FINISHED] source={}, crossfade_phase={}, playing={}, paused={}",
+            self.source,
+            self.crossfade_phase.label(),
+            self.playing,
+            self.paused
         );
 
         // If crossfade is active and the outgoing decoder finished, that's expected.
@@ -1850,20 +1912,29 @@ impl CustomAudioEngine {
         // OutgoingFinished to let the renderer continue the crossfade using
         // already-buffered data. Engine finalization happens when the renderer
         // completes the crossfade (crossfade_done) or the outgoing queue drains.
-        if self.crossfade_phase == CrossfadePhase::Active {
-            debug!(
-                "🔀 [DECODER FINISHED] Outgoing EOF during crossfade — phase → OutgoingFinished"
-            );
-            self.crossfade_phase = CrossfadePhase::OutgoingFinished;
-            return;
-        }
-
-        // If crossfade phase is OutgoingFinished, ignore additional decoder
-        // finished callbacks (e.g., from buffer starvation retries) — the
-        // renderer is still draining and will signal completion.
-        if self.crossfade_phase == CrossfadePhase::OutgoingFinished {
-            debug!("🔀 [DECODER FINISHED] Ignoring — OutgoingFinished, waiting for renderer");
-            return;
+        match std::mem::replace(&mut self.crossfade_phase, CrossfadePhase::Idle) {
+            CrossfadePhase::Active {
+                decoder,
+                incoming_source,
+            } => {
+                debug!(
+                    "🔀 [DECODER FINISHED] Outgoing EOF during crossfade — phase → OutgoingFinished"
+                );
+                self.crossfade_phase = CrossfadePhase::OutgoingFinished {
+                    decoder,
+                    incoming_source,
+                };
+                return;
+            }
+            phase @ CrossfadePhase::OutgoingFinished { .. } => {
+                debug!("🔀 [DECODER FINISHED] Ignoring — OutgoingFinished, waiting for renderer");
+                self.crossfade_phase = phase;
+                return;
+            }
+            CrossfadePhase::Idle => {
+                // Already restored to Idle by the mem::replace above; fall
+                // through to the normal track-completion path.
+            }
         }
 
         // Snapshot the current source so we can detect repeat-one loops after the
