@@ -422,11 +422,14 @@ fn tracks_loaded_for_unrelated_album_does_not_re_pin() {
     // expansion of a different album a3 — the children-load for a3 must
     // not steal the highlight from a2's pin.
     let mut app = test_app();
-    app.library.albums.set_from_vec(vec![
-        make_album("a1", "Album One", "Artist"),
-        make_album("a2", "Album Two", "Artist"),
-        make_album("a3", "Album Three", "Artist"),
-    ]);
+    seed_albums(
+        &mut app,
+        vec![
+            make_album("a1", "Album One", "Artist"),
+            make_album("a2", "Album Two", "Artist"),
+            make_album("a3", "Album Three", "Artist"),
+        ],
+    );
     app.pending_top_pin = Some(crate::state::PendingTopPin::Album("a2".to_string()));
 
     let _ = app.handle_albums(crate::views::AlbumsMessage::TracksLoaded(
@@ -502,15 +505,17 @@ fn try_resolve_pending_expand_genre_matches_by_name_not_internal_id() {
     // The lookup must therefore match against `g.name`, not `g.id`, or
     // every click toasts "Genre not found in library".
     let mut app = test_app();
-    app.pending_expand = Some(crate::state::PendingExpand::Genre {
-        genre_id: "Black Metal".to_string(), // the displayed name, not an internal id
-        for_browsing_pane: false,
-    });
-    app.library.genres.set_from_vec(vec![
-        make_genre("uuid-rock-123", "Rock"),
-        make_genre("uuid-blackmetal-456", "Black Metal"),
-        make_genre("uuid-ambient-789", "Ambient"),
-    ]);
+    // "Black Metal" is the displayed name dispatched by the click site, not
+    // the internal uuid stored in library.genres.
+    arm_pending_genre(&mut app, "Black Metal");
+    seed_genres(
+        &mut app,
+        vec![
+            make_genre("uuid-rock-123", "Rock"),
+            make_genre("uuid-blackmetal-456", "Black Metal"),
+            make_genre("uuid-ambient-789", "Ambient"),
+        ],
+    );
 
     let _ = app.try_resolve_pending_expand_genre();
 
@@ -537,13 +542,8 @@ fn try_resolve_pending_expand_genre_clears_when_idle_and_missing() {
     // Genres are single-shot: if not loading and target absent, it really
     // isn't in the library — no further pages to wait for.
     let mut app = test_app();
-    app.pending_expand = Some(crate::state::PendingExpand::Genre {
-        genre_id: "Missing".to_string(),
-        for_browsing_pane: false,
-    });
-    app.library
-        .genres
-        .set_from_vec(vec![make_genre("Rock", "Rock")]);
+    arm_pending_genre(&mut app, "Missing");
+    seed_genres(&mut app, vec![make_genre("Rock", "Rock")]);
     assert!(!app.library.genres.is_loading());
 
     let task = app.try_resolve_pending_expand_genre();
@@ -996,9 +996,7 @@ fn start_center_on_playing_album_chain_clears_search_and_arms_center_only() {
     let mut app = test_app();
     app.albums_page.common.search_query = "user typed query".to_string();
     app.albums_page.common.search_input_focused = true;
-    app.library
-        .albums
-        .set_from_vec(vec![make_album("stale", "Stale", "Artist")]);
+    seed_albums(&mut app, vec![make_album("stale", "Stale", "Artist")]);
 
     let _ = app.start_center_on_playing_album_chain("a42".to_string());
 
@@ -1050,15 +1048,9 @@ fn start_center_on_playing_song_chain_installs_song_target() {
 #[test]
 fn try_resolve_pending_expand_album_center_only_centers_without_top_pin() {
     let mut app = test_app();
-    app.pending_expand = Some(crate::state::PendingExpand::Album {
-        album_id: "a320".to_string(),
-        for_browsing_pane: false,
-    });
+    arm_pending_album(&mut app, "a320");
     app.pending_expand_center_only = true;
-    let albums: Vec<_> = (0..1343)
-        .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
-        .collect();
-    app.library.albums.set_from_vec(albums);
+    seed_albums(&mut app, albums_indexed(1343));
 
     let task = app.try_resolve_pending_expand_album();
     assert!(task.is_some());
@@ -1083,15 +1075,9 @@ fn try_resolve_pending_expand_album_center_only_centers_without_top_pin() {
 #[test]
 fn try_resolve_pending_expand_song_centers_target() {
     let mut app = test_app();
-    app.pending_expand = Some(crate::state::PendingExpand::Song {
-        song_id: "s50".to_string(),
-        for_browsing_pane: false,
-    });
+    arm_pending_song(&mut app, "s50");
     app.pending_expand_center_only = true;
-    let songs: Vec<_> = (0..200)
-        .map(|i| make_song(&format!("s{i}"), &format!("Song {i}"), "Artist"))
-        .collect();
-    app.library.songs.set_from_vec(songs);
+    seed_songs(&mut app, songs_indexed(200));
 
     let task = app.try_resolve_pending_expand_song();
     assert!(task.is_some(), "found song should produce a task");
@@ -1108,10 +1094,7 @@ fn try_resolve_pending_expand_song_centers_target() {
 #[test]
 fn try_resolve_pending_expand_song_force_loads_when_idle_and_more_remain() {
     let mut app = test_app();
-    app.pending_expand = Some(crate::state::PendingExpand::Song {
-        song_id: "s999".to_string(),
-        for_browsing_pane: false,
-    });
+    arm_pending_song(&mut app, "s999");
     app.pending_expand_center_only = true;
     // 1 loaded of 100 known total, idle → should request next page
     app.library
@@ -1131,14 +1114,9 @@ fn try_resolve_pending_expand_song_force_loads_when_idle_and_more_remain() {
 #[test]
 fn try_resolve_pending_expand_song_clears_when_fully_loaded_and_missing() {
     let mut app = test_app();
-    app.pending_expand = Some(crate::state::PendingExpand::Song {
-        song_id: "missing".to_string(),
-        for_browsing_pane: false,
-    });
+    arm_pending_song(&mut app, "missing");
     app.pending_expand_center_only = true;
-    app.library
-        .songs
-        .set_from_vec(vec![make_song("s1", "Song One", "Artist")]);
+    seed_songs(&mut app, vec![make_song("s1", "Song One", "Artist")]);
 
     let task = app.try_resolve_pending_expand_song();
 
@@ -1150,10 +1128,7 @@ fn try_resolve_pending_expand_song_clears_when_fully_loaded_and_missing() {
 #[test]
 fn cancel_pending_expand_also_clears_center_only_flag() {
     let mut app = test_app();
-    app.pending_expand = Some(crate::state::PendingExpand::Album {
-        album_id: "a1".to_string(),
-        for_browsing_pane: false,
-    });
+    arm_pending_album(&mut app, "a1");
     app.pending_expand_center_only = true;
 
     app.cancel_pending_expand();
