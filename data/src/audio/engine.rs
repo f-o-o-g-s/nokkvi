@@ -7,7 +7,7 @@ use anyhow::Result;
 use parking_lot::Mutex as PlMutex;
 use tracing::{debug, error, trace, warn};
 
-use crate::audio::{AudioDecoder, AudioFormat, AudioRenderer};
+use crate::audio::{AudioDecoder, AudioFormat, AudioRenderer, DecodeLoopHandle, SourceGeneration};
 
 /// Convert S16 (i16) PCM bytes to f32 samples normalized to [-1.0, 1.0].
 /// The decoder always produces S16 via `RawSampleBuffer::<i16>`.
@@ -103,7 +103,7 @@ pub struct CustomAudioEngine {
     // Decoding loop cancellation: each spawned loop captures the current
     // generation at spawn time and exits when the generation no longer matches.
     // This prevents the old loop from continuing when a new loop starts.
-    decode_generation: Arc<AtomicU64>,
+    decode_loop: DecodeLoopHandle,
 
     // Gapless preloading state
     next_track_prepared: Arc<tokio::sync::Mutex<bool>>,
@@ -129,7 +129,7 @@ pub struct CustomAudioEngine {
     /// Incremented on every source change. Shared with the renderer so
     /// completion callbacks can detect staleness (e.g. manual skip raced
     /// with track-end) without needing the engine lock.
-    source_generation: Arc<AtomicU64>,
+    source_generation: SourceGeneration,
 
     /// Set by the decode loop when the primary decoder reaches EOF.
     /// Shared with the renderer to gate crossfade trigger: prevents false
@@ -184,7 +184,7 @@ impl CustomAudioEngine {
             next_source: String::new(),
             renderer: Arc::new(PlMutex::new(AudioRenderer::new())),
             state: PlaybackState::Stopped,
-            decode_generation: Arc::new(AtomicU64::new(0)),
+            decode_loop: DecodeLoopHandle::new(),
             next_track_prepared: Arc::new(tokio::sync::Mutex::new(false)),
             completion_callback: None,
             seeking: Arc::new(AtomicBool::new(false)),
@@ -192,7 +192,7 @@ impl CustomAudioEngine {
             render_running: Arc::new(AtomicBool::new(false)),
             live_bitrate: Arc::new(AtomicU32::new(0)),
             live_sample_rate: Arc::new(AtomicU32::new(0)),
-            source_generation: Arc::new(AtomicU64::new(0)),
+            source_generation: SourceGeneration::new(),
             decoder_eof: Arc::new(AtomicBool::new(false)),
             crossfade_duration_shared: Arc::new(AtomicU64::new(5000)),
             crossfade_phase: CrossfadePhase::Idle,
@@ -248,7 +248,7 @@ impl CustomAudioEngine {
         self.position = 0;
 
         self.source = source;
-        self.source_generation.fetch_add(1, Ordering::Release);
+        self.source_generation.bump_for_user_action();
         trace!(" AudioEngine: source set successfully");
     }
 
@@ -498,8 +498,8 @@ impl CustomAudioEngine {
         // Increment decode generation — invalidates any previous decode loop.
         // Each loop captures its generation at spawn time and exits when
         // the generation no longer matches (i.e. a newer loop superseded it).
-        let my_gen = self.decode_generation.fetch_add(1, Ordering::AcqRel) + 1;
-        let decode_gen = self.decode_generation.clone();
+        let my_gen = self.decode_loop.supersede();
+        let decode_gen = self.decode_loop.clone();
 
         // Spawn decoding task
         tokio::spawn(async move {
@@ -525,11 +525,11 @@ impl CustomAudioEngine {
 
                 // Check if this loop has been superseded by a newer one.
                 // Uses a lock-free atomic check instead of a mutex.
-                if decode_gen.load(Ordering::Acquire) != my_gen {
+                if decode_gen.current() != my_gen {
                     tracing::trace!(
                         "🔄 [DECODE LOOP] Exiting - generation superseded (my={}, current={}) after {} iterations",
                         my_gen,
-                        decode_gen.load(Ordering::Relaxed),
+                        decode_gen.current(),
                         loop_count
                     );
                     break;
@@ -586,7 +586,7 @@ impl CustomAudioEngine {
                 // CRITICAL: Check generation AGAIN after acquiring lock, before doing I/O!
                 // If a new loop started while we were waiting for the lock,
                 // we release the lock immediately instead of starting a long HTTP read.
-                if decode_gen.load(Ordering::Acquire) != my_gen {
+                if decode_gen.current() != my_gen {
                     tracing::trace!("🔄 [DECODE LOOP] Exiting after lock - generation superseded");
                     drop(decoder_guard);
                     break;
@@ -630,7 +630,7 @@ impl CustomAudioEngine {
 
                     let mut samples_to_write = samples.as_slice();
                     while !samples_to_write.is_empty() {
-                        if decode_gen.load(Ordering::Acquire) != my_gen {
+                        if decode_gen.current() != my_gen {
                             break;
                         }
 
@@ -707,7 +707,7 @@ impl CustomAudioEngine {
 
                         loop {
                             // Abort reconnect if source changed (user skipped/stopped)
-                            if decode_gen.load(Ordering::Acquire) != my_gen {
+                            if decode_gen.current() != my_gen {
                                 tracing::debug!("📻 [RECONNECT] Aborted — generation superseded");
                                 break;
                             }
@@ -791,7 +791,7 @@ impl CustomAudioEngine {
                                         *next_track_prepared.lock().await = false;
 
                                         // Increment source generation for stale callback detection
-                                        source_generation.fetch_add(1, Ordering::Release);
+                                        source_generation.bump_for_gapless();
 
                                         // Reset renderer position for the new track and
                                         // promote the staged crossfade RG to "current"
@@ -912,7 +912,7 @@ impl CustomAudioEngine {
 
         // Stop decoding loop by advancing the generation counter.
         // Any running loop will see the mismatch and exit.
-        self.decode_generation.fetch_add(1, Ordering::Release);
+        self.decode_loop.supersede();
 
         // Stop render thread
         self.stop_render_thread();
@@ -961,7 +961,7 @@ impl CustomAudioEngine {
         // Clear EOF — decoder will restart from seek position
         self.decoder_eof.store(false, Ordering::Release);
 
-        self.decode_generation.fetch_add(1, Ordering::Release);
+        self.decode_loop.supersede();
 
         // Give the decoding loop time to notice the flag and release the lock
         trace!("🔍 [SEEK] Waiting for decoding loop to release lock");
@@ -1366,7 +1366,7 @@ impl CustomAudioEngine {
         debug!("🔀 [CROSSFADE] Finalizing — incoming becomes current");
 
         // Stop outgoing decode loop by advancing generation
-        self.decode_generation.fetch_add(1, Ordering::Release);
+        self.decode_loop.supersede();
 
         // Take the crossfade decoder and make it the primary
         let crossfade_dec = self.crossfade_decoder.lock().await.take();
@@ -1412,8 +1412,10 @@ impl CustomAudioEngine {
             // Engine position also starts at the crossfade offset
             self.position = crossfade_elapsed_ms;
 
-            // Don't increment source_generation here — the crossfade was an
-            // intentional transition, not a user-initiated skip.
+            // Intentional no-op (was: "Don't increment source_generation here")
+            // — the crossfade was an intentional transition, not a user-
+            // initiated skip.
+            self.source_generation.accept_internal_swap();
 
             // Restart the primary decode loop with the new decoder
             self.start_decoding_loop();
@@ -1529,7 +1531,7 @@ impl CustomAudioEngine {
         drop(next_decoder_guard);
 
         // Stop current decoding loop before swapping decoders
-        self.decode_generation.fetch_add(1, Ordering::Release);
+        self.decode_loop.supersede();
 
         // Store previous format for gapless detection
         let prev_format = self.current_format.clone();
@@ -1616,7 +1618,7 @@ impl CustomAudioEngine {
     /// Current source generation (incremented on every `set_source` call).
     /// Used by the renderer's stale-callback guard.
     pub fn source_generation(&self) -> u64 {
-        self.source_generation.load(Ordering::Acquire)
+        self.source_generation.current()
     }
 
     /// Clear the prepared next-track decoder and all associated state.
@@ -1941,7 +1943,7 @@ impl Default for CustomAudioEngine {
 impl Drop for CustomAudioEngine {
     fn drop(&mut self) {
         // Kill the decode loop immediately (lock-free atomic check).
-        self.decode_generation.fetch_add(1, Ordering::Release);
+        self.decode_loop.supersede();
 
         // Stop the render thread — sets render_running=false and joins the OS thread.
         // Without this, the render thread keeps feeding buffered audio to CPAL/PipeWire

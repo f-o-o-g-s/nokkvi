@@ -9,7 +9,7 @@
 
 use std::sync::{
     Arc, Weak,
-    atomic::{AtomicBool, AtomicU64, Ordering},
+    atomic::{AtomicBool, Ordering},
 };
 
 use anyhow::Result;
@@ -18,7 +18,8 @@ use tracing::{debug, trace, warn};
 
 use crate::{
     audio::{
-        AudioFormat, NormalizationConfig, NormalizationContext, resolve_normalization,
+        AudioFormat, NormalizationConfig, NormalizationContext, SourceGeneration,
+        resolve_normalization,
         rodio_output::{ActiveStream, RodioOutput},
         streaming_source::SharedVisualizerCallback,
     },
@@ -58,7 +59,7 @@ pub struct AudioRenderer {
     pub engine: Weak<Mutex<super::engine::CustomAudioEngine>>,
     tokio_handle: tokio::runtime::Handle,
     /// Source generation counter — shared with engine for stale callback detection.
-    pub source_generation: Arc<AtomicU64>,
+    pub source_generation: SourceGeneration,
     /// Set by the engine's decode loop when the primary decoder reaches EOF.
     pub decoder_eof: Arc<AtomicBool>,
 
@@ -207,7 +208,7 @@ impl AudioRenderer {
             finished_called: false,
             engine: Weak::new(),
             tokio_handle: tokio::runtime::Handle::current(),
-            source_generation: Arc::new(AtomicU64::new(0)),
+            source_generation: SourceGeneration::new(),
             decoder_eof: Arc::new(AtomicBool::new(false)),
             crossfade_active: false,
             crossfade_duration_ms: 0,
@@ -982,7 +983,7 @@ impl AudioRenderer {
     /// avoid deadlocking when the engine lock is already held in the same
     /// call chain (e.g. render_tick → finalize → engine lock).
     fn on_renderer_finished(&mut self) {
-        let generation = self.source_generation.load(Ordering::Acquire);
+        let generation = self.source_generation.current();
         trace!("🏁 [RENDERER] Track finished (generation={})", generation);
 
         if let Some(engine_ref) = self.engine.upgrade() {

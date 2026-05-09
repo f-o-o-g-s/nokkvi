@@ -10,6 +10,7 @@ pub mod decoder;
 pub mod engine;
 pub mod eq;
 pub mod format;
+mod generation;
 pub mod normalization;
 
 #[cfg(target_os = "linux")]
@@ -26,6 +27,7 @@ pub use buffer::AudioBuffer;
 pub use decoder::AudioDecoder;
 pub use eq::{EqProcessor, EqState};
 pub use format::{AudioFormat, SampleFormat};
+pub(crate) use generation::{DecodeLoopHandle, SourceGeneration};
 pub use normalization::{NormalizationConfig, NormalizationContext, resolve_normalization};
 pub use renderer::AudioRenderer;
 pub use rodio_output::{ActiveStream, RodioOutput};
