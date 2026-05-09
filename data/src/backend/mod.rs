@@ -13,10 +13,12 @@ pub mod library_orchestrator;
 pub mod playback_controller;
 pub mod playlists;
 pub mod queue;
+pub mod queue_orchestrator;
 pub mod settings;
 pub mod songs;
 
 pub use library_orchestrator::LibraryOrchestrator;
+pub use queue_orchestrator::QueueOrchestrator;
 
 /// Trait for entities whose starred status can be updated.
 /// Abstracts over field name differences (`starred` vs `is_starred`).

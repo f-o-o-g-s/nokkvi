@@ -719,7 +719,18 @@ impl AppService {
             ),
         )
     }
+}
 
+// === Queue orchestrator accessor ===
+impl AppService {
+    /// Borrow-handle for queue-mutation verbs. Holds no state.
+    #[allow(dead_code)] // First production caller arrives in Lane C (play_* delegators).
+    pub(crate) fn queue_orchestrator(&self) -> crate::backend::QueueOrchestrator<'_> {
+        crate::backend::QueueOrchestrator::new(&self.queue_service, &self.playback)
+    }
+}
+
+impl AppService {
     /// Load all songs for a genre via the Genres API.
     async fn load_genre_songs(&self, genre_name: &str) -> Result<Vec<crate::types::song::Song>> {
         let songs_service = self.songs_api().await?;
