@@ -9,6 +9,7 @@
 
 mod navigation;
 mod order;
+mod write_guard;
 
 use anyhow::Result;
 pub use navigation::{NextSongResult, PeekedQueue, PreviousSongResult, TransitionResult};
@@ -128,20 +129,19 @@ impl QueueManager {
 
     pub fn add_songs(&mut self, mut songs: Vec<Song>) -> Result<()> {
         self.assign_original_positions(&mut songs);
-        let start_idx = self.queue.song_ids.len();
+        let mut tx = self.write();
+        let start_idx = tx.queue.song_ids.len();
         let count = songs.len();
 
         // Add IDs to ordering, songs to pool
         for song in &songs {
-            self.queue.song_ids.push(song.id.clone());
+            tx.queue.song_ids.push(song.id.clone());
         }
-        self.pool.insert_many(songs);
+        tx.pool.insert_many(songs);
 
         // Extend order array with new indices
-        self.extend_order(start_idx..start_idx + count);
-        self.clear_queued();
-        self.save_all()?;
-        Ok(())
+        tx.extend_order(start_idx..start_idx + count);
+        tx.commit_save_all()
     }
 
     pub fn set_queue(&mut self, mut songs: Vec<Song>, current_index: Option<usize>) -> Result<()> {
@@ -149,51 +149,51 @@ impl QueueManager {
         for (i, song) in songs.iter_mut().enumerate() {
             song.original_position = Some(i as u32);
         }
-        self.queue.song_ids = songs.iter().map(|s| s.id.clone()).collect();
-        self.queue.current_index = current_index;
+        let mut tx = self.write();
+        tx.queue.song_ids = songs.iter().map(|s| s.id.clone()).collect();
+        tx.queue.current_index = current_index;
         // Clear and rebuild pool
-        self.pool.clear();
-        self.pool.insert_many(songs);
+        tx.pool.clear();
+        tx.pool.insert_many(songs);
         // Clear history on context switch (new album/playlist) — Spotify behavior
-        self.playback_history.clear();
+        tx.playback_history.clear();
         // Rebuild order array and sync
-        self.rebuild_order_and_sync();
+        tx.rebuild_order_and_sync();
         // If shuffle is on, shuffle the new order
-        if self.queue.shuffle {
-            self.shuffle_order();
+        if tx.queue.shuffle {
+            tx.shuffle_order();
         }
-        self.clear_queued();
-        self.save_all()?;
-        Ok(())
+        tx.commit_save_all()
     }
 
     pub fn remove_song(&mut self, index: usize) -> Result<()> {
-        if index < self.queue.song_ids.len() {
-            let removed_id = self.queue.song_ids.remove(index);
-            self.pool.remove(&removed_id);
-
-            // Remove from order array and adjust indices
-            self.remove_from_order(index);
-
-            // Adjust current_index to keep tracking the same playing song
-            if let Some(cur) = self.queue.current_index {
-                if self.queue.song_ids.is_empty() {
-                    // Queue is now empty
-                    self.queue.current_index = None;
-                } else if index < cur {
-                    // Removed before current — shift back
-                    self.queue.current_index = Some(cur - 1);
-                } else if index == cur {
-                    // Removed the current song — clamp to valid range
-                    self.queue.current_index = Some(cur.min(self.queue.song_ids.len() - 1));
-                }
-                // index > cur: no adjustment needed
-            }
-
-            self.clear_queued();
-            self.save_all()?;
+        if index >= self.queue.song_ids.len() {
+            return Ok(());
         }
-        Ok(())
+        let mut tx = self.write();
+        let removed_id = tx.queue.song_ids.remove(index);
+        tx.pool.remove(&removed_id);
+
+        // Remove from order array and adjust indices
+        tx.remove_from_order(index);
+
+        // Adjust current_index to keep tracking the same playing song
+        if let Some(cur) = tx.queue.current_index {
+            if tx.queue.song_ids.is_empty() {
+                // Queue is now empty
+                tx.queue.current_index = None;
+            } else if index < cur {
+                // Removed before current — shift back
+                tx.queue.current_index = Some(cur - 1);
+            } else if index == cur {
+                // Removed the current song — clamp to valid range
+                let new_len = tx.queue.song_ids.len();
+                tx.queue.current_index = Some(cur.min(new_len - 1));
+            }
+            // index > cur: no adjustment needed
+        }
+
+        tx.commit_save_all()
     }
 
     /// Remove a song from the pool by ID (used by consume paths that manage
@@ -229,19 +229,18 @@ impl QueueManager {
     }
 
     pub fn toggle_shuffle(&mut self) -> Result<()> {
-        self.queue.shuffle = !self.queue.shuffle;
+        let mut tx = self.write();
+        tx.queue.shuffle = !tx.queue.shuffle;
         debug!(
             " [SHUFFLE] Shuffle mode: {}",
-            if self.queue.shuffle { "ON" } else { "OFF" }
+            if tx.queue.shuffle { "ON" } else { "OFF" }
         );
-        if self.queue.shuffle {
-            self.shuffle_order();
+        if tx.queue.shuffle {
+            tx.shuffle_order();
         } else {
-            self.unshuffle_order();
+            tx.unshuffle_order();
         }
-        self.clear_queued();
-        self.save_order()?;
-        Ok(())
+        tx.commit_save_order()
     }
 
     /// Shuffle the queue order randomly.
@@ -251,30 +250,29 @@ impl QueueManager {
             return Ok(());
         }
 
-        let current_song_id = self
+        let mut tx = self.write();
+        let current_song_id = tx
             .queue
             .current_index
-            .and_then(|idx| self.queue.song_ids.get(idx))
+            .and_then(|idx| tx.queue.song_ids.get(idx))
             .cloned();
 
         // Shuffle the IDs using Fisher-Yates algorithm
         let mut rng = rand::rng();
-        self.queue.song_ids.shuffle(&mut rng);
+        tx.queue.song_ids.shuffle(&mut rng);
 
         // Update current_index to point to the same song after shuffle
         if let Some(song_id) = current_song_id {
-            self.queue.current_index = self.index_of(&song_id);
+            tx.queue.current_index = tx.index_of(&song_id);
         }
 
         // Rebuild order after physical reorder
-        self.rebuild_order_and_sync();
-        if self.queue.shuffle {
-            self.shuffle_order();
+        tx.rebuild_order_and_sync();
+        if tx.queue.shuffle {
+            tx.shuffle_order();
         }
-        self.clear_queued();
         debug!(" [QUEUE] Queue shuffled, new order preserved");
-        self.save_order()?;
-        Ok(())
+        tx.commit_save_order()
     }
 
     /// Sort the queue by the given sort mode and direction.
@@ -290,15 +288,21 @@ impl QueueManager {
             return self.shuffle_queue();
         }
 
-        let current_song_id = self
+        let mut tx = self.write();
+        // The sort_by closure needs a disjoint borrow of `pool` and
+        // `queue.song_ids`. Field-disjoint borrows work through a real
+        // `&mut QueueManager`, but not through the guard's Deref/DerefMut
+        // (which hide field structure). Reborrow once and operate via `qm`.
+        let qm: &mut QueueManager = &mut tx;
+        let current_song_id = qm
             .queue
             .current_index
-            .and_then(|idx| self.queue.song_ids.get(idx))
+            .and_then(|idx| qm.queue.song_ids.get(idx))
             .cloned();
 
         // Sort IDs by looking up song data from pool
-        let pool = &self.pool;
-        self.queue.song_ids.sort_by(|a_id, b_id| {
+        let pool = &qm.pool;
+        qm.queue.song_ids.sort_by(|a_id, b_id| {
             let a = pool.get(a_id);
             let b = pool.get(b_id);
             let cmp = match (a, b) {
@@ -333,34 +337,32 @@ impl QueueManager {
 
         // Update current_index to point to the same song after sort
         if let Some(song_id) = current_song_id {
-            self.queue.current_index = self.index_of(&song_id);
+            qm.queue.current_index = qm.index_of(&song_id);
         }
 
         // Rebuild order after physical reorder
-        self.rebuild_order_and_sync();
-        if self.queue.shuffle {
-            self.shuffle_order();
+        qm.rebuild_order_and_sync();
+        if qm.queue.shuffle {
+            qm.shuffle_order();
         }
-        self.clear_queued();
         debug!(
             " [QUEUE] Queue sorted by {:?} ({})",
             mode,
             if ascending { "ASC" } else { "DESC" }
         );
-        self.save_order()?;
-        Ok(())
+        tx.commit_save_order()
     }
 
     pub fn set_repeat(&mut self, mode: RepeatMode) -> Result<()> {
-        self.queue.repeat = mode;
-        self.save_order()?;
-        Ok(())
+        let mut tx = self.write();
+        tx.queue.repeat = mode;
+        tx.commit_save_order()
     }
 
     pub fn toggle_consume(&mut self) -> Result<()> {
-        self.queue.consume = !self.queue.consume;
-        self.save_order()?;
-        Ok(())
+        let mut tx = self.write();
+        tx.queue.consume = !tx.queue.consume;
+        tx.commit_save_order()
     }
 
     pub fn get_current_song(&self) -> Option<Song> {
@@ -405,9 +407,10 @@ impl QueueManager {
     /// clears `queued` so the order array stays consistent.
     /// Use this instead of setting `queue.current_index` directly.
     pub fn set_current_index(&mut self, index: Option<usize>) {
-        self.queue.current_index = index;
-        self.sync_current_order_to_index();
-        self.clear_queued();
+        let mut tx = self.write();
+        tx.queue.current_index = index;
+        tx.sync_current_order_to_index();
+        tx.commit_no_save();
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -423,13 +426,14 @@ impl QueueManager {
             return Ok(());
         }
 
-        let item = self.queue.song_ids.remove(from);
+        let mut tx = self.write();
+        let item = tx.queue.song_ids.remove(from);
         let insert_at = if from < to { to - 1 } else { to };
-        self.queue.song_ids.insert(insert_at, item);
+        tx.queue.song_ids.insert(insert_at, item);
 
         // Adjust current_index to keep tracking the same song
-        if let Some(cur) = self.queue.current_index {
-            self.queue.current_index = Some(if cur == from {
+        if let Some(cur) = tx.queue.current_index {
+            tx.queue.current_index = Some(if cur == from {
                 // The playing song itself was moved
                 insert_at
             } else if from < cur && cur <= insert_at {
@@ -444,53 +448,50 @@ impl QueueManager {
         }
 
         // Rebuild order after move (indices changed)
-        self.rebuild_order_and_sync();
-        if self.queue.shuffle {
-            self.shuffle_order();
+        tx.rebuild_order_and_sync();
+        if tx.queue.shuffle {
+            tx.shuffle_order();
         }
-        self.clear_queued();
         debug!(
             "📦 [QUEUE] Moved item from {} to {} (inserted at {})",
             from, to, insert_at
         );
-        self.save_order()?;
-        Ok(())
+        tx.commit_save_order()
     }
 
     /// Insert songs right after the currently playing position ("Play Next").
     /// If nothing is playing, appends to the end.
     /// Does NOT change `current_index` — the currently playing song stays the same.
     pub fn insert_after_current(&mut self, mut songs: Vec<Song>) -> Result<()> {
-        let insert_pos = self
+        self.assign_original_positions(&mut songs);
+
+        let mut tx = self.write();
+        let insert_pos = tx
             .queue
             .current_index
-            .map_or(self.queue.song_ids.len(), |idx| idx + 1);
+            .map_or(tx.queue.song_ids.len(), |idx| idx + 1);
 
-        let clamped = insert_pos.min(self.queue.song_ids.len());
+        let clamped = insert_pos.min(tx.queue.song_ids.len());
         let count = songs.len();
-
-        self.assign_original_positions(&mut songs);
 
         // Insert IDs in reverse so they end up in order, and add to pool
         for song in songs.into_iter().rev() {
-            self.queue.song_ids.insert(clamped, song.id.clone());
-            self.pool.insert(song);
+            tx.queue.song_ids.insert(clamped, song.id.clone());
+            tx.pool.insert(song);
         }
 
         // Update order array for the insertion
-        self.insert_into_order(clamped, count);
+        tx.insert_into_order(clamped, count);
 
         // Adjust current_index for songs inserted before it
-        if let Some(cur) = self.queue.current_index
+        if let Some(cur) = tx.queue.current_index
             && clamped <= cur
         {
-            self.queue.current_index = Some(cur + count);
+            tx.queue.current_index = Some(cur + count);
         }
 
-        self.clear_queued();
         debug!("📦 [QUEUE] Inserted songs after current (pos {})", clamped);
-        self.save_all()?;
-        Ok(())
+        tx.commit_save_all()
     }
 
     /// Insert a song at `index` and set it as the currently-playing song.
@@ -511,34 +512,33 @@ impl QueueManager {
         if songs.is_empty() {
             return Ok(());
         }
-        let clamped = index.min(self.queue.song_ids.len());
-        let count = songs.len();
-
         self.assign_original_positions(&mut songs);
+
+        let mut tx = self.write();
+        let clamped = index.min(tx.queue.song_ids.len());
+        let count = songs.len();
 
         // Insert in reverse so they end up in order at `clamped`
         for song in songs.into_iter().rev() {
-            self.queue.song_ids.insert(clamped, song.id.clone());
-            self.pool.insert(song);
+            tx.queue.song_ids.insert(clamped, song.id.clone());
+            tx.pool.insert(song);
         }
 
         // Update order array for the insertion
-        self.insert_into_order(clamped, count);
+        tx.insert_into_order(clamped, count);
 
         // Adjust current_index: if inserting before the playing song, shift it forward
-        if let Some(cur) = self.queue.current_index
+        if let Some(cur) = tx.queue.current_index
             && clamped <= cur
         {
-            self.queue.current_index = Some(cur + count);
+            tx.queue.current_index = Some(cur + count);
         }
 
-        self.clear_queued();
         debug!(
             "📦 [QUEUE] Inserted {} songs at position {}",
             count, clamped
         );
-        self.save_all()?;
-        Ok(())
+        tx.commit_save_all()
     }
 
     /// Update the rating for a song in the persisted queue by song ID (O(1)).
@@ -924,6 +924,44 @@ pub(crate) mod tests {
         // Add a song — should clear queued
         qm.add_songs(vec![make_test_song("d")]).unwrap();
         assert!(qm.queue.queued.is_none());
+    }
+
+    #[test]
+    fn set_repeat_clears_queued() {
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+        ];
+        let mut qm = make_test_manager(songs, Some(0));
+
+        qm.peek_next_song();
+        assert!(qm.queue.queued.is_some());
+
+        qm.set_repeat(RepeatMode::Track).unwrap();
+        assert!(
+            qm.queue.queued.is_none(),
+            "set_repeat must clear queued (IG-5)"
+        );
+    }
+
+    #[test]
+    fn toggle_consume_clears_queued() {
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+        ];
+        let mut qm = make_test_manager(songs, Some(0));
+
+        qm.peek_next_song();
+        assert!(qm.queue.queued.is_some());
+
+        qm.toggle_consume().unwrap();
+        assert!(
+            qm.queue.queued.is_none(),
+            "toggle_consume must clear queued (IG-5)"
+        );
     }
 
     #[test]
