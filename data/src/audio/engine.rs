@@ -2117,4 +2117,52 @@ mod tests {
             "Idle predicate must NOT report Active/OutgoingFinished",
         );
     }
+
+    fn fresh_decoder() -> AudioDecoder {
+        AudioDecoder::new(Arc::new(std::sync::RwLock::new(None)))
+    }
+
+    #[test]
+    fn gapless_slot_new_is_not_prepared() {
+        let slot = GaplessSlot::new();
+        assert!(!slot.is_prepared());
+        assert!(slot.decoder.is_none());
+        assert!(slot.source.is_empty());
+    }
+
+    #[test]
+    fn gapless_slot_prepared_flag_alone_does_not_count_as_prepared() {
+        let mut slot = GaplessSlot::new();
+        slot.prepared = true;
+        assert!(!slot.is_prepared());
+    }
+
+    #[test]
+    fn gapless_slot_decoder_alone_does_not_count_as_prepared() {
+        let mut slot = GaplessSlot::new();
+        slot.decoder = Some(fresh_decoder());
+        assert!(!slot.is_prepared());
+    }
+
+    #[test]
+    fn gapless_slot_prepared_requires_both_flag_and_decoder() {
+        let mut slot = GaplessSlot::new();
+        slot.decoder = Some(fresh_decoder());
+        slot.prepared = true;
+        slot.source = "http://example.test/track".to_string();
+        assert!(slot.is_prepared());
+    }
+
+    #[test]
+    fn gapless_slot_clear_resets_all_fields() {
+        let mut slot = GaplessSlot::new();
+        slot.decoder = Some(fresh_decoder());
+        slot.prepared = true;
+        slot.source = "http://example.test/track".to_string();
+        slot.clear();
+        assert!(!slot.is_prepared());
+        assert!(slot.decoder.is_none());
+        assert!(slot.source.is_empty());
+        assert!(!slot.prepared);
+    }
 }
