@@ -84,10 +84,6 @@ use iced::Task;
 // the incremental wiring of `try_resolve_pending_expand_*` wrappers in
 // `navigation.rs`. Each per-entity migration commit removes its line's
 // expect; the final wrapper migration leaves the four lines plain.
-#[expect(
-    unused_imports,
-    reason = "wired up by try_resolve_pending_expand_album wrapper migration"
-)]
 pub(crate) use pending_expand_resolve::AlbumSpec;
 #[expect(
     unused_imports,

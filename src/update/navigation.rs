@@ -839,89 +839,11 @@ impl Nokkvi {
     /// After each albums page lands, look for the pending expand target in
     /// `library.albums`. Returns `Some(task)` if the helper acted (found and
     /// dispatched, fully-loaded miss, or kicked the next page) and `None` if
-    /// it should be retried after the next page arrives.
+    /// it should be retried after the next page arrives. Albums force-load
+    /// pages until the buffer is exhausted; CenterOnPlaying (Shift+C) centers
+    /// the row without dispatching FocusAndExpand.
     pub(crate) fn try_resolve_pending_expand_album(&mut self) -> Option<Task<Message>> {
-        let target_id = match &self.pending_expand {
-            Some(crate::state::PendingExpand::Album { album_id, .. }) => album_id.clone(),
-            _ => return None,
-        };
-
-        if let Some(idx) = self.library.albums.iter().position(|a| a.id == target_id) {
-            let center_only = self.pending_expand_center_only;
-            debug!(
-                " [EXPAND] Found album '{}' at index {} — {}",
-                target_id,
-                idx,
-                if center_only {
-                    "centering (CenterOnPlaying)"
-                } else {
-                    "scrolling + dispatching FocusAndExpand"
-                }
-            );
-            self.pending_expand = None;
-            self.pending_expand_center_only = false;
-            let total = self.library.albums.len();
-            // Click chain pins to slot 0 (so the expanded tracks fill the
-            // viewport below); CenterOnPlaying centers the row instead and
-            // skips expansion. viewport_offset is the index rendered at the
-            // *center slot*, so `idx + center_slot` shifts the window down
-            // by `center_slot`, leaving the target at slot 0.
-            let target_offset = if center_only {
-                idx
-            } else {
-                let center_slot = self.albums_page.common.slot_list.slot_count.max(2) / 2;
-                idx.saturating_add(center_slot).min(total.saturating_sub(1))
-            };
-            self.albums_page
-                .common
-                .slot_list
-                .set_offset(target_offset, total);
-            // set_offset clears selected_offset; re-set as a top-pin so the
-            // target keeps the highlight styling (effective center derives
-            // from selected_offset before falling back to viewport_offset)
-            // AND the next mouse-wheel scroll doesn't snap the viewport
-            // backward to `idx`.
-            self.albums_page.common.slot_list.pin_selected(idx, total);
-            self.albums_page.common.slot_list.flash_center();
-            // Mini-artwork prefetch follows the viewport. The page-load
-            // prefetch ran for viewport=0 (and page-2/3 loads don't prefetch
-            // at all), so the rows around the new viewport would render
-            // as empty placeholders without an explicit kick here.
-            let prefetch_task = self.prefetch_viewport_artwork();
-            if center_only {
-                return Some(prefetch_task);
-            }
-            // Pin the highlight onto the target so it survives `set_children`
-            // when tracks land — handle_albums' TracksLoaded post-hook
-            // re-runs set_selected for this id.
-            self.pending_top_pin = Some(crate::state::PendingTopPin::Album(target_id.clone()));
-            return Some(Task::batch([
-                prefetch_task,
-                Task::done(Message::Albums(views::AlbumsMessage::FocusAndExpand(idx))),
-            ]));
-        }
-
-        if self.library.albums.fully_loaded() {
-            warn!(
-                " [EXPAND] Album '{}' not found after full load — clearing target",
-                target_id
-            );
-            self.toast_warn("Album not found in library");
-            self.pending_expand = None;
-            self.pending_expand_center_only = false;
-            return Some(Task::none());
-        }
-
-        if self.library.albums.is_loading() {
-            return None;
-        }
-
-        let next_offset = self.library.albums.loaded_count();
-        debug!(
-            " [EXPAND] Album '{}' not in buffer — force-fetching next page at offset {}",
-            target_id, next_offset
-        );
-        Some(self.force_load_albums_page(next_offset))
+        self.try_resolve_pending_expand_with::<crate::update::AlbumSpec>()
     }
 
     /// Fired ~2s after `handle_navigate_and_expand_album` to surface a

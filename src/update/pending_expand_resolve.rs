@@ -7,17 +7,6 @@
 //! genre's single-shot pagination) now become typed data on the per-spec
 //! impls rather than divergence across four hand-mirrored function bodies.
 
-// Trait + specs land in one commit; the four `try_resolve_pending_expand_*`
-// wrappers in `navigation.rs` migrate one per follow-up commit. Until the
-// last wrapper migration lands, at least one of the four specs is
-// constructed nowhere — `#![expect]` keeps the dead-code lint satisfied
-// until everything is wired, at which point this attribute itself becomes
-// unfulfilled and forces its own removal.
-#![expect(
-    dead_code,
-    reason = "wired up incrementally by per-entity wrapper migration commits"
-)]
-
 use std::borrow::Cow;
 
 use iced::Task;
@@ -78,8 +67,20 @@ pub(crate) trait ResolveSpec {
 }
 
 pub(crate) struct AlbumSpec;
+#[expect(
+    dead_code,
+    reason = "wired up by try_resolve_pending_expand_artist wrapper migration"
+)]
 pub(crate) struct ArtistSpec;
+#[expect(
+    dead_code,
+    reason = "wired up by try_resolve_pending_expand_genre wrapper migration"
+)]
 pub(crate) struct GenreSpec;
+#[expect(
+    dead_code,
+    reason = "wired up by try_resolve_pending_expand_song wrapper migration"
+)]
 pub(crate) struct SongSpec;
 
 impl ResolveSpec for AlbumSpec {
