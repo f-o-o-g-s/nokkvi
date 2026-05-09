@@ -80,17 +80,7 @@ mod tray;
 mod window;
 
 use iced::Task;
-// Per-line re-exports + per-line `#[expect(unused_imports)]` markers track
-// the incremental wiring of `try_resolve_pending_expand_*` wrappers in
-// `navigation.rs`. Each per-entity migration commit removes its line's
-// expect; the final wrapper migration leaves the four lines plain.
-pub(crate) use pending_expand_resolve::AlbumSpec;
-#[expect(
-    unused_imports,
-    reason = "wired up by try_resolve_pending_expand_song wrapper migration"
-)]
-pub(crate) use pending_expand_resolve::SongSpec;
-pub(crate) use pending_expand_resolve::{ArtistSpec, GenreSpec};
+pub(crate) use pending_expand_resolve::{AlbumSpec, ArtistSpec, GenreSpec, SongSpec};
 use tracing::debug;
 
 use crate::{Nokkvi, View, app_message::Message};

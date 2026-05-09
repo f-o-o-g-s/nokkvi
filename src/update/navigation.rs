@@ -767,49 +767,10 @@ impl Nokkvi {
     /// Song-side mirror of `try_resolve_pending_expand_album`. Songs aren't
     /// expandable, so this always centers and never dispatches a
     /// `FocusAndExpand` — `pending_expand_center_only` is implicit here.
+    /// `SongSpec::focus_and_expand` returns `None`, which the generic body
+    /// treats as effective-center-only (no top pin, viewport_offset = idx).
     pub(crate) fn try_resolve_pending_expand_song(&mut self) -> Option<Task<Message>> {
-        let target_id = match &self.pending_expand {
-            Some(crate::state::PendingExpand::Song { song_id, .. }) => song_id.clone(),
-            _ => return None,
-        };
-
-        if let Some(idx) = self.library.songs.iter().position(|s| s.id == target_id) {
-            debug!(
-                " [EXPAND] Found song '{}' at index {} — centering (CenterOnPlaying)",
-                target_id, idx
-            );
-            self.pending_expand = None;
-            self.pending_expand_center_only = false;
-            let total = self.library.songs.len();
-            // Center mode: viewport_offset is the center-slot index, so
-            // setting it to `idx` puts the target at center.
-            self.songs_page.common.slot_list.set_offset(idx, total);
-            self.songs_page.common.slot_list.pin_selected(idx, total);
-            self.songs_page.common.slot_list.flash_center();
-            return Some(self.prefetch_viewport_artwork());
-        }
-
-        if self.library.songs.fully_loaded() {
-            warn!(
-                " [EXPAND] Song '{}' not found after full load — clearing target",
-                target_id
-            );
-            self.toast_warn("Song not found in library");
-            self.pending_expand = None;
-            self.pending_expand_center_only = false;
-            return Some(Task::none());
-        }
-
-        if self.library.songs.is_loading() {
-            return None;
-        }
-
-        let next_offset = self.library.songs.loaded_count();
-        debug!(
-            " [EXPAND] Song '{}' not in buffer — force-fetching next page at offset {}",
-            target_id, next_offset
-        );
-        Some(self.force_load_songs_page(next_offset))
+        self.try_resolve_pending_expand_with::<crate::update::SongSpec>()
     }
 
     /// CenterOnPlaying (Shift+C) fallback for the Albums view: clear search

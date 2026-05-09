@@ -69,10 +69,6 @@ pub(crate) trait ResolveSpec {
 pub(crate) struct AlbumSpec;
 pub(crate) struct ArtistSpec;
 pub(crate) struct GenreSpec;
-#[expect(
-    dead_code,
-    reason = "wired up by try_resolve_pending_expand_song wrapper migration"
-)]
 pub(crate) struct SongSpec;
 
 impl ResolveSpec for AlbumSpec {
