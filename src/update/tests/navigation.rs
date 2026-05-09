@@ -1040,7 +1040,7 @@ fn tracks_loaded_re_pins_selected_offset_for_album() {
 }
 
 #[test]
-fn albums_loaded_re_pins_selected_offset_for_artist() {
+fn artists_albums_loaded_re_pins_selected_offset_in_artists_view() {
     let mut app = test_app();
     app.library.artists.set_from_vec(vec![
         make_artist("ar1", "Artist One"),

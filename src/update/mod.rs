@@ -228,14 +228,8 @@ impl Nokkvi {
             }
 
             // -----------------------------------------------------------------
-            // Loader Results (per-domain *LoaderMessage)
-            //
-            // These route to per-domain `dispatch_<domain>_loader` helpers in
-            // `update/<domain>.rs`. Phase 1 wires all six; Genres is the
-            // proof-of-concept and is fully migrated. The other five are stubs
-            // (`unimplemented!()`) until Phase 2 fills them in — currently
-            // unreachable because no fire site constructs the new variants
-            // for those domains.
+            // Loader Results (per-domain *LoaderMessage) — route to
+            // `dispatch_<domain>_loader` helpers in `update/<domain>.rs`.
             // -----------------------------------------------------------------
             Message::AlbumsLoader(msg) => self.dispatch_albums_loader(msg),
             Message::ArtistsLoader(msg) => self.dispatch_artists_loader(msg),
