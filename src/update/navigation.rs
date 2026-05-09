@@ -56,6 +56,64 @@ fn expand_song_timeout_task(song_id: String) -> Task<Message> {
     )
 }
 
+// === pending-expand helpers ===
+
+/// Single source of truth for the find-and-expand priming reset. Called by
+/// every `handle_navigate_and_expand_*`, `handle_browser_pane_navigate_and_expand_*`,
+/// and `start_center_on_playing_*_chain` site after the caller decides which
+/// entity is being targeted. Differences across entities are limited to the
+/// page-state field the reset hits; songs additionally skip
+/// `expansion.clear()` because songs aren't expandable.
+///
+/// Always resets `pending_expand_center_only = false`. CenterOnPlaying
+/// callers re-arm the flag *after* this returns — keep that order.
+pub(crate) fn prime_expand_target(app: &mut Nokkvi, pending: crate::state::PendingExpand) {
+    match &pending {
+        crate::state::PendingExpand::Album { .. } => {
+            app.albums_page.common.search_input_focused = false;
+            app.albums_page.common.active_filter = None;
+            app.albums_page.common.search_query.clear();
+            app.albums_page.expansion.clear();
+            app.albums_page.common.slot_list.viewport_offset = 0;
+            app.albums_page.common.slot_list.selected_indices.clear();
+            app.albums_page.common.slot_list.selected_offset = None;
+            app.library.albums.clear();
+        }
+        crate::state::PendingExpand::Artist { .. } => {
+            app.artists_page.common.search_input_focused = false;
+            app.artists_page.common.active_filter = None;
+            app.artists_page.common.search_query.clear();
+            app.artists_page.expansion.clear();
+            app.artists_page.common.slot_list.viewport_offset = 0;
+            app.artists_page.common.slot_list.selected_indices.clear();
+            app.artists_page.common.slot_list.selected_offset = None;
+            app.library.artists.clear();
+        }
+        crate::state::PendingExpand::Genre { .. } => {
+            app.genres_page.common.search_input_focused = false;
+            app.genres_page.common.active_filter = None;
+            app.genres_page.common.search_query.clear();
+            app.genres_page.expansion.clear();
+            app.genres_page.common.slot_list.viewport_offset = 0;
+            app.genres_page.common.slot_list.selected_indices.clear();
+            app.genres_page.common.slot_list.selected_offset = None;
+            app.library.genres.clear();
+        }
+        crate::state::PendingExpand::Song { .. } => {
+            app.songs_page.common.search_input_focused = false;
+            app.songs_page.common.active_filter = None;
+            app.songs_page.common.search_query.clear();
+            // Songs aren't expandable — no expansion field to clear.
+            app.songs_page.common.slot_list.viewport_offset = 0;
+            app.songs_page.common.slot_list.selected_indices.clear();
+            app.songs_page.common.slot_list.selected_offset = None;
+            app.library.songs.clear();
+        }
+    }
+    app.pending_expand_center_only = false;
+    app.pending_expand = Some(pending);
+}
+
 impl Nokkvi {
     pub(crate) fn handle_session_expired(&mut self) -> Task<Message> {
         info!(" [SESSION] Session expired (401 Unauthorized)");
@@ -537,22 +595,13 @@ impl Nokkvi {
     /// arrival), drop the current buffer, and install the pending target.
     /// Caller dispatches the actual load + timeout tasks.
     fn prime_expand_album_target(&mut self, album_id: String, for_browsing_pane: bool) {
-        self.albums_page.common.search_input_focused = false;
-        self.albums_page.common.active_filter = None;
-        self.albums_page.common.search_query.clear();
-        self.albums_page.expansion.clear();
-        self.albums_page.common.slot_list.viewport_offset = 0;
-        self.albums_page.common.slot_list.selected_indices.clear();
-        self.albums_page.common.slot_list.selected_offset = None;
-        self.library.albums.clear();
-        // Reset center-only mode — click-driven callers want the default
-        // (top-pin + FocusAndExpand). `start_center_on_playing_album_chain`
-        // re-arms it explicitly after this returns.
-        self.pending_expand_center_only = false;
-        self.pending_expand = Some(crate::state::PendingExpand::Album {
-            album_id,
-            for_browsing_pane,
-        });
+        prime_expand_target(
+            self,
+            crate::state::PendingExpand::Album {
+                album_id,
+                for_browsing_pane,
+            },
+        );
     }
 
     /// Drop the in-flight find-and-expand chain (whichever kind) plus any
@@ -593,19 +642,13 @@ impl Nokkvi {
 
     /// Shared setup for both genre navigate-and-expand variants.
     fn prime_expand_genre_target(&mut self, genre_id: String, for_browsing_pane: bool) {
-        self.genres_page.common.search_input_focused = false;
-        self.genres_page.common.active_filter = None;
-        self.genres_page.common.search_query.clear();
-        self.genres_page.expansion.clear();
-        self.genres_page.common.slot_list.viewport_offset = 0;
-        self.genres_page.common.slot_list.selected_indices.clear();
-        self.genres_page.common.slot_list.selected_offset = None;
-        self.library.genres.clear();
-        self.pending_expand_center_only = false;
-        self.pending_expand = Some(crate::state::PendingExpand::Genre {
-            genre_id,
-            for_browsing_pane,
-        });
+        prime_expand_target(
+            self,
+            crate::state::PendingExpand::Genre {
+                genre_id,
+                for_browsing_pane,
+            },
+        );
     }
 
     /// Genre-side mirror of `handle_pending_expand_album_timeout`.
@@ -669,19 +712,13 @@ impl Nokkvi {
 
     /// Shared setup for both artist navigate-and-expand variants.
     fn prime_expand_artist_target(&mut self, artist_id: String, for_browsing_pane: bool) {
-        self.artists_page.common.search_input_focused = false;
-        self.artists_page.common.active_filter = None;
-        self.artists_page.common.search_query.clear();
-        self.artists_page.expansion.clear();
-        self.artists_page.common.slot_list.viewport_offset = 0;
-        self.artists_page.common.slot_list.selected_indices.clear();
-        self.artists_page.common.slot_list.selected_offset = None;
-        self.library.artists.clear();
-        self.pending_expand_center_only = false;
-        self.pending_expand = Some(crate::state::PendingExpand::Artist {
-            artist_id,
-            for_browsing_pane,
-        });
+        prime_expand_target(
+            self,
+            crate::state::PendingExpand::Artist {
+                artist_id,
+                for_browsing_pane,
+            },
+        );
     }
 
     /// Artist-side mirror of `handle_pending_expand_album_timeout`.
@@ -737,20 +774,16 @@ impl Nokkvi {
     /// Songs-side mirror of `prime_expand_album_target`. Songs aren't
     /// expandable, so this is only used by the CenterOnPlaying (Shift+C)
     /// fallback — never by a click. The corresponding `try_resolve_*` is
-    /// implicitly center-only (skips FocusAndExpand).
+    /// implicitly center-only (skips FocusAndExpand). The shared
+    /// `prime_expand_target` skips `expansion.clear()` for the Song variant.
     fn prime_expand_song_target(&mut self, song_id: String, for_browsing_pane: bool) {
-        self.songs_page.common.search_input_focused = false;
-        self.songs_page.common.active_filter = None;
-        self.songs_page.common.search_query.clear();
-        self.songs_page.common.slot_list.viewport_offset = 0;
-        self.songs_page.common.slot_list.selected_indices.clear();
-        self.songs_page.common.slot_list.selected_offset = None;
-        self.library.songs.clear();
-        self.pending_expand_center_only = false;
-        self.pending_expand = Some(crate::state::PendingExpand::Song {
-            song_id,
-            for_browsing_pane,
-        });
+        prime_expand_target(
+            self,
+            crate::state::PendingExpand::Song {
+                song_id,
+                for_browsing_pane,
+            },
+        );
     }
 
     /// Song-side mirror of `handle_pending_expand_album_timeout`.
