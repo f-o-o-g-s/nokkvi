@@ -12,51 +12,34 @@ use crate::{
     services, views, widgets,
 };
 
-/// 2s delayed task that emits `PendingExpandAlbumTimeout` so the handler can
-/// surface a "Finding album…" toast only when the find chain hasn't already
-/// resolved. The handler verifies the id still matches the active target
-/// before toasting, so superseded clicks stay silent.
-fn expand_album_timeout_task(album_id: String) -> Task<Message> {
-    Task::perform(
-        async {
-            tokio::time::sleep(Duration::from_secs(2)).await;
-        },
-        move |()| Message::PendingExpandAlbumTimeout(album_id.clone()),
-    )
-}
-
-/// Artist-side mirror of `expand_album_timeout_task`.
-fn expand_artist_timeout_task(artist_id: String) -> Task<Message> {
-    Task::perform(
-        async {
-            tokio::time::sleep(Duration::from_secs(2)).await;
-        },
-        move |()| Message::PendingExpandArtistTimeout(artist_id.clone()),
-    )
-}
-
-/// Genre-side mirror — see `expand_album_timeout_task`.
-fn expand_genre_timeout_task(genre_id: String) -> Task<Message> {
-    Task::perform(
-        async {
-            tokio::time::sleep(Duration::from_secs(2)).await;
-        },
-        move |()| Message::PendingExpandGenreTimeout(genre_id.clone()),
-    )
-}
-
-/// Song-side mirror — see `expand_album_timeout_task`. Songs only enter the
-/// find-and-expand chain via the CenterOnPlaying (Shift+C) fallback.
-fn expand_song_timeout_task(song_id: String) -> Task<Message> {
-    Task::perform(
-        async {
-            tokio::time::sleep(Duration::from_secs(2)).await;
-        },
-        move |()| Message::PendingExpandSongTimeout(song_id.clone()),
-    )
-}
-
 // === pending-expand helpers ===
+
+/// 2s delayed task that emits the `Message::PendingExpand*Timeout` matching
+/// the variant of `pending`. The corresponding handler verifies the id is
+/// still the active target before toasting, so superseded clicks stay silent.
+/// Songs only enter the find-and-expand chain via the CenterOnPlaying
+/// (Shift+C) fallback.
+pub(crate) fn pending_expand_timeout_task(pending: crate::state::PendingExpand) -> Task<Message> {
+    Task::perform(
+        async {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        },
+        move |()| match &pending {
+            crate::state::PendingExpand::Album { album_id, .. } => {
+                Message::PendingExpandAlbumTimeout(album_id.clone())
+            }
+            crate::state::PendingExpand::Artist { artist_id, .. } => {
+                Message::PendingExpandArtistTimeout(artist_id.clone())
+            }
+            crate::state::PendingExpand::Genre { genre_id, .. } => {
+                Message::PendingExpandGenreTimeout(genre_id.clone())
+            }
+            crate::state::PendingExpand::Song { song_id, .. } => {
+                Message::PendingExpandSongTimeout(song_id.clone())
+            }
+        },
+    )
+}
 
 /// Single source of truth for the find-and-expand priming reset. Called by
 /// every `handle_navigate_and_expand_*`, `handle_browser_pane_navigate_and_expand_*`,
@@ -569,7 +552,13 @@ impl Nokkvi {
         // Clearing `library.albums` above flips `is_empty()` to true, so
         // handle_switch_view's Albums arm dispatches LoadAlbums for us.
         let switch_task = self.handle_switch_view(View::Albums);
-        Task::batch([switch_task, expand_album_timeout_task(album_id)])
+        Task::batch([
+            switch_task,
+            pending_expand_timeout_task(crate::state::PendingExpand::Album {
+                album_id,
+                for_browsing_pane: false,
+            }),
+        ])
     }
 
     /// Browsing-pane variant of `handle_navigate_and_expand_album` — switches
@@ -586,7 +575,10 @@ impl Nokkvi {
         Task::batch([
             switch_task,
             Task::done(Message::LoadAlbums),
-            expand_album_timeout_task(album_id),
+            pending_expand_timeout_task(crate::state::PendingExpand::Album {
+                album_id,
+                for_browsing_pane: true,
+            }),
         ])
     }
 
@@ -621,7 +613,13 @@ impl Nokkvi {
     pub(crate) fn handle_navigate_and_expand_genre(&mut self, genre_id: String) -> Task<Message> {
         self.prime_expand_genre_target(genre_id.clone(), false);
         let switch_task = self.handle_switch_view(View::Genres);
-        Task::batch([switch_task, expand_genre_timeout_task(genre_id)])
+        Task::batch([
+            switch_task,
+            pending_expand_timeout_task(crate::state::PendingExpand::Genre {
+                genre_id,
+                for_browsing_pane: false,
+            }),
+        ])
     }
 
     /// Browsing-pane variant of `handle_navigate_and_expand_genre`.
@@ -636,7 +634,10 @@ impl Nokkvi {
         Task::batch([
             switch_task,
             Task::done(Message::LoadGenres),
-            expand_genre_timeout_task(genre_id),
+            pending_expand_timeout_task(crate::state::PendingExpand::Genre {
+                genre_id,
+                for_browsing_pane: true,
+            }),
         ])
     }
 
@@ -691,7 +692,13 @@ impl Nokkvi {
     pub(crate) fn handle_navigate_and_expand_artist(&mut self, artist_id: String) -> Task<Message> {
         self.prime_expand_artist_target(artist_id.clone(), false);
         let switch_task = self.handle_switch_view(View::Artists);
-        Task::batch([switch_task, expand_artist_timeout_task(artist_id)])
+        Task::batch([
+            switch_task,
+            pending_expand_timeout_task(crate::state::PendingExpand::Artist {
+                artist_id,
+                for_browsing_pane: false,
+            }),
+        ])
     }
 
     /// Browsing-pane variant of `handle_navigate_and_expand_artist`.
@@ -706,7 +713,10 @@ impl Nokkvi {
         Task::batch([
             switch_task,
             Task::done(Message::LoadArtists),
-            expand_artist_timeout_task(artist_id),
+            pending_expand_timeout_task(crate::state::PendingExpand::Artist {
+                artist_id,
+                for_browsing_pane: true,
+            }),
         ])
     }
 
@@ -819,7 +829,10 @@ impl Nokkvi {
         self.pending_expand_center_only = true;
         Task::batch([
             Task::done(Message::LoadAlbums),
-            expand_album_timeout_task(album_id),
+            pending_expand_timeout_task(crate::state::PendingExpand::Album {
+                album_id,
+                for_browsing_pane: false,
+            }),
         ])
     }
 
@@ -832,7 +845,10 @@ impl Nokkvi {
         self.pending_expand_center_only = true;
         Task::batch([
             Task::done(Message::LoadArtists),
-            expand_artist_timeout_task(artist_id),
+            pending_expand_timeout_task(crate::state::PendingExpand::Artist {
+                artist_id,
+                for_browsing_pane: false,
+            }),
         ])
     }
 
@@ -846,7 +862,10 @@ impl Nokkvi {
         self.pending_expand_center_only = true;
         Task::batch([
             Task::done(Message::LoadGenres),
-            expand_genre_timeout_task(genre_id),
+            pending_expand_timeout_task(crate::state::PendingExpand::Genre {
+                genre_id,
+                for_browsing_pane: false,
+            }),
         ])
     }
 
@@ -857,7 +876,10 @@ impl Nokkvi {
         self.pending_expand_center_only = true;
         Task::batch([
             Task::done(Message::LoadSongs),
-            expand_song_timeout_task(song_id),
+            pending_expand_timeout_task(crate::state::PendingExpand::Song {
+                song_id,
+                for_browsing_pane: false,
+            }),
         ])
     }
 
