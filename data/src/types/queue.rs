@@ -57,7 +57,7 @@ pub struct Queue {
     #[serde(default)]
     pub order: Vec<usize>,
     /// Order-index of the pre-buffered next song (gapless/crossfade prep).
-    /// Set by `peek_next_song()`, consumed by `transition_to_queued()`.
+    /// Set by `peek_next_song()`, consumed by `PeekedQueue::transition()`.
     #[serde(default)]
     pub queued: Option<usize>,
     pub shuffle: bool,

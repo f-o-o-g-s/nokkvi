@@ -202,7 +202,7 @@ impl QueueNavigator {
     /// 2. Prepared track available → gapless load
     /// 3. Normal → need to load a new track
     ///
-    /// In ALL cases, the queue transition uses `transition_to_queued()`.
+    /// In ALL cases, the queue transition uses `PeekedQueue::transition()`.
     ///
     /// This is a thin wrapper around [`decide_transition`] + [`execute_transition`].
     /// The completion callback in `playback_controller.rs` calls those two halves

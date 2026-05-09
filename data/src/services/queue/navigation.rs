@@ -64,7 +64,7 @@ impl<'a> PeekedQueue<'a> {
     /// Consume the peek and advance current_index/current_order.
     pub fn transition(mut self) -> TransitionResult {
         let mgr = self.mgr.take().expect("guard already consumed");
-        mgr.transition_to_queued()
+        mgr.transition_to_queued_internal()
             .expect("PeekedQueue invariant: queued is set when guard exists")
     }
 }
@@ -193,8 +193,12 @@ impl QueueManager {
     /// This is the SINGLE transition path — all automatic and manual transitions
     /// converge here (gapless, crossfade, normal end-of-track, manual skip).
     ///
+    /// Crate-internal: the only public commit path is [`PeekedQueue::transition`].
+    /// `get_next_song` reaches in directly to skip the guard ceremony for the
+    /// peek-then-transition convenience.
+    ///
     /// Returns `None` if no song is queued.
-    pub fn transition_to_queued(&mut self) -> Option<TransitionResult> {
+    pub(crate) fn transition_to_queued_internal(&mut self) -> Option<TransitionResult> {
         let queued_order = self.queue.queued.take()?;
         if queued_order >= self.queue.order.len() {
             return None;
