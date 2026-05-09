@@ -235,7 +235,9 @@ impl CustomAudioEngine {
         if let Ok(mut guard) = self.live_icy_metadata.try_write() {
             *guard = None;
         }
-        if let Ok(mut guard) = self.live_codec_name.write() {
+        // Non-blocking like the icy_metadata reset above: stale codec data
+        // is acceptable here, and `set_source` must not block on UI readers.
+        if let Ok(mut guard) = self.live_codec_name.try_write() {
             *guard = None;
         }
 
