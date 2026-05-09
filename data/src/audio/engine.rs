@@ -1083,6 +1083,19 @@ impl CustomAudioEngine {
         self.set_source(url.to_string()).await;
     }
 
+    /// Atomic three-step: stash ReplayGain → set source. The caller still
+    /// invokes `play()` afterward, but the RG-stash + source-update pair is
+    /// uncuttable. Replaces the historical `set_pending_replay_gain` +
+    /// `load_track` / `set_source` pairing in `PlaybackController`.
+    pub async fn load_track_with_rg(
+        &mut self,
+        url: &str,
+        rg: Option<crate::types::song::ReplayGain>,
+    ) {
+        self.renderer.lock().set_pending_replay_gain(rg);
+        self.set_source(url.to_string()).await;
+    }
+
     /// Prepare next track for gapless playback
     /// NOTE: This method holds the engine lock during the HTTP download.
     /// For better visualizer performance, use store_prepared_decoder() instead.
