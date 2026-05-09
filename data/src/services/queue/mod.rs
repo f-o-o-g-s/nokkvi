@@ -935,7 +935,9 @@ pub(crate) mod tests {
         ];
         let mut qm = make_test_manager(songs, Some(0));
 
-        qm.peek_next_song();
+        // Set queued directly (the guard's drop semantics would otherwise
+        // clear it before we can observe the mutation's effect).
+        qm.queue.queued = Some(1);
         assert!(qm.queue.queued.is_some());
 
         qm.set_repeat(RepeatMode::Track).unwrap();
@@ -954,7 +956,9 @@ pub(crate) mod tests {
         ];
         let mut qm = make_test_manager(songs, Some(0));
 
-        qm.peek_next_song();
+        // Set queued directly (the guard's drop semantics would otherwise
+        // clear it before we can observe the mutation's effect).
+        qm.queue.queued = Some(1);
         assert!(qm.queue.queued.is_some());
 
         qm.toggle_consume().unwrap();
