@@ -809,15 +809,15 @@ impl AppService {
 
     /// Play next: add album songs right after currently playing track.
     pub async fn play_next_album(&self, album_id: &str) -> Result<()> {
-        let songs = self.albums_service.load_album_songs(album_id).await?;
-        self.play_next_songs(songs).await
+        let songs = self.library_orchestrator().resolve_album(album_id).await?;
+        self.queue_orchestrator().play_next(songs).await
     }
 
     /// Play next: add a single song (by ID) right after currently playing track.
     pub async fn play_next_song_by_id(&self, song_id: &str, album_id: &str) -> Result<()> {
         let songs = self.albums_service.load_album_songs(album_id).await?;
         if let Some(song) = songs.into_iter().find(|s| s.id == song_id) {
-            self.play_next_songs(vec![song]).await
+            self.queue_orchestrator().play_next(vec![song]).await
         } else {
             Err(anyhow::anyhow!(
                 "Song {song_id} not found in album {album_id}"
@@ -827,25 +827,34 @@ impl AppService {
 
     /// Play next: add artist songs right after currently playing track.
     pub async fn play_next_artist(&self, artist_id: &str) -> Result<()> {
-        let songs = self.artists_service.load_artist_songs(artist_id).await?;
-        self.play_next_songs(songs).await
+        let songs = self
+            .library_orchestrator()
+            .resolve_artist(artist_id)
+            .await?;
+        self.queue_orchestrator().play_next(songs).await
     }
 
     /// Play next: add genre songs right after currently playing track.
     pub async fn play_next_genre(&self, genre_name: &str) -> Result<()> {
-        let songs = self.load_genre_songs(genre_name).await?;
-        self.play_next_songs(songs).await
+        let songs = self
+            .library_orchestrator()
+            .resolve_genre(genre_name)
+            .await?;
+        self.queue_orchestrator().play_next(songs).await
     }
 
     /// Play next: add playlist songs right after currently playing track.
     pub async fn play_next_playlist(&self, playlist_id: &str) -> Result<()> {
-        let songs = self.load_playlist_songs(playlist_id).await?;
-        self.play_next_songs(songs).await
+        let songs = self
+            .library_orchestrator()
+            .resolve_playlist(playlist_id)
+            .await?;
+        self.queue_orchestrator().play_next(songs).await
     }
 
     /// Play next: add pre-loaded songs right after currently playing track.
     pub async fn play_next_preloaded(&self, songs: Vec<crate::types::song::Song>) -> Result<()> {
-        self.play_next_songs(songs).await
+        self.queue_orchestrator().play_next(songs).await
     }
 
     // =========================================================================
