@@ -24,7 +24,7 @@ When you complete an item, append the commit ref(s) and flip the status. Keep th
 | Rank | Item | Status | Evidence |
 |---:|---|---|---|
 | 1 | Bug fixes batch (B1, B2, B3, B6, B8, B9) | ❌ open | None of the 6 bugs in the batch have closed. See §5 table below for per-bug detail. |
-| 2 | `View::ALL` + replace 8 wildcard `_ =>` arms | ❌ open | No `View::ALL` declared in `src/main.rs`. `src/update/navigation.rs` now has 10 `_ =>` arms (audit said 8 — count grew). |
+| **2** | **`View::ALL` + replace 8 wildcard `_ =>` arms** | **✅ done** | Three-slice fanout (2026-05-08): `f7aed5f` (slice 1 — `View::ALL` + `NavView::ALL` with paired const-asserts as length anchors), `b57d739` (slice 2 — 6 `_ =>` arms in `update/navigation.rs` made explicit), `ff5f63b` (slice 3 — 6 `_ =>` arms across `update/window.rs`, `update/components.rs`, `update/playback.rs`, `update/hotkeys/navigation.rs`, `views/sort_api.rs` made explicit). 12 wildcard arms eliminated total. The 4 remaining `_ =>` arms in `update/navigation.rs` (lines 643/772/846/980) are `PendingExpand` matches, not `View` — out of scope. |
 | 3 | Extend `define_view_columns!` to emit `persist_*_column_visibility` | ❌ open | 7 hand-written `persist_*_column_visibility` functions still live in `src/update/`. |
 | 4 | Migrate `hotkeys/star_rating.rs` to `star_item_task`/`set_item_rating_task` | ❓ stale path | `src/hotkeys/star_rating.rs` does not exist. Only `global.rs` and `mod.rs` live in `src/hotkeys/`. The inline-rebuild pattern (if still present) is somewhere else; locate before starting. |
 | 5 | `enum ItemKind` to replace `item_type: &str` | ❌ open | 7 sites still pass `item_type: &str` (e.g. `src/update/components.rs:783-806`). No `enum ItemKind` defined. |
@@ -112,7 +112,7 @@ When you complete an item, append the commit ref(s) and flip the status. Keep th
 
 | # | Item | Status | Evidence |
 |---:|---|---|---|
-| 1 | `View` enum match-block fanout + 8 silent `_ =>` arms | ❌ open | Same as §7 #2. |
+| 1 | `View` enum match-block fanout + 8 silent `_ =>` arms | 🟡 partial | Wildcards eliminated in §7 #2 fanout (`f7aed5f..ff5f63b`, 2026-05-08); per-`View` dispatch onto `ViewPage` (§7 #9) remains open. |
 | 2 | `item_type: &str` carrying entity kind | ❌ open | Same as §7 #5. |
 | 3 | Settings 3 parallel lists | ✅ done | Same as §7 #10. |
 | 4 | `HotkeyAction` parallel matches (`hotkey_action_to_message`, `hotkey_action_to_key`) | ❌ open | Not verified. The hotkey macro consolidation in `da1723d` (pre-audit) closed part of this; the two parallel matches the audit cites may still be hand-written. |
@@ -125,7 +125,7 @@ When you complete an item, append the commit ref(s) and flip the status. Keep th
 | 11 | Hamburger menu match-arms | ✅ done | Same as B6. |
 | 12 | Visualizer config dotted keys (37 distinct literals) | ❌ open | No typed visualizer-key enum on `ConfigKey`. |
 | 13 | Crossfade armed/active dual-flag in `AudioRenderer` | ✅ done | Lane B `c1f4676` (2026-05-08): folded into `CrossfadeState` enum (see IG-8). The `crossfade_active` / `crossfade_armed` bools and the 3 `crossfade_armed_*` fields are gone — `is_crossfade_active()` / `is_crossfade_armed()` now `matches!` the variant. |
-| 14 | Missing `View::ALL` / `NavView::ALL` declarations | ❌ open | Same as §7 #2. |
+| 14 | Missing `View::ALL` / `NavView::ALL` declarations | ✅ done | `f7aed5f` (2026-05-08): `View::ALL` (8 variants) and `NavView::ALL` (7 variants) declared with paired `const _: [(); N - ALL.len()]` and `[(); ALL.len() - N]` asserts that fail to compile if a variant is added without extending ALL. |
 
 ---
 
@@ -133,9 +133,8 @@ When you complete an item, append the commit ref(s) and flip the status. Keep th
 
 If picking the next item to work, these are the highest agent-friendliness payoff per the audit's ranking and remain open:
 
-1. **§7 #2 — `View::ALL` + replace 8 wildcards** (S effort, foundational, every future View change benefits).
-2. **§7 #3 — `define_view_columns!` persist emission** (M effort, the most-frequent feature edit; persist-arm omission fails silently on relaunch).
-3. **§7 #5 — `enum ItemKind`** (M effort, kills `_ => Song` silent-default class outright).
-4. **Bugs B1, B2, B6, B8, B9** (S effort each, real visible bugs and a stale comment that misleads future agents).
+1. **§7 #3 — `define_view_columns!` persist emission** (M effort, the most-frequent feature edit; persist-arm omission fails silently on relaunch).
+2. **§7 #5 — `enum ItemKind`** (M effort, kills `_ => Song` silent-default class outright).
+3. **Bugs B1, B2, B6, B8, B9** (S effort each, real visible bugs and a stale comment that misleads future agents).
 
 §7 #6, #7, #12 are L effort; not first picks unless explicitly scheduled. (§7 #10 was the third L-effort item; it landed across the 2026-05-08 follow-up fanout.)
