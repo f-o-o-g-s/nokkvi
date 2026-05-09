@@ -767,73 +767,7 @@ impl Nokkvi {
     /// give up if fully loaded, wait if still loading, or kick the next
     /// page (force-loaded) if more remain.
     pub(crate) fn try_resolve_pending_expand_artist(&mut self) -> Option<Task<Message>> {
-        let target_id = match &self.pending_expand {
-            Some(crate::state::PendingExpand::Artist { artist_id, .. }) => artist_id.clone(),
-            _ => return None,
-        };
-
-        if let Some(idx) = self.library.artists.iter().position(|a| a.id == target_id) {
-            let center_only = self.pending_expand_center_only;
-            debug!(
-                " [EXPAND] Found artist '{}' at index {} — {}",
-                target_id,
-                idx,
-                if center_only {
-                    "centering (CenterOnPlaying)"
-                } else {
-                    "scrolling + dispatching FocusAndExpand"
-                }
-            );
-            self.pending_expand = None;
-            self.pending_expand_center_only = false;
-            let total = self.library.artists.len();
-            let target_offset = if center_only {
-                idx
-            } else {
-                let center_slot = self.artists_page.common.slot_list.slot_count.max(2) / 2;
-                idx.saturating_add(center_slot).min(total.saturating_sub(1))
-            };
-            self.artists_page
-                .common
-                .slot_list
-                .set_offset(target_offset, total);
-            self.artists_page.common.slot_list.pin_selected(idx, total);
-            self.artists_page.common.slot_list.flash_center();
-            let prefetch_task = self.prefetch_viewport_artwork();
-            if center_only {
-                return Some(prefetch_task);
-            }
-            // Pin the highlight onto the target so it survives `set_children`
-            // when albums land — handle_artists' AlbumsLoaded post-hook
-            // re-runs set_selected for this id.
-            self.pending_top_pin = Some(crate::state::PendingTopPin::Artist(target_id.clone()));
-            return Some(Task::batch([
-                prefetch_task,
-                Task::done(Message::Artists(views::ArtistsMessage::FocusAndExpand(idx))),
-            ]));
-        }
-
-        if self.library.artists.fully_loaded() {
-            warn!(
-                " [EXPAND] Artist '{}' not found after full load — clearing target",
-                target_id
-            );
-            self.toast_warn("Artist not found in library");
-            self.pending_expand = None;
-            self.pending_expand_center_only = false;
-            return Some(Task::none());
-        }
-
-        if self.library.artists.is_loading() {
-            return None;
-        }
-
-        let next_offset = self.library.artists.loaded_count();
-        debug!(
-            " [EXPAND] Artist '{}' not in buffer — force-fetching next page at offset {}",
-            target_id, next_offset
-        );
-        Some(self.force_load_artists_page(next_offset))
+        self.try_resolve_pending_expand_with::<crate::update::ArtistSpec>()
     }
 
     /// After each albums page lands, look for the pending expand target in

@@ -67,10 +67,6 @@ pub(crate) trait ResolveSpec {
 }
 
 pub(crate) struct AlbumSpec;
-#[expect(
-    dead_code,
-    reason = "wired up by try_resolve_pending_expand_artist wrapper migration"
-)]
 pub(crate) struct ArtistSpec;
 #[expect(
     dead_code,
