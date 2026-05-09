@@ -149,51 +149,51 @@ impl QueueManager {
         for (i, song) in songs.iter_mut().enumerate() {
             song.original_position = Some(i as u32);
         }
-        self.queue.song_ids = songs.iter().map(|s| s.id.clone()).collect();
-        self.queue.current_index = current_index;
+        let mut tx = self.write();
+        tx.queue.song_ids = songs.iter().map(|s| s.id.clone()).collect();
+        tx.queue.current_index = current_index;
         // Clear and rebuild pool
-        self.pool.clear();
-        self.pool.insert_many(songs);
+        tx.pool.clear();
+        tx.pool.insert_many(songs);
         // Clear history on context switch (new album/playlist) — Spotify behavior
-        self.playback_history.clear();
+        tx.playback_history.clear();
         // Rebuild order array and sync
-        self.rebuild_order_and_sync();
+        tx.rebuild_order_and_sync();
         // If shuffle is on, shuffle the new order
-        if self.queue.shuffle {
-            self.shuffle_order();
+        if tx.queue.shuffle {
+            tx.shuffle_order();
         }
-        self.clear_queued();
-        self.save_all()?;
-        Ok(())
+        tx.commit_save_all()
     }
 
     pub fn remove_song(&mut self, index: usize) -> Result<()> {
-        if index < self.queue.song_ids.len() {
-            let removed_id = self.queue.song_ids.remove(index);
-            self.pool.remove(&removed_id);
-
-            // Remove from order array and adjust indices
-            self.remove_from_order(index);
-
-            // Adjust current_index to keep tracking the same playing song
-            if let Some(cur) = self.queue.current_index {
-                if self.queue.song_ids.is_empty() {
-                    // Queue is now empty
-                    self.queue.current_index = None;
-                } else if index < cur {
-                    // Removed before current — shift back
-                    self.queue.current_index = Some(cur - 1);
-                } else if index == cur {
-                    // Removed the current song — clamp to valid range
-                    self.queue.current_index = Some(cur.min(self.queue.song_ids.len() - 1));
-                }
-                // index > cur: no adjustment needed
-            }
-
-            self.clear_queued();
-            self.save_all()?;
+        if index >= self.queue.song_ids.len() {
+            return Ok(());
         }
-        Ok(())
+        let mut tx = self.write();
+        let removed_id = tx.queue.song_ids.remove(index);
+        tx.pool.remove(&removed_id);
+
+        // Remove from order array and adjust indices
+        tx.remove_from_order(index);
+
+        // Adjust current_index to keep tracking the same playing song
+        if let Some(cur) = tx.queue.current_index {
+            if tx.queue.song_ids.is_empty() {
+                // Queue is now empty
+                tx.queue.current_index = None;
+            } else if index < cur {
+                // Removed before current — shift back
+                tx.queue.current_index = Some(cur - 1);
+            } else if index == cur {
+                // Removed the current song — clamp to valid range
+                let new_len = tx.queue.song_ids.len();
+                tx.queue.current_index = Some(cur.min(new_len - 1));
+            }
+            // index > cur: no adjustment needed
+        }
+
+        tx.commit_save_all()
     }
 
     /// Remove a song from the pool by ID (used by consume paths that manage
