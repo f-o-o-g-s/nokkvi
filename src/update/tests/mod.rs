@@ -13,6 +13,8 @@ mod general;
 mod hotkeys;
 mod library_refresh;
 mod menus;
+#[macro_use]
+mod navigation_macros;
 mod navigation;
 mod playback;
 mod queue;
