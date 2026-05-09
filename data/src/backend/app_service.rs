@@ -545,11 +545,11 @@ impl AppService {
 
     /// Insert an album's songs at a specific position in the queue.
     pub async fn insert_album_at_position(&self, album_id: &str, position: usize) -> Result<()> {
-        let songs = self.albums_service.load_album_songs(album_id).await?;
+        let songs = self.library_orchestrator().resolve_album(album_id).await?;
         if songs.is_empty() {
             return Err(anyhow::anyhow!("No songs found in album"));
         }
-        self.queue_service.insert_songs_at(position, songs).await?;
+        self.queue_orchestrator().insert_at(songs, position).await?;
         debug!(
             "📌 Inserted album {} at queue position {}",
             album_id, position
@@ -559,11 +559,14 @@ impl AppService {
 
     /// Insert an artist's songs at a specific position in the queue.
     pub async fn insert_artist_at_position(&self, artist_id: &str, position: usize) -> Result<()> {
-        let songs = self.artists_service.load_artist_songs(artist_id).await?;
+        let songs = self
+            .library_orchestrator()
+            .resolve_artist(artist_id)
+            .await?;
         if songs.is_empty() {
             return Err(anyhow::anyhow!("No songs found for artist"));
         }
-        self.queue_service.insert_songs_at(position, songs).await?;
+        self.queue_orchestrator().insert_at(songs, position).await?;
         debug!(
             "📌 Inserted artist {} at queue position {}",
             artist_id, position
@@ -577,8 +580,8 @@ impl AppService {
         song: crate::types::song::Song,
         position: usize,
     ) -> Result<()> {
-        self.queue_service
-            .insert_songs_at(position, vec![song])
+        self.queue_orchestrator()
+            .insert_at(vec![song], position)
             .await?;
         debug!("📌 Inserted song at queue position {}", position);
         Ok(())
@@ -610,11 +613,14 @@ impl AppService {
 
     /// Insert all songs in a genre at a specific position in the queue.
     pub async fn insert_genre_at_position(&self, genre_name: &str, position: usize) -> Result<()> {
-        let songs = self.load_genre_songs(genre_name).await?;
+        let songs = self
+            .library_orchestrator()
+            .resolve_genre(genre_name)
+            .await?;
         if songs.is_empty() {
             return Err(anyhow::anyhow!("No songs found in genre"));
         }
-        self.queue_service.insert_songs_at(position, songs).await?;
+        self.queue_orchestrator().insert_at(songs, position).await?;
         debug!(
             "📌 Inserted genre '{}' at queue position {}",
             genre_name, position
