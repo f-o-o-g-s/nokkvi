@@ -407,13 +407,12 @@ impl PlaybackController {
     pub async fn toggle_random(&self) -> Result<bool> {
         let queue_manager_arc = self.queue_service.queue_manager();
         let mut queue_manager = queue_manager_arc.lock().await;
-        let _ = queue_manager.toggle_shuffle()?;
+        let effect = queue_manager.toggle_shuffle()?;
         let is_random = queue_manager.get_queue().shuffle;
         drop(queue_manager);
 
         // Invalidate engine-level gapless prep (stale after order change)
-        let mut engine = self.audio_engine.lock().await;
-        engine.reset_next_track().await;
+        effect.apply_to(&self.audio_engine).await;
 
         Ok(is_random)
     }
@@ -435,14 +434,13 @@ impl PlaybackController {
             RepeatMode::Playlist => RepeatMode::None,
         };
 
-        let _ = queue_manager.set_repeat(next_repeat)?;
+        let effect = queue_manager.set_repeat(next_repeat)?;
         queue_manager.clear_queued();
         queue_manager.save_order()?;
         drop(queue_manager);
 
         // Invalidate engine-level gapless prep (stale after mode change)
-        let mut engine = self.audio_engine.lock().await;
-        engine.reset_next_track().await;
+        effect.apply_to(&self.audio_engine).await;
 
         let repeat = next_repeat == RepeatMode::Track;
         let repeat_queue = next_repeat == RepeatMode::Playlist;
@@ -456,13 +454,12 @@ impl PlaybackController {
     pub async fn toggle_consume(&self) -> Result<bool> {
         let queue_manager_arc = self.queue_service.queue_manager();
         let mut queue_manager = queue_manager_arc.lock().await;
-        let _ = queue_manager.toggle_consume()?;
+        let effect = queue_manager.toggle_consume()?;
         let consume = queue_manager.get_queue().consume;
         drop(queue_manager);
 
         // Invalidate engine-level gapless prep (stale after mode change)
-        let mut engine = self.audio_engine.lock().await;
-        engine.reset_next_track().await;
+        effect.apply_to(&self.audio_engine).await;
 
         Ok(consume)
     }
