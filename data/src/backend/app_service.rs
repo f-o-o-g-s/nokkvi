@@ -372,9 +372,7 @@ impl AppService {
         songs: Vec<crate::types::song::Song>,
         start_index: usize,
     ) -> Result<()> {
-        self.playback
-            .play_songs_from_index(songs, start_index)
-            .await
+        self.queue_orchestrator().play(songs, start_index).await
     }
 
     // =========================================================================
