@@ -419,10 +419,8 @@ impl AppService {
     /// Used by `EnterBehavior::AppendAndPlay` — preserves existing queue.
     pub async fn add_song_and_play(&self, song: crate::types::song::Song) -> Result<()> {
         let song_id = song.id.clone();
-        let queue_index = self.queue_service.get_songs().len();
-        self.queue_service.add_songs(vec![song]).await?;
-        self.playback
-            .play_song_from_queue(&song_id, queue_index)
+        self.queue_orchestrator()
+            .enqueue_and_play(vec![song])
             .await?;
         debug!("➕▶ Added song to queue and started playing: {}", song_id);
         Ok(())
@@ -478,32 +476,25 @@ impl AppService {
 
     /// Append an album's songs to the queue and start playing the first one.
     pub async fn add_album_and_play(&self, album_id: &str) -> Result<()> {
-        let songs = self.albums_service.load_album_songs(album_id).await?;
+        let songs = self.library_orchestrator().resolve_album(album_id).await?;
         if songs.is_empty() {
             return Err(anyhow::anyhow!("No songs found in album"));
         }
-        let first_id = songs[0].id.clone();
-        let queue_index = self.queue_service.get_songs().len();
-        self.queue_service.add_songs(songs).await?;
-        self.playback
-            .play_song_from_queue(&first_id, queue_index)
-            .await?;
+        self.queue_orchestrator().enqueue_and_play(songs).await?;
         debug!("➕▶ Added album {} to queue and started playing", album_id);
         Ok(())
     }
 
     /// Append an artist's songs to the queue and start playing the first one.
     pub async fn add_artist_and_play(&self, artist_id: &str) -> Result<()> {
-        let songs = self.artists_service.load_artist_songs(artist_id).await?;
+        let songs = self
+            .library_orchestrator()
+            .resolve_artist(artist_id)
+            .await?;
         if songs.is_empty() {
             return Err(anyhow::anyhow!("No songs found for artist"));
         }
-        let first_id = songs[0].id.clone();
-        let queue_index = self.queue_service.get_songs().len();
-        self.queue_service.add_songs(songs).await?;
-        self.playback
-            .play_song_from_queue(&first_id, queue_index)
-            .await?;
+        self.queue_orchestrator().enqueue_and_play(songs).await?;
         debug!(
             "➕▶ Added artist {} to queue and started playing",
             artist_id
@@ -513,16 +504,14 @@ impl AppService {
 
     /// Append a genre's songs to the queue and start playing the first one.
     pub async fn add_genre_and_play(&self, genre_name: &str) -> Result<()> {
-        let songs = self.load_genre_songs(genre_name).await?;
+        let songs = self
+            .library_orchestrator()
+            .resolve_genre(genre_name)
+            .await?;
         if songs.is_empty() {
             return Err(anyhow::anyhow!("No songs found in genre"));
         }
-        let first_id = songs[0].id.clone();
-        let queue_index = self.queue_service.get_songs().len();
-        self.queue_service.add_songs(songs).await?;
-        self.playback
-            .play_song_from_queue(&first_id, queue_index)
-            .await?;
+        self.queue_orchestrator().enqueue_and_play(songs).await?;
         debug!(
             "➕▶ Added genre '{}' to queue and started playing",
             genre_name
@@ -532,16 +521,14 @@ impl AppService {
 
     /// Append a playlist's songs to the queue and start playing the first one.
     pub async fn add_playlist_and_play(&self, playlist_id: &str) -> Result<()> {
-        let songs = self.load_playlist_songs(playlist_id).await?;
+        let songs = self
+            .library_orchestrator()
+            .resolve_playlist(playlist_id)
+            .await?;
         if songs.is_empty() {
             return Err(anyhow::anyhow!("No songs found in playlist"));
         }
-        let first_id = songs[0].id.clone();
-        let queue_index = self.queue_service.get_songs().len();
-        self.queue_service.add_songs(songs).await?;
-        self.playback
-            .play_song_from_queue(&first_id, queue_index)
-            .await?;
+        self.queue_orchestrator().enqueue_and_play(songs).await?;
         debug!(
             "➕▶ Added playlist {} to queue and started playing",
             playlist_id
