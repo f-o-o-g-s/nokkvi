@@ -754,13 +754,6 @@ impl AppService {
 }
 
 impl AppService {
-    /// Load all songs for a genre via the Genres API.
-    async fn load_genre_songs(&self, genre_name: &str) -> Result<Vec<crate::types::song::Song>> {
-        let songs_service = self.songs_api().await?;
-        let (songs, _) = songs_service.load_songs_by_genre(genre_name).await?;
-        Ok(songs)
-    }
-
     /// Load all internet radio stations via the Radios API.
     pub async fn load_radio_stations(
         &self,
@@ -769,46 +762,12 @@ impl AppService {
         radios_service.load_radio_stations().await
     }
 
-    /// Load all songs for a playlist via the Playlists API.
-    async fn load_playlist_songs(
-        &self,
-        playlist_id: &str,
-    ) -> Result<Vec<crate::types::song::Song>> {
-        let playlists_service = self.playlists_api().await?;
-        playlists_service.load_playlist_songs(playlist_id).await
-    }
-
     // =========================================================================
     // Play-Next Orchestration Methods
     //
     // These methods add songs to the queue and then move them to right after
     // the currently playing track, so they play next.
     // =========================================================================
-
-    /// Core helper: insert songs right after the currently playing track.
-    ///
-    /// Uses `insert_songs_at` for a single O(n) bulk splice instead of the
-    /// previous add-then-move pattern which was O(n²) (n lock acquisitions × n
-    /// Vec shifts).
-    async fn play_next_songs(&self, songs: Vec<crate::types::song::Song>) -> Result<()> {
-        if songs.is_empty() {
-            return Err(anyhow::anyhow!("No songs to add"));
-        }
-        let count = songs.len();
-
-        // Target position: right after the currently playing index
-        let current_idx = self.queue_service.current_index().await;
-        let target = current_idx.map_or(0, |i| i + 1);
-
-        // Single bulk insert at the target position
-        self.queue_service.insert_songs_at(target, songs).await?;
-        self.queue_service.refresh_from_queue().await?;
-        debug!(
-            "⏭ Inserted {} songs as play-next at position {}",
-            count, target
-        );
-        Ok(())
-    }
 
     /// Play next: add album songs right after currently playing track.
     pub async fn play_next_album(&self, album_id: &str) -> Result<()> {
@@ -872,74 +831,27 @@ impl AppService {
         &self,
         batch: crate::types::batch::BatchPayload,
     ) -> Result<Vec<crate::types::song::Song>> {
-        use std::collections::HashSet;
-
-        use crate::types::batch::BatchItem;
-
-        let mut resolved_songs = Vec::new();
-        let mut seen_ids = HashSet::new();
-
-        for item in batch.items {
-            let songs_result = match item {
-                BatchItem::Song(song) => Ok(vec![*song]),
-                BatchItem::Album(album_id) => self.albums_service.load_album_songs(&album_id).await,
-                BatchItem::Artist(artist_id) => {
-                    self.artists_service.load_artist_songs(&artist_id).await
-                }
-                BatchItem::Genre(genre) => self.load_genre_songs(&genre).await,
-                BatchItem::Playlist(playlist_id) => self.load_playlist_songs(&playlist_id).await,
-            };
-
-            match songs_result {
-                Ok(songs) => {
-                    for song in songs {
-                        if seen_ids.insert(song.id.clone()) {
-                            resolved_songs.push(song);
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!("Batch item resolution failed, skipping: {e}");
-                }
-            }
-        }
-
-        if resolved_songs.is_empty() {
-            Err(anyhow::anyhow!("No songs found in batch payload"))
-        } else {
-            Ok(resolved_songs)
-        }
+        self.library_orchestrator().resolve_batch(batch).await
     }
 
     /// Play a batch. Replaces the current queue and starts playing.
     pub async fn play_batch(&self, batch: crate::types::batch::BatchPayload) -> Result<()> {
-        let songs = self.resolve_batch(batch).await?;
-        self.playback_songs(songs, 0).await
-    }
-
-    // helper wrapper to call internal logic bypassing self-clone if possible:
-    async fn playback_songs(
-        &self,
-        songs: Vec<crate::types::song::Song>,
-        start_index: usize,
-    ) -> Result<()> {
-        self.playback
-            .play_songs_from_index(songs, start_index)
-            .await
+        let songs = self.library_orchestrator().resolve_batch(batch).await?;
+        self.queue_orchestrator().play(songs, 0).await
     }
 
     /// Add a batch to the queue (append).
     pub async fn add_batch_to_queue(&self, batch: crate::types::batch::BatchPayload) -> Result<()> {
-        let songs = self.resolve_batch(batch).await?;
-        self.queue_service.add_songs(songs).await?;
+        let songs = self.library_orchestrator().resolve_batch(batch).await?;
+        self.queue_orchestrator().enqueue(songs).await?;
         debug!("➕ Added batch to queue");
         Ok(())
     }
 
     /// Add a batch right after the currently playing track.
     pub async fn play_next_batch(&self, batch: crate::types::batch::BatchPayload) -> Result<()> {
-        let songs = self.resolve_batch(batch).await?;
-        self.play_next_songs(songs).await
+        let songs = self.library_orchestrator().resolve_batch(batch).await?;
+        self.queue_orchestrator().play_next(songs).await
     }
 
     /// Insert a batch at a specific position in the queue.
@@ -948,8 +860,8 @@ impl AppService {
         batch: crate::types::batch::BatchPayload,
         position: usize,
     ) -> Result<()> {
-        let songs = self.resolve_batch(batch).await?;
-        self.queue_service.insert_songs_at(position, songs).await?;
+        let songs = self.library_orchestrator().resolve_batch(batch).await?;
+        self.queue_orchestrator().insert_at(songs, position).await?;
         debug!("📌 Inserted batch at queue position {}", position);
         Ok(())
     }
