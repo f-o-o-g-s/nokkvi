@@ -176,8 +176,8 @@ mod tests {
 
     #[test]
     fn session_round_trip() {
-        let db_path = std::env::temp_dir().join("test_session_roundtrip.redb");
-        let _ = std::fs::remove_file(&db_path);
+        let temp = tempfile::TempDir::new().unwrap();
+        let db_path = temp.path().join("session.redb");
 
         let storage = crate::services::state_storage::StateStorage::new(db_path.clone()).unwrap();
 
@@ -188,23 +188,21 @@ mod tests {
 
         // Load from a fresh handle (simulates app restart)
         drop(storage);
-        let storage2 = crate::services::state_storage::StateStorage::new(db_path.clone()).unwrap();
+        let storage2 = crate::services::state_storage::StateStorage::new(db_path).unwrap();
 
         let jwt_loaded: Option<String> = storage2.load(JWT_TOKEN_KEY).unwrap();
         let sub_loaded: Option<String> = storage2.load(SUBSONIC_CREDENTIAL_KEY).unwrap();
 
         assert_eq!(jwt_loaded.unwrap(), jwt);
         assert_eq!(sub_loaded.unwrap(), subsonic);
-
-        std::fs::remove_file(db_path).unwrap();
     }
 
     #[test]
     fn clear_session_removes_tokens() {
-        let db_path = std::env::temp_dir().join("test_session_clear.redb");
-        let _ = std::fs::remove_file(&db_path);
+        let temp = tempfile::TempDir::new().unwrap();
+        let db_path = temp.path().join("session.redb");
 
-        let storage = crate::services::state_storage::StateStorage::new(db_path.clone()).unwrap();
+        let storage = crate::services::state_storage::StateStorage::new(db_path).unwrap();
 
         save_session(&storage, "jwt", "subsonic").unwrap();
         clear_session(&storage).unwrap();
@@ -213,8 +211,6 @@ mod tests {
         // (load_session() opens a new handle which may conflict)
         let jwt: Option<String> = storage.load(JWT_TOKEN_KEY).unwrap();
         assert!(jwt.unwrap().is_empty());
-
-        std::fs::remove_file(db_path).unwrap();
     }
 
     #[test]
@@ -244,15 +240,13 @@ mod tests {
 
     #[test]
     fn load_session_returns_none_when_empty() {
-        let db_path = std::env::temp_dir().join("test_session_empty.redb");
-        let _ = std::fs::remove_file(&db_path);
+        let temp = tempfile::TempDir::new().unwrap();
+        let db_path = temp.path().join("session.redb");
 
-        let storage = crate::services::state_storage::StateStorage::new(db_path.clone()).unwrap();
+        let storage = crate::services::state_storage::StateStorage::new(db_path).unwrap();
 
         // No session saved yet
         let jwt: Option<String> = storage.load(JWT_TOKEN_KEY).unwrap();
         assert!(jwt.is_none());
-
-        std::fs::remove_file(db_path).unwrap();
     }
 }

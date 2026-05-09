@@ -372,7 +372,7 @@ mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         let peeked = qm.peek_next_song().unwrap();
         assert_eq!(peeked.index(), 1);
@@ -390,7 +390,7 @@ mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(1));
+        let (mut qm, _temp) = make_test_manager(songs, Some(1));
         qm.set_repeat(RepeatMode::Track).unwrap();
 
         let peeked = qm.peek_next_song().unwrap();
@@ -402,7 +402,7 @@ mod tests {
     #[test]
     fn peek_at_end_no_repeat_returns_none() {
         let songs = vec![make_test_song("a"), make_test_song("b")];
-        let mut qm = make_test_manager(songs, Some(1)); // at last song
+        let (mut qm, _temp) = make_test_manager(songs, Some(1)); // at last song
 
         let peeked = qm.peek_next_song();
         assert!(peeked.is_none());
@@ -411,7 +411,7 @@ mod tests {
     #[test]
     fn peek_at_end_repeat_playlist_wraps() {
         let songs = vec![make_test_song("a"), make_test_song("b")];
-        let mut qm = make_test_manager(songs, Some(1)); // at last song
+        let (mut qm, _temp) = make_test_manager(songs, Some(1)); // at last song
         qm.set_repeat(RepeatMode::Playlist).unwrap();
 
         let peeked = qm.peek_next_song().unwrap();
@@ -427,7 +427,7 @@ mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         // Peek first
         let peeked = qm.peek_next_song().unwrap();
@@ -451,7 +451,7 @@ mod tests {
             make_test_song("d"),
             make_test_song("e"),
         ];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         // Advance through all songs sequentially
         for expected_idx in 1..5 {
@@ -468,7 +468,7 @@ mod tests {
     #[test]
     fn get_next_at_end_no_repeat_returns_none() {
         let songs = vec![make_test_song("a"), make_test_song("b")];
-        let mut qm = make_test_manager(songs, Some(1));
+        let (mut qm, _temp) = make_test_manager(songs, Some(1));
 
         let next = qm.get_next_song();
         assert!(next.is_none());
@@ -479,7 +479,7 @@ mod tests {
     #[test]
     fn get_next_at_end_repeat_playlist_wraps() {
         let songs = vec![make_test_song("a"), make_test_song("b")];
-        let mut qm = make_test_manager(songs, Some(1));
+        let (mut qm, _temp) = make_test_manager(songs, Some(1));
         qm.set_repeat(RepeatMode::Playlist).unwrap();
 
         let next = qm.get_next_song().unwrap();
@@ -496,7 +496,7 @@ mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(1));
+        let (mut qm, _temp) = make_test_manager(songs, Some(1));
         qm.set_repeat(RepeatMode::Track).unwrap();
 
         let next = qm.get_next_song().unwrap();
@@ -512,7 +512,7 @@ mod tests {
 
     #[test]
     fn get_next_empty_queue_returns_none() {
-        let mut qm = make_test_manager(vec![], None);
+        let (mut qm, _temp) = make_test_manager(vec![], None);
         assert!(qm.get_next_song().is_none());
     }
 
@@ -525,7 +525,7 @@ mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(2));
+        let (mut qm, _temp) = make_test_manager(songs, Some(2));
 
         // Add "a" to history (simulating having played it)
         qm.add_to_history(make_test_song("a"));
@@ -547,7 +547,7 @@ mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(2));
+        let (mut qm, _temp) = make_test_manager(songs, Some(2));
         // No history — should fall back to index-1
 
         let result = qm.get_previous_song(Some(2));
@@ -563,7 +563,7 @@ mod tests {
     #[test]
     fn previous_removed_song_from_history() {
         let songs = vec![make_test_song("b"), make_test_song("c")];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         // Add "x" (not in queue) to history
         qm.add_to_history(make_test_song("x"));
@@ -580,7 +580,7 @@ mod tests {
     #[test]
     fn previous_no_history_at_start_returns_none() {
         let songs = vec![make_test_song("a"), make_test_song("b")];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
         // No history, at index 0 — nowhere to go
 
         let result = qm.get_previous_song(Some(0));
@@ -592,7 +592,7 @@ mod tests {
     #[test]
     fn history_repeat_guard_skips_duplicates() {
         let songs = vec![make_test_song("a")];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         qm.add_to_history(make_test_song("x"));
         qm.add_to_history(make_test_song("x")); // duplicate — should be skipped
@@ -605,7 +605,7 @@ mod tests {
     #[test]
     fn history_max_size_cap() {
         let songs = vec![make_test_song("a")];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         // Add more than max_history_size entries
         for i in 0..150 {
@@ -626,7 +626,7 @@ mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
         qm.queue.shuffle = true;
         qm.queue.consume = true;
         // Force current_order to end of the shuffled order
@@ -648,7 +648,7 @@ mod tests {
     #[test]
     fn next_shuffle_consume_single_song_returns_none() {
         let songs = vec![make_test_song("a")];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
         qm.queue.shuffle = true;
         qm.queue.consume = true;
 
@@ -664,7 +664,7 @@ mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
         qm.queue.shuffle = true;
         qm.queue.consume = false;
         qm.queue.current_order = Some(qm.queue.order.len() - 1);
@@ -685,7 +685,7 @@ mod tests {
             make_test_song("d"),
             make_test_song("e"),
         ];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
         qm.queue.shuffle = true;
         qm.set_repeat(RepeatMode::Playlist).unwrap();
         qm.shuffle_order();
@@ -717,7 +717,7 @@ mod tests {
     #[test]
     fn next_shuffle_repeat_playlist_single_song() {
         let songs = vec![make_test_song("a")];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
         qm.queue.shuffle = true;
         qm.set_repeat(RepeatMode::Playlist).unwrap();
 
@@ -737,7 +737,7 @@ mod tests {
     /// Helper: configure a QueueManager with the given mode flags
     fn with_modes(shuffle: bool, consume: bool, repeat: RepeatMode) -> QueueManager {
         let songs: Vec<_> = (0..10).map(|i| make_test_song(&i.to_string())).collect();
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
         if shuffle {
             qm.toggle_shuffle().unwrap();
         }
@@ -920,7 +920,7 @@ mod tests {
     fn previous_with_consume_returns_removed() {
         // Simulate consume mode: playing "b", "a" was consumed (removed)
         let songs = vec![make_test_song("b"), make_test_song("c")];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
         qm.queue.consume = true;
 
         // Add consumed song "a" to history
@@ -944,7 +944,7 @@ mod tests {
         // The exact bug scenario: 1 song left, consume + repeat-playlist.
         // peek_next_song must return None — there's nothing to wrap to.
         let songs = vec![make_test_song("a")];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
         qm.queue.consume = true;
         qm.set_repeat(RepeatMode::Playlist).unwrap();
 
@@ -964,7 +964,7 @@ mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
         qm.queue.consume = true;
         qm.set_repeat(RepeatMode::Playlist).unwrap();
 
@@ -984,7 +984,7 @@ mod tests {
     fn consume_shuffle_repeat_playlist_last_song_returns_none() {
         // Shuffle + consume + repeat-playlist with 1 song: must return None.
         let songs = vec![make_test_song("a")];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
         qm.queue.shuffle = true;
         qm.queue.consume = true;
         qm.set_repeat(RepeatMode::Playlist).unwrap();
@@ -1006,7 +1006,7 @@ mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
         qm.queue.consume = true;
         qm.set_repeat(RepeatMode::Playlist).unwrap();
 
@@ -1046,7 +1046,7 @@ mod proptest_navigation {
     ) -> super::QueueManager {
         let songs: Vec<_> = (0..n).map(|i| make_test_song(&i.to_string())).collect();
         let start = if n > 0 { start_idx % n } else { 0 };
-        let mut qm = make_test_manager(songs, if n > 0 { Some(start) } else { None });
+        let (mut qm, _temp) = make_test_manager(songs, if n > 0 { Some(start) } else { None });
         if shuffle {
             qm.toggle_shuffle().unwrap();
         }
@@ -1132,7 +1132,7 @@ mod proptest_navigation {
         ) {
             let songs: Vec<_> = (0..n).map(|i| make_test_song(&i.to_string())).collect();
             let s = start % n;
-            let mut qm = make_test_manager(songs, Some(s));
+            let (mut qm, _temp) = make_test_manager(songs, Some(s));
             // Sequential, no consume, no repeat
             qm.queue.consume = false;
             qm.set_repeat(RepeatMode::None).unwrap();
@@ -1176,7 +1176,7 @@ mod proptest_navigation {
         #[test]
         fn shuffle_visits_all_once(n in 2usize..20) {
             let songs: Vec<_> = (0..n).map(|i| make_test_song(&i.to_string())).collect();
-            let mut qm = make_test_manager(songs, Some(0));
+            let (mut qm, _temp) = make_test_manager(songs, Some(0));
             qm.toggle_shuffle().unwrap();
             qm.queue.consume = false;
             qm.set_repeat(RepeatMode::None).unwrap();

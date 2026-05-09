@@ -583,13 +583,9 @@ pub(crate) mod tests {
     pub(crate) fn make_test_manager(
         songs: Vec<Song>,
         current_index: Option<usize>,
-    ) -> QueueManager {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let temp_dir = std::env::temp_dir();
-        let db_path = temp_dir.join(format!("test_queue_{}_{}.redb", std::process::id(), id));
-        let _ = std::fs::remove_file(&db_path);
+    ) -> (QueueManager, tempfile::TempDir) {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let db_path = temp.path().join("queue.redb");
         let storage = StateStorage::new(db_path).expect("temp storage");
         let mut qm = QueueManager::new(storage).expect("queue manager");
         let ids: Vec<String> = songs.iter().map(|s| s.id.clone()).collect();
@@ -597,7 +593,7 @@ pub(crate) mod tests {
         qm.queue.song_ids = ids;
         qm.queue.current_index = current_index;
         qm.rebuild_order_and_sync();
-        qm
+        (qm, temp)
     }
 
     #[test]
@@ -607,7 +603,7 @@ pub(crate) mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, None);
+        let (mut qm, _temp) = make_test_manager(songs, None);
 
         qm.move_item(0, 2).unwrap();
         let ids: Vec<&str> = qm.queue.song_ids.iter().map(|s| s.as_str()).collect();
@@ -621,7 +617,7 @@ pub(crate) mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, None);
+        let (mut qm, _temp) = make_test_manager(songs, None);
 
         qm.move_item(2, 0).unwrap();
         let ids: Vec<&str> = qm.queue.song_ids.iter().map(|s| s.as_str()).collect();
@@ -631,7 +627,7 @@ pub(crate) mod tests {
     #[test]
     fn move_item_same_position_is_noop() {
         let songs = vec![make_test_song("a"), make_test_song("b")];
-        let mut qm = make_test_manager(songs, None);
+        let (mut qm, _temp) = make_test_manager(songs, None);
 
         qm.move_item(1, 1).unwrap();
         let ids: Vec<&str> = qm.queue.song_ids.iter().map(|s| s.as_str()).collect();
@@ -641,7 +637,7 @@ pub(crate) mod tests {
     #[test]
     fn move_item_out_of_bounds_is_noop() {
         let songs = vec![make_test_song("a"), make_test_song("b")];
-        let mut qm = make_test_manager(songs, None);
+        let (mut qm, _temp) = make_test_manager(songs, None);
 
         qm.move_item(5, 0).unwrap();
         let ids: Vec<&str> = qm.queue.song_ids.iter().map(|s| s.as_str()).collect();
@@ -655,7 +651,7 @@ pub(crate) mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         qm.move_item(0, 2).unwrap();
         assert_eq!(qm.queue.current_index, Some(1));
@@ -669,7 +665,7 @@ pub(crate) mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(2));
+        let (mut qm, _temp) = make_test_manager(songs, Some(2));
 
         qm.move_item(2, 0).unwrap();
         assert_eq!(qm.queue.current_index, Some(0));
@@ -683,7 +679,7 @@ pub(crate) mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(1));
+        let (mut qm, _temp) = make_test_manager(songs, Some(1));
 
         qm.move_item(0, 2).unwrap();
         assert_eq!(qm.queue.current_index, Some(0));
@@ -697,7 +693,7 @@ pub(crate) mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(1));
+        let (mut qm, _temp) = make_test_manager(songs, Some(1));
 
         qm.move_item(2, 0).unwrap();
         assert_eq!(qm.queue.current_index, Some(2));
@@ -707,7 +703,7 @@ pub(crate) mod tests {
     #[test]
     fn move_item_to_end_of_two_item_queue() {
         let songs = vec![make_test_song("a"), make_test_song("b")];
-        let mut qm = make_test_manager(songs, None);
+        let (mut qm, _temp) = make_test_manager(songs, None);
 
         // from=0, to=2 (== len) means "place after the last item"
         qm.move_item(0, 2).unwrap();
@@ -724,7 +720,7 @@ pub(crate) mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(2)); // playing "c"
+        let (mut qm, _temp) = make_test_manager(songs, Some(2)); // playing "c"
 
         qm.remove_song(0).unwrap(); // remove "a"
         assert_eq!(qm.queue.current_index, Some(1)); // "c" shifted from 2→1
@@ -738,7 +734,7 @@ pub(crate) mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(0)); // playing "a"
+        let (mut qm, _temp) = make_test_manager(songs, Some(0)); // playing "a"
 
         qm.remove_song(2).unwrap(); // remove "c"
         assert_eq!(qm.queue.current_index, Some(0)); // unchanged
@@ -752,7 +748,7 @@ pub(crate) mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(2)); // playing "c" (last)
+        let (mut qm, _temp) = make_test_manager(songs, Some(2)); // playing "c" (last)
 
         qm.remove_song(2).unwrap(); // remove "c"
         assert_eq!(qm.queue.current_index, Some(1)); // clamped to last valid
@@ -761,7 +757,7 @@ pub(crate) mod tests {
     #[test]
     fn remove_song_until_empty_clears_index() {
         let songs = vec![make_test_song("a")];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         qm.remove_song(0).unwrap();
         assert_eq!(qm.queue.current_index, None);
@@ -777,7 +773,7 @@ pub(crate) mod tests {
             make_test_song("d"),
             make_test_song("e"),
         ];
-        let mut qm = make_test_manager(songs, Some(4)); // playing "e" at index 4
+        let (mut qm, _temp) = make_test_manager(songs, Some(4)); // playing "e" at index 4
 
         qm.remove_song(0).unwrap(); // remove "a" → current becomes 3
         qm.remove_song(0).unwrap(); // remove "b" → current becomes 2
@@ -792,7 +788,7 @@ pub(crate) mod tests {
     #[test]
     fn pool_get_returns_song_data() {
         let songs = vec![make_test_song("a"), make_test_song("b")];
-        let qm = make_test_manager(songs, None);
+        let (qm, _temp) = make_test_manager(songs, None);
 
         assert_eq!(qm.get_song("a").unwrap().title, "Song a");
         assert_eq!(qm.get_song("b").unwrap().title, "Song b");
@@ -802,7 +798,7 @@ pub(crate) mod tests {
     #[test]
     fn save_order_does_not_include_song_data() {
         let songs = vec![make_test_song("x"), make_test_song("y")];
-        let qm = make_test_manager(songs, Some(0));
+        let (qm, _temp) = make_test_manager(songs, Some(0));
 
         // Save order only
         qm.save_order().unwrap();
@@ -823,7 +819,7 @@ pub(crate) mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let qm = make_test_manager(songs, Some(0));
+        let (qm, _temp) = make_test_manager(songs, Some(0));
 
         assert_eq!(qm.queue.order, vec![0, 1, 2]);
         assert_eq!(qm.queue.current_order, Some(0));
@@ -832,7 +828,7 @@ pub(crate) mod tests {
     #[test]
     fn order_array_shuffled_preserves_current() {
         let songs: Vec<Song> = (0..10).map(|i| make_test_song(&i.to_string())).collect();
-        let mut qm = make_test_manager(songs, Some(3));
+        let (mut qm, _temp) = make_test_manager(songs, Some(3));
 
         // Toggle shuffle on
         qm.toggle_shuffle().unwrap();
@@ -852,7 +848,7 @@ pub(crate) mod tests {
             make_test_song("d"),
             make_test_song("e"),
         ];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         // Peek should return song at index 1 (next in order)
         let peeked = qm.peek_next_song().unwrap();
@@ -863,7 +859,7 @@ pub(crate) mod tests {
     #[test]
     fn peek_next_shuffle_returns_order_array_entry() {
         let songs: Vec<Song> = (0..10).map(|i| make_test_song(&i.to_string())).collect();
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         qm.toggle_shuffle().unwrap();
 
@@ -881,7 +877,7 @@ pub(crate) mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         // Peek + transition via the guard
         let peeked = qm.peek_next_song().unwrap();
@@ -899,7 +895,7 @@ pub(crate) mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         let peeked = qm.peek_next_song().unwrap();
         // peeked's existence implies queued is set (guard invariant).
@@ -914,7 +910,7 @@ pub(crate) mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         // Set queued directly (the guard's drop semantics would otherwise
         // clear it before we can observe the mutation's effect).
@@ -933,7 +929,7 @@ pub(crate) mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         // Set queued directly (the guard's drop semantics would otherwise
         // clear it before we can observe the mutation's effect).
@@ -954,7 +950,7 @@ pub(crate) mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         // Set queued directly (the guard's drop semantics would otherwise
         // clear it before we can observe the mutation's effect).
@@ -976,7 +972,7 @@ pub(crate) mod tests {
             make_test_song("c"),
             make_test_song("d"),
         ];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         // Order is [0, 1, 2, 3]. Remove song at index 1 ("b")
         qm.remove_song(1).unwrap();
@@ -989,7 +985,7 @@ pub(crate) mod tests {
     #[test]
     fn add_songs_extends_order() {
         let songs = vec![make_test_song("a"), make_test_song("b")];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         assert_eq!(qm.queue.order, vec![0, 1]);
 
@@ -1007,7 +1003,7 @@ pub(crate) mod tests {
     #[test]
     fn unshuffle_restores_identity() {
         let songs: Vec<Song> = (0..10).map(|i| make_test_song(&i.to_string())).collect();
-        let mut qm = make_test_manager(songs, Some(3));
+        let (mut qm, _temp) = make_test_manager(songs, Some(3));
 
         // Shuffle
         qm.toggle_shuffle().unwrap();
@@ -1040,7 +1036,7 @@ pub(crate) mod tests {
         songs[1].title = "Alpha".to_string();
         songs[2].title = "Bravo".to_string();
 
-        let mut qm = make_test_manager(songs, Some(0)); // playing "c" = "Charlie"
+        let (mut qm, _temp) = make_test_manager(songs, Some(0)); // playing "c" = "Charlie"
         qm.sort_queue(QueueSortMode::Title, true).unwrap();
 
         // After title sort ascending: Alpha, Bravo, Charlie
@@ -1053,7 +1049,7 @@ pub(crate) mod tests {
     fn sort_queue_empty_is_noop() {
         use crate::types::queue_sort_mode::QueueSortMode;
 
-        let mut qm = make_test_manager(vec![], None);
+        let (mut qm, _temp) = make_test_manager(vec![], None);
         qm.sort_queue(QueueSortMode::Title, true).unwrap();
         assert!(qm.queue.song_ids.is_empty());
         assert_eq!(qm.queue.current_index, None);
@@ -1071,7 +1067,7 @@ pub(crate) mod tests {
         songs[0].play_count = Some(5);
         songs[1].play_count = Some(20);
         songs[2].play_count = Some(10);
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         // ascending=true mirrors Rating's pre-flip convention: highest first.
         qm.sort_queue(QueueSortMode::MostPlayed, true).unwrap();
@@ -1085,7 +1081,7 @@ pub(crate) mod tests {
         let mut songs = vec![make_test_song("a"), make_test_song("b")];
         songs[0].play_count = None;
         songs[1].play_count = Some(3);
-        let mut qm = make_test_manager(songs, None);
+        let (mut qm, _temp) = make_test_manager(songs, None);
 
         qm.sort_queue(QueueSortMode::MostPlayed, true).unwrap();
         assert_eq!(qm.queue.song_ids, vec!["b", "a"]);
@@ -1094,7 +1090,7 @@ pub(crate) mod tests {
     #[test]
     fn shuffle_queue_preserves_current_song_identity() {
         let songs: Vec<Song> = (0..20).map(|i| make_test_song(&i.to_string())).collect();
-        let mut qm = make_test_manager(songs, Some(7)); // playing "7"
+        let (mut qm, _temp) = make_test_manager(songs, Some(7)); // playing "7"
 
         qm.shuffle_queue().unwrap();
 
@@ -1113,7 +1109,7 @@ pub(crate) mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(1)); // playing "b" at 1
+        let (mut qm, _temp) = make_test_manager(songs, Some(1)); // playing "b" at 1
 
         let new_songs = vec![make_test_song("x"), make_test_song("y")];
         qm.insert_after_current(new_songs).unwrap();
@@ -1130,7 +1126,7 @@ pub(crate) mod tests {
     #[test]
     fn insert_after_current_when_nothing_playing() {
         let songs = vec![make_test_song("a"), make_test_song("b")];
-        let mut qm = make_test_manager(songs, None);
+        let (mut qm, _temp) = make_test_manager(songs, None);
 
         let new_songs = vec![make_test_song("x")];
         qm.insert_after_current(new_songs).unwrap();
@@ -1149,7 +1145,7 @@ pub(crate) mod tests {
             make_test_song("c"),
             make_test_song("d"),
         ];
-        let mut qm = make_test_manager(songs, Some(3)); // playing "d" at 3
+        let (mut qm, _temp) = make_test_manager(songs, Some(3)); // playing "d" at 3
 
         let new_songs = vec![make_test_song("x"), make_test_song("y")];
         qm.insert_songs_at(1, new_songs).unwrap();
@@ -1167,7 +1163,7 @@ pub(crate) mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(1)); // playing "b" at 1
+        let (mut qm, _temp) = make_test_manager(songs, Some(1)); // playing "b" at 1
 
         let new_songs = vec![make_test_song("x")];
         qm.insert_songs_at(3, new_songs).unwrap(); // insert after end
@@ -1183,7 +1179,7 @@ pub(crate) mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(2)); // playing "c" at 2
+        let (mut qm, _temp) = make_test_manager(songs, Some(2)); // playing "c" at 2
 
         let new_songs = vec![
             make_test_song("x"),
@@ -1201,7 +1197,7 @@ pub(crate) mod tests {
     fn increment_song_play_count_bumps_existing_value() {
         let mut song = make_test_song("a");
         song.play_count = Some(3);
-        let mut qm = make_test_manager(vec![song], Some(0));
+        let (mut qm, _temp) = make_test_manager(vec![song], Some(0));
 
         qm.increment_song_play_count("a").unwrap();
         assert_eq!(qm.pool.get("a").unwrap().play_count, Some(4));
@@ -1211,7 +1207,7 @@ pub(crate) mod tests {
     fn increment_song_play_count_starts_from_none() {
         let mut song = make_test_song("a");
         song.play_count = None;
-        let mut qm = make_test_manager(vec![song], Some(0));
+        let (mut qm, _temp) = make_test_manager(vec![song], Some(0));
 
         qm.increment_song_play_count("a").unwrap();
         assert_eq!(qm.pool.get("a").unwrap().play_count, Some(1));
@@ -1221,7 +1217,7 @@ pub(crate) mod tests {
     fn increment_song_play_count_unknown_id_is_noop() {
         let mut song = make_test_song("a");
         song.play_count = Some(2);
-        let mut qm = make_test_manager(vec![song], Some(0));
+        let (mut qm, _temp) = make_test_manager(vec![song], Some(0));
 
         qm.increment_song_play_count("nonexistent").unwrap();
         assert_eq!(qm.pool.get("a").unwrap().play_count, Some(2));
@@ -1239,7 +1235,7 @@ pub(crate) mod tests {
             make_test_song("c"),
             make_test_song("d"),
         ];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         qm.remove_song_by_id("c").unwrap();
 
@@ -1250,7 +1246,7 @@ pub(crate) mod tests {
     #[test]
     fn remove_song_by_id_unknown_id_is_noop() {
         let songs = vec![make_test_song("a"), make_test_song("b")];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         qm.remove_song_by_id("nonexistent").unwrap();
 
@@ -1265,7 +1261,7 @@ pub(crate) mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(2)); // playing "c"
+        let (mut qm, _temp) = make_test_manager(songs, Some(2)); // playing "c"
 
         // Remove "a" (before current) — current should shift back
         qm.remove_song_by_id("a").unwrap();
@@ -1282,7 +1278,7 @@ pub(crate) mod tests {
             make_test_song("d"),
             make_test_song("e"),
         ];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         qm.remove_songs_by_ids(&["b".to_string(), "d".to_string()])
             .unwrap();
@@ -1300,7 +1296,7 @@ pub(crate) mod tests {
             make_test_song("b"),
             make_test_song("c"),
         ];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         qm.remove_songs_by_ids(&["b".to_string(), "nonexistent".to_string(), "c".to_string()])
             .unwrap();
@@ -1319,7 +1315,7 @@ pub(crate) mod tests {
             make_test_song("c"),
             make_test_song("d"),
         ];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         // IDs deliberately given in ascending-index order — the buggy version
         // (snapshot indices, remove ascending) would mistakenly remove "b" and "d".
@@ -1332,7 +1328,7 @@ pub(crate) mod tests {
     #[test]
     fn remove_songs_by_ids_empty_is_noop() {
         let songs = vec![make_test_song("a"), make_test_song("b")];
-        let mut qm = make_test_manager(songs, Some(0));
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
 
         qm.remove_songs_by_ids(&[]).unwrap();
 
