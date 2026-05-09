@@ -6,7 +6,7 @@
 
 use iced::{
     Alignment, Element, Length,
-    widget::{Row, button, column, container, mouse_area, row},
+    widget::{Row, Space, button, column, container, mouse_area, row},
 };
 use nokkvi_data::backend::queue::QueueSongUIViewData;
 
@@ -162,8 +162,13 @@ impl QueuePage {
             Some(QueueMessage::Roulette),
         );
 
-        // Build final header: regular header + optional edit mode bar
-        let header: Element<'a, QueueMessage> = if let Some((ref name, _)) = data.edit_mode_info {
+        // Build final header: regular header + optional edit mode bar.
+        //
+        // Every branch produces the same `column![extra, sep, header]` shape so
+        // iced's positional reconciler keeps the search `text_input::Id` stable
+        // across edit / playlist-context / read-only mode toggles. In read-only
+        // mode `extra` and `sep` are zero-sized `Space` placeholders.
+        let extra: Element<'a, QueueMessage> = if let Some((ref name, _)) = data.edit_mode_info {
             use iced::widget::svg;
 
             // Pencil-line icon to indicate editing
@@ -336,8 +341,7 @@ impl QueuePage {
             })
             .width(Length::Fill);
 
-            let sep_bottom: Element<'a, QueueMessage> = crate::theme::horizontal_separator(1.0);
-            column![edit_bar, sep_bottom, header].into()
+            edit_bar.into()
         } else if let Some(ref ctx) = data.playlist_context_info {
             // Read-only playlist context bar (playing a playlist, not editing)
             use iced::widget::svg;
@@ -446,13 +450,23 @@ impl QueuePage {
             })
             .width(Length::Fill);
 
-            let sep_bottom: Element<'a, QueueMessage> = crate::theme::horizontal_separator(1.0);
-            column![playlist_bar, sep_bottom, header].into()
+            playlist_bar.into()
         } else {
-            header
+            Space::new()
+                .width(Length::Shrink)
+                .height(Length::Fixed(0.0))
+                .into()
         };
-
-        let header: Element<'a, QueueMessage> = header;
+        let sep: Element<'a, QueueMessage> =
+            if data.edit_mode_info.is_some() || data.playlist_context_info.is_some() {
+                crate::theme::horizontal_separator(1.0)
+            } else {
+                Space::new()
+                    .width(Length::Shrink)
+                    .height(Length::Fixed(0.0))
+                    .into()
+            };
+        let header: Element<'a, QueueMessage> = column![extra, sep, header].into();
 
         // Compose with the tri-state "select all" header bar when the
         // multi-select column is on. The bar's tri-state derives from the
