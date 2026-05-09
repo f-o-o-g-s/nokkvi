@@ -68,10 +68,6 @@ pub(crate) trait ResolveSpec {
 
 pub(crate) struct AlbumSpec;
 pub(crate) struct ArtistSpec;
-#[expect(
-    dead_code,
-    reason = "wired up by try_resolve_pending_expand_genre wrapper migration"
-)]
 pub(crate) struct GenreSpec;
 #[expect(
     dead_code,
@@ -327,6 +323,14 @@ impl Nokkvi {
             });
         }
 
+        // Loading takes precedence over fully_loaded: an empty single-shot
+        // buffer (Genre during its first request) reports `fully_loaded() ==
+        // true` because total_count defaults to 0 — the loading state is
+        // what tells us a page is still inbound.
+        if S::library(&self.library).is_loading() {
+            return None;
+        }
+
         if S::library(&self.library).fully_loaded() {
             warn!(
                 " [EXPAND] {} '{}' not found after full load — clearing target",
@@ -336,10 +340,6 @@ impl Nokkvi {
             self.pending_expand = None;
             self.pending_expand_center_only = false;
             return Some(Task::none());
-        }
-
-        if S::library(&self.library).is_loading() {
-            return None;
         }
 
         let next_offset = S::library(&self.library).loaded_count();

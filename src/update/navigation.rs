@@ -638,70 +638,7 @@ impl Nokkvi {
     /// that internal id — the post-hook in `handle_genres` matches against
     /// it to decide whether to re-pin the highlight.
     pub(crate) fn try_resolve_pending_expand_genre(&mut self) -> Option<Task<Message>> {
-        let target_id = match &self.pending_expand {
-            Some(crate::state::PendingExpand::Genre { genre_id, .. }) => genre_id.clone(),
-            _ => return None,
-        };
-
-        let found = self
-            .library
-            .genres
-            .iter()
-            .enumerate()
-            .find_map(|(i, g)| (g.name == target_id).then(|| (i, g.id.clone())));
-        if let Some((idx, resolved_id)) = found {
-            let center_only = self.pending_expand_center_only;
-            debug!(
-                " [EXPAND] Found genre '{}' at index {} (id={}) — {}",
-                target_id,
-                idx,
-                resolved_id,
-                if center_only {
-                    "centering (CenterOnPlaying)"
-                } else {
-                    "scrolling + dispatching FocusAndExpand"
-                }
-            );
-            self.pending_expand = None;
-            self.pending_expand_center_only = false;
-            let total = self.library.genres.len();
-            let target_offset = if center_only {
-                idx
-            } else {
-                let center_slot = self.genres_page.common.slot_list.slot_count.max(2) / 2;
-                idx.saturating_add(center_slot).min(total.saturating_sub(1))
-            };
-            self.genres_page
-                .common
-                .slot_list
-                .set_offset(target_offset, total);
-            self.genres_page.common.slot_list.pin_selected(idx, total);
-            self.genres_page.common.slot_list.flash_center();
-            let prefetch_task = self.prefetch_viewport_artwork();
-            if center_only {
-                return Some(prefetch_task);
-            }
-            self.pending_top_pin = Some(crate::state::PendingTopPin::Genre(resolved_id));
-            return Some(Task::batch([
-                prefetch_task,
-                Task::done(Message::Genres(views::GenresMessage::FocusAndExpand(idx))),
-            ]));
-        }
-
-        if self.library.genres.is_loading() {
-            return None;
-        }
-
-        // Single-shot: idle + not-found means the genre genuinely isn't in
-        // the library — no more pages will arrive.
-        warn!(
-            " [EXPAND] Genre '{}' not found after load — clearing target",
-            target_id
-        );
-        self.toast_warn("Genre not found in library");
-        self.pending_expand = None;
-        self.pending_expand_center_only = false;
-        Some(Task::none())
+        self.try_resolve_pending_expand_with::<crate::update::GenreSpec>()
     }
 
     /// Artist-side mirror of `handle_navigate_and_expand_album`. Lands on
