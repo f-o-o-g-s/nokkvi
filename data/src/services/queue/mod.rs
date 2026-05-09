@@ -11,7 +11,7 @@ mod navigation;
 mod order;
 
 use anyhow::Result;
-pub use navigation::{NextSongResult, PreviousSongResult, TransitionResult};
+pub use navigation::{NextSongResult, PeekedQueue, PreviousSongResult, TransitionResult};
 use rand::seq::SliceRandom;
 use tracing::{debug, warn};
 
@@ -867,8 +867,8 @@ pub(crate) mod tests {
 
         // Peek should return song at index 1 (next in order)
         let peeked = qm.peek_next_song().unwrap();
-        assert_eq!(peeked.index, 1);
-        assert_eq!(peeked.song.id, "b");
+        assert_eq!(peeked.index(), 1);
+        assert_eq!(peeked.song().id, "b");
     }
 
     #[test]
@@ -878,10 +878,11 @@ pub(crate) mod tests {
 
         qm.toggle_shuffle().unwrap();
 
+        // Capture expected index BEFORE peek to avoid the guard's borrow on qm.
+        let expected_idx = qm.queue.order[1];
         let peeked = qm.peek_next_song().unwrap();
         // Should return order[1] (whatever that maps to after shuffle)
-        let expected_idx = qm.queue.order[1];
-        assert_eq!(peeked.index, expected_idx);
+        assert_eq!(peeked.index(), expected_idx);
     }
 
     #[test]
@@ -893,11 +894,9 @@ pub(crate) mod tests {
         ];
         let mut qm = make_test_manager(songs, Some(0));
 
-        // Peek to set queued
-        qm.peek_next_song();
-
-        // Transition
-        let result = qm.transition_to_queued().unwrap();
+        // Peek + transition via the guard
+        let peeked = qm.peek_next_song().unwrap();
+        let result = peeked.transition();
         assert_eq!(result.new_index, 1);
         assert_eq!(result.old_index, Some(0));
         assert_eq!(qm.queue.current_index, Some(1));
@@ -913,10 +912,9 @@ pub(crate) mod tests {
         ];
         let mut qm = make_test_manager(songs, Some(0));
 
-        qm.peek_next_song();
-        assert!(qm.queue.queued.is_some());
-
-        qm.transition_to_queued();
+        let peeked = qm.peek_next_song().unwrap();
+        // peeked's existence implies queued is set (guard invariant).
+        peeked.transition();
         assert!(qm.queue.queued.is_none());
     }
 
@@ -929,8 +927,9 @@ pub(crate) mod tests {
         ];
         let mut qm = make_test_manager(songs, Some(0));
 
-        // Set queued via peek
-        qm.peek_next_song();
+        // Set queued directly (the guard's drop semantics would otherwise
+        // clear it before we can observe the mutation's effect).
+        qm.queue.queued = Some(1);
         assert!(qm.queue.queued.is_some());
 
         // Add a song — should clear queued

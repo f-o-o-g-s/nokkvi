@@ -36,15 +36,66 @@ pub enum PreviousSongResult {
     None,
 }
 
+/// Borrow guard returned by [`QueueManager::peek_next_song`].
+///
+/// Owns the only public path to commit the peek to a transition.
+/// Dropping without calling [`Self::transition`] runs `clear_queued()`
+/// — the "abandon peek" path is a clean reset rather than silent
+/// stale-queued state.
+pub struct PeekedQueue<'a> {
+    mgr: Option<&'a mut QueueManager>,
+    info: NextSongResult,
+}
+
+impl<'a> PeekedQueue<'a> {
+    pub fn song(&self) -> &Song {
+        &self.info.song
+    }
+    pub fn index(&self) -> usize {
+        self.info.index
+    }
+    pub fn reason(&self) -> &str {
+        &self.info.reason
+    }
+    pub fn info(&self) -> &NextSongResult {
+        &self.info
+    }
+
+    /// Consume the peek and advance current_index/current_order.
+    pub fn transition(mut self) -> TransitionResult {
+        let mgr = self.mgr.take().expect("guard already consumed");
+        mgr.transition_to_queued()
+            .expect("PeekedQueue invariant: queued is set when guard exists")
+    }
+}
+
+impl Drop for PeekedQueue<'_> {
+    fn drop(&mut self) {
+        if let Some(mgr) = self.mgr.take() {
+            mgr.clear_queued();
+        }
+    }
+}
+
 impl QueueManager {
     // ══════════════════════════════════════════════════════════════════════
     //  Song Navigation (Order Array Based)
     // ══════════════════════════════════════════════════════════════════════
 
     /// Peek at the next song WITHOUT updating current_index/current_order.
-    /// Sets `queued` to the next order position if not already set.
+    /// Sets `queued` to the next order position if not already set, and returns
+    /// a [`PeekedQueue`] guard that owns the only public path to `transition()`.
+    /// Dropping the guard without calling `transition()` clears `queued`.
     /// Used for gapless/crossfade preparation.
-    pub fn peek_next_song(&mut self) -> Option<NextSongResult> {
+    pub fn peek_next_song(&mut self) -> Option<PeekedQueue<'_>> {
+        let info = self.compute_peek_next()?;
+        Some(PeekedQueue {
+            mgr: Some(self),
+            info,
+        })
+    }
+
+    fn compute_peek_next(&mut self) -> Option<NextSongResult> {
         if self.queue.song_ids.is_empty() || self.queue.order.is_empty() {
             return None;
         }
@@ -214,17 +265,15 @@ impl QueueManager {
             self.queue.repeat = RepeatMode::None;
         }
 
-        // Ensure queued is set
-        let peek_res = self.peek_next_song();
+        // Peek and (if Some) transition in one expression so the guard's
+        // borrow on `self` ends before we touch `self.queue.repeat` again.
+        let transition = self.peek_next_song().map(|p| p.transition());
 
         if was_repeat_track {
             self.queue.repeat = RepeatMode::Track;
         }
 
-        peek_res?;
-
-        // Transition (consumes queued, updates indices)
-        let transition = self.transition_to_queued()?;
+        let transition = transition?;
 
         Some(NextSongResult {
             song: transition.song,
@@ -322,8 +371,9 @@ mod tests {
         let mut qm = make_test_manager(songs, Some(0));
 
         let peeked = qm.peek_next_song().unwrap();
-        assert_eq!(peeked.index, 1);
-        assert_eq!(peeked.song.id, "b");
+        assert_eq!(peeked.index(), 1);
+        assert_eq!(peeked.song().id, "b");
+        drop(peeked);
         // current_index must NOT have changed
         assert_eq!(qm.queue.current_index, Some(0));
         assert_eq!(qm.queue.current_order, Some(0));
@@ -340,9 +390,9 @@ mod tests {
         qm.set_repeat(RepeatMode::Track).unwrap();
 
         let peeked = qm.peek_next_song().unwrap();
-        assert_eq!(peeked.index, 1);
-        assert_eq!(peeked.song.id, "b");
-        assert_eq!(peeked.reason, "repeat");
+        assert_eq!(peeked.index(), 1);
+        assert_eq!(peeked.song().id, "b");
+        assert_eq!(peeked.reason(), "repeat");
     }
 
     #[test]
@@ -361,9 +411,9 @@ mod tests {
         qm.set_repeat(RepeatMode::Playlist).unwrap();
 
         let peeked = qm.peek_next_song().unwrap();
-        assert_eq!(peeked.index, 0);
-        assert_eq!(peeked.song.id, "a");
-        assert_eq!(peeked.reason, "repeatQueue");
+        assert_eq!(peeked.index(), 0);
+        assert_eq!(peeked.song().id, "a");
+        assert_eq!(peeked.reason(), "repeatQueue");
     }
 
     #[test]
@@ -377,10 +427,10 @@ mod tests {
 
         // Peek first
         let peeked = qm.peek_next_song().unwrap();
-        assert_eq!(peeked.song.id, "b");
+        assert_eq!(peeked.song().id, "b");
 
-        // Then transition
-        let result = qm.transition_to_queued().unwrap();
+        // Then transition (consumes the guard)
+        let result = peeked.transition();
         assert_eq!(result.new_index, 1);
         assert_eq!(result.old_index, Some(0));
         assert_eq!(qm.queue.current_index, Some(1));
@@ -763,8 +813,9 @@ mod tests {
         let mut qm = with_modes(false, false, RepeatMode::Track);
         // peek_next_song with repeat=Track always returns current
         let peeked = qm.peek_next_song().unwrap();
-        assert_eq!(peeked.index, 0);
-        assert_eq!(peeked.reason, "repeat");
+        assert_eq!(peeked.index(), 0);
+        assert_eq!(peeked.reason(), "repeat");
+        drop(peeked);
 
         // get_next_song bypasses repeat-track and advances
         let next = qm.get_next_song().unwrap();
@@ -897,7 +948,7 @@ mod tests {
         assert!(
             peeked.is_none(),
             "consume + repeat-playlist with 1 song should NOT wrap (got {:?})",
-            peeked.map(|r| r.song.id)
+            peeked.map(|r| r.song().id.clone())
         );
     }
 
@@ -938,7 +989,7 @@ mod tests {
         assert!(
             peeked.is_none(),
             "shuffle + consume + repeat-playlist with 1 song should NOT wrap (got {:?})",
-            peeked.map(|r| r.song.id)
+            peeked.map(|r| r.song().id.clone())
         );
     }
 
@@ -955,9 +1006,8 @@ mod tests {
         qm.queue.consume = true;
         qm.set_repeat(RepeatMode::Playlist).unwrap();
 
-        let next = qm.peek_next_song();
-        assert!(next.is_some(), "should advance to next song mid-queue");
-        assert_eq!(next.unwrap().song.id, "b");
+        let next = qm.peek_next_song().unwrap();
+        assert_eq!(next.song().id, "b", "should advance to next song mid-queue");
     }
 }
 
@@ -1108,8 +1158,8 @@ mod proptest_navigation {
         ) {
             let mut qm = queue_setup(n, shuffle, false, repeat, start);
 
-            let peek1 = qm.peek_next_song().map(|r| (r.index, r.song.id.clone()));
-            let peek2 = qm.peek_next_song().map(|r| (r.index, r.song.id.clone()));
+            let peek1 = qm.peek_next_song().map(|r| (r.index(), r.song().id.clone()));
+            let peek2 = qm.peek_next_song().map(|r| (r.index(), r.song().id.clone()));
 
             prop_assert_eq!(
                 peek1, peek2,
