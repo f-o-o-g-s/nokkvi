@@ -384,29 +384,32 @@ impl AppService {
 
     /// Add an album's songs to the queue (without starting playback).
     pub async fn add_album_to_queue(&self, album_id: &str) -> Result<()> {
-        let songs = self.albums_service.load_album_songs(album_id).await?;
+        let songs = self.library_orchestrator().resolve_album(album_id).await?;
         if songs.is_empty() {
             return Err(anyhow::anyhow!("No songs found in album"));
         }
-        self.queue_service.add_songs(songs).await?;
+        self.queue_orchestrator().enqueue(songs).await?;
         debug!("➕ Added album {} to queue", album_id);
         Ok(())
     }
 
     /// Add an artist's songs to the queue (without starting playback).
     pub async fn add_artist_to_queue(&self, artist_id: &str) -> Result<()> {
-        let songs = self.artists_service.load_artist_songs(artist_id).await?;
+        let songs = self
+            .library_orchestrator()
+            .resolve_artist(artist_id)
+            .await?;
         if songs.is_empty() {
             return Err(anyhow::anyhow!("No songs found for artist"));
         }
-        self.queue_service.add_songs(songs).await?;
+        self.queue_orchestrator().enqueue(songs).await?;
         debug!("➕ Added artist {} to queue", artist_id);
         Ok(())
     }
 
     /// Add a single song to the queue (without starting playback).
     pub async fn add_song_to_queue(&self, song: crate::types::song::Song) -> Result<()> {
-        self.queue_service.add_songs(vec![song]).await?;
+        self.queue_orchestrator().enqueue(vec![song]).await?;
         debug!("➕ Added song to queue");
         Ok(())
     }
@@ -441,22 +444,28 @@ impl AppService {
 
     /// Add all songs in a genre to the queue (without starting playback).
     pub async fn add_genre_to_queue(&self, genre_name: &str) -> Result<()> {
-        let songs = self.load_genre_songs(genre_name).await?;
+        let songs = self
+            .library_orchestrator()
+            .resolve_genre(genre_name)
+            .await?;
         if songs.is_empty() {
             return Err(anyhow::anyhow!("No songs found in genre"));
         }
-        self.queue_service.add_songs(songs).await?;
+        self.queue_orchestrator().enqueue(songs).await?;
         debug!("➕ Added genre '{}' to queue", genre_name);
         Ok(())
     }
 
     /// Add all songs in a playlist to the queue (without starting playback).
     pub async fn add_playlist_to_queue(&self, playlist_id: &str) -> Result<()> {
-        let songs = self.load_playlist_songs(playlist_id).await?;
+        let songs = self
+            .library_orchestrator()
+            .resolve_playlist(playlist_id)
+            .await?;
         if songs.is_empty() {
             return Err(anyhow::anyhow!("No songs found in playlist"));
         }
-        self.queue_service.add_songs(songs).await?;
+        self.queue_orchestrator().enqueue(songs).await?;
         debug!("➕ Added playlist {} to queue", playlist_id);
         Ok(())
     }
