@@ -28,7 +28,7 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 ## Optimistic UI & Race Conditions
 
 - **Tick handler race**: 10 Hz tick can overwrite optimistic state with stale backend state — use pending flags to prevent reversion before API response.
-- **Source generation counter**: renderer snapshots `source_generation` (AtomicU64) before releasing the engine lock and discards the callback if it changed. Prevents consume+shuffle replaying the just-consumed track.
+- **Source generation counter**: typed `SourceGeneration` wrapper (over `AtomicU64`) — every user-driven source change goes through `bump_for_user_action()`; renderer snapshots `current()` before releasing the engine lock and discards the callback if it changed. Prevents consume+shuffle replaying the just-consumed track.
 - **PagedBuffer pagination guard**: call `set_loading(true)` before dispatching a page fetch — prevents duplicate fetches on rapid scroll. `PaginatedFetch::from_common()` handles this in update handlers.
 - **PagedBuffer generation**: `generation()` bumps on every mutation. Use `(query, generation)` keys when memoizing filtered results.
 - **LRU artwork snapshot staleness**: call `refresh_album_art_snapshot()` after every `put()` / `get()` on `album_art`, and `refresh_large_artwork_snapshot()` for `large_artwork`. Forget either and the next render shows stale thumbnails.
@@ -49,7 +49,7 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 - **Stale gapless prep on mode toggles**: mode toggle handlers call `reset_next_track()` to clear the prepared decoder and disarm the crossfade trigger.
 - **Pre-volume visualizer samples**: visualizer receives raw samples before volume multiplication, scaled to S16 range. FFT input is volume-independent.
 - **Track-completion lock**: the navigator releases its lock across engine I/O during track completion — do not re-introduce a held lock.
-- **ReplayGain stash**: incoming-track ReplayGain must be stashed via `set_pending_replay_gain()` / `set_pending_crossfade_replay_gain()` before stream creation; the engine pulls the right factor at primary or crossfade-stream creation time.
+- **ReplayGain stash**: prefer `engine.load_track_with_rg(source, decoder, rg)` — the atomic three-step that bundles `set_pending_replay_gain` + `reset_next_track` + `set_source` so a load can't be interleaved. Use `set_pending_crossfade_replay_gain()` for the crossfade decoder before its stream is built.
 - **Repeat track replay**: `on_track_finished` natively supports repeat-track via seek-to-start. Manual skip (next/prev) bypasses repeat-track.
 
 ## Config & Persistence

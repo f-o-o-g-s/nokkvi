@@ -15,7 +15,7 @@ globs: src/widgets/**
 
 ## Single-Active Overlay Menu (`Nokkvi.open_menu`)
 
-Hamburger, player-bar kebab, view-header `checkbox_dropdown`, and right-click context menus are all **controlled** widgets — no local `is_open` state. Each widget bubbles `Message::SetOpenMenu(Option<OpenMenu>)` to root, which atomically replaces the current menu (so opening one closes any other). `OpenMenu` variants: `Hamburger`, `PlayerModes`, `CheckboxDropdown { view, trigger_bounds }`, `Context { id, position }`. Auto-closes on `SwitchView` and `WindowResized`.
+Hamburger, player-bar kebab, view-header `checkbox_dropdown`, and right-click context menus are all **controlled** widgets — no local `is_open` state. Each widget bubbles `Message::SetOpenMenu(Option<OpenMenu>)` to root, which atomically replaces the current menu (so opening one closes any other). `OpenMenu` variants: `Hamburger`, `PlayerModes`, `CheckboxDropdown { view, trigger_bounds }`, `CheckboxDropdownSimilar { trigger_bounds }` (browsing-panel-only Similar columns dropdown — has no matching `View` variant), `Context { id, position }`. Auto-closes on `SwitchView` and `WindowResized`.
 
 ## Player Bar (`player_bar.rs`)
 
@@ -42,6 +42,7 @@ Custom `iced::advanced` seekable widget. `Vec<OverlaySegment>` for scrolling col
 | Context Menu | `context_menu.rs` | Right-click menu. `LibraryContextEntry` / `QueueContextEntry` / `StripContextEntry` |
 | Checkbox Dropdown | `checkbox_dropdown.rs` | Multi-checkbox column-visibility dropdown, generic over `Key` (controlled via `OpenMenu::CheckboxDropdown`) |
 | Info Modal | `info_modal.rs` | Two-column property table for Get Info. `InfoModalItem` enum |
+| About Modal | `about_modal.rs` | Metadata + diagnostics, theme-adaptive logo, Ko-fi tip link |
 | Text Input Dialog | `text_input_dialog.rs` | Modal text input or confirmation. Save Queue uses `combo_box` |
 | EQ Slider | `eq_slider.rs` | Vertical ±15 dB slider for 10-band EQ |
 | Drag Column | `drag_column.rs` | In-queue drag-and-drop reorder (multi-selection batch aware) |

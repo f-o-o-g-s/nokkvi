@@ -19,7 +19,7 @@ Spectrum config: `lower_cutoff_freq`, `higher_cutoff_freq`, `noise_reduction`, `
 
 **Render path:** non-MSAA fast path by default; switches to **4× MSAA → resolve → blit** when perspective lean is active (`is_msaa_required()` toggles per-frame).
 
-`VisualizationMode` enum: `Bars`, `Lines`. `MIN_BAR_COUNT = 4`; bar width interpolates between `bar_width_min` and `bar_width_max` over a 400→2560px window range.
+`VisualizationMode` enum: `Off`, `Bars`, `Lines` (cycled by the player-bar toggle). `MIN_BAR_COUNT = 4`; bar width interpolates between `bar_width_min` and `bar_width_max` over a 400→2560px window range.
 
 ## Bars Mode
 

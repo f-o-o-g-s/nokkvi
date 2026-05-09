@@ -67,4 +67,4 @@ Root `Message` is namespaced: `PlaybackMessage`, `ScrobbleMessage`, `HotkeyMessa
 
 ## Reference Codebases
 
-External repos cloned locally for read-only reference (not part of this project). `reference-{name}/`: `iced`, `iced-apps`, `iced-book`, `iced-docs`, `symphonia`, `feishin`, `lucide` (icons), `navidrome`, `rmpc`, `rmpc-docs`, `rodio`.
+External repos cloned locally for read-only reference (not part of this project). `reference-{name}/`: `iced`, `iced-apps`, `iced-book`, `iced-docs`, `symphonia`, `feishin`, `lookas`, `lucide` (icons), `mpris`, `navidrome`, `rmpc`, `rmpc-docs`, `rodio`.

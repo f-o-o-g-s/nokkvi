@@ -15,7 +15,10 @@ CustomAudioEngine
 ├── AudioRenderer (ring buffers) → visualizer callback from StreamingSource
 │   └── RodioOutput (shared rodio Mixer) → ActiveStream per track
 │       └── StreamingSource (rodio::Source) → EqProcessor → lock-free ring buffer → pipewire callback
-├── CrossfadePhase: Idle → Active → OutgoingFinished
+├── CrossfadePhase enum (engine): Idle → Active { decoder, incoming_source } → OutgoingFinished { decoder, incoming_source }
+├── CrossfadeState enum (renderer): Idle / Armed / Active — per-phase data lives inside the variant; `mem::replace` swaps phases atomically
+├── GaplessSlot — bundles `decoder` + `source` + `prepared` under one `tokio::Mutex` so the decode loop, async path, and `cancel_crossfade` always lock together (audit IG-13)
+├── DecodeLoopHandle / SourceGeneration (`generation.rs`) — typed atomic-counter wrappers; `bump_for_user_action` / `bump_for_gapless` / `accept_internal_swap` make every "stop the loop" / "invalidate callback" call site self-documenting
 └── EqState (eq.rs) — shared atomic gains passed to each StreamingSource
 ```
 
@@ -29,9 +32,9 @@ One native PipeWire stream via a shared `rodio::Mixer`:
 
 ## Critical Rules
 
-- **Track changes**: create fresh decoders **before** locking the engine; release the engine lock during decoder operations.
-- **`source_generation` (AtomicU64)**: engine increments on `set_source()`; renderer snapshots and discards stale callbacks.
-- **Mode toggle reset**: `reset_next_track()` clears the prepared decoder and disarms crossfade on shuffle / repeat / consume toggle.
+- **Track changes**: create fresh decoders **before** locking the engine; release the engine lock during decoder operations. Use `engine.load_track_with_rg(source, decoder, rg)` — the atomic three-step that replaces the historical `set_pending_replay_gain` + `reset_next_track` + `set_source` sequence.
+- **`SourceGeneration`**: typed atomic counter; `bump_for_user_action()` on every user-driven source change. The renderer snapshots `current()` before releasing the engine lock and discards stale completion callbacks.
+- **Mode toggle reset**: `reset_next_track()` clears the prepared decoder and disarms crossfade on shuffle / repeat / consume toggle. Mode toggles return `ModeToggleEffect` (currently a no-op type) so the controller chains the reset uniformly.
 - **Track-completion path**: the playback navigator releases its lock across engine I/O — do not re-introduce a held lock around `transition_to_queued()` / `set_source()`.
 - Decoupled render thread: 20 ms intervals (50 Hz), handles crossfade tick + completion detection.
 
@@ -45,7 +48,7 @@ Dual-path: PipeWire native (preferred) or software fallback.
 
 ## Volume Normalization & ReplayGain
 
-`VolumeNormalizationMode`: `Off`, `Agc`, `ReplayGainTrack`, `ReplayGainAlbum`. Settings under General → Application include preamp dB, fallback dB, fallback-to-AGC, prevent-clipping. Renderer reads `volume_normalization_mode` and resolves a gain factor; `RodioOutput` applies it via `source.amplify(gain).limit(LimitSettings::dynamic_content())`. Engine stashes incoming-track ReplayGain via `set_pending_replay_gain()` / `set_pending_crossfade_replay_gain()` so the next stream creation picks up the right factor.
+`VolumeNormalizationMode`: `Off`, `Agc`, `ReplayGainTrack`, `ReplayGainAlbum`. Settings under General → Application include preamp dB, fallback dB, fallback-to-AGC, prevent-clipping. Renderer reads `volume_normalization_mode` and resolves a gain factor; `RodioOutput` applies it via `source.amplify(gain).limit(LimitSettings::dynamic_content())`. Primary loads stash incoming-track ReplayGain via `load_track_with_rg(source, decoder, rg)`; the crossfade decoder uses `set_pending_crossfade_replay_gain()` before its stream is built — both paths land the right factor at stream creation.
 
 ## Equalizer
 

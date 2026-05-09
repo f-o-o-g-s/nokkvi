@@ -37,6 +37,6 @@ description: End-to-end checklist when building new features. Covers cross-view 
 - [ ] **Icons**: drop SVGs into `assets/icons/` — `build.rs` regenerates the lookup table; no manual registration
 
 ## Verification
-- [ ] **TDD**: write tests for observable state mutations *before* implementing handlers (`update/tests.rs`, `test_app()` helper)
+- [ ] **TDD**: write tests for observable state mutations *before* implementing handlers (`update/tests/{area}.rs` or the per-area `tests_*.rs` siblings; `test_app()` from `src/test_helpers.rs`)
 - [ ] `cargo +nightly fmt --all`, `cargo clippy --all-targets -- -D warnings`, `cargo test` clean
 - [ ] Manual: happy path + edge cases + stable widget tree (root widget type unchanged across renders)

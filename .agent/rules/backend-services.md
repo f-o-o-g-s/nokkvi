@@ -39,10 +39,13 @@ AppService (orchestrator)
 
 ## Queue System
 
-`SongPool` (HashMap) + `Queue` ordering (`song_ids` + `order` array + `current_order`):
+`SongPool` (HashMap) + `Queue` ordering (`song_ids` + `order` array + `current_order`). Modules: `services/queue/{mod, navigation, order, write_guard}.rs`.
+
+- **Mutation guard** (`write_guard.rs`): every queue write goes through `QueueWriteGuard`, which forces the caller to pick a commit mode at the end of the borrow — `commit_save_all` (full save), `commit_save_order` (order-only), or `commit_no_save` (in-memory only). Drop without committing panics in debug, warns in release.
+- **Navigation typestate** (`navigation.rs`): `peek_next_song()` returns a `PeekedQueue<'_>` guard whose only public consumer is `transition()`. The crate-internal `transition_to_queued_internal` is the actual mutator — no other call site can advance the queue without first peeking.
 - Shuffle off: identity order. Shuffle on: Fisher-Yates with the current song anchored at index 0.
-- **Navigation** (`services/queue/navigation.rs`): `peek_next_song()` → `transition_to_queued()` is the single transition path for all auto/manual transitions. `get_next_song()` = peek + transition convenience.
 - Every queue mutation calls `clear_queued()` to invalidate the buffered next song.
+- Mode toggles (`toggle_shuffle`, `set_repeat`, `toggle_consume`) return `ModeToggleEffect` so the playback controller can chain `reset_next_track()` on the engine uniformly.
 - Progressive build: first 500 plays immediately; recursive `ProgressiveQueueAppendPage` chain for the rest.
 - Serialization: bincode `Encode` / `Decode` (~3× faster than JSON). `load_binary_or_json()` migrates legacy.
 - **Reshuffle on repeat wrap**: shuffle + repeat-playlist re-shuffles the order array when the queue wraps back to the start.
@@ -68,7 +71,11 @@ AppService (orchestrator)
 
 `SettingsManager` owns `PlayerSettings`, `TomlSettings`, `TomlViewPreferences`, `HotkeyConfig`, `StateStorage`. Loads `config.toml` → merges with redb → `PlayerSettings`. Per-field setters persist atomically. `reload_from_toml()` for hot-reload.
 
-`PlayerSettings` is the live in-memory union of every user-tunable knob; `TomlSettings` is the on-disk shape of `[settings]`. Notable groupings: `font_family`, `library_page_size`, `artwork_resolution`, `volume_normalization` + ReplayGain knobs, per-view column flags (`queue_show_*`, `albums_show_*`, `songs_show_*`, `artists_show_*` — `*_index`, `*_thumbnail`, `*_stars`, etc.), artwork column (`artwork_column_mode` / `_stretch_fit` / `_width_pct`), tray (`show_tray_icon` / `close_to_tray`), nav (`nav_layout`, `nav_display_mode`), `slot_row_height`, `track_info_display`, default-playlist (`default_playlist_id` / `_name`, `quick_add_to_playlist`, `queue_show_default_playlist`), strip (`strip_show_*`, `strip_merged_mode`, `strip_separator`, `strip_click_action`). Read the structs for the full set.
+`PlayerSettings` is the live in-memory union of every user-tunable knob; split into per-domain submodules under `data/src/types/player_settings/` (`artwork`, `library`, `navigation`, `playback`, `slot_list`, `strip`, `visualizer`). `TomlSettings` is the on-disk shape of `[settings]`. Notable knobs include `font_family`, `library_page_size`, `artwork_resolution`, `volume_normalization` + ReplayGain, per-view column flags (`{view}_show_*`), artwork column, tray, nav, `slot_row_height`, `track_info_display`, default-playlist, strip. Read the structs for the full set.
+
+### `define_settings!` registration
+
+Every setting backed by the Settings UI is registered via the `define_settings!` macro (`data/src/services/settings_tables/{general,interface,playback}.rs`). Each entry declares a key, label, scalar/array type, default, on_dispatch hook, and ui_meta cluster; the macro emits the dispatch arm + the per-tab `dump_<tab>_player_settings` helper that round-trips into `PlayerSettings`. Use `SettingsSideEffect` (`data/src/types/settings_side_effect.rs`) variants to thread side effects (toasts, atomic flag flips, library reloads) back to the UI from the on_dispatch hook. Hotkey actions follow the same single-table pattern in `data/src/types/hotkey_config/action.rs`. Per-tab `SettingsData`, `SettingItem`, `SettingMeta`, and `SettingsEntry` live in `data/src/types/`.
 
 ## Theme System
 
@@ -83,7 +90,8 @@ Iced-free. Key types:
 - `PagedBuffer<T>` — replaces `Vec<T>` for library data. `Deref<Target=[T]>`. **`generation()`** monotonic counter bumps on every mutation (use for `(query, generation)` filter-cache keys)
 - `HotkeyConfig` — HashMap with O(1) lookup
 - `PlayerSettings`, `TomlSettings`, `TomlViewPreferences`
-- `Queue`, `QueueSortMode` (physical sort: Album/Artist/Title/Duration/Genre/Rating/MostPlayed)
+- `Queue`, `QueueSortMode` (physical sort: Album/Artist/Title/Duration/Genre/Rating/MostPlayed/Random — Random re-rolls on re-select)
+- `ModeToggleEffect` (`mode_toggle.rs`) returned from queue mode toggles to chain engine resets
 - `SongPool`, `BatchPayload` / `BatchItem`
 - `LibraryFilter` — ID-based cross-view navigation filter
 - `PlaylistEditState` — dirty detection
