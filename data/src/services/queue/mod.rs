@@ -250,30 +250,29 @@ impl QueueManager {
             return Ok(());
         }
 
-        let current_song_id = self
+        let mut tx = self.write();
+        let current_song_id = tx
             .queue
             .current_index
-            .and_then(|idx| self.queue.song_ids.get(idx))
+            .and_then(|idx| tx.queue.song_ids.get(idx))
             .cloned();
 
         // Shuffle the IDs using Fisher-Yates algorithm
         let mut rng = rand::rng();
-        self.queue.song_ids.shuffle(&mut rng);
+        tx.queue.song_ids.shuffle(&mut rng);
 
         // Update current_index to point to the same song after shuffle
         if let Some(song_id) = current_song_id {
-            self.queue.current_index = self.index_of(&song_id);
+            tx.queue.current_index = tx.index_of(&song_id);
         }
 
         // Rebuild order after physical reorder
-        self.rebuild_order_and_sync();
-        if self.queue.shuffle {
-            self.shuffle_order();
+        tx.rebuild_order_and_sync();
+        if tx.queue.shuffle {
+            tx.shuffle_order();
         }
-        self.clear_queued();
         debug!(" [QUEUE] Queue shuffled, new order preserved");
-        self.save_order()?;
-        Ok(())
+        tx.commit_save_order()
     }
 
     /// Sort the queue by the given sort mode and direction.
@@ -289,15 +288,21 @@ impl QueueManager {
             return self.shuffle_queue();
         }
 
-        let current_song_id = self
+        let mut tx = self.write();
+        // The sort_by closure needs a disjoint borrow of `pool` and
+        // `queue.song_ids`. Field-disjoint borrows work through a real
+        // `&mut QueueManager`, but not through the guard's Deref/DerefMut
+        // (which hide field structure). Reborrow once and operate via `qm`.
+        let qm: &mut QueueManager = &mut tx;
+        let current_song_id = qm
             .queue
             .current_index
-            .and_then(|idx| self.queue.song_ids.get(idx))
+            .and_then(|idx| qm.queue.song_ids.get(idx))
             .cloned();
 
         // Sort IDs by looking up song data from pool
-        let pool = &self.pool;
-        self.queue.song_ids.sort_by(|a_id, b_id| {
+        let pool = &qm.pool;
+        qm.queue.song_ids.sort_by(|a_id, b_id| {
             let a = pool.get(a_id);
             let b = pool.get(b_id);
             let cmp = match (a, b) {
@@ -332,22 +337,20 @@ impl QueueManager {
 
         // Update current_index to point to the same song after sort
         if let Some(song_id) = current_song_id {
-            self.queue.current_index = self.index_of(&song_id);
+            qm.queue.current_index = qm.index_of(&song_id);
         }
 
         // Rebuild order after physical reorder
-        self.rebuild_order_and_sync();
-        if self.queue.shuffle {
-            self.shuffle_order();
+        qm.rebuild_order_and_sync();
+        if qm.queue.shuffle {
+            qm.shuffle_order();
         }
-        self.clear_queued();
         debug!(
             " [QUEUE] Queue sorted by {:?} ({})",
             mode,
             if ascending { "ASC" } else { "DESC" }
         );
-        self.save_order()?;
-        Ok(())
+        tx.commit_save_order()
     }
 
     pub fn set_repeat(&mut self, mode: RepeatMode) -> Result<()> {
@@ -427,13 +430,14 @@ impl QueueManager {
             return Ok(());
         }
 
-        let item = self.queue.song_ids.remove(from);
+        let mut tx = self.write();
+        let item = tx.queue.song_ids.remove(from);
         let insert_at = if from < to { to - 1 } else { to };
-        self.queue.song_ids.insert(insert_at, item);
+        tx.queue.song_ids.insert(insert_at, item);
 
         // Adjust current_index to keep tracking the same song
-        if let Some(cur) = self.queue.current_index {
-            self.queue.current_index = Some(if cur == from {
+        if let Some(cur) = tx.queue.current_index {
+            tx.queue.current_index = Some(if cur == from {
                 // The playing song itself was moved
                 insert_at
             } else if from < cur && cur <= insert_at {
@@ -448,17 +452,15 @@ impl QueueManager {
         }
 
         // Rebuild order after move (indices changed)
-        self.rebuild_order_and_sync();
-        if self.queue.shuffle {
-            self.shuffle_order();
+        tx.rebuild_order_and_sync();
+        if tx.queue.shuffle {
+            tx.shuffle_order();
         }
-        self.clear_queued();
         debug!(
             "📦 [QUEUE] Moved item from {} to {} (inserted at {})",
             from, to, insert_at
         );
-        self.save_order()?;
-        Ok(())
+        tx.commit_save_order()
     }
 
     /// Insert songs right after the currently playing position ("Play Next").
