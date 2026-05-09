@@ -32,7 +32,7 @@ When you complete an item, append the commit ref(s) and flip the status. Keep th
 | 7 | AppService `LibraryOrchestrator` + `QueueOrchestrator` split | ❌ open | 4 `play_X` + 4 `add_X_to_queue` + matching `play_next_X` / `insert_X_at_position` still hand-written on `AppService`. No `LibraryOrchestrator` / `QueueOrchestrator` types. No `enum SongSource`. |
 | 8 | Loader-result `LoaderTarget` trait | ❌ open | The `*LoaderMessage` Phase 1+2 scaffolding landed pre-audit (commits `171c053..bc53b17`) but the unifying `LoaderTarget` trait was not introduced. The 5 `handle_*_loaded` bodies are still parallel. |
 | 9 | Move slot_list + roulette per-`View` dispatch onto `ViewPage` trait | 🟡 partial | `pub(crate) trait ViewPage` exists at `src/views/mod.rs:55` with rich API (search_input_id, sort_mode_options, toggle_sort_order_message, etc.). BUT `src/update/slot_list.rs:115-158` still has 8 `View::X` match arms; the migration onto the trait is not done. |
-| **10** | **`define_settings!` macro** | **✅ done** | Commits: `48d022c` (scaffold) → `46d4717` (General) → `4d268b3` (Interface) → `8e13d81` (Playback + Theme-top) → `db5faf1` (drop helper) → `eb94d56` (sync UI cache) → `e7c6314` (watchpoint test, lane D) → `3e70230..7176b6c` (read-side mirror, lane A: 4 commits) → `3f254e1..a23eeb2` (legacy-arm fold, lane B: 4 commits). Lane C (items-builder driver) is **deferred** — see `~/.claude/projects/-home-foogs-nokkvi/memory/project_items_builder_migration_deferred.md`. |
+| **10** | **`define_settings!` macro** | **✅ done** | Pre-audit: `48d022c` (scaffold) → `46d4717` (General) → `4d268b3` (Interface) → `8e13d81` (Playback + Theme-top) → `db5faf1` (drop helper) → `eb94d56` (sync UI cache). Post-audit follow-up fanout (2026-05-08): `e7c6314` (lane D — sync-setter watchpoint), `3e70230..969f9f8` (lane A — read-side mirror, 3 commits), `3f254e1..4f4e728` (lane B — legacy-arm fold, 3 commits), `7176b6c` (cleanup — `get_player_settings` to `..Default::default()`), `a23eeb2` (artwork-resolution toast text fix), `2f5a484..5e73346` (lane C — items-builder driver, 7 commits). The strangler-fig is fully retired; `define_settings!` now emits dispatch / apply / dump / items-helper artifacts; `ui_meta:` cluster is the discriminator for UI-emitting vs lifecycle-only entries; `entries.rs:193` search filter widened to match `item.subtitle`. |
 | 11 | `ConfigKey` typed-key constructors (drop `is_theme_path` runtime classifier) | ❌ open | `is_theme_path` is still active in `src/config_writer.rs:55`; both `for_value` (line 37) and `for_array` (line 47) sniff the prefix at runtime. |
 | 12 | Type-level queue invariants (IG-1 + IG-2 + IG-4 + IG-5) | ❌ open | `get_queue_mut` still at `data/src/services/queue/mod.rs:404`. No `QueueWriteGuard`. No `PeekedQueue`. `insert_song_at` (line 502) and `insert_songs_at` (line 521) still differ in semantics with no rename. |
 
@@ -138,10 +138,4 @@ If picking the next item to work, these are the highest agent-friendliness payof
 3. **§7 #5 — `enum ItemKind`** (M effort, kills `_ => Song` silent-default class outright).
 4. **Bugs B1, B2, B6, B8, B9** (S effort each, real visible bugs and a stale comment that misleads future agents).
 
-§7 #6, #7, #10, #12 are L effort; not first picks unless explicitly scheduled.
-
----
-
-## Notes on the deferred work
-
-- **Lane C (`refactor/settings-items-from-table`) — items-builder migration**: deferred 2026-05-08 after a partial attempt found 4 of 9 sections had non-macro rows interleaved with macro-eligible ones. Lane B has since absorbed the deferred-dispatch keys, removing most of the General-tab interleaving; ToggleSet, conditional, and dialog rows in Interface + Playback are the remaining obstacles. Detailed notes at `~/.claude/projects/-home-foogs-nokkvi/memory/project_items_builder_migration_deferred.md`.
+§7 #6, #7, #12 are L effort; not first picks unless explicitly scheduled. (§7 #10 was the third L-effort item; it landed across the 2026-05-08 follow-up fanout.)
