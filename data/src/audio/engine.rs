@@ -2044,3 +2044,39 @@ impl Drop for CustomAudioEngine {
         self.renderer.lock().stop();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// IG-8: the typestate makes `Idle → OutgoingFinished` direct transition
+    /// impossible. Previously the bool-flag representation could be set to
+    /// any value at any time; now `OutgoingFinished` only exists by destructuring
+    /// `Active` (its `decoder` and `incoming_source` are non-`Default`,
+    /// so they can only come from a prior `Active` state).
+    ///
+    /// This test exercises the runtime side: feeding `on_decoder_finished`
+    /// to a fresh engine (which starts in `Idle`) must NOT promote the phase
+    /// to `OutgoingFinished` — the match arm in `on_decoder_finished` falls
+    /// through to the normal track-completion path instead.
+    #[tokio::test]
+    async fn crossfade_idle_cannot_transition_directly_to_outgoing_finished() {
+        let mut engine = CustomAudioEngine::new();
+
+        assert!(
+            engine.crossfade_is_idle(),
+            "fresh engine must start in Idle"
+        );
+
+        engine.on_decoder_finished().await;
+
+        assert!(
+            engine.crossfade_is_idle(),
+            "phase must remain Idle when no crossfade is active",
+        );
+        assert!(
+            !engine.crossfade_is_active_or_finished(),
+            "Idle predicate must NOT report Active/OutgoingFinished",
+        );
+    }
+}
