@@ -354,15 +354,15 @@ impl QueueManager {
     }
 
     pub fn set_repeat(&mut self, mode: RepeatMode) -> Result<()> {
-        self.queue.repeat = mode;
-        self.save_order()?;
-        Ok(())
+        let mut tx = self.write();
+        tx.queue.repeat = mode;
+        tx.commit_save_order()
     }
 
     pub fn toggle_consume(&mut self) -> Result<()> {
-        self.queue.consume = !self.queue.consume;
-        self.save_order()?;
-        Ok(())
+        let mut tx = self.write();
+        tx.queue.consume = !tx.queue.consume;
+        tx.commit_save_order()
     }
 
     pub fn get_current_song(&self) -> Option<Song> {
@@ -935,6 +935,44 @@ pub(crate) mod tests {
         // Add a song — should clear queued
         qm.add_songs(vec![make_test_song("d")]).unwrap();
         assert!(qm.queue.queued.is_none());
+    }
+
+    #[test]
+    fn set_repeat_clears_queued() {
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+        ];
+        let mut qm = make_test_manager(songs, Some(0));
+
+        qm.peek_next_song();
+        assert!(qm.queue.queued.is_some());
+
+        qm.set_repeat(RepeatMode::Track).unwrap();
+        assert!(
+            qm.queue.queued.is_none(),
+            "set_repeat must clear queued (IG-5)"
+        );
+    }
+
+    #[test]
+    fn toggle_consume_clears_queued() {
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+        ];
+        let mut qm = make_test_manager(songs, Some(0));
+
+        qm.peek_next_song();
+        assert!(qm.queue.queued.is_some());
+
+        qm.toggle_consume().unwrap();
+        assert!(
+            qm.queue.queued.is_none(),
+            "toggle_consume must clear queued (IG-5)"
+        );
     }
 
     #[test]
