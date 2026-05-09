@@ -273,8 +273,11 @@ impl AppService {
     ///
     /// Loads all songs by this artist, sets queue, and starts playback.
     pub async fn play_artist(&self, artist_id: &str) -> Result<()> {
-        let songs = self.artists_service.load_artist_songs(artist_id).await?;
-        self.playback.play_songs_from_index(songs, 0).await
+        let songs = self
+            .library_orchestrator()
+            .resolve_artist(artist_id)
+            .await?;
+        self.queue_orchestrator().play(songs, 0).await
     }
 
     /// Play all songs in a genre.
@@ -300,12 +303,15 @@ impl AppService {
     /// Roulette variant of [`Self::play_artist`]: load all artist songs,
     /// then start playback from a random index.
     pub async fn play_artist_random(&self, artist_id: &str) -> Result<()> {
-        let songs = self.artists_service.load_artist_songs(artist_id).await?;
+        let songs = self
+            .library_orchestrator()
+            .resolve_artist(artist_id)
+            .await?;
         if songs.is_empty() {
             return Err(anyhow::anyhow!("No songs found for artist"));
         }
         let start = rand::random_range(0..songs.len());
-        self.playback.play_songs_from_index(songs, start).await
+        self.queue_orchestrator().play(songs, start).await
     }
 
     /// Play all songs in a playlist.
