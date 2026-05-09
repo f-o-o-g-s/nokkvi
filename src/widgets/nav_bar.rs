@@ -38,6 +38,21 @@ pub enum NavView {
     Radios,
 }
 
+impl NavView {
+    pub const ALL: &'static [NavView] = &[
+        NavView::Queue,
+        NavView::Albums,
+        NavView::Artists,
+        NavView::Songs,
+        NavView::Genres,
+        NavView::Playlists,
+        NavView::Radios,
+    ];
+}
+
+const _: [(); 7 - NavView::ALL.len()] = [];
+const _: [(); NavView::ALL.len() - 7] = [];
+
 /// Pure view data passed from root for nav bar rendering
 #[derive(Debug, Clone)]
 pub(crate) struct NavBarViewData {

@@ -61,6 +61,26 @@ pub enum View {
     Settings,
 }
 
+impl View {
+    /// Every `View` variant. Length-anchored — see the `const _:` lines below.
+    pub const ALL: &'static [View] = &[
+        View::Albums,
+        View::Queue,
+        View::Songs,
+        View::Artists,
+        View::Genres,
+        View::Playlists,
+        View::Radios,
+        View::Settings,
+    ];
+}
+
+// Length anchor: adding a `View` variant without extending `ALL` fails to
+// compile. Both directions are needed — a single subtraction passes if
+// either side is too small.
+const _: [(); 8 - View::ALL.len()] = [];
+const _: [(); View::ALL.len() - 8] = [];
+
 // ============================================================================
 // SECTION: Application State (KEEP IN main.rs)
 // ============================================================================
