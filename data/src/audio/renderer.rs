@@ -56,12 +56,12 @@ pub struct AudioRenderer {
     finished_called: bool,
 
     /// Engine back-reference for completion callbacks.
-    pub engine: Weak<Mutex<super::engine::CustomAudioEngine>>,
+    engine: Weak<Mutex<super::engine::CustomAudioEngine>>,
     tokio_handle: tokio::runtime::Handle,
     /// Source generation counter — shared with engine for stale callback detection.
-    pub source_generation: SourceGeneration,
+    source_generation: SourceGeneration,
     /// Set by the engine's decode loop when the primary decoder reaches EOF.
-    pub decoder_eof: Arc<AtomicBool>,
+    decoder_eof: Arc<AtomicBool>,
 
     // ---- Crossfade state ----
     crossfade_active: bool,
@@ -233,6 +233,20 @@ impl AudioRenderer {
             eq_state: None,
             pw_volume_active: false,
         }
+    }
+
+    /// Sealed setter — the only path to install the engine back-link, the
+    /// source-generation handle, and the EOF flag. Replaces the historical
+    /// pub-field assignment in `engine.set_engine_reference`.
+    pub fn set_engine_link(
+        &mut self,
+        engine: Weak<Mutex<super::engine::CustomAudioEngine>>,
+        source_generation: SourceGeneration,
+        decoder_eof: Arc<AtomicBool>,
+    ) {
+        self.engine = engine;
+        self.source_generation = source_generation;
+        self.decoder_eof = decoder_eof;
     }
 
     // =========================================================================

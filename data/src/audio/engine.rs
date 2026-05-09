@@ -1678,9 +1678,11 @@ impl CustomAudioEngine {
     /// Set engine reference in renderer
     pub fn set_engine_reference(&mut self, engine: Weak<tokio::sync::Mutex<CustomAudioEngine>>) {
         let mut renderer = self.renderer.lock();
-        renderer.engine = engine;
-        renderer.source_generation = self.source_generation.clone();
-        renderer.decoder_eof = self.decoder_eof.clone();
+        renderer.set_engine_link(
+            engine,
+            self.source_generation.clone(),
+            self.decoder_eof.clone(),
+        );
     }
 
     /// Check if next track is prepared for gapless playback
