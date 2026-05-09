@@ -118,25 +118,25 @@ pub(crate) const NAV_TABS: &[(&str, &str, NavView)] = &[
 /// only distinguishes active (accent) vs idle (bg0_hard).
 ///
 /// Shared between the horizontal nav bar and the vertical side nav bar.
-pub(crate) fn flat_tab_style(
+pub(crate) fn flat_tab_container_style(
     is_active: bool,
-) -> impl Fn(&iced::Theme, button::Status) -> button::Style {
-    move |_theme: &iced::Theme, _status: button::Status| button::Style {
+) -> impl Fn(&iced::Theme) -> container::Style {
+    move |_theme: &iced::Theme| container::Style {
         background: if is_active {
             Some(Background::Color(theme::accent_bright()))
         } else {
             Some(Background::Color(theme::bg0_hard()))
         },
-        text_color: if is_active {
+        text_color: Some(if is_active {
             theme::bg0()
         } else {
             theme::fg2()
-        },
+        }),
         border: Border {
             radius: theme::ui_border_radius(),
             ..Default::default()
         },
-        ..button::Style::default()
+        ..Default::default()
     }
 }
 
@@ -316,22 +316,26 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             .into();
             elem
         } else {
-            // Flat mode: filled background button (shared style)
-            let tab_style = flat_tab_style(is_active);
+            // Flat mode: filled background container wrapped in mouse_area so the
+            // HoverOverlay's press-scale fires (native button captures ButtonPressed first).
+            let tab_style = flat_tab_container_style(is_active);
             let text_color = if is_active {
                 theme::bg0()
             } else {
                 theme::fg2()
             };
 
-            super::hover_overlay::HoverOverlay::new(
-                button(tab_content(label, icon_path, display_mode, text_color))
-                    .on_press(NavBarMessage::SwitchView(view))
-                    .padding(tab_padding)
-                    .height(Length::Fill)
-                    .style(tab_style),
+            mouse_area(
+                super::hover_overlay::HoverOverlay::new(
+                    container(tab_content(label, icon_path, display_mode, text_color))
+                        .padding(tab_padding)
+                        .height(Length::Fill)
+                        .style(tab_style),
+                )
+                .border_radius(theme::ui_border_radius()),
             )
-            .border_radius(theme::ui_border_radius())
+            .on_press(NavBarMessage::SwitchView(view))
+            .interaction(iced::mouse::Interaction::Pointer)
             .into()
         }
     };

@@ -13,13 +13,13 @@ use std::f32::consts::FRAC_PI_2;
 use iced::{
     Background, Border, Color, Element, Length, Point, Rectangle, Vector,
     font::{Font, Weight},
-    widget::{Space, button, canvas, column, container, row},
+    widget::{Space, canvas, column, container, mouse_area, row},
 };
 use nokkvi_data::types::player_settings::NavDisplayMode;
 
 use super::{
     hover_indicator::{HoverExpand, HoverIndicator},
-    nav_bar::{NAV_TABS, NavBarMessage, NavView, colored_icon, flat_tab_style},
+    nav_bar::{NAV_TABS, NavBarMessage, NavView, colored_icon, flat_tab_container_style},
 };
 use crate::theme;
 
@@ -200,16 +200,18 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
         let is_active = !settings_open && current == view;
         let display_mode = theme::nav_display_mode();
 
-        // Button style — flat mode uses shared flat_tab_style, rounded uses plain bg
-        let tab_style = move |_theme: &iced::Theme, status: button::Status| {
+        // Container style — flat mode uses shared flat_tab_container_style, rounded uses plain bg.
+        // mouse_area + HoverOverlay(container) so the press-scale fires (native button captures
+        // ButtonPressed first).
+        let tab_style = move |_theme: &iced::Theme| {
             if is_rounded {
-                button::Style {
+                container::Style {
                     background: Some(Background::Color(theme::bg0_hard())),
-                    text_color: theme::fg2(),
-                    ..button::Style::default()
+                    text_color: Some(theme::fg2()),
+                    ..Default::default()
                 }
             } else {
-                flat_tab_style(is_active)(_theme, status)
+                flat_tab_container_style(is_active)(_theme)
             }
         };
 
@@ -249,15 +251,18 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
             hover_indicator_color,
         );
 
-        super::hover_overlay::HoverOverlay::new(
-            button(content)
-                .on_press(NavBarMessage::SwitchView(view))
-                .padding(0)
-                .width(Length::Fixed(SIDE_NAV_WIDTH))
-                .height(Length::Fixed(tab_height))
-                .style(tab_style),
+        mouse_area(
+            super::hover_overlay::HoverOverlay::new(
+                container(content)
+                    .padding(0)
+                    .width(Length::Fixed(SIDE_NAV_WIDTH))
+                    .height(Length::Fixed(tab_height))
+                    .style(tab_style),
+            )
+            .border_radius(theme::ui_border_radius()),
         )
-        .border_radius(theme::ui_border_radius())
+        .on_press(NavBarMessage::SwitchView(view))
+        .interaction(iced::mouse::Interaction::Pointer)
         .into()
     };
 

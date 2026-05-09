@@ -8,7 +8,7 @@ use iced::{
     event::Event,
     keyboard,
     keyboard::key,
-    widget::{button, column, container, operation, space, text, text_input},
+    widget::{column, container, mouse_area, operation, space, text, text_input},
 };
 
 use crate::theme;
@@ -299,23 +299,22 @@ impl LoginPage {
                 text(" ") // using empty text instead of nothing to preserve height, although iced handles missing fine
             },
             Element::from(
-                crate::widgets::hover_overlay::HoverOverlay::<'_, LoginMessage>::new(
-                    button(
-                        text(if self.login_in_progress {
-                            "Connecting..."
-                        } else {
-                            "Login"
-                        })
-                        .width(Length::Fill)
-                        .align_x(Alignment::Center)
-                    )
-                    .on_press(LoginMessage::LoginPressed)
-                    .padding(14)
-                    .width(input_width)
-                    .style(|_theme, _status| {
-                        button::Style {
+                mouse_area(
+                    crate::widgets::hover_overlay::HoverOverlay::<'_, LoginMessage>::new(
+                        container(
+                            text(if self.login_in_progress {
+                                "Connecting..."
+                            } else {
+                                "Login"
+                            })
+                            .width(Length::Fill)
+                            .align_x(Alignment::Center)
+                        )
+                        .padding(14)
+                        .width(input_width)
+                        .style(|_theme| container::Style {
                             background: Some((theme::accent()).into()),
-                            text_color: theme::bg0_hard(),
+                            text_color: Some(theme::bg0_hard()),
                             border: iced::Border {
                                 color: theme::accent_border_light(),
                                 width: 1.0,
@@ -323,10 +322,12 @@ impl LoginPage {
                             },
                             shadow: iced::Shadow::default(),
                             snap: false,
-                        }
-                    })
+                        })
+                    )
+                    .border_radius(theme::ui_border_radius())
                 )
-                .border_radius(theme::ui_border_radius())
+                .on_press(LoginMessage::LoginPressed)
+                .interaction(iced::mouse::Interaction::Pointer)
             ),
         ]
         .spacing(16)
