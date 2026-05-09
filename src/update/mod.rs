@@ -55,6 +55,7 @@ mod library_refresh;
 mod menus;
 mod mpris;
 mod navigation;
+mod pending_expand_resolve;
 mod playback;
 mod player_bar;
 mod playlists;
@@ -79,6 +80,30 @@ mod tray;
 mod window;
 
 use iced::Task;
+// Per-line re-exports + per-line `#[expect(unused_imports)]` markers track
+// the incremental wiring of `try_resolve_pending_expand_*` wrappers in
+// `navigation.rs`. Each per-entity migration commit removes its line's
+// expect; the final wrapper migration leaves the four lines plain.
+#[expect(
+    unused_imports,
+    reason = "wired up by try_resolve_pending_expand_album wrapper migration"
+)]
+pub(crate) use pending_expand_resolve::AlbumSpec;
+#[expect(
+    unused_imports,
+    reason = "wired up by try_resolve_pending_expand_artist wrapper migration"
+)]
+pub(crate) use pending_expand_resolve::ArtistSpec;
+#[expect(
+    unused_imports,
+    reason = "wired up by try_resolve_pending_expand_genre wrapper migration"
+)]
+pub(crate) use pending_expand_resolve::GenreSpec;
+#[expect(
+    unused_imports,
+    reason = "wired up by try_resolve_pending_expand_song wrapper migration"
+)]
+pub(crate) use pending_expand_resolve::SongSpec;
 use tracing::debug;
 
 use crate::{Nokkvi, View, app_message::Message};
