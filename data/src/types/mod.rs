@@ -30,6 +30,7 @@ pub mod settings_data;
 pub mod settings_side_effect;
 pub mod song;
 pub mod song_pool;
+pub mod song_source;
 pub mod sort_mode;
 pub mod theme_file;
 pub mod toast;
@@ -38,6 +39,7 @@ pub mod toml_views;
 pub mod view_preferences;
 
 pub use mode_toggle::ModeToggleEffect;
+pub use song_source::SongSource;
 
 pub fn deserialize_starred<'de, D>(deserializer: D) -> Result<bool, D::Error>
 where
