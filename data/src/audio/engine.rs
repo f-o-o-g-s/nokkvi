@@ -80,6 +80,47 @@ pub struct GaplessTransitionInfo {
     pub codec: Option<String>,
 }
 
+/// Bundled gapless-prep state for the next track. Replaces the three
+/// independent tokio mutexes (`next_decoder`, `next_track_prepared`,
+/// `next_source_shared`) that the audit (`backend-boundary.md` §4 IG-13)
+/// flagged as enforced only by reading every site.
+///
+/// Lock order: this struct lives behind one `Arc<tokio::sync::Mutex<…>>`,
+/// so all three fields are acquired together. The decode loop, the engine
+/// async path, and `cancel_crossfade` all take the same mutex in the same
+/// order — the order question disappears.
+pub(crate) struct GaplessSlot {
+    /// Decoder for the prepared next track. `None` when nothing is staged.
+    pub decoder: Option<AudioDecoder>,
+    /// Source URL of the prepared track. Empty when not staged.
+    pub source: String,
+    /// True when the slot is fully prepared and the renderer can use it
+    /// for gapless transition. Distinct from `decoder.is_some()` because
+    /// the decode loop sets `prepared = false` AFTER `take`-ing the
+    /// decoder (so the next loop iteration knows the slot is mid-swap).
+    pub prepared: bool,
+}
+
+impl GaplessSlot {
+    pub fn new() -> Self {
+        Self {
+            decoder: None,
+            source: String::new(),
+            prepared: false,
+        }
+    }
+
+    pub fn is_prepared(&self) -> bool {
+        self.prepared && self.decoder.is_some()
+    }
+
+    pub fn clear(&mut self) {
+        self.decoder = None;
+        self.source.clear();
+        self.prepared = false;
+    }
+}
+
 /// Calculate buffer size for one decode chunk (~100ms of audio).
 ///
 /// Returns bytes for 100ms of the given format, clamped to [4096, 16384],
@@ -120,7 +161,6 @@ pub struct CustomAudioEngine {
 
     // Decoder
     decoder: Arc<tokio::sync::Mutex<AudioDecoder>>,
-    next_decoder: Arc<tokio::sync::Mutex<Option<AudioDecoder>>>,
 
     // Format tracking for gapless
     current_format: AudioFormat,
@@ -140,8 +180,10 @@ pub struct CustomAudioEngine {
     // This prevents the old loop from continuing when a new loop starts.
     decode_loop: DecodeLoopHandle,
 
-    // Gapless preloading state
-    next_track_prepared: Arc<tokio::sync::Mutex<bool>>,
+    // Gapless preloading state — bundles `decoder`, `source`, `prepared`
+    // under one tokio mutex so the lock order across the decode loop,
+    // engine async path, and crossfade cancel is enforced structurally.
+    gapless: Arc<tokio::sync::Mutex<GaplessSlot>>,
 
     // Completion callback — called when a track ends.
     // The bool argument is `true` when the same track is looping (repeat-one),
@@ -187,8 +229,6 @@ pub struct CustomAudioEngine {
     // ---- Gapless transition state ----
     /// Transition info written by the decode loop, consumed by the engine.
     gapless_transition_info: Arc<tokio::sync::Mutex<Option<GaplessTransitionInfo>>>,
-    /// Next track source URL — shared with the decode loop for gapless transitions.
-    next_source_shared: Arc<tokio::sync::Mutex<String>>,
 
     /// Raw ICY-metadata parsed by IcyMetadataReader
     live_icy_metadata: Arc<std::sync::RwLock<Option<String>>>,
@@ -210,14 +250,13 @@ impl CustomAudioEngine {
             decoder: Arc::new(tokio::sync::Mutex::new(AudioDecoder::new(
                 live_icy_metadata.clone(),
             ))),
-            next_decoder: Arc::new(tokio::sync::Mutex::new(None)),
             current_format: AudioFormat::invalid(),
             next_format: AudioFormat::invalid(),
             next_source: String::new(),
             renderer: Arc::new(PlMutex::new(AudioRenderer::new())),
             state: PlaybackState::Stopped,
             decode_loop: DecodeLoopHandle::new(),
-            next_track_prepared: Arc::new(tokio::sync::Mutex::new(false)),
+            gapless: Arc::new(tokio::sync::Mutex::new(GaplessSlot::new())),
             completion_callback: None,
             seeking: Arc::new(AtomicBool::new(false)),
             render_thread: None,
@@ -231,7 +270,6 @@ impl CustomAudioEngine {
             crossfade_enabled: false,
             crossfade_duration_ms: 5000,
             gapless_transition_info: Arc::new(tokio::sync::Mutex::new(None)),
-            next_source_shared: Arc::new(tokio::sync::Mutex::new(String::new())),
             live_icy_metadata,
             live_codec_name: Arc::new(std::sync::RwLock::new(None)),
         }
@@ -374,7 +412,9 @@ impl CustomAudioEngine {
 
         // Start new playback
         trace!(" AudioEngine: starting new playback");
-        *self.next_track_prepared.lock().await = false; // Reset prepared flag for new track
+        // Ungate any prepared slot for this new track. Decoder ownership
+        // stays so a concurrent prep is not silently dropped.
+        self.gapless.lock().await.prepared = false;
         let mut decoder = self.decoder.lock().await;
         if !decoder.is_initialized() {
             trace!(" AudioEngine: decoder not initialized, initializing with source");
@@ -516,12 +556,10 @@ impl CustomAudioEngine {
         let crossfade_duration_shared = self.crossfade_duration_shared.clone();
 
         // Gapless: pass next-track state so the decode loop can swap inline
-        let next_decoder = self.next_decoder.clone();
-        let next_track_prepared = self.next_track_prepared.clone();
+        let gapless = self.gapless.clone();
         let completion_callback = self.completion_callback.clone();
         let gapless_info = self.gapless_transition_info.clone();
         let source_generation = self.source_generation.clone();
-        let next_source_shared = self.next_source_shared.clone();
         let reconnect_url = self.source.clone();
 
         // Clear EOF flag — this decoder is starting fresh
@@ -791,89 +829,90 @@ impl CustomAudioEngine {
                     drop(decoder_guard); // release primary decoder lock
 
                     let did_gapless = {
-                        let is_prepared = *next_track_prepared.lock().await;
-                        if is_prepared {
-                            let mut next_dec_guard = next_decoder.lock().await;
-                            if let Some(ref next_dec) = *next_dec_guard {
-                                let next_fmt = next_dec.format().clone();
-                                let formats_match = current_format.is_valid()
-                                    && next_fmt.is_valid()
-                                    && current_format.sample_rate() == next_fmt.sample_rate()
-                                    && current_format.channel_count() == next_fmt.channel_count();
-                                // RG-track mode: the live stream's amplify
-                                // factor is baked at create time; deny gapless
-                                // when the next track needs a different gain.
-                                let rg_allows_swap = renderer.lock().gapless_swap_allowed();
-                                if !rg_allows_swap {
-                                    tracing::debug!(
-                                        "🔄 [DECODE LOOP] RG-track gain differs — denying gapless swap"
-                                    );
+                        let mut slot = gapless.lock().await;
+                        if !slot.is_prepared() {
+                            drop(slot);
+                            false
+                        } else if let Some(next_dec) = slot.decoder.take() {
+                            // Hold the slot lock through the format check + ownership
+                            // transition so `prepared` and `decoder` flip atomically.
+                            let next_fmt = next_dec.format().clone();
+                            let formats_match = current_format.is_valid()
+                                && next_fmt.is_valid()
+                                && current_format.sample_rate() == next_fmt.sample_rate()
+                                && current_format.channel_count() == next_fmt.channel_count();
+                            // RG-track mode: the live stream's amplify factor is baked
+                            // at create time; deny gapless when the next track needs a
+                            // different gain.
+                            let rg_allows_swap = renderer.lock().gapless_swap_allowed();
+                            if !rg_allows_swap {
+                                tracing::debug!(
+                                    "🔄 [DECODE LOOP] RG-track gain differs — denying gapless swap"
+                                );
+                            }
+
+                            if formats_match && rg_allows_swap {
+                                let next_duration = next_dec.duration();
+                                let next_source_url = std::mem::take(&mut slot.source);
+                                let next_codec = next_dec.live_codec();
+                                slot.prepared = false;
+                                drop(slot); // release before locking decoder + renderer
+
+                                // Swap into primary decoder
+                                *decoder.lock().await = next_dec;
+
+                                // Increment source generation for stale callback detection
+                                source_generation.bump_for_gapless();
+
+                                // Reset renderer position for the new track and
+                                // promote the staged crossfade RG to "current"
+                                // (since we're keeping the same stream, the
+                                // amplify factor is already correct — we just
+                                // need our bookkeeping to reflect the new track).
+                                {
+                                    let mut r = renderer.lock();
+                                    r.reset_position();
+                                    r.reset_finished_called();
+                                    r.adopt_pending_crossfade_replay_gain();
                                 }
 
-                                if formats_match && rg_allows_swap {
-                                    // Take the next decoder and swap it into the primary slot
-                                    if let Some(next_dec) = next_dec_guard.take() {
-                                        let next_duration = next_dec.duration();
-                                        let next_source_url =
-                                            next_source_shared.lock().await.clone();
-                                        let next_codec = next_dec.live_codec();
-
-                                        // Swap into primary decoder
-                                        *decoder.lock().await = next_dec;
-                                        *next_track_prepared.lock().await = false;
-
-                                        // Increment source generation for stale callback detection
-                                        source_generation.bump_for_gapless();
-
-                                        // Reset renderer position for the new track and
-                                        // promote the staged crossfade RG to "current"
-                                        // (since we're keeping the same stream, the
-                                        // amplify factor is already correct — we just
-                                        // need our bookkeeping to reflect the new track).
-                                        {
-                                            let mut r = renderer.lock();
-                                            r.reset_position();
-                                            r.reset_finished_called();
-                                            r.adopt_pending_crossfade_replay_gain();
-                                        }
-
-                                        // Store transition info for the engine to pick up
-                                        {
-                                            let mut info = gapless_info.lock().await;
-                                            *info = Some(GaplessTransitionInfo {
-                                                source: next_source_url,
-                                                duration: next_duration,
-                                                format: next_fmt,
-                                                codec: next_codec,
-                                            });
-                                        }
-
-                                        // Fire completion callback so the UI updates
-                                        // (queue advances, track info refreshes)
-                                        if let Some(ref cb) = completion_callback {
-                                            cb(false);
-                                        }
-
-                                        tracing::info!(
-                                            "🎵 [DECODE LOOP] Gapless transition — continuing decode loop"
-                                        );
-                                        backpressure_active = false;
-                                        true
-                                    } else {
-                                        false
-                                    }
-                                } else {
-                                    tracing::debug!(
-                                        "🔄 [DECODE LOOP] Format mismatch for gapless: {:?} → {:?}",
-                                        current_format,
-                                        next_fmt
-                                    );
-                                    false
+                                // Store transition info for the engine to pick up
+                                {
+                                    let mut info = gapless_info.lock().await;
+                                    *info = Some(GaplessTransitionInfo {
+                                        source: next_source_url,
+                                        duration: next_duration,
+                                        format: next_fmt,
+                                        codec: next_codec,
+                                    });
                                 }
+
+                                // Fire completion callback so the UI updates
+                                // (queue advances, track info refreshes)
+                                if let Some(ref cb) = completion_callback {
+                                    cb(false);
+                                }
+
+                                tracing::info!(
+                                    "🎵 [DECODE LOOP] Gapless transition — continuing decode loop"
+                                );
+                                backpressure_active = false;
+                                true
                             } else {
+                                tracing::debug!(
+                                    "🔄 [DECODE LOOP] Format mismatch for gapless: {:?} → {:?}",
+                                    current_format,
+                                    next_fmt
+                                );
+                                // Put the decoder back so a future swap can retry.
+                                slot.decoder = Some(next_dec);
+                                drop(slot);
                                 false
                             }
                         } else {
+                            // Slot said prepared but decoder was missing — clear.
+                            slot.prepared = false;
+                            drop(slot);
                             false
                         }
                     };
@@ -1135,7 +1174,6 @@ impl CustomAudioEngine {
         replay_gain: Option<crate::types::song::ReplayGain>,
     ) {
         self.reset_next_track().await;
-        *self.next_track_prepared.lock().await = false;
 
         if url.is_empty() {
             return;
@@ -1151,10 +1189,13 @@ impl CustomAudioEngine {
         if next_decoder.init(url).await.is_ok() {
             let incoming_duration = next_decoder.duration();
             self.next_format = next_decoder.format().clone();
-            *self.next_decoder.lock().await = Some(next_decoder);
             self.next_source = url.to_string();
-            *self.next_source_shared.lock().await = url.to_string();
-            *self.next_track_prepared.lock().await = true;
+            {
+                let mut slot = self.gapless.lock().await;
+                slot.decoder = Some(next_decoder);
+                slot.source = url.to_string();
+                slot.prepared = true;
+            }
 
             // Stash the incoming track's ReplayGain so the next crossfade
             // (or gapless transition) applies the right amplify factor.
@@ -1198,10 +1239,14 @@ impl CustomAudioEngine {
         }
 
         self.next_format = decoder.format().clone();
-        *self.next_decoder.lock().await = Some(decoder);
+        let incoming_duration = decoder.duration();
         self.next_source = url;
-        *self.next_source_shared.lock().await = self.next_source.clone();
-        *self.next_track_prepared.lock().await = true;
+        {
+            let mut slot = self.gapless.lock().await;
+            slot.decoder = Some(decoder);
+            slot.source = self.next_source.clone();
+            slot.prepared = true;
+        }
 
         // Stash the incoming track's ReplayGain so the next crossfade
         // (or gapless transition) applies the right amplify factor.
@@ -1211,13 +1256,6 @@ impl CustomAudioEngine {
 
         // Arm the renderer to trigger crossfade when the queue drains
         if self.crossfade_enabled && self.crossfade_duration_ms > 0 {
-            // decoder was moved into next_decoder — read duration from it
-            let incoming_duration = self
-                .next_decoder
-                .lock()
-                .await
-                .as_ref()
-                .map_or(0, |d| d.duration());
             self.renderer.lock().arm_crossfade(
                 self.crossfade_duration_ms,
                 &self.next_format,
@@ -1245,7 +1283,7 @@ impl CustomAudioEngine {
                 *guard = info.codec;
             }
             self.next_source.clear();
-            *self.next_source_shared.lock().await = String::new();
+            self.gapless.lock().await.source.clear();
             self.live_sample_rate
                 .store(self.current_format.sample_rate(), Ordering::Relaxed);
         }
@@ -1343,23 +1381,25 @@ impl CustomAudioEngine {
             return false;
         }
 
-        // Check if we have a prepared next track
-        let has_prepared = *self.next_track_prepared.lock().await;
-        if !has_prepared {
-            debug!("🔀 [CROSSFADE] No prepared decoder, cannot start");
-            return false;
-        }
-
-        // Take the prepared decoder for crossfade use
-        let next_decoder_opt = self.next_decoder.lock().await.take();
-        let next_decoder = match next_decoder_opt {
-            Some(d) => d,
-            None => {
-                debug!("🔀 [CROSSFADE] Prepared flag set but no decoder, skipping");
+        // Take the prepared decoder for crossfade use, ungating the slot
+        // and decoder ownership atomically.
+        let next_decoder = {
+            let mut slot = self.gapless.lock().await;
+            if !slot.is_prepared() {
+                drop(slot);
+                debug!("🔀 [CROSSFADE] No prepared decoder, cannot start");
                 return false;
             }
+            let dec = slot.decoder.take();
+            slot.prepared = false;
+            match dec {
+                Some(d) => d,
+                None => {
+                    debug!("🔀 [CROSSFADE] Prepared flag set but no decoder, skipping");
+                    return false;
+                }
+            }
         };
-        *self.next_track_prepared.lock().await = false;
 
         let incoming_format = next_decoder.format().clone();
         let duration_ms = self.crossfade_duration_ms;
@@ -1595,14 +1635,18 @@ impl CustomAudioEngine {
 
     /// Load prepared track (for gapless transition)
     pub async fn load_prepared_track(&mut self) -> Result<()> {
-        let mut next_decoder_guard = self.next_decoder.lock().await;
-        let next_decoder = match next_decoder_guard.take() {
-            Some(d) => d,
-            None => {
-                anyhow::bail!("No prepared track to load");
-            }
+        // Drain the slot atomically: take ownership of the decoder, clear
+        // prepared + source so the slot can't be reused mid-swap.
+        let next_decoder = {
+            let mut slot = self.gapless.lock().await;
+            let dec = match slot.decoder.take() {
+                Some(d) => d,
+                None => anyhow::bail!("No prepared track to load"),
+            };
+            slot.prepared = false;
+            slot.source.clear();
+            dec
         };
-        drop(next_decoder_guard);
 
         // Stop current decoding loop before swapping decoders
         self.decode_loop.supersede();
@@ -1621,7 +1665,6 @@ impl CustomAudioEngine {
         self.live_sample_rate
             .store(self.current_format.sample_rate(), Ordering::Relaxed);
         self.next_format = AudioFormat::invalid();
-        *self.next_track_prepared.lock().await = false; // Reset flag after loading prepared track
 
         // Update duration
         self.duration = decoder.duration();
@@ -1700,10 +1743,8 @@ impl CustomAudioEngine {
     /// Call this whenever the play order changes (shuffle/repeat/consume toggle)
     /// to prevent a stale gapless transition to the wrong song.
     pub async fn reset_next_track(&mut self) {
-        *self.next_decoder.lock().await = None;
-        *self.next_track_prepared.lock().await = false;
+        self.gapless.lock().await.clear();
         self.next_source.clear();
-        *self.next_source_shared.lock().await = String::new();
         self.next_format = AudioFormat::invalid();
         self.renderer.lock().disarm_crossfade();
     }
@@ -1761,7 +1802,7 @@ impl CustomAudioEngine {
 
     /// Check if next track is prepared for gapless playback
     pub async fn is_next_track_prepared(&self) -> bool {
-        *self.next_track_prepared.lock().await
+        self.gapless.lock().await.is_prepared()
     }
 
     /// Handle renderer finished (called when renderer runs out of buffers)
@@ -1853,7 +1894,7 @@ impl CustomAudioEngine {
             return false;
         }
 
-        let has_prepared = *self.next_track_prepared.lock().await;
+        let has_prepared = self.gapless.lock().await.is_prepared();
         if has_prepared {
             debug!(
                 "🔀 [RENDERER FINISHED] Starting crossfade (prepared={}, eof={})",
@@ -1942,10 +1983,7 @@ impl CustomAudioEngine {
         let source_before = self.source.clone();
 
         // Check if we have a prepared next track
-        let has_prepared = {
-            let next_decoder = self.next_decoder.lock().await;
-            next_decoder.is_some()
-        };
+        let has_prepared = self.gapless.lock().await.decoder.is_some();
 
         if has_prepared {
             debug!(" Track finished, loading prepared next track");
