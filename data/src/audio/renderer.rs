@@ -30,14 +30,34 @@ use crate::{
 /// The callback receives f32 samples scaled to S16 range, and the sample rate.
 pub type VisualizerCallback = crate::audio::streaming_source::VisualizerCallback;
 
+/// Renderer-side crossfade state machine.
+///
+/// Variants carry the data each phase needs (the crossfade `ActiveStream`,
+/// timing, formats), so impossible states are unrepresentable: `Idle` has no
+/// stream, `Armed` has no stream and no start time, and `Active` always has
+/// both. Replaces the eight parallel `crossfade_*` fields that previously
+/// had to be reset in lockstep.
+enum CrossfadeState {
+    Idle,
+    Armed {
+        duration_ms: u64,
+        incoming_format: AudioFormat,
+        track_duration_ms: u64,
+    },
+    Active {
+        stream: ActiveStream,
+        started_at: std::time::Instant,
+        duration_ms: u64,
+        incoming_format: AudioFormat,
+    },
+}
+
 /// Audio renderer that manages streaming sources on the rodio mixer.
 pub struct AudioRenderer {
     /// The rodio output — holds the cpal stream and mixer.
     output: Option<RodioOutput>,
     /// Primary audio stream (current track).
     primary_stream: Option<ActiveStream>,
-    /// Crossfade audio stream (incoming track during crossfade).
-    crossfade_stream: Option<ActiveStream>,
 
     /// Current audio format from the decoder.
     format: AudioFormat,
@@ -63,18 +83,13 @@ pub struct AudioRenderer {
     /// Set by the engine's decode loop when the primary decoder reaches EOF.
     decoder_eof: Arc<AtomicBool>,
 
-    // ---- Crossfade state ----
-    crossfade_active: bool,
-    crossfade_duration_ms: u64,
-    crossfade_start_time: Option<std::time::Instant>,
-    crossfade_incoming_format: AudioFormat,
+    /// Crossfade phase + per-phase data. See [`CrossfadeState`].
+    crossfade_state: CrossfadeState,
+    /// Elapsed crossfade time (ms) staged after `finalize_crossfade` so the
+    /// engine can read it on the next render tick as a position offset.
+    /// Lives outside `CrossfadeState` because it survives the Active→Idle
+    /// transition by exactly one tick.
     crossfade_finalized_elapsed_ms: u64,
-
-    // ---- Crossfade trigger (renderer-side, like MPD) ----
-    crossfade_armed: bool,
-    crossfade_armed_duration_ms: u64,
-    crossfade_armed_incoming_format: AudioFormat,
-    crossfade_armed_track_duration_ms: u64,
 
     /// Shared visualizer callback slot. Owned by the renderer, shared with
     /// all `RodioOutput` instances and their `StreamingSource`s.
@@ -197,7 +212,6 @@ impl AudioRenderer {
         Self {
             output: None,
             primary_stream: None,
-            crossfade_stream: None,
             format: AudioFormat::invalid(),
             prev_format: AudioFormat::invalid(),
             playing: false,
@@ -210,15 +224,8 @@ impl AudioRenderer {
             tokio_handle: tokio::runtime::Handle::current(),
             source_generation: SourceGeneration::new(),
             decoder_eof: Arc::new(AtomicBool::new(false)),
-            crossfade_active: false,
-            crossfade_duration_ms: 0,
-            crossfade_start_time: None,
-            crossfade_incoming_format: AudioFormat::invalid(),
+            crossfade_state: CrossfadeState::Idle,
             crossfade_finalized_elapsed_ms: 0,
-            crossfade_armed: false,
-            crossfade_armed_duration_ms: 0,
-            crossfade_armed_incoming_format: AudioFormat::invalid(),
-            crossfade_armed_track_duration_ms: 0,
             viz_callback: std::sync::Arc::new(parking_lot::RwLock::new(None)),
             shared_mixer: None,
             volume_normalization_mode: VolumeNormalizationMode::Off,
@@ -426,7 +433,7 @@ impl AudioRenderer {
             stream.resume();
             stream.set_volume(self.stream_volume());
         }
-        if let Some(ref stream) = self.crossfade_stream {
+        if let CrossfadeState::Active { stream, .. } = &self.crossfade_state {
             stream.resume();
         }
 
@@ -461,7 +468,7 @@ impl AudioRenderer {
         if let Some(ref stream) = self.primary_stream {
             stream.pause();
         }
-        if let Some(ref stream) = self.crossfade_stream {
+        if let CrossfadeState::Active { stream, .. } = &self.crossfade_state {
             stream.pause();
         }
     }
@@ -476,11 +483,11 @@ impl AudioRenderer {
         if let Some(ref stream) = self.primary_stream {
             stream.resume();
         }
-        if let Some(ref stream) = self.crossfade_stream {
+        if let CrossfadeState::Active { stream, .. } = &self.crossfade_state {
             stream.resume();
         }
         // Restore volume (may have been changed during pause via set_volume)
-        if !self.crossfade_active
+        if !matches!(self.crossfade_state, CrossfadeState::Active { .. })
             && let Some(ref stream) = self.primary_stream
         {
             stream.set_volume(self.stream_volume());
@@ -537,7 +544,7 @@ impl AudioRenderer {
             // Nothing to do here; PipeWire volume is set via SfxEngine.
             return;
         }
-        if self.crossfade_active {
+        if matches!(self.crossfade_state, CrossfadeState::Active { .. }) {
             // During crossfade, volumes are managed by the crossfade tick.
             // Just store the new volume — next tick applies it proportionally.
         } else if !self.paused
@@ -676,10 +683,11 @@ impl AudioRenderer {
             );
         }
 
-        self.crossfade_armed = true;
-        self.crossfade_armed_duration_ms = effective;
-        self.crossfade_armed_incoming_format = incoming_format.clone();
-        self.crossfade_armed_track_duration_ms = track_duration_ms;
+        self.crossfade_state = CrossfadeState::Armed {
+            duration_ms: effective,
+            incoming_format: incoming_format.clone(),
+            track_duration_ms,
+        };
         debug!(
             "🔀 [RENDERER] Crossfade ARMED: duration={}ms, track={}ms, incoming={:?}",
             effective, track_duration_ms, incoming_format
@@ -687,11 +695,14 @@ impl AudioRenderer {
     }
 
     /// Disarm the crossfade trigger.
+    ///
+    /// Only resets when currently `Armed` — leaves `Active` and `Idle`
+    /// states untouched, matching the previous field-based semantics
+    /// where this only zeroed the `crossfade_armed_*` group.
     pub fn disarm_crossfade(&mut self) {
-        self.crossfade_armed = false;
-        self.crossfade_armed_duration_ms = 0;
-        self.crossfade_armed_incoming_format = AudioFormat::invalid();
-        self.crossfade_armed_track_duration_ms = 0;
+        if matches!(self.crossfade_state, CrossfadeState::Armed { .. }) {
+            self.crossfade_state = CrossfadeState::Idle;
+        }
     }
 
     /// Start a crossfade transition.
@@ -719,11 +730,12 @@ impl AudioRenderer {
             self.eq_state.clone(),
         );
 
-        self.crossfade_stream = Some(cf_stream);
-        self.crossfade_active = true;
-        self.crossfade_duration_ms = duration_ms;
-        self.crossfade_start_time = Some(std::time::Instant::now());
-        self.crossfade_incoming_format = incoming_format.clone();
+        self.crossfade_state = CrossfadeState::Active {
+            stream: cf_stream,
+            started_at: std::time::Instant::now(),
+            duration_ms,
+            incoming_format: incoming_format.clone(),
+        };
 
         debug!(
             "🔀 [RENDERER] Crossfade STARTED: {}ms, incoming={:?}",
@@ -733,24 +745,23 @@ impl AudioRenderer {
 
     /// Cancel an active crossfade.
     pub fn cancel_crossfade(&mut self) {
-        if self.crossfade_active {
+        let prior = std::mem::replace(&mut self.crossfade_state, CrossfadeState::Idle);
+        if let CrossfadeState::Active {
+            stream,
+            started_at,
+            duration_ms,
+            ..
+        } = prior
+        {
             debug!(
-                "🔀 [RENDERER] Crossfade CANCELLED: elapsed={:?}ms/{}ms",
-                self.crossfade_start_time.map(|t| t.elapsed().as_millis()),
-                self.crossfade_duration_ms,
+                "🔀 [RENDERER] Crossfade CANCELLED: elapsed={}ms/{}ms",
+                started_at.elapsed().as_millis(),
+                duration_ms,
             );
-        }
-        self.crossfade_active = false;
-        self.crossfade_duration_ms = 0;
-        self.crossfade_start_time = None;
-        self.crossfade_incoming_format = AudioFormat::invalid();
-        // Drop the staged RG since the incoming stream is being thrown away.
-        self.pending_crossfade_replay_gain = None;
-
-        // Stop crossfade stream
-        if let Some(stream) = self.crossfade_stream.take() {
             stream.silence_and_stop();
         }
+        // Drop the staged RG since the incoming stream is being thrown away.
+        self.pending_crossfade_replay_gain = None;
 
         // Restore primary volume
         if !self.paused
@@ -762,7 +773,7 @@ impl AudioRenderer {
 
     /// Write decoded f32 samples to the crossfade (incoming) stream.
     pub fn write_crossfade_samples(&mut self, samples: &[f32]) -> usize {
-        if let Some(ref mut stream) = self.crossfade_stream {
+        if let CrossfadeState::Active { stream, .. } = &mut self.crossfade_state {
             stream.write_samples(samples)
         } else {
             0
@@ -771,44 +782,54 @@ impl AudioRenderer {
 
     /// Check available space in the crossfade stream.
     pub fn crossfade_available_space(&self) -> usize {
-        self.crossfade_stream
-            .as_ref()
-            .map_or(0, |s| s.available_space())
+        if let CrossfadeState::Active { stream, .. } = &self.crossfade_state {
+            stream.available_space()
+        } else {
+            0
+        }
     }
 
     /// Whether a crossfade is currently in progress.
     pub fn is_crossfade_active(&self) -> bool {
-        self.crossfade_active
+        matches!(self.crossfade_state, CrossfadeState::Active { .. })
     }
 
     /// Get crossfade buffer count (approximate samples in crossfade ring buffer).
     pub fn crossfade_buffer_count(&self) -> usize {
-        self.crossfade_stream.as_ref().map_or(0, |s| {
-            crate::audio::rodio_output::RING_BUFFER_CAPACITY.saturating_sub(s.available_space())
-        })
+        if let CrossfadeState::Active { stream, .. } = &self.crossfade_state {
+            crate::audio::rodio_output::RING_BUFFER_CAPACITY
+                .saturating_sub(stream.available_space())
+        } else {
+            0
+        }
     }
 
     /// Tick the crossfade: update volumes based on elapsed time.
     /// Called periodically (e.g., from the decode loop or a timer).
     /// Returns `true` if the crossfade should be finalized.
     pub fn tick_crossfade(&mut self) -> bool {
-        if !self.crossfade_active {
-            return false;
-        }
-
-        let elapsed_ms = self
-            .crossfade_start_time
-            .map_or(0, |t| t.elapsed().as_millis() as u64);
-
-        let progress = if self.crossfade_duration_ms > 0 {
-            (elapsed_ms as f64 / self.crossfade_duration_ms as f64).min(1.0)
-        } else {
-            1.0
+        // Compute fade coefficients first (immutable borrow), then apply them
+        // to both streams in a separate pass so the variant's stream and the
+        // primary stream can be touched without overlapping borrows.
+        let (fade_out, fade_in, progress) = match &self.crossfade_state {
+            CrossfadeState::Active {
+                started_at,
+                duration_ms,
+                ..
+            } => {
+                let elapsed_ms = started_at.elapsed().as_millis() as u64;
+                let progress = if *duration_ms > 0 {
+                    (elapsed_ms as f64 / *duration_ms as f64).min(1.0)
+                } else {
+                    1.0
+                };
+                // Equal-power crossfade using cos²/sin² curves.
+                let fade_out = (progress * std::f64::consts::FRAC_PI_2).cos().powi(2);
+                let fade_in = (progress * std::f64::consts::FRAC_PI_2).sin().powi(2);
+                (fade_out, fade_in, progress)
+            }
+            _ => return false,
         };
-
-        // Equal-power crossfade using cos²/sin² curves
-        let fade_out = (progress * std::f64::consts::FRAC_PI_2).cos().powi(2);
-        let fade_in = (progress * std::f64::consts::FRAC_PI_2).sin().powi(2);
 
         // When PipeWire handles user volume, software only applies the fade
         // coefficient. PipeWire applies the user's volume uniformly to the
@@ -821,7 +842,7 @@ impl AudioRenderer {
         if let Some(ref stream) = self.primary_stream {
             stream.set_volume((fade_out * user_vol as f64) as f32);
         }
-        if let Some(ref stream) = self.crossfade_stream {
+        if let CrossfadeState::Active { stream, .. } = &self.crossfade_state {
             stream.set_volume((fade_in * user_vol as f64) as f32);
         }
 
@@ -831,24 +852,28 @@ impl AudioRenderer {
     /// Finalize the crossfade: swap crossfade stream → primary stream.
     /// Returns the elapsed crossfade time in milliseconds (for position offset).
     pub fn finalize_crossfade(&mut self) -> u64 {
-        if !self.crossfade_active {
+        let CrossfadeState::Active {
+            stream,
+            started_at,
+            duration_ms,
+            incoming_format,
+        } = std::mem::replace(&mut self.crossfade_state, CrossfadeState::Idle)
+        else {
             return 0;
-        }
+        };
 
-        let elapsed_ms = self
-            .crossfade_start_time
-            .map_or(0, |t| t.elapsed().as_millis() as u64);
+        let elapsed_ms = started_at.elapsed().as_millis() as u64;
 
         debug!(
             "🔀 [RENDERER] Crossfade FINALIZED: elapsed={}ms/{}ms",
-            elapsed_ms, self.crossfade_duration_ms,
+            elapsed_ms, duration_ms,
         );
 
         // Stop old primary, promote crossfade stream to primary
         if let Some(old_primary) = self.primary_stream.take() {
             old_primary.silence_and_stop();
         }
-        self.primary_stream = self.crossfade_stream.take();
+        self.primary_stream = Some(stream);
 
         // Set new primary to full user volume
         if let Some(ref stream) = self.primary_stream {
@@ -856,17 +881,10 @@ impl AudioRenderer {
         }
 
         // Update format to the incoming track's format
-        self.format = self.crossfade_incoming_format.clone();
+        self.format = incoming_format;
         // Promote the crossfade RG to "current" — it's now baked into the
         // new primary stream's `amplify` factor.
         self.current_replay_gain = self.pending_crossfade_replay_gain.take();
-
-        // Reset crossfade state
-        self.crossfade_active = false;
-        self.crossfade_duration_ms = 0;
-        self.crossfade_start_time = None;
-        self.crossfade_incoming_format = AudioFormat::invalid();
-        self.disarm_crossfade();
 
         // Store for engine to read as position offset
         self.crossfade_finalized_elapsed_ms = elapsed_ms;
@@ -880,17 +898,25 @@ impl AudioRenderer {
 
     /// Check if crossfade is armed.
     pub fn is_crossfade_armed(&self) -> bool {
-        self.crossfade_armed
+        matches!(self.crossfade_state, CrossfadeState::Armed { .. })
     }
 
-    /// Get the armed crossfade duration.
+    /// Get the armed crossfade duration, or `0` if not currently armed.
     pub fn crossfade_armed_duration_ms(&self) -> u64 {
-        self.crossfade_armed_duration_ms
+        match &self.crossfade_state {
+            CrossfadeState::Armed { duration_ms, .. } => *duration_ms,
+            _ => 0,
+        }
     }
 
-    /// Get the armed crossfade incoming format.
-    pub fn crossfade_armed_incoming_format(&self) -> &AudioFormat {
-        &self.crossfade_armed_incoming_format
+    /// Get the armed crossfade incoming format, or `None` if not currently armed.
+    pub fn crossfade_armed_incoming_format(&self) -> Option<&AudioFormat> {
+        match &self.crossfade_state {
+            CrossfadeState::Armed {
+                incoming_format, ..
+            } => Some(incoming_format),
+            _ => None,
+        }
     }
 
     // =========================================================================
@@ -915,8 +941,8 @@ impl AudioRenderer {
                 self.is_buffer_queue_empty(),
                 self.buffer_count(),
                 self.primary_stream.is_some(),
-                self.crossfade_active,
-                self.crossfade_armed,
+                self.is_crossfade_active(),
+                self.is_crossfade_armed(),
                 self.finished_called,
             );
         }
@@ -926,10 +952,10 @@ impl AudioRenderer {
         }
 
         // Tick crossfade volumes if active
-        if self.crossfade_active && self.tick_crossfade() {
+        if matches!(self.crossfade_state, CrossfadeState::Active { .. }) && self.tick_crossfade() {
             // Crossfade duration expired — finalize the renderer-side crossfade
             // synchronously (we already hold the lock). This swaps the crossfade
-            // stream to primary and resets crossfade_active. Then signal the engine
+            // stream to primary and resets the state to Idle. Then signal the engine
             // to swap decoders/sources.
             debug!("🔀 [RENDER_TICK] Crossfade complete — finalizing renderer + signaling engine");
             self.finalize_crossfade();
@@ -938,13 +964,18 @@ impl AudioRenderer {
         }
 
         // Check for crossfade trigger: position-based, NOT EOF-based.
-        // We start the crossfade `crossfade_duration_ms` before the track ends,
-        // so the outgoing track still has audio in its buffer to fade out.
-        // Falls back to EOF if duration is unknown (0).
-        if self.crossfade_armed {
+        // We start the crossfade `duration_ms` before the track ends, so the
+        // outgoing track still has audio in its buffer to fade out. Falls back
+        // to EOF if duration is unknown (0).
+        if let CrossfadeState::Armed {
+            duration_ms,
+            track_duration_ms,
+            ..
+        } = &self.crossfade_state
+        {
             let pos = self.position();
-            let track_dur = self.crossfade_armed_track_duration_ms;
-            let xfade_dur = self.crossfade_armed_duration_ms;
+            let track_dur = *track_duration_ms;
+            let xfade_dur = *duration_ms;
             let trigger = if track_dur > 0 && xfade_dur > 0 {
                 pos >= track_dur.saturating_sub(xfade_dur)
             } else {
@@ -956,16 +987,27 @@ impl AudioRenderer {
                     "🔀 [RENDER_TICK] Crossfade trigger — pos={}ms, track={}ms, xfade={}ms",
                     pos, track_dur, xfade_dur
                 );
-                // Capture armed values before disarm clears them
-                let cf_duration = self.crossfade_armed_duration_ms;
-                let cf_format = self.crossfade_armed_incoming_format.clone();
-                self.disarm_crossfade();
+                // Capture armed values by replacing the state with Idle, then
+                // immediately start the active crossfade. The mem::replace
+                // serves as the disarm.
+                let armed = std::mem::replace(&mut self.crossfade_state, CrossfadeState::Idle);
+                let CrossfadeState::Armed {
+                    duration_ms: cf_duration,
+                    incoming_format: cf_format,
+                    ..
+                } = armed
+                else {
+                    // Unreachable — we already matched Armed above. Restore
+                    // state and bail out.
+                    self.crossfade_state = armed;
+                    return;
+                };
 
-                // Start the renderer-side crossfade SYNCHRONOUSLY so that
-                // crossfade_active=true prevents the track-completion check
-                // from firing before the async engine task can respond.
-                // The engine's start_crossfade() skips renderer.start_crossfade()
-                // if we've already activated it here.
+                // Start the renderer-side crossfade SYNCHRONOUSLY so that the
+                // Active state prevents the track-completion check from firing
+                // before the async engine task can respond. The engine's
+                // start_crossfade() skips renderer.start_crossfade() if we've
+                // already activated it here.
                 self.start_crossfade(cf_duration, &cf_format);
 
                 // Signal the engine async to set up the decoder and decode loop
@@ -975,7 +1017,7 @@ impl AudioRenderer {
         }
 
         // Check for track completion (ring buffer empty + decoder EOF + not crossfading)
-        if !self.crossfade_active
+        if !matches!(self.crossfade_state, CrossfadeState::Active { .. })
             && !self.finished_called
             && self.decoder_eof.load(Ordering::Acquire)
             && self.is_buffer_queue_empty()
