@@ -324,8 +324,11 @@ impl AppService {
     ///
     /// Loads all songs in this playlist, sets queue, and starts playback.
     pub async fn play_playlist(&self, playlist_id: &str) -> Result<()> {
-        let songs = self.load_playlist_songs(playlist_id).await?;
-        self.playback.play_songs_from_index(songs, 0).await
+        let songs = self
+            .library_orchestrator()
+            .resolve_playlist(playlist_id)
+            .await?;
+        self.queue_orchestrator().play(songs, 0).await
     }
 
     /// Play a playlist starting from a specific track index.
@@ -336,8 +339,12 @@ impl AppService {
         playlist_id: &str,
         track_idx: usize,
     ) -> Result<()> {
-        let songs = self.load_playlist_songs(playlist_id).await?;
-        self.playback.play_songs_from_index(songs, track_idx).await
+        let songs = self
+            .library_orchestrator()
+            .resolve_playlist(playlist_id)
+            .await?;
+        let start = track_idx.min(songs.len().saturating_sub(1));
+        self.queue_orchestrator().play(songs, start).await
     }
 
     /// Load a playlist's songs into the queue WITHOUT starting playback.
