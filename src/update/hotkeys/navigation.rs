@@ -307,9 +307,11 @@ impl Nokkvi {
                 View::Radios => {
                     let total = self.library.radio_stations.len();
                     self.radios_page.common.handle_set_offset(i, total);
-                    Task::done(Message::Radios(views::RadiosMessage::SlotListSetOffset(
-                        i,
-                        iced::keyboard::Modifiers::default(),
+                    Task::done(Message::Radios(views::RadiosMessage::SlotList(
+                        crate::widgets::SlotListPageMessage::SetOffset(
+                            i,
+                            iced::keyboard::Modifiers::default(),
+                        ),
                     )))
                 }
                 View::Playlists | View::Settings => Task::none(),

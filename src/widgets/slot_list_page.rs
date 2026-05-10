@@ -43,6 +43,35 @@ impl Default for SlotListPageState {
     }
 }
 
+/// Unified message enum for slot-list navigation, activation, selection, and
+/// sort/search. Non-expansion views (Songs, Queue, Radios, Similar) dispatch
+/// this directly through `SlotListPageState::handle()`. Expansion views
+/// (Albums, Artists, Genres, Playlists) match sub-variants individually inside
+/// their `SlotList(msg)` arm because they route through expansion-aware methods.
+#[derive(Debug, Clone)]
+pub enum SlotListPageMessage {
+    // Navigation (all views)
+    NavigateUp,
+    NavigateDown,
+    SetOffset(usize, iced::keyboard::Modifiers),
+    ScrollSeek(usize),
+    // Activation
+    ActivateCenter,
+    ClickPlay(usize),
+    // Selection
+    SelectionToggle(usize),
+    SelectAllToggle,
+    // Queue/refresh/center
+    AddCenterToQueue,
+    RefreshViewData,
+    CenterOnPlaying,
+    // Sort/search (emitted by non-expansion views only)
+    SearchQueryChanged(String),
+    SearchFocused(bool),
+    SortModeSelected(crate::widgets::view_header::SortMode),
+    ToggleSortOrder,
+}
+
 ///
 /// Views should wrap these in their own action enum, e.g.:
 /// ```
@@ -53,10 +82,14 @@ impl Default for SlotListPageState {
 /// ```
 #[derive(Debug, Clone)]
 pub enum SlotListPageAction {
+    None,
+    ActivateCenter,
+    AddCenterToQueue,
+    RefreshViewData,
+    CenterOnPlaying,
     SearchChanged(String),
     SortModeChanged(SortMode),
     SortOrderChanged(bool),
-    None,
 }
 
 /// Tri-state for the column-header "select all" checkbox.
@@ -273,6 +306,56 @@ impl SlotListPageState {
     /// Handle search focus change
     pub fn handle_search_focused(&mut self, focused: bool) {
         self.search_input_focused = focused;
+    }
+
+    /// Unified dispatch for non-expansion views (Songs, Queue, Radios, Similar).
+    /// Expansion views (Albums, Artists, Genres, Playlists) do NOT call this —
+    /// they use expansion-aware methods (self.expansion.handle_navigate_up etc.)
+    /// and match SlotListPageMessage sub-variants individually.
+    pub fn handle(&mut self, msg: SlotListPageMessage, total: usize) -> SlotListPageAction {
+        match msg {
+            SlotListPageMessage::NavigateUp => {
+                self.handle_navigate_up(total);
+                SlotListPageAction::None
+            }
+            SlotListPageMessage::NavigateDown => {
+                self.handle_navigate_down(total);
+                SlotListPageAction::None
+            }
+            SlotListPageMessage::SetOffset(offset, mods) => {
+                self.handle_slot_click(offset, total, mods);
+                SlotListPageAction::None
+            }
+            SlotListPageMessage::ScrollSeek(offset) => {
+                self.handle_set_offset(offset, total);
+                SlotListPageAction::None
+            }
+            SlotListPageMessage::SelectionToggle(offset) => {
+                self.handle_selection_toggle(offset, total);
+                SlotListPageAction::None
+            }
+            SlotListPageMessage::SelectAllToggle => {
+                self.handle_select_all_toggle(total);
+                SlotListPageAction::None
+            }
+            SlotListPageMessage::ActivateCenter => SlotListPageAction::ActivateCenter,
+            SlotListPageMessage::ClickPlay(idx) => {
+                self.handle_set_offset(idx, total);
+                SlotListPageAction::ActivateCenter
+            }
+            SlotListPageMessage::AddCenterToQueue => SlotListPageAction::AddCenterToQueue,
+            SlotListPageMessage::SearchQueryChanged(q) => {
+                self.handle_search_query_changed(q, total)
+            }
+            SlotListPageMessage::SearchFocused(focused) => {
+                self.handle_search_focused(focused);
+                SlotListPageAction::None
+            }
+            SlotListPageMessage::SortModeSelected(mode) => self.handle_sort_mode_selected(mode),
+            SlotListPageMessage::ToggleSortOrder => self.handle_toggle_sort_order(),
+            SlotListPageMessage::RefreshViewData => SlotListPageAction::RefreshViewData,
+            SlotListPageMessage::CenterOnPlaying => SlotListPageAction::CenterOnPlaying,
+        }
     }
 
     /// Get the currently centered item index.

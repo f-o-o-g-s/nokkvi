@@ -143,7 +143,9 @@ impl Nokkvi {
             View::Playlists => Task::done(Message::Playlists(
                 views::PlaylistsMessage::SlotListNavigateUp,
             )),
-            View::Radios => Task::done(Message::Radios(views::RadiosMessage::SlotListNavigateUp)),
+            View::Radios => Task::done(Message::Radios(views::RadiosMessage::SlotList(
+                crate::widgets::SlotListPageMessage::NavigateUp,
+            ))),
             View::Settings => Task::done(Message::Settings(views::SettingsMessage::SlotListUp)),
         }
     }
@@ -188,7 +190,9 @@ impl Nokkvi {
             View::Playlists => Task::done(Message::Playlists(
                 views::PlaylistsMessage::SlotListNavigateDown,
             )),
-            View::Radios => Task::done(Message::Radios(views::RadiosMessage::SlotListNavigateDown)),
+            View::Radios => Task::done(Message::Radios(views::RadiosMessage::SlotList(
+                crate::widgets::SlotListPageMessage::NavigateDown,
+            ))),
             View::Settings => Task::done(Message::Settings(views::SettingsMessage::SlotListDown)),
         };
         Task::batch([unfocus_task, nav_task])
@@ -224,9 +228,11 @@ impl Nokkvi {
                     iced::keyboard::Modifiers::default(),
                 ),
             )),
-            View::Radios => Task::done(Message::Radios(views::RadiosMessage::SlotListSetOffset(
-                offset,
-                iced::keyboard::Modifiers::default(),
+            View::Radios => Task::done(Message::Radios(views::RadiosMessage::SlotList(
+                crate::widgets::SlotListPageMessage::SetOffset(
+                    offset,
+                    iced::keyboard::Modifiers::default(),
+                ),
             ))),
             View::Settings => Task::done(Message::Settings(
                 views::SettingsMessage::SlotListSetOffset(
@@ -294,9 +300,9 @@ impl Nokkvi {
             View::Playlists => Task::done(Message::Playlists(
                 views::PlaylistsMessage::SlotListActivateCenter,
             )),
-            View::Radios => Task::done(Message::Radios(
-                views::RadiosMessage::SlotListActivateCenter,
-            )),
+            View::Radios => Task::done(Message::Radios(views::RadiosMessage::SlotList(
+                crate::widgets::SlotListPageMessage::ActivateCenter,
+            ))),
             View::Settings => Task::done(Message::Settings(views::SettingsMessage::EditActivate)),
         }
     }
