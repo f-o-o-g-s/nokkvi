@@ -84,6 +84,7 @@ ksni = "0.3"
 notify = "8"
 parking_lot = "0.12.5"
 arc-swap = "1.7"
+mimalloc = "0.1"
 
 [dev-dependencies]
 tempfile = "3.27.0"
