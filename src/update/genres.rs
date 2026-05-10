@@ -1,7 +1,7 @@
 //! Genre data loading and component message handlers
 
 use iced::Task;
-use nokkvi_data::{backend::genres::GenreUIViewData, types::ItemKind};
+use nokkvi_data::backend::genres::GenreUIViewData;
 use tracing::{debug, error, info};
 
 use crate::{

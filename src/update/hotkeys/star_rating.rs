@@ -153,8 +153,7 @@ impl Nokkvi {
         );
 
         // Apply optimistic update immediately
-        let optimistic_msg =
-            Self::starred_revert_message(info.id.clone(), info.kind.api_str(), new_starred);
+        let optimistic_msg = Self::starred_revert_message(info.id.clone(), info.kind, new_starred);
 
         let toggle_kind = info.kind;
         let revert_id = info.id.clone();
@@ -213,7 +212,7 @@ impl Nokkvi {
                 Err(e) => {
                     error!(" Failed to toggle star: {}", e);
                     // Revert to original starred state
-                    Self::starred_revert_message(revert_id, toggle_kind.api_str(), current_starred)
+                    Self::starred_revert_message(revert_id, toggle_kind, current_starred)
                 }
             },
         );
@@ -428,8 +427,7 @@ impl Nokkvi {
         );
 
         // Apply optimistic update immediately
-        let optimistic_msg =
-            Self::rating_revert_message(info.id.clone(), info.kind.api_str(), new_rating);
+        let optimistic_msg = Self::rating_revert_message(info.id.clone(), info.kind, new_rating);
 
         let toggle_kind = info.kind;
         let revert_id = info.id.clone();
@@ -473,7 +471,7 @@ impl Nokkvi {
                 Err(e) => {
                     error!(" Failed to set rating: {}", e);
                     // Revert to original rating
-                    Self::rating_revert_message(revert_id, toggle_kind.api_str(), current_rating)
+                    Self::rating_revert_message(revert_id, toggle_kind, current_rating)
                 }
             },
         );

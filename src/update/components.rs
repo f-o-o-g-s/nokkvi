@@ -21,7 +21,10 @@
 use std::collections::HashSet;
 
 use iced::{Task, widget::image};
-use nokkvi_data::{backend::albums::AlbumsService, types::{ItemKind, error::NokkviError}};
+use nokkvi_data::{
+    backend::albums::AlbumsService,
+    types::{ItemKind, error::NokkviError},
+};
 use tracing::{debug, error, info};
 
 use crate::{
@@ -722,12 +725,7 @@ impl Nokkvi {
     /// Star or unstar an item via the Subsonic API.
     /// Optimistic local state updates should be done inline at the call site before calling this.
     /// On failure, emits a revert message to restore the original starred state.
-    pub(crate) fn star_item_task(
-        &self,
-        id: String,
-        kind: ItemKind,
-        star: bool,
-    ) -> Task<Message> {
+    pub(crate) fn star_item_task(&self, id: String, kind: ItemKind, star: bool) -> Task<Message> {
         let action = if star { "star" } else { "unstar" };
         let revert_id = id.clone();
         debug!(

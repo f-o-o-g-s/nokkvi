@@ -139,8 +139,9 @@ fn unstarring_song_does_not_touch_rating() {
 
 #[test]
 fn starred_revert_message_routes_album_to_album_handler() {
-    use crate::app_message::{HotkeyMessage, Message};
     use nokkvi_data::types::ItemKind;
+
+    use crate::app_message::{HotkeyMessage, Message};
     let msg = crate::Nokkvi::starred_revert_message("id1".to_string(), ItemKind::Album, true);
     assert!(
         matches!(
@@ -154,8 +155,9 @@ fn starred_revert_message_routes_album_to_album_handler() {
 
 #[test]
 fn starred_revert_message_routes_artist_to_artist_handler() {
-    use crate::app_message::{HotkeyMessage, Message};
     use nokkvi_data::types::ItemKind;
+
+    use crate::app_message::{HotkeyMessage, Message};
     let msg = crate::Nokkvi::starred_revert_message("id2".to_string(), ItemKind::Artist, false);
     assert!(
         matches!(
@@ -169,8 +171,9 @@ fn starred_revert_message_routes_artist_to_artist_handler() {
 
 #[test]
 fn starred_revert_message_routes_song_to_song_handler() {
-    use crate::app_message::{HotkeyMessage, Message};
     use nokkvi_data::types::ItemKind;
+
+    use crate::app_message::{HotkeyMessage, Message};
     let msg = crate::Nokkvi::starred_revert_message("s1".to_string(), ItemKind::Song, true);
     assert!(
         matches!(
@@ -184,8 +187,9 @@ fn starred_revert_message_routes_song_to_song_handler() {
 
 #[test]
 fn starred_revert_message_routes_playlist_through_song_handler_for_now() {
-    use crate::app_message::{HotkeyMessage, Message};
     use nokkvi_data::types::ItemKind;
+
+    use crate::app_message::{HotkeyMessage, Message};
     let msg = crate::Nokkvi::starred_revert_message("pl1".to_string(), ItemKind::Playlist, true);
     assert!(
         matches!(
@@ -199,8 +203,9 @@ fn starred_revert_message_routes_playlist_through_song_handler_for_now() {
 
 #[test]
 fn rating_revert_message_routes_album_to_album_handler() {
-    use crate::app_message::{HotkeyMessage, Message};
     use nokkvi_data::types::ItemKind;
+
+    use crate::app_message::{HotkeyMessage, Message};
     let msg = crate::Nokkvi::rating_revert_message("a1".to_string(), ItemKind::Album, 4);
     assert!(
         matches!(
@@ -214,8 +219,9 @@ fn rating_revert_message_routes_album_to_album_handler() {
 
 #[test]
 fn rating_revert_message_routes_artist_to_artist_handler() {
-    use crate::app_message::{HotkeyMessage, Message};
     use nokkvi_data::types::ItemKind;
+
+    use crate::app_message::{HotkeyMessage, Message};
     let msg = crate::Nokkvi::rating_revert_message("ar1".to_string(), ItemKind::Artist, 3);
     assert!(
         matches!(
@@ -229,8 +235,9 @@ fn rating_revert_message_routes_artist_to_artist_handler() {
 
 #[test]
 fn rating_revert_message_routes_song_to_song_handler() {
-    use crate::app_message::{HotkeyMessage, Message};
     use nokkvi_data::types::ItemKind;
+
+    use crate::app_message::{HotkeyMessage, Message};
     let msg = crate::Nokkvi::rating_revert_message("s1".to_string(), ItemKind::Song, 5);
     assert!(
         matches!(
@@ -244,8 +251,9 @@ fn rating_revert_message_routes_song_to_song_handler() {
 
 #[test]
 fn rating_revert_message_routes_playlist_through_song_handler_for_now() {
-    use crate::app_message::{HotkeyMessage, Message};
     use nokkvi_data::types::ItemKind;
+
+    use crate::app_message::{HotkeyMessage, Message};
     let msg = crate::Nokkvi::rating_revert_message("pl1".to_string(), ItemKind::Playlist, 2);
     assert!(
         matches!(

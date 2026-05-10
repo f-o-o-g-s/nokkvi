@@ -1,7 +1,7 @@
 //! Playlist data loading and component message handlers
 
 use iced::Task;
-use nokkvi_data::{backend::playlists::PlaylistUIViewData, types::ItemKind};
+use nokkvi_data::backend::playlists::PlaylistUIViewData;
 use tracing::{debug, error, info};
 
 use crate::{
