@@ -100,7 +100,7 @@ When you complete an item, append the commit ref(s) and flip the status. Keep th
 | **15** | **Sub-fetch Unauthorized routing** | **✅ done** | Same as B10 — `d612dcc` (2026-05-09). |
 | 16 | `HasCommonAction` opt-out for Radios | ❌ open | Not verified. Re-check before declaring. |
 | 17 | Stream URL building 5× | 🟡 partial | `fn build_stream_url` exists in 2 spots in `data/src/`; whether the 5 historical sites all route through it is not verified. |
-| 18 | AppService `_api()` factories | ❌ open | No `api_factory!` macro. The 5 factory methods are still hand-written. |
+| 18 | AppService `_api()` factories | ✅ done | `35c5595` — `api_factory!` macro_rules! replaces all 5; `SongsApiService` gains `new_with_client` alias for uniformity. |
 | 19 | Direct callers of `update_config_value` / `update_theme_value` | ❌ open | Not verified. |
 | 20 | EQ + SFX text-toggle in player bar | ❌ open | Not verified. |
 
