@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use iced::Task;
-use nokkvi_data::audio;
+use nokkvi_data::{audio, utils::artwork_url::THUMBNAIL_SIZE};
 
 use super::components::{prefetch_album_artwork_tasks, prefetch_song_artwork_tasks};
 use crate::{Nokkvi, View, app_message::Message};
@@ -156,7 +156,10 @@ impl Nokkvi {
                 let vm = albums_vm.clone();
                 tasks.push(Task::perform(
                     async move {
-                        let bytes = vm.fetch_album_artwork(&art_id, Some(80), None).await.ok();
+                        let bytes = vm
+                            .fetch_album_artwork(&art_id, Some(THUMBNAIL_SIZE), None)
+                            .await
+                            .ok();
                         (id, bytes.map(image::Handle::from_bytes))
                     },
                     |(id, handle)| {

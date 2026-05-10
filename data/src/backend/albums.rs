@@ -64,7 +64,7 @@ impl AlbumUIViewData {
             art_id,
             server_url,
             subsonic_credential,
-            Some(80),
+            Some(crate::utils::artwork_url::THUMBNAIL_SIZE),
         );
         // Build genres display string: "Black Metal • Heavy Metal • Rock"
         let genres = album.genres.as_ref().map(|g| {

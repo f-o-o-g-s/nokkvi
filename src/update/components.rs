@@ -24,6 +24,7 @@ use iced::{Task, widget::image};
 use nokkvi_data::{
     backend::albums::AlbumsService,
     types::{ItemKind, error::NokkviError},
+    utils::artwork_url::THUMBNAIL_SIZE,
 };
 use tracing::{debug, error, info};
 
@@ -164,7 +165,10 @@ where
             let id = album_id;
             Task::perform(
                 async move {
-                    let bytes = vm.fetch_album_artwork(&id, Some(80), None).await.ok();
+                    let bytes = vm
+                        .fetch_album_artwork(&id, Some(THUMBNAIL_SIZE), None)
+                        .await
+                        .ok();
                     (id, bytes.map(image::Handle::from_bytes))
                 },
                 |(id, handle)| {
