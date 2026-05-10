@@ -108,54 +108,20 @@ impl Nokkvi {
 
         // Dispatch to the target view's artwork-loading path.
         // For queue: dedicated zero-clone helper.
-        // For other views: dispatch a synthetic SetOffset(current_offset) which
-        // flows through the normal handler and triggers artwork prefetch via
-        // the LoadLargeArtwork / prefetch_album_artwork_tasks path.
+        // For library views: dispatch a synthetic SetOffset(current_offset) via
+        // the trait method, which flows through the normal handler and triggers
+        // artwork prefetch via the LoadLargeArtwork / prefetch_album_artwork_tasks path.
+        // For settings: no-op.
         match view {
             View::Queue => self.load_queue_viewport_artwork(),
-            View::Albums => {
-                let offset = self.albums_page.common.slot_list.viewport_offset;
-                self.handle_albums(views::AlbumsMessage::SlotListSetOffset(
-                    offset,
-                    iced::keyboard::Modifiers::default(),
-                ))
-            }
-            View::Songs => {
-                let offset = self.songs_page.common.slot_list.viewport_offset;
-                self.handle_songs(views::SongsMessage::SlotListSetOffset(
-                    offset,
-                    iced::keyboard::Modifiers::default(),
-                ))
-            }
-            View::Genres => {
-                let offset = self.genres_page.common.slot_list.viewport_offset;
-                self.handle_genres(views::GenresMessage::SlotListSetOffset(
-                    offset,
-                    iced::keyboard::Modifiers::default(),
-                ))
-            }
-            View::Artists => {
-                let offset = self.artists_page.common.slot_list.viewport_offset;
-                self.handle_artists(views::ArtistsMessage::SlotListSetOffset(
-                    offset,
-                    iced::keyboard::Modifiers::default(),
-                ))
-            }
-            View::Playlists => {
-                let offset = self.playlists_page.common.slot_list.viewport_offset;
-                self.handle_playlists(views::PlaylistsMessage::SlotListSetOffset(
-                    offset,
-                    iced::keyboard::Modifiers::default(),
-                ))
-            }
-            View::Radios => {
-                let offset = self.radios_page.common.slot_list.viewport_offset;
-                self.handle_radios(views::RadiosMessage::SlotListSetOffset(
-                    offset,
-                    iced::keyboard::Modifiers::default(),
-                ))
-            }
             View::Settings => Task::none(),
+            _ => {
+                let msg = self.view_page(view).and_then(|page| {
+                    let offset = page.common().slot_list.viewport_offset;
+                    page.synth_set_offset_message(offset)
+                });
+                msg.map_or_else(Task::none, |m| self.update(m))
+            }
         }
     }
 

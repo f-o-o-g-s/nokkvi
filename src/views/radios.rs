@@ -452,4 +452,11 @@ impl super::ViewPage for RadiosPage {
     fn reload_message(&self) -> Option<Message> {
         Some(Message::LoadRadioStations)
     }
+
+    fn synth_set_offset_message(&self, offset: usize) -> Option<Message> {
+        Some(Message::Radios(RadiosMessage::SlotListSetOffset(
+            offset,
+            iced::keyboard::Modifiers::default(),
+        )))
+    }
 }

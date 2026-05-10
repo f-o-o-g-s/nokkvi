@@ -230,6 +230,13 @@ impl super::ViewPage for SongsPage {
     fn reload_message(&self) -> Option<Message> {
         Some(Message::LoadSongs)
     }
+
+    fn synth_set_offset_message(&self, offset: usize) -> Option<Message> {
+        Some(Message::Songs(SongsMessage::SlotListSetOffset(
+            offset,
+            iced::keyboard::Modifiers::default(),
+        )))
+    }
 }
 
 #[cfg(test)]

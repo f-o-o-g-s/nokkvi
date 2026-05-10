@@ -271,6 +271,13 @@ impl super::ViewPage for AlbumsPage {
     fn reload_message(&self) -> Option<Message> {
         Some(Message::LoadAlbums)
     }
+
+    fn synth_set_offset_message(&self, offset: usize) -> Option<Message> {
+        Some(Message::Albums(AlbumsMessage::SlotListSetOffset(
+            offset,
+            iced::keyboard::Modifiers::default(),
+        )))
+    }
 }
 
 #[cfg(test)]

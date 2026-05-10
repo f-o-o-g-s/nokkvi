@@ -249,6 +249,13 @@ impl super::ViewPage for GenresPage {
     fn reload_message(&self) -> Option<Message> {
         Some(Message::LoadGenres)
     }
+
+    fn synth_set_offset_message(&self, offset: usize) -> Option<Message> {
+        Some(Message::Genres(GenresMessage::SlotListSetOffset(
+            offset,
+            iced::keyboard::Modifiers::default(),
+        )))
+    }
 }
 
 #[cfg(test)]

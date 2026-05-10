@@ -274,6 +274,13 @@ impl super::ViewPage for ArtistsPage {
     fn reload_message(&self) -> Option<Message> {
         Some(Message::LoadArtists)
     }
+
+    fn synth_set_offset_message(&self, offset: usize) -> Option<Message> {
+        Some(Message::Artists(ArtistsMessage::SlotListSetOffset(
+            offset,
+            iced::keyboard::Modifiers::default(),
+        )))
+    }
 }
 
 #[cfg(test)]

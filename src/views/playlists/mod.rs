@@ -264,4 +264,11 @@ impl super::ViewPage for PlaylistsPage {
     fn reload_message(&self) -> Option<Message> {
         Some(Message::LoadPlaylists)
     }
+
+    fn synth_set_offset_message(&self, offset: usize) -> Option<Message> {
+        Some(Message::Playlists(PlaylistsMessage::SlotListSetOffset(
+            offset,
+            iced::keyboard::Modifiers::default(),
+        )))
+    }
 }

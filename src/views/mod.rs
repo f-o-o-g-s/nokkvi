@@ -91,6 +91,18 @@ pub(crate) trait ViewPage {
     fn reload_message(&self) -> Option<Message> {
         None
     }
+
+    /// Build a synthetic `SlotListSetOffset` message for this view at the given offset.
+    ///
+    /// Used by `handle_seek_settled` to trigger artwork prefetch after scrollbar
+    /// seek settles — routes through the normal per-view SetOffset handler which
+    /// drives the `LoadLargeArtwork` / `prefetch_album_artwork_tasks` path.
+    ///
+    /// Returns `None` for views that don't participate in the seek-settle
+    /// artwork pipeline (e.g. Queue, Settings).
+    fn synth_set_offset_message(&self, _offset: usize) -> Option<Message> {
+        None
+    }
 }
 
 // ============================================================================
