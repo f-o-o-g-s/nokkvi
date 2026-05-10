@@ -13,12 +13,6 @@
 //! - `app_view.rs`: view() function and rendering helpers
 //! - `state.rs`: Consolidated state structs (PlaybackState, ScrobbleState, etc.)
 
-// glibc malloc's per-thread arenas hoard freed pages and inflate long-running
-// RSS — measured ~330 MiB of stranded heap on a typical session. mimalloc
-// returns memory to the OS more aggressively under the same workload.
-#[global_allocator]
-static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
 mod app_message;
 mod app_view;
 mod config_writer;
