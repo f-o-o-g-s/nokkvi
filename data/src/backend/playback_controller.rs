@@ -6,7 +6,6 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use chrono;
 use tokio::sync::{
     Mutex,
     mpsc::{self, UnboundedReceiver},
@@ -213,12 +212,10 @@ impl PlaybackController {
                 let queue_manager = queue_manager_arc.lock().await;
                 if let Some(song) = queue_manager.get_song(&song_id) {
                     // Construct streaming URL
-                    let stream_url = format!(
-                        "{}/rest/stream?id={}&{}&f=json&v=1.8.0&c=nokkvi&_={}",
-                        server_url,
-                        song.id,
-                        subsonic_credential,
-                        chrono::Utc::now().timestamp_millis()
+                    let stream_url = crate::utils::artwork_url::build_stream_url(
+                        &song.id,
+                        &server_url,
+                        &subsonic_credential,
                     );
 
                     // Load and play the track
@@ -268,12 +265,10 @@ impl PlaybackController {
                 }
 
                 // Construct streaming URL
-                let stream_url = format!(
-                    "{}/rest/stream?id={}&{}&f=json&v=1.8.0&c=nokkvi&_={}",
-                    server_url,
-                    song.id,
-                    subsonic_credential,
-                    chrono::Utc::now().timestamp_millis()
+                let stream_url = crate::utils::artwork_url::build_stream_url(
+                    &song.id,
+                    &server_url,
+                    &subsonic_credential,
                 );
 
                 // Sync reactive current_index for UI highlighting
@@ -518,12 +513,10 @@ impl PlaybackController {
             if let Some(peeked) = queue_manager.peek_next_song() {
                 let next_song = peeked.song().clone();
                 drop(peeked); // explicit: clears queued; gapless prep proceeds with the captured data
-                let url = format!(
-                    "{}/rest/stream?id={}&{}&f=json&v=1.8.0&c=nokkvi&_={}",
-                    server_url,
-                    next_song.id,
-                    subsonic_credential,
-                    chrono::Utc::now().timestamp_millis()
+                let url = crate::utils::artwork_url::build_stream_url(
+                    &next_song.id,
+                    &server_url,
+                    &subsonic_credential,
                 );
                 (Some(url), next_song.replay_gain.clone(), repeat_track)
             } else {

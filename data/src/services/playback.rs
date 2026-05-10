@@ -133,17 +133,6 @@ impl QueueNavigator {
     //  Shared helpers
     // ══════════════════════════════════════════════════════════════════════
 
-    /// Build a stream URL for a song.
-    fn build_stream_url(song_id: &str, server_url: &str, subsonic_credential: &str) -> String {
-        format!(
-            "{}/rest/stream?id={}&{}&f=json&v=1.8.0&c=nokkvi&_={}",
-            server_url,
-            song_id,
-            subsonic_credential,
-            chrono::Utc::now().timestamp_millis()
-        )
-    }
-
     /// Record the previous song in history, then consume it if consume mode
     /// is active.
     ///
@@ -280,8 +269,11 @@ impl QueueNavigator {
                 debug!("▶️ Now Playing: {} - {} (repeat)", song.title, song.artist);
                 let reason = "repeat".to_string();
                 return if needs_load {
-                    let stream_url =
-                        Self::build_stream_url(&song.id, server_url, subsonic_credential);
+                    let stream_url = crate::utils::artwork_url::build_stream_url(
+                        &song.id,
+                        server_url,
+                        subsonic_credential,
+                    );
                     TrackTransitionPlan::LoadFresh {
                         stream_url,
                         song,
@@ -352,7 +344,11 @@ impl QueueNavigator {
         );
 
         if needs_load {
-            let stream_url = Self::build_stream_url(&song.id, server_url, subsonic_credential);
+            let stream_url = crate::utils::artwork_url::build_stream_url(
+                &song.id,
+                server_url,
+                subsonic_credential,
+            );
             TrackTransitionPlan::LoadFresh {
                 stream_url,
                 song,
@@ -420,7 +416,8 @@ impl QueueNavigator {
             song.title, song.artist, song.id
         );
 
-        let stream_url = Self::build_stream_url(&song.id, server_url, subsonic_credential);
+        let stream_url =
+            crate::utils::artwork_url::build_stream_url(&song.id, server_url, subsonic_credential);
 
         *self.current_song_id.lock().await = Some(song.id.clone());
 

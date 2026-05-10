@@ -10,8 +10,17 @@
 //! [`SettingsSideEffect`] variant into the right user-visible follow-up:
 //! toast pushed at the right level, `LoadArtists` / Tick task chained,
 //! verbose-config TOML toast surfaced.
+//!
+//! The `artwork_overlay_*` tests below cover the `handle_player_settings_loaded`
+//! path: when settings with `albums_artwork_overlay = false` (or any other
+//! per-view variant) arrive, the corresponding process-global theme atomic must
+//! be flipped. Each test saves the prior value and restores it on exit to avoid
+//! bleeding state into the shared `UI_MODE` statics for parallel tests.
 
-use nokkvi_data::{services::settings_tables::SettingsSideEffect, types::toast::ToastLevel};
+use nokkvi_data::{
+    services::settings_tables::SettingsSideEffect,
+    types::{player_settings::PlayerSettings, toast::ToastLevel},
+};
 
 use crate::test_helpers::*;
 
@@ -158,4 +167,90 @@ fn side_effect_write_verbose_config_disable_emits_success_toast() {
         matches!(level, ToastLevel::Success | ToastLevel::Warning),
         "expected Success or Warning, got {level:?}"
     );
+}
+
+// ============================================================================
+// Artwork overlay theme-atomic tests (B5)
+// ============================================================================
+
+#[test]
+fn player_settings_loaded_albums_artwork_overlay_false_clears_atomic() {
+    let mut app = test_app();
+    let prior = crate::theme::albums_artwork_overlay();
+
+    let _ = app.handle_player_settings_loaded(PlayerSettings {
+        albums_artwork_overlay: false,
+        ..Default::default()
+    });
+
+    assert!(
+        !crate::theme::albums_artwork_overlay(),
+        "albums_artwork_overlay atomic must be false after loading settings with false"
+    );
+
+    // Restore to avoid bleeding state between tests.
+    crate::theme::set_albums_artwork_overlay(prior);
+}
+
+#[test]
+fn player_settings_loaded_albums_artwork_overlay_true_sets_atomic() {
+    // Force the atomic to false first so the test is self-contained regardless
+    // of the initial global state (avoids false-pass when it's already true).
+    crate::theme::set_albums_artwork_overlay(false);
+    let mut app = test_app();
+
+    let _ = app.handle_player_settings_loaded(PlayerSettings {
+        albums_artwork_overlay: true,
+        ..Default::default()
+    });
+
+    assert!(
+        crate::theme::albums_artwork_overlay(),
+        "albums_artwork_overlay atomic must be true after loading settings with true"
+    );
+
+    // Restore default (true — the real default from toml_settings.rs).
+    crate::theme::set_albums_artwork_overlay(true);
+}
+
+#[test]
+fn player_settings_loaded_artists_artwork_overlay_flips_atomic() {
+    let mut app = test_app();
+    let prior = crate::theme::artists_artwork_overlay();
+
+    let _ = app.handle_player_settings_loaded(PlayerSettings {
+        artists_artwork_overlay: false,
+        ..Default::default()
+    });
+    assert!(!crate::theme::artists_artwork_overlay());
+
+    crate::theme::set_artists_artwork_overlay(prior);
+}
+
+#[test]
+fn player_settings_loaded_songs_artwork_overlay_flips_atomic() {
+    let mut app = test_app();
+    let prior = crate::theme::songs_artwork_overlay();
+
+    let _ = app.handle_player_settings_loaded(PlayerSettings {
+        songs_artwork_overlay: false,
+        ..Default::default()
+    });
+    assert!(!crate::theme::songs_artwork_overlay());
+
+    crate::theme::set_songs_artwork_overlay(prior);
+}
+
+#[test]
+fn player_settings_loaded_playlists_artwork_overlay_flips_atomic() {
+    let mut app = test_app();
+    let prior = crate::theme::playlists_artwork_overlay();
+
+    let _ = app.handle_player_settings_loaded(PlayerSettings {
+        playlists_artwork_overlay: false,
+        ..Default::default()
+    });
+    assert!(!crate::theme::playlists_artwork_overlay());
+
+    crate::theme::set_playlists_artwork_overlay(prior);
 }
