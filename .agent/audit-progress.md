@@ -4,7 +4,7 @@ Tracks completion status of the 2026-05-07 DRY/scalability/monolith audit at `~/
 
 **Read this before starting any audit-derived task.** Pick up where the last commit left off, not where the source report said things stood.
 
-Last verified: **2026-05-10** (full §7 + §5 + spot-checks across §3/§4/§6). §7 #3 + §3 #3 closed 2026-05-09. §3 #7 + §4 #6 + §4 #7 closed 2026-05-09 (view-layer helpers fanout). §5 B5 + §3 #17 + §3 #19 closed 2026-05-10 (verification pass).
+Last verified: **2026-05-10** (full §7 + §5 + spot-checks across §3/§4/§6). §7 #3 + §3 #3 closed 2026-05-09. §3 #7 + §4 #6 + §4 #7 closed 2026-05-09 (view-layer helpers fanout). §5 B5 + §3 #14 + §3 #16 + §3 #17 + §3 #19 + §3 #20 closed 2026-05-10 (Batch 1 fanout + verification pass).
 
 ---
 
@@ -96,13 +96,13 @@ When you complete an item, append the commit ref(s) and flip the status. Keep th
 | 11 | Handler prologue (SetOpenMenu / Roulette / play_view_sfx) | ❌ open | No `dispatch_view_chrome` free fn. |
 | **12** | **`AddBatchToQueue` insert-or-append** | **✅ done** | `add_or_insert_batch_to_queue_task` helper + all call sites: `36e2160` (foundation + albums), `814f751` (artists), `bed303e` (songs), `5cb063c` (genres + playlists), `0faaf89` (similar). `pending_queue_insert_position.take()` ordering now enforced in one place. |
 | **13** | **`ToggleStar` with optimistic revert** | **✅ done** | `toggle_star_with_revert_task` helper + all call sites: `36e2160` (foundation + albums), `814f751` (artists — also collapses legacy `StarArtist`/`UnstarArtist` arms), `bed303e` (songs), `5cb063c` (genres + playlists), `0faaf89` (queue + similar). Optimistic-revert pairing now enforced in one place. |
-| 14 | 3D-button pressed-state color ramp | ❌ open | No `BevelStateColors::compute()` in `src/widgets/`. |
+| **14** | **3D-button pressed-state color ramp** | **✅ done** | `40c3500` (2026-05-10): `pub(crate) struct BevelStateColors { top_left, bottom_right, bg, fg }` + `BevelStateColors::compute(active_or_pressed, idle_bg, idle_fg, pressed_fg)` added to `three_d_helpers.rs`; all 4 widgets (`three_d_button`, `three_d_icon_button`, `hamburger_menu`, `player_modes_menu`) replaced their inline 5-line ramps with one call. `player_modes_menu` added to the `draw_3d_bevel` callers docstring. |
 | **15** | **Sub-fetch Unauthorized routing** | **✅ done** | Same as B10 — `d612dcc` (2026-05-09). |
-| 16 | `HasCommonAction` opt-out for Radios | ❌ open | Not verified. Re-check before declaring. |
+| **16** | **`HasCommonAction` opt-out for Radios** | **✅ done** | `92c831f` (2026-05-10): `impl_has_common_action!` macro in `views/mod.rs` extended with a third arm for `no_navigate_filter` flag (omits `NavigateAndFilter` + `NavigateAndExpand*` arms); hand-rolled `impl HasCommonAction for RadiosAction` in `views/radios.rs` replaced with `impl_has_common_action!(RadiosAction, no_navigate_filter)`. `update/radios.rs` handler unchanged. |
 | **17** | **Stream URL building 5×** | **✅ done** | Two helpers existed: `data/src/utils/artwork_url::build_stream_url` (public) and `data/src/services/playback::QueueNavigator::build_stream_url` (private assoc fn). Three more inline `format!` sites existed in `data/src/backend/playback_controller.rs` (play(), play() cold-start, gapless-prep). All 3 inline sites + the private helper (+ its 3 call sites) migrated to `crate::utils::artwork_url::build_stream_url`. `chrono` import removed from `playback_controller.rs`. One `build_stream_url` canonical definition now. |
 | 18 | AppService `_api()` factories | ✅ done | `35c5595` — `api_factory!` macro_rules! replaces all 5; `SongsApiService` gains `new_with_client` alias for uniformity. |
 | **19** | **Direct callers of `update_config_value` / `update_theme_value`** | **✅ done** | All call sites verified correct: `update_config_value` callers use config.toml keys (`settings.light_mode`, `visualizer.waves`, `visualizer.monstercat`); `update_theme_value` callers receive theme-file keys (`dark.*`/`light.*` via the `RestoreColorGroup` entries which come only from `HexColor` items built in `items_theme.rs` with `{palette_prefix}.field` keys). Routing in `mod.rs` is guarded by the `key.starts_with("general.")` predicate that redirects `general.*` to `WriteGeneralSetting`; non-general keys use `item.is_theme_key` to pick `ConfigKey::theme_scalar` vs `app_scalar`. The `debug_assert_theme_path` guard in `config_writer.rs:87` catches any misroutes at dev time. No misroutes found. |
-| 20 | EQ + SFX text-toggle in player bar | ❌ open | Not verified. |
+| **20** | **EQ + SFX text-toggle in player bar** | **✅ done** | `4f67886` (2026-05-10): private `three_d_text_toggle(label, on_press, active, bg, tooltip_text)` helper added to `player_bar.rs`; two ~27-line inline EQ and SFX button chains replaced with single calls. |
 
 ---
 
@@ -131,10 +131,12 @@ When you complete an item, append the commit ref(s) and flip the status. Keep th
 
 ## Quick-pick: highest-leverage open items
 
-§7 is fully ✅ done except #9 (🟡 partial). All twelve §5 bugs are closed. Remaining open work is in §3/§4:
+§7 is fully ✅ done except #9 (🟡 partial). All twelve §5 bugs are closed. §3 #14/#16/#17/#19/#20 closed 2026-05-10. Remaining open work in §3/§4:
 
-1. **§4 #9 — per-view message enums + bubble-only intercepts** (unverified; could be large or already done — re-check before planning).
-2. **§3 #9 — paginated_load_task helper** (M effort; the most-repeated fetch pattern; pairs well with §7 #9's ViewPage dispatch).
-3. **§3 #14 — 3D-button pressed-state color ramp (`BevelStateColors::compute()`)** (S effort; 4 widget files re-derive same computation; pure widget file change, no view impact).
-4. **§4 #5 — visualizer parallel `Vec<f64>` arrays** (unverified — confirm drift magnitude before planning).
-5. **§4 #12 — visualizer config dotted-key literals** (37 distinct string literals; typed enum would catch misspellings at compile time).
+1. **§4 #9 — per-view message enums + bubble-only intercepts** (large; Proposals A/B/C from drift-triangle.md; needs a plan doc before fanout).
+2. **§3 #9 — `paginated_load_task` helper** (M effort; most-repeated fetch pattern; pairs well with §7 #9's ViewPage dispatch).
+3. **§7 #9 / §4 #1 — slot_list per-`View` dispatch onto `ViewPage` trait** (`update/slot_list.rs:115-158` still has 8 hand-written arms).
+4. **§4 #5 — visualizer parallel `Vec<f64>` arrays** (M effort; `safe_len` gap; SoA → `BarBufferLen` newtype in `state.rs`).
+5. **§4 #12 — visualizer config dotted-key literals** (M effort; 37 string literals; typed `VisualizerKey` enum).
+6. **§3 #10 — bulk fixture + scenario-seeder helpers in tests** (unverified scope — Explore first).
+7. **§3 #11 — handler prologue dedup** (`dispatch_view_chrome` free fn; 7 handler files).
