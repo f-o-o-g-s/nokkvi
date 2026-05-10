@@ -18,7 +18,10 @@ use super::{
     super::expansion::SlotListEntry, PlaylistContextEntry, PlaylistsColumn, PlaylistsMessage,
     PlaylistsPage, PlaylistsViewData,
 };
-use crate::widgets;
+use crate::widgets::{
+    self,
+    view_header::{HeaderButton, ViewHeaderConfig},
+};
 
 /// SongCount column auto-shows when sort = SongCount regardless of toggle.
 pub(crate) fn playlists_song_count_visible(
@@ -153,25 +156,27 @@ impl PlaylistsPage {
             .align_y(Alignment::Center)
             .into();
 
-        let header = widgets::view_header::view_header(
-            self.common.current_sort_mode,
-            crate::views::sort_api::sort_modes_for_view(crate::View::Playlists),
-            self.common.sort_ascending,
-            &self.common.search_query,
-            data.playlists.len(),
-            data.total_playlist_count,
-            "playlists",
-            crate::views::PLAYLISTS_SEARCH_ID,
-            PlaylistsMessage::SortModeSelected,
-            Some(PlaylistsMessage::ToggleSortOrder),
-            Some(PlaylistsMessage::RefreshViewData),
-            None, // Playlists view doesn't need center on playing button
-            Some(("New Playlist", PlaylistsMessage::OpenCreatePlaylistDialog)),
-            Some(trailing), // chip + columns-cog dropdown
-            true,           // show_search
-            PlaylistsMessage::SearchQueryChanged,
-            Some(PlaylistsMessage::Roulette),
-        );
+        let header = widgets::view_header::view_header(ViewHeaderConfig {
+            current_view: self.common.current_sort_mode,
+            view_options: crate::views::sort_api::sort_modes_for_view(crate::View::Playlists),
+            sort_ascending: self.common.sort_ascending,
+            search_query: &self.common.search_query,
+            filtered_count: data.playlists.len(),
+            total_count: data.total_playlist_count,
+            item_type: "playlists",
+            search_input_id: crate::views::PLAYLISTS_SEARCH_ID,
+            on_view_selected: Box::new(PlaylistsMessage::SortModeSelected),
+            show_search: true,
+            on_search_change: Box::new(PlaylistsMessage::SearchQueryChanged),
+            // Playlists view doesn't need a center-on-playing button.
+            buttons: vec![
+                HeaderButton::SortToggle(PlaylistsMessage::ToggleSortOrder),
+                HeaderButton::Refresh(PlaylistsMessage::RefreshViewData),
+                HeaderButton::Add("New Playlist", PlaylistsMessage::OpenCreatePlaylistDialog),
+                HeaderButton::Trailing(trailing), // chip + columns-cog dropdown
+            ],
+            on_roulette: Some(PlaylistsMessage::Roulette),
+        });
 
         // Compose with the tri-state "select all" header bar when the
         // multi-select column is on. Tri-state derives from the current

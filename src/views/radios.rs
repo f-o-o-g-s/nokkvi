@@ -12,7 +12,11 @@ use nokkvi_data::types::radio_station::RadioStation;
 
 use crate::{
     app_message::Message,
-    widgets::{self, SlotListPageState, slot_list_page::SlotListPageAction, view_header::SortMode},
+    widgets::{
+        self, SlotListPageState,
+        slot_list_page::SlotListPageAction,
+        view_header::{HeaderButton, SortMode, ViewHeaderConfig},
+    },
 };
 
 // ============================================================================
@@ -242,25 +246,26 @@ impl RadiosPage {
 
     pub fn view<'a>(&'a self, data: RadiosViewData<'a>) -> Element<'a, RadiosMessage> {
         // Gemini: Only Name sort mode makes sense for radio stations.
-        let header = widgets::view_header::view_header(
-            self.common.current_sort_mode,
-            &[SortMode::Name],
-            self.common.sort_ascending,
-            &self.common.search_query,
-            data.stations.len(),
-            data.total_station_count,
-            "stations",
-            crate::views::RADIOS_SEARCH_ID,
-            RadiosMessage::SortModeSelected,
-            Some(RadiosMessage::ToggleSortOrder),
-            Some(RadiosMessage::RefreshViewData),
-            Some(RadiosMessage::CenterOnPlaying),
-            Some(("Add Station", RadiosMessage::AddRadioStation)), // on_add
-            None,                                                  // trailing_button
-            true,                                                  // show_search
-            RadiosMessage::SearchQueryChanged,
-            Some(RadiosMessage::Roulette),
-        );
+        let header = widgets::view_header::view_header(ViewHeaderConfig {
+            current_view: self.common.current_sort_mode,
+            view_options: &[SortMode::Name],
+            sort_ascending: self.common.sort_ascending,
+            search_query: &self.common.search_query,
+            filtered_count: data.stations.len(),
+            total_count: data.total_station_count,
+            item_type: "stations",
+            search_input_id: crate::views::RADIOS_SEARCH_ID,
+            on_view_selected: Box::new(RadiosMessage::SortModeSelected),
+            show_search: true,
+            on_search_change: Box::new(RadiosMessage::SearchQueryChanged),
+            buttons: vec![
+                HeaderButton::SortToggle(RadiosMessage::ToggleSortOrder),
+                HeaderButton::Refresh(RadiosMessage::RefreshViewData),
+                HeaderButton::CenterOnPlaying(RadiosMessage::CenterOnPlaying),
+                HeaderButton::Add("Add Station", RadiosMessage::AddRadioStation),
+            ],
+            on_roulette: Some(RadiosMessage::Roulette),
+        });
 
         use crate::widgets::base_slot_list_layout::BaseSlotListLayoutConfig;
         let layout_config = BaseSlotListLayoutConfig {

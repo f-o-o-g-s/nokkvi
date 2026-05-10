@@ -12,7 +12,10 @@ use iced::{
 use nokkvi_data::utils::formatters;
 
 use super::{SongsColumn, SongsMessage, SongsPage, SongsViewData};
-use crate::widgets::{self, view_header::SortMode};
+use crate::widgets::{
+    self,
+    view_header::{HeaderButton, SortMode, ViewHeaderConfig},
+};
 
 pub(crate) fn songs_stars_visible(sort: SortMode, user_visible: bool) -> bool {
     user_visible || matches!(sort, SortMode::Rating)
@@ -60,37 +63,39 @@ impl SongsPage {
             )
             .into();
 
-        let header = widgets::view_header::view_header(
-            self.common.current_sort_mode,
-            crate::views::sort_api::sort_modes_for_view(crate::View::Songs),
-            self.common.sort_ascending,
-            &self.common.search_query,
-            data.songs.len(),
-            data.total_song_count,
-            "songs",
-            crate::views::SONGS_SEARCH_ID,
-            SongsMessage::SortModeSelected,
-            Some(SongsMessage::ToggleSortOrder),
-            Some(SongsMessage::RefreshViewData),
-            // Hidden in the browsing panel — the narrower pane needs the
-            // header space for sort/refresh/columns/search, and the user
-            // already has the main-pane button when they want to center.
-            if data.in_browsing_panel {
-                None
-            } else {
-                Some(SongsMessage::CenterOnPlaying)
+        let header = widgets::view_header::view_header(ViewHeaderConfig {
+            current_view: self.common.current_sort_mode,
+            view_options: crate::views::sort_api::sort_modes_for_view(crate::View::Songs),
+            sort_ascending: self.common.sort_ascending,
+            search_query: &self.common.search_query,
+            filtered_count: data.songs.len(),
+            total_count: data.total_song_count,
+            item_type: "songs",
+            search_input_id: crate::views::SONGS_SEARCH_ID,
+            on_view_selected: Box::new(SongsMessage::SortModeSelected),
+            show_search: true,
+            on_search_change: Box::new(SongsMessage::SearchQueryChanged),
+            buttons: {
+                let mut btns = vec![
+                    HeaderButton::SortToggle(SongsMessage::ToggleSortOrder),
+                    HeaderButton::Refresh(SongsMessage::RefreshViewData),
+                ];
+                // Hidden in the browsing panel — the narrower pane needs the
+                // header space for sort/refresh/columns/search, and the user
+                // already has the main-pane button when they want to center.
+                if !data.in_browsing_panel {
+                    btns.push(HeaderButton::CenterOnPlaying(SongsMessage::CenterOnPlaying));
+                }
+                btns.push(HeaderButton::Trailing(column_dropdown));
+                btns
             },
-            None,                  // on_add
-            Some(column_dropdown), // trailing_button
-            true,                  // show_search
-            SongsMessage::SearchQueryChanged,
             // Roulette is main-pane only — see Albums view for rationale.
-            if data.in_browsing_panel {
+            on_roulette: if data.in_browsing_panel {
                 None
             } else {
                 Some(SongsMessage::Roulette)
             },
-        );
+        });
 
         // Compose with the tri-state "select all" header bar when the
         // multi-select column is on. Tri-state derives from the current

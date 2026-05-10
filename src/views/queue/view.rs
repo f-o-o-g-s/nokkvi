@@ -13,7 +13,11 @@ use nokkvi_data::backend::queue::QueueSongUIViewData;
 use super::{
     QueueColumn, QueueContextEntry, QueueMessage, QueuePage, QueueSortMode, QueueViewData,
 };
-use crate::widgets::{self, hover_overlay::HoverOverlay};
+use crate::widgets::{
+    self,
+    hover_overlay::HoverOverlay,
+    view_header::{HeaderButton, ViewHeaderConfig},
+};
 
 /// Hide the queue stars column when the queue panel is narrower than this.
 /// Queue panel is measured (via `iced::widget::responsive`), so this fires
@@ -129,26 +133,32 @@ impl QueuePage {
             column_dropdown
         };
 
-        let header = widgets::view_header::view_header(
-            self.queue_sort_mode,
-            QUEUE_VIEW_OPTIONS,
-            self.common.sort_ascending,
-            &self.common.search_query,
-            data.queue_songs.len(),
-            data.total_queue_count, // Use total count for header display
-            "songs",
-            crate::views::QUEUE_SEARCH_ID,
-            QueueMessage::SortModeSelected,
-            Some(QueueMessage::ToggleSortOrder),
-            None, // No refresh button for queue
-            data.current_playing_queue_index
-                .map(|idx| QueueMessage::FocusCurrentPlaying(idx, true)),
-            None,           // on_add
-            Some(trailing), // trailing_button
-            true,           // show_search
-            QueueMessage::SearchQueryChanged,
-            Some(QueueMessage::Roulette),
-        );
+        let header = widgets::view_header::view_header(ViewHeaderConfig {
+            current_view: self.queue_sort_mode,
+            view_options: QUEUE_VIEW_OPTIONS,
+            sort_ascending: self.common.sort_ascending,
+            search_query: &self.common.search_query,
+            filtered_count: data.queue_songs.len(),
+            total_count: data.total_queue_count, // Use total count for header display
+            item_type: "songs",
+            search_input_id: crate::views::QUEUE_SEARCH_ID,
+            on_view_selected: Box::new(QueueMessage::SortModeSelected),
+            show_search: true,
+            on_search_change: Box::new(QueueMessage::SearchQueryChanged),
+            // Queue has no refresh button; CenterOnPlaying only when there's a
+            // currently-playing track in the queue.
+            buttons: {
+                let mut btns = vec![HeaderButton::SortToggle(QueueMessage::ToggleSortOrder)];
+                if let Some(idx) = data.current_playing_queue_index {
+                    btns.push(HeaderButton::CenterOnPlaying(
+                        QueueMessage::FocusCurrentPlaying(idx, true),
+                    ));
+                }
+                btns.push(HeaderButton::Trailing(trailing));
+                btns
+            },
+            on_roulette: Some(QueueMessage::Roulette),
+        });
 
         // Build final header: regular header + optional edit mode bar.
         //

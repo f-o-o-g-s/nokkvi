@@ -12,7 +12,10 @@ use iced::{
 use nokkvi_data::backend::{albums::AlbumUIViewData, genres::GenreUIViewData};
 
 use super::{super::expansion::SlotListEntry, GenresMessage, GenresPage, GenresViewData};
-use crate::widgets;
+use crate::widgets::{
+    self,
+    view_header::{HeaderButton, ViewHeaderConfig},
+};
 
 impl GenresPage {
     /// Build the view
@@ -54,37 +57,41 @@ impl GenresPage {
             )
             .into();
 
-        let header = widgets::view_header::view_header(
-            self.common.current_sort_mode,
-            crate::views::sort_api::sort_modes_for_view(crate::View::Genres),
-            self.common.sort_ascending,
-            &self.common.search_query,
-            data.genres.len(),
-            data.total_genre_count,
-            "genres",
-            crate::views::GENRES_SEARCH_ID,
-            GenresMessage::SortModeSelected,
-            Some(GenresMessage::ToggleSortOrder),
-            Some(GenresMessage::RefreshViewData),
-            // Hidden in the browsing panel — the narrower pane needs the
-            // header space for sort/refresh/columns/search, and the user
-            // already has the main-pane button when they want to center.
-            if data.in_browsing_panel {
-                None
-            } else {
-                Some(GenresMessage::CenterOnPlaying)
+        let header = widgets::view_header::view_header(ViewHeaderConfig {
+            current_view: self.common.current_sort_mode,
+            view_options: crate::views::sort_api::sort_modes_for_view(crate::View::Genres),
+            sort_ascending: self.common.sort_ascending,
+            search_query: &self.common.search_query,
+            filtered_count: data.genres.len(),
+            total_count: data.total_genre_count,
+            item_type: "genres",
+            search_input_id: crate::views::GENRES_SEARCH_ID,
+            on_view_selected: Box::new(GenresMessage::SortModeSelected),
+            show_search: true,
+            on_search_change: Box::new(GenresMessage::SearchQueryChanged),
+            buttons: {
+                let mut btns = vec![
+                    HeaderButton::SortToggle(GenresMessage::ToggleSortOrder),
+                    HeaderButton::Refresh(GenresMessage::RefreshViewData),
+                ];
+                // Hidden in the browsing panel — the narrower pane needs the
+                // header space for sort/refresh/columns/search, and the user
+                // already has the main-pane button when they want to center.
+                if !data.in_browsing_panel {
+                    btns.push(HeaderButton::CenterOnPlaying(
+                        GenresMessage::CenterOnPlaying,
+                    ));
+                }
+                btns.push(HeaderButton::Trailing(column_dropdown));
+                btns
             },
-            None,                  // on_add
-            Some(column_dropdown), // trailing_button
-            true,                  // show_search
-            GenresMessage::SearchQueryChanged,
             // Roulette is main-pane only — see Albums view for rationale.
-            if data.in_browsing_panel {
+            on_roulette: if data.in_browsing_panel {
                 None
             } else {
                 Some(GenresMessage::Roulette)
             },
-        );
+        });
 
         // Compose with the tri-state "select all" header bar when the
         // multi-select column is on. Tri-state derives from the current

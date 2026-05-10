@@ -34,38 +34,74 @@ impl<V: std::fmt::Display> std::fmt::Display for SortPickerEntry<V> {
     }
 }
 
+/// One optional toolbar button, rendered left-to-right in push order.
+///
+/// Callers push only the buttons they want — unused variants are invisible.
+/// Adding a new button type requires extending this enum and the render
+/// loop in [`view_header`]; views that don't want the new button are
+/// completely untouched.
+pub(crate) enum HeaderButton<'a, Message> {
+    SortToggle(Message),
+    Refresh(Message),
+    CenterOnPlaying(Message),
+    /// `(tooltip_label, on_press)` — the plus-icon "add" button.
+    Add(&'static str, Message),
+    /// Arbitrary element rendered between the built-in buttons and the
+    /// search field (e.g. the columns-cog dropdown).
+    Trailing(Element<'a, Message>),
+}
+
+/// Configuration for [`view_header`].
+///
+/// `on_roulette` is NOT a button — it injects a "Roulette" entry into the
+/// sort picker dropdown and is intercepted before reaching the standard
+/// `on_view_selected` path. It must stay a separate field.
+pub(crate) struct ViewHeaderConfig<'a, V, Message> {
+    pub current_view: V,
+    pub view_options: &'a [V],
+    pub sort_ascending: bool,
+    pub search_query: &'a str,
+    pub filtered_count: usize,
+    pub total_count: usize,
+    pub item_type: &'a str,
+    /// Unique ID for this view's search input (must be `'static`).
+    pub search_input_id: &'static str,
+    pub on_view_selected: Box<dyn Fn(V) -> Message + 'a>,
+    pub show_search: bool,
+    pub on_search_change: Box<dyn Fn(String) -> Message + 'a>,
+    /// Toolbar buttons, rendered in push order.
+    pub buttons: Vec<HeaderButton<'a, Message>>,
+    /// When `Some`, appends a "Roulette" action entry to the sort dropdown
+    /// that emits this message on selection. The dropdown's persisted sort
+    /// is left untouched.
+    pub on_roulette: Option<Message>,
+}
+
 /// ViewHeader component - horizontal bar with view selector, sort, search, and count
 /// Generic over sort mode V to support different view enums (Albums, Queue, etc.)
-#[allow(clippy::too_many_arguments)] // Reusable component with naturally many configuration params
 pub(crate) fn view_header<
     'a,
     Message: 'a + Clone,
     V: 'a + std::fmt::Display + Clone + PartialEq,
 >(
-    current_view: V,
-    view_options: &'a [V],
-    sort_ascending: bool,
-    search_query: &str,
-    filtered_count: usize,
-    total_count: usize,
-    item_type: &str,
-    search_input_id: &'static str, // Unique ID for this view's search input (must be 'static)
-    on_view_selected: impl Fn(V) -> Message + 'a,
-    on_sort_toggle: Option<Message>,
-    on_refresh: Option<Message>,             // Optional refresh button
-    on_center_on_playing: Option<Message>,   // Optional center button
-    on_add: Option<(&'static str, Message)>, // Optional add button (tooltip, message)
-    // Optional trailing element rendered between built-in buttons and the
-    // search field — view-specific controls like the columns dropdown.
-    trailing_button: Option<Element<'a, Message>>,
-    show_search: bool,
-    on_search_change: impl Fn(String) -> Message + 'a,
-    // When `Some`, appends a "Roulette" action entry to the sort dropdown
-    // that emits this message on selection. The dropdown's persisted sort
-    // is left untouched — the entry is intercepted before reaching the
-    // standard `on_view_selected` path.
-    on_roulette: Option<Message>,
+    config: ViewHeaderConfig<'a, V, Message>,
 ) -> Element<'a, Message> {
+    let ViewHeaderConfig {
+        current_view,
+        view_options,
+        sort_ascending,
+        search_query,
+        filtered_count,
+        total_count,
+        item_type,
+        search_input_id,
+        on_view_selected,
+        show_search,
+        on_search_change,
+        buttons,
+        on_roulette,
+    } = config;
+
     let view_selector = if view_options.is_empty() {
         // Render a static pill matching the pick_list styling
         Some(
@@ -166,32 +202,52 @@ pub(crate) fn view_header<
         ) // Match button and search field height
     };
 
-    let sort_button = on_sort_toggle.map(|sort_msg| {
-        let sort_icon_path = if sort_ascending {
-            "assets/icons/arrow-up.svg"
-        } else {
-            "assets/icons/arrow-down.svg"
-        };
-        let tooltip_text = if sort_ascending {
-            "Sort: Ascending"
-        } else {
-            "Sort: Descending"
-        };
-        header_icon_button(sort_icon_path, tooltip_text, sort_msg)
-    });
-
-    let refresh_button = on_refresh.map(|refresh_msg| {
-        header_icon_button("assets/icons/refresh-cw.svg", "Refresh Data", refresh_msg)
-    });
-
-    // Optional center on playing button
-    let center_button = on_center_on_playing.map(|center_msg| {
-        header_icon_button("assets/icons/locate.svg", "Center on Playing", center_msg)
-    });
-
-    // Optional add button
-    let add_button = on_add
-        .map(|(tooltip, add_msg)| header_icon_button("assets/icons/plus.svg", tooltip, add_msg));
+    // Render each requested toolbar button into an element. Render order is
+    // controlled by the caller's push order — keep call sites consistent
+    // with the legacy positional ordering: SortToggle, Refresh,
+    // CenterOnPlaying, Add, Trailing.
+    let mut button_elements: Vec<Element<'a, Message>> = Vec::with_capacity(buttons.len());
+    for btn in buttons {
+        match btn {
+            HeaderButton::SortToggle(sort_msg) => {
+                let sort_icon_path = if sort_ascending {
+                    "assets/icons/arrow-up.svg"
+                } else {
+                    "assets/icons/arrow-down.svg"
+                };
+                let tooltip_text = if sort_ascending {
+                    "Sort: Ascending"
+                } else {
+                    "Sort: Descending"
+                };
+                button_elements.push(header_icon_button(sort_icon_path, tooltip_text, sort_msg));
+            }
+            HeaderButton::Refresh(refresh_msg) => {
+                button_elements.push(header_icon_button(
+                    "assets/icons/refresh-cw.svg",
+                    "Refresh Data",
+                    refresh_msg,
+                ));
+            }
+            HeaderButton::CenterOnPlaying(center_msg) => {
+                button_elements.push(header_icon_button(
+                    "assets/icons/locate.svg",
+                    "Center on Playing",
+                    center_msg,
+                ));
+            }
+            HeaderButton::Add(tooltip, add_msg) => {
+                button_elements.push(header_icon_button(
+                    "assets/icons/plus.svg",
+                    tooltip,
+                    add_msg,
+                ));
+            }
+            HeaderButton::Trailing(element) => {
+                button_elements.push(element);
+            }
+        }
+    }
 
     let search_field = if show_search {
         Some(crate::widgets::search_bar::search_bar(
@@ -225,20 +281,8 @@ pub(crate) fn view_header<
     if let Some(selector) = view_selector {
         header_row = header_row.push(selector);
     }
-    if let Some(sort_btn) = sort_button {
-        header_row = header_row.push(sort_btn);
-    }
-    if let Some(refresh_btn) = refresh_button {
-        header_row = header_row.push(refresh_btn);
-    }
-    if let Some(center_btn) = center_button {
-        header_row = header_row.push(center_btn);
-    }
-    if let Some(add_btn) = add_button {
-        header_row = header_row.push(add_btn);
-    }
-    if let Some(trailing) = trailing_button {
-        header_row = header_row.push(trailing);
+    for element in button_elements {
+        header_row = header_row.push(element);
     }
     if let Some(search_element) = search_field {
         header_row = header_row.push(search_element);

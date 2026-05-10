@@ -12,7 +12,10 @@ use iced::{
 };
 use nokkvi_data::{types::song::Song, utils::formatters};
 
-use crate::widgets::{self, SlotListPageState, view_header::SortMode};
+use crate::widgets::{
+    self, SlotListPageState,
+    view_header::{HeaderButton, SortMode, ViewHeaderConfig},
+};
 
 /// Similar page local state — just a slot list, no sort/search/pagination.
 #[derive(Debug)]
@@ -346,25 +349,22 @@ impl SimilarPage {
             )
             .into();
 
-        let header = widgets::view_header::view_header(
-            header_prefix,
-            empty_options,
-            true, // ascending dummy
-            "",   // no search query
-            data.songs.len(),
-            data.songs.len(),
-            "songs",
-            crate::views::SIMILAR_SEARCH_ID,
-            |_| SimilarMessage::NoOp,
-            None,                  // Hide sort button
-            None,                  // Hide refresh
-            None,                  // Hide center on playing
-            None,                  // on_add
-            Some(column_dropdown), // trailing_button
-            false,                 // Hide search
-            |_| SimilarMessage::NoOp,
-            None, // Similar lives only in the browsing panel — no roulette
-        );
+        let header = widgets::view_header::view_header(ViewHeaderConfig {
+            current_view: header_prefix,
+            view_options: empty_options,
+            sort_ascending: true, // ascending dummy
+            search_query: "",     // no search query
+            filtered_count: data.songs.len(),
+            total_count: data.songs.len(),
+            item_type: "songs",
+            search_input_id: crate::views::SIMILAR_SEARCH_ID,
+            on_view_selected: Box::new(|_| SimilarMessage::NoOp),
+            show_search: false, // Hide search
+            on_search_change: Box::new(|_| SimilarMessage::NoOp),
+            // No sort/refresh/center/add buttons; only the columns-cog dropdown.
+            buttons: vec![HeaderButton::Trailing(column_dropdown)],
+            on_roulette: None, // Similar lives only in the browsing panel — no roulette
+        });
 
         // Compose with the tri-state "select all" header bar when the
         // multi-select column is on. Tri-state derives from the current
