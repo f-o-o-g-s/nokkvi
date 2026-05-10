@@ -300,21 +300,17 @@ impl AlbumsService {
         self.fetch_artwork_by_url(&url).await
     }
 
-    /// Burst-tolerant variant of [`fetch_album_artwork`]: up to 3 attempts
-    /// with 100 ms / 200 ms backoff. Required for callers that fan out many
-    /// concurrent fetches in a single tick (e.g. the genre/playlist collage
-    /// panel after a scrollbar drag settles), because Navidrome's
-    /// `getCoverArt` throttle middleware caps in-flight requests at
-    /// `max(2, NumCPU/2)` with a 100-request backlog and rejects overflow
-    /// with HTTP 429. `fetch_artwork_by_url` surfaces that as an error;
-    /// without retry, the dropped request leaves a permanently-blank
-    /// thumbnail until the user revisits the slot.
-    pub async fn fetch_album_artwork_with_retry(
-        &self,
-        art_id: &str,
-        size: Option<u32>,
-        updated_at: Option<&str>,
-    ) -> Result<Vec<u8>> {
+    /// Burst-tolerant variant of [`fetch_artwork_by_url`]: up to 3 attempts
+    /// with 100 ms / 200 ms backoff. Single retry implementation shared by
+    /// every artwork-fetch caller — `fetch_album_artwork_with_retry`,
+    /// `expansion_album_artwork_tasks`, and the collage path all funnel
+    /// through here. Required because Navidrome's `getCoverArt` throttle
+    /// middleware caps in-flight requests at `max(2, NumCPU/2)` with a
+    /// 100-request backlog and rejects overflow with HTTP 429;
+    /// `fetch_artwork_by_url` surfaces that as an error, and without retry
+    /// the dropped request would leave a permanently-blank thumbnail until
+    /// the slot was revisited.
+    pub async fn fetch_artwork_by_url_with_retry(&self, url: &str) -> Result<Vec<u8>> {
         const MAX_ATTEMPTS: u32 = 3;
         let mut last_err: Option<anyhow::Error> = None;
         for attempt in 0..MAX_ATTEMPTS {
@@ -322,19 +318,42 @@ impl AlbumsService {
                 let backoff = 100u64 << (attempt - 1);
                 tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
             }
-            match self.fetch_album_artwork(art_id, size, updated_at).await {
+            match self.fetch_artwork_by_url(url).await {
                 Ok(bytes) => return Ok(bytes),
                 Err(e) => last_err = Some(e),
             }
         }
         let err = last_err.unwrap_or_else(|| anyhow::anyhow!("artwork fetch failed"));
         tracing::warn!(
-            "Collage artwork fetch gave up after {} attempts for {}: {:?}",
+            "Artwork fetch gave up after {} attempts for {}: {:?}",
             MAX_ATTEMPTS,
-            art_id,
+            url,
             err
         );
         Err(err)
+    }
+
+    /// Convenience wrapper for callers that have an `art_id` rather than a
+    /// pre-built URL — builds the URL once and delegates to
+    /// [`fetch_artwork_by_url_with_retry`] (no per-attempt URL rebuild).
+    pub async fn fetch_album_artwork_with_retry(
+        &self,
+        art_id: &str,
+        size: Option<u32>,
+        updated_at: Option<&str>,
+    ) -> Result<Vec<u8>> {
+        let (server_url, subsonic_credential) = self.get_server_config().await;
+        if server_url.is_empty() || subsonic_credential.is_empty() {
+            return Err(anyhow::anyhow!("missing server config"));
+        }
+        let url = crate::utils::artwork_url::build_cover_art_url_with_timestamp(
+            art_id,
+            &server_url,
+            &subsonic_credential,
+            size,
+            updated_at,
+        );
+        self.fetch_artwork_by_url_with_retry(&url).await
     }
 
     /// Associate an authentication gateway.
