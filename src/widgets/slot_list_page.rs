@@ -389,7 +389,6 @@ impl SlotListPageState {
         self.clear_multi_selection();
         indices
     }
-
 }
 
 #[cfg(test)]

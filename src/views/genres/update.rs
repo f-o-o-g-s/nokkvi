@@ -183,7 +183,9 @@ impl GenresPage {
 
                         (Task::none(), GenresAction::AddBatchToQueue(payload))
                     }
-                    SlotListPageMessage::RefreshViewData => (Task::none(), GenresAction::RefreshViewData),
+                    SlotListPageMessage::RefreshViewData => {
+                        (Task::none(), GenresAction::RefreshViewData)
+                    }
                     SlotListPageMessage::CenterOnPlaying => {
                         (Task::none(), GenresAction::CenterOnPlaying)
                     }
