@@ -52,6 +52,7 @@ mod genres;
 mod hotkeys;
 mod info_modal;
 mod library_refresh;
+mod loader_target;
 mod menus;
 mod mpris;
 mod navigation;
@@ -80,6 +81,9 @@ mod tray;
 mod window;
 
 use iced::Task;
+pub(crate) use loader_target::{
+    AlbumsTarget, ArtistsTarget, GenresTarget, LoaderTarget, PlaylistsTarget, SongsTarget,
+};
 pub(crate) use pending_expand_resolve::{AlbumSpec, ArtistSpec, GenreSpec, SongSpec};
 use tracing::debug;
 
