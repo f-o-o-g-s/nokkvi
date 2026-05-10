@@ -498,7 +498,9 @@ fn artists_selection_toggle_on_album_child_lands_in_selected_indices() {
     ];
 
     let (_, _action) = app.artists_page.update(
-        crate::views::ArtistsMessage::SlotListSelectionToggle(2),
+        crate::views::ArtistsMessage::SlotList(
+            crate::widgets::SlotListPageMessage::SelectionToggle(2),
+        ),
         artists.len(),
         &artists,
     );

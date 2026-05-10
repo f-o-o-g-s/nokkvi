@@ -93,20 +93,8 @@ pub struct ArtistsViewData<'a> {
 /// Messages for local artist page interactions
 #[derive(Debug, Clone)]
 pub enum ArtistsMessage {
-    // Slot list navigation
-    SlotListNavigateUp,
-    SlotListNavigateDown,
-    SlotListSetOffset(usize, iced::keyboard::Modifiers),
-    SlotListScrollSeek(usize),
-    SlotListActivateCenter,
-    SlotListClickPlay(usize), // Click non-center to play directly (skip focus)
-    /// Click on a row's leading select checkbox — toggles `item_index` in
-    /// `selected_indices`. No play/highlight side effects.
-    SlotListSelectionToggle(usize),
-    /// Click on the tri-state "select all" header — fills selection with
-    /// every visible row, or clears if every visible row is already selected.
-    SlotListSelectAllToggle,
-    AddCenterToQueue, // Add all songs from centered artist to queue (Shift+Q)
+    // Slot list navigation, activation, selection, queue, refresh, center
+    SlotList(crate::widgets::SlotListPageMessage),
 
     // Mouse click on star/heart (item_index, value)
     ClickSetRating(usize, usize), // (item_index, rating 1-5)
@@ -134,8 +122,6 @@ pub enum ArtistsMessage {
     ToggleSortOrder,
     SearchQueryChanged(String),
     SearchFocused(bool),
-    RefreshViewData,
-    CenterOnPlaying,
     ToggleColumnVisible(ArtistsColumn),
     /// Sort dropdown's "Roulette" entry was selected — intercepted at the
     /// root handler before the page's `update` runs.
@@ -263,7 +249,9 @@ impl super::ViewPage for ArtistsPage {
     }
 
     fn add_to_queue_message(&self) -> Option<Message> {
-        Some(Message::Artists(ArtistsMessage::AddCenterToQueue))
+        Some(Message::Artists(ArtistsMessage::SlotList(
+            crate::widgets::SlotListPageMessage::AddCenterToQueue,
+        )))
     }
     fn expand_center_message(&self) -> Option<Message> {
         // ExpandCenter on a 2nd-tier album row routes through `update()`'s
@@ -276,9 +264,11 @@ impl super::ViewPage for ArtistsPage {
     }
 
     fn synth_set_offset_message(&self, offset: usize) -> Option<Message> {
-        Some(Message::Artists(ArtistsMessage::SlotListSetOffset(
-            offset,
-            iced::keyboard::Modifiers::default(),
+        Some(Message::Artists(ArtistsMessage::SlotList(
+            crate::widgets::SlotListPageMessage::SetOffset(
+                offset,
+                iced::keyboard::Modifiers::default(),
+            ),
         )))
     }
 }

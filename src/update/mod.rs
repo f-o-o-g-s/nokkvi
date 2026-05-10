@@ -401,7 +401,9 @@ impl Nokkvi {
                     self,
                     msg,
                     handle_artists,
-                    crate::views::ArtistsMessage::SlotListScrollSeek(_),
+                    crate::views::ArtistsMessage::SlotList(
+                        crate::widgets::SlotListPageMessage::ScrollSeek(_)
+                    ),
                     View::Artists
                 )
             }

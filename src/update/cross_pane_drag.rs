@@ -334,9 +334,9 @@ impl Nokkvi {
         let msg = match panel.active_view {
             views::BrowsingView::Albums => Message::Albums(views::AlbumsMessage::AddCenterToQueue),
             views::BrowsingView::Songs => Message::Songs(views::SongsMessage::AddCenterToQueue),
-            views::BrowsingView::Artists => {
-                Message::Artists(views::ArtistsMessage::AddCenterToQueue)
-            }
+            views::BrowsingView::Artists => Message::Artists(views::ArtistsMessage::SlotList(
+                crate::widgets::SlotListPageMessage::AddCenterToQueue,
+            )),
             views::BrowsingView::Genres => Message::Genres(views::GenresMessage::AddCenterToQueue),
             views::BrowsingView::Similar => {
                 Message::Similar(views::SimilarMessage::AddCenterToQueue)

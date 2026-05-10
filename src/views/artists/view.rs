@@ -79,14 +79,18 @@ impl ArtistsPage {
             crate::views::ARTISTS_SEARCH_ID,
             ArtistsMessage::SortModeSelected,
             Some(ArtistsMessage::ToggleSortOrder),
-            Some(ArtistsMessage::RefreshViewData),
+            Some(ArtistsMessage::SlotList(
+                crate::widgets::SlotListPageMessage::RefreshViewData,
+            )),
             // Hidden in the browsing panel — the narrower pane needs the
             // header space for sort/refresh/columns/search, and the user
             // already has the main-pane button when they want to center.
             if data.in_browsing_panel {
                 None
             } else {
-                Some(ArtistsMessage::CenterOnPlaying)
+                Some(ArtistsMessage::SlotList(
+                    crate::widgets::SlotListPageMessage::CenterOnPlaying,
+                ))
             },
             None,                  // on_add
             Some(column_dropdown), // trailing_button
@@ -108,7 +112,7 @@ impl ArtistsPage {
             crate::widgets::slot_list::compose_header_with_select(
                 self.column_visibility.select,
                 self.common.select_all_state(flattened_len),
-                ArtistsMessage::SlotListSelectAllToggle,
+                ArtistsMessage::SlotList(crate::widgets::SlotListPageMessage::SelectAllToggle),
                 header,
             )
         };
@@ -160,11 +164,15 @@ impl ArtistsPage {
             &self.common.slot_list,
             &flattened,
             &config,
-            ArtistsMessage::SlotListNavigateUp,
-            ArtistsMessage::SlotListNavigateDown,
+            ArtistsMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateUp),
+            ArtistsMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateDown),
             {
                 let total = flattened.len();
-                move |f| ArtistsMessage::SlotListScrollSeek((f * total as f32) as usize)
+                move |f| {
+                    ArtistsMessage::SlotList(crate::widgets::SlotListPageMessage::ScrollSeek(
+                        (f * total as f32) as usize,
+                    ))
+                }
             },
             |entry, ctx| match entry {
                 SlotListEntry::Parent(artist) => {
@@ -179,7 +187,11 @@ impl ArtistsPage {
                         select_header_visible,
                         ctx.is_selected,
                         ctx.item_index,
-                        ArtistsMessage::SlotListSelectionToggle,
+                        |i| {
+                            ArtistsMessage::SlotList(
+                                crate::widgets::SlotListPageMessage::SelectionToggle(i),
+                            )
+                        },
                         row,
                     )
                 }
@@ -199,7 +211,11 @@ impl ArtistsPage {
                         select_header_visible,
                         ctx.is_selected,
                         ctx.item_index,
-                        ArtistsMessage::SlotListSelectionToggle,
+                        |i| {
+                            ArtistsMessage::SlotList(
+                                crate::widgets::SlotListPageMessage::SelectionToggle(i),
+                            )
+                        },
                         row,
                     )
                 }
@@ -579,13 +595,21 @@ impl ArtistsPage {
 
         let slot_button = button(clickable)
             .on_press(if ctx.modifiers.control() || ctx.modifiers.shift() {
-                ArtistsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
+                ArtistsMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
+                    ctx.item_index,
+                    ctx.modifiers,
+                ))
             } else if ctx.is_center {
-                ArtistsMessage::SlotListActivateCenter
+                ArtistsMessage::SlotList(crate::widgets::SlotListPageMessage::ActivateCenter)
             } else if stable_viewport {
-                ArtistsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
+                ArtistsMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
+                    ctx.item_index,
+                    ctx.modifiers,
+                ))
             } else {
-                ArtistsMessage::SlotListClickPlay(ctx.item_index)
+                ArtistsMessage::SlotList(crate::widgets::SlotListPageMessage::ClickPlay(
+                    ctx.item_index,
+                ))
             })
             .style(|_theme, _status| button::Style {
                 background: None,
@@ -624,11 +648,16 @@ impl ArtistsPage {
             sub_index_label,
             album_art.get(&album.id),
             self.column_visibility.thumbnail,
-            ArtistsMessage::SlotListActivateCenter,
+            ArtistsMessage::SlotList(crate::widgets::SlotListPageMessage::ActivateCenter),
             if stable_viewport {
-                ArtistsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
+                ArtistsMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
+                    ctx.item_index,
+                    ctx.modifiers,
+                ))
             } else {
-                ArtistsMessage::SlotListClickPlay(ctx.item_index)
+                ArtistsMessage::SlotList(crate::widgets::SlotListPageMessage::ClickPlay(
+                    ctx.item_index,
+                ))
             },
             false, // artist is already the parent row
             Some(ArtistsMessage::ClickToggleStar(ctx.item_index)),
