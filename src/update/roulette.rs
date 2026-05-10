@@ -310,7 +310,9 @@ impl Nokkvi {
                     .common
                     .handle_set_offset(target_idx, total_items);
                 self.queue_page.common.slot_list.flash_center();
-                Task::done(Message::Queue(views::QueueMessage::SlotListActivateCenter))
+                Task::done(Message::Queue(views::QueueMessage::SlotList(
+                    crate::widgets::SlotListPageMessage::ActivateCenter,
+                )))
             }
             View::Songs => {
                 self.songs_page

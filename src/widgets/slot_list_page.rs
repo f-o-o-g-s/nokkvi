@@ -5,6 +5,40 @@
 
 use crate::widgets::{SlotListView, view_header::SortMode};
 
+/// Shared slot-list message enum replacing stamped navigation variants.
+///
+/// Expansion views (Albums/Artists/Genres/Playlists) emit the navigation/activation/selection
+/// variants via `SlotList(...)` but keep SortModeSelected/ToggleSortOrder/SearchQueryChanged/
+/// SearchFocused as per-view variants handled by `impl_expansion_update!` (which calls
+/// `self.expansion.clear()` before delegating to `common`).
+///
+/// Non-expansion views (Songs/Queue/Radios/Similar) emit all applicable variants.
+/// Queue keeps `SortModeSelected(QueueSortMode)` per-view (different type) and does
+/// not emit `SlotList(SortModeSelected)`.
+#[derive(Debug, Clone)]
+pub enum SlotListPageMessage {
+    // Navigation (all views)
+    NavigateUp,
+    NavigateDown,
+    SetOffset(usize, iced::keyboard::Modifiers),
+    ScrollSeek(usize),
+    // Activation (all views except Similar which has no ActivateCenter/ClickPlay)
+    ActivateCenter,
+    ClickPlay(usize),
+    // Selection (all views except Radios)
+    SelectionToggle(usize),
+    SelectAllToggle,
+    // Queue/refresh/center (varies by view; views that don't need them just return None)
+    AddCenterToQueue,
+    RefreshViewData,
+    CenterOnPlaying,
+    // Sort/search (emitted by non-expansion views only; expansion views handle via macro)
+    SearchQueryChanged(String),
+    SearchFocused(bool),
+    SortModeSelected(SortMode), // Queue keeps SortModeSelected(QueueSortMode) per-view
+    ToggleSortOrder,
+}
+
 /// Common state shared by all slot-list-based views
 #[derive(Debug)]
 pub struct SlotListPageState {
@@ -53,10 +87,19 @@ impl Default for SlotListPageState {
 /// ```
 #[derive(Debug, Clone)]
 pub enum SlotListPageAction {
+    /// Navigation/selection completed with no semantic action needed.
+    None,
+    /// Center item was activated — view interprets (expand album, play song, etc.).
+    ActivateCenter,
+    /// Center item should be added to queue without playing.
+    AddCenterToQueue,
+    /// View data should be re-fetched from server / reloaded.
+    RefreshViewData,
+    /// Slot list should scroll to the currently playing item.
+    CenterOnPlaying,
     SearchChanged(String),
     SortModeChanged(SortMode),
     SortOrderChanged(bool),
-    None,
 }
 
 /// Tri-state for the column-header "select all" checkbox.
@@ -305,6 +348,59 @@ impl SlotListPageState {
         let indices = self.evaluate_context_menu(clicked_idx);
         self.clear_multi_selection();
         indices
+    }
+
+    /// Unified dispatch for non-expansion views (Songs, Queue, Radios, Similar).
+    ///
+    /// Expansion views (Albums, Artists, Genres, Playlists) do NOT call this method —
+    /// they match `SlotList` sub-variants individually using expansion-aware methods
+    /// (`self.expansion.handle_navigate_up(items, &mut self.common)`, etc.).
+    ///
+    /// `total` is the current item count (used for navigation bounds and search reset).
+    pub fn handle(&mut self, msg: SlotListPageMessage, total: usize) -> SlotListPageAction {
+        match msg {
+            SlotListPageMessage::NavigateUp => {
+                self.handle_navigate_up(total);
+                SlotListPageAction::None
+            }
+            SlotListPageMessage::NavigateDown => {
+                self.handle_navigate_down(total);
+                SlotListPageAction::None
+            }
+            SlotListPageMessage::SetOffset(offset, mods) => {
+                self.handle_slot_click(offset, total, mods);
+                SlotListPageAction::None
+            }
+            SlotListPageMessage::ScrollSeek(offset) => {
+                self.handle_set_offset(offset, total);
+                SlotListPageAction::None
+            }
+            SlotListPageMessage::SelectionToggle(offset) => {
+                self.handle_selection_toggle(offset, total);
+                SlotListPageAction::None
+            }
+            SlotListPageMessage::SelectAllToggle => {
+                self.handle_select_all_toggle(total);
+                SlotListPageAction::None
+            }
+            SlotListPageMessage::ActivateCenter => SlotListPageAction::ActivateCenter,
+            SlotListPageMessage::ClickPlay(idx) => {
+                self.handle_set_offset(idx, total);
+                SlotListPageAction::ActivateCenter
+            }
+            SlotListPageMessage::AddCenterToQueue => SlotListPageAction::AddCenterToQueue,
+            SlotListPageMessage::SearchQueryChanged(q) => {
+                self.handle_search_query_changed(q, total)
+            }
+            SlotListPageMessage::SearchFocused(focused) => {
+                self.handle_search_focused(focused);
+                SlotListPageAction::None
+            }
+            SlotListPageMessage::SortModeSelected(mode) => self.handle_sort_mode_selected(mode),
+            SlotListPageMessage::ToggleSortOrder => self.handle_toggle_sort_order(),
+            SlotListPageMessage::RefreshViewData => SlotListPageAction::RefreshViewData,
+            SlotListPageMessage::CenterOnPlaying => SlotListPageAction::CenterOnPlaying,
+        }
     }
 }
 

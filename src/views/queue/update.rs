@@ -12,7 +12,7 @@ use nokkvi_data::backend::queue::QueueSongUIViewData;
 use tracing::{debug, trace};
 
 use super::{QueueAction, QueueContextEntry, QueueMessage, QueuePage};
-use crate::widgets::drag_column::DragEvent;
+use crate::widgets::{SlotListPageAction, drag_column::DragEvent};
 
 impl QueuePage {
     /// Update internal state and return actions for root
@@ -23,43 +23,28 @@ impl QueuePage {
     ) -> (Task<QueueMessage>, QueueAction) {
         let total_items = queue_songs.len();
         match message {
-            QueueMessage::SlotListNavigateUp => {
-                self.common.handle_navigate_up(total_items);
-                (Task::none(), QueueAction::None)
-            }
-            QueueMessage::SlotListNavigateDown => {
-                self.common.handle_navigate_down(total_items);
-                (Task::none(), QueueAction::None)
-            }
-            QueueMessage::SlotListSetOffset(offset, modifiers) => {
-                self.common
-                    .handle_slot_click(offset, total_items, modifiers);
-                (Task::none(), QueueAction::None)
-            }
-            QueueMessage::SlotListScrollSeek(offset) => {
-                self.common.handle_set_offset(offset, total_items);
-                (Task::none(), QueueAction::None)
-            }
-            QueueMessage::SlotListActivateCenter => {
-                // Play the centered song
-                if let Some(center_idx) = self.common.get_center_item_index(total_items) {
-                    self.common.slot_list.flash_center();
-                    (Task::none(), QueueAction::PlaySong(center_idx))
-                } else {
-                    (Task::none(), QueueAction::None)
+            QueueMessage::SlotList(msg) => {
+                match self.common.handle(msg, total_items) {
+                    SlotListPageAction::ActivateCenter => {
+                        // Play the centered song
+                        if let Some(center_idx) = self.common.get_center_item_index(total_items) {
+                            self.common.slot_list.flash_center();
+                            (Task::none(), QueueAction::PlaySong(center_idx))
+                        } else {
+                            (Task::none(), QueueAction::None)
+                        }
+                    }
+                    SlotListPageAction::SearchChanged(q) => {
+                        (Task::none(), QueueAction::SearchChanged(q))
+                    }
+                    SlotListPageAction::SortOrderChanged(b) => {
+                        (Task::none(), QueueAction::SortOrderChanged(b))
+                    }
+                    SlotListPageAction::None => (Task::none(), QueueAction::None),
+                    // Queue has no AddCenterToQueue / RefreshViewData / CenterOnPlaying / SortModeChanged
+                    // via SlotList arm (SortModeSelected stays per-view with QueueSortMode).
+                    _ => (Task::none(), QueueAction::None),
                 }
-            }
-            QueueMessage::SlotListClickPlay(offset) => {
-                self.common.handle_set_offset(offset, total_items);
-                self.update(QueueMessage::SlotListActivateCenter, queue_songs)
-            }
-            QueueMessage::SlotListSelectionToggle(offset) => {
-                self.common.handle_selection_toggle(offset, total_items);
-                (Task::none(), QueueAction::None)
-            }
-            QueueMessage::SlotListSelectAllToggle => {
-                self.common.handle_select_all_toggle(total_items);
-                (Task::none(), QueueAction::None)
             }
             QueueMessage::FocusCurrentPlaying(queue_index, flash) => {
                 // Auto-scroll slot list to center the currently playing track by queue index
@@ -86,18 +71,6 @@ impl QueuePage {
             QueueMessage::SortModeSelected(sort_mode) => {
                 self.queue_sort_mode = sort_mode;
                 (Task::none(), QueueAction::SortModeChanged(sort_mode))
-            }
-            QueueMessage::ToggleSortOrder => {
-                self.common.sort_ascending = !self.common.sort_ascending;
-                (
-                    Task::none(),
-                    QueueAction::SortOrderChanged(self.common.sort_ascending),
-                )
-            }
-            QueueMessage::SearchQueryChanged(query) => {
-                self.common.search_query = query.clone();
-                self.common.slot_list.set_offset(0, total_items); // Reset to top on search
-                (Task::none(), QueueAction::SearchChanged(query))
             }
             QueueMessage::ToggleColumnVisible(col) => {
                 let new_value = !self.column_visibility.get(col);

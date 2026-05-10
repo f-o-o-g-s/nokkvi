@@ -8,6 +8,7 @@ use crate::{
     Nokkvi, View,
     app_message::{Message, SlotListMessage},
     views,
+    widgets::SlotListPageMessage,
 };
 
 impl Nokkvi {
@@ -137,7 +138,9 @@ impl Nokkvi {
             View::Artists => {
                 Task::done(Message::Artists(views::ArtistsMessage::SlotListNavigateUp))
             }
-            View::Queue => Task::done(Message::Queue(views::QueueMessage::SlotListNavigateUp)),
+            View::Queue => Task::done(Message::Queue(views::QueueMessage::SlotList(
+                SlotListPageMessage::NavigateUp,
+            ))),
             View::Songs => Task::done(Message::Songs(views::SongsMessage::SlotListNavigateUp)),
             View::Genres => Task::done(Message::Genres(views::GenresMessage::SlotListNavigateUp)),
             View::Playlists => Task::done(Message::Playlists(
@@ -182,7 +185,9 @@ impl Nokkvi {
             View::Artists => Task::done(Message::Artists(
                 views::ArtistsMessage::SlotListNavigateDown,
             )),
-            View::Queue => Task::done(Message::Queue(views::QueueMessage::SlotListNavigateDown)),
+            View::Queue => Task::done(Message::Queue(views::QueueMessage::SlotList(
+                SlotListPageMessage::NavigateDown,
+            ))),
             View::Songs => Task::done(Message::Songs(views::SongsMessage::SlotListNavigateDown)),
             View::Genres => Task::done(Message::Genres(views::GenresMessage::SlotListNavigateDown)),
             View::Playlists => Task::done(Message::Playlists(
@@ -206,9 +211,8 @@ impl Nokkvi {
                     iced::keyboard::Modifiers::default(),
                 )))
             }
-            View::Queue => Task::done(Message::Queue(views::QueueMessage::SlotListSetOffset(
-                offset,
-                iced::keyboard::Modifiers::default(),
+            View::Queue => Task::done(Message::Queue(views::QueueMessage::SlotList(
+                SlotListPageMessage::SetOffset(offset, iced::keyboard::Modifiers::default()),
             ))),
             View::Songs => Task::done(Message::Songs(views::SongsMessage::SlotListSetOffset(
                 offset,
@@ -286,7 +290,9 @@ impl Nokkvi {
             View::Artists => Task::done(Message::Artists(
                 views::ArtistsMessage::SlotListActivateCenter,
             )),
-            View::Queue => Task::done(Message::Queue(views::QueueMessage::SlotListActivateCenter)),
+            View::Queue => Task::done(Message::Queue(views::QueueMessage::SlotList(
+                SlotListPageMessage::ActivateCenter,
+            ))),
             View::Songs => Task::done(Message::Songs(views::SongsMessage::SlotListActivateCenter)),
             View::Genres => Task::done(Message::Genres(
                 views::GenresMessage::SlotListActivateCenter,

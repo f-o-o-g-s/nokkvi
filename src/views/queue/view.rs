@@ -139,14 +139,16 @@ impl QueuePage {
             "songs",
             crate::views::QUEUE_SEARCH_ID,
             QueueMessage::SortModeSelected,
-            Some(QueueMessage::ToggleSortOrder),
+            Some(QueueMessage::SlotList(
+                crate::widgets::SlotListPageMessage::ToggleSortOrder,
+            )),
             None, // No refresh button for queue
             data.current_playing_queue_index
                 .map(|idx| QueueMessage::FocusCurrentPlaying(idx, true)),
             None,           // on_add
             Some(trailing), // trailing_button
             true,           // show_search
-            QueueMessage::SearchQueryChanged,
+            |q| QueueMessage::SlotList(crate::widgets::SlotListPageMessage::SearchQueryChanged(q)),
             Some(QueueMessage::Roulette),
         );
 
@@ -462,7 +464,7 @@ impl QueuePage {
         let header = crate::widgets::slot_list::compose_header_with_select(
             self.column_visibility.select,
             self.common.select_all_state(data.queue_songs.len()),
-            QueueMessage::SlotListSelectAllToggle,
+            QueueMessage::SlotList(crate::widgets::SlotListPageMessage::SelectAllToggle),
             header,
         );
 
@@ -783,13 +785,21 @@ impl QueuePage {
                 // Make it interactive
                 let slot_button = button(clickable)
                     .on_press(if ctx.modifiers.control() || ctx.modifiers.shift() {
-                        QueueMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
+                        QueueMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
+                            ctx.item_index,
+                            ctx.modifiers,
+                        ))
                     } else if ctx.is_center {
-                        QueueMessage::SlotListActivateCenter
+                        QueueMessage::SlotList(crate::widgets::SlotListPageMessage::ActivateCenter)
                     } else if stable_viewport {
-                        QueueMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
+                        QueueMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
+                            ctx.item_index,
+                            ctx.modifiers,
+                        ))
                     } else {
-                        QueueMessage::SlotListClickPlay(ctx.item_index)
+                        QueueMessage::SlotList(crate::widgets::SlotListPageMessage::ClickPlay(
+                            ctx.item_index,
+                        ))
                     })
                     .style(|_theme, _status| button::Style {
                         background: None,
@@ -915,7 +925,11 @@ impl QueuePage {
                 column_visibility.select,
                 ctx.is_selected,
                 ctx.item_index,
-                QueueMessage::SlotListSelectionToggle,
+                |idx| {
+                    QueueMessage::SlotList(crate::widgets::SlotListPageMessage::SelectionToggle(
+                        idx,
+                    ))
+                },
                 responsive_row.into(),
             )
         };
@@ -928,11 +942,15 @@ impl QueuePage {
                 &self.common.slot_list,
                 &queue_songs,
                 &config,
-                QueueMessage::SlotListNavigateUp,
-                QueueMessage::SlotListNavigateDown,
+                QueueMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateUp),
+                QueueMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateDown),
                 {
                     let total = queue_songs.len();
-                    move |f| QueueMessage::SlotListScrollSeek((f * total as f32) as usize)
+                    move |f| {
+                        QueueMessage::SlotList(crate::widgets::SlotListPageMessage::ScrollSeek(
+                            (f * total as f32) as usize,
+                        ))
+                    }
                 },
                 QueueMessage::DragReorder,
                 render_item,
