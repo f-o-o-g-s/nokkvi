@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use tokio::sync::{Mutex, mpsc::UnboundedReceiver};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::{
     audio::engine::CustomAudioEngine,
@@ -169,7 +169,15 @@ impl AppService {
     ///
     /// Returns `None` if the receiver was already taken or the lock is contended.
     pub fn take_loop_receiver(&self) -> Option<UnboundedReceiver<String>> {
-        self.loop_rx.try_lock().ok()?.take()
+        match self.loop_rx.try_lock() {
+            Ok(mut guard) => {
+                if guard.is_none() {
+                    warn!("[APP SERVICE] take_loop_receiver called after receiver already taken");
+                }
+                guard.take()
+            }
+            Err(_) => None,
+        }
     }
 
     /// Take the queue-changed receiver (once, synchronously).
@@ -180,7 +188,17 @@ impl AppService {
     ///
     /// Returns `None` if the receiver was already taken or the lock is contended.
     pub fn take_queue_changed_receiver(&self) -> Option<UnboundedReceiver<()>> {
-        self.queue_changed_rx.try_lock().ok()?.take()
+        match self.queue_changed_rx.try_lock() {
+            Ok(mut guard) => {
+                if guard.is_none() {
+                    warn!(
+                        "[APP SERVICE] take_queue_changed_receiver called after receiver already taken"
+                    );
+                }
+                guard.take()
+            }
+            Err(_) => None,
+        }
     }
 
     /// Take the task status receiver (once, synchronously).

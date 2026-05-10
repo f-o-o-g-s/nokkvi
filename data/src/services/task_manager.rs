@@ -91,7 +91,17 @@ impl TaskManager {
 
     /// Take the status receiver (once) for UI integration
     pub fn take_status_receiver(&self) -> Option<TaskStatusReceiver> {
-        self.status_rx.try_lock().ok()?.take()
+        match self.status_rx.try_lock() {
+            Ok(mut guard) => {
+                if guard.is_none() {
+                    warn!(
+                        "[TASK MANAGER] take_status_receiver called after receiver already taken"
+                    );
+                }
+                guard.take()
+            }
+            Err(_) => None,
+        }
     }
 
     /// Get the cancellation token for checking shutdown status
@@ -120,6 +130,7 @@ impl TaskManager {
             name: task_name.clone(),
         };
 
+        let token = self.cancellation_token.clone();
         let active_tasks = self.active_tasks.clone();
         let handle_clone = handle.clone();
         let status_tx = self.status_tx.clone();
@@ -133,10 +144,15 @@ impl TaskManager {
 
             let _ = status_tx.send((handle_clone.clone(), TaskStatus::Running));
 
-            // Run task
-            future().await;
-
-            let _ = status_tx.send((handle_clone.clone(), TaskStatus::Completed));
+            tokio::select! {
+                _ = token.cancelled() => {
+                    debug!("[TASK {}] cancelled before completion", task_name);
+                    let _ = status_tx.send((handle_clone.clone(), TaskStatus::Cancelled));
+                }
+                _ = future() => {
+                    let _ = status_tx.send((handle_clone.clone(), TaskStatus::Completed));
+                }
+            }
 
             // Unregister task
             {
@@ -165,6 +181,7 @@ impl TaskManager {
             name: task_name.clone(),
         };
 
+        let token = self.cancellation_token.clone();
         let active_tasks = self.active_tasks.clone();
         let handle_clone = handle.clone();
         let status_tx = self.status_tx.clone();
@@ -178,16 +195,22 @@ impl TaskManager {
 
             let _ = status_tx.send((handle_clone.clone(), TaskStatus::Running));
 
-            // Run task and log errors
-            match future().await {
-                Ok(_) => {
-                    // Success - no logging needed for routine tasks
-                    let _ = status_tx.send((handle_clone.clone(), TaskStatus::Completed));
+            tokio::select! {
+                _ = token.cancelled() => {
+                    debug!("[TASK {}] cancelled before completion", task_name);
+                    let _ = status_tx.send((handle_clone.clone(), TaskStatus::Cancelled));
                 }
-                Err(e) => {
-                    error!(" [TASK] {} failed: {}", task_name, e);
-                    let _ =
-                        status_tx.send((handle_clone.clone(), TaskStatus::Failed(e.to_string())));
+                result = future() => {
+                    match result {
+                        Ok(_) => {
+                            let _ = status_tx.send((handle_clone.clone(), TaskStatus::Completed));
+                        }
+                        Err(e) => {
+                            error!(" [TASK] {} failed: {}", task_name, e);
+                            let _ = status_tx
+                                .send((handle_clone.clone(), TaskStatus::Failed(e.to_string())));
+                        }
+                    }
                 }
             }
 
