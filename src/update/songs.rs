@@ -17,13 +17,14 @@ impl Nokkvi {
     /// Shared paginated fetch for Songs. Used by both the initial load
     /// (`handle_load_songs`, offset 0) and follow-up page loads
     /// (`handle_songs_load_page`, offset N).
-    fn load_songs_internal<M>(&mut self, offset: usize, msg_ctor: M) -> Task<Message>
+    fn load_songs_internal<M>(&mut self, offset: usize, force: bool, msg_ctor: M) -> Task<Message>
     where
         M: FnOnce((Result<Vec<SongUIViewData>, String>, usize)) -> Message + Send + 'static,
     {
         let page_size = self.library_page_size.to_usize();
         // Phase 5A defensive gate — see load_albums_internal for rationale.
-        if offset > 0
+        if !force
+            && offset > 0
             && self
                 .library
                 .songs
@@ -80,7 +81,7 @@ impl Nokkvi {
         background: bool,
         anchor_id: Option<String>,
     ) -> Task<Message> {
-        self.load_songs_internal(0, move |(result, total_count)| {
+        self.load_songs_internal(0, false, move |(result, total_count)| {
             Message::SongsLoader(crate::app_message::SongsLoaderMessage::Loaded {
                 result,
                 total_count,
@@ -92,7 +93,7 @@ impl Nokkvi {
 
     /// Load a subsequent page of songs (triggered by scroll near edge of loaded data)
     pub(crate) fn handle_songs_load_page(&mut self, offset: usize) -> Task<Message> {
-        self.load_songs_internal(offset, |(result, total_count)| {
+        self.load_songs_internal(offset, false, |(result, total_count)| {
             Message::SongsLoader(crate::app_message::SongsLoaderMessage::PageLoaded(
                 result,
                 total_count,
@@ -105,51 +106,11 @@ impl Nokkvi {
     /// library while the viewport stays at 0 (the user pressed Shift+C and
     /// the playing track isn't in the loaded buffer yet).
     pub(crate) fn force_load_songs_page(&mut self, offset: usize) -> Task<Message> {
-        let page_size = self.library_page_size.to_usize();
-        let params = PaginatedFetch::from_common(
-            &self.songs_page.common,
-            views::SongsPage::sort_mode_to_api_string,
-            offset,
-            page_size,
-        );
-        debug!(
-            " ForceLoadSongs: offset={}, page_size={}, view={}, sort={}, search={:?}",
-            params.offset,
-            params.page_size,
-            params.view_str,
-            params.sort_order,
-            params.search_query,
-        );
-        self.library.songs.set_loading(true);
-        self.shell_task(
-            move |shell| async move {
-                let songs_vm = shell.songs().clone();
-                match songs_vm
-                    .load_raw_songs_page(
-                        Some(params.view_str),
-                        Some(params.sort_order),
-                        params.search_query.as_deref(),
-                        params.filter.as_ref(),
-                        params.offset,
-                        params.page_size,
-                    )
-                    .await
-                {
-                    Ok(songs) => {
-                        let ui_songs: Vec<SongUIViewData> =
-                            songs.into_iter().map(SongUIViewData::from).collect();
-                        (Ok(ui_songs), songs_vm.get_total_count() as usize)
-                    }
-                    Err(e) => (Err(format!("{e:#}")), 0),
-                }
-            },
-            |(result, total_count)| {
-                Message::SongsLoader(crate::app_message::SongsLoaderMessage::PageLoaded(
-                    result,
-                    total_count,
-                ))
-            },
-        )
+        self.load_songs_internal(offset, true, |(result, total_count)| {
+            Message::SongsLoader(crate::app_message::SongsLoaderMessage::PageLoaded(
+                result, total_count,
+            ))
+        })
     }
 
     /// Handle a subsequent page of songs being loaded (appends to buffer).
