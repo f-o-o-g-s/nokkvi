@@ -226,11 +226,11 @@ impl Nokkvi {
         &mut self,
         target: CollageTarget,
     ) -> Task<Message> {
-        // Access the cache inline (not via collage_cache_mut) to avoid a
+        // Access the snapshot inline (not via collage_cache_mut) to avoid a
         // full `&mut self` borrow that would conflict with `self.library`.
-        let mini_cache = match target {
-            CollageTarget::Genre => &self.artwork.genre.mini,
-            CollageTarget::Playlist => &self.artwork.playlist.mini,
+        let mini_snapshot = match target {
+            CollageTarget::Genre => &self.artwork.genre.mini_snapshot,
+            CollageTarget::Playlist => &self.artwork.playlist.mini_snapshot,
         };
 
         let items_to_load: Vec<(String, String)> = match target {
@@ -238,14 +238,14 @@ impl Nokkvi {
                 .library
                 .genres
                 .iter()
-                .filter(|g| !mini_cache.contains_key(&g.id) && !g.artwork_album_ids.is_empty())
+                .filter(|g| !mini_snapshot.contains_key(&g.id) && !g.artwork_album_ids.is_empty())
                 .map(|g| (g.id.clone(), g.artwork_album_ids[0].clone()))
                 .collect(),
             CollageTarget::Playlist => self
                 .library
                 .playlists
                 .iter()
-                .filter(|p| !mini_cache.contains_key(&p.id) && !p.artwork_album_ids.is_empty())
+                .filter(|p| !mini_snapshot.contains_key(&p.id) && !p.artwork_album_ids.is_empty())
                 .map(|p| (p.id.clone(), p.artwork_album_ids[0].clone()))
                 .collect(),
         };
@@ -329,7 +329,8 @@ impl Nokkvi {
         let cache = self.collage_cache_mut(target);
         cache.pending.remove(&item_id);
         if let Some(handle) = handle_opt {
-            cache.mini.insert(item_id, handle);
+            cache.mini.put(item_id, handle);
+            cache.refresh_snapshot();
         }
         Task::none()
     }
@@ -346,11 +347,17 @@ impl Nokkvi {
         let cache = self.collage_cache_mut(target);
         cache.pending.remove(&item_id);
 
+        let mut mutated = false;
         if let Some(handle) = handle_opt {
-            cache.mini.insert(item_id.clone(), handle);
+            cache.mini.put(item_id.clone(), handle);
+            mutated = true;
         }
         if !collage_handles.is_empty() {
-            cache.collage.insert(item_id.clone(), collage_handles);
+            cache.collage.put(item_id.clone(), collage_handles);
+            mutated = true;
+        }
+        if mutated {
+            cache.refresh_snapshot();
         }
 
         if !album_ids.is_empty() {
@@ -373,11 +380,17 @@ impl Nokkvi {
         } in results
         {
             let cache = self.collage_cache_mut(target);
+            let mut mutated = false;
             if let Some(handle) = handle_opt {
-                cache.mini.insert(item_id.clone(), handle);
+                cache.mini.put(item_id.clone(), handle);
+                mutated = true;
             }
             if !collage_handles.is_empty() {
-                cache.collage.insert(item_id.clone(), collage_handles);
+                cache.collage.put(item_id.clone(), collage_handles);
+                mutated = true;
+            }
+            if mutated {
+                cache.refresh_snapshot();
             }
             if !album_ids.is_empty() {
                 self.set_collage_item_album_ids(target, &item_id, album_ids);

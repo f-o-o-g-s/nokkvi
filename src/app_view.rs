@@ -452,7 +452,7 @@ impl Nokkvi {
                 crate::widgets::default_playlist_picker::default_playlist_picker_overlay(
                     picker_state,
                     self.window.height,
-                    &self.artwork.playlist.mini,
+                    &self.artwork.playlist.mini_snapshot,
                 );
             stack = stack.push(picker_overlay.map(Message::DefaultPlaylistPicker));
         }
@@ -909,8 +909,8 @@ impl Nokkvi {
                             column_dropdown_state(&self.open_menu, View::Genres);
                         let view_data = views::GenresViewData {
                             genres: &self.library.genres,
-                            genre_artwork: &self.artwork.genre.mini,
-                            genre_collage_artwork: &self.artwork.genre.collage,
+                            genre_artwork: &self.artwork.genre.mini_snapshot,
+                            genre_collage_artwork: &self.artwork.genre.collage_snapshot,
                             album_art: &self.artwork.album_art_snapshot,
                             window_width: self.window.width * 0.45,
                             window_height: browser_height,
@@ -1077,8 +1077,8 @@ impl Nokkvi {
                     column_dropdown_state(&self.open_menu, View::Genres);
                 let view_data = views::GenresViewData {
                     genres: &self.library.genres,
-                    genre_artwork: &self.artwork.genre.mini,
-                    genre_collage_artwork: &self.artwork.genre.collage,
+                    genre_artwork: &self.artwork.genre.mini_snapshot,
+                    genre_collage_artwork: &self.artwork.genre.collage_snapshot,
                     album_art: &self.artwork.album_art_snapshot,
                     window_width: self.window.width,
                     window_height: self.window.height,
@@ -1099,8 +1099,8 @@ impl Nokkvi {
                     column_dropdown_state(&self.open_menu, View::Playlists);
                 let view_data = views::PlaylistsViewData {
                     playlists: &self.library.playlists,
-                    playlist_artwork: &self.artwork.playlist.mini,
-                    playlist_collage_artwork: &self.artwork.playlist.collage,
+                    playlist_artwork: &self.artwork.playlist.mini_snapshot,
+                    playlist_collage_artwork: &self.artwork.playlist.collage_snapshot,
                     window_width: self.window.width,
                     window_height: self.window.height,
                     scale_factor: self.window.scale_factor,

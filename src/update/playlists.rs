@@ -226,8 +226,8 @@ impl Nokkvi {
                     let ctx = CollageArtworkContext {
                         slot_list: &self.playlists_page.common.slot_list,
                         pending_ids: &self.artwork.playlist.pending,
-                        memory_artwork: &self.artwork.playlist.mini,
-                        memory_collage: &self.artwork.playlist.collage,
+                        memory_artwork: &self.artwork.playlist.mini_snapshot,
+                        memory_collage: &self.artwork.playlist.collage_snapshot,
                     };
 
                     let (pending_inserts, cache_inserts, tasks) =
@@ -247,8 +247,11 @@ impl Nokkvi {
                         );
 
                     // Insert disk-cached items and mark all as pending
+                    // (cache_inserts is always empty since the disk cache was retired,
+                    // but the loop is kept for structural symmetry)
                     for (id, handle) in cache_inserts {
-                        self.artwork.playlist.mini.insert(id, handle);
+                        self.artwork.playlist.mini.put(id, handle);
+                        self.artwork.playlist.refresh_snapshot();
                     }
                     for id in pending_inserts {
                         self.artwork.playlist.pending.insert(id);
@@ -272,8 +275,8 @@ impl Nokkvi {
                     let ctx = CollageArtworkContext {
                         slot_list: &self.playlists_page.common.slot_list,
                         pending_ids: &self.artwork.playlist.pending,
-                        memory_artwork: &self.artwork.playlist.mini,
-                        memory_collage: &self.artwork.playlist.collage,
+                        memory_artwork: &self.artwork.playlist.mini_snapshot,
+                        memory_collage: &self.artwork.playlist.collage_snapshot,
                     };
 
                     let (pending_inserts, task) = collage_artwork::preload_artwork(

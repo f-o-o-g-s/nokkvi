@@ -15,16 +15,55 @@ const LARGE_ARTWORK_CACHE_CAPACITY: usize = 200;
 /// 80px slot list viewport so recently-visited slot regions stay warm but
 /// memory stays bounded as the user scrolls a large library.
 const MINI_ARTWORK_CACHE_CAPACITY: usize = 512;
+/// Capacity for the per-target collage mini LRU (genre or playlist).
+const COLLAGE_MINI_CACHE_CAPACITY: usize = 100;
+/// Capacity for the per-target collage tile LRU (genre or playlist).
+const COLLAGE_ARTWORK_CACHE_CAPACITY: usize = 100;
 
 /// Per-target collage artwork cache (genre or playlist)
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct CollageArtworkCache {
-    /// Mini artwork cache (item_id -> Handle, first album's cover)
-    pub mini: HashMap<String, image::Handle>,
-    /// Collage artwork cache (item_id -> Vec<Handle> for 3x3 collage, up to 9)
-    pub collage: HashMap<String, Vec<image::Handle>>,
+    /// Mini artwork LRU cache (item_id -> Handle, first album's cover)
+    pub mini: LruCache<String, image::Handle>,
+    /// Read-only snapshot of `mini` for view() borrowing (refreshed after LRU mutations).
+    pub mini_snapshot: HashMap<String, image::Handle>,
+    /// Collage artwork LRU cache (item_id -> Vec<Handle> for 3x3 collage, up to 9)
+    pub collage: LruCache<String, Vec<image::Handle>>,
+    /// Read-only snapshot of `collage` for view() borrowing (refreshed after LRU mutations).
+    pub collage_snapshot: HashMap<String, Vec<image::Handle>>,
     /// IDs with pending artwork loads (prevents duplicate in-flight requests)
     pub pending: HashSet<String>,
+}
+
+impl CollageArtworkCache {
+    pub fn new() -> Self {
+        Self {
+            mini: LruCache::new(
+                NonZeroUsize::new(COLLAGE_MINI_CACHE_CAPACITY).expect("capacity must be > 0"),
+            ),
+            mini_snapshot: HashMap::new(),
+            collage: LruCache::new(
+                NonZeroUsize::new(COLLAGE_ARTWORK_CACHE_CAPACITY).expect("capacity must be > 0"),
+            ),
+            collage_snapshot: HashMap::new(),
+            pending: HashSet::new(),
+        }
+    }
+
+    /// Refresh both read-only snapshots from the LRU caches.
+    /// Call after any mutation to `mini` or `collage` (put/get).
+    pub fn refresh_snapshot(&mut self) {
+        self.mini_snapshot = self
+            .mini
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        self.collage_snapshot = self
+            .collage
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+    }
 }
 
 /// Artwork caches and loading state
@@ -99,8 +138,8 @@ impl Default for ArtworkState {
                 NonZeroUsize::new(LARGE_ARTWORK_CACHE_CAPACITY).expect("capacity must be > 0"),
             ),
             album_dominant_colors_snapshot: HashMap::new(),
-            genre: CollageArtworkCache::default(),
-            playlist: CollageArtworkCache::default(),
+            genre: CollageArtworkCache::new(),
+            playlist: CollageArtworkCache::new(),
             loading_large_artwork: None,
         }
     }
