@@ -53,15 +53,21 @@ pub(crate) trait LoaderTarget {
 
     // ── Defaulted: viewport ───────────────────────────────────────────────
     /// Fallback when the anchor id is not found in the newly-loaded buffer.
-    /// Default: reset to 0. `AlbumsTarget` overrides to clamp to `new_len − 1`.
+    /// Default: reset to 0. `AlbumsTarget` overrides to clamp to `new_len − 1`
+    /// so that if the centered item was deleted during a background sync the
+    /// viewport stays near its last position instead of jumping to the top.
     fn anchor_miss_fallback(current_offset: usize, new_len: usize) -> usize {
         let _ = (current_offset, new_len);
         0
     }
 
-    /// Apply viewport state after initial load. Default implements the paged
-    /// behavior (Albums / Artists / Songs). `GenresTarget` and `PlaylistsTarget`
-    /// override to reset to 0 unconditionally.
+    /// Apply viewport state after initial load. Default implements anchor-based
+    /// preservation for paged views (Albums / Artists / Songs): on a background
+    /// reload the centered item's id is used to relocate the viewport, keeping
+    /// the user's position in large libraries. `GenresTarget` and
+    /// `PlaylistsTarget` override to reset to 0 unconditionally because these
+    /// are small, fully-refreshed lists where a background sync may reorder
+    /// entries — preserving an arbitrary offset would be misleading.
     fn apply_viewport_on_load(app: &mut Nokkvi, background: bool, anchor_id: Option<&str>) {
         let new_len = Self::library(app).len();
         if !background {
@@ -86,7 +92,10 @@ pub(crate) trait LoaderTarget {
 
     // ── Defaulted: error-path cancel ──────────────────────────────────────
     /// Whether to call `cancel_pending_expand()` in the Err branch.
-    /// Default: `true`. `PlaylistsTarget` overrides to `false` (no pending expand).
+    /// Default: `true` (Albums / Artists / Songs / Genres). `PlaylistsTarget`
+    /// overrides to `false` because playlists have no pending-expand chain
+    /// (`try_resolve_pending_expand` always returns `None`) so there is nothing
+    /// to cancel and the call would be a no-op.
     const CANCEL_PENDING_ON_ERR: bool = true;
 
     // ── Defaulted: post-load hook ─────────────────────────────────────────
@@ -126,6 +135,7 @@ impl LoaderTarget for AlbumsTarget {
         "Albums"
     }
 
+    // Stay near current position when the anchor album was deleted.
     fn anchor_miss_fallback(current_offset: usize, new_len: usize) -> usize {
         current_offset.min(new_len.saturating_sub(1))
     }
@@ -319,6 +329,7 @@ impl LoaderTarget for GenresTarget {
         "Genres"
     }
 
+    // Genres are a small, fully-refreshed list — always start at 0.
     fn apply_viewport_on_load(app: &mut Nokkvi, _background: bool, _anchor_id: Option<&str>) {
         Self::slot_list_mut(app).viewport_offset = 0;
     }
@@ -381,6 +392,7 @@ impl LoaderTarget for PlaylistsTarget {
 
     const CANCEL_PENDING_ON_ERR: bool = false;
 
+    // Playlists are a small, fully-refreshed list — always start at 0.
     fn apply_viewport_on_load(app: &mut Nokkvi, _background: bool, _anchor_id: Option<&str>) {
         Self::slot_list_mut(app).viewport_offset = 0;
     }
