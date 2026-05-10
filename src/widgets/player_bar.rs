@@ -260,6 +260,46 @@ fn player_control_button(
     .into()
 }
 
+/// Build a text-label 3D toggle button with tooltip — shared pattern for the
+/// EQ and SFX inline player-bar buttons. Unlike `mode_toggle_button`, these
+/// use `three_d_button` (text label) instead of `three_d_icon_button` (SVG).
+fn three_d_text_toggle(
+    label: &'static str,
+    on_press: PlayerBarMessage,
+    active: bool,
+    bg: iced::Color,
+    tooltip_text: &str,
+) -> Element<'static, PlayerBarMessage> {
+    Element::from(HoverOverlay::new(
+        tooltip(
+            three_d_button(
+                container(text(label).size(10.0).font(Font {
+                    weight: Weight::Bold,
+                    ..theme::ui_font()
+                }))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center_x(Length::Fill)
+                .center_y(Length::Fill),
+            )
+            .on_press(on_press)
+            .width(Length::Fixed(BUTTON_SIZE))
+            .height(BUTTON_SIZE)
+            .background(bg)
+            .active(active),
+            container(
+                text(tooltip_text.to_owned())
+                    .size(11.0)
+                    .font(theme::ui_font()),
+            )
+            .padding(4),
+            tooltip::Position::Top,
+        )
+        .gap(4)
+        .style(theme::container_tooltip),
+    ))
+}
+
 /// Build a mode toggle button with tooltip — shared pattern for repeat, shuffle,
 /// consume, and visualizer toggles. The inner `player_control_button` already
 /// wraps in `HoverOverlay`, so this function only adds the tooltip layer.
@@ -710,65 +750,29 @@ pub(crate) fn player_bar<'a>(
     }
     if !eq_in_kebab {
         // EQ inline button — text-styled 3D button (not icon-based).
-        mode_toggles_row = mode_toggles_row.push(Element::from(HoverOverlay::new(
-            tooltip(
-                three_d_button(
-                    container(text("EQ").size(10.0).font(Font {
-                        weight: Weight::Bold,
-                        ..theme::ui_font()
-                    }))
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .center_x(Length::Fill)
-                    .center_y(Length::Fill),
-                )
-                .on_press(PlayerBarMessage::ToggleEq)
-                .width(Length::Fixed(BUTTON_SIZE))
-                .height(BUTTON_SIZE)
-                .background(if eq_enabled {
-                    theme::accent_bright()
-                } else {
-                    theme::bg1()
-                })
-                .active(eq_enabled),
-                container(text(eq_tooltip).size(11.0).font(theme::ui_font())).padding(4),
-                tooltip::Position::Top,
-            )
-            .gap(4)
-            .style(theme::container_tooltip),
-        )));
+        let eq_bg = if eq_enabled {
+            theme::accent_bright()
+        } else {
+            theme::bg1()
+        };
+        mode_toggles_row = mode_toggles_row.push(three_d_text_toggle(
+            "EQ",
+            PlayerBarMessage::ToggleEq,
+            eq_enabled,
+            eq_bg,
+            eq_tooltip,
+        ));
     }
     if !sfx_in_kebab && sound_effects_enabled {
         // SFX inline button — text-styled 3D button. Only renders when SFX
         // is on AND not yet folded into the kebab.
-        mode_toggles_row = mode_toggles_row.push(Element::from(HoverOverlay::new(
-            tooltip(
-                three_d_button(
-                    container(text("SFX").size(10.0).font(Font {
-                        weight: Weight::Bold,
-                        ..theme::ui_font()
-                    }))
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .center_x(Length::Fill)
-                    .center_y(Length::Fill),
-                )
-                .on_press(PlayerBarMessage::ToggleSoundEffects)
-                .width(Length::Fixed(BUTTON_SIZE))
-                .height(BUTTON_SIZE)
-                .background(theme::accent_bright())
-                .active(true),
-                container(
-                    text("Sound Effects: UI sounds enabled")
-                        .size(11.0)
-                        .font(theme::ui_font()),
-                )
-                .padding(4),
-                tooltip::Position::Top,
-            )
-            .gap(4)
-            .style(theme::container_tooltip),
-        )));
+        mode_toggles_row = mode_toggles_row.push(three_d_text_toggle(
+            "SFX",
+            PlayerBarMessage::ToggleSoundEffects,
+            true,
+            theme::accent_bright(),
+            "Sound Effects: UI sounds enabled",
+        ));
     }
     if !crossfade_in_kebab {
         mode_toggles_row = mode_toggles_row.push(mode_toggle_button(
