@@ -4,7 +4,7 @@ Tracks completion status of the 2026-05-07 DRY/scalability/monolith audit at `~/
 
 **Read this before starting any audit-derived task.** Pick up where the last commit left off, not where the source report said things stood.
 
-Last verified: **2026-05-09** (full §7 + §5 + spot-checks across §3/§4/§6). §7 #3 + §3 #3 closed 2026-05-09.
+Last verified: **2026-05-10** (full §7 + §5 + spot-checks across §3/§4/§6). §7 #3 + §3 #3 closed 2026-05-09. §3 #7 + §4 #6 + §4 #7 closed 2026-05-09 (view-layer helpers fanout). §5 B5 + §3 #17 + §3 #19 closed 2026-05-10 (verification pass).
 
 ---
 
@@ -46,7 +46,7 @@ When you complete an item, append the commit ref(s) and flip the status. Keep th
 | B2 | `src/views/login.rs:226,253,282` + `widgets/info_modal.rs:559,565` — `radius: 4.0.into()` | ✅ done | Lane B `a8a7d92` (2026-05-08): all 5 sites switched to `theme::ui_border_radius()`. Login card radius (`login.rs:343`, `12.0`) intentionally unchanged. |
 | B3 | `src/views/queue/view.rs` — queue header morphs widget-tree depth across edit/playlist-context/read-only modes | ✅ done | Lane C `8fb9308` (2026-05-08): every branch now produces the same `column![extra, sep, header]` shape; read-only branch uses zero-sized `Space::new()` placeholders (Shrink × `Length::Fixed(0.0)`) so visual output is unchanged but the search `text_input::Id` parent stays positionally stable across edit-mode toggles. |
 | B4 | `src/update/tests/general.rs::toggle_light_mode_persists_to_settings_key` — mutates env vars + reads disk | ✅ done | `7185f34` (2026-05-09): env-var mutations and disk-read assertions removed; test now asserts `crate::theme::is_light_mode()` in-memory atomic. |
-| B5 | `src/update/tests/settings.rs::settings_general_*_artwork_overlay_flips_theme_cache` family — asserts on process-global atomics | ❓ unverified | Grep returned 0 matches for the named tests. They may have been renamed, removed, or live elsewhere. Locate before declaring. |
+| **B5** | **`src/update/tests/settings.rs::settings_general_*_artwork_overlay_flips_theme_cache` family — asserts on process-global atomics** | **✅ done** | Tests did not exist under that name. Written as `player_settings_loaded_{albums,artists,songs,playlists}_artwork_overlay_*` in `src/update/tests/settings.rs` — 5 tests via `handle_player_settings_loaded` with save/restore of process-global atomics. The audit's hypothetical names were never the test names; the correct handler is `handle_player_settings_loaded` (not `dispatch_settings_side_effect`). Commit: see below. |
 | B6 | `src/widgets/hamburger_menu.rs:401-407` — `match item_index { 0 => …, 4 => Quit }` paired with `MENU_ITEM_COUNT = 5` const | ✅ done | Lane D `598bd19` (2026-05-08): `const MENU_ITEMS: &[MenuAction]` is the single source of truth for click-dispatch order; `MENU_ITEM_COUNT = MENU_ITEMS.len()`; indexed match replaced with `MENU_ITEMS.get(item_index).copied()` (`MenuAction` gained `Copy`). `SEPARATOR_INDEX < MENU_ITEM_COUNT` and `MENU_ITEMS.last() == Quit` pinned by const-asserts; labels array length pinned by `debug_assert_eq!`. |
 | B7 | `src/update/settings.rs:373,391` — `visualizer.waves` ↔ `visualizer.monstercat=0.0` mutual-exclusion does not call `reload_visualizer_config()` after the secondary write | ✅ done | `b1205da` (2026-05-09): added `self.reload_visualizer_config()` after `patch_cached_entry` in both mutual-exclusivity arms (`"visualizer.monstercat"` and `"visualizer.waves"`), guarded by the existing `if matches!(...)` so the reload only fires on actual secondary writes. |
 | B8 | `src/update/tests/navigation.rs:1043` — test `albums_loaded_re_pins_selected_offset_for_artist` body operates on Artists | ✅ done | Lane E `a74d94a` (2026-05-08): renamed to `artists_albums_loaded_re_pins_selected_offset_in_artists_view` to match the test body's Artists-view focus. |
@@ -89,7 +89,7 @@ When you complete an item, append the commit ref(s) and flip the status. Keep th
 | **4** | **AppService entity × verb matrix** | **✅ done** | Same as §7 #7. |
 | 5 | Settings 3-parallel-list drift | ✅ done | Same as §7 #10. |
 | **6** | **Hotkey star/rating boilerplate** | **✅ done** | Same as §7 #4 — `be75eb6`. |
-| 7 | Per-row library context-menu wrapper | ❌ open | No `wrap_library_row` helper in `src/widgets/`. |
+| **7** | **Per-row library context-menu wrapper** | **✅ done** | Five-lane fanout (2026-05-09) from `.agent/plans/view-layer-helpers.md`: `cf1d905` (Lane A — `wrap_library_row` + `wrap_similar_row` in `context_menu.rs`; `view_columns_dropdown` + `similar_columns_dropdown` in `checkbox_dropdown.rs`; albums/view.rs reference), `d0aba46` (genres), `fe4aad2` (artists), `f2d7fc5` (songs + similar; `#[allow(dead_code)]` attrs removed), `359f63c`/`15d14ac` (playlists + queue — dropdown only). Bug classes closed: wrong `view:` literal in `OpenMenu::CheckboxDropdown`, dropped `cm_id.clone()` in context-menu closures, forgotten `open_state_for` call. |
 | **8** | **`PlayNextBatch` handler dedup** | **✅ done** | `play_next_batch_task` helper + all call sites: `36e2160` (foundation + albums), `814f751` (artists), `bed303e` (songs), `5cb063c` (genres + playlists). queue.rs has no `PlayNextBatch` variant; similar.rs has no `PlayNextBatch` variant. shuffle-warn baked into helper. |
 | 9 | Paginated library loader Pattern A | ❌ open | No `paginated_load_task` helper. |
 | 10 | Bulk fixture + scenario-seeder helpers in tests | ❌ open | Not verified. |
@@ -99,9 +99,9 @@ When you complete an item, append the commit ref(s) and flip the status. Keep th
 | 14 | 3D-button pressed-state color ramp | ❌ open | No `BevelStateColors::compute()` in `src/widgets/`. |
 | **15** | **Sub-fetch Unauthorized routing** | **✅ done** | Same as B10 — `d612dcc` (2026-05-09). |
 | 16 | `HasCommonAction` opt-out for Radios | ❌ open | Not verified. Re-check before declaring. |
-| 17 | Stream URL building 5× | 🟡 partial | `fn build_stream_url` exists in 2 spots in `data/src/`; whether the 5 historical sites all route through it is not verified. |
+| **17** | **Stream URL building 5×** | **✅ done** | Two helpers existed: `data/src/utils/artwork_url::build_stream_url` (public) and `data/src/services/playback::QueueNavigator::build_stream_url` (private assoc fn). Three more inline `format!` sites existed in `data/src/backend/playback_controller.rs` (play(), play() cold-start, gapless-prep). All 3 inline sites + the private helper (+ its 3 call sites) migrated to `crate::utils::artwork_url::build_stream_url`. `chrono` import removed from `playback_controller.rs`. One `build_stream_url` canonical definition now. |
 | 18 | AppService `_api()` factories | ✅ done | `35c5595` — `api_factory!` macro_rules! replaces all 5; `SongsApiService` gains `new_with_client` alias for uniformity. |
-| 19 | Direct callers of `update_config_value` / `update_theme_value` | ❌ open | Not verified. |
+| **19** | **Direct callers of `update_config_value` / `update_theme_value`** | **✅ done** | All call sites verified correct: `update_config_value` callers use config.toml keys (`settings.light_mode`, `visualizer.waves`, `visualizer.monstercat`); `update_theme_value` callers receive theme-file keys (`dark.*`/`light.*` via the `RestoreColorGroup` entries which come only from `HexColor` items built in `items_theme.rs` with `{palette_prefix}.field` keys). Routing in `mod.rs` is guarded by the `key.starts_with("general.")` predicate that redirects `general.*` to `WriteGeneralSetting`; non-general keys use `item.is_theme_key` to pick `ConfigKey::theme_scalar` vs `app_scalar`. The `debug_assert_theme_path` guard in `config_writer.rs:87` catches any misroutes at dev time. No misroutes found. |
 | 20 | EQ + SFX text-toggle in player bar | ❌ open | Not verified. |
 
 ---
@@ -117,8 +117,8 @@ When you complete an item, append the commit ref(s) and flip the status. Keep th
 | 3 | Settings 3 parallel lists | ✅ done | Same as §7 #10. |
 | **4** | **`HotkeyAction` parallel matches (`hotkey_action_to_message`, `hotkey_action_to_key`)** | **✅ done** | `c304391` (2026-05-09): `settings_key` field added to `define_hotkey_actions!` macro; `fn settings_key(&self) -> &'static str` emitted on `HotkeyAction`; 44-arm `hotkey_action_to_key` in `items_hotkeys.rs` deleted; 2 call sites replaced with `action.settings_key()`. `hotkey_action_to_message` in `global.rs` left unchanged (UI-crate `Message` type cannot enter the data crate). |
 | 5 | Visualizer parallel `Vec<f64>` arrays | ❌ open | Not verified. |
-| 6 | `SortMode` × per-view `*_OPTIONS` arrays | ❌ open | No central `pub const TABLE` in `data/src/types/sort_mode.rs`. |
-| 7 | `OpenMenu::CheckboxDropdown { view: View::X, ... }` per-view construction | ❌ open | No `SlotListPageState::checkbox_dropdown_open_message` helper. |
+| **6** | **`SortMode` × per-view `*_OPTIONS` arrays** | **✅ done** | Stale marker — `sort_modes_for_view(view: View) -> &'static [SortMode]` in `src/views/sort_api.rs:90` is exhaustive over every `View` variant and all views delegate through `ViewPage::sort_mode_options()`. The progress tracker incorrectly expected a TABLE in `data/src/types/sort_mode.rs`; the function lives in `sort_api.rs` instead. No code change needed; tracker corrected 2026-05-09. |
+| **7** | **`OpenMenu::CheckboxDropdown { view: View::X, ... }` per-view construction** | **✅ done** | Same fanout as §3 #7 — `view_columns_dropdown` + `similar_columns_dropdown` helpers in `src/widgets/checkbox_dropdown.rs` (`cf1d905`); all 7 view sites migrated across lanes A–E. |
 | **8** | **`update_config_value` vs `update_theme_value` runtime classifier** | **✅ done** | Same as §7 #11 — `04342f9` (2026-05-09). |
 | 9 | Per-view message enums + bubble-only intercepts | ❌ open | Not verified. |
 | 10 | Hardcoded `Some(80)` instead of `Some(THUMBNAIL_SIZE)` | ✅ done | `f9dedd9` (2026-05-09): replaced 3 production sites (`data/src/backend/albums.rs`, `src/update/window.rs`, `src/update/components.rs`); `src/update/songs.rs` was already using the constant. |
@@ -131,9 +131,10 @@ When you complete an item, append the commit ref(s) and flip the status. Keep th
 
 ## Quick-pick: highest-leverage open items
 
-If picking the next item to work, these are the highest agent-friendliness payoff per the audit's ranking and remain open:
+§7 is fully ✅ done except #9 (🟡 partial). All twelve §5 bugs are closed. Remaining open work is in §3/§4:
 
-1. **§7 #5 — `enum ItemKind`** (M effort, kills `_ => Song` silent-default class outright). Now more accessible: `SongSource` (landed via §7 #7) sets the precedent for typed entity-kind enums in `data/src/types/`, so `ItemKind` follows the same shape.
-2. **§7 #3 — `define_view_columns!` persist emission** (M effort, the most-frequent feature edit; persist-arm omission fails silently on relaunch).
-
-All four L-effort items from §7 (#6, #7, #10, #12) are now ✅ done — landed across 2026-05-08 / 2026-05-09 fanouts.
+1. **§4 #9 — per-view message enums + bubble-only intercepts** (unverified; could be large or already done — re-check before planning).
+2. **§3 #9 — paginated_load_task helper** (M effort; the most-repeated fetch pattern; pairs well with §7 #9's ViewPage dispatch).
+3. **§3 #14 — 3D-button pressed-state color ramp (`BevelStateColors::compute()`)** (S effort; 4 widget files re-derive same computation; pure widget file change, no view impact).
+4. **§4 #5 — visualizer parallel `Vec<f64>` arrays** (unverified — confirm drift magnitude before planning).
+5. **§4 #12 — visualizer config dotted-key literals** (37 distinct string literals; typed enum would catch misspellings at compile time).
