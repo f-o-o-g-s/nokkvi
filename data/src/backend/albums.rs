@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use tokio::sync::OnceCell;
+use tokio::sync::{OnceCell, Semaphore};
 use tracing::debug;
 
 use crate::{
@@ -203,6 +203,15 @@ impl crate::utils::search::Searchable for AlbumUIViewData {
     }
 }
 
+/// Cap on simultaneously in-flight `getCoverArt` requests issued by this
+/// process. Sized well below Navidrome's default throttle (`max(2, NumCPU/2)`
+/// in-flight + 100 backlog) so a worst-case settle from a 25-slot viewport
+/// (~250 fetches in a single tick) drains as a queue on our side instead of
+/// flooding Navidrome's backlog and tripping HTTP 429s. Leaves ~85+ backlog
+/// slots free for other clients/instances. The retry layer above this is
+/// kept as belt-and-braces for genuine transient failures.
+const ARTWORK_CONCURRENCY_LIMIT: usize = 16;
+
 #[derive(Clone)]
 pub struct AlbumsService {
     // API service (lazily initialized on first use after login)
@@ -216,6 +225,10 @@ pub struct AlbumsService {
     /// scoped Handle reuse is provided by the UI's `album_art` / `large_artwork`
     /// maps in `ArtworkState`.
     artwork_client: Arc<reqwest::Client>,
+
+    /// Per-process gate that bounds concurrent in-flight artwork fetches —
+    /// see [`ARTWORK_CONCURRENCY_LIMIT`].
+    artwork_semaphore: Arc<Semaphore>,
 
     // Dependencies
     auth_gateway: Arc<OnceCell<AuthGateway>>,
@@ -233,12 +246,18 @@ impl AlbumsService {
             albums_service: Arc::new(OnceCell::new()),
             total_count: ReactiveInt::new(0),
             artwork_client: Arc::new(reqwest::Client::new()),
+            artwork_semaphore: Arc::new(Semaphore::new(ARTWORK_CONCURRENCY_LIMIT)),
             auth_gateway: Arc::new(OnceCell::new()),
         }
     }
 
     /// Fetch album artwork from Navidrome, given a fully-built URL. No client
     /// cache — every call goes to the server. Returns the raw image bytes.
+    ///
+    /// Acquires a permit from `artwork_semaphore` for the lifetime of the
+    /// request so a viewport-wide settle (~25 slots × up to 10 fetches each)
+    /// queues on our side rather than flooding Navidrome's `getCoverArt`
+    /// backlog cap.
     ///
     /// Treats a zero-byte success body as an error. Navidrome's
     /// `getCoverArt` throttle middleware can return `200 OK` with an empty
@@ -250,6 +269,12 @@ impl AlbumsService {
         if url.is_empty() {
             return Err(anyhow::anyhow!("empty artwork url"));
         }
+
+        let _permit = self
+            .artwork_semaphore
+            .acquire()
+            .await
+            .map_err(|e| anyhow::anyhow!("artwork semaphore closed: {e}"))?;
 
         let response = self
             .artwork_client
