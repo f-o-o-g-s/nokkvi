@@ -722,25 +722,17 @@ Plan doc: /home/foogs/nokkvi/.agent/plans/loader-target-trait.md (sections 2.4 a
 
 Working directory: ~/nokkvi-loader-b (this worktree). Branch: refactor/loader-target-paged. The worktree is already created — do NOT run `git worktree add`.
 
-**PREREQUISITE**: Lane A (branch `refactor/loader-target-foundation`) must be merged into `main` before you start the migrations. Check:
+**PREREQUISITE**: Poll until Lane A has merged `loader_target.rs` into `main`, then rebase. Run this block first — do not proceed past it until it exits:
 
 ```bash
-git fetch origin
-git log --oneline origin/main | head -8
-grep -n 'mod loader_target' ~/nokkvi/src/update/mod.rs
-```
-
-If `mod loader_target` is not in `mod.rs`, Lane A has not merged yet. Rebase and wait:
-```bash
+echo "Polling for Lane A (mod loader_target) on origin/main..."
+until git fetch origin --quiet && git show origin/main:src/update/mod.rs 2>/dev/null | grep -q 'mod loader_target'; do
+    echo "  not yet — sleeping 45s"
+    sleep 45
+done
+echo "Lane A detected on main. Rebasing."
 git rebase origin/main
-```
-Check again. Proceed only when `mod loader_target` appears in `mod.rs`.
-
-## After confirming Lane A has merged
-
-```bash
-git rebase origin/main   # pick up loader_target.rs
-cargo build              # must pass before any migration
+cargo build   # must pass before any migration step
 ```
 
 ## Step 1: Consolidate force_load_songs_page
@@ -892,18 +884,17 @@ Plan doc: /home/foogs/nokkvi/.agent/plans/loader-target-trait.md (sections 2 and
 
 Working directory: ~/nokkvi-loader-c (this worktree). Branch: refactor/loader-target-single-shot. The worktree is already created — do NOT run `git worktree add`.
 
-**PREREQUISITE**: Lane A (branch `refactor/loader-target-foundation`) must be merged into `main` before the migrations. Check:
+**PREREQUISITE**: Poll until Lane A has merged `loader_target.rs` into `main`, then rebase. Run this block first — do not proceed past it until it exits:
 
 ```bash
-git fetch origin
-grep -n 'mod loader_target' ~/nokkvi/src/update/mod.rs
-```
-
-If absent, rebase: `git rebase origin/main`. Proceed only when present.
-
-```bash
+echo "Polling for Lane A (mod loader_target) on origin/main..."
+until git fetch origin --quiet && git show origin/main:src/update/mod.rs 2>/dev/null | grep -q 'mod loader_target'; do
+    echo "  not yet — sleeping 45s"
+    sleep 45
+done
+echo "Lane A detected on main. Rebasing."
 git rebase origin/main
-cargo build   # must pass before migrating
+cargo build   # must pass before any migration step
 ```
 
 ## Step 1: Migrate genres
