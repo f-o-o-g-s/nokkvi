@@ -869,6 +869,8 @@ impl Nokkvi {
         // while waiting for the async API response. The tick handler reconciles
         // with server groundtruth every cycle.
         self.modes.consume = !self.modes.consume;
+        let label = if self.modes.consume { "Consume: On" } else { "Consume: Off" };
+        self.toast_info(label);
         self.shell_task(
             |shell| async move { shell.toggle_consume().await.unwrap_or(false) },
             |c| Message::Playback(PlaybackMessage::ConsumeToggled(c)),
@@ -884,6 +886,8 @@ impl Nokkvi {
 
     pub(crate) fn handle_toggle_sound_effects(&mut self) -> Task<Message> {
         self.sfx.enabled = !self.sfx.enabled;
+        let label = if self.sfx.enabled { "UI SFX: On" } else { "UI SFX: Off" };
+        self.toast_info(label);
         self.sfx_engine.set_enabled(self.sfx.enabled);
 
         // Persist to storage
@@ -921,6 +925,8 @@ impl Nokkvi {
 
     pub(crate) fn handle_toggle_crossfade(&mut self) -> Task<Message> {
         self.engine.crossfade_enabled = !self.engine.crossfade_enabled;
+        let label = if self.engine.crossfade_enabled { "Crossfade: On" } else { "Crossfade: Off" };
+        self.toast_info(label);
 
         // Persist to storage and sync to audio engine
         let enabled = self.engine.crossfade_enabled;
