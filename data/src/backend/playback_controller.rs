@@ -255,7 +255,7 @@ impl PlaybackController {
             if let Some(idx) = current_index
                 && queue_manager.get_queue().current_index.is_none()
             {
-                queue_manager.set_current_index(Some(idx));
+                queue_manager.reposition_to_index(Some(idx));
                 let _ = queue_manager.save_order();
             }
             drop(queue_manager);
@@ -661,7 +661,7 @@ impl PlaybackController {
 
         // 1. Set queue current index directly (no index_of scan needed)
         let mut qm = queue_manager.lock().await;
-        qm.set_current_index(Some(queue_index));
+        qm.reposition_to_index(Some(queue_index));
         qm.save_order()?;
         drop(qm);
 

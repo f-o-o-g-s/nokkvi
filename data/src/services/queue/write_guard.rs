@@ -10,7 +10,7 @@
 //! - [`commit_save_order`](QueueWriteGuard::commit_save_order) — order-only
 //!   save (pool untouched). Use after move/sort/shuffle/mode-toggle.
 //! - [`commit_no_save`](QueueWriteGuard::commit_no_save) — in-memory only.
-//!   Use after `set_current_index`.
+//!   Use after `reposition_to_index`.
 //!
 //! Drop is the safety net: on `?` propagation or panic between `write()`
 //! and `commit_*`, Drop still runs `clear_queued()`, so the navigator

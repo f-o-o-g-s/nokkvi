@@ -407,10 +407,12 @@ impl QueueManager {
         &self.queue
     }
 
-    /// Set the current playback position. Always syncs `current_order` and
-    /// clears `queued` so the order array stays consistent.
-    /// Use this instead of setting `queue.current_index` directly.
-    pub fn set_current_index(&mut self, index: Option<usize>) {
+    /// Directly reposition the playhead to `index` without triggering a
+    /// gapless transition. Use for play-from-here, stop, and shuffle resets.
+    ///
+    /// For gapless transitions, use `peek_next_song()` →
+    /// `transition_to_queued_internal()` instead.
+    pub fn reposition_to_index(&mut self, index: Option<usize>) {
         let mut tx = self.write();
         tx.queue.current_index = index;
         tx.sync_current_order_to_index();
@@ -503,7 +505,7 @@ impl QueueManager {
     pub fn insert_song_and_make_current(&mut self, index: usize, song: Song) -> Result<()> {
         let clamped = index.min(self.queue.song_ids.len());
         self.insert_songs_at(clamped, vec![song])?;
-        self.set_current_index(Some(clamped));
+        self.reposition_to_index(Some(clamped));
         self.save_order()
     }
 

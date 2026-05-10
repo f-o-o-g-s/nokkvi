@@ -306,7 +306,7 @@ impl QueueNavigator {
                 self.record_and_consume(&mut queue_manager, pid, idx);
             }
             *self.current_song_id.lock().await = None;
-            queue_manager.set_current_index(None);
+            queue_manager.reposition_to_index(None);
             queue_manager.save_all().ok();
             drop(queue_manager);
             debug!(" No next song available (queue empty or at end)");
