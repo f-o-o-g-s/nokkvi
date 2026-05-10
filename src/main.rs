@@ -913,6 +913,19 @@ impl Nokkvi {
 // ============================================================================
 
 pub fn main() -> iced::Result {
+    // Cap glibc malloc arenas to 2 before any thread spawns. The default cap
+    // (8 × num_cores) hoards ~330 MiB across mostly-empty per-thread arenas
+    // over a long session — measured PSS drops from ~1042 MiB to ~703 MiB
+    // with this single knob, with no observable contention cost on this
+    // workload (audio uses preallocated ring buffers; UI rebuilds are tick-rate).
+    #[cfg(target_env = "gnu")]
+    {
+        // Safety: mallopt is MT-unsafe; called as the first statement in main()
+        // before any thread spawns, which makes the call sequenced-before any
+        // potential concurrent allocator activity.
+        unsafe { libc::mallopt(libc::M_ARENA_MAX, 2) };
+    }
+
     // Handle --version / --help before tracing init so these short-lived
     // invocations don't truncate ~/.local/state/nokkvi/nokkvi.log.
     for arg in std::env::args().skip(1) {
