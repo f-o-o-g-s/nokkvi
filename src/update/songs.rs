@@ -10,6 +10,7 @@ use super::components::{PaginatedFetch, prefetch_song_artwork_tasks};
 use crate::{
     Nokkvi, View,
     app_message::{ArtworkMessage, Message},
+    update::SongsTarget,
     views::{self, HasCommonAction, SongsAction, SongsMessage},
 };
 
@@ -108,48 +109,18 @@ impl Nokkvi {
     pub(crate) fn force_load_songs_page(&mut self, offset: usize) -> Task<Message> {
         self.load_songs_internal(offset, true, |(result, total_count)| {
             Message::SongsLoader(crate::app_message::SongsLoaderMessage::PageLoaded(
-                result, total_count,
+                result,
+                total_count,
             ))
         })
     }
 
-    /// Handle a subsequent page of songs being loaded (appends to buffer).
-    /// Mirror of `handle_albums_page_loaded` — drives
-    /// `try_resolve_pending_expand_song` after the append so the Shift+C
-    /// center-only find chain can advance once the new page lands.
     pub(crate) fn handle_songs_page_loaded(
         &mut self,
         result: Result<Vec<SongUIViewData>, String>,
         total_count: usize,
     ) -> Task<Message> {
-        match result {
-            Ok(new_items) => {
-                let count = new_items.len();
-                let loaded_before = self.library.songs.loaded_count();
-                self.library.songs.append_page(new_items, total_count);
-                debug!(
-                    "📄 Songs page loaded: {} new items ({}→{} of {})",
-                    count,
-                    loaded_before,
-                    self.library.songs.loaded_count(),
-                    total_count,
-                );
-                if let Some(task) = self.try_resolve_pending_expand_song() {
-                    return task;
-                }
-            }
-            Err(e) => {
-                if e.contains("Unauthorized") {
-                    self.library.songs.set_loading(false);
-                    return self.handle_session_expired();
-                }
-                error!("Error loading Songs page: {}", e);
-                self.library.songs.set_loading(false);
-                self.cancel_pending_expand();
-                self.toast_error(format!("Failed to load Songs: {e}"));
-            }
-        }
-        Task::none()
+        self.handle_page_loaded_with::<SongsTarget>(result, total_count)
     }
 
     pub(crate) fn handle_songs_loaded(
@@ -159,109 +130,7 @@ impl Nokkvi {
         background: bool,
         anchor_id: Option<String>,
     ) -> Task<Message> {
-        self.library.counts.songs = total_count;
-        match result {
-            Ok(new_songs) => {
-                debug!(
-                    "✅ Loaded {} songs (total in library: {})",
-                    new_songs.len(),
-                    total_count
-                );
-                self.library.songs.set_first_page(new_songs, total_count);
-
-                if !background {
-                    self.songs_page.common.slot_list.viewport_offset = 0;
-                    self.songs_page.common.slot_list.selected_indices.clear();
-                } else if let Some(ref id) = anchor_id {
-                    let songs = &self.library.songs;
-                    if let Some(new_idx) = songs.iter().position(|a| a.id == *id) {
-                        self.songs_page.common.slot_list.viewport_offset = new_idx;
-                    } else {
-                        // Anchor not found in this page (expected with Random sort — the new
-                        // first page is a different random sample). Reset rather than leaving
-                        // viewport_offset pointing at whoever now occupies the old index.
-                        self.songs_page.common.slot_list.viewport_offset = 0;
-                    }
-                    // Clear stale selected_offset: after re-ordering, the old absolute index
-                    // maps to a different song and would highlight the wrong slot.
-                    self.songs_page.common.slot_list.selected_offset = None;
-                }
-                let mut tasks: Vec<Task<Message>> = Vec::new();
-
-                // Load artwork for visible songs using canonical prefetch
-                if let Some(shell) = &self.app_service {
-                    let albums_vm = shell.albums().clone();
-                    let total = self.library.songs.len();
-                    if total > 0 {
-                        // Track already-queued album IDs to avoid duplicates
-                        let mut loaded_album_ids = std::collections::HashSet::new();
-
-                        for idx in self.songs_page.common.slot_list.prefetch_indices(total) {
-                            if let Some(song) = self.library.songs.get(idx)
-                                && let Some(album_id) = &song.album_id
-                            {
-                                // Skip if already cached or already queued for loading
-                                if self.artwork.album_art.contains(album_id)
-                                    || loaded_album_ids.contains(album_id)
-                                {
-                                    continue;
-                                }
-                                loaded_album_ids.insert(album_id.clone());
-
-                                let art_id = album_id.clone();
-                                let vm = albums_vm.clone();
-                                tasks.push(Task::perform(
-                                    async move {
-                                        let bytes = vm
-                                            .fetch_album_artwork(&art_id, Some(80), None)
-                                            .await
-                                            .ok();
-                                        (art_id, bytes.map(image::Handle::from_bytes))
-                                    },
-                                    |(id, handle)| {
-                                        Message::Artwork(ArtworkMessage::SongMiniLoaded(id, handle))
-                                    },
-                                ));
-                            }
-                        }
-                    }
-                }
-
-                // Load large artwork for centered song
-                if let Some(center_idx) = self
-                    .songs_page
-                    .common
-                    .slot_list
-                    .get_center_item_index(self.library.songs.len())
-                    && let Some(song) = self.library.songs.get(center_idx)
-                    && let Some(album_id) = &song.album_id
-                {
-                    tasks.push(Task::done(Message::Artwork(ArtworkMessage::LoadLarge(
-                        album_id.clone(),
-                    ))));
-                }
-
-                // Drive the song find-and-center chain forward (Shift+C
-                // landed here with a pending target).
-                if let Some(task) = self.try_resolve_pending_expand_song() {
-                    tasks.push(task);
-                }
-
-                if !tasks.is_empty() {
-                    return Task::batch(tasks);
-                }
-            }
-            Err(e) => {
-                if e.contains("Unauthorized") {
-                    self.library.songs.set_loading(false);
-                    return self.handle_session_expired();
-                }
-                error!("Error loading songs: {}", e);
-                self.library.songs.set_loading(false);
-                self.toast_error(format!("Failed to load songs: {e}"));
-            }
-        }
-        Task::none()
+        self.handle_loaded_with::<SongsTarget>(result, total_count, background, anchor_id)
     }
 
     pub(crate) fn handle_song_artwork_loaded(
