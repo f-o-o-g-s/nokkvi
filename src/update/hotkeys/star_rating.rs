@@ -1,6 +1,7 @@
 //! Star/Favorite and Rating hotkey handlers
 
 use iced::Task;
+use nokkvi_data::types::ItemKind;
 use tracing::{debug, error, info};
 
 use crate::{Nokkvi, View, app_message::Message, views::expansion::SlotListEntry};
@@ -12,7 +13,7 @@ pub(in crate::update) struct CenterItemInfo {
     pub artist: String,
     pub starred: bool,
     pub rating: u32,
-    pub item_type: &'static str,
+    pub kind: ItemKind,
 }
 
 impl Nokkvi {
@@ -33,7 +34,7 @@ impl Nokkvi {
                         artist: song.artist.clone(),
                         starred: song.starred,
                         rating: song.rating.unwrap_or(0),
-                        item_type: "song",
+                        kind: ItemKind::Song,
                     })
             }
             View::Albums => self
@@ -47,7 +48,7 @@ impl Nokkvi {
                         artist: song.artist.clone(),
                         starred: song.is_starred,
                         rating: song.rating.unwrap_or(0),
-                        item_type: "song",
+                        kind: ItemKind::Song,
                     },
                     SlotListEntry::Parent(album) => CenterItemInfo {
                         id: album.id.clone(),
@@ -55,7 +56,7 @@ impl Nokkvi {
                         artist: album.artist.clone(),
                         starred: album.is_starred,
                         rating: album.rating.unwrap_or(0),
-                        item_type: "album",
+                        kind: ItemKind::Album,
                     },
                 }),
             View::Songs => self
@@ -70,7 +71,7 @@ impl Nokkvi {
                     artist: song.artist.clone(),
                     starred: song.is_starred,
                     rating: song.rating.unwrap_or(0),
-                    item_type: "song",
+                    kind: ItemKind::Song,
                 }),
             View::Artists => self
                 .artists_page
@@ -83,7 +84,7 @@ impl Nokkvi {
                         artist: album.artist.clone(),
                         starred: album.is_starred,
                         rating: album.rating.unwrap_or(0),
-                        item_type: "album",
+                        kind: ItemKind::Album,
                     },
                     SlotListEntry::Parent(artist) => CenterItemInfo {
                         id: artist.id.clone(),
@@ -91,7 +92,7 @@ impl Nokkvi {
                         artist: String::new(),
                         starred: artist.is_starred,
                         rating: artist.rating.unwrap_or(0),
-                        item_type: "artist",
+                        kind: ItemKind::Artist,
                     },
                 }),
             View::Playlists => self
@@ -107,7 +108,7 @@ impl Nokkvi {
                         artist: song.artist.clone(),
                         starred: song.is_starred,
                         rating: song.rating.unwrap_or(0),
-                        item_type: "song",
+                        kind: ItemKind::Song,
                     }),
                     SlotListEntry::Parent(_) => None, // playlists themselves can't be starred/rated
                 }),
@@ -122,7 +123,7 @@ impl Nokkvi {
                         artist: album.artist.clone(),
                         starred: album.is_starred,
                         rating: album.rating.unwrap_or(0),
-                        item_type: "album",
+                        kind: ItemKind::Album,
                     }),
                     SlotListEntry::Parent(_) => None, // genres themselves can't be starred/rated
                 }),
@@ -141,7 +142,7 @@ impl Nokkvi {
         let new_starred = !info.starred;
         debug!(
             "  Toggling star for {}: {} - {} (currently: {})",
-            info.item_type,
+            info.kind,
             info.name,
             info.artist,
             if info.starred {
@@ -153,11 +154,10 @@ impl Nokkvi {
 
         // Apply optimistic update immediately
         let optimistic_msg =
-            Self::starred_revert_message(info.id.clone(), info.item_type, new_starred);
+            Self::starred_revert_message(info.id.clone(), info.kind.api_str(), new_starred);
 
-        let item_type_owned = info.item_type.to_string();
+        let toggle_kind = info.kind;
         let revert_id = info.id.clone();
-        let revert_type = info.item_type.to_string();
         let current_starred = info.starred;
         let toast_name = info.name.clone();
         let name = info.name;
@@ -180,7 +180,7 @@ impl Nokkvi {
                     &server_url,
                     &subsonic_credential,
                     &item_id,
-                    &item_type_owned,
+                    toggle_kind.api_str(),
                     current_starred,
                 )
                 .await?;
@@ -188,7 +188,7 @@ impl Nokkvi {
                 debug!(
                     "✅ {} {}: {} - {}",
                     if new_starred { "Starred" } else { "Unstarred" },
-                    item_type_owned,
+                    toggle_kind,
                     name,
                     artist
                 );
@@ -213,7 +213,7 @@ impl Nokkvi {
                 Err(e) => {
                     error!(" Failed to toggle star: {}", e);
                     // Revert to original starred state
-                    Self::starred_revert_message(revert_id, &revert_type, current_starred)
+                    Self::starred_revert_message(revert_id, toggle_kind.api_str(), current_starred)
                 }
             },
         );
@@ -424,16 +424,15 @@ impl Nokkvi {
 
         debug!(
             "  Setting rating for {} {}: {} -> {}",
-            info.item_type, display_name, current_rating, new_rating
+            info.kind, display_name, current_rating, new_rating
         );
 
         // Apply optimistic update immediately
         let optimistic_msg =
-            Self::rating_revert_message(info.id.clone(), info.item_type, new_rating);
+            Self::rating_revert_message(info.id.clone(), info.kind.api_str(), new_rating);
 
-        let item_type_owned = info.item_type.to_string();
+        let toggle_kind = info.kind;
         let revert_id = info.id.clone();
-        let revert_type = info.item_type.to_string();
         let item_id = info.id;
         let toast_display_name = display_name.clone();
 
@@ -459,7 +458,7 @@ impl Nokkvi {
 
                 info!(
                     "⭐ Set rating for {} {}: {}",
-                    item_type_owned, display_name, new_rating
+                    toggle_kind, display_name, new_rating
                 );
 
                 Ok::<_, anyhow::Error>(())
@@ -474,7 +473,7 @@ impl Nokkvi {
                 Err(e) => {
                     error!(" Failed to set rating: {}", e);
                     // Revert to original rating
-                    Self::rating_revert_message(revert_id, &revert_type, current_rating)
+                    Self::rating_revert_message(revert_id, toggle_kind.api_str(), current_rating)
                 }
             },
         );
