@@ -33,134 +33,160 @@ impl PlaylistsPage {
         ) {
             Ok(result) => result,
             Err(msg) => match msg {
-                PlaylistsMessage::SlotListNavigateUp => {
-                    let center = self
-                        .expansion
-                        .handle_navigate_up(playlists, &mut self.common);
-                    match center {
-                        Some(idx) => (Task::none(), PlaylistsAction::LoadArtwork(idx.to_string())),
-                        None => (Task::none(), PlaylistsAction::None),
-                    }
-                }
-                PlaylistsMessage::SlotListNavigateDown => {
-                    let center = self
-                        .expansion
-                        .handle_navigate_down(playlists, &mut self.common);
-                    match center {
-                        Some(idx) => (Task::none(), PlaylistsAction::LoadArtwork(idx.to_string())),
-                        None => (Task::none(), PlaylistsAction::None),
-                    }
-                }
-                PlaylistsMessage::SlotListSetOffset(offset, modifiers) => {
-                    let center = self.expansion.handle_select_offset(
-                        offset,
-                        modifiers,
-                        playlists,
-                        &mut self.common,
-                    );
-                    match center {
-                        Some(idx) => (Task::none(), PlaylistsAction::LoadArtwork(idx.to_string())),
-                        None => (Task::none(), PlaylistsAction::None),
+                PlaylistsMessage::SlotList(msg) => {
+                    use crate::widgets::SlotListPageMessage;
+                    match msg {
+                        SlotListPageMessage::NavigateUp => {
+                            let center = self
+                                .expansion
+                                .handle_navigate_up(playlists, &mut self.common);
+                            match center {
+                                Some(idx) => {
+                                    (Task::none(), PlaylistsAction::LoadArtwork(idx.to_string()))
+                                }
+                                None => (Task::none(), PlaylistsAction::None),
+                            }
+                        }
+                        SlotListPageMessage::NavigateDown => {
+                            let center = self
+                                .expansion
+                                .handle_navigate_down(playlists, &mut self.common);
+                            match center {
+                                Some(idx) => {
+                                    (Task::none(), PlaylistsAction::LoadArtwork(idx.to_string()))
+                                }
+                                None => (Task::none(), PlaylistsAction::None),
+                            }
+                        }
+                        SlotListPageMessage::SetOffset(offset, modifiers) => {
+                            let center = self.expansion.handle_select_offset(
+                                offset,
+                                modifiers,
+                                playlists,
+                                &mut self.common,
+                            );
+                            match center {
+                                Some(idx) => {
+                                    (Task::none(), PlaylistsAction::LoadArtwork(idx.to_string()))
+                                }
+                                None => (Task::none(), PlaylistsAction::None),
+                            }
+                        }
+                        SlotListPageMessage::ScrollSeek(offset) => {
+                            self.expansion
+                                .handle_set_offset(offset, playlists, &mut self.common);
+                            (Task::none(), PlaylistsAction::None)
+                        }
+                        SlotListPageMessage::ClickPlay(offset) => {
+                            self.expansion
+                                .handle_set_offset(offset, playlists, &mut self.common);
+                            self.update(
+                                PlaylistsMessage::SlotList(SlotListPageMessage::ActivateCenter),
+                                total_items,
+                                playlists,
+                            )
+                        }
+                        SlotListPageMessage::SelectionToggle(offset) => {
+                            // Flattened (parents + expansion children) index space —
+                            // `total_items` from the dispatcher is the base count.
+                            let flattened = self.expansion.flattened_len(playlists);
+                            self.common.handle_selection_toggle(offset, flattened);
+                            (Task::none(), PlaylistsAction::None)
+                        }
+                        SlotListPageMessage::SelectAllToggle => {
+                            let flattened = self.expansion.flattened_len(playlists);
+                            self.common.handle_select_all_toggle(flattened);
+                            (Task::none(), PlaylistsAction::None)
+                        }
+                        SlotListPageMessage::ActivateCenter => {
+                            let total = self.expansion.flattened_len(playlists);
+                            if let Some(center_idx) = self.common.get_center_item_index(total) {
+                                self.common.slot_list.flash_center();
+                                match self
+                                    .expansion
+                                    .get_entry_at(center_idx, playlists, |p| &p.id)
+                                {
+                                    Some(SlotListEntry::Child(_song, parent_playlist_id)) => {
+                                        // Play playlist starting from this track
+                                        let track_idx = self.expansion.count_children_before(
+                                            center_idx,
+                                            playlists,
+                                            |p| &p.id,
+                                        );
+                                        (
+                                            Task::none(),
+                                            PlaylistsAction::PlayPlaylistFromTrack(
+                                                parent_playlist_id,
+                                                track_idx,
+                                            ),
+                                        )
+                                    }
+                                    Some(SlotListEntry::Parent(playlist)) => (
+                                        Task::none(),
+                                        PlaylistsAction::PlayPlaylist(playlist.id.clone()),
+                                    ),
+                                    None => (Task::none(), PlaylistsAction::None),
+                                }
+                            } else {
+                                (Task::none(), PlaylistsAction::None)
+                            }
+                        }
+                        SlotListPageMessage::AddCenterToQueue => {
+                            use nokkvi_data::types::batch::BatchItem;
+                            let total = self.expansion.flattened_len(playlists);
+
+                            let target_indices = self.common.get_queue_target_indices(total);
+
+                            if target_indices.is_empty() {
+                                return (Task::none(), PlaylistsAction::None);
+                            }
+
+                            let payload =
+                                super::super::expansion::build_batch_payload(target_indices, |i| {
+                                    match self.expansion.get_entry_at(i, playlists, |p| &p.id) {
+                                        Some(SlotListEntry::Parent(playlist)) => {
+                                            Some(BatchItem::Playlist(playlist.id.clone()))
+                                        }
+                                        Some(SlotListEntry::Child(song, _)) => {
+                                            let item: nokkvi_data::types::song::Song =
+                                                song.clone().into();
+                                            Some(BatchItem::Song(Box::new(item)))
+                                        }
+                                        None => None,
+                                    }
+                                });
+
+                            (Task::none(), PlaylistsAction::AddBatchToQueue(payload))
+                        }
+                        SlotListPageMessage::RefreshViewData => {
+                            (Task::none(), PlaylistsAction::RefreshViewData)
+                        }
+                        // Playlists does not emit CenterOnPlaying; exhaustiveness arm only.
+                        SlotListPageMessage::CenterOnPlaying => {
+                            (Task::none(), PlaylistsAction::None)
+                        }
+                        // Sort/search exhaustiveness arms (expansion views don't emit these via SlotList):
+                        SlotListPageMessage::SearchQueryChanged(_)
+                        | SlotListPageMessage::SearchFocused(_)
+                        | SlotListPageMessage::SortModeSelected(_)
+                        | SlotListPageMessage::ToggleSortOrder => {
+                            (Task::none(), PlaylistsAction::None)
+                        }
                     }
                 }
                 PlaylistsMessage::FocusAndExpand(idx) => {
                     self.common.slot_list.selected_indices.clear();
                     let (t1, _) = self.update(
-                        PlaylistsMessage::SlotListSetOffset(
+                        PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
                             idx,
                             iced::keyboard::Modifiers::default(),
-                        ),
+                        )),
                         total_items,
                         playlists,
                     );
                     let (t2, action) =
                         self.update(PlaylistsMessage::ExpandCenter, total_items, playlists);
                     (Task::batch(vec![t1, t2]), action)
-                }
-                PlaylistsMessage::SlotListScrollSeek(offset) => {
-                    self.expansion
-                        .handle_set_offset(offset, playlists, &mut self.common);
-                    (Task::none(), PlaylistsAction::None)
-                }
-                PlaylistsMessage::SlotListClickPlay(offset) => {
-                    self.expansion
-                        .handle_set_offset(offset, playlists, &mut self.common);
-                    self.update(
-                        PlaylistsMessage::SlotListActivateCenter,
-                        total_items,
-                        playlists,
-                    )
-                }
-                PlaylistsMessage::SlotListSelectionToggle(offset) => {
-                    // Flattened (parents + expansion children) index space —
-                    // `total_items` from the dispatcher is the base count.
-                    let flattened = self.expansion.flattened_len(playlists);
-                    self.common.handle_selection_toggle(offset, flattened);
-                    (Task::none(), PlaylistsAction::None)
-                }
-                PlaylistsMessage::SlotListSelectAllToggle => {
-                    let flattened = self.expansion.flattened_len(playlists);
-                    self.common.handle_select_all_toggle(flattened);
-                    (Task::none(), PlaylistsAction::None)
-                }
-                PlaylistsMessage::SlotListActivateCenter => {
-                    let total = self.expansion.flattened_len(playlists);
-                    if let Some(center_idx) = self.common.get_center_item_index(total) {
-                        self.common.slot_list.flash_center();
-                        match self
-                            .expansion
-                            .get_entry_at(center_idx, playlists, |p| &p.id)
-                        {
-                            Some(SlotListEntry::Child(_song, parent_playlist_id)) => {
-                                // Play playlist starting from this track
-                                let track_idx = self.expansion.count_children_before(
-                                    center_idx,
-                                    playlists,
-                                    |p| &p.id,
-                                );
-                                (
-                                    Task::none(),
-                                    PlaylistsAction::PlayPlaylistFromTrack(
-                                        parent_playlist_id,
-                                        track_idx,
-                                    ),
-                                )
-                            }
-                            Some(SlotListEntry::Parent(playlist)) => (
-                                Task::none(),
-                                PlaylistsAction::PlayPlaylist(playlist.id.clone()),
-                            ),
-                            None => (Task::none(), PlaylistsAction::None),
-                        }
-                    } else {
-                        (Task::none(), PlaylistsAction::None)
-                    }
-                }
-                PlaylistsMessage::AddCenterToQueue => {
-                    use nokkvi_data::types::batch::BatchItem;
-                    let total = self.expansion.flattened_len(playlists);
-
-                    let target_indices = self.common.get_queue_target_indices(total);
-
-                    if target_indices.is_empty() {
-                        return (Task::none(), PlaylistsAction::None);
-                    }
-
-                    let payload = super::super::expansion::build_batch_payload(
-                        target_indices,
-                        |i| match self.expansion.get_entry_at(i, playlists, |p| &p.id) {
-                            Some(SlotListEntry::Parent(playlist)) => {
-                                Some(BatchItem::Playlist(playlist.id.clone()))
-                            }
-                            Some(SlotListEntry::Child(song, _)) => {
-                                let item: nokkvi_data::types::song::Song = song.clone().into();
-                                Some(BatchItem::Song(Box::new(item)))
-                            }
-                            None => None,
-                        },
-                    );
-
-                    (Task::none(), PlaylistsAction::AddBatchToQueue(payload))
                 }
                 PlaylistsMessage::ClickToggleStar(item_index) => {
                     if let Some(entry) = self
@@ -189,9 +215,6 @@ impl PlaylistsPage {
                 // runs; arm exists only for exhaustiveness.
                 PlaylistsMessage::SetOpenMenu(_) => (Task::none(), PlaylistsAction::None),
                 PlaylistsMessage::Roulette => (Task::none(), PlaylistsAction::None),
-                PlaylistsMessage::RefreshViewData => {
-                    (Task::none(), PlaylistsAction::RefreshViewData)
-                }
                 PlaylistsMessage::NavigateAndFilter(view, filter) => (
                     Task::none(),
                     PlaylistsAction::NavigateAndFilter(view, filter),

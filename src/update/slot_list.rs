@@ -140,9 +140,9 @@ impl Nokkvi {
             View::Queue => Task::done(Message::Queue(views::QueueMessage::SlotListNavigateUp)),
             View::Songs => Task::done(Message::Songs(views::SongsMessage::SlotListNavigateUp)),
             View::Genres => Task::done(Message::Genres(views::GenresMessage::SlotListNavigateUp)),
-            View::Playlists => Task::done(Message::Playlists(
-                views::PlaylistsMessage::SlotListNavigateUp,
-            )),
+            View::Playlists => Task::done(Message::Playlists(views::PlaylistsMessage::SlotList(
+                crate::widgets::SlotListPageMessage::NavigateUp,
+            ))),
             View::Radios => Task::done(Message::Radios(views::RadiosMessage::SlotListNavigateUp)),
             View::Settings => Task::done(Message::Settings(views::SettingsMessage::SlotListUp)),
         }
@@ -185,9 +185,9 @@ impl Nokkvi {
             View::Queue => Task::done(Message::Queue(views::QueueMessage::SlotListNavigateDown)),
             View::Songs => Task::done(Message::Songs(views::SongsMessage::SlotListNavigateDown)),
             View::Genres => Task::done(Message::Genres(views::GenresMessage::SlotListNavigateDown)),
-            View::Playlists => Task::done(Message::Playlists(
-                views::PlaylistsMessage::SlotListNavigateDown,
-            )),
+            View::Playlists => Task::done(Message::Playlists(views::PlaylistsMessage::SlotList(
+                crate::widgets::SlotListPageMessage::NavigateDown,
+            ))),
             View::Radios => Task::done(Message::Radios(views::RadiosMessage::SlotListNavigateDown)),
             View::Settings => Task::done(Message::Settings(views::SettingsMessage::SlotListDown)),
         };
@@ -218,12 +218,12 @@ impl Nokkvi {
                 offset,
                 iced::keyboard::Modifiers::default(),
             ))),
-            View::Playlists => Task::done(Message::Playlists(
-                views::PlaylistsMessage::SlotListSetOffset(
+            View::Playlists => Task::done(Message::Playlists(views::PlaylistsMessage::SlotList(
+                crate::widgets::SlotListPageMessage::SetOffset(
                     offset,
                     iced::keyboard::Modifiers::default(),
                 ),
-            )),
+            ))),
             View::Radios => Task::done(Message::Radios(views::RadiosMessage::SlotListSetOffset(
                 offset,
                 iced::keyboard::Modifiers::default(),
@@ -291,9 +291,9 @@ impl Nokkvi {
             View::Genres => Task::done(Message::Genres(
                 views::GenresMessage::SlotListActivateCenter,
             )),
-            View::Playlists => Task::done(Message::Playlists(
-                views::PlaylistsMessage::SlotListActivateCenter,
-            )),
+            View::Playlists => Task::done(Message::Playlists(views::PlaylistsMessage::SlotList(
+                crate::widgets::SlotListPageMessage::ActivateCenter,
+            ))),
             View::Radios => Task::done(Message::Radios(
                 views::RadiosMessage::SlotListActivateCenter,
             )),

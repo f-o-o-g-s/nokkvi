@@ -82,7 +82,10 @@ impl Nokkvi {
         self.play_view_sfx(
             matches!(
                 msg,
-                PlaylistsMessage::SlotListNavigateUp | PlaylistsMessage::SlotListNavigateDown
+                PlaylistsMessage::SlotList(
+                    crate::widgets::SlotListPageMessage::NavigateUp
+                        | crate::widgets::SlotListPageMessage::NavigateDown
+                )
             ),
             matches!(
                 msg,

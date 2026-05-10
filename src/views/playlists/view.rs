@@ -164,7 +164,9 @@ impl PlaylistsPage {
             crate::views::PLAYLISTS_SEARCH_ID,
             PlaylistsMessage::SortModeSelected,
             Some(PlaylistsMessage::ToggleSortOrder),
-            Some(PlaylistsMessage::RefreshViewData),
+            Some(PlaylistsMessage::SlotList(
+                crate::widgets::SlotListPageMessage::RefreshViewData,
+            )),
             None, // Playlists view doesn't need center on playing button
             Some(("New Playlist", PlaylistsMessage::OpenCreatePlaylistDialog)),
             Some(trailing), // chip + columns-cog dropdown
@@ -184,7 +186,7 @@ impl PlaylistsPage {
             crate::widgets::slot_list::compose_header_with_select(
                 self.column_visibility.select,
                 self.common.select_all_state(flattened_len),
-                PlaylistsMessage::SlotListSelectAllToggle,
+                PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::SelectAllToggle),
                 header,
             )
         };
@@ -239,11 +241,15 @@ impl PlaylistsPage {
             &self.common.slot_list,
             &flattened,
             &config,
-            PlaylistsMessage::SlotListNavigateUp,
-            PlaylistsMessage::SlotListNavigateDown,
+            PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateUp),
+            PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateDown),
             {
                 let total = flattened.len();
-                move |f| PlaylistsMessage::SlotListScrollSeek((f * total as f32) as usize)
+                move |f| {
+                    PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::ScrollSeek(
+                        (f * total as f32) as usize,
+                    ))
+                }
             },
             |entry, ctx| match entry {
                 SlotListEntry::Parent(playlist) => {
@@ -258,7 +264,11 @@ impl PlaylistsPage {
                         select_header_visible,
                         ctx.is_selected,
                         ctx.item_index,
-                        PlaylistsMessage::SlotListSelectionToggle,
+                        |i| {
+                            PlaylistsMessage::SlotList(
+                                crate::widgets::SlotListPageMessage::SelectionToggle(i),
+                            )
+                        },
                         row,
                     )
                 }
@@ -272,7 +282,11 @@ impl PlaylistsPage {
                         select_header_visible,
                         ctx.is_selected,
                         ctx.item_index,
-                        PlaylistsMessage::SlotListSelectionToggle,
+                        |i| {
+                            PlaylistsMessage::SlotList(
+                                crate::widgets::SlotListPageMessage::SelectionToggle(i),
+                            )
+                        },
                         row,
                     )
                 }
@@ -585,13 +599,21 @@ impl PlaylistsPage {
 
         let slot_button = button(clickable)
             .on_press(if ctx.modifiers.control() || ctx.modifiers.shift() {
-                PlaylistsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
+                PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
+                    ctx.item_index,
+                    ctx.modifiers,
+                ))
             } else if ctx.is_center {
-                PlaylistsMessage::SlotListActivateCenter
+                PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::ActivateCenter)
             } else if stable_viewport {
-                PlaylistsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
+                PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
+                    ctx.item_index,
+                    ctx.modifiers,
+                ))
             } else {
-                PlaylistsMessage::SlotListClickPlay(ctx.item_index)
+                PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::ClickPlay(
+                    ctx.item_index,
+                ))
             })
             .style(|_theme, _status| button::Style {
                 background: None,
@@ -643,11 +665,16 @@ impl PlaylistsPage {
             song,
             ctx,
             sub_index_label,
-            PlaylistsMessage::SlotListActivateCenter,
+            PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::ActivateCenter),
             if stable_viewport {
-                PlaylistsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
+                PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
+                    ctx.item_index,
+                    ctx.modifiers,
+                ))
             } else {
-                PlaylistsMessage::SlotListClickPlay(ctx.item_index)
+                PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::ClickPlay(
+                    ctx.item_index,
+                ))
             },
             Some(PlaylistsMessage::ClickToggleStar(ctx.item_index)),
             song.artist_id

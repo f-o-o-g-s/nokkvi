@@ -437,7 +437,9 @@ impl Nokkvi {
                     self,
                     msg,
                     handle_playlists,
-                    crate::views::PlaylistsMessage::SlotListScrollSeek(_),
+                    crate::views::PlaylistsMessage::SlotList(
+                        crate::widgets::SlotListPageMessage::ScrollSeek(_)
+                    ),
                     View::Playlists
                 )
             }

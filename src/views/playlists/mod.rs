@@ -98,20 +98,8 @@ pub enum PlaylistContextEntry {
 /// Messages for local playlists page interactions
 #[derive(Debug, Clone)]
 pub enum PlaylistsMessage {
-    // Slot list navigation
-    SlotListNavigateUp,
-    SlotListNavigateDown,
-    SlotListSetOffset(usize, iced::keyboard::Modifiers),
-    SlotListScrollSeek(usize),
-    SlotListActivateCenter,
-    SlotListClickPlay(usize), // Click non-center to play directly (skip focus)
-    /// Click on a row's leading select checkbox — toggles `item_index` in
-    /// `selected_indices`. No play/highlight side effects.
-    SlotListSelectionToggle(usize),
-    /// Click on the tri-state "select all" header — fills selection with
-    /// every visible row, or clears if every visible row is already selected.
-    SlotListSelectAllToggle,
-    AddCenterToQueue, // Add all songs from centered playlist to queue (Shift+A)
+    // Slot list navigation (wrapped carrier — 10 variants, no CenterOnPlaying for Playlists)
+    SlotList(crate::widgets::SlotListPageMessage),
 
     // Mouse click on heart
     ClickToggleStar(usize), // item_index
@@ -127,12 +115,11 @@ pub enum PlaylistsMessage {
     CollapseExpansion,     // Collapse current expansion (Escape when expanded)
     TracksLoaded(String, Vec<SongUIViewData>), // playlist_id, tracks
 
-    // View header
+    // View header (sort/search stay per-view — handled by impl_expansion_update! macro)
     SortModeSelected(crate::widgets::view_header::SortMode),
     ToggleSortOrder,
     SearchQueryChanged(String),
     SearchFocused(bool),
-    RefreshViewData,
     /// Sort dropdown's "Roulette" entry was selected — intercepted at the
     /// root handler before the page's `update` runs.
     Roulette,
@@ -256,7 +243,9 @@ impl super::ViewPage for PlaylistsPage {
     }
 
     fn add_to_queue_message(&self) -> Option<Message> {
-        Some(Message::Playlists(PlaylistsMessage::AddCenterToQueue))
+        Some(Message::Playlists(PlaylistsMessage::SlotList(
+            crate::widgets::SlotListPageMessage::AddCenterToQueue,
+        )))
     }
     fn expand_center_message(&self) -> Option<Message> {
         Some(Message::Playlists(PlaylistsMessage::ExpandCenter))
@@ -266,9 +255,11 @@ impl super::ViewPage for PlaylistsPage {
     }
 
     fn synth_set_offset_message(&self, offset: usize) -> Option<Message> {
-        Some(Message::Playlists(PlaylistsMessage::SlotListSetOffset(
-            offset,
-            iced::keyboard::Modifiers::default(),
+        Some(Message::Playlists(PlaylistsMessage::SlotList(
+            crate::widgets::SlotListPageMessage::SetOffset(
+                offset,
+                iced::keyboard::Modifiers::default(),
+            ),
         )))
     }
 }
