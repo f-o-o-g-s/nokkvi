@@ -58,6 +58,12 @@ struct State {
     /// animation restarts from offset 0 with the initial pause instead of
     /// resuming mid-scroll from a stale elapsed time.
     was_overflowing: bool,
+    /// When true, the initial pause is skipped so scrolling starts immediately.
+    /// Set on resize-driven overflow (content unchanged) and on breakpoint-driven
+    /// field drops that happen while the marquee is already scrolling — in both
+    /// cases there is no new text for the user to read from the start, so the
+    /// 2-second hold is unwanted.
+    skip_initial_pause: bool,
 }
 
 impl Default for State {
@@ -68,6 +74,7 @@ impl Default for State {
             cycle_start: Instant::now(),
             content_hash: 0,
             was_overflowing: false,
+            skip_initial_pause: false,
         }
     }
 }
@@ -157,13 +164,6 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for MarqueeText {
     ) -> layout::Node {
         let state = tree.state.downcast_mut::<State>();
 
-        // Detect content changes (e.g. track change) → reset animation
-        let new_hash = hash_content(&self.content);
-        if new_hash != state.content_hash {
-            state.content_hash = new_hash;
-            state.cycle_start = Instant::now();
-        }
-
         // Follow Iced's native text layout pattern: layout::sized() resolves
         // Length::Fill/Shrink against limits, then we build the paragraph with
         // the resolved bounds and return min_bounds().
@@ -194,14 +194,35 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for MarqueeText {
                 <iced::Renderer as TextRenderer>::Paragraph::with_text(unconstrained_text);
             state.full_width = full_para.min_bounds().width;
 
-            // Reset the cycle on a fits→overflows transition so the animation
-            // restarts from offset 0 with the initial pause, instead of
-            // resuming mid-scroll from a stale elapsed time accumulated while
-            // the text was fitting.
             let now_overflowing = state.full_width > bounds.width;
+
+            // Detect content changes (e.g. track change) → reset animation.
+            // When the marquee was already overflowing (visible scrolling) and the
+            // content changes due to a breakpoint-driven field drop (album/artist
+            // hidden as the window narrows), the new string is shorter but the
+            // user hasn't navigated to a new track — skip the initial pause so
+            // the marquee continues without a 2-second freeze.
+            let new_hash = hash_content(&self.content);
+            let content_changed = new_hash != state.content_hash;
+            if content_changed {
+                state.content_hash = new_hash;
+                state.cycle_start = Instant::now();
+                state.skip_initial_pause = state.was_overflowing;
+            }
+
+            // Reset the cycle on a fits→overflows transition so the animation
+            // restarts from offset 0.  When the transition is caused purely by a
+            // resize (content unchanged), skip the initial pause so scrolling
+            // begins immediately — the user is resizing the window, not looking
+            // at a new track title.
             if now_overflowing && !state.was_overflowing {
                 state.cycle_start = Instant::now();
+                if !content_changed {
+                    // Pure resize-to-overflow: no new title to read from the start.
+                    state.skip_initial_pause = true;
+                }
             }
+
             state.was_overflowing = now_overflowing;
 
             state.constrained.min_bounds()
@@ -254,11 +275,17 @@ impl<M: 'static> Widget<M, Theme, iced::Renderer> for MarqueeText {
             // One full loop cycle = scrolling through (content_width + gap) pixels
             let cycle_px = content_width + LOOP_GAP;
 
-            let offset = if elapsed < INITIAL_PAUSE_SECS {
-                // Hold at start so user can read the beginning
+            let offset = if !state.skip_initial_pause && elapsed < INITIAL_PAUSE_SECS {
+                // Hold at start so user can read the beginning of a new track title.
+                // Skipped for resize-driven overflow or breakpoint-driven field drops
+                // while already scrolling (skip_initial_pause = true in those cases).
                 0.0
             } else {
-                let scroll_elapsed = elapsed - INITIAL_PAUSE_SECS;
+                let scroll_elapsed = if state.skip_initial_pause {
+                    elapsed
+                } else {
+                    elapsed - INITIAL_PAUSE_SECS
+                };
                 // Continuous modulo for seamless looping
                 (scroll_elapsed * SCROLL_PX_PER_SEC) % cycle_px
             };

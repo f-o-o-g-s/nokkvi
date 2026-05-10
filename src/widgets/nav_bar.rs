@@ -401,17 +401,20 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         mode == TrackInfoDisplay::TopBar
     };
 
-    // Responsive visibility flags — fields collapse progressively.
-    // AND with the user's settings toggles so fields are hidden either by
-    // narrow window OR by user preference.
+    // In merged mode the marquee scrolls any-length text, so breakpoints are
+    // irrelevant — all user-enabled fields stay visible regardless of window
+    // width.  In non-merged mode fields are separate labeled elements that each
+    // need their own lane, so the responsive breakpoints still apply.
+    let merged_mode_active = data.radio_name.is_none() && theme::strip_merged_mode();
+
     let show_title = show_nav_metadata
-        && data.window_width >= BREAKPOINT_SHOW_TITLE
+        && (merged_mode_active || data.window_width >= BREAKPOINT_SHOW_TITLE)
         && theme::strip_show_title();
     let show_artist = show_nav_metadata
-        && data.window_width >= BREAKPOINT_SHOW_ARTIST
+        && (merged_mode_active || data.window_width >= BREAKPOINT_SHOW_ARTIST)
         && theme::strip_show_artist();
     let show_album = show_nav_metadata
-        && data.window_width >= BREAKPOINT_SHOW_ALBUM
+        && (merged_mode_active || data.window_width >= BREAKPOINT_SHOW_ALBUM)
         && theme::strip_show_album();
     let show_labels = theme::strip_show_labels();
     let title_label = if show_labels { "title:" } else { "" };
@@ -469,7 +472,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             // Merged mode wants the marquee to span the full lane (matching
             // `track_info_strip::build_merged_centered_strip`); flanking Fill
             // spacers would compete with it and shrink the scroll lane.
-            let is_merged_layout = data.radio_name.is_none() && theme::strip_merged_mode();
+            let is_merged_layout = merged_mode_active;
 
             if !is_merged_layout {
                 // Fill spacer → center the metadata fields
