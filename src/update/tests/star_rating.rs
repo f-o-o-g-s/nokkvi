@@ -49,11 +49,11 @@ fn play_count_increment_propagates_to_expansion_children() {
     let mut app = test_app();
     let mut album_track = make_song("s1", "Track", "Artist");
     album_track.play_count = Some(7);
-    app.albums_page.expansion.children = vec![album_track];
+    expand_albums_with(&mut app, "a1", vec![album_track]);
 
     let mut playlist_track = make_song("s1", "Track", "Artist");
     playlist_track.play_count = Some(7);
-    app.playlists_page.expansion.children = vec![playlist_track];
+    expand_playlists_with(&mut app, "p1", vec![playlist_track]);
 
     let _ = app.handle_song_play_count_incremented("s1".to_string());
     assert_eq!(app.albums_page.expansion.children[0].play_count, Some(8));
@@ -79,7 +79,7 @@ fn album_starred_propagates_to_artists_expansion() {
     let mut app = test_app();
     let mut album = make_album("a1", "Expanded Album", "Artist");
     album.is_starred = false;
-    app.artists_page.expansion.children = vec![album];
+    expand_artists_with(&mut app, "ar1", vec![album]);
 
     let _ = app.handle_album_starred_status_updated("a1".to_string(), true);
     assert!(
@@ -93,7 +93,7 @@ fn album_starred_propagates_to_genres_expansion() {
     let mut app = test_app();
     let mut album = make_album("a1", "Genre Album", "Artist");
     album.is_starred = false;
-    app.genres_page.expansion.children = vec![album];
+    expand_genres_with(&mut app, "g1", vec![album]);
 
     let _ = app.handle_album_starred_status_updated("a1".to_string(), true);
     assert!(

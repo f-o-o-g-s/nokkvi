@@ -672,10 +672,11 @@ fn genres_context_menu_get_info_on_child_album() {
     app.library.genres.set_from_vec(genres.clone());
 
     // Expand genre so child album is at index 1
-    let album = make_album("a1", "Album 1", "Artist A");
-    app.genres_page.expansion.expanded_id = Some("g1".to_string());
-    app.genres_page.expansion.parent_offset = 0;
-    app.genres_page.expansion.children = vec![album];
+    expand_genres_with(
+        &mut app,
+        "g1",
+        vec![make_album("a1", "Album 1", "Artist A")],
+    );
 
     let (_, action) = app.genres_page.update(
         crate::views::GenresMessage::ContextMenuAction(
@@ -702,10 +703,11 @@ fn genres_context_menu_show_in_folder_on_child_album() {
     let genres = vec![make_genre("g1", "Rock")];
     app.library.genres.set_from_vec(genres.clone());
 
-    let album = make_album("a1", "Album 1", "Artist A");
-    app.genres_page.expansion.expanded_id = Some("g1".to_string());
-    app.genres_page.expansion.parent_offset = 0;
-    app.genres_page.expansion.children = vec![album];
+    expand_genres_with(
+        &mut app,
+        "g1",
+        vec![make_album("a1", "Album 1", "Artist A")],
+    );
 
     let (_, action) = app.genres_page.update(
         crate::views::GenresMessage::ContextMenuAction(
@@ -739,10 +741,11 @@ fn artists_shift_enter_on_parent_collapses_outer_expansion() {
     app.library.artists.set_from_vec(artists.clone());
 
     // Outer expansion open on ar1; viewport centered on parent (idx 0).
-    let album = make_album("a1", "Album 1", "Artist 1");
-    app.artists_page.expansion.expanded_id = Some("ar1".to_string());
-    app.artists_page.expansion.parent_offset = 0;
-    app.artists_page.expansion.children = vec![album];
+    expand_artists_with(
+        &mut app,
+        "ar1",
+        vec![make_album("a1", "Album 1", "Artist 1")],
+    );
     app.artists_page.common.slot_list.selected_offset = Some(0);
 
     let (_, _action) = app.artists_page.update(
@@ -763,10 +766,11 @@ fn artists_shift_enter_on_child_album_routes_to_navigate_and_expand_album() {
     let artists = vec![make_artist("ar1", "Artist 1")];
     app.library.artists.set_from_vec(artists.clone());
 
-    let album = make_album("a1", "Album 1", "Artist 1");
-    app.artists_page.expansion.expanded_id = Some("ar1".to_string());
-    app.artists_page.expansion.parent_offset = 0;
-    app.artists_page.expansion.children = vec![album];
+    expand_artists_with(
+        &mut app,
+        "ar1",
+        vec![make_album("a1", "Album 1", "Artist 1")],
+    );
 
     // Center on the child album row (flat idx 1).
     app.artists_page.common.slot_list.selected_offset = Some(1);
@@ -815,10 +819,11 @@ fn genres_shift_enter_on_parent_collapses_outer_expansion() {
     let genres = vec![make_genre("g1", "Rock")];
     app.library.genres.set_from_vec(genres.clone());
 
-    let album = make_album("a1", "Album 1", "Artist 1");
-    app.genres_page.expansion.expanded_id = Some("g1".to_string());
-    app.genres_page.expansion.parent_offset = 0;
-    app.genres_page.expansion.children = vec![album];
+    expand_genres_with(
+        &mut app,
+        "g1",
+        vec![make_album("a1", "Album 1", "Artist 1")],
+    );
     app.genres_page.common.slot_list.selected_offset = Some(0);
 
     let _ = app.genres_page.update(
@@ -839,10 +844,11 @@ fn genres_shift_enter_on_child_album_routes_to_navigate_and_expand_album() {
     let genres = vec![make_genre("g1", "Rock")];
     app.library.genres.set_from_vec(genres.clone());
 
-    let album = make_album("a1", "Album 1", "Artist 1");
-    app.genres_page.expansion.expanded_id = Some("g1".to_string());
-    app.genres_page.expansion.parent_offset = 0;
-    app.genres_page.expansion.children = vec![album];
+    expand_genres_with(
+        &mut app,
+        "g1",
+        vec![make_album("a1", "Album 1", "Artist 1")],
+    );
 
     app.genres_page.common.slot_list.selected_offset = Some(1);
 
