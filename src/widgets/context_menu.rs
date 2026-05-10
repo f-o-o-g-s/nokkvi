@@ -408,7 +408,6 @@ where
 
 /// Like [`wrap_library_row`] for Similar/TopSongs rows, which use
 /// `ContextMenuId::SimilarRow` instead of `LibraryRow`.
-#[allow(dead_code)]
 pub(crate) fn wrap_similar_row<'a, Message>(
     item_index: usize,
     base: impl Into<Element<'a, Message>>,

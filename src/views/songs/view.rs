@@ -31,46 +31,34 @@ pub(crate) fn songs_genre_visible(sort: SortMode, user_visible: bool) -> bool {
 impl SongsPage {
     /// Build the view
     pub fn view<'a>(&'a self, data: SongsViewData<'a>) -> Element<'a, SongsMessage> {
-        let column_dropdown: Element<'a, SongsMessage> = {
-            use crate::widgets::checkbox_dropdown::checkbox_dropdown;
-            let items: Vec<(SongsColumn, &'static str, bool)> = vec![
-                (SongsColumn::Select, "Select", self.column_visibility.select),
-                (SongsColumn::Index, "Index", self.column_visibility.index),
-                (
-                    SongsColumn::Thumbnail,
-                    "Thumbnail",
-                    self.column_visibility.thumbnail,
-                ),
-                (SongsColumn::Stars, "Stars", self.column_visibility.stars),
-                (SongsColumn::Album, "Album", self.column_visibility.album),
-                (SongsColumn::Genre, "Genre", self.column_visibility.genre),
-                (
-                    SongsColumn::Duration,
-                    "Duration",
-                    self.column_visibility.duration,
-                ),
-                (SongsColumn::Plays, "Plays", self.column_visibility.plays),
-                (SongsColumn::Love, "Love", self.column_visibility.love),
-            ];
-            checkbox_dropdown(
-                "assets/icons/columns-3-cog.svg",
-                "Show/hide columns",
-                items,
+        let column_dropdown: Element<'a, SongsMessage> =
+            crate::widgets::checkbox_dropdown::view_columns_dropdown(
+                crate::View::Songs,
+                vec![
+                    (SongsColumn::Select, "Select", self.column_visibility.select),
+                    (SongsColumn::Index, "Index", self.column_visibility.index),
+                    (
+                        SongsColumn::Thumbnail,
+                        "Thumbnail",
+                        self.column_visibility.thumbnail,
+                    ),
+                    (SongsColumn::Stars, "Stars", self.column_visibility.stars),
+                    (SongsColumn::Album, "Album", self.column_visibility.album),
+                    (SongsColumn::Genre, "Genre", self.column_visibility.genre),
+                    (
+                        SongsColumn::Duration,
+                        "Duration",
+                        self.column_visibility.duration,
+                    ),
+                    (SongsColumn::Plays, "Plays", self.column_visibility.plays),
+                    (SongsColumn::Love, "Love", self.column_visibility.love),
+                ],
                 SongsMessage::ToggleColumnVisible,
-                |trigger_bounds| match trigger_bounds {
-                    Some(b) => SongsMessage::SetOpenMenu(Some(
-                        crate::app_message::OpenMenu::CheckboxDropdown {
-                            view: crate::View::Songs,
-                            trigger_bounds: b,
-                        },
-                    )),
-                    None => SongsMessage::SetOpenMenu(None),
-                },
+                SongsMessage::SetOpenMenu,
                 data.column_dropdown_open,
                 data.column_dropdown_trigger_bounds,
             )
-            .into()
-        };
+            .into();
 
         let header = widgets::view_header::view_header(
             self.common.current_sort_mode,
@@ -452,41 +440,22 @@ impl SongsPage {
                     .padding(0)
                     .width(Length::Fill);
 
-                use crate::widgets::context_menu::{
-                    context_menu, library_entry_view, open_state_for, song_entries_with_folder,
-                };
-                let item_idx = ctx.item_index;
-                let cm_id = crate::app_message::ContextMenuId::LibraryRow {
-                    view: crate::View::Songs,
-                    item_index: item_idx,
-                };
-                let (cm_open, cm_position) = open_state_for(open_menu_for_rows, &cm_id);
-                let cm = context_menu(
+                use crate::widgets::context_menu::{song_entries_with_folder, wrap_library_row};
+                let cm_row = wrap_library_row(
+                    crate::View::Songs,
+                    ctx.item_index,
                     slot_button,
                     song_entries_with_folder(),
-                    move |entry, length| {
-                        library_entry_view(entry, length, |e| {
-                            SongsMessage::ContextMenuAction(item_idx, e)
-                        })
-                    },
-                    cm_open,
-                    cm_position,
-                    move |position| match position {
-                        Some(p) => {
-                            SongsMessage::SetOpenMenu(Some(crate::app_message::OpenMenu::Context {
-                                id: cm_id.clone(),
-                                position: p,
-                            }))
-                        }
-                        None => SongsMessage::SetOpenMenu(None),
-                    },
+                    open_menu_for_rows,
+                    SongsMessage::ContextMenuAction,
+                    SongsMessage::SetOpenMenu,
                 );
                 crate::widgets::slot_list::wrap_with_select_column(
                     select_header_visible,
                     ctx.is_selected,
                     ctx.item_index,
                     SongsMessage::SlotListSelectionToggle,
-                    cm.into(),
+                    cm_row,
                 )
             },
         );

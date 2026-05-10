@@ -317,44 +317,34 @@ impl SimilarPage {
         // Columns-cog dropdown for the view header. Emits its own
         // `OpenMenu::CheckboxDropdownSimilar` variant since `View` has no
         // `Similar` member to disambiguate against.
-        let column_dropdown: Element<'a, SimilarMessage> = {
-            use crate::widgets::checkbox_dropdown::checkbox_dropdown;
-            let items: Vec<(SimilarColumn, &'static str, bool)> = vec![
-                (
-                    SimilarColumn::Select,
-                    "Select",
-                    self.column_visibility.select,
-                ),
-                (SimilarColumn::Index, "Index", self.column_visibility.index),
-                (
-                    SimilarColumn::Thumbnail,
-                    "Thumbnail",
-                    self.column_visibility.thumbnail,
-                ),
-                (SimilarColumn::Album, "Album", self.column_visibility.album),
-                (
-                    SimilarColumn::Duration,
-                    "Duration",
-                    self.column_visibility.duration,
-                ),
-                (SimilarColumn::Love, "Love", self.column_visibility.love),
-            ];
-            checkbox_dropdown(
-                "assets/icons/columns-3-cog.svg",
-                "Show/hide columns",
-                items,
+        let column_dropdown: Element<'a, SimilarMessage> =
+            crate::widgets::checkbox_dropdown::similar_columns_dropdown(
+                vec![
+                    (
+                        SimilarColumn::Select,
+                        "Select",
+                        self.column_visibility.select,
+                    ),
+                    (SimilarColumn::Index, "Index", self.column_visibility.index),
+                    (
+                        SimilarColumn::Thumbnail,
+                        "Thumbnail",
+                        self.column_visibility.thumbnail,
+                    ),
+                    (SimilarColumn::Album, "Album", self.column_visibility.album),
+                    (
+                        SimilarColumn::Duration,
+                        "Duration",
+                        self.column_visibility.duration,
+                    ),
+                    (SimilarColumn::Love, "Love", self.column_visibility.love),
+                ],
                 SimilarMessage::ToggleColumnVisible,
-                |trigger_bounds| match trigger_bounds {
-                    Some(b) => SimilarMessage::SetOpenMenu(Some(
-                        crate::app_message::OpenMenu::CheckboxDropdownSimilar { trigger_bounds: b },
-                    )),
-                    None => SimilarMessage::SetOpenMenu(None),
-                },
+                SimilarMessage::SetOpenMenu,
                 data.column_dropdown_open,
                 data.column_dropdown_trigger_bounds,
             )
-            .into()
-        };
+            .into();
 
         let header = widgets::view_header::view_header(
             header_prefix,
@@ -599,38 +589,21 @@ impl SimilarPage {
                     .padding(0)
                     .width(Length::Fill);
 
-                use crate::widgets::context_menu::{
-                    context_menu, library_entry_view, open_state_for, similar_entries,
-                };
-                let item_idx = ctx.item_index;
-                let cm_id = crate::app_message::ContextMenuId::SimilarRow(item_idx);
-                let (cm_open, cm_position) = open_state_for(open_menu_for_rows, &cm_id);
-                let cm = context_menu(
+                use crate::widgets::context_menu::{similar_entries, wrap_similar_row};
+                let cm_row = wrap_similar_row(
+                    ctx.item_index,
                     slot_button,
                     similar_entries(),
-                    move |entry, length| {
-                        library_entry_view(entry, length, |e| {
-                            SimilarMessage::ContextMenuAction(item_idx, e)
-                        })
-                    },
-                    cm_open,
-                    cm_position,
-                    move |position| match position {
-                        Some(p) => SimilarMessage::SetOpenMenu(Some(
-                            crate::app_message::OpenMenu::Context {
-                                id: cm_id.clone(),
-                                position: p,
-                            },
-                        )),
-                        None => SimilarMessage::SetOpenMenu(None),
-                    },
+                    open_menu_for_rows,
+                    SimilarMessage::ContextMenuAction,
+                    SimilarMessage::SetOpenMenu,
                 );
                 crate::widgets::slot_list::wrap_with_select_column(
                     select_header_visible,
                     ctx.is_selected,
                     ctx.item_index,
                     SimilarMessage::SlotListSelectionToggle,
-                    cm.into(),
+                    cm_row,
                 )
             },
         );

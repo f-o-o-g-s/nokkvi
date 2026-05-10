@@ -101,7 +101,6 @@ where
 
 /// Like [`view_columns_dropdown`] for the Similar panel, which uses
 /// `OpenMenu::CheckboxDropdownSimilar` because `View` has no `Similar` variant.
-#[allow(dead_code)]
 pub(crate) fn similar_columns_dropdown<'a, Key, Message>(
     items: Vec<(Key, &'static str, bool)>,
     on_toggle: impl Fn(Key) -> Message + 'a,
