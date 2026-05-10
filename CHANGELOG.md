@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.3.14 — 2026-05-10
+
+### Added
+
 - Ctrl+R hotkey for Roulette — spins the current view's wheel and auto-plays the landing item, equivalent to picking the Roulette entry in the sort dropdown. The binding is rebindable in Settings → Hotkeys (under Sort & View). The hotkey is a no-op in Settings, and in split-view it always rolls the main pane regardless of pane focus.
 - Toggle toasts on shuffle, repeat, consume, UI SFX, and crossfade — flipping any of these via hotkey or menu now confirms the new state in-place, so you can see what you switched to without re-opening the menu.
 
