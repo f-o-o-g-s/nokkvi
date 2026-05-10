@@ -150,10 +150,11 @@ impl Nokkvi {
     ///
     /// Collects items that still need album IDs (`artwork_album_ids` is empty),
     /// fetches them in parallel via the supplied closure, and emits
-    /// `CollageAlbumIdsLoaded` when done.
-    ///
-    /// If all items already have album IDs, skips straight to
-    /// `LoadCollageFromIds` to begin artwork loading.
+    /// `CollageAlbumIdsLoaded` when done. Once stored on the library items,
+    /// these IDs let the viewport-driven `LoadArtwork` path skip a per-item
+    /// album-list roundtrip; mini/collage artwork itself is loaded lazily by
+    /// that viewport-driven path, not eagerly here, so the bounded mini LRU
+    /// can't be thrashed by a serial fetch over every genre/playlist.
     pub(crate) fn handle_start_collage_prefetch<F, Fut>(
         &mut self,
         target: CollageTarget,
@@ -167,8 +168,7 @@ impl Nokkvi {
         Fut: Future<Output = Vec<String>> + Send,
     {
         if items_needing_ids.is_empty() {
-            // All items already have album IDs — skip to artwork loading
-            return Task::done(Message::Artwork(ArtworkMessage::LoadCollageFromIds(target)));
+            return Task::none();
         }
 
         tracing::debug!(
@@ -214,85 +214,6 @@ impl Nokkvi {
             move |results: Vec<(String, Vec<String>)>| {
                 Message::Artwork(ArtworkMessage::CollageAlbumIdsLoaded(target, results))
             },
-        )
-    }
-
-    /// Unified artwork-from-IDs loader for collage targets.
-    ///
-    /// Collects items that have `artwork_album_ids` but no mini artwork yet,
-    /// pre-caches 300px artwork to disk in a background task, then the artwork
-    /// will be loaded from disk cache when scrolled into view.
-    pub(crate) fn handle_load_collage_artwork_from_ids(
-        &mut self,
-        target: CollageTarget,
-    ) -> Task<Message> {
-        // Access the snapshot inline (not via collage_cache_mut) to avoid a
-        // full `&mut self` borrow that would conflict with `self.library`.
-        let mini_snapshot = match target {
-            CollageTarget::Genre => &self.artwork.genre.mini_snapshot,
-            CollageTarget::Playlist => &self.artwork.playlist.mini_snapshot,
-        };
-
-        let items_to_load: Vec<(String, String)> = match target {
-            CollageTarget::Genre => self
-                .library
-                .genres
-                .iter()
-                .filter(|g| !mini_snapshot.contains_key(&g.id) && !g.artwork_album_ids.is_empty())
-                .map(|g| (g.id.clone(), g.artwork_album_ids[0].clone()))
-                .collect(),
-            CollageTarget::Playlist => self
-                .library
-                .playlists
-                .iter()
-                .filter(|p| !mini_snapshot.contains_key(&p.id) && !p.artwork_album_ids.is_empty())
-                .map(|p| (p.id.clone(), p.artwork_album_ids[0].clone()))
-                .collect(),
-        };
-
-        if items_to_load.is_empty() {
-            return Task::none();
-        }
-
-        let count = items_to_load.len();
-        tracing::debug!(
-            " Starting background {:?} artwork load for {} items",
-            target,
-            count
-        );
-
-        self.shell_task(
-            move |shell| async move {
-                let albums_vm = shell.albums().clone();
-                let mut results: crate::app_message::ArtworkBatchData = Vec::new();
-
-                for (item_id, first_album_id) in items_to_load {
-                    // The dedicated genre/playlist disk cache is gone — every fetch
-                    // now goes through the cached HTTP client, which already
-                    // deduplicates album-artwork URLs at 300px regardless of which
-                    // collage refers to them.
-                    if let Ok(bytes) = albums_vm
-                        .fetch_album_artwork(&first_album_id, Some(300), None)
-                        .await
-                    {
-                        results.push(crate::app_message::ArtworkBatchEntry {
-                            id: item_id,
-                            mini_artwork: Some(iced::widget::image::Handle::from_bytes(bytes)),
-                            collage_handles: Vec::new(),
-                            // Don't overwrite artwork_album_ids — full list already stored.
-                            album_ids: Vec::new(),
-                        });
-                    }
-                }
-
-                tracing::debug!(
-                    " Background {:?} artwork from IDs complete ({} results)",
-                    target,
-                    results.len()
-                );
-                results
-            },
-            move |results| Message::Artwork(ArtworkMessage::CollageBatchLoaded(target, results)),
         )
     }
 
@@ -366,40 +287,9 @@ impl Nokkvi {
         Task::none()
     }
 
-    /// Handle a batch of collage artwork results.
-    pub(crate) fn handle_collage_batch_loaded(
-        &mut self,
-        target: CollageTarget,
-        results: crate::app_message::ArtworkBatchData,
-    ) -> Task<Message> {
-        for crate::app_message::ArtworkBatchEntry {
-            id: item_id,
-            mini_artwork: handle_opt,
-            collage_handles,
-            album_ids,
-        } in results
-        {
-            let cache = self.collage_cache_mut(target);
-            let mut mutated = false;
-            if let Some(handle) = handle_opt {
-                cache.mini.put(item_id.clone(), handle);
-                mutated = true;
-            }
-            if !collage_handles.is_empty() {
-                cache.collage.put(item_id.clone(), collage_handles);
-                mutated = true;
-            }
-            if mutated {
-                cache.refresh_snapshot();
-            }
-            if !album_ids.is_empty() {
-                self.set_collage_item_album_ids(target, &item_id, album_ids);
-            }
-        }
-        Task::none()
-    }
-
-    /// Handle album IDs resolution result — store IDs on items and trigger artwork loading.
+    /// Handle album IDs resolution result — store IDs on items so the
+    /// viewport-driven `LoadArtwork` path can skip a per-item album-list
+    /// roundtrip when scrolling fetches its mini/collage artwork.
     pub(crate) fn handle_collage_album_ids_loaded(
         &mut self,
         target: CollageTarget,
@@ -408,8 +298,6 @@ impl Nokkvi {
         for (item_id, album_ids) in results {
             self.set_collage_item_album_ids(target, &item_id, album_ids);
         }
-        Task::done(Message::Artwork(
-            crate::app_message::ArtworkMessage::LoadCollageFromIds(target),
-        ))
+        Task::none()
     }
 }

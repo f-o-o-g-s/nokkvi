@@ -138,9 +138,6 @@ impl Nokkvi {
             ArtworkMessage::CollageAlbumIdsLoaded(target, results) => {
                 self.handle_collage_album_ids_loaded(target, results)
             }
-            ArtworkMessage::LoadCollageFromIds(target) => {
-                self.handle_load_collage_artwork_from_ids(target)
-            }
             ArtworkMessage::CollageMiniLoaded(target, id, handle_opt) => {
                 self.handle_collage_mini_loaded(target, id, handle_opt)
             }
@@ -152,9 +149,6 @@ impl Nokkvi {
                     collage_handles,
                     album_ids,
                 )
-            }
-            ArtworkMessage::CollageBatchLoaded(target, results) => {
-                self.handle_collage_batch_loaded(target, results)
             }
             ArtworkMessage::CollageBatchReady(target, ids, server_url, cred) => {
                 Task::batch(ids.into_iter().map(|id| {

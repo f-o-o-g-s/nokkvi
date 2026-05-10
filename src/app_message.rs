@@ -39,18 +39,6 @@ impl std::fmt::Display for PlaylistMutation {
     }
 }
 
-/// Named entry for batch collage artwork results
-#[derive(Debug, Clone)]
-pub struct ArtworkBatchEntry {
-    pub id: String,
-    pub mini_artwork: Option<image::Handle>,
-    pub collage_handles: Vec<image::Handle>,
-    pub album_ids: Vec<String>,
-}
-
-/// Batch of collage artwork results
-pub(crate) type ArtworkBatchData = Vec<ArtworkBatchEntry>;
-
 /// Named struct for player settings — canonical definition in data crate
 pub(crate) use nokkvi_data::types::player_settings::PlayerSettings;
 /// Named struct for all view sort preferences — canonical definition in data crate
@@ -223,7 +211,6 @@ pub enum ArtworkMessage {
     LoadCollage(CollageTarget, String, String, String, Vec<String>),
     StartCollagePrefetch(CollageTarget),
     CollageAlbumIdsLoaded(CollageTarget, Vec<(String, Vec<String>)>),
-    LoadCollageFromIds(CollageTarget),
     CollageMiniLoaded(CollageTarget, String, Option<image::Handle>),
     CollageLoaded(
         CollageTarget,
@@ -232,7 +219,6 @@ pub enum ArtworkMessage {
         Vec<image::Handle>,
         Vec<String>,
     ),
-    CollageBatchLoaded(CollageTarget, ArtworkBatchData),
     CollageBatchReady(CollageTarget, Vec<String>, String, String),
 
     // --- Song Artwork ---
