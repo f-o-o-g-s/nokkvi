@@ -201,24 +201,12 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ThreeDButton<'_,
         let bounds = layout.bounds();
         let border_width = 2.0;
 
-        // Determine border colors based on state
-        // Both active and pressed states use the same "pressed in" appearance
-        // Get raised border colors from theme (automatically handles light/dark mode)
-        let (raised_top_left, raised_bottom_right) = theme::border_3d_raised();
-        let (top_left_color, bottom_right_color) = if self.is_active || state.is_pressed {
-            // Pressed: invert for "pushed in" look
-            (raised_bottom_right, raised_top_left)
-        } else {
-            // Normal: raised 3D
-            (raised_top_left, raised_bottom_right)
-        };
-
-        // Main background
-        let bg_color = if state.is_pressed || self.is_active {
-            theme::accent_bright()
-        } else {
-            self.bg_color
-        };
+        let colors = super::three_d_helpers::BevelStateColors::compute(
+            self.is_active || state.is_pressed,
+            self.bg_color,
+            self.content_color,
+            self.pressed_content_color,
+        );
 
         // Helper closure: draw the bevel + content at current renderer transform
         let draw_content = |renderer: &mut iced::Renderer| {
@@ -227,19 +215,15 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ThreeDButton<'_,
                 renderer,
                 bounds,
                 border_width,
-                bg_color,
-                top_left_color,
-                bottom_right_color,
+                colors.bg,
+                colors.top_left,
+                colors.bottom_right,
             );
 
             // Draw content - get the content layout from children
             if let Some(content_layout) = layout.children().next() {
                 let content_style = renderer::Style {
-                    text_color: if state.is_pressed || self.is_active {
-                        self.pressed_content_color
-                    } else {
-                        self.content_color
-                    },
+                    text_color: colors.fg,
                 };
 
                 self.content.as_widget().draw(
