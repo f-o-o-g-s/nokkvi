@@ -22,7 +22,7 @@ pub(crate) use nokkvi_data::types::queue_sort_mode::QueueSortMode;
 
 use crate::{
     app_message::Message,
-    widgets::{SlotListPageState, drag_column::DragEvent},
+    widgets::{SlotListPageMessage, SlotListPageState, drag_column::DragEvent},
 };
 
 mod update;
@@ -119,20 +119,9 @@ pub enum QueueContextEntry {
 /// Messages for local queue page interactions
 #[derive(Debug, Clone)]
 pub enum QueueMessage {
-    // Slot list navigation
-    SlotListNavigateUp,
-    SlotListNavigateDown,
-    SlotListSetOffset(usize, iced::keyboard::Modifiers),
-    SlotListScrollSeek(usize),
-    SlotListActivateCenter,
-    SlotListClickPlay(usize), // Click non-center to play directly (skip focus)
-    /// Click on a row's leading select checkbox — toggles `item_index` in the
-    /// page's `selected_indices` set. No play/highlight side effects.
-    SlotListSelectionToggle(usize),
-    /// Click on the tri-state "select all" header checkbox — fills the
-    /// selection set with every visible (filtered) row, or clears it when
-    /// every visible row is already selected.
-    SlotListSelectAllToggle,
+    // Shared slot-list navigation/activation/selection/sort/search
+    SlotList(SlotListPageMessage),
+
     FocusCurrentPlaying(usize, bool), // Auto-scroll slot list to center currently playing track (by queue index, flash)
 
     // Mouse click on star/heart (item_index, value)
@@ -147,8 +136,6 @@ pub enum QueueMessage {
 
     // View header interactions
     SortModeSelected(QueueSortMode),
-    ToggleSortOrder,
-    SearchQueryChanged(String),
     ToggleColumnVisible(QueueColumn),
     /// Sort dropdown's "Roulette" entry was selected — intercepted at the
     /// root handler before the page's `update` runs.
@@ -264,7 +251,7 @@ impl super::ViewPage for QueuePage {
 
     // Queue uses QueueSortMode, not SortMode — sort_mode_selected_message returns None (default).
     fn toggle_sort_order_message(&self) -> Message {
-        Message::Queue(QueueMessage::ToggleSortOrder)
+        Message::Queue(QueueMessage::SlotList(SlotListPageMessage::ToggleSortOrder))
     }
 
     // Queue items are already in the queue, so add_to_queue_message returns None (default).

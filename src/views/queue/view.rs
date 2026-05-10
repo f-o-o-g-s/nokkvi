@@ -139,16 +139,20 @@ impl QueuePage {
             sort_ascending: self.common.sort_ascending,
             search_query: &self.common.search_query,
             filtered_count: data.queue_songs.len(),
-            total_count: data.total_queue_count, // Use total count for header display
+            total_count: data.total_queue_count,
             item_type: "songs",
             search_input_id: crate::views::QUEUE_SEARCH_ID,
             on_view_selected: Box::new(QueueMessage::SortModeSelected),
             show_search: true,
-            on_search_change: Box::new(QueueMessage::SearchQueryChanged),
+            on_search_change: Box::new(|q| {
+                QueueMessage::SlotList(crate::widgets::SlotListPageMessage::SearchQueryChanged(q))
+            }),
             // Queue has no refresh button; CenterOnPlaying only when there's a
             // currently-playing track in the queue.
             buttons: {
-                let mut btns = vec![HeaderButton::SortToggle(QueueMessage::ToggleSortOrder)];
+                let mut btns = vec![HeaderButton::SortToggle(QueueMessage::SlotList(
+                    crate::widgets::SlotListPageMessage::ToggleSortOrder,
+                ))];
                 if let Some(idx) = data.current_playing_queue_index {
                     btns.push(HeaderButton::CenterOnPlaying(
                         QueueMessage::FocusCurrentPlaying(idx, true),
@@ -472,7 +476,7 @@ impl QueuePage {
         let header = crate::widgets::slot_list::compose_header_with_select(
             self.column_visibility.select,
             self.common.select_all_state(data.queue_songs.len()),
-            QueueMessage::SlotListSelectAllToggle,
+            QueueMessage::SlotList(crate::widgets::SlotListPageMessage::SelectAllToggle),
             header,
         );
 
@@ -793,13 +797,21 @@ impl QueuePage {
                 // Make it interactive
                 let slot_button = button(clickable)
                     .on_press(if ctx.modifiers.control() || ctx.modifiers.shift() {
-                        QueueMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
+                        QueueMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
+                            ctx.item_index,
+                            ctx.modifiers,
+                        ))
                     } else if ctx.is_center {
-                        QueueMessage::SlotListActivateCenter
+                        QueueMessage::SlotList(crate::widgets::SlotListPageMessage::ActivateCenter)
                     } else if stable_viewport {
-                        QueueMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
+                        QueueMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
+                            ctx.item_index,
+                            ctx.modifiers,
+                        ))
                     } else {
-                        QueueMessage::SlotListClickPlay(ctx.item_index)
+                        QueueMessage::SlotList(crate::widgets::SlotListPageMessage::ClickPlay(
+                            ctx.item_index,
+                        ))
                     })
                     .style(|_theme, _status| button::Style {
                         background: None,
@@ -925,7 +937,11 @@ impl QueuePage {
                 column_visibility.select,
                 ctx.is_selected,
                 ctx.item_index,
-                QueueMessage::SlotListSelectionToggle,
+                |idx| {
+                    QueueMessage::SlotList(crate::widgets::SlotListPageMessage::SelectionToggle(
+                        idx,
+                    ))
+                },
                 responsive_row.into(),
             )
         };
@@ -938,11 +954,15 @@ impl QueuePage {
                 &self.common.slot_list,
                 &queue_songs,
                 &config,
-                QueueMessage::SlotListNavigateUp,
-                QueueMessage::SlotListNavigateDown,
+                QueueMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateUp),
+                QueueMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateDown),
                 {
                     let total = queue_songs.len();
-                    move |f| QueueMessage::SlotListScrollSeek((f * total as f32) as usize)
+                    move |f| {
+                        QueueMessage::SlotList(crate::widgets::SlotListPageMessage::ScrollSeek(
+                            (f * total as f32) as usize,
+                        ))
+                    }
                 },
                 QueueMessage::DragReorder,
                 render_item,

@@ -14,6 +14,7 @@ use crate::{
     Nokkvi, View,
     app_message::{ArtworkMessage, Message, PlaybackMessage},
     views::{self, QueueAction, QueueMessage},
+    widgets::SlotListPageMessage,
 };
 
 impl Nokkvi {
@@ -123,7 +124,7 @@ impl Nokkvi {
         // The seek handler only needs to move the viewport offset, so we
         // short-circuit here: move the offset, record the scroll for the
         // scrollbar fade animation, and return immediately.
-        if let QueueMessage::SlotListScrollSeek(offset) = &msg {
+        if let QueueMessage::SlotList(SlotListPageMessage::ScrollSeek(offset)) = &msg {
             let total = if self.queue_page.common.search_query.is_empty() {
                 self.library.queue_songs.len()
             } else {

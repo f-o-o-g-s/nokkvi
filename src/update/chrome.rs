@@ -211,7 +211,13 @@ impl HasViewChrome for QueueMessage {
     }
 
     fn is_nav_action(&self) -> bool {
-        matches!(self, Self::SlotListNavigateUp | Self::SlotListNavigateDown)
+        matches!(
+            self,
+            Self::SlotList(
+                crate::widgets::SlotListPageMessage::NavigateUp
+                    | crate::widgets::SlotListPageMessage::NavigateDown
+            )
+        )
     }
 
     fn is_expand_action(&self) -> bool {

@@ -258,9 +258,11 @@ impl Nokkvi {
                 View::Queue => {
                     let total = self.filter_queue_songs().len();
                     self.queue_page.common.handle_set_offset(i, total);
-                    Task::done(Message::Queue(views::QueueMessage::SlotListSetOffset(
-                        i,
-                        iced::keyboard::Modifiers::default(),
+                    Task::done(Message::Queue(views::QueueMessage::SlotList(
+                        crate::widgets::SlotListPageMessage::SetOffset(
+                            i,
+                            iced::keyboard::Modifiers::default(),
+                        ),
                     )))
                 }
                 View::Albums => {
