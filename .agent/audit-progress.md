@@ -90,12 +90,12 @@ When you complete an item, append the commit ref(s) and flip the status. Keep th
 | 5 | Settings 3-parallel-list drift | ✅ done | Same as §7 #10. |
 | 6 | Hotkey star/rating boilerplate | ❓ stale path | Same as §7 #4. |
 | 7 | Per-row library context-menu wrapper | ❌ open | No `wrap_library_row` helper in `src/widgets/`. |
-| 8 | Per-view "columns cog" dropdown / `PlayNextBatch` helper | 🟡 partial | `play_next_batch_task` helper landed in `36e2160` (main). `albums.rs` migrated in `36e2160`; `artists.rs` migrated in `77d5860` (refactor/batch2-artists). Remaining lanes not yet merged. |
+| **8** | **`PlayNextBatch` handler dedup** | **✅ done** | `play_next_batch_task` helper + all call sites: `36e2160` (foundation + albums), `814f751` (artists), `bed303e` (songs), `5cb063c` (genres + playlists). queue.rs has no `PlayNextBatch` variant; similar.rs has no `PlayNextBatch` variant. shuffle-warn baked into helper. |
 | 9 | Paginated library loader Pattern A | ❌ open | No `paginated_load_task` helper. |
 | 10 | Bulk fixture + scenario-seeder helpers in tests | ❌ open | Not verified. |
 | 11 | Handler prologue (SetOpenMenu / Roulette / play_view_sfx) | ❌ open | No `dispatch_view_chrome` free fn. |
-| 12 | `AddBatchToQueue` insert-or-append | 🟡 partial | `add_or_insert_batch_to_queue_task` helper landed in `36e2160` (main). `albums.rs` migrated in `36e2160`; `artists.rs` migrated in `77d5860` (refactor/batch2-artists). Remaining lanes (songs, genres, playlists, radios) not yet merged. |
-| 13 | `ToggleStar` with optimistic revert | 🟡 partial | `toggle_star_with_revert_task` helper landed in `36e2160` (main). `albums.rs` migrated in `36e2160`; `artists.rs` migrated in `77d5860` (refactor/batch2-artists). Remaining lanes not yet merged. |
+| **12** | **`AddBatchToQueue` insert-or-append** | **✅ done** | `add_or_insert_batch_to_queue_task` helper + all call sites: `36e2160` (foundation + albums), `814f751` (artists), `bed303e` (songs), `5cb063c` (genres + playlists), `0faaf89` (similar). `pending_queue_insert_position.take()` ordering now enforced in one place. |
+| **13** | **`ToggleStar` with optimistic revert** | **✅ done** | `toggle_star_with_revert_task` helper + all call sites: `36e2160` (foundation + albums), `814f751` (artists — also collapses legacy `StarArtist`/`UnstarArtist` arms), `bed303e` (songs), `5cb063c` (genres + playlists), `0faaf89` (queue + similar). Optimistic-revert pairing now enforced in one place. |
 | 14 | 3D-button pressed-state color ramp | ❌ open | No `BevelStateColors::compute()` in `src/widgets/`. |
 | 15 | Sub-fetch Unauthorized routing | ❓ unverified | Same as B10 — locate first. |
 | 16 | `HasCommonAction` opt-out for Radios | ❌ open | Not verified. Re-check before declaring. |
