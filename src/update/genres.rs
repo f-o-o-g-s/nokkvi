@@ -2,11 +2,12 @@
 
 use iced::Task;
 use nokkvi_data::backend::genres::GenreUIViewData;
-use tracing::{debug, error, info};
+use tracing::debug;
 
 use crate::{
     Nokkvi, View,
     app_message::{ArtworkMessage, CollageTarget, Message},
+    update::GenresTarget,
     views::{self, GenresAction, GenresMessage, HasCommonAction},
 };
 
@@ -120,59 +121,7 @@ impl Nokkvi {
         result: Result<Vec<GenreUIViewData>, String>,
         total_count: usize,
     ) -> Task<Message> {
-        self.library.counts.genres = total_count;
-        match result {
-            Ok(new_genres) => {
-                info!(
-                    " Loaded {} genres (total: {})",
-                    new_genres.len(),
-                    total_count
-                );
-                self.library.genres.set_first_page(new_genres, total_count);
-                self.genres_page.common.slot_list.viewport_offset = 0;
-
-                let mut tasks: Vec<Task<Message>> = Vec::new();
-
-                // NOTE: Don't re-focus search field here - text_input maintains its own focus state.
-                // Re-focusing here causes issues when users press Escape (widget unfocuses but we'd re-focus).
-
-                // Start batch artwork prefetch for all genres
-                tasks.push(Task::done(Message::Artwork(
-                    ArtworkMessage::StartCollagePrefetch(CollageTarget::Genre),
-                )));
-
-                // Also trigger collage load for initially centered genre (index 0)
-                if !self.library.genres.is_empty() {
-                    tasks.push(Task::done(Message::Genres(
-                        views::GenresMessage::SlotListSetOffset(
-                            0,
-                            iced::keyboard::Modifiers::default(),
-                        ),
-                    )));
-                }
-
-                // Drive the genre find-and-expand chain forward (click-driven
-                // NavigateAndExpandGenre, or Shift+C CenterOnPlaying fallback).
-                if let Some(task) = self.try_resolve_pending_expand_genre() {
-                    tasks.push(task);
-                }
-
-                if !tasks.is_empty() {
-                    return Task::batch(tasks);
-                }
-            }
-            Err(e) => {
-                if e.contains("Unauthorized") {
-                    self.library.genres.set_loading(false);
-                    return self.handle_session_expired();
-                }
-                error!("Error loading genres: {}", e);
-                self.library.genres.set_loading(false);
-                self.cancel_pending_expand();
-                self.toast_error(format!("Failed to load genres: {e}"));
-            }
-        }
-        Task::none()
+        self.handle_loaded_with::<GenresTarget>(result, total_count, false, None)
     }
 
     pub(crate) fn handle_genres(&mut self, msg: views::GenresMessage) -> Task<Message> {
