@@ -17,7 +17,7 @@ impl Nokkvi {
             move |shell| async move {
                 let service = match shell.radios_api().await {
                     Ok(s) => s,
-                    Err(e) => return (Err(e.to_string()), 0),
+                    Err(e) => return (Err(format!("{e:#}")), 0),
                 };
 
                 match service.load_radio_stations().await {

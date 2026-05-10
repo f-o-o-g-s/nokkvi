@@ -27,7 +27,7 @@ impl Nokkvi {
             move |shell| async move {
                 let service = match shell.playlists_api().await {
                     Ok(s) => s,
-                    Err(e) => return (Err(e.to_string()), 0),
+                    Err(e) => return (Err(format!("{e:#}")), 0),
                 };
 
                 let sort_order_str = if sort_ascending { "ASC" } else { "DESC" };
