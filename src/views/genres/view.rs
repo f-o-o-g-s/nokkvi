@@ -72,15 +72,17 @@ impl GenresPage {
             buttons: {
                 let mut btns = vec![
                     HeaderButton::SortToggle(GenresMessage::ToggleSortOrder),
-                    HeaderButton::Refresh(GenresMessage::RefreshViewData),
+                    HeaderButton::Refresh(GenresMessage::SlotList(
+                        crate::widgets::SlotListPageMessage::RefreshViewData,
+                    )),
                 ];
                 // Hidden in the browsing panel — the narrower pane needs the
                 // header space for sort/refresh/columns/search, and the user
                 // already has the main-pane button when they want to center.
                 if !data.in_browsing_panel {
-                    btns.push(HeaderButton::CenterOnPlaying(
-                        GenresMessage::CenterOnPlaying,
-                    ));
+                    btns.push(HeaderButton::CenterOnPlaying(GenresMessage::SlotList(
+                        crate::widgets::SlotListPageMessage::CenterOnPlaying,
+                    )));
                 }
                 btns.push(HeaderButton::Trailing(column_dropdown));
                 btns
@@ -101,7 +103,7 @@ impl GenresPage {
             crate::widgets::slot_list::compose_header_with_select(
                 self.column_visibility.select,
                 self.common.select_all_state(flattened_len),
-                GenresMessage::SlotListSelectAllToggle,
+                GenresMessage::SlotList(crate::widgets::SlotListPageMessage::SelectAllToggle),
                 header,
             )
         };
@@ -156,11 +158,15 @@ impl GenresPage {
             &self.common.slot_list,
             &flattened,
             &config,
-            GenresMessage::SlotListNavigateUp,
-            GenresMessage::SlotListNavigateDown,
+            GenresMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateUp),
+            GenresMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateDown),
             {
                 let total = flattened.len();
-                move |f| GenresMessage::SlotListScrollSeek((f * total as f32) as usize)
+                move |f| {
+                    GenresMessage::SlotList(crate::widgets::SlotListPageMessage::ScrollSeek(
+                        (f * total as f32) as usize,
+                    ))
+                }
             },
             |entry, ctx| match entry {
                 SlotListEntry::Parent(genre) => {
@@ -175,7 +181,11 @@ impl GenresPage {
                         select_header_visible,
                         ctx.is_selected,
                         ctx.item_index,
-                        GenresMessage::SlotListSelectionToggle,
+                        |i| {
+                            GenresMessage::SlotList(
+                                crate::widgets::SlotListPageMessage::SelectionToggle(i),
+                            )
+                        },
                         row,
                     )
                 }
@@ -195,7 +205,11 @@ impl GenresPage {
                         select_header_visible,
                         ctx.is_selected,
                         ctx.item_index,
-                        GenresMessage::SlotListSelectionToggle,
+                        |i| {
+                            GenresMessage::SlotList(
+                                crate::widgets::SlotListPageMessage::SelectionToggle(i),
+                            )
+                        },
                         row,
                     )
                 }
@@ -348,13 +362,21 @@ impl GenresPage {
 
         let slot_button = button(clickable)
             .on_press(if ctx.modifiers.control() || ctx.modifiers.shift() {
-                GenresMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
+                GenresMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
+                    ctx.item_index,
+                    ctx.modifiers,
+                ))
             } else if ctx.is_center {
-                GenresMessage::SlotListActivateCenter
+                GenresMessage::SlotList(crate::widgets::SlotListPageMessage::ActivateCenter)
             } else if stable_viewport {
-                GenresMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
+                GenresMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
+                    ctx.item_index,
+                    ctx.modifiers,
+                ))
             } else {
-                GenresMessage::SlotListClickPlay(ctx.item_index)
+                GenresMessage::SlotList(crate::widgets::SlotListPageMessage::ClickPlay(
+                    ctx.item_index,
+                ))
             })
             .style(|_theme, _status| button::Style {
                 background: None,
@@ -393,11 +415,16 @@ impl GenresPage {
             sub_index_label,
             album_art.get(&album.id),
             self.column_visibility.thumbnail,
-            GenresMessage::SlotListActivateCenter,
+            GenresMessage::SlotList(crate::widgets::SlotListPageMessage::ActivateCenter),
             if stable_viewport {
-                GenresMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
+                GenresMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
+                    ctx.item_index,
+                    ctx.modifiers,
+                ))
             } else {
-                GenresMessage::SlotListClickPlay(ctx.item_index)
+                GenresMessage::SlotList(crate::widgets::SlotListPageMessage::ClickPlay(
+                    ctx.item_index,
+                ))
             },
             true, // show artist since genre groups albums from different artists
             Some(GenresMessage::ClickToggleStar(ctx.item_index)),

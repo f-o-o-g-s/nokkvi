@@ -95,12 +95,12 @@ impl Nokkvi {
             View::Genres if !self.library.genres.is_empty() => {
                 // Re-dispatch a SetOffset to trigger collage artwork loading
                 let offset = self.genres_page.common.slot_list.viewport_offset;
-                Task::done(Message::Genres(
-                    crate::views::GenresMessage::SlotListSetOffset(
+                Task::done(Message::Genres(crate::views::GenresMessage::SlotList(
+                    crate::widgets::SlotListPageMessage::SetOffset(
                         offset,
                         iced::keyboard::Modifiers::default(),
                     ),
-                ))
+                )))
             }
             View::Playlists if !self.library.playlists.is_empty() => {
                 // Re-dispatch a SetOffset to trigger collage artwork loading

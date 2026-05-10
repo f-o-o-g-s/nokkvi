@@ -543,7 +543,9 @@ fn genres_selection_toggle_on_album_child_lands_in_selected_indices() {
     );
 
     let (_, _action) = app.genres_page.update(
-        crate::views::GenresMessage::SlotListSelectionToggle(2),
+        crate::views::GenresMessage::SlotList(
+            crate::widgets::SlotListPageMessage::SelectionToggle(2),
+        ),
         genres.len(),
         &genres,
     );

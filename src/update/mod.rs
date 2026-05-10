@@ -429,7 +429,9 @@ impl Nokkvi {
                     self,
                     msg,
                     handle_genres,
-                    crate::views::GenresMessage::SlotListScrollSeek(_),
+                    crate::views::GenresMessage::SlotList(
+                        crate::widgets::SlotListPageMessage::ScrollSeek(_)
+                    ),
                     View::Genres
                 )
             }
