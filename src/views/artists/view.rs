@@ -32,53 +32,41 @@ impl ArtistsPage {
     /// Build the view
     pub fn view<'a>(&'a self, data: ArtistsViewData<'a>) -> Element<'a, ArtistsMessage> {
         // Build the columns-visibility dropdown for the artists view header.
-        let column_dropdown: Element<'a, ArtistsMessage> = {
-            use crate::widgets::checkbox_dropdown::checkbox_dropdown;
-            let items: Vec<(ArtistsColumn, &'static str, bool)> = vec![
-                (
-                    ArtistsColumn::Select,
-                    "Select",
-                    self.column_visibility.select,
-                ),
-                (ArtistsColumn::Index, "Index", self.column_visibility.index),
-                (
-                    ArtistsColumn::Thumbnail,
-                    "Thumbnail",
-                    self.column_visibility.thumbnail,
-                ),
-                (ArtistsColumn::Stars, "Stars", self.column_visibility.stars),
-                (
-                    ArtistsColumn::AlbumCount,
-                    "Album Count",
-                    self.column_visibility.albumcount,
-                ),
-                (
-                    ArtistsColumn::SongCount,
-                    "Song Count",
-                    self.column_visibility.songcount,
-                ),
-                (ArtistsColumn::Plays, "Plays", self.column_visibility.plays),
-                (ArtistsColumn::Love, "Love", self.column_visibility.love),
-            ];
-            checkbox_dropdown(
-                "assets/icons/columns-3-cog.svg",
-                "Show/hide columns",
-                items,
+        let column_dropdown: Element<'a, ArtistsMessage> =
+            crate::widgets::checkbox_dropdown::view_columns_dropdown(
+                crate::View::Artists,
+                vec![
+                    (
+                        ArtistsColumn::Select,
+                        "Select",
+                        self.column_visibility.select,
+                    ),
+                    (ArtistsColumn::Index, "Index", self.column_visibility.index),
+                    (
+                        ArtistsColumn::Thumbnail,
+                        "Thumbnail",
+                        self.column_visibility.thumbnail,
+                    ),
+                    (ArtistsColumn::Stars, "Stars", self.column_visibility.stars),
+                    (
+                        ArtistsColumn::AlbumCount,
+                        "Album Count",
+                        self.column_visibility.albumcount,
+                    ),
+                    (
+                        ArtistsColumn::SongCount,
+                        "Song Count",
+                        self.column_visibility.songcount,
+                    ),
+                    (ArtistsColumn::Plays, "Plays", self.column_visibility.plays),
+                    (ArtistsColumn::Love, "Love", self.column_visibility.love),
+                ],
                 ArtistsMessage::ToggleColumnVisible,
-                |trigger_bounds| match trigger_bounds {
-                    Some(b) => ArtistsMessage::SetOpenMenu(Some(
-                        crate::app_message::OpenMenu::CheckboxDropdown {
-                            view: crate::View::Artists,
-                            trigger_bounds: b,
-                        },
-                    )),
-                    None => ArtistsMessage::SetOpenMenu(None),
-                },
+                ArtistsMessage::SetOpenMenu,
                 data.column_dropdown_open,
                 data.column_dropdown_trigger_bounds,
             )
-            .into()
-        };
+            .into();
 
         let header = widgets::view_header::view_header(
             self.common.current_sort_mode,
@@ -607,36 +595,16 @@ impl ArtistsPage {
             .padding(0)
             .width(Length::Fill);
 
-        use crate::widgets::context_menu::{
-            artist_entries_with_folder, context_menu, library_entry_view, open_state_for,
-        };
-        let item_idx = ctx.item_index;
-        let cm_id = crate::app_message::ContextMenuId::LibraryRow {
-            view: crate::View::Artists,
-            item_index: item_idx,
-        };
-        let (cm_open, cm_position) = open_state_for(open_menu, &cm_id);
-        context_menu(
+        use crate::widgets::context_menu::{artist_entries_with_folder, wrap_library_row};
+        wrap_library_row(
+            crate::View::Artists,
+            ctx.item_index,
             slot_button,
             artist_entries_with_folder(),
-            move |entry, length| {
-                library_entry_view(entry, length, |e| {
-                    ArtistsMessage::ContextMenuAction(item_idx, e)
-                })
-            },
-            cm_open,
-            cm_position,
-            move |position| match position {
-                Some(p) => {
-                    ArtistsMessage::SetOpenMenu(Some(crate::app_message::OpenMenu::Context {
-                        id: cm_id.clone(),
-                        position: p,
-                    }))
-                }
-                None => ArtistsMessage::SetOpenMenu(None),
-            },
+            open_menu,
+            ArtistsMessage::ContextMenuAction,
+            ArtistsMessage::SetOpenMenu,
         )
-        .into()
     }
 
     /// Render a child album row in the slot list (indented, simpler layout)
@@ -670,36 +638,16 @@ impl ArtistsPage {
             1,    // depth 1: child albums under artist
         );
 
-        use crate::widgets::context_menu::{
-            context_menu, library_entries_with_folder, library_entry_view, open_state_for,
-        };
-        let item_idx = ctx.item_index;
-        let cm_id = crate::app_message::ContextMenuId::LibraryRow {
-            view: crate::View::Artists,
-            item_index: item_idx,
-        };
-        let (cm_open, cm_position) = open_state_for(open_menu, &cm_id);
-        context_menu(
+        use crate::widgets::context_menu::{library_entries_with_folder, wrap_library_row};
+        wrap_library_row(
+            crate::View::Artists,
+            ctx.item_index,
             album_el,
             library_entries_with_folder(),
-            move |entry, length| {
-                library_entry_view(entry, length, |e| {
-                    ArtistsMessage::ContextMenuAction(item_idx, e)
-                })
-            },
-            cm_open,
-            cm_position,
-            move |position| match position {
-                Some(p) => {
-                    ArtistsMessage::SetOpenMenu(Some(crate::app_message::OpenMenu::Context {
-                        id: cm_id.clone(),
-                        position: p,
-                    }))
-                }
-                None => ArtistsMessage::SetOpenMenu(None),
-            },
+            open_menu,
+            ArtistsMessage::ContextMenuAction,
+            ArtistsMessage::SetOpenMenu,
         )
-        .into()
     }
 }
 
