@@ -2,11 +2,55 @@
 //!
 //! Consolidates the 5-quad flat-mode bevel pattern (background + 4 directional
 //! border quads) and the rounded-mode fallback (single quad with corner radius)
-//! used by `ThreeDButton`, `ThreeDIconButton`, and `HamburgerMenu`.
+//! used by `ThreeDButton`, `ThreeDIconButton`, `HamburgerMenu`, and
+//! `PlayerModesMenu`.
 
 use iced::{Color, Rectangle, advanced::renderer};
 
 use crate::theme;
+
+/// Resolved bevel colors for a single draw call.
+///
+/// Compute via [`BevelStateColors::compute`], then pass the individual fields
+/// to [`draw_3d_bevel`] and any icon/content draw call.
+pub(crate) struct BevelStateColors {
+    pub(crate) top_left: Color,
+    pub(crate) bottom_right: Color,
+    pub(crate) bg: Color,
+    pub(crate) fg: Color,
+}
+
+impl BevelStateColors {
+    /// Derive bevel colors from widget state.
+    ///
+    /// - `active_or_pressed`: `true` produces the "pushed in" look (inverted
+    ///   border pair + accent background + `pressed_fg`).
+    /// - `idle_bg` / `idle_fg`: colors used when the widget is at rest.
+    /// - `pressed_fg`: foreground (icon/text) color used when active/pressed.
+    pub(crate) fn compute(
+        active_or_pressed: bool,
+        idle_bg: Color,
+        idle_fg: Color,
+        pressed_fg: Color,
+    ) -> Self {
+        let (raised_top_left, raised_bottom_right) = theme::border_3d_raised();
+        if active_or_pressed {
+            Self {
+                top_left: raised_bottom_right,
+                bottom_right: raised_top_left,
+                bg: theme::accent_bright(),
+                fg: pressed_fg,
+            }
+        } else {
+            Self {
+                top_left: raised_top_left,
+                bottom_right: raised_bottom_right,
+                bg: idle_bg,
+                fg: idle_fg,
+            }
+        }
+    }
+}
 
 /// Draw a 3D beveled button background.
 ///

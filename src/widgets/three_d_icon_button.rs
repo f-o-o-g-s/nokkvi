@@ -187,27 +187,12 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ThreeDIconButton
         let bounds = layout.bounds();
         let border_width = 2.0;
 
-        // Determine colors based on state
-        // Both active and pressed states use the same "pressed in" appearance
-        // Get raised border colors from theme (automatically handles light/dark mode)
-        let (raised_top_left, raised_bottom_right) = theme::border_3d_raised();
-        let (top_left_color, bottom_right_color) = if self.is_active || state.is_pressed {
-            (raised_bottom_right, raised_top_left)
-        } else {
-            (raised_top_left, raised_bottom_right)
-        };
-
-        let bg_color = if state.is_pressed || self.is_active {
-            theme::accent_bright()
-        } else {
-            self.bg_color
-        };
-
-        let icon_color = if state.is_pressed || self.is_active {
-            self.pressed_icon_color
-        } else {
-            self.icon_color
-        };
+        let colors = super::three_d_helpers::BevelStateColors::compute(
+            self.is_active || state.is_pressed,
+            self.bg_color,
+            self.icon_color,
+            self.pressed_icon_color,
+        );
 
         // Helper closure: draw the bevel + icon at current renderer transform
         let draw_content = |renderer: &mut iced::Renderer| {
@@ -216,9 +201,9 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ThreeDIconButton
                 renderer,
                 bounds,
                 border_width,
-                bg_color,
-                top_left_color,
-                bottom_right_color,
+                colors.bg,
+                colors.top_left,
+                colors.bottom_right,
             );
 
             // Draw centered SVG icon
@@ -234,7 +219,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ThreeDIconButton
             renderer.draw_svg(
                 SvgData {
                     handle: self.icon_handle.clone(),
-                    color: Some(icon_color),
+                    color: Some(colors.fg),
                     rotation: Radians(0.0),
                     opacity: 1.0,
                 },

@@ -157,36 +157,24 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Hambur
         let icon_color = if self.player_bar_style {
             // 3D player bar button styling (matches ThreeDIconButton)
             let border_width = 2.0;
-            let (raised_top_left, raised_bottom_right) = theme::border_3d_raised();
-            let (top_left_color, bottom_right_color) = if self.is_open {
-                (raised_bottom_right, raised_top_left)
-            } else {
-                (raised_top_left, raised_bottom_right)
-            };
-
-            let bg_color = if self.is_open {
-                theme::accent_bright()
-            } else {
-                theme::bg1()
-            };
-
-            let icon_color = if self.is_open {
-                theme::bg0_hard()
-            } else {
-                theme::fg1()
-            };
+            let colors = super::three_d_helpers::BevelStateColors::compute(
+                self.is_open,
+                theme::bg1(),
+                theme::fg1(),
+                theme::bg0_hard(),
+            );
 
             // Draw 3D beveled background (shared helper)
             super::three_d_helpers::draw_3d_bevel(
                 renderer,
                 bounds,
                 border_width,
-                bg_color,
-                top_left_color,
-                bottom_right_color,
+                colors.bg,
+                colors.top_left,
+                colors.bottom_right,
             );
 
-            icon_color
+            colors.fg
         } else {
             // Original flat nav bar styling
             // Hover feedback is handled by HoverOverlay at the call site —
