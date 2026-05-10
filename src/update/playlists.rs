@@ -180,8 +180,23 @@ impl Nokkvi {
                             ))
                         }
                         Err(e) => {
+                            if e.downcast_ref::<nokkvi_data::types::error::NokkviError>()
+                                .is_some_and(|err| {
+                                    matches!(
+                                        err,
+                                        nokkvi_data::types::error::NokkviError::Unauthorized
+                                    )
+                                })
+                            {
+                                return Message::SessionExpired;
+                            }
                             tracing::error!(" Failed to load playlist tracks: {}", e);
-                            Message::NoOp
+                            Message::Toast(crate::app_message::ToastMessage::Push(
+                                nokkvi_data::types::toast::Toast::new(
+                                    format!("Failed to load playlist tracks: {e}"),
+                                    nokkvi_data::types::toast::ToastLevel::Error,
+                                ),
+                            ))
                         }
                     },
                 );

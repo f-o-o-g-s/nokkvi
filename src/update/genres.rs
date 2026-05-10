@@ -313,8 +313,23 @@ impl Nokkvi {
                                 Message::Genres(GenresMessage::AlbumsLoaded(genre_id, albums))
                             }
                             Err(e) => {
+                                if e.downcast_ref::<nokkvi_data::types::error::NokkviError>()
+                                    .is_some_and(|err| {
+                                        matches!(
+                                            err,
+                                            nokkvi_data::types::error::NokkviError::Unauthorized
+                                        )
+                                    })
+                                {
+                                    return Message::SessionExpired;
+                                }
                                 tracing::error!(" Failed to load genre albums: {}", e);
-                                Message::NoOp
+                                Message::Toast(crate::app_message::ToastMessage::Push(
+                                    nokkvi_data::types::toast::Toast::new(
+                                        format!("Failed to load genre albums: {e}"),
+                                        nokkvi_data::types::toast::ToastLevel::Error,
+                                    ),
+                                ))
                             }
                         }
                     },
