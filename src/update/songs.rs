@@ -454,70 +454,12 @@ impl Nokkvi {
                 return self.handle_find_top_songs(artist_name, label);
             }
             SongsAction::ColumnVisibilityChanged(col, value) => {
-                return self.persist_songs_column_visibility(col, value);
+                return self.persist_column_visibility(col, value);
             }
             _ => {} // None + already-handled common actions
         }
 
         cmd.map(Message::Songs)
-    }
-
-    /// Persist the user's songs column visibility toggle to config.toml +
-    /// redb via `AppService::settings()`. The page's in-memory state was
-    /// already mutated in `SongsPage::update`.
-    pub(crate) fn persist_songs_column_visibility(
-        &self,
-        col: views::SongsColumn,
-        value: bool,
-    ) -> Task<Message> {
-        match col {
-            views::SongsColumn::Stars => {
-                self.shell_spawn("persist_songs_show_stars", move |shell| async move {
-                    shell.settings().set_songs_show_stars(value).await
-                });
-            }
-            views::SongsColumn::Album => {
-                self.shell_spawn("persist_songs_show_album", move |shell| async move {
-                    shell.settings().set_songs_show_album(value).await
-                });
-            }
-            views::SongsColumn::Duration => {
-                self.shell_spawn("persist_songs_show_duration", move |shell| async move {
-                    shell.settings().set_songs_show_duration(value).await
-                });
-            }
-            views::SongsColumn::Plays => {
-                self.shell_spawn("persist_songs_show_plays", move |shell| async move {
-                    shell.settings().set_songs_show_plays(value).await
-                });
-            }
-            views::SongsColumn::Love => {
-                self.shell_spawn("persist_songs_show_love", move |shell| async move {
-                    shell.settings().set_songs_show_love(value).await
-                });
-            }
-            views::SongsColumn::Index => {
-                self.shell_spawn("persist_songs_show_index", move |shell| async move {
-                    shell.settings().set_songs_show_index(value).await
-                });
-            }
-            views::SongsColumn::Thumbnail => {
-                self.shell_spawn("persist_songs_show_thumbnail", move |shell| async move {
-                    shell.settings().set_songs_show_thumbnail(value).await
-                });
-            }
-            views::SongsColumn::Genre => {
-                self.shell_spawn("persist_songs_show_genre", move |shell| async move {
-                    shell.settings().set_songs_show_genre(value).await
-                });
-            }
-            views::SongsColumn::Select => {
-                self.shell_spawn("persist_songs_show_select", move |shell| async move {
-                    shell.settings().set_songs_show_select(value).await
-                });
-            }
-        }
-        Task::none()
     }
 
     /// Routes `Message::SongsLoader(...)` arrivals to the existing

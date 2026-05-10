@@ -461,7 +461,7 @@ impl Nokkvi {
                 return self.handle_show_in_folder(path);
             }
             GenresAction::ColumnVisibilityChanged(col, value) => {
-                return self.persist_genres_column_visibility(col, value);
+                return self.persist_column_visibility(col, value);
             }
             _ => {} // None + already-handled common actions
         }
@@ -487,44 +487,6 @@ impl Nokkvi {
             tasks.extend(prefetch);
             Task::batch(tasks)
         }
-    }
-
-    /// Persist the user's genres column visibility toggle to config.toml +
-    /// redb via `AppService::settings()`. The page's in-memory state was
-    /// already mutated in `GenresPage::update`.
-    pub(crate) fn persist_genres_column_visibility(
-        &self,
-        col: views::GenresColumn,
-        value: bool,
-    ) -> Task<Message> {
-        match col {
-            views::GenresColumn::Index => {
-                self.shell_spawn("persist_genres_show_index", move |shell| async move {
-                    shell.settings().set_genres_show_index(value).await
-                });
-            }
-            views::GenresColumn::Thumbnail => {
-                self.shell_spawn("persist_genres_show_thumbnail", move |shell| async move {
-                    shell.settings().set_genres_show_thumbnail(value).await
-                });
-            }
-            views::GenresColumn::AlbumCount => {
-                self.shell_spawn("persist_genres_show_albumcount", move |shell| async move {
-                    shell.settings().set_genres_show_albumcount(value).await
-                });
-            }
-            views::GenresColumn::SongCount => {
-                self.shell_spawn("persist_genres_show_songcount", move |shell| async move {
-                    shell.settings().set_genres_show_songcount(value).await
-                });
-            }
-            views::GenresColumn::Select => {
-                self.shell_spawn("persist_genres_show_select", move |shell| async move {
-                    shell.settings().set_genres_show_select(value).await
-                });
-            }
-        }
-        Task::none()
     }
 
     /// Routes `Message::GenresLoader(...)` arrivals to the existing

@@ -311,6 +311,19 @@ impl Nokkvi {
         });
     }
 
+    /// Persist a column visibility toggle for any view whose column enum implements `ColumnPersist`.
+    /// Replaces the 7 per-view `persist_*_column_visibility` helpers.
+    pub(crate) fn persist_column_visibility<C: nokkvi_data::services::settings::ColumnPersist>(
+        &self,
+        col: C,
+        value: bool,
+    ) -> Task<Message> {
+        self.shell_spawn("persist_column_visibility", move |shell| async move {
+            shell.settings().set_column_visibility(col, value).await
+        });
+        Task::none()
+    }
+
     /// Play an entity by parsing an index string, looking up the item, and calling a shell method.
     /// Used by albums, artists, genres, playlists (all follow: parse index → get ID → shell → SwitchView).
     pub(crate) fn play_entity_task<T, F, Fut>(

@@ -19,25 +19,17 @@ pub(crate) mod songs;
 pub(crate) mod sort_api;
 
 // Re-export commonly used items
-pub(crate) use albums::{AlbumsAction, AlbumsColumn, AlbumsMessage, AlbumsPage, AlbumsViewData};
-pub(crate) use artists::{
-    ArtistsAction, ArtistsColumn, ArtistsMessage, ArtistsPage, ArtistsViewData,
-};
+pub(crate) use albums::{AlbumsAction, AlbumsMessage, AlbumsPage, AlbumsViewData};
+pub(crate) use artists::{ArtistsAction, ArtistsMessage, ArtistsPage, ArtistsViewData};
 pub(crate) use browsing_panel::{BrowsingPanel, BrowsingPanelMessage, BrowsingView};
-pub(crate) use genres::{GenresAction, GenresColumn, GenresMessage, GenresPage, GenresViewData};
+pub(crate) use genres::{GenresAction, GenresMessage, GenresPage, GenresViewData};
 pub(crate) use login::{LoginAction, LoginMessage, LoginPage};
-pub(crate) use playlists::{
-    PlaylistsAction, PlaylistsColumn, PlaylistsMessage, PlaylistsPage, PlaylistsViewData,
-};
-pub(crate) use queue::{
-    QueueAction, QueueColumn, QueueMessage, QueuePage, QueueSortMode, QueueViewData,
-};
+pub(crate) use playlists::{PlaylistsAction, PlaylistsMessage, PlaylistsPage, PlaylistsViewData};
+pub(crate) use queue::{QueueAction, QueueMessage, QueuePage, QueueSortMode, QueueViewData};
 pub(crate) use radios::{RadiosAction, RadiosMessage, RadiosPage, RadiosViewData};
 pub(crate) use settings::{SettingsAction, SettingsMessage, SettingsPage, SettingsViewData};
-pub(crate) use similar::{
-    SimilarAction, SimilarColumn, SimilarMessage, SimilarPage, SimilarViewData,
-};
-pub(crate) use songs::{SongsAction, SongsColumn, SongsMessage, SongsPage, SongsViewData};
+pub(crate) use similar::{SimilarAction, SimilarMessage, SimilarPage, SimilarViewData};
+pub(crate) use songs::{SongsAction, SongsMessage, SongsPage, SongsViewData};
 
 use crate::{
     app_message::Message,
@@ -311,6 +303,33 @@ pub(crate) const RADIOS_SEARCH_ID: &str = "radios_search_input";
 /// ```
 #[allow(unused_macros)]
 macro_rules! define_view_columns {
+    // WITH setter annotations — production views that persist column visibility.
+    // `=> $setter` maps each variant to its `SettingsManager` method name and
+    // emits `impl ColumnPersist` so `Nokkvi::persist_column_visibility` can
+    // dispatch without per-view boilerplate.
+    (
+        $col_enum:ident => $vis_struct:ident {
+            $( $variant:ident : $field:ident = $default:expr => $setter:ident ),* $(,)?
+        }
+    ) => {
+        $crate::views::define_view_columns!(
+            $col_enum => $vis_struct { $( $variant : $field = $default ),* }
+        );
+
+        impl nokkvi_data::services::settings::ColumnPersist for $col_enum {
+            fn apply_to_settings(
+                self,
+                sm: &mut nokkvi_data::services::settings::SettingsManager,
+                value: bool,
+            ) -> anyhow::Result<()> {
+                match self {
+                    $( Self::$variant => sm.$setter(value) ),*
+                }
+            }
+        }
+    };
+    // WITHOUT setter annotations — test-only or non-persistent column enums.
+    // Emits only the column enum, visibility struct, Default, get, and set.
     (
         $col_enum:ident => $vis_struct:ident {
             $( $variant:ident : $field:ident = $default:expr ),* $(,)?

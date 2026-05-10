@@ -47,14 +47,14 @@ pub struct ArtistsPage {
 // discovery affordance for multi-selection.
 super::define_view_columns! {
     ArtistsColumn => ArtistsColumnVisibility {
-        Select: select = false,
-        Index: index = true,
-        Thumbnail: thumbnail = true,
-        Stars: stars = true,
-        AlbumCount: albumcount = true,
-        SongCount: songcount = true,
-        Plays: plays = true,
-        Love: love = true,
+        Select: select = false => set_artists_show_select,
+        Index: index = true => set_artists_show_index,
+        Thumbnail: thumbnail = true => set_artists_show_thumbnail,
+        Stars: stars = true => set_artists_show_stars,
+        AlbumCount: albumcount = true => set_artists_show_albumcount,
+        SongCount: songcount = true => set_artists_show_songcount,
+        Plays: plays = true => set_artists_show_plays,
+        Love: love = true => set_artists_show_love,
     }
 }
 

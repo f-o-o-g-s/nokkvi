@@ -1052,3 +1052,10 @@ impl From<crate::types::view_preferences::AllViewPreferences>
         }
     }
 }
+
+/// Implemented by column enums emitted by `define_view_columns!` (with `=> setter` annotations).
+/// Routes a column variant + bool to its `SettingsManager` setter so `SettingsService::set_column_visibility`
+/// can persist the toggle without per-view boilerplate.
+pub trait ColumnPersist: Copy + Send + 'static {
+    fn apply_to_settings(self, sm: &mut SettingsManager, value: bool) -> Result<()>;
+}

@@ -41,11 +41,11 @@ pub struct GenresPage {
 // render their artwork column.
 super::define_view_columns! {
     GenresColumn => GenresColumnVisibility {
-        Select: select = false,
-        Index: index = true,
-        Thumbnail: thumbnail = true,
-        AlbumCount: albumcount = true,
-        SongCount: songcount = true,
+        Select: select = false => set_genres_show_select,
+        Index: index = true => set_genres_show_index,
+        Thumbnail: thumbnail = true => set_genres_show_thumbnail,
+        AlbumCount: albumcount = true => set_genres_show_albumcount,
+        SongCount: songcount = true => set_genres_show_songcount,
     }
 }
 

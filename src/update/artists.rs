@@ -527,7 +527,7 @@ impl Nokkvi {
                 return Task::done(Message::FindTopSongs { artist_name, label });
             }
             ArtistsAction::ColumnVisibilityChanged(col, value) => {
-                return self.persist_artists_column_visibility(col, value);
+                return self.persist_column_visibility(col, value);
             }
             ArtistsAction::LoadLargeArtwork => {
                 // Settled-scroll / hotkey navigation: refresh viewport mini
@@ -591,59 +591,6 @@ impl Nokkvi {
             tasks.extend(prefetch);
             Task::batch(tasks)
         }
-    }
-
-    /// Persist the user's artists column visibility toggle to config.toml +
-    /// redb via `AppService::settings()`. The page's in-memory state was
-    /// already mutated in `ArtistsPage::update`.
-    pub(crate) fn persist_artists_column_visibility(
-        &self,
-        col: views::ArtistsColumn,
-        value: bool,
-    ) -> Task<Message> {
-        match col {
-            views::ArtistsColumn::Stars => {
-                self.shell_spawn("persist_artists_show_stars", move |shell| async move {
-                    shell.settings().set_artists_show_stars(value).await
-                });
-            }
-            views::ArtistsColumn::AlbumCount => {
-                self.shell_spawn("persist_artists_show_albumcount", move |shell| async move {
-                    shell.settings().set_artists_show_albumcount(value).await
-                });
-            }
-            views::ArtistsColumn::SongCount => {
-                self.shell_spawn("persist_artists_show_songcount", move |shell| async move {
-                    shell.settings().set_artists_show_songcount(value).await
-                });
-            }
-            views::ArtistsColumn::Plays => {
-                self.shell_spawn("persist_artists_show_plays", move |shell| async move {
-                    shell.settings().set_artists_show_plays(value).await
-                });
-            }
-            views::ArtistsColumn::Love => {
-                self.shell_spawn("persist_artists_show_love", move |shell| async move {
-                    shell.settings().set_artists_show_love(value).await
-                });
-            }
-            views::ArtistsColumn::Index => {
-                self.shell_spawn("persist_artists_show_index", move |shell| async move {
-                    shell.settings().set_artists_show_index(value).await
-                });
-            }
-            views::ArtistsColumn::Thumbnail => {
-                self.shell_spawn("persist_artists_show_thumbnail", move |shell| async move {
-                    shell.settings().set_artists_show_thumbnail(value).await
-                });
-            }
-            views::ArtistsColumn::Select => {
-                self.shell_spawn("persist_artists_show_select", move |shell| async move {
-                    shell.settings().set_artists_show_select(value).await
-                });
-            }
-        }
-        Task::none()
     }
 
     /// Routes `Message::ArtistsLoader(...)` arrivals to the existing

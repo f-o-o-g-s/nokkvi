@@ -723,60 +723,12 @@ impl Nokkvi {
                 return Task::done(Message::FindSimilar { id, label });
             }
             AlbumsAction::ColumnVisibilityChanged(col, value) => {
-                return self.persist_albums_column_visibility(col, value);
+                return self.persist_column_visibility(col, value);
             }
             _ => {} // None + already-handled common actions
         }
 
         cmd.map(Message::Albums)
-    }
-
-    /// Persist the user's albums column visibility toggle to config.toml +
-    /// redb via `AppService::settings()`. The page's in-memory state was
-    /// already mutated in `AlbumsPage::update`.
-    pub(crate) fn persist_albums_column_visibility(
-        &self,
-        col: views::AlbumsColumn,
-        value: bool,
-    ) -> Task<Message> {
-        match col {
-            views::AlbumsColumn::Stars => {
-                self.shell_spawn("persist_albums_show_stars", move |shell| async move {
-                    shell.settings().set_albums_show_stars(value).await
-                });
-            }
-            views::AlbumsColumn::SongCount => {
-                self.shell_spawn("persist_albums_show_songcount", move |shell| async move {
-                    shell.settings().set_albums_show_songcount(value).await
-                });
-            }
-            views::AlbumsColumn::Plays => {
-                self.shell_spawn("persist_albums_show_plays", move |shell| async move {
-                    shell.settings().set_albums_show_plays(value).await
-                });
-            }
-            views::AlbumsColumn::Love => {
-                self.shell_spawn("persist_albums_show_love", move |shell| async move {
-                    shell.settings().set_albums_show_love(value).await
-                });
-            }
-            views::AlbumsColumn::Index => {
-                self.shell_spawn("persist_albums_show_index", move |shell| async move {
-                    shell.settings().set_albums_show_index(value).await
-                });
-            }
-            views::AlbumsColumn::Thumbnail => {
-                self.shell_spawn("persist_albums_show_thumbnail", move |shell| async move {
-                    shell.settings().set_albums_show_thumbnail(value).await
-                });
-            }
-            views::AlbumsColumn::Select => {
-                self.shell_spawn("persist_albums_show_select", move |shell| async move {
-                    shell.settings().set_albums_show_select(value).await
-                });
-            }
-        }
-        Task::none()
     }
 
     /// Routes `Message::AlbumsLoader(...)` arrivals to the existing

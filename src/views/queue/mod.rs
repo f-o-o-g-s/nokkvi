@@ -51,15 +51,15 @@ pub struct QueuePage {
 // columns stay always-on.
 super::define_view_columns! {
     QueueColumn => QueueColumnVisibility {
-        Select: select = false,
-        Index: index = true,
-        Thumbnail: thumbnail = true,
-        Stars: stars = true,
-        Album: album = true,
-        Duration: duration = true,
-        Love: love = true,
-        Plays: plays = false,
-        Genre: genre = false,
+        Select: select = false => set_queue_show_select,
+        Index: index = true => set_queue_show_index,
+        Thumbnail: thumbnail = true => set_queue_show_thumbnail,
+        Stars: stars = true => set_queue_show_stars,
+        Album: album = true => set_queue_show_album,
+        Duration: duration = true => set_queue_show_duration,
+        Love: love = true => set_queue_show_love,
+        Plays: plays = false => set_queue_show_plays,
+        Genre: genre = false => set_queue_show_genre,
     }
 }
 

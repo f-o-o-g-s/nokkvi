@@ -16,7 +16,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::{
-    services::settings::SettingsManager,
+    services::settings::{ColumnPersist, SettingsManager},
     types::{
         hotkey_config::{HotkeyAction, HotkeyConfig, KeyCombo},
         player_settings::{
@@ -286,6 +286,18 @@ impl SettingsService {
     delegate_setter!(set_similar_show_duration, bool);
     delegate_setter!(set_similar_show_love, bool);
     delegate_setter!(set_similar_show_select, bool);
+
+    /// Persist a single column visibility toggle using the `ColumnPersist` impl
+    /// emitted by `define_view_columns!`. Replaces the 7 per-view
+    /// `persist_*_column_visibility` helpers on `Nokkvi`.
+    pub async fn set_column_visibility<C: ColumnPersist>(
+        &self,
+        col: C,
+        value: bool,
+    ) -> anyhow::Result<()> {
+        let mut sm = self.settings_manager.lock().await;
+        col.apply_to_settings(&mut sm, value)
+    }
 
     // -- Volume normalization / ReplayGain --
     delegate_setter!(set_volume_normalization, VolumeNormalizationMode);

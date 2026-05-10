@@ -53,13 +53,13 @@ pub struct AlbumsPage {
 // multi-selection.
 super::define_view_columns! {
     AlbumsColumn => AlbumsColumnVisibility {
-        Select: select = false,
-        Index: index = true,
-        Thumbnail: thumbnail = true,
-        Stars: stars = false,
-        SongCount: songcount = true,
-        Plays: plays = false,
-        Love: love = true,
+        Select: select = false => set_albums_show_select,
+        Index: index = true => set_albums_show_index,
+        Thumbnail: thumbnail = true => set_albums_show_thumbnail,
+        Stars: stars = false => set_albums_show_stars,
+        SongCount: songcount = true => set_albums_show_songcount,
+        Plays: plays = false => set_albums_show_plays,
+        Love: love = true => set_albums_show_love,
     }
 }
 

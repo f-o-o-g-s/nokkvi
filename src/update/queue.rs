@@ -601,7 +601,7 @@ impl Nokkvi {
                 return Task::done(Message::NavigateAndExpandGenre { genre_id });
             }
             QueueAction::ColumnVisibilityChanged(col, value) => {
-                return self.persist_queue_column_visibility(col, value);
+                return self.persist_column_visibility(col, value);
             }
             QueueAction::OpenDefaultPlaylistPicker => {
                 return Task::done(Message::DefaultPlaylistPicker(
@@ -818,64 +818,6 @@ impl Nokkvi {
                 ))
             },
         )
-    }
-
-    /// Persist the user's queue column visibility toggle to config.toml +
-    /// redb via `AppService::settings()`. The page's in-memory state was
-    /// already mutated in `QueuePage::update`.
-    pub(crate) fn persist_queue_column_visibility(
-        &self,
-        col: views::QueueColumn,
-        value: bool,
-    ) -> Task<Message> {
-        match col {
-            views::QueueColumn::Stars => {
-                self.shell_spawn("persist_queue_show_stars", move |shell| async move {
-                    shell.settings().set_queue_show_stars(value).await
-                });
-            }
-            views::QueueColumn::Album => {
-                self.shell_spawn("persist_queue_show_album", move |shell| async move {
-                    shell.settings().set_queue_show_album(value).await
-                });
-            }
-            views::QueueColumn::Duration => {
-                self.shell_spawn("persist_queue_show_duration", move |shell| async move {
-                    shell.settings().set_queue_show_duration(value).await
-                });
-            }
-            views::QueueColumn::Love => {
-                self.shell_spawn("persist_queue_show_love", move |shell| async move {
-                    shell.settings().set_queue_show_love(value).await
-                });
-            }
-            views::QueueColumn::Plays => {
-                self.shell_spawn("persist_queue_show_plays", move |shell| async move {
-                    shell.settings().set_queue_show_plays(value).await
-                });
-            }
-            views::QueueColumn::Index => {
-                self.shell_spawn("persist_queue_show_index", move |shell| async move {
-                    shell.settings().set_queue_show_index(value).await
-                });
-            }
-            views::QueueColumn::Thumbnail => {
-                self.shell_spawn("persist_queue_show_thumbnail", move |shell| async move {
-                    shell.settings().set_queue_show_thumbnail(value).await
-                });
-            }
-            views::QueueColumn::Genre => {
-                self.shell_spawn("persist_queue_show_genre", move |shell| async move {
-                    shell.settings().set_queue_show_genre(value).await
-                });
-            }
-            views::QueueColumn::Select => {
-                self.shell_spawn("persist_queue_show_select", move |shell| async move {
-                    shell.settings().set_queue_show_select(value).await
-                });
-            }
-        }
-        Task::none()
     }
 
     /// Routes `Message::QueueLoader(...)` arrivals to the existing

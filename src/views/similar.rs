@@ -22,65 +22,16 @@ pub struct SimilarPage {
     pub column_visibility: SimilarColumnVisibility,
 }
 
-/// Toggleable similar columns. Title/Artist is always shown; everything
-/// else is user-toggleable through the columns-cog dropdown.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SimilarColumn {
-    Select,
-    Index,
-    Thumbnail,
-    Album,
-    Duration,
-    Love,
-}
-
-/// User-toggle state for each toggleable similar column.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SimilarColumnVisibility {
-    pub select: bool,
-    pub index: bool,
-    pub thumbnail: bool,
-    pub album: bool,
-    pub duration: bool,
-    pub love: bool,
-}
-
-impl Default for SimilarColumnVisibility {
-    fn default() -> Self {
-        // Match today's always-on layout (Index/Art/Album/Duration/Love); the
-        // Select column is opt-in like elsewhere in the app.
-        Self {
-            select: false,
-            index: true,
-            thumbnail: true,
-            album: true,
-            duration: true,
-            love: true,
-        }
-    }
-}
-
-impl SimilarColumnVisibility {
-    pub fn get(&self, col: SimilarColumn) -> bool {
-        match col {
-            SimilarColumn::Select => self.select,
-            SimilarColumn::Index => self.index,
-            SimilarColumn::Thumbnail => self.thumbnail,
-            SimilarColumn::Album => self.album,
-            SimilarColumn::Duration => self.duration,
-            SimilarColumn::Love => self.love,
-        }
-    }
-
-    pub fn set(&mut self, col: SimilarColumn, value: bool) {
-        match col {
-            SimilarColumn::Select => self.select = value,
-            SimilarColumn::Index => self.index = value,
-            SimilarColumn::Thumbnail => self.thumbnail = value,
-            SimilarColumn::Album => self.album = value,
-            SimilarColumn::Duration => self.duration = value,
-            SimilarColumn::Love => self.love = value,
-        }
+// Title/Artist is always shown; everything else is user-toggleable through the columns-cog dropdown.
+// Select is opt-in like everywhere else in the app; all others default on to match the historical layout.
+super::define_view_columns! {
+    SimilarColumn => SimilarColumnVisibility {
+        Select: select = false => set_similar_show_select,
+        Index: index = true => set_similar_show_index,
+        Thumbnail: thumbnail = true => set_similar_show_thumbnail,
+        Album: album = true => set_similar_show_album,
+        Duration: duration = true => set_similar_show_duration,
+        Love: love = true => set_similar_show_love,
     }
 }
 
