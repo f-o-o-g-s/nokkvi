@@ -218,6 +218,7 @@ impl LoaderTarget for ArtistsTarget {
         app.try_resolve_pending_expand_artist()
     }
 }
+
 // ── SongsTarget ──────────────────────────────────────────────────────────────
 
 pub(crate) struct SongsTarget;
@@ -287,6 +288,207 @@ impl LoaderTarget for SongsTarget {
     }
 }
 
-// ── Remaining specs (committed in subsequent slice) ──────────────────────────
+// ── GenresTarget ─────────────────────────────────────────────────────────────
+
 pub(crate) struct GenresTarget;
+
+impl LoaderTarget for GenresTarget {
+    type Item = nokkvi_data::backend::genres::GenreUIViewData;
+
+    fn library(app: &Nokkvi) -> &PagedBuffer<Self::Item> {
+        &app.library.genres
+    }
+
+    fn library_mut(app: &mut Nokkvi) -> &mut PagedBuffer<Self::Item> {
+        &mut app.library.genres
+    }
+
+    fn count_mut(app: &mut Nokkvi) -> &mut usize {
+        &mut app.library.counts.genres
+    }
+
+    fn slot_list_mut(app: &mut Nokkvi) -> &mut SlotListView {
+        &mut app.genres_page.common.slot_list
+    }
+
+    fn item_id(item: &Self::Item) -> &str {
+        &item.id
+    }
+
+    fn entity_label() -> &'static str {
+        "Genres"
+    }
+
+    fn apply_viewport_on_load(app: &mut Nokkvi, _background: bool, _anchor_id: Option<&str>) {
+        Self::slot_list_mut(app).viewport_offset = 0;
+    }
+
+    fn prefetch_artwork_tasks(app: &mut Nokkvi) -> Vec<Task<Message>> {
+        let mut tasks = Vec::new();
+        tasks.push(Task::done(Message::Artwork(
+            ArtworkMessage::StartCollagePrefetch(CollageTarget::Genre),
+        )));
+        if !app.library.genres.is_empty() {
+            tasks.push(Task::done(Message::Genres(
+                views::GenresMessage::SlotListSetOffset(0, iced::keyboard::Modifiers::default()),
+            )));
+        }
+        tasks
+    }
+
+    fn center_large_artwork_task(_app: &mut Nokkvi) -> Option<Task<Message>> {
+        None
+    }
+
+    fn try_resolve_pending_expand(app: &mut Nokkvi) -> Option<Task<Message>> {
+        app.try_resolve_pending_expand_genre()
+    }
+}
+
+// ── PlaylistsTarget ──────────────────────────────────────────────────────────
+
 pub(crate) struct PlaylistsTarget;
+
+impl LoaderTarget for PlaylistsTarget {
+    type Item = nokkvi_data::backend::playlists::PlaylistUIViewData;
+
+    fn library(app: &Nokkvi) -> &PagedBuffer<Self::Item> {
+        &app.library.playlists
+    }
+
+    fn library_mut(app: &mut Nokkvi) -> &mut PagedBuffer<Self::Item> {
+        &mut app.library.playlists
+    }
+
+    fn count_mut(app: &mut Nokkvi) -> &mut usize {
+        &mut app.library.counts.playlists
+    }
+
+    fn slot_list_mut(app: &mut Nokkvi) -> &mut SlotListView {
+        &mut app.playlists_page.common.slot_list
+    }
+
+    fn item_id(item: &Self::Item) -> &str {
+        &item.id
+    }
+
+    fn entity_label() -> &'static str {
+        "Playlists"
+    }
+
+    const CANCEL_PENDING_ON_ERR: bool = false;
+
+    fn apply_viewport_on_load(app: &mut Nokkvi, _background: bool, _anchor_id: Option<&str>) {
+        Self::slot_list_mut(app).viewport_offset = 0;
+    }
+
+    fn post_load_ok_hook(app: &mut Nokkvi) {
+        app.refresh_default_playlist_picker_after_load();
+    }
+
+    fn prefetch_artwork_tasks(app: &mut Nokkvi) -> Vec<Task<Message>> {
+        let mut tasks = Vec::new();
+        tasks.push(Task::done(Message::Artwork(
+            ArtworkMessage::StartCollagePrefetch(CollageTarget::Playlist),
+        )));
+        if !app.library.playlists.is_empty() {
+            tasks.push(Task::done(Message::Playlists(
+                views::PlaylistsMessage::SlotListSetOffset(0, iced::keyboard::Modifiers::default()),
+            )));
+        }
+        tasks
+    }
+
+    fn center_large_artwork_task(_app: &mut Nokkvi) -> Option<Task<Message>> {
+        None
+    }
+
+    fn try_resolve_pending_expand(_app: &mut Nokkvi) -> Option<Task<Message>> {
+        None
+    }
+}
+
+impl Nokkvi {
+    pub(crate) fn handle_loaded_with<T: LoaderTarget>(
+        &mut self,
+        result: Result<Vec<T::Item>, String>,
+        total_count: usize,
+        background: bool,
+        anchor_id: Option<String>,
+    ) -> Task<Message> {
+        *T::count_mut(self) = total_count;
+        match result {
+            Ok(items) => {
+                debug!(
+                    "✅ Loaded {} {}s (total: {})",
+                    items.len(),
+                    T::entity_label(),
+                    total_count
+                );
+                T::library_mut(self).set_first_page(items, total_count);
+                T::apply_viewport_on_load(self, background, anchor_id.as_deref());
+                T::post_load_ok_hook(self);
+
+                let mut tasks: Vec<Task<Message>> = T::prefetch_artwork_tasks(self);
+                if let Some(task) = T::center_large_artwork_task(self) {
+                    tasks.push(task);
+                }
+                if let Some(task) = T::try_resolve_pending_expand(self) {
+                    tasks.push(task);
+                }
+                if !tasks.is_empty() {
+                    return Task::batch(tasks);
+                }
+            }
+            Err(e) => {
+                if e.contains("Unauthorized") {
+                    T::library_mut(self).set_loading(false);
+                    return self.handle_session_expired();
+                }
+                error!("Error loading {}: {}", T::entity_label(), e);
+                T::library_mut(self).set_loading(false);
+                if T::CANCEL_PENDING_ON_ERR {
+                    self.cancel_pending_expand();
+                }
+                self.toast_error(format!("Failed to load {}: {e}", T::entity_label()));
+            }
+        }
+        Task::none()
+    }
+
+    pub(crate) fn handle_page_loaded_with<T: LoaderTarget>(
+        &mut self,
+        result: Result<Vec<T::Item>, String>,
+        total_count: usize,
+    ) -> Task<Message> {
+        match result {
+            Ok(new_items) => {
+                let count = new_items.len();
+                let loaded_before = T::library(self).loaded_count();
+                T::library_mut(self).append_page(new_items, total_count);
+                debug!(
+                    "📄 {} page loaded: {} new items ({}→{} of {})",
+                    T::entity_label(),
+                    count,
+                    loaded_before,
+                    T::library(self).loaded_count(),
+                    total_count,
+                );
+                if let Some(task) = T::try_resolve_pending_expand(self) {
+                    return task;
+                }
+            }
+            Err(e) => {
+                if e.contains("Unauthorized") {
+                    T::library_mut(self).set_loading(false);
+                    return self.handle_session_expired();
+                }
+                error!("Error loading {} page: {}", T::entity_label(), e);
+                T::library_mut(self).set_loading(false);
+                self.cancel_pending_expand();
+                self.toast_error(format!("Failed to load {}: {e}", T::entity_label()));
+            }
+        }
+        Task::none()
+    }
+}
