@@ -10,6 +10,10 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Cold-start visit to Genres no longer briefly shows slot thumbnails and then drops them to gray — the eager collage mini prefetch that evicted visible-viewport entries from the bounded artwork LRU is gone.
+- Scrollbar drag or rapid scroll on Genres / Playlists no longer leaves the right-side 3×3 collage panel showing gray tiles — collage fetches retry on Navidrome's request-throttle 429s, a per-app concurrent-fetch cap (16) keeps bursts under the server's backlog, and only the centered slot fans out the full 9-tile collage instead of every visible row.
+- Right-side artwork panel now keeps up with rapid viewport changes — holding Tab, dragging the scrollbar, or letting a roulette spin decelerate through slots refreshes the panel each time the centered slot changes (instead of staying stuck on whatever was cached when the motion started), and during fast cruise the slot-list mini fills in as a blurry placeholder until the full-res image arrives.
+
 ### Removed
 
 ## v0.3.14 — 2026-05-10
