@@ -402,9 +402,13 @@ impl PlaylistsPage {
                 pill_content,
             ))
         } else {
-            // album_count > 1 but collage NOT loaded yet - show placeholder
+            // Multi-album playlist with no collage cached — fall back to
+            // the slot-list mini at single-image size. Lets the panel
+            // track the centered slot during a roulette spin's fast
+            // cruise where the 9-tile fetch can't keep up with offset
+            // changes.
             Some(single_artwork_panel_with_pill::<PlaylistsMessage>(
-                None,
+                playlist_artwork.get(&playlist_id),
                 pill_content,
                 None,
                 None,

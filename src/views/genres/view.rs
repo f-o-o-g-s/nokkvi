@@ -246,8 +246,13 @@ impl GenresPage {
             // Render 3x3 collage grid (2+ albums)
             Some(collage_artwork_panel::<GenresMessage>(handles))
         } else {
-            // album_count > 1 but collage NOT loaded yet - show placeholder
-            Some(single_artwork_panel::<GenresMessage>(None))
+            // Multi-album genre with no collage cached — fall back to the
+            // slot-list mini at single-image size. Lets the panel track
+            // the centered slot during a roulette spin's fast cruise where
+            // the 9-tile fetch can't keep up with offset changes.
+            Some(single_artwork_panel::<GenresMessage>(
+                genre_artwork.get(&genre_id),
+            ))
         };
 
         crate::widgets::base_slot_list_layout::base_slot_list_layout_with_handle(

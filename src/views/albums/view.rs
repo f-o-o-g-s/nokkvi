@@ -247,7 +247,16 @@ impl AlbumsPage {
             None => None,
         });
 
-        let artwork_handle = centered_album.and_then(|album| data.large_artwork.get(&album.id));
+        // Fall back to the slot-list mini when the large isn't loaded yet
+        // (cruise phase of a roulette spin scrolls through items faster
+        // than LoadLarge can roundtrip). The mini is upscaled by Iced's
+        // image widget — blurry but instantly available, so the panel
+        // tracks the centered slot instead of going blank.
+        let artwork_handle = centered_album.and_then(|album| {
+            data.large_artwork
+                .get(&album.id)
+                .or_else(|| data.album_art.get(&album.id))
+        });
         let active_dominant_color =
             centered_album.and_then(|album| data.dominant_colors.get(&album.id).copied());
 

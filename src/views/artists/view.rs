@@ -242,7 +242,13 @@ impl ArtistsPage {
             None => None,
         });
 
-        let artwork_handle = centered_artist.and_then(|artist| data.large_artwork.get(&artist.id));
+        // Fall back to the slot-list mini when the large isn't loaded yet —
+        // see Albums view for rationale.
+        let artwork_handle = centered_artist.and_then(|artist| {
+            data.large_artwork
+                .get(&artist.id)
+                .or_else(|| data.album_art.get(&artist.id))
+        });
         let active_dominant_color =
             centered_artist.and_then(|artist| data.dominant_colors.get(&artist.id).copied());
 

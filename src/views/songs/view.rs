@@ -497,11 +497,17 @@ impl SongsPage {
 
         use crate::widgets::base_slot_list_layout::single_artwork_panel_with_pill;
 
-        // Build artwork column component - use album artwork of centered song
+        // Build artwork column component - use album artwork of centered song.
+        // Fall back to the slot-list mini when the large isn't loaded yet —
+        // see Albums view for rationale.
         let centered_song = center_index.and_then(|idx| songs.get(idx));
         let artwork_handle = centered_song
             .and_then(|song| song.album_id.as_ref())
-            .and_then(|album_id| data.large_artwork.get(album_id));
+            .and_then(|album_id| {
+                data.large_artwork
+                    .get(album_id)
+                    .or_else(|| data.album_art.get(album_id))
+            });
         let active_dominant_color = centered_song
             .and_then(|song| song.album_id.as_ref())
             .and_then(|album_id| data.dominant_colors.get(album_id).copied());

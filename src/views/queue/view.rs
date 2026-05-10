@@ -975,12 +975,21 @@ impl QueuePage {
 
         let slot_list_content: Element<'a, QueueMessage> = slot_list_content;
 
-        // Get large artwork: prioritize currently playing song, fallback to centered song
+        // Get large artwork: prioritize currently playing song, fall back
+        // to centered song's large, then to either song's mini. Mini is
+        // upscaled by Iced — blurry, but lets the panel track the centered
+        // slot during a roulette spin's fast cruise where LoadLarge can't
+        // keep up with offset changes (see Albums view for the same
+        // pattern).
         let center_artwork_handle: Option<&iced::widget::image::Handle> = if data.is_playing {
             current_playing_song_id
                 .as_ref()
                 .and_then(|song_id| queue_songs.iter().find(|s| &s.id == song_id))
-                .and_then(|song| large_artwork.get(&song.album_id))
+                .and_then(|song| {
+                    large_artwork
+                        .get(&song.album_id)
+                        .or_else(|| album_art.get(&song.album_id))
+                })
         } else {
             None
         }
@@ -989,7 +998,11 @@ impl QueuePage {
                 .slot_list
                 .get_center_item_index(queue_songs.len())
                 .and_then(|center_idx| queue_songs.get(center_idx))
-                .and_then(|song| large_artwork.get(&song.album_id))
+                .and_then(|song| {
+                    large_artwork
+                        .get(&song.album_id)
+                        .or_else(|| album_art.get(&song.album_id))
+                })
         });
 
         use crate::widgets::base_slot_list_layout::single_artwork_panel_with_menu;
