@@ -136,9 +136,9 @@ impl Nokkvi {
             View::Albums => Task::done(Message::Albums(views::AlbumsMessage::SlotList(
                 crate::widgets::SlotListPageMessage::NavigateUp,
             ))),
-            View::Artists => {
-                Task::done(Message::Artists(views::ArtistsMessage::SlotListNavigateUp))
-            }
+            View::Artists => Task::done(Message::Artists(views::ArtistsMessage::SlotList(
+                crate::widgets::SlotListPageMessage::NavigateUp,
+            ))),
             View::Queue => Task::done(Message::Queue(views::QueueMessage::SlotListNavigateUp)),
             View::Songs => Task::done(Message::Songs(views::SongsMessage::SlotListNavigateUp)),
             View::Genres => Task::done(Message::Genres(views::GenresMessage::SlotList(
@@ -185,9 +185,9 @@ impl Nokkvi {
             View::Albums => Task::done(Message::Albums(views::AlbumsMessage::SlotList(
                 crate::widgets::SlotListPageMessage::NavigateDown,
             ))),
-            View::Artists => Task::done(Message::Artists(
-                views::ArtistsMessage::SlotListNavigateDown,
-            )),
+            View::Artists => Task::done(Message::Artists(views::ArtistsMessage::SlotList(
+                crate::widgets::SlotListPageMessage::NavigateDown,
+            ))),
             View::Queue => Task::done(Message::Queue(views::QueueMessage::SlotListNavigateDown)),
             View::Songs => Task::done(Message::Songs(views::SongsMessage::SlotListNavigateDown)),
             View::Genres => Task::done(Message::Genres(views::GenresMessage::SlotList(
@@ -210,12 +210,12 @@ impl Nokkvi {
                     iced::keyboard::Modifiers::default(),
                 ),
             ))),
-            View::Artists => {
-                Task::done(Message::Artists(views::ArtistsMessage::SlotListSetOffset(
+            View::Artists => Task::done(Message::Artists(views::ArtistsMessage::SlotList(
+                crate::widgets::SlotListPageMessage::SetOffset(
                     offset,
                     iced::keyboard::Modifiers::default(),
-                )))
-            }
+                ),
+            ))),
             View::Queue => Task::done(Message::Queue(views::QueueMessage::SlotListSetOffset(
                 offset,
                 iced::keyboard::Modifiers::default(),
@@ -295,9 +295,9 @@ impl Nokkvi {
             View::Albums => Task::done(Message::Albums(views::AlbumsMessage::SlotList(
                 crate::widgets::SlotListPageMessage::ActivateCenter,
             ))),
-            View::Artists => Task::done(Message::Artists(
-                views::ArtistsMessage::SlotListActivateCenter,
-            )),
+            View::Artists => Task::done(Message::Artists(views::ArtistsMessage::SlotList(
+                crate::widgets::SlotListPageMessage::ActivateCenter,
+            ))),
             View::Queue => Task::done(Message::Queue(views::QueueMessage::SlotListActivateCenter)),
             View::Songs => Task::done(Message::Songs(views::SongsMessage::SlotListActivateCenter)),
             View::Genres => Task::done(Message::Genres(views::GenresMessage::SlotList(
