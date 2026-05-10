@@ -103,59 +103,47 @@ impl PlaylistsPage {
                 PlaylistsMessage::OpenDefaultPlaylistPicker,
             );
 
-        let column_dropdown: Element<'a, PlaylistsMessage> = {
-            use crate::widgets::checkbox_dropdown::checkbox_dropdown;
-            let items: Vec<(PlaylistsColumn, &'static str, bool)> = vec![
-                (
-                    PlaylistsColumn::Select,
-                    "Select",
-                    self.column_visibility.select,
-                ),
-                (
-                    PlaylistsColumn::Index,
-                    "Index",
-                    self.column_visibility.index,
-                ),
-                (
-                    PlaylistsColumn::Thumbnail,
-                    "Thumbnail",
-                    self.column_visibility.thumbnail,
-                ),
-                (
-                    PlaylistsColumn::SongCount,
-                    "Song count",
-                    self.column_visibility.songcount,
-                ),
-                (
-                    PlaylistsColumn::Duration,
-                    "Duration",
-                    self.column_visibility.duration,
-                ),
-                (
-                    PlaylistsColumn::UpdatedAt,
-                    "Updated at",
-                    self.column_visibility.updatedat,
-                ),
-            ];
-            checkbox_dropdown(
-                "assets/icons/columns-3-cog.svg",
-                "Show/hide columns",
-                items,
+        let column_dropdown: Element<'a, PlaylistsMessage> =
+            crate::widgets::checkbox_dropdown::view_columns_dropdown(
+                crate::View::Playlists,
+                vec![
+                    (
+                        PlaylistsColumn::Select,
+                        "Select",
+                        self.column_visibility.select,
+                    ),
+                    (
+                        PlaylistsColumn::Index,
+                        "Index",
+                        self.column_visibility.index,
+                    ),
+                    (
+                        PlaylistsColumn::Thumbnail,
+                        "Thumbnail",
+                        self.column_visibility.thumbnail,
+                    ),
+                    (
+                        PlaylistsColumn::SongCount,
+                        "Song count",
+                        self.column_visibility.songcount,
+                    ),
+                    (
+                        PlaylistsColumn::Duration,
+                        "Duration",
+                        self.column_visibility.duration,
+                    ),
+                    (
+                        PlaylistsColumn::UpdatedAt,
+                        "Updated at",
+                        self.column_visibility.updatedat,
+                    ),
+                ],
                 PlaylistsMessage::ToggleColumnVisible,
-                |trigger_bounds| match trigger_bounds {
-                    Some(b) => PlaylistsMessage::SetOpenMenu(Some(
-                        crate::app_message::OpenMenu::CheckboxDropdown {
-                            view: crate::View::Playlists,
-                            trigger_bounds: b,
-                        },
-                    )),
-                    None => PlaylistsMessage::SetOpenMenu(None),
-                },
+                PlaylistsMessage::SetOpenMenu,
                 data.column_dropdown_open,
                 data.column_dropdown_trigger_bounds,
             )
-            .into()
-        };
+            .into();
 
         // Header's trailing slot only takes one element — bundle the
         // existing default-playlist chip with the new columns-cog into a

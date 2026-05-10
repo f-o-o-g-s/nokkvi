@@ -83,46 +83,34 @@ impl QueuePage {
         // Build the columns-visibility dropdown for the queue's view header.
         // Indices match the order in `items` below; the closure converts
         // them back to `QueueColumn` variants for the toggle message.
-        let column_dropdown: Element<'a, QueueMessage> = {
-            use crate::widgets::checkbox_dropdown::checkbox_dropdown;
-            let items: Vec<(QueueColumn, &'static str, bool)> = vec![
-                (QueueColumn::Select, "Select", self.column_visibility.select),
-                (QueueColumn::Index, "Index", self.column_visibility.index),
-                (
-                    QueueColumn::Thumbnail,
-                    "Thumbnail",
-                    self.column_visibility.thumbnail,
-                ),
-                (QueueColumn::Stars, "Stars", self.column_visibility.stars),
-                (QueueColumn::Album, "Album", self.column_visibility.album),
-                (QueueColumn::Genre, "Genre", self.column_visibility.genre),
-                (
-                    QueueColumn::Duration,
-                    "Duration",
-                    self.column_visibility.duration,
-                ),
-                (QueueColumn::Love, "Love", self.column_visibility.love),
-                (QueueColumn::Plays, "Plays", self.column_visibility.plays),
-            ];
-            checkbox_dropdown(
-                "assets/icons/columns-3-cog.svg",
-                "Show/hide columns",
-                items,
+        let column_dropdown: Element<'a, QueueMessage> =
+            crate::widgets::checkbox_dropdown::view_columns_dropdown(
+                crate::View::Queue,
+                vec![
+                    (QueueColumn::Select, "Select", self.column_visibility.select),
+                    (QueueColumn::Index, "Index", self.column_visibility.index),
+                    (
+                        QueueColumn::Thumbnail,
+                        "Thumbnail",
+                        self.column_visibility.thumbnail,
+                    ),
+                    (QueueColumn::Stars, "Stars", self.column_visibility.stars),
+                    (QueueColumn::Album, "Album", self.column_visibility.album),
+                    (QueueColumn::Genre, "Genre", self.column_visibility.genre),
+                    (
+                        QueueColumn::Duration,
+                        "Duration",
+                        self.column_visibility.duration,
+                    ),
+                    (QueueColumn::Love, "Love", self.column_visibility.love),
+                    (QueueColumn::Plays, "Plays", self.column_visibility.plays),
+                ],
                 QueueMessage::ToggleColumnVisible,
-                |trigger_bounds| match trigger_bounds {
-                    Some(b) => QueueMessage::SetOpenMenu(Some(
-                        crate::app_message::OpenMenu::CheckboxDropdown {
-                            view: crate::View::Queue,
-                            trigger_bounds: b,
-                        },
-                    )),
-                    None => QueueMessage::SetOpenMenu(None),
-                },
+                QueueMessage::SetOpenMenu,
                 data.column_dropdown_open,
                 data.column_dropdown_trigger_bounds,
             )
-            .into()
-        };
+            .into();
 
         // When the user has enabled the default-playlist chip, render it
         // alongside the column-visibility dropdown in the trailing slot.
