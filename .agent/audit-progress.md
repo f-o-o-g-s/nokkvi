@@ -115,7 +115,7 @@ When you complete an item, append the commit ref(s) and flip the status. Keep th
 | 1 | `View` enum match-block fanout + 8 silent `_ =>` arms | 🟡 partial | Wildcards eliminated in §7 #2 fanout (`61593bc..6441198`, 2026-05-08); per-`View` dispatch onto `ViewPage` (§7 #9) remains open. |
 | 2 | `item_type: &str` carrying entity kind | ✅ done | Same as §7 #5. |
 | 3 | Settings 3 parallel lists | ✅ done | Same as §7 #10. |
-| 4 | `HotkeyAction` parallel matches (`hotkey_action_to_message`, `hotkey_action_to_key`) | ❌ open | Not verified. The hotkey macro consolidation in `da1723d` (pre-audit) closed part of this; the two parallel matches the audit cites may still be hand-written. |
+| **4** | **`HotkeyAction` parallel matches (`hotkey_action_to_message`, `hotkey_action_to_key`)** | **✅ done** | `c304391` (2026-05-09): `settings_key` field added to `define_hotkey_actions!` macro; `fn settings_key(&self) -> &'static str` emitted on `HotkeyAction`; 44-arm `hotkey_action_to_key` in `items_hotkeys.rs` deleted; 2 call sites replaced with `action.settings_key()`. `hotkey_action_to_message` in `global.rs` left unchanged (UI-crate `Message` type cannot enter the data crate). |
 | 5 | Visualizer parallel `Vec<f64>` arrays | ❌ open | Not verified. |
 | 6 | `SortMode` × per-view `*_OPTIONS` arrays | ❌ open | No central `pub const TABLE` in `data/src/types/sort_mode.rs`. |
 | 7 | `OpenMenu::CheckboxDropdown { view: View::X, ... }` per-view construction | ❌ open | No `SlotListPageState::checkbox_dropdown_open_message` helper. |
