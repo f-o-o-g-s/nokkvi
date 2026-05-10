@@ -80,6 +80,12 @@ pub struct RouletteState {
     /// Decel keyframe holds are already ≥ 50 ms, so the throttle is
     /// inactive during decel — every click fires its SFX.
     pub last_sfx_at: Option<std::time::Instant>,
+    /// Last time a viewport-artwork prefetch was dispatched. Throttled
+    /// so the spin doesn't hammer the artwork API at 60 Hz — without
+    /// this, the roulette would queue duplicate fetches faster than
+    /// they can return and the LRU snapshot lags behind the spinning
+    /// viewport, leaving thumbnails as gray boxes until settle.
+    pub last_prefetch_at: Option<std::time::Instant>,
 }
 
 impl RouletteState {

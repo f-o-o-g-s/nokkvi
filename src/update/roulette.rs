@@ -52,6 +52,14 @@ const ALL_DECEL_WEIGHT: u64 = 4;
 /// keyframes after the natural walk for the final wobble.
 const NATURAL_KEYFRAME_COUNT: usize = 17;
 
+/// Minimum gap between viewport-artwork prefetch dispatches during the
+/// spin. Matches the normal-scroll `seek_settled_timer` debounce so
+/// the spin doesn't queue 60 prefetch batches per second — each batch
+/// covers the visible viewport, dedup'd against the artwork LRU, and
+/// new viewport positions are checked again 150 ms later. By settle,
+/// every album the wheel scrolled past has had its thumbnail fetched.
+const PREFETCH_MIN_INTERVAL_MS: u64 = 150;
+
 impl Nokkvi {
     pub(crate) fn handle_roulette_message(&mut self, msg: RouletteMessage) -> Task<Message> {
         match msg {
@@ -188,6 +196,7 @@ impl Nokkvi {
             start_time: Instant::now(),
             last_offset: original_offset,
             last_sfx_at: None,
+            last_prefetch_at: None,
         });
 
         Task::none()
@@ -204,9 +213,11 @@ impl Nokkvi {
         let target_idx = state.target_idx;
         let last_offset = state.last_offset;
         let last_sfx_at = state.last_sfx_at;
+        let last_prefetch_at = state.last_prefetch_at;
 
         let (offset, settled) = state.position_at(now);
 
+        let mut prefetch_task: Option<Task<Message>> = None;
         if offset != last_offset {
             self.roulette_apply_offset(view, offset, total_items);
 
@@ -220,6 +231,23 @@ impl Nokkvi {
                     s.last_sfx_at = Some(now);
                 }
             }
+
+            // Dispatch viewport-artwork prefetch — without this, the
+            // spin scrolls past slots whose thumbnails were never
+            // requested and the slot list shows gray boxes until
+            // settle. Throttled to ~150 ms so we don't queue 60
+            // batches per second.
+            let should_prefetch = last_prefetch_at.is_none_or(|t| {
+                now.saturating_duration_since(t).as_millis() as u64 >= PREFETCH_MIN_INTERVAL_MS
+            });
+            if should_prefetch {
+                let task = self.prefetch_viewport_artwork();
+                if let Some(s) = self.roulette.as_mut() {
+                    s.last_prefetch_at = Some(now);
+                }
+                prefetch_task = Some(task);
+            }
+
             if let Some(s) = self.roulette.as_mut() {
                 s.last_offset = offset;
             }
@@ -229,10 +257,14 @@ impl Nokkvi {
             trace!("Roulette settle on view={:?} idx={}", view, target_idx);
             self.sfx_engine.play(SfxType::Enter);
             self.roulette = None;
-            return self.roulette_settle_play(view, target_idx, total_items);
+            let settle_task = self.roulette_settle_play(view, target_idx, total_items);
+            return match prefetch_task {
+                Some(p) => Task::batch([p, settle_task]),
+                None => settle_task,
+            };
         }
 
-        Task::none()
+        prefetch_task.unwrap_or_else(Task::none)
     }
 
     fn handle_roulette_cancel(&mut self) -> Task<Message> {
@@ -656,6 +688,7 @@ mod tests {
             start_time: Instant::now(),
             last_offset: original,
             last_sfx_at: None,
+            last_prefetch_at: None,
         }
     }
 
@@ -688,6 +721,7 @@ mod tests {
             start_time: Instant::now(),
             last_offset: original,
             last_sfx_at: None,
+            last_prefetch_at: None,
         }
     }
 
