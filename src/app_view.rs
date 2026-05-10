@@ -7,11 +7,7 @@ use iced::{
     widget::{Stack, column, container},
 };
 
-use crate::{
-    Nokkvi, Screen, View,
-    app_message::Message,
-    views, widgets,
-};
+use crate::{Nokkvi, Screen, View, app_message::Message, views, widgets};
 
 /// Extract `(is_open, trigger_bounds)` for a view's column-visibility
 /// `checkbox_dropdown` from the root-level open-menu state. Returns the open

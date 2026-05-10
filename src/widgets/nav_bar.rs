@@ -72,7 +72,7 @@ pub(crate) struct NavBarViewData {
     pub window_width: f32,
     /// Current light mode state (for hamburger menu toggle label)
     pub is_light_mode: bool,
-/// Whether the settings view is currently open (disables nav tab highlighting)
+    /// Whether the settings view is currently open (disables nav tab highlighting)
     pub settings_open: bool,
     /// Local music path for "Show in File Manager" (empty = not configured)
     pub local_music_path: String,
