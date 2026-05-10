@@ -90,12 +90,12 @@ When you complete an item, append the commit ref(s) and flip the status. Keep th
 | 5 | Settings 3-parallel-list drift | ✅ done | Same as §7 #10. |
 | 6 | Hotkey star/rating boilerplate | ❓ stale path | Same as §7 #4. |
 | 7 | Per-row library context-menu wrapper | ❌ open | No `wrap_library_row` helper in `src/widgets/`. |
-| 8 | Per-view "columns cog" dropdown | ❌ open | Not verified. Re-check before declaring. |
+| 8 | Per-view "columns cog" dropdown / `PlayNextBatch` helper | 🟡 partial | `play_next_batch_task` helper landed in `36e2160` (main). `albums.rs` migrated in `36e2160`; `artists.rs` migrated in `77d5860` (refactor/batch2-artists). Remaining lanes not yet merged. |
 | 9 | Paginated library loader Pattern A | ❌ open | No `paginated_load_task` helper. |
 | 10 | Bulk fixture + scenario-seeder helpers in tests | ❌ open | Not verified. |
 | 11 | Handler prologue (SetOpenMenu / Roulette / play_view_sfx) | ❌ open | No `dispatch_view_chrome` free fn. |
-| 12 | `AddBatchToQueue` insert-or-append | ❌ open | No `add_or_insert_batch_to_queue_task` helper. |
-| 13 | `ToggleStar` with optimistic revert | ❌ open | No `toggle_star_with_revert_task` helper. |
+| 12 | `AddBatchToQueue` insert-or-append | 🟡 partial | `add_or_insert_batch_to_queue_task` helper landed in `36e2160` (main). `albums.rs` migrated in `36e2160`; `artists.rs` migrated in `77d5860` (refactor/batch2-artists). Remaining lanes (songs, genres, playlists, radios) not yet merged. |
+| 13 | `ToggleStar` with optimistic revert | 🟡 partial | `toggle_star_with_revert_task` helper landed in `36e2160` (main). `albums.rs` migrated in `36e2160`; `artists.rs` migrated in `77d5860` (refactor/batch2-artists). Remaining lanes not yet merged. |
 | 14 | 3D-button pressed-state color ramp | ❌ open | No `BevelStateColors::compute()` in `src/widgets/`. |
 | 15 | Sub-fetch Unauthorized routing | ❓ unverified | Same as B10 — locate first. |
 | 16 | `HasCommonAction` opt-out for Radios | ❌ open | Not verified. Re-check before declaring. |
