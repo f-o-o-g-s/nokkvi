@@ -96,20 +96,8 @@ pub struct AlbumsViewData<'a> {
 /// Messages for local album page interactions
 #[derive(Debug, Clone)]
 pub enum AlbumsMessage {
-    // Slot list navigation
-    SlotListNavigateUp,
-    SlotListNavigateDown,
-    SlotListSetOffset(usize, iced::keyboard::Modifiers),
-    SlotListScrollSeek(usize),
-    SlotListActivateCenter,
-    SlotListClickPlay(usize), // Click non-center to play directly (skip focus)
-    /// Click on a row's leading select checkbox — toggles `item_index` in
-    /// `selected_indices`. No play/highlight side effects.
-    SlotListSelectionToggle(usize),
-    /// Click on the tri-state "select all" header — fills selection with
-    /// every visible row, or clears if every visible row is already selected.
-    SlotListSelectAllToggle,
-    AddCenterToQueue, // Add centered album to queue (Shift+Q)
+    // Slot list navigation / activation / selection / queue (wrapped carrier)
+    SlotList(crate::widgets::SlotListPageMessage),
 
     // Mouse click on star/heart (item_index, value)
     ClickSetRating(usize, usize), // (item_index, rating 1-5)
@@ -117,8 +105,6 @@ pub enum AlbumsMessage {
 
     // Context menu
     ContextMenuAction(usize, crate::widgets::context_menu::LibraryContextEntry),
-
-    CenterOnPlaying,
 
     // Inline expansion (Shift+Enter)
     ExpandCenter,
@@ -132,7 +118,6 @@ pub enum AlbumsMessage {
     ToggleSortOrder,
     SearchQueryChanged(String),
     SearchFocused(bool),
-    RefreshViewData,
     /// Sort dropdown's "Roulette" entry was selected — intercepted at the
     /// root handler before the page's `update` runs, so the page never
     /// sees this and no per-view state changes here.
@@ -263,7 +248,9 @@ impl super::ViewPage for AlbumsPage {
     }
 
     fn add_to_queue_message(&self) -> Option<Message> {
-        Some(Message::Albums(AlbumsMessage::AddCenterToQueue))
+        Some(Message::Albums(AlbumsMessage::SlotList(
+            crate::widgets::SlotListPageMessage::AddCenterToQueue,
+        )))
     }
     fn expand_center_message(&self) -> Option<Message> {
         Some(Message::Albums(AlbumsMessage::ExpandCenter))
@@ -273,9 +260,11 @@ impl super::ViewPage for AlbumsPage {
     }
 
     fn synth_set_offset_message(&self, offset: usize) -> Option<Message> {
-        Some(Message::Albums(AlbumsMessage::SlotListSetOffset(
-            offset,
-            iced::keyboard::Modifiers::default(),
+        Some(Message::Albums(AlbumsMessage::SlotList(
+            crate::widgets::SlotListPageMessage::SetOffset(
+                offset,
+                iced::keyboard::Modifiers::default(),
+            ),
         )))
     }
 }

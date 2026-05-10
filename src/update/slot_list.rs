@@ -133,7 +133,9 @@ impl Nokkvi {
         // Play tab navigation sound
         self.sfx_engine.play(audio::SfxType::Tab);
         match self.current_view {
-            View::Albums => Task::done(Message::Albums(views::AlbumsMessage::SlotListNavigateUp)),
+            View::Albums => Task::done(Message::Albums(views::AlbumsMessage::SlotList(
+                crate::widgets::SlotListPageMessage::NavigateUp,
+            ))),
             View::Artists => {
                 Task::done(Message::Artists(views::ArtistsMessage::SlotListNavigateUp))
             }
@@ -178,7 +180,9 @@ impl Nokkvi {
         // Play tab navigation sound
         self.sfx_engine.play(audio::SfxType::Tab);
         let nav_task = match self.current_view {
-            View::Albums => Task::done(Message::Albums(views::AlbumsMessage::SlotListNavigateDown)),
+            View::Albums => Task::done(Message::Albums(views::AlbumsMessage::SlotList(
+                crate::widgets::SlotListPageMessage::NavigateDown,
+            ))),
             View::Artists => Task::done(Message::Artists(
                 views::ArtistsMessage::SlotListNavigateDown,
             )),
@@ -196,9 +200,11 @@ impl Nokkvi {
 
     fn handle_slot_list_set_offset(&mut self, offset: usize) -> Task<Message> {
         match self.current_view {
-            View::Albums => Task::done(Message::Albums(views::AlbumsMessage::SlotListSetOffset(
-                offset,
-                iced::keyboard::Modifiers::default(),
+            View::Albums => Task::done(Message::Albums(views::AlbumsMessage::SlotList(
+                crate::widgets::SlotListPageMessage::SetOffset(
+                    offset,
+                    iced::keyboard::Modifiers::default(),
+                ),
             ))),
             View::Artists => {
                 Task::done(Message::Artists(views::ArtistsMessage::SlotListSetOffset(
@@ -280,9 +286,9 @@ impl Nokkvi {
             }
         }
         match self.current_view {
-            View::Albums => Task::done(Message::Albums(
-                views::AlbumsMessage::SlotListActivateCenter,
-            )),
+            View::Albums => Task::done(Message::Albums(views::AlbumsMessage::SlotList(
+                crate::widgets::SlotListPageMessage::ActivateCenter,
+            ))),
             View::Artists => Task::done(Message::Artists(
                 views::ArtistsMessage::SlotListActivateCenter,
             )),

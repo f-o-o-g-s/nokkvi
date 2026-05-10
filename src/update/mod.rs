@@ -385,7 +385,9 @@ impl Nokkvi {
                     self,
                     msg,
                     handle_albums,
-                    crate::views::AlbumsMessage::SlotListScrollSeek(_),
+                    crate::views::AlbumsMessage::SlotList(
+                        crate::widgets::SlotListPageMessage::ScrollSeek(_),
+                    ),
                     View::Albums
                 )
             }
