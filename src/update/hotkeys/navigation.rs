@@ -292,9 +292,11 @@ impl Nokkvi {
                 View::Songs => {
                     let total = self.library.songs.len();
                     self.songs_page.common.handle_set_offset(i, total);
-                    Task::done(Message::Songs(views::SongsMessage::SlotListSetOffset(
-                        i,
-                        iced::keyboard::Modifiers::default(),
+                    Task::done(Message::Songs(views::SongsMessage::SlotList(
+                        crate::widgets::SlotListPageMessage::SetOffset(
+                            i,
+                            iced::keyboard::Modifiers::default(),
+                        ),
                     )))
                 }
                 View::Genres => {

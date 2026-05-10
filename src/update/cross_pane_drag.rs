@@ -335,7 +335,9 @@ impl Nokkvi {
             views::BrowsingView::Albums => Message::Albums(views::AlbumsMessage::SlotList(
                 crate::widgets::SlotListPageMessage::AddCenterToQueue,
             )),
-            views::BrowsingView::Songs => Message::Songs(views::SongsMessage::AddCenterToQueue),
+            views::BrowsingView::Songs => Message::Songs(views::SongsMessage::SlotList(
+                crate::widgets::SlotListPageMessage::AddCenterToQueue,
+            )),
             views::BrowsingView::Artists => Message::Artists(views::ArtistsMessage::SlotList(
                 crate::widgets::SlotListPageMessage::AddCenterToQueue,
             )),

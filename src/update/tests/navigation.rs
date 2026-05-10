@@ -622,11 +622,13 @@ fn albums_sort_mode_most_played_updates_state_and_emits_action() {
 
 #[test]
 fn songs_sort_mode_most_played_updates_state_and_emits_action() {
-    use crate::widgets::view_header::SortMode;
+    use crate::widgets::{SlotListPageMessage, view_header::SortMode};
     let mut app = test_app();
 
     let (_, action) = app.songs_page.update(
-        crate::views::SongsMessage::SortModeSelected(SortMode::MostPlayed),
+        crate::views::SongsMessage::SlotList(SlotListPageMessage::SortModeSelected(
+            SortMode::MostPlayed,
+        )),
         &[],
     );
 
