@@ -2,12 +2,11 @@
 //!
 //! Flat slot list for internet radio stations. No expansion, no artwork, no star/rating.
 //! Activating a station transitions to ActivePlayback::Radio and plays the stream URL.
-//!
-//! NOTE from Claude: Scaffolded ahead of Gemini for Phase 6.
-//! Gemini — the update() logic and routing are complete. The view() has a
-//! functional placeholder renderer; polish the row rendering when ready.
 
-use iced::{Element, Length, Task};
+use iced::{
+    Alignment, Element, Length, Task,
+    widget::{button, container},
+};
 use nokkvi_data::types::radio_station::RadioStation;
 
 use crate::{
@@ -205,7 +204,8 @@ impl RadiosPage {
     // ========================================================================
 
     pub fn view<'a>(&'a self, data: RadiosViewData<'a>) -> Element<'a, RadiosMessage> {
-        // Gemini: Only Name sort mode makes sense for radio stations.
+        // Only Name sort mode is meaningful for radio stations — no date, artist,
+        // or album metadata to sort on.
         let header = widgets::view_header::view_header(ViewHeaderConfig {
             current_view: self.common.current_sort_mode,
             view_options: &[SortMode::Name],
@@ -258,13 +258,13 @@ impl RadiosPage {
 
         // Configure slot list
         use crate::widgets::slot_list::{
-            SlotListConfig, SlotListSlotStyle, chrome_height_with_header,
-            slot_list_view_with_scroll,
+            SLOT_LIST_SLOT_PADDING, SlotListConfig, SlotListSlotStyle, chrome_height_with_header,
+            slot_list_text_column, slot_list_view_with_scroll,
         };
 
         let config =
             SlotListConfig::with_dynamic_slots(data.window_height, chrome_height_with_header())
-                .with_modifiers(Default::default());
+                .with_modifiers(data.modifiers);
 
         let stations = data.stations.as_ref();
         let open_menu_for_rows = data.open_menu;
@@ -285,73 +285,89 @@ impl RadiosPage {
                 }
             },
             |station, ctx| {
-                // Gemini: This is a minimal functional renderer. Polish as desired.
-                // Pattern follows render_genre_row from genres.rs.
-                use iced::widget::{container, row};
-
                 let style = SlotListSlotStyle::for_slot(
                     ctx.is_center,
-                    false, // no highlight state for radio
+                    false,
                     ctx.is_selected,
                     ctx.has_multi_selection,
                     ctx.opacity,
-                    0, // depth 0: flat list
+                    0,
                 );
 
-                // 📻 icon for visual flair
-                let radio_icon = iced::widget::container(
+                let m = ctx.metrics;
+
+                // Radio tower icon — tinted to match slot text color
+                let radio_icon = container(
                     crate::embedded_svg::svg_widget("assets/icons/radio-tower.svg")
-                        .width(iced::Length::Fixed(ctx.metrics.title_size))
-                        .height(iced::Length::Fixed(ctx.metrics.title_size))
+                        .width(Length::Fixed(m.title_size))
+                        .height(Length::Fixed(m.title_size))
                         .style(move |_, _| iced::widget::svg::Style {
                             color: Some(style.text_color),
                         }),
                 )
-                .align_y(iced::Alignment::Center)
-                .align_x(iced::Alignment::Center);
+                .align_y(Alignment::Center)
+                .align_x(Alignment::Center);
 
-                // Using slot_list_text_column for consistent typography and truncation
-                use crate::widgets::slot_list::slot_list_text_column;
+                // Name as title; stream URL as subtitle (aids identification when
+                // station names are ambiguous or duplicated across sources).
+                let subtitle = station
+                    .home_page_url
+                    .as_deref()
+                    .unwrap_or(&station.stream_url)
+                    .to_owned();
+
                 let text_col = slot_list_text_column::<RadiosMessage>(
                     station.name.clone(),
                     None,
-                    station.stream_url.clone(),
+                    subtitle,
                     None,
-                    ctx.metrics.title_size,
-                    ctx.metrics.subtitle_size,
+                    m.title_size,
+                    m.subtitle_size,
                     style,
-                    ctx.is_center, // Bold if center
-                    100,           // 100% since there are no other columns
+                    ctx.is_center,
+                    100,
                 );
 
-                let row_content = row![radio_icon, text_col]
-                    .spacing(12)
-                    .align_y(iced::Alignment::Center)
+                let content = iced::widget::Row::new()
+                    .push(radio_icon)
+                    .push(text_col)
+                    .spacing(10.0)
+                    .align_y(Alignment::Center)
+                    .padding(iced::Padding {
+                        left: SLOT_LIST_SLOT_PADDING,
+                        right: 4.0,
+                        top: 4.0,
+                        bottom: 4.0,
+                    })
                     .height(Length::Fill);
 
-                let slot = container(row_content)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .padding([
-                        crate::widgets::slot_list::SLOT_LIST_SLOT_PADDING, // top/bottom 8.0
-                        12.0,                                              // left/right 12.0
-                    ])
-                    .style(move |_| style.to_container_style());
+                let clickable = container(content)
+                    .style(move |_theme| style.to_container_style())
+                    .width(Length::Fill);
 
-                // Click handler: center slot → activate (play), other → focus
-                let click_msg = if ctx.is_center {
-                    RadiosMessage::SlotList(SlotListPageMessage::ActivateCenter)
-                } else if data.stable_viewport {
-                    RadiosMessage::SlotList(SlotListPageMessage::SetOffset(
-                        ctx.item_index,
-                        data.modifiers,
-                    ))
-                } else {
-                    RadiosMessage::SlotList(SlotListPageMessage::ClickPlay(ctx.item_index))
-                };
-
-                let slot_button: Element<'a, RadiosMessage> =
-                    iced::widget::mouse_area(slot).on_press(click_msg).into();
+                let slot_button = button(clickable)
+                    .on_press(if ctx.modifiers.control() || ctx.modifiers.shift() {
+                        RadiosMessage::SlotList(SlotListPageMessage::SetOffset(
+                            ctx.item_index,
+                            ctx.modifiers,
+                        ))
+                    } else if ctx.is_center {
+                        RadiosMessage::SlotList(SlotListPageMessage::ActivateCenter)
+                    } else if data.stable_viewport {
+                        RadiosMessage::SlotList(SlotListPageMessage::SetOffset(
+                            ctx.item_index,
+                            ctx.modifiers,
+                        ))
+                    } else {
+                        RadiosMessage::SlotList(SlotListPageMessage::ClickPlay(ctx.item_index))
+                    })
+                    .style(|_theme, _status| button::Style {
+                        background: None,
+                        border: iced::Border::default(),
+                        ..Default::default()
+                    })
+                    .padding(0)
+                    .width(Length::Fill);
 
                 let cm_id = crate::app_message::ContextMenuId::RadioRow(ctx.item_index);
                 let (cm_open, cm_position) =
@@ -363,18 +379,25 @@ impl RadiosPage {
                     {
                         let station_cloned = station.clone();
                         move |entry, length| {
-                             let s = station_cloned.clone();
-                             crate::widgets::context_menu::radio_entry_view(entry, length, move |a| match a {
-                                 crate::widgets::context_menu::RadioContextEntry::Edit => {
-                                     RadiosMessage::EditStationDialog(s.clone())
-                                 }
-                                 crate::widgets::context_menu::RadioContextEntry::CopyStreamUrl => {
-                                     RadiosMessage::CopyStreamUrl(s.stream_url.clone())
-                                 }
-                                 crate::widgets::context_menu::RadioContextEntry::Delete => {
-                                     RadiosMessage::DeleteStationConfirmation(s.id.clone(), s.name.clone())
-                                 }
-                             })
+                            let s = station_cloned.clone();
+                            crate::widgets::context_menu::radio_entry_view(
+                                entry,
+                                length,
+                                move |a| match a {
+                                    crate::widgets::context_menu::RadioContextEntry::Edit => {
+                                        RadiosMessage::EditStationDialog(s.clone())
+                                    }
+                                    crate::widgets::context_menu::RadioContextEntry::CopyStreamUrl => {
+                                        RadiosMessage::CopyStreamUrl(s.stream_url.clone())
+                                    }
+                                    crate::widgets::context_menu::RadioContextEntry::Delete => {
+                                        RadiosMessage::DeleteStationConfirmation(
+                                            s.id.clone(),
+                                            s.name.clone(),
+                                        )
+                                    }
+                                },
+                            )
                         }
                     },
                     cm_open,
