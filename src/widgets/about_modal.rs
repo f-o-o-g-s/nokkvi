@@ -190,7 +190,7 @@ pub(crate) fn about_modal_overlay<'a>(
     let mut rows: Vec<Element<'_, AboutModalMessage>> = vec![
         info_row("Captain", "foogs"),
         row_separator(),
-        info_row("Shipwrights", "Claude Opus 4.6 & Gemini 3.1"),
+        info_row("Shipwrights", "Claude Opus 4.7"),
         row_separator(),
         info_row("Version", version),
         row_separator(),
