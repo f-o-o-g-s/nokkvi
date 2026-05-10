@@ -77,12 +77,16 @@ impl Nokkvi {
                     return (entity_id_clone, None, Vec::new(), Vec::new());
                 }
 
-                // 1. Load mini artwork (first album) at 300px via the cached client.
+                // 1. Load mini artwork (first album) at 300px via the cached
+                //    client. Use the retry variant so a single 429 from
+                //    Navidrome's throttle (e.g. when a scrollbar-drag settle
+                //    fans out ~10× per visible item) doesn't leave the slot
+                //    permanently blank — see `fetch_album_artwork_with_retry`.
                 let first_album_id = album_ids[0].clone();
                 let mini_vm = albums_vm.clone();
                 let mini_handle_fut = async move {
                     mini_vm
-                        .fetch_album_artwork(&first_album_id, Some(300), None)
+                        .fetch_album_artwork_with_retry(&first_album_id, Some(300), None)
                         .await
                         .ok()
                         .map(image::Handle::from_bytes)
@@ -97,7 +101,7 @@ impl Nokkvi {
                     let (mini_handle, full_res_bytes) =
                         futures::join!(mini_handle_fut, async move {
                             full_vm
-                                .fetch_album_artwork(&only_id, full_size, None)
+                                .fetch_album_artwork_with_retry(&only_id, full_size, None)
                                 .await
                                 .ok()
                         });
@@ -111,13 +115,19 @@ impl Nokkvi {
                 }
 
                 // Multiple albums: fetch up to 9 tiles at 300px in parallel.
+                // Same retry rationale as the mini fetch above — burst settle
+                // from one drag can dispatch ~117 tile requests at once.
                 let collage_tiles_futs: Vec<_> = album_ids
                     .iter()
                     .take(9)
                     .cloned()
                     .map(|id| {
                         let vm = albums_vm.clone();
-                        async move { vm.fetch_album_artwork(&id, Some(300), None).await.ok() }
+                        async move {
+                            vm.fetch_album_artwork_with_retry(&id, Some(300), None)
+                                .await
+                                .ok()
+                        }
                     })
                     .collect();
 

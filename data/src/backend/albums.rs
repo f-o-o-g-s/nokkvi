@@ -300,6 +300,43 @@ impl AlbumsService {
         self.fetch_artwork_by_url(&url).await
     }
 
+    /// Burst-tolerant variant of [`fetch_album_artwork`]: up to 3 attempts
+    /// with 100 ms / 200 ms backoff. Required for callers that fan out many
+    /// concurrent fetches in a single tick (e.g. the genre/playlist collage
+    /// panel after a scrollbar drag settles), because Navidrome's
+    /// `getCoverArt` throttle middleware caps in-flight requests at
+    /// `max(2, NumCPU/2)` with a 100-request backlog and rejects overflow
+    /// with HTTP 429. `fetch_artwork_by_url` surfaces that as an error;
+    /// without retry, the dropped request leaves a permanently-blank
+    /// thumbnail until the user revisits the slot.
+    pub async fn fetch_album_artwork_with_retry(
+        &self,
+        art_id: &str,
+        size: Option<u32>,
+        updated_at: Option<&str>,
+    ) -> Result<Vec<u8>> {
+        const MAX_ATTEMPTS: u32 = 3;
+        let mut last_err: Option<anyhow::Error> = None;
+        for attempt in 0..MAX_ATTEMPTS {
+            if attempt > 0 {
+                let backoff = 100u64 << (attempt - 1);
+                tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
+            }
+            match self.fetch_album_artwork(art_id, size, updated_at).await {
+                Ok(bytes) => return Ok(bytes),
+                Err(e) => last_err = Some(e),
+            }
+        }
+        let err = last_err.unwrap_or_else(|| anyhow::anyhow!("artwork fetch failed"));
+        tracing::warn!(
+            "Collage artwork fetch gave up after {} attempts for {}: {:?}",
+            MAX_ATTEMPTS,
+            art_id,
+            err
+        );
+        Err(err)
+    }
+
     /// Associate an authentication gateway.
     ///
     /// Stores the `AuthGateway` reference. The inner `AlbumsApiService` is
