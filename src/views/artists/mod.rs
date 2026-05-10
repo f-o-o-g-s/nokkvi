@@ -15,7 +15,10 @@
 use std::collections::HashMap;
 
 use iced::widget::image;
-use nokkvi_data::backend::{albums::AlbumUIViewData, artists::ArtistUIViewData};
+use nokkvi_data::{
+    backend::{albums::AlbumUIViewData, artists::ArtistUIViewData},
+    types::ItemKind,
+};
 
 use super::expansion::ExpansionState;
 use crate::{
@@ -159,10 +162,10 @@ pub enum ArtistsAction {
     PlayAlbum(String),    // album_id - play child album
     StarArtist(String),   // artist_id - star the artist
     UnstarArtist(String), // artist_id - unstar the artist
-    /// Set absolute rating on item (item_id, item_type, rating)
-    SetRating(String, &'static str, usize),
-    /// Star/unstar item by click (item_id, item_type, new_starred)
-    ToggleStar(String, &'static str, bool),
+    /// Set absolute rating on item (item_id, kind, rating)
+    SetRating(String, ItemKind, usize),
+    /// Star/unstar item by click (item_id, kind, new_starred)
+    ToggleStar(String, ItemKind, bool),
     /// Expand artist inline — root should load albums (artist_id)
     ExpandArtist(String),
     /// Switch to Albums view and prime the named album for inline expansion.

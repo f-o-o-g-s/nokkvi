@@ -5,7 +5,7 @@
 //! types live in `mod.rs`.
 
 use iced::Task;
-use nokkvi_data::backend::genres::GenreUIViewData;
+use nokkvi_data::{backend::genres::GenreUIViewData, types::ItemKind};
 
 use super::{super::expansion::SlotListEntry, GenresAction, GenresMessage, GenresPage};
 
@@ -177,7 +177,11 @@ impl GenresPage {
                     match self.expansion.get_entry_at(item_index, genres, |g| &g.id) {
                         Some(SlotListEntry::Child(album, _)) => (
                             Task::none(),
-                            GenresAction::ToggleStar(album.id.clone(), "album", !album.is_starred),
+                            GenresAction::ToggleStar(
+                                album.id.clone(),
+                                ItemKind::Album,
+                                !album.is_starred,
+                            ),
                         ),
                         Some(SlotListEntry::Parent(_genre)) => {
                             // Genres don't have starred state

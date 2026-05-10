@@ -4,7 +4,7 @@
 //! types live in `mod.rs`.
 
 use iced::Task;
-use nokkvi_data::backend::playlists::PlaylistUIViewData;
+use nokkvi_data::{backend::playlists::PlaylistUIViewData, types::ItemKind};
 
 use super::{
     super::expansion::SlotListEntry, PlaylistContextEntry, PlaylistsAction, PlaylistsMessage,
@@ -172,7 +172,7 @@ impl PlaylistsPage {
                                 Task::none(),
                                 PlaylistsAction::ToggleStar(
                                     song.id.clone(),
-                                    "song",
+                                    ItemKind::Song,
                                     !song.is_starred,
                                 ),
                             ),

@@ -11,7 +11,10 @@
 use std::collections::HashMap;
 
 use iced::widget::image;
-use nokkvi_data::backend::{albums::AlbumUIViewData, genres::GenreUIViewData};
+use nokkvi_data::{
+    backend::{albums::AlbumUIViewData, genres::GenreUIViewData},
+    types::ItemKind,
+};
 
 use super::expansion::ExpansionState;
 use crate::{
@@ -153,7 +156,7 @@ pub enum GenresAction {
     SortModeChanged(widgets::view_header::SortMode), // trigger reload
     SortOrderChanged(bool), // trigger reload
     RefreshViewData,     // trigger reload
-    ToggleStar(String, &'static str, bool), // (item_id, item_type, starred)
+    ToggleStar(String, ItemKind, bool), // (item_id, kind, starred)
     PlayNextBatch(nokkvi_data::types::batch::BatchPayload),
     AddBatchToPlaylist(nokkvi_data::types::batch::BatchPayload),
     FindSimilar(String, String), // (entity_id, label) - open similar tab

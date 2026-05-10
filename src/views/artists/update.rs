@@ -4,7 +4,7 @@
 //! types live in `mod.rs`.
 
 use iced::Task;
-use nokkvi_data::backend::artists::ArtistUIViewData;
+use nokkvi_data::{backend::artists::ArtistUIViewData, types::ItemKind};
 
 use super::{super::expansion::SlotListEntry, ArtistsAction, ArtistsMessage, ArtistsPage};
 
@@ -174,7 +174,11 @@ impl ArtistsPage {
                             let new_rating = compute_rating_toggle(current, rating);
                             (
                                 Task::none(),
-                                ArtistsAction::SetRating(album.id.clone(), "album", new_rating),
+                                ArtistsAction::SetRating(
+                                    album.id.clone(),
+                                    ItemKind::Album,
+                                    new_rating,
+                                ),
                             )
                         }
                         Some(SlotListEntry::Parent(artist)) => {
@@ -182,7 +186,11 @@ impl ArtistsPage {
                             let new_rating = compute_rating_toggle(current, rating);
                             (
                                 Task::none(),
-                                ArtistsAction::SetRating(artist.id.clone(), "artist", new_rating),
+                                ArtistsAction::SetRating(
+                                    artist.id.clone(),
+                                    ItemKind::Artist,
+                                    new_rating,
+                                ),
                             )
                         }
                         None => (Task::none(), ArtistsAction::None),
@@ -192,13 +200,17 @@ impl ArtistsPage {
                     match self.expansion.get_entry_at(item_index, artists, |a| &a.id) {
                         Some(SlotListEntry::Child(album, _)) => (
                             Task::none(),
-                            ArtistsAction::ToggleStar(album.id.clone(), "album", !album.is_starred),
+                            ArtistsAction::ToggleStar(
+                                album.id.clone(),
+                                ItemKind::Album,
+                                !album.is_starred,
+                            ),
                         ),
                         Some(SlotListEntry::Parent(artist)) => (
                             Task::none(),
                             ArtistsAction::ToggleStar(
                                 artist.id.clone(),
-                                "artist",
+                                ItemKind::Artist,
                                 !artist.is_starred,
                             ),
                         ),

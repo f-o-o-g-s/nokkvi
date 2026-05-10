@@ -4,7 +4,7 @@
 //! types live in `mod.rs`.
 
 use iced::Task;
-use nokkvi_data::backend::albums::AlbumUIViewData;
+use nokkvi_data::{backend::albums::AlbumUIViewData, types::ItemKind};
 
 use super::{super::expansion::SlotListEntry, AlbumsAction, AlbumsMessage, AlbumsPage};
 
@@ -217,7 +217,11 @@ impl AlbumsPage {
                                 let new_rating = compute_rating_toggle(current, rating);
                                 (
                                     Task::none(),
-                                    AlbumsAction::SetRating(song.id.clone(), "song", new_rating),
+                                    AlbumsAction::SetRating(
+                                        song.id.clone(),
+                                        ItemKind::Song,
+                                        new_rating,
+                                    ),
                                 )
                             }
                             SlotListEntry::Parent(album) => {
@@ -225,7 +229,11 @@ impl AlbumsPage {
                                 let new_rating = compute_rating_toggle(current, rating);
                                 (
                                     Task::none(),
-                                    AlbumsAction::SetRating(album.id.clone(), "album", new_rating),
+                                    AlbumsAction::SetRating(
+                                        album.id.clone(),
+                                        ItemKind::Album,
+                                        new_rating,
+                                    ),
                                 )
                             }
                         }
@@ -239,13 +247,17 @@ impl AlbumsPage {
                         match entry {
                             SlotListEntry::Child(song, _) => (
                                 Task::none(),
-                                AlbumsAction::ToggleStar(song.id.clone(), "song", !song.is_starred),
+                                AlbumsAction::ToggleStar(
+                                    song.id.clone(),
+                                    ItemKind::Song,
+                                    !song.is_starred,
+                                ),
                             ),
                             SlotListEntry::Parent(album) => (
                                 Task::none(),
                                 AlbumsAction::ToggleStar(
                                     album.id.clone(),
-                                    "album",
+                                    ItemKind::Album,
                                     !album.is_starred,
                                 ),
                             ),

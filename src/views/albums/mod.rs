@@ -17,7 +17,10 @@
 use std::collections::HashMap;
 
 use iced::widget::image;
-use nokkvi_data::backend::{albums::AlbumUIViewData, songs::SongUIViewData};
+use nokkvi_data::{
+    backend::{albums::AlbumUIViewData, songs::SongUIViewData},
+    types::ItemKind,
+};
 
 use super::expansion::ExpansionState;
 use crate::{
@@ -170,10 +173,10 @@ pub enum AlbumsAction {
     ExpandAlbum(String),
     /// Play batch starting from a specific track (album_id, track_index)
     PlayAlbumFromTrack(String, usize),
-    /// Set rating on item (item_id, item_type "album"|"song", rating)
-    SetRating(String, &'static str, usize),
-    /// Star/unstar item (item_id, item_type, new_starred)
-    ToggleStar(String, &'static str, bool),
+    /// Set rating on item (item_id, kind, rating)
+    SetRating(String, ItemKind, usize),
+    /// Star/unstar item (item_id, kind, new_starred)
+    ToggleStar(String, ItemKind, bool),
 
     LoadPage(usize),       // offset - trigger fetch of next page
     SearchChanged(String), // trigger reload

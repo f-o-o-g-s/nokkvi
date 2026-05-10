@@ -12,7 +12,10 @@
 use std::collections::HashMap;
 
 use iced::widget::image;
-use nokkvi_data::backend::{playlists::PlaylistUIViewData, songs::SongUIViewData};
+use nokkvi_data::{
+    backend::{playlists::PlaylistUIViewData, songs::SongUIViewData},
+    types::ItemKind,
+};
 
 use super::expansion::ExpansionState;
 use crate::{
@@ -166,7 +169,7 @@ pub enum PlaylistsAction {
     SortModeChanged(crate::widgets::view_header::SortMode), // trigger reload
     SortOrderChanged(bool), // trigger reload
     RefreshViewData,        // trigger reload
-    ToggleStar(String, &'static str, bool), // (item_id, item_type, starred)
+    ToggleStar(String, ItemKind, bool), // (item_id, kind, starred)
     PlayNextBatch(nokkvi_data::types::batch::BatchPayload),
     DeletePlaylist(String),                     // playlist_id
     RenamePlaylist(String),                     // playlist_id — triggers rename flow
