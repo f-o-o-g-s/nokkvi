@@ -3,7 +3,10 @@
 use std::collections::HashSet;
 
 use iced::Task;
-use nokkvi_data::{backend::queue::QueueSongUIViewData, types::queue_sort_mode::QueueSortMode};
+use nokkvi_data::{
+    backend::queue::QueueSongUIViewData,
+    types::{ItemKind, queue_sort_mode::QueueSortMode},
+};
 use tracing::{debug, error, trace};
 
 use super::components::prefetch_album_artwork_tasks;
@@ -272,13 +275,14 @@ impl Nokkvi {
                     .find(|s| s.id == song_id)
                     .and_then(|s| s.rating)
                     .unwrap_or(0);
-                return self.set_item_rating_task(song_id, "song", new_rating, current);
+                return self.set_item_rating_task(song_id, ItemKind::Song, new_rating, current);
             }
             QueueAction::ToggleStar(song_id, star) => {
-                let optimistic_msg = Self::starred_revert_message(song_id.clone(), "song", star);
+                let optimistic_msg =
+                    Self::starred_revert_message(song_id.clone(), ItemKind::Song, star);
                 return Task::batch(vec![
                     Task::done(optimistic_msg),
-                    self.star_item_task(song_id, "song", star),
+                    self.star_item_task(song_id, ItemKind::Song, star),
                 ]);
             }
             QueueAction::MoveItem { from, to } => {

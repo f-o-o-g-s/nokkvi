@@ -21,7 +21,7 @@
 use std::collections::HashSet;
 
 use iced::{Task, widget::image};
-use nokkvi_data::{backend::albums::AlbumsService, types::error::NokkviError};
+use nokkvi_data::{backend::albums::AlbumsService, types::{ItemKind, error::NokkviError}};
 use tracing::{debug, error, info};
 
 use crate::{
@@ -725,7 +725,7 @@ impl Nokkvi {
     pub(crate) fn star_item_task(
         &self,
         id: String,
-        item_type: &'static str,
+        kind: ItemKind,
         star: bool,
     ) -> Task<Message> {
         let action = if star { "star" } else { "unstar" };
@@ -733,7 +733,7 @@ impl Nokkvi {
         debug!(
             " {} {} {}",
             if star { "Starring" } else { "Unstarring" },
-            item_type,
+            kind,
             id
         );
         self.shell_task(
@@ -751,7 +751,7 @@ impl Nokkvi {
                         &server_url,
                         &subsonic_credential,
                         &id,
-                        item_type,
+                        kind.api_str(),
                     )
                     .await
                 } else {
@@ -760,7 +760,7 @@ impl Nokkvi {
                         &server_url,
                         &subsonic_credential,
                         &id,
-                        item_type,
+                        kind.api_str(),
                     )
                     .await
                 }
@@ -772,33 +772,43 @@ impl Nokkvi {
                     {
                         return Message::SessionExpired;
                     }
-                    error!(" Failed to {} {}: {}", action, item_type, e);
+                    error!(" Failed to {} {}: {}", action, kind, e);
                     // Revert optimistic update by emitting the original starred state
-                    return Self::starred_revert_message(revert_id, item_type, !star);
+                    return Self::starred_revert_message(revert_id, kind, !star);
                 }
                 Message::NoOp
             },
         )
     }
 
-    /// Build the appropriate starred-status-updated message for a given item type.
+    /// Build the appropriate starred-status-updated message for a given item kind.
     /// Used to revert optimistic star updates on API failure.
-    pub(crate) fn starred_revert_message(id: String, item_type: &str, starred: bool) -> Message {
-        match item_type {
-            "album" => Message::Hotkey(HotkeyMessage::AlbumStarredStatusUpdated(id, starred)),
-            "artist" => Message::Hotkey(HotkeyMessage::ArtistStarredStatusUpdated(id, starred)),
-            _ => Message::Hotkey(HotkeyMessage::SongStarredStatusUpdated(id, starred)),
-        }
+    pub(crate) fn starred_revert_message(id: String, kind: ItemKind, starred: bool) -> Message {
+        use HotkeyMessage::{
+            AlbumStarredStatusUpdated, ArtistStarredStatusUpdated, SongStarredStatusUpdated,
+        };
+        Message::Hotkey(match kind {
+            ItemKind::Album => AlbumStarredStatusUpdated(id, starred),
+            ItemKind::Artist => ArtistStarredStatusUpdated(id, starred),
+            // Playlist starring/unstarring isn't surfaced in the UI today
+            // (playlist Parents return None from get_center_item_info, and
+            // ClickToggleStar on a playlist Parent emits Action::None).
+            // Until that lands, route Playlist through the Song handler so
+            // a stray dispatch can't corrupt unrelated state — the handler
+            // mutates only by-id matches, so it's a no-op for non-song ids.
+            ItemKind::Song | ItemKind::Playlist => SongStarredStatusUpdated(id, starred),
+        })
     }
 
-    /// Build the appropriate rating-updated message for a given item type.
+    /// Build the appropriate rating-updated message for a given item kind.
     /// Used to revert optimistic rating updates on API failure.
-    pub(crate) fn rating_revert_message(id: String, item_type: &str, rating: u32) -> Message {
-        match item_type {
-            "album" => Message::Hotkey(HotkeyMessage::AlbumRatingUpdated(id, rating)),
-            "artist" => Message::Hotkey(HotkeyMessage::ArtistRatingUpdated(id, rating)),
-            _ => Message::Hotkey(HotkeyMessage::SongRatingUpdated(id, rating)),
-        }
+    pub(crate) fn rating_revert_message(id: String, kind: ItemKind, rating: u32) -> Message {
+        use HotkeyMessage::{AlbumRatingUpdated, ArtistRatingUpdated, SongRatingUpdated};
+        Message::Hotkey(match kind {
+            ItemKind::Album => AlbumRatingUpdated(id, rating),
+            ItemKind::Artist => ArtistRatingUpdated(id, rating),
+            ItemKind::Song | ItemKind::Playlist => SongRatingUpdated(id, rating),
+        })
     }
 
     /// Set an absolute rating on an item via the Subsonic API.
@@ -806,21 +816,20 @@ impl Nokkvi {
     pub(crate) fn set_item_rating_task(
         &self,
         id: String,
-        item_type: &str,
+        kind: ItemKind,
         new_rating: usize,
         current_rating: u32,
     ) -> Task<Message> {
         let new_rating_u32 = new_rating as u32;
         debug!(
             "⭐ Setting rating for {} {}: {} -> {}",
-            item_type, id, current_rating, new_rating
+            kind, id, current_rating, new_rating
         );
 
         // Optimistic update
-        let optimistic_msg = Self::rating_revert_message(id.clone(), item_type, new_rating_u32);
+        let optimistic_msg = Self::rating_revert_message(id.clone(), kind, new_rating_u32);
 
         let revert_id = id.clone();
-        let revert_type = item_type.to_string();
         let item_id = id;
 
         let api_task = self.shell_task(
@@ -853,7 +862,7 @@ impl Nokkvi {
                         return Message::SessionExpired;
                     }
                     error!(" Failed to set rating: {}", e);
-                    Self::rating_revert_message(revert_id, &revert_type, current_rating)
+                    Self::rating_revert_message(revert_id, kind, current_rating)
                 }
             },
         );
@@ -1028,10 +1037,11 @@ impl Nokkvi {
         let name = self.playback.title.clone();
 
         // Optimistic update
-        let optimistic_msg = Self::starred_revert_message(song_id.clone(), "song", new_starred);
+        let optimistic_msg =
+            Self::starred_revert_message(song_id.clone(), ItemKind::Song, new_starred);
 
         // API call
-        let api_task = self.star_item_task(song_id, "song", new_starred);
+        let api_task = self.star_item_task(song_id, ItemKind::Song, new_starred);
 
         // Toast
         let toast_label = if new_starred {

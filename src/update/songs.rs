@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use iced::{Task, widget::image};
-use nokkvi_data::backend::songs::SongUIViewData;
+use nokkvi_data::{backend::songs::SongUIViewData, types::ItemKind};
 use tracing::{debug, error};
 
 use super::components::{PaginatedFetch, prefetch_song_artwork_tasks};
@@ -510,10 +510,11 @@ impl Nokkvi {
                 );
             }
             SongsAction::ToggleStar(song_id, star) => {
-                let optimistic_msg = Self::starred_revert_message(song_id.clone(), "song", star);
+                let optimistic_msg =
+                    Self::starred_revert_message(song_id.clone(), ItemKind::Song, star);
                 return Task::batch(vec![
                     Task::done(optimistic_msg),
-                    self.star_item_task(song_id, "song", star),
+                    self.star_item_task(song_id, ItemKind::Song, star),
                 ]);
             }
 
@@ -525,7 +526,7 @@ impl Nokkvi {
                     .find(|s| s.id == song_id)
                     .and_then(|s| s.rating)
                     .unwrap_or(0);
-                return self.set_item_rating_task(song_id, "song", new_rating, current);
+                return self.set_item_rating_task(song_id, ItemKind::Song, new_rating, current);
             }
             SongsAction::LoadLargeArtwork(album_id) => {
                 // Direct call (rather than dispatching Message::Artwork(LoadLarge))

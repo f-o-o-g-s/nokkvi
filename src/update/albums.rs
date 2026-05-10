@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use iced::{Task, widget::image};
-use nokkvi_data::backend::albums::AlbumUIViewData;
+use nokkvi_data::{backend::albums::AlbumUIViewData, types::ItemKind};
 use tracing::{debug, error, warn};
 
 use super::components::{PaginatedFetch, prefetch_album_artwork_tasks};
@@ -784,8 +784,8 @@ impl Nokkvi {
                 );
             }
 
-            AlbumsAction::SetRating(item_id, item_type, new_rating) => {
-                let current = if item_type == "album" {
+            AlbumsAction::SetRating(item_id, kind, new_rating) => {
+                let current = if matches!(kind, ItemKind::Album) {
                     self.library
                         .albums
                         .iter()
@@ -802,13 +802,13 @@ impl Nokkvi {
                         .and_then(|s| s.rating)
                         .unwrap_or(0)
                 };
-                return self.set_item_rating_task(item_id, item_type, new_rating, current);
+                return self.set_item_rating_task(item_id, kind, new_rating, current);
             }
-            AlbumsAction::ToggleStar(item_id, item_type, star) => {
-                let optimistic_msg = Self::starred_revert_message(item_id.clone(), item_type, star);
+            AlbumsAction::ToggleStar(item_id, kind, star) => {
+                let optimistic_msg = Self::starred_revert_message(item_id.clone(), kind, star);
                 return Task::batch(vec![
                     Task::done(optimistic_msg),
-                    self.star_item_task(item_id, item_type, star),
+                    self.star_item_task(item_id, kind, star),
                 ]);
             }
             AlbumsAction::AddBatchToPlaylist(payload) => {

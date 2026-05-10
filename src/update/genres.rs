@@ -1,7 +1,7 @@
 //! Genre data loading and component message handlers
 
 use iced::Task;
-use nokkvi_data::backend::genres::GenreUIViewData;
+use nokkvi_data::{backend::genres::GenreUIViewData, types::ItemKind};
 use tracing::{debug, error, info};
 
 use crate::{
@@ -477,11 +477,11 @@ impl Nokkvi {
                     }
                 }
             }
-            GenresAction::ToggleStar(item_id, item_type, star) => {
-                let optimistic_msg = Self::starred_revert_message(item_id.clone(), item_type, star);
+            GenresAction::ToggleStar(item_id, kind, star) => {
+                let optimistic_msg = Self::starred_revert_message(item_id.clone(), kind, star);
                 return Task::batch(vec![
                     Task::done(optimistic_msg),
-                    self.star_item_task(item_id, item_type, star),
+                    self.star_item_task(item_id, kind, star),
                 ]);
             }
             GenresAction::AddBatchToPlaylist(payload) => {

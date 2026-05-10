@@ -134,3 +134,127 @@ fn unstarring_song_does_not_touch_rating() {
 }
 
 // ============================================================================
+// Revert-message routing truth table
+// ============================================================================
+
+#[test]
+fn starred_revert_message_routes_album_to_album_handler() {
+    use crate::app_message::{HotkeyMessage, Message};
+    use nokkvi_data::types::ItemKind;
+    let msg = crate::Nokkvi::starred_revert_message("id1".to_string(), ItemKind::Album, true);
+    assert!(
+        matches!(
+            msg,
+            Message::Hotkey(HotkeyMessage::AlbumStarredStatusUpdated(ref id, true))
+            if id == "id1"
+        ),
+        "Album kind must route to AlbumStarredStatusUpdated"
+    );
+}
+
+#[test]
+fn starred_revert_message_routes_artist_to_artist_handler() {
+    use crate::app_message::{HotkeyMessage, Message};
+    use nokkvi_data::types::ItemKind;
+    let msg = crate::Nokkvi::starred_revert_message("id2".to_string(), ItemKind::Artist, false);
+    assert!(
+        matches!(
+            msg,
+            Message::Hotkey(HotkeyMessage::ArtistStarredStatusUpdated(ref id, false))
+            if id == "id2"
+        ),
+        "Artist kind must route to ArtistStarredStatusUpdated"
+    );
+}
+
+#[test]
+fn starred_revert_message_routes_song_to_song_handler() {
+    use crate::app_message::{HotkeyMessage, Message};
+    use nokkvi_data::types::ItemKind;
+    let msg = crate::Nokkvi::starred_revert_message("s1".to_string(), ItemKind::Song, true);
+    assert!(
+        matches!(
+            msg,
+            Message::Hotkey(HotkeyMessage::SongStarredStatusUpdated(ref id, true))
+            if id == "s1"
+        ),
+        "Song kind must route to SongStarredStatusUpdated"
+    );
+}
+
+#[test]
+fn starred_revert_message_routes_playlist_through_song_handler_for_now() {
+    use crate::app_message::{HotkeyMessage, Message};
+    use nokkvi_data::types::ItemKind;
+    let msg = crate::Nokkvi::starred_revert_message("pl1".to_string(), ItemKind::Playlist, true);
+    assert!(
+        matches!(
+            msg,
+            Message::Hotkey(HotkeyMessage::SongStarredStatusUpdated(ref id, true))
+            if id == "pl1"
+        ),
+        "Playlist kind must collapse into SongStarredStatusUpdated until playlist starring ships"
+    );
+}
+
+#[test]
+fn rating_revert_message_routes_album_to_album_handler() {
+    use crate::app_message::{HotkeyMessage, Message};
+    use nokkvi_data::types::ItemKind;
+    let msg = crate::Nokkvi::rating_revert_message("a1".to_string(), ItemKind::Album, 4);
+    assert!(
+        matches!(
+            msg,
+            Message::Hotkey(HotkeyMessage::AlbumRatingUpdated(ref id, 4))
+            if id == "a1"
+        ),
+        "Album kind must route to AlbumRatingUpdated"
+    );
+}
+
+#[test]
+fn rating_revert_message_routes_artist_to_artist_handler() {
+    use crate::app_message::{HotkeyMessage, Message};
+    use nokkvi_data::types::ItemKind;
+    let msg = crate::Nokkvi::rating_revert_message("ar1".to_string(), ItemKind::Artist, 3);
+    assert!(
+        matches!(
+            msg,
+            Message::Hotkey(HotkeyMessage::ArtistRatingUpdated(ref id, 3))
+            if id == "ar1"
+        ),
+        "Artist kind must route to ArtistRatingUpdated"
+    );
+}
+
+#[test]
+fn rating_revert_message_routes_song_to_song_handler() {
+    use crate::app_message::{HotkeyMessage, Message};
+    use nokkvi_data::types::ItemKind;
+    let msg = crate::Nokkvi::rating_revert_message("s1".to_string(), ItemKind::Song, 5);
+    assert!(
+        matches!(
+            msg,
+            Message::Hotkey(HotkeyMessage::SongRatingUpdated(ref id, 5))
+            if id == "s1"
+        ),
+        "Song kind must route to SongRatingUpdated"
+    );
+}
+
+#[test]
+fn rating_revert_message_routes_playlist_through_song_handler_for_now() {
+    use crate::app_message::{HotkeyMessage, Message};
+    use nokkvi_data::types::ItemKind;
+    let msg = crate::Nokkvi::rating_revert_message("pl1".to_string(), ItemKind::Playlist, 2);
+    assert!(
+        matches!(
+            msg,
+            Message::Hotkey(HotkeyMessage::SongRatingUpdated(ref id, 2))
+            if id == "pl1"
+        ),
+        "Playlist kind must collapse into SongRatingUpdated until playlist rating ships"
+    );
+}
+
+// ============================================================================

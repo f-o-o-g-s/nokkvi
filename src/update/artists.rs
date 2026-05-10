@@ -1,7 +1,7 @@
 //! Artist data loading and component message handlers
 
 use iced::{Task, widget::image};
-use nokkvi_data::backend::artists::ArtistUIViewData;
+use nokkvi_data::{backend::artists::ArtistUIViewData, types::ItemKind};
 use tracing::{debug, error};
 
 use crate::{
@@ -559,23 +559,23 @@ impl Nokkvi {
             ArtistsAction::StarArtist(artist_id) => {
                 // Route through central update message for cross-view propagation
                 let optimistic_msg =
-                    Self::starred_revert_message(artist_id.clone(), "artist", true);
+                    Self::starred_revert_message(artist_id.clone(), ItemKind::Artist, true);
                 return Task::batch(vec![
                     Task::done(optimistic_msg),
-                    self.star_item_task(artist_id, "artist", true),
+                    self.star_item_task(artist_id, ItemKind::Artist, true),
                 ]);
             }
             ArtistsAction::UnstarArtist(artist_id) => {
                 // Route through central update message for cross-view propagation
                 let optimistic_msg =
-                    Self::starred_revert_message(artist_id.clone(), "artist", false);
+                    Self::starred_revert_message(artist_id.clone(), ItemKind::Artist, false);
                 return Task::batch(vec![
                     Task::done(optimistic_msg),
-                    self.star_item_task(artist_id, "artist", false),
+                    self.star_item_task(artist_id, ItemKind::Artist, false),
                 ]);
             }
-            ArtistsAction::SetRating(item_id, item_type, new_rating) => {
-                let current = if item_type == "artist" {
+            ArtistsAction::SetRating(item_id, kind, new_rating) => {
+                let current = if matches!(kind, ItemKind::Artist) {
                     self.library
                         .artists
                         .iter()
@@ -592,13 +592,13 @@ impl Nokkvi {
                         .and_then(|a| a.rating)
                         .unwrap_or(0)
                 };
-                return self.set_item_rating_task(item_id, item_type, new_rating, current);
+                return self.set_item_rating_task(item_id, kind, new_rating, current);
             }
-            ArtistsAction::ToggleStar(item_id, item_type, star) => {
-                let optimistic_msg = Self::starred_revert_message(item_id.clone(), item_type, star);
+            ArtistsAction::ToggleStar(item_id, kind, star) => {
+                let optimistic_msg = Self::starred_revert_message(item_id.clone(), kind, star);
                 return Task::batch(vec![
                     Task::done(optimistic_msg),
-                    self.star_item_task(item_id, item_type, star),
+                    self.star_item_task(item_id, kind, star),
                 ]);
             }
             ArtistsAction::LoadPage(offset) => {

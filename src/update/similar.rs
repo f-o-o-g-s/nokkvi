@@ -4,6 +4,7 @@
 //! and SimilarSongsLoaded response processing with generation counter.
 
 use iced::Task;
+use nokkvi_data::types::ItemKind;
 use tracing::{debug, info, warn};
 
 use crate::{
@@ -61,10 +62,11 @@ impl Nokkvi {
                 self.handle_add_batch_to_playlist(payload)
             }
             SimilarAction::ToggleStar(song_id, starred) => {
-                let optimistic_msg = Self::starred_revert_message(song_id.clone(), "song", starred);
+                let optimistic_msg =
+                    Self::starred_revert_message(song_id.clone(), ItemKind::Song, starred);
                 Task::batch(vec![
                     Task::done(optimistic_msg),
-                    self.star_item_task(song_id, "song", starred),
+                    self.star_item_task(song_id, ItemKind::Song, starred),
                 ])
             }
 

@@ -1,7 +1,7 @@
 //! Playlist data loading and component message handlers
 
 use iced::Task;
-use nokkvi_data::backend::playlists::PlaylistUIViewData;
+use nokkvi_data::{backend::playlists::PlaylistUIViewData, types::ItemKind};
 use tracing::{debug, error, info};
 
 use crate::{
@@ -365,11 +365,11 @@ impl Nokkvi {
                     }
                 }
             }
-            PlaylistsAction::ToggleStar(item_id, item_type, star) => {
-                let optimistic_msg = Self::starred_revert_message(item_id.clone(), item_type, star);
+            PlaylistsAction::ToggleStar(item_id, kind, star) => {
+                let optimistic_msg = Self::starred_revert_message(item_id.clone(), kind, star);
                 return Task::batch(vec![
                     Task::done(optimistic_msg),
-                    self.star_item_task(item_id, item_type, star),
+                    self.star_item_task(item_id, kind, star),
                 ]);
             }
             PlaylistsAction::PlayNextBatch(payload) => {
