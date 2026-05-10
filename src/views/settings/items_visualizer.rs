@@ -18,64 +18,79 @@ fn push_visualizer_color_entries(
     defaults: &VisualizerColors,
 ) {
     e.push(SettingsEntry::Header { label, icon });
-    e.push(SettingItem::hex_color(
-        meta!(
-            format!("{prefix}.visualizer.border_color"),
-            "Border Color",
-            label,
-            "Color of bar borders and LED gaps"
-        ),
-        &colors.border_color,
-        &defaults.border_color,
-    ));
-    e.push(SettingItem::float(
-        meta!(
-            format!("{prefix}.visualizer.border_opacity"),
-            "Border Opacity",
-            label,
-            "Transparency of bar outlines in non-LED mode"
-        ),
-        colors.border_opacity as f64,
-        defaults.border_opacity as f64,
-        0.0,
-        1.0,
-        0.1,
-        "",
-    ));
-    e.push(SettingItem::float(
-        meta!(
-            format!("{prefix}.visualizer.led_border_opacity"),
-            "LED Border Opacity",
-            label,
-            "Opacity of gaps between LED segments"
-        ),
-        colors.led_border_opacity as f64,
-        defaults.led_border_opacity as f64,
-        0.0,
-        1.0,
-        0.1,
-        "",
-    ));
-    e.push(SettingItem::color_array(
-        meta!(
-            format!("{prefix}.visualizer.bar_gradient_colors"),
-            "Bar Gradient",
-            label,
-            "6 colors from low to high frequency"
-        ),
-        colors.bar_gradient_colors.clone(),
-        defaults.bar_gradient_colors.clone(),
-    ));
-    e.push(SettingItem::color_array(
-        meta!(
-            format!("{prefix}.visualizer.peak_gradient_colors"),
-            "Peak Gradient",
-            label,
-            "6 colors cycling for peak indicators"
-        ),
-        colors.peak_gradient_colors.clone(),
-        defaults.peak_gradient_colors.clone(),
-    ));
+    e.push(
+        SettingItem::hex_color(
+            meta!(
+                format!("{prefix}.visualizer.border_color"),
+                "Border Color",
+                label,
+                "Color of bar borders and LED gaps"
+            ),
+            &colors.border_color,
+            &defaults.border_color,
+        )
+        .with_theme_key(),
+    );
+    e.push(
+        SettingItem::float(
+            meta!(
+                format!("{prefix}.visualizer.border_opacity"),
+                "Border Opacity",
+                label,
+                "Transparency of bar outlines in non-LED mode"
+            ),
+            colors.border_opacity as f64,
+            defaults.border_opacity as f64,
+            0.0,
+            1.0,
+            0.1,
+            "",
+        )
+        .with_theme_key(),
+    );
+    e.push(
+        SettingItem::float(
+            meta!(
+                format!("{prefix}.visualizer.led_border_opacity"),
+                "LED Border Opacity",
+                label,
+                "Opacity of gaps between LED segments"
+            ),
+            colors.led_border_opacity as f64,
+            defaults.led_border_opacity as f64,
+            0.0,
+            1.0,
+            0.1,
+            "",
+        )
+        .with_theme_key(),
+    );
+    e.push(
+        SettingItem::color_array(
+            meta!(
+                format!("{prefix}.visualizer.bar_gradient_colors"),
+                "Bar Gradient",
+                label,
+                "6 colors from low to high frequency"
+            ),
+            colors.bar_gradient_colors.clone(),
+            defaults.bar_gradient_colors.clone(),
+        )
+        .with_theme_key(),
+    );
+    e.push(
+        SettingItem::color_array(
+            meta!(
+                format!("{prefix}.visualizer.peak_gradient_colors"),
+                "Peak Gradient",
+                label,
+                "6 colors cycling for peak indicators"
+            ),
+            colors.peak_gradient_colors.clone(),
+            defaults.peak_gradient_colors.clone(),
+        )
+        .with_theme_key(),
+    );
 }
 
 /// Build settings entries for the Visualizer tab from live config.

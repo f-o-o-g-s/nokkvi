@@ -45,6 +45,9 @@ pub struct SettingItem {
     pub label_icon: Option<&'static str>,
     /// Optional subtitle override (displayed instead of `category` in the UI).
     pub subtitle: Option<&'static str>,
+    /// True when the key targets the active theme file (`dark.*` / `light.*`).
+    /// False means the key targets config.toml.
+    pub is_theme_key: bool,
 }
 
 impl SettingItem {
@@ -58,6 +61,7 @@ impl SettingItem {
             default,
             label_icon: None,
             subtitle: m.subtitle,
+            is_theme_key: false,
         })
     }
 
@@ -220,5 +224,14 @@ impl SettingsEntry {
     /// Whether this entry is a section header (non-interactive separator).
     pub fn is_header(&self) -> bool {
         matches!(self, SettingsEntry::Header { .. })
+    }
+
+    /// Mark the item as targeting the active theme file.
+    /// No-op on headers (they are never written to any config file).
+    pub fn with_theme_key(mut self) -> Self {
+        if let SettingsEntry::Item(ref mut item) = self {
+            item.is_theme_key = true;
+        }
+        self
     }
 }

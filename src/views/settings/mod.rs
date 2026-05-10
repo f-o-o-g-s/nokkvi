@@ -808,6 +808,7 @@ impl SettingsPage {
                     if let Some(SettingsEntry::Item(item)) = self.cached_entries.get(edit_idx) {
                         let default_value = item.default.clone();
                         let key = item.key.to_string();
+                        let is_theme = item.is_theme_key;
                         // Skip reset if no key or value is already the default
                         if !key.is_empty() && item.value.display() != default_value.display() {
                             // Update cached entry
@@ -824,7 +825,11 @@ impl SettingsPage {
                                 };
                             }
                             return SettingsAction::WriteConfig {
-                                key: crate::config_writer::ConfigKey::for_value(key),
+                                key: if is_theme {
+                                    crate::config_writer::ConfigKey::theme_scalar(key)
+                                } else {
+                                    crate::config_writer::ConfigKey::app_scalar(key)
+                                },
                                 value: default_value,
                                 description: None,
                             };
@@ -899,6 +904,7 @@ impl SettingsPage {
                     && let Some(normalized) = normalize_hex(&self.hex_input)
                 {
                     let key = item.key.to_string();
+                    let is_theme = item.is_theme_key;
                     // Update cached entry
                     if let Some(SettingsEntry::Item(item_mut)) =
                         self.cached_entries.get_mut(edit_idx)
@@ -909,7 +915,11 @@ impl SettingsPage {
                     self.hex_input.clear();
                     if !key.is_empty() && !key.starts_with("__") {
                         return SettingsAction::WriteConfig {
-                            key: crate::config_writer::ConfigKey::for_value(key),
+                            key: if is_theme {
+                                crate::config_writer::ConfigKey::theme_scalar(key)
+                            } else {
+                                crate::config_writer::ConfigKey::app_scalar(key)
+                            },
                             value: SettingValue::HexColor(normalized),
                             description: None,
                         };
@@ -1093,6 +1103,7 @@ impl SettingsPage {
             && let Some(mut new_value) = change_fn(&item.value)
         {
             let key = item.key.to_string();
+            let is_theme = item.is_theme_key;
 
             // Monstercat snap: values in (0.0, MIN_EFFECTIVE) are a dead zone where the
             // filter amplifies instead of attenuating.  Snap based on direction:
@@ -1137,7 +1148,11 @@ impl SettingsPage {
                     };
                 }
                 return SettingsAction::WriteConfig {
-                    key: crate::config_writer::ConfigKey::for_value(key),
+                    key: if is_theme {
+                        crate::config_writer::ConfigKey::theme_scalar(key)
+                    } else {
+                        crate::config_writer::ConfigKey::app_scalar(key)
+                    },
                     value: new_value,
                     description: self.cached_entries.get(edit_idx).and_then(|e| match e {
                         SettingsEntry::Item(item) => item.subtitle.map(String::from),

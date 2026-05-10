@@ -707,6 +707,7 @@ mod tests {
                 },
                 label_icon: None,
                 subtitle: None,
+                is_theme_key: false,
             }),
             SettingsEntry::Item(SettingItem {
                 key: "visualizer.waves".into(),
@@ -716,6 +717,7 @@ mod tests {
                 default: SettingValue::Bool(false),
                 label_icon: None,
                 subtitle: None,
+                is_theme_key: false,
             }),
         ];
 

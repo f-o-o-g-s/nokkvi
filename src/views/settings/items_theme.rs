@@ -46,16 +46,19 @@ pub(crate) fn build_theme_items(
     });
 
     // Restore Defaults (only for built-in themes)
-    e.push(SettingItem::text(
-        meta!(
-            "__restore_theme",
-            "⟲ Restore Defaults",
-            "Select Theme",
-            "Restore this theme to its original built-in colors"
-        ),
-        "Press Enter",
-        "Press Enter",
-    ));
+    e.push(
+        SettingItem::text(
+            meta!(
+                "__restore_theme",
+                "⟲ Restore Defaults",
+                "Select Theme",
+                "Restore this theme to its original built-in colors"
+            ),
+            "Press Enter",
+            "Press Enter",
+        )
+        .with_theme_key(),
+    );
 
     // List all discovered themes
     let themes = presets::all_themes();
@@ -72,11 +75,7 @@ pub(crate) fn build_theme_items(
         } else {
             "Custom"
         };
-        e.push(SettingItem::text(
-            meta!(key, &label, "Select Theme"),
-            sub,
-            "",
-        ));
+        e.push(SettingItem::text(meta!(key, &label, "Select Theme"), sub, "").with_theme_key());
     }
 
     // ── Appearance ───────────────────────────────────────────────────
@@ -86,48 +85,60 @@ pub(crate) fn build_theme_items(
         icon: A,
     });
     let theme_val = if is_light_mode { "Light" } else { "Dark" };
-    e.push(SettingItem::enum_val(
-        meta!(
-            "general.light_mode",
-            "Theme Mode",
-            "Appearance",
-            "Switch between dark and light"
-        ),
-        theme_val,
-        "Dark",
-        vec!["Dark", "Light"],
-    ));
-    e.push(SettingItem::bool_val(
-        meta!(
-            "general.rounded_mode",
-            "Rounded Corners",
-            "Appearance",
-            "Apply rounded borders to UI elements"
-        ),
-        rounded_mode,
-        false,
-    ));
-    e.push(SettingItem::bool_val(
-        meta!(
-            "general.opacity_gradient",
-            "Opacity Gradient",
-            "Appearance",
-            "Fade non-center slots in list views"
-        ),
-        opacity_gradient,
-        true,
-    ));
+    e.push(
+        SettingItem::enum_val(
+            meta!(
+                "general.light_mode",
+                "Theme Mode",
+                "Appearance",
+                "Switch between dark and light"
+            ),
+            theme_val,
+            "Dark",
+            vec!["Dark", "Light"],
+        )
+        .with_theme_key(),
+    );
+    e.push(
+        SettingItem::bool_val(
+            meta!(
+                "general.rounded_mode",
+                "Rounded Corners",
+                "Appearance",
+                "Apply rounded borders to UI elements"
+            ),
+            rounded_mode,
+            false,
+        )
+        .with_theme_key(),
+    );
+    e.push(
+        SettingItem::bool_val(
+            meta!(
+                "general.opacity_gradient",
+                "Opacity Gradient",
+                "Appearance",
+                "Fade non-center slots in list views"
+            ),
+            opacity_gradient,
+            true,
+        )
+        .with_theme_key(),
+    );
 
     // ── Background Colors ────────────────────────────────────────────
     e.push(SettingsEntry::Header {
         label: "Background Colors",
         icon: P,
     });
-    e.push(SettingItem::text(
-        meta!("__restore_bg", "⟲ Restore Defaults", "Background Colors"),
-        "Press Enter",
-        "Press Enter",
-    ));
+    e.push(
+        SettingItem::text(
+            meta!("__restore_bg", "⟲ Restore Defaults", "Background Colors"),
+            "Press Enter",
+            "Press Enter",
+        )
+        .with_theme_key(),
+    );
     for (field, value, default) in [
         (
             "hard",
@@ -166,15 +177,18 @@ pub(crate) fn build_theme_items(
         ),
     ] {
         let key = format!("{palette_prefix}.background.{field}");
-        e.push(SettingItem::hex_color(
-            meta!(
-                key,
-                &format!("BG {field} ({palette_label})"),
-                "Background Colors"
-            ),
-            value,
-            default,
-        ));
+        e.push(
+            SettingItem::hex_color(
+                meta!(
+                    key,
+                    &format!("BG {field} ({palette_label})"),
+                    "Background Colors"
+                ),
+                value,
+                default,
+            )
+            .with_theme_key(),
+        );
     }
 
     // ── Foreground Colors ────────────────────────────────────────────
@@ -182,11 +196,14 @@ pub(crate) fn build_theme_items(
         label: "Foreground Colors",
         icon: P,
     });
-    e.push(SettingItem::text(
-        meta!("__restore_fg", "⟲ Restore Defaults", "Foreground Colors"),
-        "Press Enter",
-        "Press Enter",
-    ));
+    e.push(
+        SettingItem::text(
+            meta!("__restore_fg", "⟲ Restore Defaults", "Foreground Colors"),
+            "Press Enter",
+            "Press Enter",
+        )
+        .with_theme_key(),
+    );
     for (field, value, default) in [
         (
             "bright",
@@ -220,15 +237,18 @@ pub(crate) fn build_theme_items(
         ),
     ] {
         let key = format!("{palette_prefix}.foreground.{field}");
-        e.push(SettingItem::hex_color(
-            meta!(
-                key,
-                &format!("FG {field} ({palette_label})"),
-                "Foreground Colors"
-            ),
-            value,
-            default,
-        ));
+        e.push(
+            SettingItem::hex_color(
+                meta!(
+                    key,
+                    &format!("FG {field} ({palette_label})"),
+                    "Foreground Colors"
+                ),
+                value,
+                default,
+            )
+            .with_theme_key(),
+        );
     }
 
     // ── Accent Colors ────────────────────────────────────────────────
@@ -236,11 +256,14 @@ pub(crate) fn build_theme_items(
         label: "Accent Colors",
         icon: P,
     });
-    e.push(SettingItem::text(
-        meta!("__restore_accent", "⟲ Restore Defaults", "Accent Colors"),
-        "Press Enter",
-        "Press Enter",
-    ));
+    e.push(
+        SettingItem::text(
+            meta!("__restore_accent", "⟲ Restore Defaults", "Accent Colors"),
+            "Press Enter",
+            "Press Enter",
+        )
+        .with_theme_key(),
+    );
     for (field, value, default) in [
         (
             "primary",
@@ -274,15 +297,18 @@ pub(crate) fn build_theme_items(
         ),
     ] {
         let key = format!("{palette_prefix}.accent.{field}");
-        e.push(SettingItem::hex_color(
-            meta!(
-                key,
-                &format!("Accent {field} ({palette_label})"),
-                "Accent Colors"
-            ),
-            value,
-            default,
-        ));
+        e.push(
+            SettingItem::hex_color(
+                meta!(
+                    key,
+                    &format!("Accent {field} ({palette_label})"),
+                    "Accent Colors"
+                ),
+                value,
+                default,
+            )
+            .with_theme_key(),
+        );
     }
 
     // ── Semantic Colors ──────────────────────────────────────────────
@@ -290,15 +316,18 @@ pub(crate) fn build_theme_items(
         label: "Semantic Colors",
         icon: P,
     });
-    e.push(SettingItem::text(
-        meta!(
-            "__restore_semantic",
-            "⟲ Restore Defaults",
-            "Semantic Colors"
-        ),
-        "Press Enter",
-        "Press Enter",
-    ));
+    e.push(
+        SettingItem::text(
+            meta!(
+                "__restore_semantic",
+                "⟲ Restore Defaults",
+                "Semantic Colors"
+            ),
+            "Press Enter",
+            "Press Enter",
+        )
+        .with_theme_key(),
+    );
     for (color_name, section, base, bright, def_base, def_bright) in [
         (
             "Danger",
@@ -335,24 +364,30 @@ pub(crate) fn build_theme_items(
     ] {
         let key_base = format!("{palette_prefix}.{section}.base");
         let key_bright = format!("{palette_prefix}.{section}.bright");
-        e.push(SettingItem::hex_color(
-            meta!(
-                key_base,
-                &format!("{color_name} Base ({palette_label})"),
-                "Semantic Colors"
-            ),
-            base,
-            def_base,
-        ));
-        e.push(SettingItem::hex_color(
-            meta!(
-                key_bright,
-                &format!("{color_name} Bright ({palette_label})"),
-                "Semantic Colors"
-            ),
-            bright,
-            def_bright,
-        ));
+        e.push(
+            SettingItem::hex_color(
+                meta!(
+                    key_base,
+                    &format!("{color_name} Base ({palette_label})"),
+                    "Semantic Colors"
+                ),
+                base,
+                def_base,
+            )
+            .with_theme_key(),
+        );
+        e.push(
+            SettingItem::hex_color(
+                meta!(
+                    key_bright,
+                    &format!("{color_name} Bright ({palette_label})"),
+                    "Semantic Colors"
+                ),
+                bright,
+                def_bright,
+            )
+            .with_theme_key(),
+        );
     }
 
     e
