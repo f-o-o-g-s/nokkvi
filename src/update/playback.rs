@@ -821,6 +821,8 @@ impl Nokkvi {
         // while waiting for the async API response. The tick handler reconciles
         // with server groundtruth every cycle.
         self.modes.random = !self.modes.random;
+        let label = if self.modes.random { "Shuffle: On" } else { "Shuffle: Off" };
+        self.toast_info(label);
         self.shell_task(
             |shell| async move { shell.toggle_random().await.unwrap_or(false) },
             |r| Message::Playback(PlaybackMessage::RandomToggled(r)),
@@ -846,6 +848,12 @@ impl Nokkvi {
         };
         self.modes.repeat = new_repeat;
         self.modes.repeat_queue = new_repeat_queue;
+        let label = match (self.modes.repeat, self.modes.repeat_queue) {
+            (true, false) => "Repeat: One",
+            (false, true) => "Repeat: Queue",
+            _ => "Repeat: Off",
+        };
+        self.toast_info(label);
         self.shell_task(
             |shell| async move { shell.cycle_repeat().await.unwrap_or((false, false)) },
             |(r, rq)| Message::Playback(PlaybackMessage::RepeatToggled(r, rq)),
