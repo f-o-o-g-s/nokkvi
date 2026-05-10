@@ -3,7 +3,7 @@
 use nokkvi_data::types::theme_file::{ThemeFile, VisualizerColors};
 
 use super::items::{SettingItem, SettingsEntry};
-use crate::visualizer_config::VisualizerConfig;
+use crate::visualizer_config::{VisualizerConfig, keys};
 
 /// Push color entries for one mode (dark or light) into the settings list.
 ///
@@ -131,7 +131,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::float(
         meta!(
-            "visualizer.noise_reduction",
+            keys::NOISE_REDUCTION,
             "Noise Reduction",
             "General",
             "0.0 = raw FFT, 1.0 = fully smoothed"
@@ -145,7 +145,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::bool_val(
         meta!(
-            "visualizer.waves",
+            keys::WAVES,
             "Waves Smoothing",
             "General",
             "Bars mode only — Catmull-Rom spline smoothing creates smooth rolling hills. Mutually exclusive with Monstercat"
@@ -155,7 +155,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::int(
         meta!(
-            "visualizer.waves_smoothing",
+            keys::WAVES_SMOOTHING,
             "Waves Intensity",
             "General",
             "Bars mode only — control point spacing for waves spline. Higher = smoother (fewer control points)"
@@ -169,7 +169,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::float(
         meta!(
-            "visualizer.monstercat",
+            keys::MONSTERCAT,
             "Monstercat Smoothing",
             "General",
             "Bars mode only — sharp triangular peaks with exponential falloff. Higher = wider spread. Mutually exclusive with Waves"
@@ -183,7 +183,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::int(
         meta!(
-            "visualizer.lower_cutoff_freq",
+            keys::LOWER_CUTOFF_FREQ,
             "Lower Cutoff Freq",
             "General",
             "Frequencies below this are hidden"
@@ -197,7 +197,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::int(
         meta!(
-            "visualizer.higher_cutoff_freq",
+            keys::HIGHER_CUTOFF_FREQ,
             "Upper Cutoff Freq",
             "General",
             "Frequencies above this are hidden"
@@ -211,7 +211,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::float(
         meta!(
-            "visualizer.height_percent",
+            keys::HEIGHT_PERCENT,
             "Visualizer Height",
             "General",
             "% of window height, 10–60%"
@@ -225,7 +225,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::float(
         meta!(
-            "visualizer.opacity",
+            keys::OPACITY,
             "Visualizer Opacity",
             "General",
             "0.0 = invisible, 1.0 = fully opaque"
@@ -239,7 +239,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::bool_val(
         meta!(
-            "visualizer.auto_sensitivity",
+            keys::AUTO_SENSITIVITY,
             "Auto Sensitivity",
             "General",
             "Scales output to always fill full height"
@@ -255,7 +255,7 @@ pub(crate) fn build_visualizer_items(
     });
     e.push(SettingItem::int(
         meta!(
-            "visualizer.bars.max_bars",
+            keys::BARS_MAX_BARS,
             "Max Bar Count",
             "Bars",
             "Maximum number of bars to fit in the window"
@@ -269,7 +269,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::int(
         meta!(
-            "visualizer.bars.bar_width_min",
+            keys::BARS_BAR_WIDTH_MIN,
             "Bar Width Min",
             "Bars",
             "Bar width at smallest window size"
@@ -283,7 +283,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::int(
         meta!(
-            "visualizer.bars.bar_width_max",
+            keys::BARS_BAR_WIDTH_MAX,
             "Bar Width Max",
             "Bars",
             "Bar width at largest window size"
@@ -297,7 +297,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::int(
         meta!(
-            "visualizer.bars.bar_spacing",
+            keys::BARS_BAR_SPACING,
             "Bar Spacing",
             "Bars",
             "Gap between bars in pixels"
@@ -311,7 +311,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::int(
         meta!(
-            "visualizer.bars.border_width",
+            keys::BARS_BORDER_WIDTH,
             "Border Width",
             "Bars",
             "Outline around each bar; also sets LED gap size"
@@ -326,7 +326,7 @@ pub(crate) fn build_visualizer_items(
 
     e.push(SettingItem::bool_val(
         meta!(
-            "visualizer.bars.led_bars",
+            keys::BARS_LED_BARS,
             "LED Mode",
             "Bars",
             "Render bars as stacked LED segments like a VU meter"
@@ -336,7 +336,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::int(
         meta!(
-            "visualizer.bars.led_segment_height",
+            keys::BARS_LED_SEGMENT_HEIGHT,
             "LED Segment Height",
             "Bars",
             "Height of each LED segment in pixels"
@@ -351,7 +351,7 @@ pub(crate) fn build_visualizer_items(
 
     e.push(SettingItem::enum_val(
         meta!(
-            "visualizer.bars.gradient_mode",
+            keys::BARS_GRADIENT_MODE,
             "Gradient Mode",
             "Bars",
             "static: height-based gradient (bottom to top)\nwave: gradient stretching (taller bars show more bottom colors)\nshimmer: bars cycle through all gradient colors as flat per-bar colors\nenergy: gradient shifts based on overall loudness\nalternate: bars alternate between first two gradient colors"
@@ -362,7 +362,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::enum_val(
         meta!(
-            "visualizer.bars.gradient_orientation",
+            keys::BARS_GRADIENT_ORIENTATION,
             "Gradient Orientation",
             "Bars",
             "Axis the gradient colors are mapped along (ignored by alternate mode)\nvertical: colors map bottom-to-top within each bar\nhorizontal: colors map left-to-right across bars (bass to treble)"
@@ -373,7 +373,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::enum_val(
         meta!(
-            "visualizer.bars.peak_gradient_mode",
+            keys::BARS_PEAK_GRADIENT_MODE,
             "Peak Gradient Mode",
             "Bars",
             "Color mode for peak indicators\nstatic: uses first color in peak gradient only\ncycle: time-based animation cycling through all peak colors\nheight: color based on peak height position\nmatch: uses same color as bar gradient at that height"
@@ -384,7 +384,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::enum_val(
         meta!(
-            "visualizer.bars.peak_mode",
+            keys::BARS_PEAK_MODE,
             "Peak Mode",
             "Bars",
             "none: peak bars disabled\nfade: hold, then fade out in place (opacity decreases)\nfall: hold, then fall at constant speed\nfall_accel: hold, then fall with gravity acceleration\nfall_fade: hold, then fall at constant speed while fading out"
@@ -395,7 +395,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::int(
         meta!(
-            "visualizer.bars.peak_hold_time",
+            keys::BARS_PEAK_HOLD_TIME,
             "Peak Hold Time",
             "Bars",
             "How long peaks stay before falling/fading"
@@ -409,7 +409,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::int(
         meta!(
-            "visualizer.bars.peak_fade_time",
+            keys::BARS_PEAK_FADE_TIME,
             "Peak Fade Time",
             "Bars",
             "Duration of fade-out in 'fade' mode"
@@ -423,7 +423,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::int(
         meta!(
-            "visualizer.bars.peak_fall_speed",
+            keys::BARS_PEAK_FALL_SPEED,
             "Peak Fall Speed",
             "Bars",
             "How fast peaks drop in fall/fall_accel modes. 1 = slow, 20 = fast. No effect in fade mode"
@@ -437,7 +437,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::int(
         meta!(
-            "visualizer.bars.peak_height_ratio",
+            keys::BARS_PEAK_HEIGHT_RATIO,
             "Peak Height",
             "Bars",
             "Peak bar size as % of bar width (ignored in LED mode — peaks are one segment tall)"
@@ -451,7 +451,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::int(
         meta!(
-            "visualizer.bars.bar_depth_3d",
+            keys::BARS_BAR_DEPTH_3D,
             "Isometric Depth",
             "Bars",
             "3D top and side face depth in pixels, 0 = flat"
@@ -491,7 +491,7 @@ pub(crate) fn build_visualizer_items(
     });
     e.push(SettingItem::int(
         meta!(
-            "visualizer.lines.point_count",
+            keys::LINES_POINT_COUNT,
             "Point Count",
             "Lines",
             "8–512, more = finer detail"
@@ -505,7 +505,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::float(
         meta!(
-            "visualizer.lines.line_thickness",
+            keys::LINES_LINE_THICKNESS,
             "Line Thickness",
             "Lines",
             "% of visualizer height, 1–10%"
@@ -519,7 +519,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::float(
         meta!(
-            "visualizer.lines.outline_thickness",
+            keys::LINES_OUTLINE_THICKNESS,
             "Outline Thickness",
             "Lines",
             "Border behind the line in pixels, 0 = disabled"
@@ -533,7 +533,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::float(
         meta!(
-            "visualizer.lines.outline_opacity",
+            keys::LINES_OUTLINE_OPACITY,
             "Outline Opacity",
             "Lines",
             "0.0 = invisible, 1.0 = fully opaque"
@@ -547,7 +547,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::float(
         meta!(
-            "visualizer.lines.animation_speed",
+            keys::LINES_ANIMATION_SPEED,
             "Animation Speed",
             "Lines",
             "Color cycling speed. Lower = slower, higher = faster"
@@ -561,7 +561,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::enum_val(
         meta!(
-            "visualizer.lines.gradient_mode",
+            keys::LINES_GRADIENT_MODE,
             "Gradient Mode",
             "Lines",
             "breathing: time-based cycling through gradient palette\nstatic: uses first gradient color only\nposition: color by horizontal position (bass → treble rainbow)\nheight: color by amplitude (quiet → loud)\ngradient: position + amplitude blend (peaks shift palette)"
@@ -572,7 +572,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::float(
         meta!(
-            "visualizer.lines.fill_opacity",
+            keys::LINES_FILL_OPACITY,
             "Fill Opacity",
             "Lines",
             "Fills under the curve with a gradient. 0 = disabled"
@@ -586,7 +586,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::bool_val(
         meta!(
-            "visualizer.lines.mirror",
+            keys::LINES_MIRROR,
             "Mirror",
             "Lines",
             "Symmetric oscilloscope — line extends from center"
@@ -596,7 +596,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::enum_val(
         meta!(
-            "visualizer.lines.style",
+            keys::LINES_STYLE,
             "Line Style",
             "Lines",
             "Interpolation between data points\nsmooth: Catmull-Rom spline (curvy)\nangular: straight line segments"
@@ -607,7 +607,7 @@ pub(crate) fn build_visualizer_items(
     ));
     e.push(SettingItem::bool_val(
         meta!(
-            "visualizer.lines.boat",
+            keys::LINES_BOAT,
             "Surfing boat",
             "Lines",
             "Show a small boat that rides the waveform"

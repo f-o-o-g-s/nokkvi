@@ -378,6 +378,55 @@ impl LinesConfig {
 /// (amplifies neighbors instead of attenuating). Values in `(0.0, MIN)` are snapped to 0.0.
 pub(crate) const MONSTERCAT_MIN_EFFECTIVE: f64 = 0.7;
 
+/// Typed TOML key constants for all `visualizer.*` config entries.
+///
+/// Use these instead of raw string literals so that typos become compile errors.
+/// The `starts_with("visualizer.")` prefix check in `update/settings.rs` is
+/// intentionally left as a string literal — it is structural routing logic,
+/// not a specific key name.
+pub(crate) mod keys {
+    // ── General ─────────────────────────────────────────────────────────
+    pub(crate) const NOISE_REDUCTION: &str = "visualizer.noise_reduction";
+    pub(crate) const WAVES: &str = "visualizer.waves";
+    pub(crate) const WAVES_SMOOTHING: &str = "visualizer.waves_smoothing";
+    pub(crate) const MONSTERCAT: &str = "visualizer.monstercat";
+    pub(crate) const LOWER_CUTOFF_FREQ: &str = "visualizer.lower_cutoff_freq";
+    pub(crate) const HIGHER_CUTOFF_FREQ: &str = "visualizer.higher_cutoff_freq";
+    pub(crate) const HEIGHT_PERCENT: &str = "visualizer.height_percent";
+    pub(crate) const OPACITY: &str = "visualizer.opacity";
+    pub(crate) const AUTO_SENSITIVITY: &str = "visualizer.auto_sensitivity";
+
+    // ── Bars ─────────────────────────────────────────────────────────────
+    pub(crate) const BARS_MAX_BARS: &str = "visualizer.bars.max_bars";
+    pub(crate) const BARS_BAR_WIDTH_MIN: &str = "visualizer.bars.bar_width_min";
+    pub(crate) const BARS_BAR_WIDTH_MAX: &str = "visualizer.bars.bar_width_max";
+    pub(crate) const BARS_BAR_SPACING: &str = "visualizer.bars.bar_spacing";
+    pub(crate) const BARS_BORDER_WIDTH: &str = "visualizer.bars.border_width";
+    pub(crate) const BARS_LED_BARS: &str = "visualizer.bars.led_bars";
+    pub(crate) const BARS_LED_SEGMENT_HEIGHT: &str = "visualizer.bars.led_segment_height";
+    pub(crate) const BARS_GRADIENT_MODE: &str = "visualizer.bars.gradient_mode";
+    pub(crate) const BARS_GRADIENT_ORIENTATION: &str = "visualizer.bars.gradient_orientation";
+    pub(crate) const BARS_PEAK_GRADIENT_MODE: &str = "visualizer.bars.peak_gradient_mode";
+    pub(crate) const BARS_PEAK_MODE: &str = "visualizer.bars.peak_mode";
+    pub(crate) const BARS_PEAK_HOLD_TIME: &str = "visualizer.bars.peak_hold_time";
+    pub(crate) const BARS_PEAK_FADE_TIME: &str = "visualizer.bars.peak_fade_time";
+    pub(crate) const BARS_PEAK_FALL_SPEED: &str = "visualizer.bars.peak_fall_speed";
+    pub(crate) const BARS_PEAK_HEIGHT_RATIO: &str = "visualizer.bars.peak_height_ratio";
+    pub(crate) const BARS_BAR_DEPTH_3D: &str = "visualizer.bars.bar_depth_3d";
+
+    // ── Lines ────────────────────────────────────────────────────────────
+    pub(crate) const LINES_POINT_COUNT: &str = "visualizer.lines.point_count";
+    pub(crate) const LINES_LINE_THICKNESS: &str = "visualizer.lines.line_thickness";
+    pub(crate) const LINES_OUTLINE_THICKNESS: &str = "visualizer.lines.outline_thickness";
+    pub(crate) const LINES_OUTLINE_OPACITY: &str = "visualizer.lines.outline_opacity";
+    pub(crate) const LINES_ANIMATION_SPEED: &str = "visualizer.lines.animation_speed";
+    pub(crate) const LINES_GRADIENT_MODE: &str = "visualizer.lines.gradient_mode";
+    pub(crate) const LINES_FILL_OPACITY: &str = "visualizer.lines.fill_opacity";
+    pub(crate) const LINES_MIRROR: &str = "visualizer.lines.mirror";
+    pub(crate) const LINES_STYLE: &str = "visualizer.lines.style";
+    pub(crate) const LINES_BOAT: &str = "visualizer.lines.boat";
+}
+
 /// Visualizer configuration loaded from config.toml
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]

@@ -1109,7 +1109,7 @@ impl SettingsPage {
             // filter amplifies instead of attenuating.  Snap based on direction:
             //   incrementing from 0.0 → jump to MIN_EFFECTIVE
             //   decrementing from MIN_EFFECTIVE → jump to 0.0
-            if key == "visualizer.monstercat" {
+            if key == crate::visualizer_config::keys::MONSTERCAT {
                 let min = crate::visualizer_config::MONSTERCAT_MIN_EFFECTIVE;
                 if let (
                     items::SettingValue::Float { val: old_val, .. },

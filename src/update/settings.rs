@@ -334,30 +334,30 @@ impl Nokkvi {
         // cached settings entry in-place so the GUI reflects the change immediately
         // (without clearing search state).
         match key_str.as_str() {
-            "visualizer.monstercat" => {
+            crate::visualizer_config::keys::MONSTERCAT => {
                 if matches!(value, crate::views::settings::items::SettingValue::Float { val, .. } if val >= crate::visualizer_config::MONSTERCAT_MIN_EFFECTIVE)
                 {
                     let _ = crate::config_writer::update_config_value(
-                        "visualizer.waves",
+                        crate::visualizer_config::keys::WAVES,
                         &crate::views::settings::items::SettingValue::Bool(false),
                         None,
                     );
                     // Patch the waves entry in the cached list
                     Self::patch_cached_entry(
                         &mut self.settings_page.cached_entries,
-                        "visualizer.waves",
+                        crate::visualizer_config::keys::WAVES,
                         crate::views::settings::items::SettingValue::Bool(false),
                     );
                     self.reload_visualizer_config();
                 }
             }
-            "visualizer.waves" => {
+            crate::visualizer_config::keys::WAVES => {
                 if matches!(
                     value,
                     crate::views::settings::items::SettingValue::Bool(true)
                 ) {
                     let _ = crate::config_writer::update_config_value(
-                        "visualizer.monstercat",
+                        crate::visualizer_config::keys::MONSTERCAT,
                         &crate::views::settings::items::SettingValue::Float {
                             val: 0.0,
                             min: 0.0,
@@ -370,7 +370,7 @@ impl Nokkvi {
                     // Patch the monstercat entry in the cached list
                     Self::patch_cached_entry(
                         &mut self.settings_page.cached_entries,
-                        "visualizer.monstercat",
+                        crate::visualizer_config::keys::MONSTERCAT,
                         crate::views::settings::items::SettingValue::Float {
                             val: 0.0,
                             min: 0.0,
@@ -688,7 +688,7 @@ mod tests {
     fn test_patch_cached_entry_mutual_exclusivity_updates_in_place() {
         let mut entries = vec![
             SettingsEntry::Item(SettingItem {
-                key: "visualizer.monstercat".into(),
+                key: crate::visualizer_config::keys::MONSTERCAT.into(),
                 label: "Monstercat".to_string(),
                 category: "Test",
                 value: SettingValue::Float {
@@ -710,7 +710,7 @@ mod tests {
                 is_theme_key: false,
             }),
             SettingsEntry::Item(SettingItem {
-                key: "visualizer.waves".into(),
+                key: crate::visualizer_config::keys::WAVES.into(),
                 label: "Waves".to_string(),
                 category: "Test",
                 value: SettingValue::Bool(false),
@@ -724,7 +724,7 @@ mod tests {
         // Simulate logic where waves is activated, so we must clamp monstercat locally
         crate::Nokkvi::patch_cached_entry(
             &mut entries,
-            "visualizer.monstercat",
+            crate::visualizer_config::keys::MONSTERCAT,
             SettingValue::Float {
                 val: 0.0,
                 min: 0.0,
@@ -735,7 +735,7 @@ mod tests {
         );
 
         if let SettingsEntry::Item(item) = &entries[0] {
-            assert_eq!(item.key, "visualizer.monstercat");
+            assert_eq!(item.key, crate::visualizer_config::keys::MONSTERCAT);
             if let SettingValue::Float { val, .. } = item.value {
                 assert_eq!(
                     val, 0.0,

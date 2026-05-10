@@ -57,7 +57,7 @@ pub(crate) use super::{
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::visualizer_config::VisualizerConfig;
+    use crate::visualizer_config::{VisualizerConfig, keys as vkeys};
 
     /// Count real items (excluding headers) in a settings entry list
     fn count_items(entries: &[SettingsEntry]) -> usize {
@@ -137,27 +137,27 @@ mod tests {
 
         // Spot-check critical key paths that config_writer depends on
         assert!(
-            keys.contains(&"visualizer.noise_reduction"),
+            keys.contains(&vkeys::NOISE_REDUCTION),
             "Missing noise_reduction key"
         );
         assert!(
-            keys.contains(&"visualizer.bars.bar_spacing"),
+            keys.contains(&vkeys::BARS_BAR_SPACING),
             "Missing bar_spacing key"
         );
         assert!(
-            keys.contains(&"visualizer.bars.gradient_mode"),
+            keys.contains(&vkeys::BARS_GRADIENT_MODE),
             "Missing gradient_mode key"
         );
         assert!(
-            keys.contains(&"visualizer.bars.peak_mode"),
+            keys.contains(&vkeys::BARS_PEAK_MODE),
             "Missing peak_mode key"
         );
         assert!(
-            keys.contains(&"visualizer.auto_sensitivity"),
+            keys.contains(&vkeys::AUTO_SENSITIVITY),
             "Missing auto_sensitivity key"
         );
         assert!(
-            keys.contains(&"visualizer.bars.bar_depth_3d"),
+            keys.contains(&vkeys::BARS_BAR_DEPTH_3D),
             "Missing bar_depth_3d key"
         );
         assert!(
@@ -178,52 +178,50 @@ mod tests {
 
         for entry in &entries {
             if let SettingsEntry::Item(item) = entry {
-                match item.key.as_ref() {
+                let k = item.key.as_ref();
+                if k.starts_with("__") {
+                    // Sentinel keys (restore buttons, etc.) — skip
+                } else if k == vkeys::NOISE_REDUCTION || k == vkeys::MONSTERCAT {
                     // Float settings
-                    "visualizer.noise_reduction" | "visualizer.monstercat" => {
-                        assert!(
-                            matches!(item.value, SettingValue::Float { .. }),
-                            "Expected Float for {}, got {:?}",
-                            item.key,
-                            item.value
-                        );
-                    }
+                    assert!(
+                        matches!(item.value, SettingValue::Float { .. }),
+                        "Expected Float for {}, got {:?}",
+                        item.key,
+                        item.value
+                    );
+                } else if k == vkeys::WAVES
+                    || k == vkeys::BARS_LED_BARS
+                    || k == vkeys::AUTO_SENSITIVITY
+                {
                     // Bool settings
-                    "visualizer.waves"
-                    | "visualizer.bars.led_bars"
-                    | "visualizer.auto_sensitivity" => {
-                        assert!(
-                            matches!(item.value, SettingValue::Bool(_)),
-                            "Expected Bool for {}, got {:?}",
-                            item.key,
-                            item.value
-                        );
-                    }
+                    assert!(
+                        matches!(item.value, SettingValue::Bool(_)),
+                        "Expected Bool for {}, got {:?}",
+                        item.key,
+                        item.value
+                    );
+                } else if k == vkeys::BARS_GRADIENT_MODE
+                    || k == vkeys::BARS_GRADIENT_ORIENTATION
+                    || k == vkeys::BARS_PEAK_GRADIENT_MODE
+                    || k == vkeys::BARS_PEAK_MODE
+                {
                     // Enum settings
-                    "visualizer.bars.gradient_mode"
-                    | "visualizer.bars.gradient_orientation"
-                    | "visualizer.bars.peak_gradient_mode"
-                    | "visualizer.bars.peak_mode" => {
-                        assert!(
-                            matches!(item.value, SettingValue::Enum { .. }),
-                            "Expected Enum for {}, got {:?}",
-                            item.key,
-                            item.value
-                        );
-                    }
-                    // Sentinel keys (restore buttons, etc.)
-                    k if k.starts_with("__") => {}
+                    assert!(
+                        matches!(item.value, SettingValue::Enum { .. }),
+                        "Expected Enum for {}, got {:?}",
+                        item.key,
+                        item.value
+                    );
+                } else if k.contains("gradient_colors") {
                     // Color arrays
-                    k if k.contains("gradient_colors") => {
-                        assert!(
-                            matches!(item.value, SettingValue::ColorArray(_)),
-                            "Expected ColorArray for {}, got {:?}",
-                            item.key,
-                            item.value
-                        );
-                    }
-                    _ => {} // Other items are fine
+                    assert!(
+                        matches!(item.value, SettingValue::ColorArray(_)),
+                        "Expected ColorArray for {}, got {:?}",
+                        item.key,
+                        item.value
+                    );
                 }
+                // Other items are fine
             }
         }
     }
