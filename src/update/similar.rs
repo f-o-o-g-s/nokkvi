@@ -30,23 +30,7 @@ impl Nokkvi {
 
         let action_task = match action {
             SimilarAction::AddBatchToQueue(payload) => {
-                let len = payload.items.len();
-                debug!(" Adding batch of {} similar items to queue", len);
-                if let Some(pos) = self.pending_queue_insert_position.take() {
-                    self.shell_fire_and_forget_task(
-                        move |shell| async move {
-                            shell.insert_batch_at_position(payload, pos).await
-                        },
-                        format!("Inserted {} items at position {}", len, pos + 1),
-                        "insert similar batch to queue",
-                    )
-                } else {
-                    self.shell_fire_and_forget_task(
-                        move |shell| async move { shell.add_batch_to_queue(payload).await },
-                        format!("Added {len} similar items to queue"),
-                        "add similar batch to queue",
-                    )
-                }
+                self.add_or_insert_batch_to_queue_task(payload)
             }
             SimilarAction::PlayBatch(payload) => {
                 let len = payload.items.len();
@@ -61,12 +45,7 @@ impl Nokkvi {
                 self.handle_add_batch_to_playlist(payload)
             }
             SimilarAction::ToggleStar(song_id, starred) => {
-                let optimistic_msg =
-                    Self::starred_revert_message(song_id.clone(), ItemKind::Song, starred);
-                Task::batch(vec![
-                    Task::done(optimistic_msg),
-                    self.star_item_task(song_id, ItemKind::Song, starred),
-                ])
+                self.toggle_star_with_revert_task(song_id, ItemKind::Song, starred)
             }
 
             SimilarAction::LoadLargeArtwork(album_id) => {

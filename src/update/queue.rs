@@ -278,12 +278,7 @@ impl Nokkvi {
                 return self.set_item_rating_task(song_id, ItemKind::Song, new_rating, current);
             }
             QueueAction::ToggleStar(song_id, star) => {
-                let optimistic_msg =
-                    Self::starred_revert_message(song_id.clone(), ItemKind::Song, star);
-                return Task::batch(vec![
-                    Task::done(optimistic_msg),
-                    self.star_item_task(song_id, ItemKind::Song, star),
-                ]);
+                return self.toggle_star_with_revert_task(song_id, ItemKind::Song, star);
             }
             QueueAction::MoveItem { from, to } => {
                 // Optimistic local reorder so the UI updates instantly
