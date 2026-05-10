@@ -7,16 +7,29 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - Ctrl+R hotkey for Roulette — spins the current view's wheel and auto-plays the landing item, equivalent to picking the Roulette entry in the sort dropdown. The binding is rebindable in Settings → Hotkeys (under Sort & View). The hotkey is a no-op in Settings, and in split-view it always rolls the main pane regardless of pane focus.
+- Toggle toasts on shuffle, repeat, consume, UI SFX, and crossfade — flipping any of these via hotkey or menu now confirms the new state in-place, so you can see what you switched to without re-opening the menu.
 
 ### Changed
 
-- Roulette main spin now cruises at constant speed for the first ~1.3–1.7 s before deceleration begins, then slows under linear-friction (`ease_out_quad`) for the remainder of the main duration — previously the eased curve started decelerating from t=0, so the wheel never felt like it was "spinning fast" first. Cruise and decel velocities are matched at the handoff so there's no visible kink, and the last main-spin tick gap shrinks from ~570 ms to ~130–200 ms, handing off naturally into the existing fake-out wobble instead of speeding back up before settling.
+- Roulette deceleration is now a 17-keyframe discrete-click sequence with cubic-distributed hold times — the slot-machine click cadence audibly slows from ~20 Hz to ~1 Hz over the decel phase, ending on one of four randomized tail patterns (clean land, overshoot-and-snap-back, false-settle fake-out, or a no-cruise variant where the entire spin is the slowing decel). Replaces the previous smoothly-eased decel + scripted fake-out wobble model; the spin now reads as discrete ticks ratcheting onto the target, inspired by StepMania's MusicWheel.
+- About modal shipwright credits updated to Claude Opus 4.7.
 
 ### Fixed
 
 - Nokkvi now reliably registers as an MPRIS player on the user's session bus after launch — previously, if another nokkvi process was alive at startup (a second build under test, or an instance kicked to the login screen by Navidrome's session lock that the user hadn't closed yet), the newly launched instance silently got queued for the bus name and stayed invisible to `playerctl`, KDE Connect, GNOME media keys, and other MPRIS clients. The bus name now includes the process ID (`org.mpris.MediaPlayer2.nokkvi.instance<pid>`) per the MPRIS spec; `playerctl -p nokkvi` still matches via prefix, so existing keybinds are unaffected.
+- Artwork-resolution toast no longer suggests rebuilding a cache — it now accurately describes the LRU behavior (new fetches at the chosen size; already-loaded images keep their size until they cycle out).
+- Visualizer live config now reloads after a mutually-exclusive setting writes its secondary value — enabling Waves auto-zeroes Monstercat (and vice versa), and the engine immediately renders the new mode instead of holding the stale one until the next manual change.
+- Login text inputs (server URL, username, password) and the info-modal scrollbar now honor the theme's Rounded vs Square radius setting instead of always rendering rounded.
+- Queue header keeps a stable widget-tree shape across edit / playlist-context / read-only modes — the search field no longer loses focus when the mode changes.
+- Press animations on the nav-bar tabs, side-nav tabs, and the login submit button now fire correctly; previously the hover overlay wrapped the native button and the button captured the press event first.
+- Failed sub-fetches in genre album expansion, playlist track expansion, and artist albums expansion now surface as session-expired or error toasts instead of silently dropping.
+- Surfing boat no longer cuts through steep wave peaks — a feed-forward wave-velocity term in the Y spring keeps the boat above the crest as the wave rises beneath it.
+- Player-bar nav text in merged mode now keeps all fields visible at narrow window widths (the marquee scrolls instead of dropping album/artist), and the marquee starts scrolling immediately after a window resize instead of pausing for ~2 s.
+- Roulette spin now prefetches viewport artwork as the wheel scrolls past slots, so thumbnails appear during the spin instead of as a wave of gray boxes that only filled in after settle.
 
 ### Removed
+
+- UI SFX toggle removed from the hamburger menu — Settings → Audio remains the place to toggle it.
 
 ## v0.3.13 — 2026-05-05
 
