@@ -81,6 +81,7 @@ mod tray;
 mod window;
 
 use iced::Task;
+#[allow(unused_imports)]
 pub(crate) use loader_target::{
     AlbumsTarget, ArtistsTarget, GenresTarget, LoaderTarget, PlaylistsTarget, SongsTarget,
 };
