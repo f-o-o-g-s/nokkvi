@@ -104,19 +104,7 @@ pub enum RadiosAction {
     None,
 }
 
-impl super::HasCommonAction for RadiosAction {
-    fn as_common(&self) -> super::CommonViewAction {
-        match self {
-            Self::SearchChanged(_) => super::CommonViewAction::SearchChanged,
-            Self::SortModeChanged(m) => super::CommonViewAction::SortModeChanged(*m),
-            Self::SortOrderChanged(a) => super::CommonViewAction::SortOrderChanged(*a),
-            Self::RefreshViewData => super::CommonViewAction::RefreshViewData,
-            Self::CenterOnPlaying => super::CommonViewAction::CenterOnPlaying,
-            Self::None => super::CommonViewAction::None,
-            _ => super::CommonViewAction::ViewSpecific,
-        }
-    }
-}
+crate::views::impl_has_common_action!(RadiosAction, no_navigate_filter);
 
 // ============================================================================
 // Default / Constructor

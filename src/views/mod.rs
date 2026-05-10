@@ -384,15 +384,18 @@ pub(crate) use define_view_columns;
 /// The always-present arms (SearchChanged, SortModeChanged, SortOrderChanged,
 /// RefreshViewData, NavigateAndFilter, None, plus a catch-all
 /// `_ => ViewSpecific`) are emitted unconditionally. `CenterOnPlaying` is
-/// emitted by default; pass `, no_center` to skip it. The variadic list adds
-/// one match arm per `NavigateAndExpand*` variant the action carries — each
-/// such variant must follow the `Variant(String)` shape and have a matching
-/// variant on `CommonViewAction`.
+/// emitted by default; pass `, no_center` to skip it. Pass `, no_navigate_filter`
+/// to skip the `NavigateAndFilter` arm and the variadic `NavigateAndExpand*`
+/// list (for views like Radios that have neither). The variadic list adds one
+/// match arm per `NavigateAndExpand*` variant the action carries — each such
+/// variant must follow the `Variant(String)` shape and have a matching variant
+/// on `CommonViewAction`.
 ///
 /// # Usage
 /// ```ignore
 /// impl_has_common_action!(GenresAction { NavigateAndExpandArtist, NavigateAndExpandAlbum });
 /// impl_has_common_action!(PlaylistsAction, no_center { NavigateAndExpandArtist });
+/// impl_has_common_action!(RadiosAction, no_navigate_filter);
 /// ```
 #[allow(unused_macros)]
 macro_rules! impl_has_common_action {
@@ -427,6 +430,21 @@ macro_rules! impl_has_common_action {
                         $crate::views::CommonViewAction::NavigateAndFilter(*v, f.clone())
                     }
                     $( Self::$variant(id) => $crate::views::CommonViewAction::$variant(id.clone()), )*
+                    Self::None => $crate::views::CommonViewAction::None,
+                    _ => $crate::views::CommonViewAction::ViewSpecific,
+                }
+            }
+        }
+    };
+    ($action:ident, no_navigate_filter) => {
+        impl $crate::views::HasCommonAction for $action {
+            fn as_common(&self) -> $crate::views::CommonViewAction {
+                match self {
+                    Self::SearchChanged(_) => $crate::views::CommonViewAction::SearchChanged,
+                    Self::SortModeChanged(m) => $crate::views::CommonViewAction::SortModeChanged(*m),
+                    Self::SortOrderChanged(a) => $crate::views::CommonViewAction::SortOrderChanged(*a),
+                    Self::RefreshViewData => $crate::views::CommonViewAction::RefreshViewData,
+                    Self::CenterOnPlaying => $crate::views::CommonViewAction::CenterOnPlaying,
                     Self::None => $crate::views::CommonViewAction::None,
                     _ => $crate::views::CommonViewAction::ViewSpecific,
                 }
