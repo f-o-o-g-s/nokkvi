@@ -110,13 +110,8 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_queue(&mut self, msg: views::QueueMessage) -> Task<Message> {
-        if let QueueMessage::SetOpenMenu(next) = msg {
-            return Task::done(Message::SetOpenMenu(next));
-        }
-        if matches!(msg, QueueMessage::Roulette) {
-            return Task::done(Message::Roulette(
-                crate::app_message::RouletteMessage::Start(crate::View::Queue),
-            ));
+        if let Some(task) = crate::update::dispatch_view_chrome(self, &msg, crate::View::Queue) {
+            return task;
         }
         // ── Fast path for scrollbar seek ──
         // During a scrollbar drag, CursorMoved fires on_seek hundreds of times
@@ -144,14 +139,6 @@ impl Nokkvi {
                 self.seek_settled_timer(View::Queue),
             ]);
         }
-
-        self.play_view_sfx(
-            matches!(
-                msg,
-                QueueMessage::SlotListNavigateUp | QueueMessage::SlotListNavigateDown
-            ),
-            false,
-        );
 
         // Keep slot_count in sync with the rendered slot list so drag index
         // translation uses the correct effective_center.

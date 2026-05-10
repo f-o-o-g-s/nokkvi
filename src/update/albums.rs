@@ -372,26 +372,9 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_albums(&mut self, msg: views::AlbumsMessage) -> Task<Message> {
-        // Bubble menu open/close requests to the root before the page sees
-        // them — page state has nothing to do with overlay-menu coordination.
-        if let AlbumsMessage::SetOpenMenu(next) = msg {
-            return Task::done(Message::SetOpenMenu(next));
+        if let Some(task) = crate::update::dispatch_view_chrome(self, &msg, crate::View::Albums) {
+            return task;
         }
-        if matches!(msg, AlbumsMessage::Roulette) {
-            return Task::done(Message::Roulette(
-                crate::app_message::RouletteMessage::Start(crate::View::Albums),
-            ));
-        }
-        self.play_view_sfx(
-            matches!(
-                msg,
-                AlbumsMessage::SlotListNavigateUp | AlbumsMessage::SlotListNavigateDown
-            ),
-            matches!(
-                msg,
-                AlbumsMessage::CollapseExpansion | AlbumsMessage::ExpandCenter
-            ),
-        );
         // The page's `update` calls `set_children` for `TracksLoaded`, which
         // wipes `selected_offset` to clamp the viewport into the post-
         // expansion flat list. For find-chain navigations we want the

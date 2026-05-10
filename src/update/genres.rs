@@ -125,24 +125,9 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_genres(&mut self, msg: views::GenresMessage) -> Task<Message> {
-        if let GenresMessage::SetOpenMenu(next) = msg {
-            return Task::done(Message::SetOpenMenu(next));
+        if let Some(task) = crate::update::dispatch_view_chrome(self, &msg, crate::View::Genres) {
+            return task;
         }
-        if matches!(msg, GenresMessage::Roulette) {
-            return Task::done(Message::Roulette(
-                crate::app_message::RouletteMessage::Start(crate::View::Genres),
-            ));
-        }
-        self.play_view_sfx(
-            matches!(
-                msg,
-                GenresMessage::SlotListNavigateUp | GenresMessage::SlotListNavigateDown
-            ),
-            matches!(
-                msg,
-                GenresMessage::CollapseExpansion | GenresMessage::ExpandCenter
-            ),
-        );
         // Capture child album ids before consuming `msg` so we can fan out
         // mini-artwork fetches for the newly-loaded expansion children.
         let expansion_album_ids: Vec<(String, String)> = match &msg {

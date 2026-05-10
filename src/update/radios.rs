@@ -57,21 +57,9 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_radios(&mut self, msg: views::RadiosMessage) -> Task<Message> {
-        if let RadiosMessage::SetOpenMenu(next) = msg {
-            return Task::done(Message::SetOpenMenu(next));
+        if let Some(task) = crate::update::dispatch_view_chrome(self, &msg, crate::View::Radios) {
+            return task;
         }
-        if matches!(msg, RadiosMessage::Roulette) {
-            return Task::done(Message::Roulette(
-                crate::app_message::RouletteMessage::Start(crate::View::Radios),
-            ));
-        }
-        self.play_view_sfx(
-            matches!(
-                msg,
-                RadiosMessage::SlotListNavigateUp | RadiosMessage::SlotListNavigateDown
-            ),
-            false,
-        );
 
         // Inline the filter call to decouple borrows.
         // `filtered_stations` borrows `self.library.radio_stations` immutably,

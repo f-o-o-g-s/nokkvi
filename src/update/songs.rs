@@ -11,7 +11,7 @@ use crate::{
     Nokkvi, View,
     app_message::{ArtworkMessage, Message},
     update::SongsTarget,
-    views::{self, HasCommonAction, SongsAction, SongsMessage},
+    views::{self, HasCommonAction, SongsAction},
 };
 
 impl Nokkvi {
@@ -146,21 +146,9 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_songs(&mut self, msg: views::SongsMessage) -> Task<Message> {
-        if let SongsMessage::SetOpenMenu(next) = msg {
-            return Task::done(Message::SetOpenMenu(next));
+        if let Some(task) = crate::update::dispatch_view_chrome(self, &msg, crate::View::Songs) {
+            return task;
         }
-        if matches!(msg, SongsMessage::Roulette) {
-            return Task::done(Message::Roulette(
-                crate::app_message::RouletteMessage::Start(crate::View::Songs),
-            ));
-        }
-        self.play_view_sfx(
-            matches!(
-                msg,
-                SongsMessage::SlotListNavigateUp | SongsMessage::SlotListNavigateDown
-            ),
-            false,
-        );
         let (cmd, action) = self.songs_page.update(msg, &self.library.songs);
 
         // Handle common actions (SearchChanged, SortModeChanged, SortOrderChanged)

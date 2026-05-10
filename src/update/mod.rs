@@ -42,6 +42,7 @@ mod artists;
 mod artwork;
 mod boat;
 mod browsing_panel;
+pub(crate) mod chrome;
 mod collage;
 mod components;
 mod config;
@@ -80,6 +81,7 @@ mod toast;
 mod tray;
 mod window;
 
+pub(crate) use chrome::dispatch_view_chrome;
 use iced::Task;
 #[allow(unused_imports)]
 pub(crate) use loader_target::{

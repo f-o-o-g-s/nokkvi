@@ -71,24 +71,10 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_playlists(&mut self, msg: views::PlaylistsMessage) -> Task<Message> {
-        if let PlaylistsMessage::SetOpenMenu(next) = msg {
-            return Task::done(Message::SetOpenMenu(next));
+        if let Some(task) = crate::update::dispatch_view_chrome(self, &msg, crate::View::Playlists)
+        {
+            return task;
         }
-        if matches!(msg, PlaylistsMessage::Roulette) {
-            return Task::done(Message::Roulette(
-                crate::app_message::RouletteMessage::Start(crate::View::Playlists),
-            ));
-        }
-        self.play_view_sfx(
-            matches!(
-                msg,
-                PlaylistsMessage::SlotListNavigateUp | PlaylistsMessage::SlotListNavigateDown
-            ),
-            matches!(
-                msg,
-                PlaylistsMessage::CollapseExpansion | PlaylistsMessage::ExpandCenter
-            ),
-        );
         let (cmd, action) =
             self.playlists_page
                 .update(msg, self.library.playlists.len(), &self.library.playlists);

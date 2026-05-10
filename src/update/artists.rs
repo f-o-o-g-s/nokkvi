@@ -223,13 +223,8 @@ impl Nokkvi {
     }
 
     pub(crate) fn handle_artists(&mut self, msg: views::ArtistsMessage) -> Task<Message> {
-        if let ArtistsMessage::SetOpenMenu(next) = msg {
-            return Task::done(Message::SetOpenMenu(next));
-        }
-        if matches!(msg, ArtistsMessage::Roulette) {
-            return Task::done(Message::Roulette(
-                crate::app_message::RouletteMessage::Start(crate::View::Artists),
-            ));
+        if let Some(task) = crate::update::dispatch_view_chrome(self, &msg, crate::View::Artists) {
+            return task;
         }
         if let ArtistsMessage::OpenExternalUrl(url) = msg {
             if let Err(e) = std::process::Command::new("xdg-open").arg(&url).spawn() {
@@ -237,16 +232,6 @@ impl Nokkvi {
             }
             return Task::none();
         }
-        self.play_view_sfx(
-            matches!(
-                msg,
-                ArtistsMessage::SlotListNavigateUp | ArtistsMessage::SlotListNavigateDown
-            ),
-            matches!(
-                msg,
-                ArtistsMessage::CollapseExpansion | ArtistsMessage::ExpandCenter
-            ),
-        );
         // Capture child album ids before consuming `msg` so we can fan out
         // mini-artwork fetches for the newly-loaded expansion children.
         let expansion_album_ids: Vec<(String, String)> = match &msg {
