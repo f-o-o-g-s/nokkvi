@@ -11,7 +11,10 @@ All slot-list-based views implement `ViewPage` (in `views/mod.rs`) — explicit 
 - `current_view_page() / current_view_page_mut()` — pane-aware routing (delegates to browsing panel in split-view)
 - `view_page(View) / view_page_mut(View)` — direct lookup by `View` enum
 - `CommonViewAction` + `HasCommonAction` — generic SearchChanged / SortModeChanged / SortOrderChanged dispatch (handled centrally in `handle_common_view_action()`)
-- `impl_expansion_update!` macro — deduplicates expansion handling
+- `impl_expansion_update!` macro — deduplicates expansion handling (7 common arms for expansion views)
+- `synth_set_offset_message(&self, offset: usize) -> Option<Message>` — builds a per-view `SlotList(SlotListPageMessage::SetOffset(offset, default_modifiers))` message; used by `handle_seek_settled` to trigger artwork prefetch after scrollbar seek. Expansion views implement this; Queue and Settings return `None`.
+
+Every per-view `*Message` enum carries a `SlotList(SlotListPageMessage)` variant as the unified slot-list carrier. This replaced the old per-view flat variants (`SetSearch`, `SetScrollOffset`, `NavigateUp`, `NavigateDown`, etc.). All slot-list state mutations route through `SlotListPageMessage`.
 
 Pages on `Nokkvi`: Login, Albums, Artists, Genres, Playlists, Queue, Songs, Radios, Settings, Similar.
 
@@ -23,14 +26,27 @@ Shared by every slot-list view: search query, scroll position, focus index. Visi
 
 ## Navigation & Interaction
 
-- `SlotListMessage` sub-enum routes through `handle_slot_list_message` in `update/slot_list.rs`. Non-wrapping, dynamic center slot near edges.
-- **Stable viewport** (default): non-center clicks → `handle_select_offset()` (highlight in-place); center clicks → `SlotListActivateCenter`.
-- **Legacy mode**: non-center clicks → `SlotListClickPlay` (direct play).
+### Root-level SlotListMessage (keyboard + scrollbar)
+
+`SlotListMessage` in `app_message.rs` carries global slot-list actions dispatched by hotkeys and scrollbar timers: `NavigateUp`, `NavigateDown`, `SetOffset(usize)`, `ActivateCenter`, `ToggleSortOrder`, `ScrollbarFadeComplete(View, u64)`, `SeekSettled(View, u64)`. Root dispatch is in `handle_slot_list_message` (`update/slot_list.rs`). Each hotkey arm fans out to a per-view `Message::Albums(AlbumsMessage::SlotList(SlotListPageMessage::NavigateUp))` (and so on for every view), so the actual state mutation is always done by the per-view update handler.
+
+### Per-view SlotList(SlotListPageMessage) carrier
+
+Every per-view message enum carries a unified `SlotList(SlotListPageMessage)` variant (e.g., `AlbumsMessage::SlotList(…)`, `SongsMessage::SlotList(…)`). `SlotListPageMessage` (in `widgets/slot_list_page.rs`) enumerates all slot-list actions: `NavigateUp`, `NavigateDown`, `SetOffset(usize, Modifiers)`, `ScrollSeek(usize)`, `ActivateCenter`, `ClickPlay(usize)`, `SelectionToggle(usize)`, `SelectAllToggle`, `AddCenterToQueue`, `RefreshViewData`, `CenterOnPlaying`, `SearchQueryChanged(String)`, `SearchFocused(bool)`, `SortModeSelected(SortMode)`, `ToggleSortOrder`.
+
+**Non-expansion views** (Songs, Queue, Radios, Similar) call `self.common.handle(msg, total)` → `SlotListPageAction`, then map the action to their `*Action` enum. `SlotListPageState::handle()` is the unified dispatcher.
+
+**Expansion views** (Albums, Artists, Genres, Playlists) match `SlotList(msg)` sub-variants individually inside their update's `Err(msg)` arm (after `impl_expansion_update!` handles search/sort/expand variants), because navigation must route through expansion-aware methods like `expansion.handle_navigate_up()` / `expansion.handle_select_offset()`.
+
+`dispatch_view_with_seek!` macro (in `update/mod.rs`) wraps each view's `handle_*` call: it detects if the message was a `SlotList(SlotListPageMessage::ScrollSeek(_))` and, if so, appends `scrollbar_fade_timer` + `seek_settled_timer` tasks.
+
+- Non-wrapping navigation; dynamic center slot near edges.
+- **Stable viewport** (default): non-center clicks → `SetOffset` (highlight in-place); center clicks → `ActivateCenter`.
+- **Legacy mode**: non-center clicks → `ClickPlay` (direct play).
 - Activation flash: `slot_list.flash_center()` on activation/transitions.
 - Clickable text links: inline album/artist text dispatches `NavigateAndFilter(View, LibraryFilter)` via `mouse_area`. When the browsing panel is active, navigation updates its tab instead of switching the main view.
 - Clickable star ratings + clickable hearts on every slot via `mouse_area`.
 - Scrollbar timers carry the target `View` so seek messages route correctly between panes.
-- `dispatch_view_with_seek!` macro routes `SlotListScrollSeek` messages.
 
 ## Inline Expansion
 
@@ -76,10 +92,16 @@ Available on every slot-list view via the "Roulette" entry in the sort dropdown 
 
 ## Update Handler Pattern
 
-Root dispatch in `update/mod.rs`. `ls src/update/` for handler files. The async-bridge helpers `shell_task` / `shell_spawn` are methods on `Nokkvi` (`src/main.rs`). Cross-cutting helpers in `update/components.rs`:
+Root dispatch in `update/mod.rs`. `ls src/update/` for handler files. The async-bridge helpers `shell_task` / `shell_spawn` are methods on `Nokkvi` (`src/main.rs`). Cross-cutting helpers:
+
+**`update/chrome.rs`** — shared handler prologue:
+- `HasViewChrome` trait — implemented by all 7 library-view message types. Classifies variants as `SetOpenMenu`, `Roulette`, nav-sfx, or expand-sfx.
+- `dispatch_view_chrome<M: HasViewChrome>(handler, msg, view)` — run at the top of every `handle_*` function. Returns `Some(task)` for `SetOpenMenu` / `Roulette` intercepts (caller returns immediately); returns `None` for normal page actions (after triggering the appropriate SFX).
+
+**`update/components.rs`** — shared action helpers:
 - `guard_play_action` — split-view + playlist-edit conflict guard
 - `set_item_rating_task`, `star_item_task`, `radio_mutation_task`
-- `handle_common_view_action` — applies generic Search/Sort actions to non-Queue library views
+- `handle_common_view_action` — applies generic Search/Sort/Navigate actions to non-Queue library views; called from each view's handler after the page `update()` returns a `CommonViewAction`
 - `PaginatedFetch::from_common()` — needs_fetch-gated paginated load (Albums / Artists / Songs)
 - `prefetch_album_artwork_tasks` / `prefetch_song_artwork_tasks` — viewport-window artwork prefetch
 - `play_entity_task` / `add_entity_to_queue_task` / `insert_entity_to_queue_at_position_task` — generic entity-action builders
