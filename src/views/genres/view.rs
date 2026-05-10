@@ -17,54 +17,42 @@ use crate::widgets;
 impl GenresPage {
     /// Build the view
     pub fn view<'a>(&'a self, data: GenresViewData<'a>) -> Element<'a, GenresMessage> {
-        let column_dropdown: Element<'a, GenresMessage> = {
-            use crate::widgets::checkbox_dropdown::checkbox_dropdown;
-            let items: Vec<(super::GenresColumn, &'static str, bool)> = vec![
-                (
-                    super::GenresColumn::Select,
-                    "Select",
-                    self.column_visibility.select,
-                ),
-                (
-                    super::GenresColumn::Index,
-                    "Index",
-                    self.column_visibility.index,
-                ),
-                (
-                    super::GenresColumn::Thumbnail,
-                    "Thumbnail",
-                    self.column_visibility.thumbnail,
-                ),
-                (
-                    super::GenresColumn::AlbumCount,
-                    "Album count",
-                    self.column_visibility.albumcount,
-                ),
-                (
-                    super::GenresColumn::SongCount,
-                    "Song count",
-                    self.column_visibility.songcount,
-                ),
-            ];
-            checkbox_dropdown(
-                "assets/icons/columns-3-cog.svg",
-                "Show/hide columns",
-                items,
+        let column_dropdown: Element<'a, GenresMessage> =
+            crate::widgets::checkbox_dropdown::view_columns_dropdown(
+                crate::View::Genres,
+                vec![
+                    (
+                        super::GenresColumn::Select,
+                        "Select",
+                        self.column_visibility.select,
+                    ),
+                    (
+                        super::GenresColumn::Index,
+                        "Index",
+                        self.column_visibility.index,
+                    ),
+                    (
+                        super::GenresColumn::Thumbnail,
+                        "Thumbnail",
+                        self.column_visibility.thumbnail,
+                    ),
+                    (
+                        super::GenresColumn::AlbumCount,
+                        "Album count",
+                        self.column_visibility.albumcount,
+                    ),
+                    (
+                        super::GenresColumn::SongCount,
+                        "Song count",
+                        self.column_visibility.songcount,
+                    ),
+                ],
                 GenresMessage::ToggleColumnVisible,
-                |trigger_bounds| match trigger_bounds {
-                    Some(b) => GenresMessage::SetOpenMenu(Some(
-                        crate::app_message::OpenMenu::CheckboxDropdown {
-                            view: crate::View::Genres,
-                            trigger_bounds: b,
-                        },
-                    )),
-                    None => GenresMessage::SetOpenMenu(None),
-                },
+                GenresMessage::SetOpenMenu,
                 data.column_dropdown_open,
                 data.column_dropdown_trigger_bounds,
             )
-            .into()
-        };
+            .into();
 
         let header = widgets::view_header::view_header(
             self.common.current_sort_mode,
@@ -369,36 +357,16 @@ impl GenresPage {
             .padding(0)
             .width(Length::Fill);
 
-        use crate::widgets::context_menu::{
-            context_menu, library_entries, library_entry_view, open_state_for,
-        };
-        let item_idx = ctx.item_index;
-        let cm_id = crate::app_message::ContextMenuId::LibraryRow {
-            view: crate::View::Genres,
-            item_index: item_idx,
-        };
-        let (cm_open, cm_position) = open_state_for(open_menu, &cm_id);
-        context_menu(
+        use crate::widgets::context_menu::{library_entries, wrap_library_row};
+        wrap_library_row(
+            crate::View::Genres,
+            ctx.item_index,
             slot_button,
             library_entries(),
-            move |entry, length| {
-                library_entry_view(entry, length, |e| {
-                    GenresMessage::ContextMenuAction(item_idx, e)
-                })
-            },
-            cm_open,
-            cm_position,
-            move |position| match position {
-                Some(p) => {
-                    GenresMessage::SetOpenMenu(Some(crate::app_message::OpenMenu::Context {
-                        id: cm_id.clone(),
-                        position: p,
-                    }))
-                }
-                None => GenresMessage::SetOpenMenu(None),
-            },
+            open_menu,
+            GenresMessage::ContextMenuAction,
+            GenresMessage::SetOpenMenu,
         )
-        .into()
     }
 
     /// Render a child album row in the slot list (indented, simpler layout)
@@ -434,35 +402,15 @@ impl GenresPage {
             1, // depth 1: child albums under genre
         );
 
-        use crate::widgets::context_menu::{
-            context_menu, library_entries_with_folder, library_entry_view, open_state_for,
-        };
-        let item_idx = ctx.item_index;
-        let cm_id = crate::app_message::ContextMenuId::LibraryRow {
-            view: crate::View::Genres,
-            item_index: item_idx,
-        };
-        let (cm_open, cm_position) = open_state_for(open_menu, &cm_id);
-        context_menu(
+        use crate::widgets::context_menu::{library_entries_with_folder, wrap_library_row};
+        wrap_library_row(
+            crate::View::Genres,
+            ctx.item_index,
             album_el,
             library_entries_with_folder(),
-            move |entry, length| {
-                library_entry_view(entry, length, |e| {
-                    GenresMessage::ContextMenuAction(item_idx, e)
-                })
-            },
-            cm_open,
-            cm_position,
-            move |position| match position {
-                Some(p) => {
-                    GenresMessage::SetOpenMenu(Some(crate::app_message::OpenMenu::Context {
-                        id: cm_id.clone(),
-                        position: p,
-                    }))
-                }
-                None => GenresMessage::SetOpenMenu(None),
-            },
+            open_menu,
+            GenresMessage::ContextMenuAction,
+            GenresMessage::SetOpenMenu,
         )
-        .into()
     }
 }
