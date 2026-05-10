@@ -29,7 +29,6 @@ use crate::theme;
 #[derive(Debug, Clone, Copy)]
 pub enum MenuAction {
     ToggleLightMode,
-    ToggleSoundEffects,
     OpenSettings,
     About,
     Quit,
@@ -55,8 +54,6 @@ pub struct HamburgerMenu<Message> {
     is_open: bool,
     /// Current light mode state (for label text)
     is_light_mode: bool,
-    /// Current SFX enabled state (for label text)
-    sfx_enabled: bool,
     /// Icon button size
     button_size: f32,
     /// Icon size within the button
@@ -71,7 +68,6 @@ impl<Message: Clone> HamburgerMenu<Message> {
         on_open_change: impl Fn(bool) -> Message + 'static,
         is_open: bool,
         is_light_mode: bool,
-        sfx_enabled: bool,
     ) -> Self {
         let svg_content = crate::embedded_svg::get_svg("assets/icons/menu.svg");
         let icon_handle = Handle::from_memory(svg_content.as_bytes());
@@ -82,7 +78,6 @@ impl<Message: Clone> HamburgerMenu<Message> {
             on_open_change: Box::new(on_open_change),
             is_open,
             is_light_mode,
-            sfx_enabled,
             button_size: 28.0,
             icon_size: 18.0,
             player_bar_style: false,
@@ -268,7 +263,6 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Hambur
             on_action: &self.on_action,
             on_open_change: &self.on_open_change,
             is_light_mode: self.is_light_mode,
-            sfx_enabled: self.sfx_enabled,
         })))
     }
 }
@@ -289,7 +283,6 @@ struct MenuOverlay<'a, Message> {
     on_action: &'a dyn Fn(MenuAction) -> Message,
     on_open_change: &'a dyn Fn(bool) -> Message,
     is_light_mode: bool,
-    sfx_enabled: bool,
 }
 
 /// Constants for menu item rendering
@@ -304,15 +297,14 @@ const MENU_TEXT_PADDING_LEFT: f32 = 10.0;
 /// is drawn. Reordering this slice is the only way to reorder the menu.
 const MENU_ITEMS: &[MenuAction] = &[
     MenuAction::ToggleLightMode,
-    MenuAction::ToggleSoundEffects,
     MenuAction::OpenSettings,
     MenuAction::About,
     MenuAction::Quit,
 ];
 
-/// Number of menu items (3 settings + separator + quit)
+/// Number of menu items
 const MENU_ITEM_COUNT: usize = MENU_ITEMS.len();
-const SEPARATOR_INDEX: usize = 4; // Separator drawn before this item
+const SEPARATOR_INDEX: usize = 3; // Separator drawn before this item
 
 const _: () = assert!(SEPARATOR_INDEX < MENU_ITEM_COUNT);
 const _: () = assert!(matches!(MENU_ITEMS[MENU_ITEM_COUNT - 1], MenuAction::Quit));
@@ -454,14 +446,6 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
                     "Dark Mode"
                 } else {
                     "Light Mode"
-                },
-                true,
-            ),
-            (
-                if self.sfx_enabled {
-                    "UI SFX: On"
-                } else {
-                    "UI SFX: Off"
                 },
                 true,
             ),

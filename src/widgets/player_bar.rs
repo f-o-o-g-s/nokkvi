@@ -877,13 +877,11 @@ pub(crate) fn player_bar<'a>(
     if !crate::theme::is_top_nav() {
         use crate::widgets::hamburger_menu::{HamburgerMenu, MenuAction};
         let is_light = data.is_light_mode;
-        let sfx_on = sound_effects_enabled;
         let hamburger_open = data.hamburger_open;
         mode_toggles_row = mode_toggles_row.push(Element::from(HoverOverlay::new(
             HamburgerMenu::new(
                 |action| match action {
                     MenuAction::ToggleLightMode => PlayerBarMessage::ToggleLightMode,
-                    MenuAction::ToggleSoundEffects => PlayerBarMessage::ToggleSoundEffects,
                     MenuAction::OpenSettings => PlayerBarMessage::OpenSettings,
                     MenuAction::About => PlayerBarMessage::About,
                     MenuAction::Quit => PlayerBarMessage::Quit,
@@ -895,7 +893,6 @@ pub(crate) fn player_bar<'a>(
                 },
                 hamburger_open,
                 is_light,
-                sfx_on,
             )
             .player_bar_style(),
         )));

@@ -9,7 +9,7 @@ use iced::{
 
 use crate::{
     Nokkvi, Screen, View,
-    app_message::{Message, PlaybackMessage},
+    app_message::Message,
     views, widgets,
 };
 
@@ -77,9 +77,6 @@ fn map_nav_bar_message(msg: widgets::NavBarMessage) -> Message {
             Message::SwitchView(view)
         }
         widgets::NavBarMessage::ToggleLightMode => Message::ToggleLightMode,
-        widgets::NavBarMessage::ToggleSoundEffects => {
-            Message::Playback(PlaybackMessage::ToggleSoundEffects)
-        }
         widgets::NavBarMessage::OpenSettings => Message::SwitchView(View::Settings),
         widgets::NavBarMessage::StripClicked => Message::StripClicked,
         widgets::NavBarMessage::StripContextAction(entry) => Message::StripContextAction(entry),
@@ -683,7 +680,6 @@ impl Nokkvi {
             bitrate_kbps: self.playback.bitrate,
             window_width: self.window.width,
             is_light_mode: crate::theme::is_light_mode(),
-            sound_effects_enabled: self.sfx.enabled,
             settings_open,
             local_music_path: self.local_music_path.clone(),
             is_current_starred: self.is_current_track_starred(),

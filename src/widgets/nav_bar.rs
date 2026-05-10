@@ -72,9 +72,7 @@ pub(crate) struct NavBarViewData {
     pub window_width: f32,
     /// Current light mode state (for hamburger menu toggle label)
     pub is_light_mode: bool,
-    /// Current SFX state (for hamburger menu toggle label)
-    pub sound_effects_enabled: bool,
-    /// Whether the settings view is currently open (disables nav tab highlighting)
+/// Whether the settings view is currently open (disables nav tab highlighting)
     pub settings_open: bool,
     /// Local music path for "Show in File Manager" (empty = not configured)
     pub local_music_path: String,
@@ -98,7 +96,6 @@ pub(crate) struct NavBarViewData {
 pub enum NavBarMessage {
     SwitchView(NavView),
     ToggleLightMode,
-    ToggleSoundEffects,
     OpenSettings,
     /// Track info strip was clicked — dispatch depends on strip_click_action setting
     StripClicked,
@@ -679,7 +676,6 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         super::hover_overlay::HoverOverlay::new(HamburgerMenu::new(
             |action| match action {
                 MenuAction::ToggleLightMode => NavBarMessage::ToggleLightMode,
-                MenuAction::ToggleSoundEffects => NavBarMessage::ToggleSoundEffects,
                 MenuAction::OpenSettings => NavBarMessage::OpenSettings,
                 MenuAction::About => NavBarMessage::About,
                 MenuAction::Quit => NavBarMessage::Quit,
@@ -689,7 +685,6 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             },
             data.hamburger_open,
             data.is_light_mode,
-            data.sound_effects_enabled,
         ))
         .border_radius(theme::ui_border_radius())
         .into();
