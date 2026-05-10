@@ -1,5 +1,9 @@
 use crate::types::song::Song;
 
+/// Length anchor used by `ItemKind`'s drift checks. Update in lockstep
+/// with the `enum BatchItem` variant count.
+pub const BATCH_ITEM_VARIANT_COUNT: usize = 5;
+
 /// A single item representing a selection source. We use this to maintain the exact
 /// visual Top-to-Bottom order that the user originally clicked things in, so the queue
 /// will be built in the correct intuitive order.

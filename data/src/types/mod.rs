@@ -12,6 +12,7 @@ pub mod filter;
 pub mod genre;
 pub mod hotkey_config;
 pub mod info_modal;
+pub mod item_kind;
 pub mod mode_toggle;
 pub mod paged_buffer;
 pub mod player_settings;
@@ -38,6 +39,7 @@ pub mod toml_settings;
 pub mod toml_views;
 pub mod view_preferences;
 
+pub use item_kind::ItemKind;
 pub use mode_toggle::ModeToggleEffect;
 pub use song_source::SongSource;
 
