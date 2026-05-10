@@ -121,7 +121,7 @@ When you complete an item, append the commit ref(s) and flip the status. Keep th
 | 7 | `OpenMenu::CheckboxDropdown { view: View::X, ... }` per-view construction | ❌ open | No `SlotListPageState::checkbox_dropdown_open_message` helper. |
 | 8 | `update_config_value` vs `update_theme_value` runtime classifier | ❌ open | Same as §7 #11. |
 | 9 | Per-view message enums + bubble-only intercepts | ❌ open | Not verified. |
-| 10 | Hardcoded `Some(80)` instead of `Some(THUMBNAIL_SIZE)` | ❌ open | 4 sites still: `data/src/backend/albums.rs:67`, `src/update/window.rs:159`, `src/update/songs.rs:255`, `src/update/components.rs:164`. |
+| 10 | Hardcoded `Some(80)` instead of `Some(THUMBNAIL_SIZE)` | ✅ done | `f9dedd9` (2026-05-09): replaced 3 production sites (`data/src/backend/albums.rs`, `src/update/window.rs`, `src/update/components.rs`); `src/update/songs.rs` was already using the constant. |
 | 11 | Hamburger menu match-arms | ✅ done | Same as B6. |
 | 12 | Visualizer config dotted keys (37 distinct literals) | ❌ open | No typed visualizer-key enum on `ConfigKey`. |
 | 13 | Crossfade armed/active dual-flag in `AudioRenderer` | ✅ done | Lane B `c1f4676` (2026-05-08): folded into `CrossfadeState` enum (see IG-8). The `crossfade_active` / `crossfade_armed` bools and the 3 `crossfade_armed_*` fields are gone — `is_crossfade_active()` / `is_crossfade_armed()` now `matches!` the variant. |
