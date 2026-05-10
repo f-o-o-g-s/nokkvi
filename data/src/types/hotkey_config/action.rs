@@ -29,6 +29,7 @@ macro_rules! define_hotkey_actions {
                 description: $description:literal,
                 category: $category:literal,
                 toml_key: $toml_key:literal,
+                settings_key: $settings_key:literal,
                 default: $default:expr,
             }),* $(,)?
         ],
@@ -37,6 +38,7 @@ macro_rules! define_hotkey_actions {
                 display: $r_display:literal,
                 description: $r_description:literal,
                 toml_key: $r_toml_key:literal,
+                settings_key: $r_settings_key:literal,
                 default: $r_default:expr,
             }),* $(,)?
         ]
@@ -100,6 +102,14 @@ macro_rules! define_hotkey_actions {
                 }
             }
 
+            /// Settings UI key string (e.g. `"hotkey.toggle_play"`).
+            pub fn settings_key(&self) -> &'static str {
+                match self {
+                    $(HotkeyAction::$variant => $settings_key,)*
+                    $(HotkeyAction::$reserved => $r_settings_key,)*
+                }
+            }
+
             /// Parse from a snake_case TOML key string. Returns None for unknown keys.
             pub fn from_toml_key(s: &str) -> Option<HotkeyAction> {
                 Some(match s {
@@ -120,6 +130,7 @@ define_hotkey_actions! {
             description: "Switch to the queue view",
             category: "Views",
             toml_key: "switch_to_queue",
+            settings_key: "hotkey.switch_to_queue",
             default: KeyCombo::key(KeyCode::Char('1')),
         },
         SwitchToAlbums {
@@ -127,6 +138,7 @@ define_hotkey_actions! {
             description: "Switch to the albums view",
             category: "Views",
             toml_key: "switch_to_albums",
+            settings_key: "hotkey.switch_to_albums",
             default: KeyCombo::key(KeyCode::Char('2')),
         },
         SwitchToArtists {
@@ -134,6 +146,7 @@ define_hotkey_actions! {
             description: "Switch to the artists view",
             category: "Views",
             toml_key: "switch_to_artists",
+            settings_key: "hotkey.switch_to_artists",
             default: KeyCombo::key(KeyCode::Char('3')),
         },
         SwitchToSongs {
@@ -141,6 +154,7 @@ define_hotkey_actions! {
             description: "Switch to the songs view",
             category: "Views",
             toml_key: "switch_to_songs",
+            settings_key: "hotkey.switch_to_songs",
             default: KeyCombo::key(KeyCode::Char('4')),
         },
         SwitchToGenres {
@@ -148,6 +162,7 @@ define_hotkey_actions! {
             description: "Switch to the genres view",
             category: "Views",
             toml_key: "switch_to_genres",
+            settings_key: "hotkey.switch_to_genres",
             default: KeyCombo::key(KeyCode::Char('5')),
         },
         SwitchToPlaylists {
@@ -155,6 +170,7 @@ define_hotkey_actions! {
             description: "Switch to the playlists view",
             category: "Views",
             toml_key: "switch_to_playlists",
+            settings_key: "hotkey.switch_to_playlists",
             default: KeyCombo::key(KeyCode::Char('6')),
         },
         SwitchToRadios {
@@ -162,6 +178,7 @@ define_hotkey_actions! {
             description: "Switch to the internet radios view",
             category: "Views",
             toml_key: "switch_to_radios",
+            settings_key: "hotkey.switch_to_radios",
             default: KeyCombo::key(KeyCode::Char('7')),
         },
         SwitchToSettings {
@@ -169,6 +186,7 @@ define_hotkey_actions! {
             description: "Open the settings panel",
             category: "Views",
             toml_key: "switch_to_settings",
+            settings_key: "hotkey.switch_to_settings",
             default: KeyCombo::key(KeyCode::Char('`')),
         },
 
@@ -178,6 +196,7 @@ define_hotkey_actions! {
             description: "Play or pause the current track",
             category: "Playback",
             toml_key: "toggle_play",
+            settings_key: "hotkey.toggle_play",
             default: KeyCombo::key(KeyCode::Space),
         },
         ToggleRandom {
@@ -185,6 +204,7 @@ define_hotkey_actions! {
             description: "Toggle random/shuffle mode",
             category: "Playback",
             toml_key: "toggle_random",
+            settings_key: "hotkey.toggle_random",
             default: KeyCombo::key(KeyCode::Char('x')),
         },
         ToggleRepeat {
@@ -192,6 +212,7 @@ define_hotkey_actions! {
             description: "Cycle repeat mode (off → one → queue)",
             category: "Playback",
             toml_key: "toggle_repeat",
+            settings_key: "hotkey.toggle_repeat",
             default: KeyCombo::key(KeyCode::Char('z')),
         },
         ToggleConsume {
@@ -199,6 +220,7 @@ define_hotkey_actions! {
             description: "Toggle consume mode (remove after play)",
             category: "Playback",
             toml_key: "toggle_consume",
+            settings_key: "hotkey.toggle_consume",
             default: KeyCombo::key(KeyCode::Char('c')),
         },
         ToggleSoundEffects {
@@ -206,6 +228,7 @@ define_hotkey_actions! {
             description: "Enable or disable sound effects",
             category: "Playback",
             toml_key: "toggle_sound_effects",
+            settings_key: "hotkey.toggle_sfx",
             default: KeyCombo::key(KeyCode::Char('s')),
         },
         CycleVisualization {
@@ -213,6 +236,7 @@ define_hotkey_actions! {
             description: "Cycle visualizer (off → bars → lines)",
             category: "Playback",
             toml_key: "cycle_visualization",
+            settings_key: "hotkey.cycle_vis",
             default: KeyCombo::key(KeyCode::Char('v')),
         },
         ToggleEqModal {
@@ -220,6 +244,7 @@ define_hotkey_actions! {
             description: "Open or close the 10-band graphic equalizer",
             category: "Playback",
             toml_key: "toggle_eq_modal",
+            settings_key: "hotkey.toggle_eq_modal",
             default: KeyCombo::key(KeyCode::Char('q')),
         },
         ToggleCrossfade {
@@ -227,6 +252,7 @@ define_hotkey_actions! {
             description: "Enable or disable gapless crossfading",
             category: "Playback",
             toml_key: "toggle_crossfade",
+            settings_key: "hotkey.toggle_crossfade",
             default: KeyCombo::key(KeyCode::Char('f')),
         },
 
@@ -236,6 +262,7 @@ define_hotkey_actions! {
             description: "Navigate up in the slot list",
             category: "Navigation",
             toml_key: "slot_list_up",
+            settings_key: "hotkey.slot_list_up",
             default: KeyCombo::key(KeyCode::Backspace),
         },
         SlotListDown {
@@ -243,6 +270,7 @@ define_hotkey_actions! {
             description: "Navigate down in the slot list",
             category: "Navigation",
             toml_key: "slot_list_down",
+            settings_key: "hotkey.slot_list_down",
             default: KeyCombo::key(KeyCode::Tab),
         },
         Activate {
@@ -250,6 +278,7 @@ define_hotkey_actions! {
             description: "Activate the focused item",
             category: "Navigation",
             toml_key: "activate",
+            settings_key: "hotkey.activate",
             default: KeyCombo::key(KeyCode::Enter),
         },
         ExpandCenter {
@@ -257,6 +286,7 @@ define_hotkey_actions! {
             description: "Expand/collapse item. Works in albums/artists/playlists/genres only.",
             category: "Navigation",
             toml_key: "expand_center",
+            settings_key: "hotkey.expand_center",
             default: KeyCombo::shift(KeyCode::Enter),
         },
 
@@ -266,6 +296,7 @@ define_hotkey_actions! {
             description: "Toggle library browser beside queue",
             category: "Navigation",
             toml_key: "toggle_browsing_panel",
+            settings_key: "hotkey.toggle_browsing_panel",
             default: KeyCombo::ctrl(KeyCode::Char('e')),
         },
         CenterOnPlaying {
@@ -273,6 +304,7 @@ define_hotkey_actions! {
             description: "Scroll to the currently playing track",
             category: "Navigation",
             toml_key: "center_on_playing",
+            settings_key: "hotkey.center_playing",
             default: KeyCombo::shift(KeyCode::Char('c')),
         },
         FocusSearch {
@@ -280,6 +312,7 @@ define_hotkey_actions! {
             description: "Focus the search input field",
             category: "Navigation",
             toml_key: "focus_search",
+            settings_key: "hotkey.focus_search",
             default: KeyCombo::key(KeyCode::Char('/')),
         },
 
@@ -289,6 +322,7 @@ define_hotkey_actions! {
             description: "Love/unlove · Navidrome star API",
             category: "Item Actions",
             toml_key: "toggle_star",
+            settings_key: "hotkey.toggle_star",
             default: KeyCombo::shift(KeyCode::Char('l')),
         },
         AddToQueue {
@@ -296,6 +330,7 @@ define_hotkey_actions! {
             description: "Add focused album/song to the queue",
             category: "Item Actions",
             toml_key: "add_to_queue",
+            settings_key: "hotkey.add_to_queue",
             default: KeyCombo::shift(KeyCode::Char('a')),
         },
         RemoveFromQueue {
@@ -303,6 +338,7 @@ define_hotkey_actions! {
             description: "Remove focused item from the queue",
             category: "Item Actions",
             toml_key: "remove_from_queue",
+            settings_key: "hotkey.remove_from_queue",
             default: KeyCombo::ctrl(KeyCode::Char('d')),
         },
         ClearQueue {
@@ -310,6 +346,7 @@ define_hotkey_actions! {
             description: "Clear the entire queue",
             category: "Item Actions",
             toml_key: "clear_queue",
+            settings_key: "hotkey.clear_queue",
             default: KeyCombo::shift(KeyCode::Char('d')),
         },
         IncreaseRating {
@@ -317,6 +354,7 @@ define_hotkey_actions! {
             description: "Increase rating by one star",
             category: "Item Actions",
             toml_key: "increase_rating",
+            settings_key: "hotkey.increase_rating",
             default: KeyCombo::key(KeyCode::Char('=')),
         },
         DecreaseRating {
@@ -324,6 +362,7 @@ define_hotkey_actions! {
             description: "Decrease rating by one star",
             category: "Item Actions",
             toml_key: "decrease_rating",
+            settings_key: "hotkey.decrease_rating",
             default: KeyCombo::key(KeyCode::Char('-')),
         },
         GetInfo {
@@ -331,6 +370,7 @@ define_hotkey_actions! {
             description: "Show info for the focused item",
             category: "Item Actions",
             toml_key: "get_info",
+            settings_key: "hotkey.get_info",
             default: KeyCombo::shift(KeyCode::Char('i')),
         },
         FindSimilar {
@@ -338,6 +378,7 @@ define_hotkey_actions! {
             description: "Find similar songs for the playing track",
             category: "Item Actions",
             toml_key: "find_similar",
+            settings_key: "hotkey.find_similar",
             default: KeyCombo::shift(KeyCode::Char('s')),
         },
         FindTopSongs {
@@ -345,6 +386,7 @@ define_hotkey_actions! {
             description: "Show top songs for the playing track's artist",
             category: "Item Actions",
             toml_key: "find_top_songs",
+            settings_key: "hotkey.find_top_songs",
             default: KeyCombo::shift(KeyCode::Char('t')),
         },
         MoveTrackUp {
@@ -352,6 +394,7 @@ define_hotkey_actions! {
             description: "Move centered track up in queue",
             category: "Item Actions",
             toml_key: "move_track_up",
+            settings_key: "hotkey.move_track_up",
             default: KeyCombo::shift(KeyCode::ArrowUp),
         },
         MoveTrackDown {
@@ -359,6 +402,7 @@ define_hotkey_actions! {
             description: "Move centered track down in queue",
             category: "Item Actions",
             toml_key: "move_track_down",
+            settings_key: "hotkey.move_track_down",
             default: KeyCombo::shift(KeyCode::ArrowDown),
         },
         SaveQueueAsPlaylist {
@@ -366,6 +410,7 @@ define_hotkey_actions! {
             description: "Open save-as-playlist dialog for the queue",
             category: "Item Actions",
             toml_key: "save_queue_as_playlist",
+            settings_key: "hotkey.save_queue_as_playlist",
             default: KeyCombo::ctrl(KeyCode::Char('s')),
         },
 
@@ -375,6 +420,7 @@ define_hotkey_actions! {
             description: "Cycle sort mode backward",
             category: "Sort & View",
             toml_key: "prev_sort_mode",
+            settings_key: "hotkey.cycle_view_left",
             default: KeyCombo::key(KeyCode::ArrowLeft),
         },
         NextSortMode {
@@ -382,6 +428,7 @@ define_hotkey_actions! {
             description: "Cycle sort mode forward",
             category: "Sort & View",
             toml_key: "next_sort_mode",
+            settings_key: "hotkey.cycle_view_right",
             default: KeyCombo::key(KeyCode::ArrowRight),
         },
         ToggleSortOrder {
@@ -389,6 +436,7 @@ define_hotkey_actions! {
             description: "Toggle ascending/descending sort",
             category: "Sort & View",
             toml_key: "toggle_sort_order",
+            settings_key: "hotkey.toggle_sort_order",
             default: KeyCombo::key(KeyCode::PageUp),
         },
         RefreshView {
@@ -396,6 +444,7 @@ define_hotkey_actions! {
             description: "Reload current view data from the server",
             category: "Sort & View",
             toml_key: "refresh_view",
+            settings_key: "hotkey.refresh_view",
             default: KeyCombo::key(KeyCode::Char('r')),
         },
         Roulette {
@@ -403,6 +452,7 @@ define_hotkey_actions! {
             description: "Spin the wheel and play a random item from the current view",
             category: "Sort & View",
             toml_key: "roulette",
+            settings_key: "hotkey.roulette",
             default: KeyCombo::ctrl(KeyCode::Char('r')),
         },
 
@@ -412,6 +462,7 @@ define_hotkey_actions! {
             description: "Toggle setting on · enable field",
             category: "Settings Edit",
             toml_key: "edit_up",
+            settings_key: "hotkey.edit_up",
             default: KeyCombo::key(KeyCode::ArrowUp),
         },
         EditDown {
@@ -419,6 +470,7 @@ define_hotkey_actions! {
             description: "Toggle setting off · disable field",
             category: "Settings Edit",
             toml_key: "edit_down",
+            settings_key: "hotkey.edit_down",
             default: KeyCombo::key(KeyCode::ArrowDown),
         },
     ],
@@ -427,12 +479,14 @@ define_hotkey_actions! {
             display: "Escape / Back",
             description: "Close overlay, clear search, or go back",
             toml_key: "escape",
+            settings_key: "hotkey.escape",
             default: KeyCombo::key(KeyCode::Escape),
         },
         ResetToDefault {
             display: "Reset to Default",
             description: "Reset focused setting to its default value",
             toml_key: "reset_to_default",
+            settings_key: "hotkey.reset_to_default",
             default: KeyCombo::key(KeyCode::Delete),
         },
     ]
