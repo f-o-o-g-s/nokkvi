@@ -2,12 +2,12 @@
 
 use iced::{Task, widget::image};
 use nokkvi_data::{backend::artists::ArtistUIViewData, types::ItemKind};
-use tracing::{debug, error};
+use tracing::debug;
 
 use crate::{
     Nokkvi, View,
     app_message::{ArtworkMessage, Message},
-    update::components::PaginatedFetch,
+    update::{ArtistsTarget, components::PaginatedFetch},
     views::{self, ArtistsAction, ArtistsMessage, HasCommonAction},
     widgets,
 };
@@ -204,44 +204,12 @@ impl Nokkvi {
         )
     }
 
-    /// Handle a subsequent page of artists being loaded (appends to buffer).
-    /// Mirror of `handle_albums_page_loaded` — drives
-    /// `try_resolve_pending_expand_artist` after the append so the
-    /// artist-find-and-expand chain (and Shift+C center-only fallback) can
-    /// advance once the new page lands.
     pub(crate) fn handle_artists_page_loaded(
         &mut self,
         result: Result<Vec<ArtistUIViewData>, String>,
         total_count: usize,
     ) -> Task<Message> {
-        match result {
-            Ok(new_items) => {
-                let count = new_items.len();
-                let loaded_before = self.library.artists.loaded_count();
-                self.library.artists.append_page(new_items, total_count);
-                debug!(
-                    "📄 Artists page loaded: {} new items ({}→{} of {})",
-                    count,
-                    loaded_before,
-                    self.library.artists.loaded_count(),
-                    total_count,
-                );
-                if let Some(task) = self.try_resolve_pending_expand_artist() {
-                    return task;
-                }
-            }
-            Err(e) => {
-                if e.contains("Unauthorized") {
-                    self.library.artists.set_loading(false);
-                    return self.handle_session_expired();
-                }
-                error!("Error loading Artists page: {}", e);
-                self.library.artists.set_loading(false);
-                self.cancel_pending_expand();
-                self.toast_error(format!("Failed to load Artists: {e}"));
-            }
-        }
-        Task::none()
+        self.handle_page_loaded_with::<ArtistsTarget>(result, total_count)
     }
 
     pub(crate) fn handle_artists_loaded(
@@ -251,83 +219,7 @@ impl Nokkvi {
         background: bool,
         anchor_id: Option<String>,
     ) -> Task<Message> {
-        self.library.counts.artists = total_count;
-        match result {
-            Ok(new_artists) => {
-                debug!(
-                    "✅ Loaded {} artists (total in library: {})",
-                    new_artists.len(),
-                    total_count
-                );
-                self.library
-                    .artists
-                    .set_first_page(new_artists, total_count);
-
-                if !background {
-                    self.artists_page.common.slot_list.viewport_offset = 0;
-                    self.artists_page.common.slot_list.selected_indices.clear();
-                } else if let Some(ref id) = anchor_id {
-                    let artists = &self.library.artists;
-                    if let Some(new_idx) = artists.iter().position(|a| a.id == *id) {
-                        self.artists_page.common.slot_list.viewport_offset = new_idx;
-                    } else {
-                        // Anchor not found in this page (expected with Random sort — the new
-                        // first page is a different random sample). Reset rather than leaving
-                        // viewport_offset pointing at whoever now occupies the old index.
-                        self.artists_page.common.slot_list.viewport_offset = 0;
-                    }
-                    // Clear stale selected_offset: after re-ordering, the old absolute index
-                    // maps to a different artist and would highlight the wrong slot.
-                    self.artists_page.common.slot_list.selected_offset = None;
-                }
-
-                // Load artwork for artists using Navidrome getCoverArt API
-                // The API supports ar-{artistId} and auto-falls back to album covers
-                let mut tasks: Vec<Task<Message>> = Vec::new();
-
-                // NOTE: Don't re-focus search field here - text_input maintains its own focus state.
-                // Re-focusing here causes issues when users press Escape (widget unfocuses but we'd re-focus).
-
-                let total = self.library.artists.len();
-                if total > 0 && self.app_service.is_some() {
-                    // Mini artwork for visible slots — async fetches via cached HTTP client.
-                    tasks.push(self.prefetch_artist_mini_artwork_tasks());
-
-                    // Large artwork for the center artist.
-                    if let Some(center_idx) = self
-                        .artists_page
-                        .common
-                        .slot_list
-                        .get_center_item_index(total)
-                        && let Some(artist) = self.library.artists.get(center_idx)
-                    {
-                        let id = artist.id.clone();
-                        tasks.push(self.handle_load_artist_large_artwork(id));
-                    }
-                }
-
-                // Drive the artist find-and-expand chain forward (click-driven
-                // NavigateAndExpandArtist, or Shift+C CenterOnPlaying fallback).
-                if let Some(task) = self.try_resolve_pending_expand_artist() {
-                    tasks.push(task);
-                }
-
-                if !tasks.is_empty() {
-                    return Task::batch(tasks);
-                }
-            }
-            Err(e) => {
-                if e.contains("Unauthorized") {
-                    self.library.artists.set_loading(false);
-                    return self.handle_session_expired();
-                }
-                error!("Error loading artists: {}", e);
-                self.library.artists.set_loading(false);
-                self.cancel_pending_expand();
-                self.toast_error(format!("Failed to load artists: {e}"));
-            }
-        }
-        Task::none()
+        self.handle_loaded_with::<ArtistsTarget>(result, total_count, background, anchor_id)
     }
 
     pub(crate) fn handle_artists(&mut self, msg: views::ArtistsMessage) -> Task<Message> {
