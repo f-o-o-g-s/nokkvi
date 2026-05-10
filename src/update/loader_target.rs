@@ -396,7 +396,10 @@ impl LoaderTarget for PlaylistsTarget {
         )));
         if !app.library.playlists.is_empty() {
             tasks.push(Task::done(Message::Playlists(
-                views::PlaylistsMessage::SlotListSetOffset(0, iced::keyboard::Modifiers::default()),
+                views::PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
+                    0,
+                    iced::keyboard::Modifiers::default(),
+                )),
             )));
         }
         tasks

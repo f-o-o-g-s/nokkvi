@@ -479,7 +479,9 @@ fn playlists_selection_toggle_on_expansion_child_lands_in_selected_indices() {
     );
 
     let (_, _action) = app.playlists_page.update(
-        crate::views::PlaylistsMessage::SlotListSelectionToggle(2),
+        crate::views::PlaylistsMessage::SlotList(
+            crate::widgets::SlotListPageMessage::SelectionToggle(2),
+        ),
         playlists.len(),
         &playlists,
     );

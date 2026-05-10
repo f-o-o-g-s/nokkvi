@@ -106,9 +106,11 @@ impl Nokkvi {
                 // Re-dispatch a SetOffset to trigger collage artwork loading
                 let offset = self.playlists_page.common.slot_list.viewport_offset;
                 Task::done(Message::Playlists(
-                    crate::views::PlaylistsMessage::SlotListSetOffset(
-                        offset,
-                        iced::keyboard::Modifiers::default(),
+                    crate::views::PlaylistsMessage::SlotList(
+                        crate::widgets::SlotListPageMessage::SetOffset(
+                            offset,
+                            iced::keyboard::Modifiers::default(),
+                        ),
                     ),
                 ))
             }

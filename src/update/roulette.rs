@@ -337,9 +337,9 @@ impl Nokkvi {
                     .common
                     .handle_set_offset(target_idx, total_items);
                 self.playlists_page.common.slot_list.flash_center();
-                Task::done(Message::Playlists(
-                    views::PlaylistsMessage::SlotListActivateCenter,
-                ))
+                Task::done(Message::Playlists(views::PlaylistsMessage::SlotList(
+                    crate::widgets::SlotListPageMessage::ActivateCenter,
+                )))
             }
             View::Radios => {
                 self.radios_page
