@@ -160,22 +160,7 @@ impl Nokkvi {
                 );
             }
             views::PlaylistsAction::AddBatchToQueue(payload) => {
-                let len = payload.items.len();
-                debug!(" Adding batch of {} items to queue", len);
-                if let Some(pos) = self.pending_queue_insert_position.take() {
-                    return self.shell_fire_and_forget_task(
-                        move |shell| async move {
-                            shell.insert_batch_at_position(payload, pos).await
-                        },
-                        format!("Inserted {} items at position {}", len, pos + 1),
-                        "insert batch to queue",
-                    );
-                }
-                return self.shell_fire_and_forget_task(
-                    move |shell| async move { shell.add_batch_to_queue(payload).await },
-                    format!("Added {len} items to queue"),
-                    "add batch to queue",
-                );
+                return self.add_or_insert_batch_to_queue_task(payload);
             }
             views::PlaylistsAction::ExpandPlaylist(playlist_id) => {
                 // Load tracks for the playlist and send them back to the view
@@ -315,21 +300,10 @@ impl Nokkvi {
                 }
             }
             PlaylistsAction::ToggleStar(item_id, kind, star) => {
-                let optimistic_msg = Self::starred_revert_message(item_id.clone(), kind, star);
-                return Task::batch(vec![
-                    Task::done(optimistic_msg),
-                    self.star_item_task(item_id, kind, star),
-                ]);
+                return self.toggle_star_with_revert_task(item_id, kind, star);
             }
             PlaylistsAction::PlayNextBatch(payload) => {
-                if self.modes.random {
-                    self.toast_warn("Shuffle is on — next tracks will be random, not these");
-                }
-                return self.shell_fire_and_forget_task(
-                    move |shell| async move { shell.play_next_batch(payload).await },
-                    "Added batch to play next".to_string(),
-                    "play next batch",
-                );
+                return self.play_next_batch_task(payload);
             }
             PlaylistsAction::DeletePlaylist(playlist_id) => {
                 let name = self
