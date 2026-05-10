@@ -1043,8 +1043,8 @@ pub(crate) fn step(
     // sampled at the boat's current x, so y dynamics and the surf gate
     // stay in lockstep without a second `sample_line_height` call.
     let height_rate = slope * state.x_velocity;
-    let ay = (local_height - state.y_ratio) * Y_SPRING_K
-        - (state.y_velocity - height_rate) * Y_DAMPING;
+    let ay =
+        (local_height - state.y_ratio) * Y_SPRING_K - (state.y_velocity - height_rate) * Y_DAMPING;
     state.y_velocity += ay * dt_secs;
     state.y_ratio += state.y_velocity * dt_secs;
     if state.y_ratio <= 0.0 {

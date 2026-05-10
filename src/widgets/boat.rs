@@ -70,7 +70,6 @@ pub(crate) use boat_physics::{
     ANCHOR_HEIGHT_MULTIPLE_OF_BOAT, BOAT_SINK_FRACTION, BOAT_WRAP_MARGIN_BOAT_WIDTHS, BoatState,
     MusicSignals, boat_pixel_size, effective_bars, rope_stroke_for, step,
 };
-
 use iced::{
     Color, Element, Event, Length, Point, Rectangle, Size, Vector,
     advanced::{

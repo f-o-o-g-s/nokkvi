@@ -1,14 +1,15 @@
 #![allow(dead_code)]
 use std::time::Duration;
 
-use super::*;
-use super::boat_physics::{
-    ANCHOR_INTERVAL_MAX_SECS, ANCHOR_INTERVAL_MIN_SECS, BPM_SCALE_MAX, BPM_SCALE_MIN,
-    LONG_ONSET_AMP, LONG_ONSET_FLOOR, MAX_ANCHOR_SWAY, MAX_TILT, MAX_X_V, MIN_SAILING_VELOCITY,
-    ONSET_AMP, REFERENCE_BPM, SLOPE_GATE_FLOOR, TACK_INTERVAL_MAX_SECS, TACK_INTERVAL_MIN_SECS,
-    TACK_RAMP_SECS, pick_facing, sample_line_height,
+use super::{
+    boat_physics::{
+        ANCHOR_INTERVAL_MAX_SECS, ANCHOR_INTERVAL_MIN_SECS, BPM_SCALE_MAX, BPM_SCALE_MIN,
+        LONG_ONSET_AMP, LONG_ONSET_FLOOR, MAX_ANCHOR_SWAY, MAX_TILT, MAX_X_V, MIN_SAILING_VELOCITY,
+        ONSET_AMP, REFERENCE_BPM, SLOPE_GATE_FLOOR, TACK_INTERVAL_MAX_SECS, TACK_INTERVAL_MIN_SECS,
+        TACK_RAMP_SECS, pick_facing, sample_line_height,
+    },
+    *,
 };
-
 
 // --- handle caching --------------------------------------------------------
 
