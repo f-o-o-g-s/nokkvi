@@ -2,11 +2,12 @@
 
 use iced::Task;
 use nokkvi_data::backend::playlists::PlaylistUIViewData;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 use crate::{
     Nokkvi, View,
     app_message::{ArtworkMessage, CollageTarget, Message},
+    update::PlaylistsTarget,
     views::{self, HasCommonAction, PlaylistsAction, PlaylistsMessage},
 };
 
@@ -66,59 +67,7 @@ impl Nokkvi {
         result: Result<Vec<PlaylistUIViewData>, String>,
         total_count: usize,
     ) -> Task<Message> {
-        self.library.counts.playlists = total_count;
-        match result {
-            Ok(new_playlists) => {
-                info!(
-                    " Loaded {} playlists (total: {})",
-                    new_playlists.len(),
-                    total_count
-                );
-                self.library
-                    .playlists
-                    .set_first_page(new_playlists, total_count);
-                self.playlists_page.common.slot_list.viewport_offset = 0;
-
-                // If the default-playlist picker is open (opened before the
-                // library was loaded), repopulate it from the new data while
-                // preserving the user's search query + scroll position.
-                self.refresh_default_playlist_picker_after_load();
-
-                let mut tasks: Vec<Task<Message>> = Vec::new();
-
-                // NOTE: Don't re-focus search field here - text_input maintains its own focus state.
-                // Re-focusing here causes issues when users press Escape (widget unfocuses but we'd re-focus).
-
-                // Start batch artwork prefetch for all playlists
-                tasks.push(Task::done(Message::Artwork(
-                    ArtworkMessage::StartCollagePrefetch(CollageTarget::Playlist),
-                )));
-
-                // Also trigger collage load for initially centered playlist (index 0)
-                if !self.library.playlists.is_empty() {
-                    tasks.push(Task::done(Message::Playlists(
-                        views::PlaylistsMessage::SlotListSetOffset(
-                            0,
-                            iced::keyboard::Modifiers::default(),
-                        ),
-                    )));
-                }
-
-                if !tasks.is_empty() {
-                    return Task::batch(tasks);
-                }
-            }
-            Err(e) => {
-                if e.contains("Unauthorized") {
-                    self.library.playlists.set_loading(false);
-                    return self.handle_session_expired();
-                }
-                error!("Error loading playlists: {}", e);
-                self.library.playlists.set_loading(false);
-                self.toast_error(format!("Failed to load playlists: {e}"));
-            }
-        }
-        Task::none()
+        self.handle_loaded_with::<PlaylistsTarget>(result, total_count, false, None)
     }
 
     pub(crate) fn handle_playlists(&mut self, msg: views::PlaylistsMessage) -> Task<Message> {
