@@ -642,7 +642,9 @@ The three table-row edits in `.agent/audit-progress.md`:
 
 ---
 
-## Fanout Prompts
+## Closed lanes (Lane A — landed at `02e7dba`)
+
+This section preserves Lane A's implementer prompt verbatim for documentation. The work is already on `main` at commit `02e7dba` (`refactor(data): add ItemKind enum + BatchItem length anchor`); the fanout script no longer dispatches Lane A because it lives outside the `## Fanout Prompts` section below.
 
 ### lane-a-foundation
 
@@ -761,6 +763,12 @@ End with a short summary: which commit, which files changed, line counts (new fi
 - If `cargo test` fails on an unrelated baseline test: stop, report, do not proceed.
 - If clippy flags the const-anchor pattern (e.g., `clippy::let_unit_value` on `const _: [(); …] = [];`): adjust minimally; do not paper over with `#[allow]` unless the precedent at `src/main.rs:78` does the same (verify by reading that file before adding any `#[allow]`).
 ````
+
+---
+
+## Fanout Prompts
+
+Active fanout lanes — branched off `02e7dba` (Lane A landed). Run `~/.claude/commands/fanout.sh` against this plan to dispatch in parallel kitty tabs. Lanes B/C/D are file-disjoint (verified pre-fanout); merge sequence is **D first, then B+C back-to-back without CI in between**, then Lane E (post-fanout closer below) as a direct commit.
 
 ### lane-b-action-variants
 
@@ -1194,6 +1202,12 @@ End with: commit hash, file LOC before/after, the count of `item_type` reference
 - If the async-closure capture pattern is awkward (you find yourself reaching for `info.kind` after `info` was moved): introduce a `let kind = info.kind;` early, just like `revert_id`/`current_starred` are pulled out today.
 - If clippy flags `unused_variables` on a destructured `info` field after migration: clean it up.
 ````
+
+---
+
+## Post-Fanout Closer (Lane E)
+
+Lane E lands as a direct commit on `main` after Lanes B/C/D verify in CI — it's a single-file edit (`.agent/audit-progress.md`) closing §7 #5 / Drift #2 / DRY #2 / §3 #6 / §4 #2, no parallel work. Preserved here for reference; the fanout script no longer dispatches it because it lives outside the `## Fanout Prompts` section above.
 
 ### lane-e-audit-progress
 
