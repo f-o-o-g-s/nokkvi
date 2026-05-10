@@ -32,6 +32,7 @@ reference-*/
 .gemini/
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+.claude/worktrees/
 
 # Logs and debugging
 *.log
