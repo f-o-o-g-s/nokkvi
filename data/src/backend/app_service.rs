@@ -648,118 +648,45 @@ impl AppService {
         );
         Ok(())
     }
+}
 
-    // =========================================================================
-    // Private Song-Loading Helpers
-    //
-    // These encapsulate the auth + API-service construction for entity types
-    // that don't have a dedicated backend service (genres, playlists).
-    // =========================================================================
+macro_rules! api_factory {
+    ( $( ($method:ident, $ty:path) ),+ $(,)? ) => {
+        $(
+            /// Construct an authenticated API service. Use `.await?` in `shell_task` closures.
+            pub async fn $method(&self) -> anyhow::Result<$ty> {
+                let client = self
+                    .auth_gateway
+                    .get_client()
+                    .await
+                    .ok_or_else(|| anyhow::anyhow!("Not authenticated"))?;
+                let server_url = self.auth_gateway.get_server_url().await;
+                let subsonic_credential = self.auth_gateway.get_subsonic_credential().await;
+                Ok(<$ty>::new_with_client(
+                    client,
+                    server_url,
+                    subsonic_credential,
+                ))
+            }
+        )+
+    };
+}
 
-    /// Construct an authenticated `SongsApiService`.
-    pub async fn songs_api(&self) -> Result<crate::services::api::songs::SongsApiService> {
-        let client = self
-            .auth_gateway
-            .get_client()
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Not authenticated"))?;
-        let server_url = self.auth_gateway.get_server_url().await;
-        let subsonic_credential = self.auth_gateway.get_subsonic_credential().await;
-        Ok(crate::services::api::songs::SongsApiService::new(
-            client,
-            server_url,
-            subsonic_credential,
-        ))
-    }
-
-    /// Construct an authenticated `GenresApiService`.
-    ///
-    /// Callers inside `shell_task` closures can use `shell.genres_api().await?`
-    /// instead of repeating the 4-line auth+construct block.
-    pub async fn genres_api(&self) -> Result<crate::services::api::genres::GenresApiService> {
-        let client = self
-            .auth_gateway
-            .get_client()
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Not authenticated"))?;
-        let server_url = self.auth_gateway.get_server_url().await;
-        let subsonic_credential = self.auth_gateway.get_subsonic_credential().await;
-        Ok(
-            crate::services::api::genres::GenresApiService::new_with_client(
-                client,
-                server_url,
-                subsonic_credential,
-            ),
-        )
-    }
-
-    /// Construct an authenticated `PlaylistsApiService`.
-    ///
-    /// Callers inside `shell_task` closures can use `shell.playlists_api().await?`
-    /// instead of repeating the 4-line auth+construct block.
-    pub async fn playlists_api(
-        &self,
-    ) -> Result<crate::services::api::playlists::PlaylistsApiService> {
-        let client = self
-            .auth_gateway
-            .get_client()
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Not authenticated"))?;
-        let server_url = self.auth_gateway.get_server_url().await;
-        let subsonic_credential = self.auth_gateway.get_subsonic_credential().await;
-        Ok(
-            crate::services::api::playlists::PlaylistsApiService::new_with_client(
-                client,
-                server_url,
-                subsonic_credential,
-            ),
-        )
-    }
-
-    /// Construct an authenticated `RadiosApiService`.
-    ///
-    /// Callers inside `shell_task` closures can use `shell.radios_api().await?`
-    /// to fetch internet radio stations from the Subsonic API.
-    ///
-    /// NOTE from Claude: Built ahead of Gemini's Phase 4 work. This follows
-    /// the exact same auth+construct pattern as genres_api/playlists_api.
-    pub async fn radios_api(&self) -> Result<crate::services::api::radios::RadiosApiService> {
-        let client = self
-            .auth_gateway
-            .get_client()
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Not authenticated"))?;
-        let server_url = self.auth_gateway.get_server_url().await;
-        let subsonic_credential = self.auth_gateway.get_subsonic_credential().await;
-        Ok(
-            crate::services::api::radios::RadiosApiService::new_with_client(
-                client,
-                server_url,
-                subsonic_credential,
-            ),
-        )
-    }
-
-    /// Construct an authenticated `SimilarApiService`.
-    ///
-    /// Callers inside `shell_task` closures can use `shell.similar_api().await?`
-    /// to fetch similar songs or top songs.
-    pub async fn similar_api(&self) -> Result<crate::services::api::similar::SimilarApiService> {
-        let client = self
-            .auth_gateway
-            .get_client()
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Not authenticated"))?;
-        let server_url = self.auth_gateway.get_server_url().await;
-        let subsonic_credential = self.auth_gateway.get_subsonic_credential().await;
-        Ok(
-            crate::services::api::similar::SimilarApiService::new_with_client(
-                client,
-                server_url,
-                subsonic_credential,
-            ),
-        )
-    }
+// === API factory methods ===
+impl AppService {
+    api_factory!(
+        (songs_api, crate::services::api::songs::SongsApiService),
+        (genres_api, crate::services::api::genres::GenresApiService),
+        (
+            playlists_api,
+            crate::services::api::playlists::PlaylistsApiService
+        ),
+        (radios_api, crate::services::api::radios::RadiosApiService),
+        (
+            similar_api,
+            crate::services::api::similar::SimilarApiService
+        ),
+    );
 }
 
 // === Queue orchestrator accessor ===

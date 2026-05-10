@@ -12,6 +12,14 @@ impl SongsApiService {
         Self { client }
     }
 
+    pub fn new_with_client(
+        client: ApiClient,
+        server_url: String,
+        subsonic_credential: String,
+    ) -> Self {
+        Self::new(client, server_url, subsonic_credential)
+    }
+
     /// Load all songs with sorting, filtering, and pagination
     ///
     /// # Arguments
