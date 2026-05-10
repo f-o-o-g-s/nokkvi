@@ -365,6 +365,82 @@ pub(crate) fn context_menu<'a, T, Message>(
     }
 }
 
+/// Wrap a slot-list row with a standard library context menu.
+///
+/// Handles `ContextMenuId::LibraryRow` construction, `open_state_for`, and the
+/// `OpenMenu::Context` open/close messages in one place.
+///
+/// Pass the bare `XxxMessage::ContextMenuAction` tuple-variant constructor as
+/// `on_context_action` — the helper supplies `item_index` as the first argument.
+/// Pass `XxxMessage::SetOpenMenu` as `on_set_open_menu`.
+pub(crate) fn wrap_library_row<'a, Message>(
+    view: crate::View,
+    item_index: usize,
+    base: impl Into<Element<'a, Message>>,
+    entries: Vec<LibraryContextEntry>,
+    open_menu: Option<&'a crate::app_message::OpenMenu>,
+    on_context_action: impl Fn(usize, LibraryContextEntry) -> Message + 'a,
+    on_set_open_menu: impl Fn(Option<crate::app_message::OpenMenu>) -> Message + 'a,
+) -> Element<'a, Message>
+where
+    Message: Clone + 'a,
+{
+    let cm_id = crate::app_message::ContextMenuId::LibraryRow { view, item_index };
+    let (cm_open, cm_position) = open_state_for(open_menu, &cm_id);
+    context_menu(
+        base,
+        entries,
+        move |entry, length| {
+            library_entry_view(entry, length, |e| on_context_action(item_index, e))
+        },
+        cm_open,
+        cm_position,
+        move |position| match position {
+            Some(p) => on_set_open_menu(Some(crate::app_message::OpenMenu::Context {
+                id: cm_id.clone(),
+                position: p,
+            })),
+            None => on_set_open_menu(None),
+        },
+    )
+    .into()
+}
+
+/// Like [`wrap_library_row`] for Similar/TopSongs rows, which use
+/// `ContextMenuId::SimilarRow` instead of `LibraryRow`.
+#[allow(dead_code)]
+pub(crate) fn wrap_similar_row<'a, Message>(
+    item_index: usize,
+    base: impl Into<Element<'a, Message>>,
+    entries: Vec<LibraryContextEntry>,
+    open_menu: Option<&'a crate::app_message::OpenMenu>,
+    on_context_action: impl Fn(usize, LibraryContextEntry) -> Message + 'a,
+    on_set_open_menu: impl Fn(Option<crate::app_message::OpenMenu>) -> Message + 'a,
+) -> Element<'a, Message>
+where
+    Message: Clone + 'a,
+{
+    let cm_id = crate::app_message::ContextMenuId::SimilarRow(item_index);
+    let (cm_open, cm_position) = open_state_for(open_menu, &cm_id);
+    context_menu(
+        base,
+        entries,
+        move |entry, length| {
+            library_entry_view(entry, length, |e| on_context_action(item_index, e))
+        },
+        cm_open,
+        cm_position,
+        move |position| match position {
+            Some(p) => on_set_open_menu(Some(crate::app_message::OpenMenu::Context {
+                id: cm_id.clone(),
+                position: p,
+            })),
+            None => on_set_open_menu(None),
+        },
+    )
+    .into()
+}
+
 // ============================================================================
 // Widget
 // ============================================================================

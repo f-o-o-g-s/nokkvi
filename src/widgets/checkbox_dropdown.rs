@@ -66,6 +66,69 @@ where
     }
 }
 
+/// Drop-in wrapper around [`checkbox_dropdown`] that pre-builds the
+/// `OpenMenu::CheckboxDropdown { view, trigger_bounds }` open-change message
+/// so each view only supplies its column items, toggle-message constructor,
+/// and `SetOpenMenu` handler.
+pub(crate) fn view_columns_dropdown<'a, Key, Message>(
+    view: crate::View,
+    items: Vec<(Key, &'static str, bool)>,
+    on_toggle: impl Fn(Key) -> Message + 'a,
+    on_set_open_menu: impl Fn(Option<crate::app_message::OpenMenu>) -> Message + 'a,
+    is_open: bool,
+    trigger_bounds: Option<iced::Rectangle>,
+) -> CheckboxDropdown<'a, Key, Message>
+where
+    Key: Copy + 'a,
+    Message: Clone + 'a,
+{
+    checkbox_dropdown(
+        "assets/icons/columns-3-cog.svg",
+        "Show/hide columns",
+        items,
+        on_toggle,
+        move |rect| match rect {
+            Some(b) => on_set_open_menu(Some(crate::app_message::OpenMenu::CheckboxDropdown {
+                view,
+                trigger_bounds: b,
+            })),
+            None => on_set_open_menu(None),
+        },
+        is_open,
+        trigger_bounds,
+    )
+}
+
+/// Like [`view_columns_dropdown`] for the Similar panel, which uses
+/// `OpenMenu::CheckboxDropdownSimilar` because `View` has no `Similar` variant.
+#[allow(dead_code)]
+pub(crate) fn similar_columns_dropdown<'a, Key, Message>(
+    items: Vec<(Key, &'static str, bool)>,
+    on_toggle: impl Fn(Key) -> Message + 'a,
+    on_set_open_menu: impl Fn(Option<crate::app_message::OpenMenu>) -> Message + 'a,
+    is_open: bool,
+    trigger_bounds: Option<iced::Rectangle>,
+) -> CheckboxDropdown<'a, Key, Message>
+where
+    Key: Copy + 'a,
+    Message: Clone + 'a,
+{
+    checkbox_dropdown(
+        "assets/icons/columns-3-cog.svg",
+        "Show/hide columns",
+        items,
+        on_toggle,
+        move |rect| match rect {
+            Some(b) => on_set_open_menu(Some(
+                crate::app_message::OpenMenu::CheckboxDropdownSimilar { trigger_bounds: b },
+            )),
+            None => on_set_open_menu(None),
+        },
+        is_open,
+        trigger_bounds,
+    )
+}
+
 const TRIGGER_SIZE: f32 = 40.0;
 const TRIGGER_ICON_SIZE: f32 = 20.0;
 const MENU_MIN_WIDTH: f32 = 180.0;

@@ -35,48 +35,36 @@ pub(crate) fn albums_plays_visible(sort: SortMode, user_visible: bool) -> bool {
 impl AlbumsPage {
     /// Build the view
     pub fn view<'a>(&'a self, data: AlbumsViewData<'a>) -> Element<'a, AlbumsMessage> {
-        let column_dropdown: Element<'a, AlbumsMessage> = {
-            use crate::widgets::checkbox_dropdown::checkbox_dropdown;
-            let items: Vec<(AlbumsColumn, &'static str, bool)> = vec![
-                (
-                    AlbumsColumn::Select,
-                    "Select",
-                    self.column_visibility.select,
-                ),
-                (AlbumsColumn::Index, "Index", self.column_visibility.index),
-                (
-                    AlbumsColumn::Thumbnail,
-                    "Thumbnail",
-                    self.column_visibility.thumbnail,
-                ),
-                (AlbumsColumn::Stars, "Stars", self.column_visibility.stars),
-                (
-                    AlbumsColumn::SongCount,
-                    "Song Count",
-                    self.column_visibility.songcount,
-                ),
-                (AlbumsColumn::Plays, "Plays", self.column_visibility.plays),
-                (AlbumsColumn::Love, "Love", self.column_visibility.love),
-            ];
-            checkbox_dropdown(
-                "assets/icons/columns-3-cog.svg",
-                "Show/hide columns",
-                items,
+        let column_dropdown: Element<'a, AlbumsMessage> =
+            crate::widgets::checkbox_dropdown::view_columns_dropdown(
+                crate::View::Albums,
+                vec![
+                    (
+                        AlbumsColumn::Select,
+                        "Select",
+                        self.column_visibility.select,
+                    ),
+                    (AlbumsColumn::Index, "Index", self.column_visibility.index),
+                    (
+                        AlbumsColumn::Thumbnail,
+                        "Thumbnail",
+                        self.column_visibility.thumbnail,
+                    ),
+                    (AlbumsColumn::Stars, "Stars", self.column_visibility.stars),
+                    (
+                        AlbumsColumn::SongCount,
+                        "Song Count",
+                        self.column_visibility.songcount,
+                    ),
+                    (AlbumsColumn::Plays, "Plays", self.column_visibility.plays),
+                    (AlbumsColumn::Love, "Love", self.column_visibility.love),
+                ],
                 AlbumsMessage::ToggleColumnVisible,
-                |trigger_bounds| match trigger_bounds {
-                    Some(b) => AlbumsMessage::SetOpenMenu(Some(
-                        crate::app_message::OpenMenu::CheckboxDropdown {
-                            view: crate::View::Albums,
-                            trigger_bounds: b,
-                        },
-                    )),
-                    None => AlbumsMessage::SetOpenMenu(None),
-                },
+                AlbumsMessage::SetOpenMenu,
                 data.column_dropdown_open,
                 data.column_dropdown_trigger_bounds,
             )
-            .into()
-        };
+            .into();
 
         let header = widgets::view_header::view_header(
             self.common.current_sort_mode,
@@ -583,36 +571,16 @@ impl AlbumsPage {
             .padding(0)
             .width(Length::Fill);
 
-        use crate::widgets::context_menu::{
-            context_menu, library_entries_with_folder, library_entry_view, open_state_for,
-        };
-        let item_idx = ctx.item_index;
-        let cm_id = crate::app_message::ContextMenuId::LibraryRow {
-            view: crate::View::Albums,
-            item_index: item_idx,
-        };
-        let (cm_open, cm_position) = open_state_for(open_menu, &cm_id);
-        context_menu(
+        use crate::widgets::context_menu::{library_entries_with_folder, wrap_library_row};
+        wrap_library_row(
+            crate::View::Albums,
+            ctx.item_index,
             slot_button,
             library_entries_with_folder(),
-            move |entry, length| {
-                library_entry_view(entry, length, |e| {
-                    AlbumsMessage::ContextMenuAction(item_idx, e)
-                })
-            },
-            cm_open,
-            cm_position,
-            move |position| match position {
-                Some(p) => {
-                    AlbumsMessage::SetOpenMenu(Some(crate::app_message::OpenMenu::Context {
-                        id: cm_id.clone(),
-                        position: p,
-                    }))
-                }
-                None => AlbumsMessage::SetOpenMenu(None),
-            },
+            open_menu,
+            AlbumsMessage::ContextMenuAction,
+            AlbumsMessage::SetOpenMenu,
         )
-        .into()
     }
 
     /// Render a child track row in the slot list (indented, simpler layout)
@@ -641,36 +609,16 @@ impl AlbumsPage {
             1, // depth 1: child tracks under album
         );
 
-        use crate::widgets::context_menu::{
-            context_menu, library_entry_view, open_state_for, song_entries_with_folder,
-        };
-        let item_idx = ctx.item_index;
-        let cm_id = crate::app_message::ContextMenuId::LibraryRow {
-            view: crate::View::Albums,
-            item_index: item_idx,
-        };
-        let (cm_open, cm_position) = open_state_for(open_menu, &cm_id);
-        context_menu(
+        use crate::widgets::context_menu::{song_entries_with_folder, wrap_library_row};
+        wrap_library_row(
+            crate::View::Albums,
+            ctx.item_index,
             track_el,
             song_entries_with_folder(),
-            move |entry, length| {
-                library_entry_view(entry, length, |e| {
-                    AlbumsMessage::ContextMenuAction(item_idx, e)
-                })
-            },
-            cm_open,
-            cm_position,
-            move |position| match position {
-                Some(p) => {
-                    AlbumsMessage::SetOpenMenu(Some(crate::app_message::OpenMenu::Context {
-                        id: cm_id.clone(),
-                        position: p,
-                    }))
-                }
-                None => AlbumsMessage::SetOpenMenu(None),
-            },
+            open_menu,
+            AlbumsMessage::ContextMenuAction,
+            AlbumsMessage::SetOpenMenu,
         )
-        .into()
     }
 }
 
