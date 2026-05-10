@@ -2,7 +2,7 @@
 
 use iced::Task;
 use nokkvi_data::types::ItemKind;
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 
 use crate::{Nokkvi, View, app_message::Message, views::expansion::SlotListEntry};
 
@@ -152,73 +152,7 @@ impl Nokkvi {
             }
         );
 
-        // Apply optimistic update immediately
-        let optimistic_msg = Self::starred_revert_message(info.id.clone(), info.kind, new_starred);
-
-        let toggle_kind = info.kind;
-        let revert_id = info.id.clone();
-        let current_starred = info.starred;
-        let toast_name = info.name.clone();
-        let name = info.name;
-        let artist = info.artist;
-        let item_id = info.id;
-
-        let api_task = self.shell_task(
-            move |shell| async move {
-                let auth_vm = shell.auth().clone();
-                let client = match auth_vm.get_client().await {
-                    Some(client) => client,
-                    None => return Err(anyhow::anyhow!("No API client available")),
-                };
-
-                let server_url = auth_vm.get_server_url().await;
-                let subsonic_credential = auth_vm.get_subsonic_credential().await;
-
-                nokkvi_data::services::api::star::toggle_star(
-                    &client.http_client(),
-                    &server_url,
-                    &subsonic_credential,
-                    &item_id,
-                    toggle_kind.api_str(),
-                    current_starred,
-                )
-                .await?;
-
-                debug!(
-                    "✅ {} {}: {} - {}",
-                    if new_starred { "Starred" } else { "Unstarred" },
-                    toggle_kind,
-                    name,
-                    artist
-                );
-
-                Ok::<_, anyhow::Error>(())
-            },
-            move |result| match result {
-                Ok(()) => {
-                    let label = if new_starred {
-                        "★ Starred"
-                    } else {
-                        "☆ Unstarred"
-                    };
-                    let msg = format!("{label}: {toast_name}");
-                    Message::Toast(crate::app_message::ToastMessage::Push(
-                        nokkvi_data::types::toast::Toast::new(
-                            msg,
-                            nokkvi_data::types::toast::ToastLevel::Success,
-                        ),
-                    ))
-                }
-                Err(e) => {
-                    error!(" Failed to toggle star: {}", e);
-                    // Revert to original starred state
-                    Self::starred_revert_message(revert_id, toggle_kind, current_starred)
-                }
-            },
-        );
-
-        // Batch: apply optimistic update + fire API call
-        Task::batch(vec![Task::done(optimistic_msg), api_task])
+        self.toggle_star_with_revert_task(info.id, info.kind, new_starred)
     }
 
     pub(crate) fn handle_song_starred_status_updated(
@@ -426,58 +360,7 @@ impl Nokkvi {
             info.kind, display_name, current_rating, new_rating
         );
 
-        // Apply optimistic update immediately
-        let optimistic_msg = Self::rating_revert_message(info.id.clone(), info.kind, new_rating);
-
-        let toggle_kind = info.kind;
-        let revert_id = info.id.clone();
-        let item_id = info.id;
-        let toast_display_name = display_name.clone();
-
-        let api_task = self.shell_task(
-            move |shell| async move {
-                let auth_vm = shell.auth().clone();
-                let client = match auth_vm.get_client().await {
-                    Some(client) => client,
-                    None => return Err(anyhow::anyhow!("No API client available")),
-                };
-
-                let server_url = auth_vm.get_server_url().await;
-                let subsonic_credential = auth_vm.get_subsonic_credential().await;
-
-                nokkvi_data::services::api::rating::set_rating(
-                    &client.http_client(),
-                    &server_url,
-                    &subsonic_credential,
-                    &item_id,
-                    new_rating,
-                )
-                .await?;
-
-                info!(
-                    "⭐ Set rating for {} {}: {}",
-                    toggle_kind, display_name, new_rating
-                );
-
-                Ok::<_, anyhow::Error>(())
-            },
-            move |result| match result {
-                Ok(()) => Message::Toast(crate::app_message::ToastMessage::Push(
-                    nokkvi_data::types::toast::Toast::new(
-                        format!("⭐ Rated {toast_display_name}: {new_rating}/5"),
-                        nokkvi_data::types::toast::ToastLevel::Success,
-                    ),
-                )),
-                Err(e) => {
-                    error!(" Failed to set rating: {}", e);
-                    // Revert to original rating
-                    Self::rating_revert_message(revert_id, toggle_kind, current_rating)
-                }
-            },
-        );
-
-        // Batch: apply optimistic update + fire API call
-        Task::batch(vec![Task::done(optimistic_msg), api_task])
+        self.set_item_rating_task(info.id, info.kind, new_rating as usize, current_rating)
     }
 
     /// Update song rating in local state after successful API call
