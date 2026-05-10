@@ -218,8 +218,75 @@ impl LoaderTarget for ArtistsTarget {
         app.try_resolve_pending_expand_artist()
     }
 }
+// ── SongsTarget ──────────────────────────────────────────────────────────────
 
-// ── Remaining specs (committed in subsequent slices) ─────────────────────────
 pub(crate) struct SongsTarget;
+
+impl LoaderTarget for SongsTarget {
+    type Item = nokkvi_data::backend::songs::SongUIViewData;
+
+    fn library(app: &Nokkvi) -> &PagedBuffer<Self::Item> {
+        &app.library.songs
+    }
+
+    fn library_mut(app: &mut Nokkvi) -> &mut PagedBuffer<Self::Item> {
+        &mut app.library.songs
+    }
+
+    fn count_mut(app: &mut Nokkvi) -> &mut usize {
+        &mut app.library.counts.songs
+    }
+
+    fn slot_list_mut(app: &mut Nokkvi) -> &mut SlotListView {
+        &mut app.songs_page.common.slot_list
+    }
+
+    fn item_id(item: &Self::Item) -> &str {
+        &item.id
+    }
+
+    fn entity_label() -> &'static str {
+        "Songs"
+    }
+
+    fn prefetch_artwork_tasks(app: &mut Nokkvi) -> Vec<Task<Message>> {
+        let Some(shell) = &app.app_service else {
+            return vec![];
+        };
+        let cached: HashSet<&String> = app.artwork.album_art.iter().map(|(k, _)| k).collect();
+        prefetch_song_artwork_tasks(
+            &app.songs_page.common.slot_list,
+            &app.library.songs,
+            &cached,
+            shell.albums().clone(),
+            |song| song.album_id.as_ref(),
+        )
+    }
+
+    fn center_large_artwork_task(app: &mut Nokkvi) -> Option<Task<Message>> {
+        let total = app.library.songs.len();
+        let center_idx = app
+            .songs_page
+            .common
+            .slot_list
+            .get_center_item_index(total)?;
+        let album_id = app
+            .library
+            .songs
+            .get(center_idx)?
+            .album_id
+            .as_ref()?
+            .clone();
+        Some(Task::done(Message::Artwork(ArtworkMessage::LoadLarge(
+            album_id,
+        ))))
+    }
+
+    fn try_resolve_pending_expand(app: &mut Nokkvi) -> Option<Task<Message>> {
+        app.try_resolve_pending_expand_song()
+    }
+}
+
+// ── Remaining specs (committed in subsequent slice) ──────────────────────────
 pub(crate) struct GenresTarget;
 pub(crate) struct PlaylistsTarget;
