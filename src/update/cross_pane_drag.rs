@@ -338,9 +338,9 @@ impl Nokkvi {
                 Message::Artists(views::ArtistsMessage::AddCenterToQueue)
             }
             views::BrowsingView::Genres => Message::Genres(views::GenresMessage::AddCenterToQueue),
-            views::BrowsingView::Similar => {
-                Message::Similar(views::SimilarMessage::AddCenterToQueue)
-            }
+            views::BrowsingView::Similar => Message::Similar(views::SimilarMessage::SlotList(
+                crate::widgets::SlotListPageMessage::AddCenterToQueue,
+            )),
         };
 
         Task::done(msg)

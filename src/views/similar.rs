@@ -12,7 +12,7 @@ use iced::{
 };
 use nokkvi_data::{types::song::Song, utils::formatters};
 
-use crate::widgets::{self, SlotListPageState, view_header::SortMode};
+use crate::widgets::{self, SlotListPageMessage, SlotListPageState, view_header::SortMode};
 
 /// Similar page local state — just a slot list, no sort/search/pagination.
 #[derive(Debug)]
@@ -63,18 +63,8 @@ pub struct SimilarViewData<'a> {
 pub enum SimilarMessage {
     NoOp,
 
-    // Slot list navigation
-    SlotListNavigateUp,
-    SlotListNavigateDown,
-    SlotListSetOffset(usize, iced::keyboard::Modifiers),
-    SlotListScrollSeek(usize),
-    /// Click on a row's leading select checkbox — toggles `item_index` in
-    /// `selected_indices`. No play/highlight side effects.
-    SlotListSelectionToggle(usize),
-    /// Click on the tri-state "select all" header — fills selection with
-    /// every visible row, or clears if every visible row is already selected.
-    SlotListSelectAllToggle,
-    AddCenterToQueue,
+    // Slot list navigation (unified carrier)
+    SlotList(SlotListPageMessage),
 
     // Mouse click on star/heart (item_index, value)
     ClickToggleStar(usize),
@@ -146,57 +136,46 @@ impl SimilarPage {
                 // Intercepted at root before reaching this update; never reached.
                 (Task::none(), SimilarAction::None)
             }
-            SimilarMessage::SlotListNavigateUp => {
-                self.common.handle_navigate_up(total_items);
-                if let Some(center_idx) = self.common.get_center_item_index(total_items)
-                    && let Some(song) = songs.get(center_idx)
-                    && let Some(album_id) = &song.album_id
-                {
-                    return (
-                        Task::none(),
-                        SimilarAction::LoadLargeArtwork(album_id.clone()),
-                    );
+            SimilarMessage::SlotList(msg) => {
+                use crate::widgets::SlotListPageAction;
+
+                // NavigateUp/Down need the post-navigation center for artwork loading.
+                let needs_artwork_load = matches!(
+                    msg,
+                    SlotListPageMessage::NavigateUp
+                        | SlotListPageMessage::NavigateDown
+                        | SlotListPageMessage::SetOffset(_, _)
+                );
+                match self.common.handle(msg, total_items) {
+                    SlotListPageAction::AddCenterToQueue => {
+                        use nokkvi_data::types::batch::BatchItem;
+
+                        let target_indices = self.common.get_queue_target_indices(total_items);
+
+                        if target_indices.is_empty() {
+                            return (Task::none(), SimilarAction::None);
+                        }
+
+                        let payload = super::expansion::build_batch_payload(target_indices, |i| {
+                            songs.get(i).map(|s| BatchItem::Song(Box::new(s.clone())))
+                        });
+
+                        (Task::none(), SimilarAction::AddBatchToQueue(payload))
+                    }
+                    _ => {
+                        if needs_artwork_load
+                            && let Some(center_idx) = self.common.get_center_item_index(total_items)
+                            && let Some(song) = songs.get(center_idx)
+                            && let Some(album_id) = &song.album_id
+                        {
+                            return (
+                                Task::none(),
+                                SimilarAction::LoadLargeArtwork(album_id.clone()),
+                            );
+                        }
+                        (Task::none(), SimilarAction::None)
+                    }
                 }
-                (Task::none(), SimilarAction::None)
-            }
-            SimilarMessage::SlotListNavigateDown => {
-                self.common.handle_navigate_down(total_items);
-                if let Some(center_idx) = self.common.get_center_item_index(total_items)
-                    && let Some(song) = songs.get(center_idx)
-                    && let Some(album_id) = &song.album_id
-                {
-                    return (
-                        Task::none(),
-                        SimilarAction::LoadLargeArtwork(album_id.clone()),
-                    );
-                }
-                (Task::none(), SimilarAction::None)
-            }
-            SimilarMessage::SlotListSetOffset(offset, modifiers) => {
-                self.common
-                    .handle_slot_click(offset, total_items, modifiers);
-                if let Some(center_idx) = self.common.get_center_item_index(total_items)
-                    && let Some(song) = songs.get(center_idx)
-                    && let Some(album_id) = &song.album_id
-                {
-                    return (
-                        Task::none(),
-                        SimilarAction::LoadLargeArtwork(album_id.clone()),
-                    );
-                }
-                (Task::none(), SimilarAction::None)
-            }
-            SimilarMessage::SlotListScrollSeek(offset) => {
-                self.common.handle_set_offset(offset, total_items);
-                (Task::none(), SimilarAction::None)
-            }
-            SimilarMessage::SlotListSelectionToggle(offset) => {
-                self.common.handle_selection_toggle(offset, total_items);
-                (Task::none(), SimilarAction::None)
-            }
-            SimilarMessage::SlotListSelectAllToggle => {
-                self.common.handle_select_all_toggle(total_items);
-                (Task::none(), SimilarAction::None)
             }
             SimilarMessage::ToggleColumnVisible(col) => {
                 let new_value = !self.column_visibility.get(col);
@@ -206,22 +185,6 @@ impl SimilarPage {
                     SimilarAction::ColumnVisibilityChanged(col, new_value),
                 )
             }
-            SimilarMessage::AddCenterToQueue => {
-                use nokkvi_data::types::batch::BatchItem;
-
-                let target_indices = self.common.get_queue_target_indices(total_items);
-
-                if target_indices.is_empty() {
-                    return (Task::none(), SimilarAction::None);
-                }
-
-                let payload = super::expansion::build_batch_payload(target_indices, |i| {
-                    songs.get(i).map(|s| BatchItem::Song(Box::new(s.clone())))
-                });
-
-                (Task::none(), SimilarAction::AddBatchToQueue(payload))
-            }
-
             SimilarMessage::ClickToggleStar(item_index) => {
                 if let Some(song) = songs.get(item_index) {
                     (
@@ -372,7 +335,7 @@ impl SimilarPage {
         let header = crate::widgets::slot_list::compose_header_with_select(
             self.column_visibility.select,
             self.common.select_all_state(data.songs.len()),
-            SimilarMessage::SlotListSelectAllToggle,
+            SimilarMessage::SlotList(SlotListPageMessage::SelectAllToggle),
             header,
         );
 
@@ -427,11 +390,15 @@ impl SimilarPage {
             &self.common.slot_list,
             songs,
             &config,
-            SimilarMessage::SlotListNavigateUp,
-            SimilarMessage::SlotListNavigateDown,
+            SimilarMessage::SlotList(SlotListPageMessage::NavigateUp),
+            SimilarMessage::SlotList(SlotListPageMessage::NavigateDown),
             {
                 let total = songs.len();
-                move |f| SimilarMessage::SlotListScrollSeek((f * total as f32) as usize)
+                move |f| {
+                    SimilarMessage::SlotList(SlotListPageMessage::ScrollSeek(
+                        (f * total as f32) as usize,
+                    ))
+                }
             },
             |song, ctx| {
                 let song_title = song.title.clone();
@@ -577,10 +544,10 @@ impl SimilarPage {
                     .width(Length::Fill);
 
                 let slot_button = button(clickable)
-                    .on_press(SimilarMessage::SlotListSetOffset(
+                    .on_press(SimilarMessage::SlotList(SlotListPageMessage::SetOffset(
                         ctx.item_index,
                         ctx.modifiers,
-                    ))
+                    )))
                     .style(|_theme, _status| button::Style {
                         background: None,
                         border: iced::Border::default(),
@@ -602,7 +569,7 @@ impl SimilarPage {
                     select_header_visible,
                     ctx.is_selected,
                     ctx.item_index,
-                    SimilarMessage::SlotListSelectionToggle,
+                    |idx| SimilarMessage::SlotList(SlotListPageMessage::SelectionToggle(idx)),
                     cm_row,
                 )
             },
@@ -665,7 +632,9 @@ impl super::ViewPage for SimilarPage {
     }
 
     fn add_to_queue_message(&self) -> Option<Message> {
-        Some(Message::Similar(SimilarMessage::AddCenterToQueue))
+        Some(Message::Similar(SimilarMessage::SlotList(
+            SlotListPageMessage::AddCenterToQueue,
+        )))
     }
 }
 

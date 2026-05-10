@@ -43,6 +43,21 @@ impl Default for SlotListPageState {
     }
 }
 
+/// Unified slot-list input message enum.
+///
+/// Views wrap these in their own message enum with a `SlotList(SlotListPageMessage)` variant
+/// and dispatch them to `SlotListPageState::handle()`.
+#[derive(Debug, Clone)]
+pub enum SlotListPageMessage {
+    NavigateUp,
+    NavigateDown,
+    SetOffset(usize, iced::keyboard::Modifiers),
+    ScrollSeek(usize),
+    SelectionToggle(usize),
+    SelectAllToggle,
+    AddCenterToQueue,
+}
+
 ///
 /// Views should wrap these in their own action enum, e.g.:
 /// ```
@@ -56,6 +71,7 @@ pub enum SlotListPageAction {
     SearchChanged(String),
     SortModeChanged(SortMode),
     SortOrderChanged(bool),
+    AddCenterToQueue,
     None,
 }
 
@@ -229,6 +245,43 @@ impl SlotListPageState {
                 }
                 self.slot_list.anchor_index = Some(0);
             }
+        }
+    }
+
+    /// Unified dispatcher: consume a `SlotListPageMessage` and return the
+    /// corresponding `SlotListPageAction`.
+    ///
+    /// Navigation, scroll, selection, and select-all messages all return
+    /// `SlotListPageAction::None` — their only effect is mutating `self`.
+    /// `AddCenterToQueue` returns `SlotListPageAction::AddCenterToQueue` so
+    /// the view can build and return its own `AddBatchToQueue` action.
+    pub fn handle(&mut self, msg: SlotListPageMessage, total_items: usize) -> SlotListPageAction {
+        match msg {
+            SlotListPageMessage::NavigateUp => {
+                self.handle_navigate_up(total_items);
+                SlotListPageAction::None
+            }
+            SlotListPageMessage::NavigateDown => {
+                self.handle_navigate_down(total_items);
+                SlotListPageAction::None
+            }
+            SlotListPageMessage::SetOffset(offset, modifiers) => {
+                self.handle_slot_click(offset, total_items, modifiers);
+                SlotListPageAction::None
+            }
+            SlotListPageMessage::ScrollSeek(offset) => {
+                self.handle_set_offset(offset, total_items);
+                SlotListPageAction::None
+            }
+            SlotListPageMessage::SelectionToggle(offset) => {
+                self.handle_selection_toggle(offset, total_items);
+                SlotListPageAction::None
+            }
+            SlotListPageMessage::SelectAllToggle => {
+                self.handle_select_all_toggle(total_items);
+                SlotListPageAction::None
+            }
+            SlotListPageMessage::AddCenterToQueue => SlotListPageAction::AddCenterToQueue,
         }
     }
 
