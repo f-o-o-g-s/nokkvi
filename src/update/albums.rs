@@ -10,6 +10,7 @@ use super::components::{PaginatedFetch, prefetch_album_artwork_tasks};
 use crate::{
     Nokkvi, View,
     app_message::{ArtworkMessage, Message},
+    update::AlbumsTarget,
     views::{self, AlbumsAction, AlbumsMessage, HasCommonAction},
 };
 
@@ -127,43 +128,12 @@ impl Nokkvi {
         })
     }
 
-    /// Handle a subsequent page of albums being loaded (appends to buffer).
-    /// Drives `try_resolve_pending_expand_album` after the append so the
-    /// album-find-and-expand chain (and Shift+C center-only fallback) can
-    /// advance once the new page lands.
     pub(crate) fn handle_albums_page_loaded(
         &mut self,
         result: Result<Vec<AlbumUIViewData>, String>,
         total_count: usize,
     ) -> Task<Message> {
-        match result {
-            Ok(new_items) => {
-                let count = new_items.len();
-                let loaded_before = self.library.albums.loaded_count();
-                self.library.albums.append_page(new_items, total_count);
-                debug!(
-                    "📄 Albums page loaded: {} new items ({}→{} of {})",
-                    count,
-                    loaded_before,
-                    self.library.albums.loaded_count(),
-                    total_count,
-                );
-                if let Some(task) = self.try_resolve_pending_expand_album() {
-                    return task;
-                }
-            }
-            Err(e) => {
-                if e.contains("Unauthorized") {
-                    self.library.albums.set_loading(false);
-                    return self.handle_session_expired();
-                }
-                error!("Error loading Albums page: {}", e);
-                self.library.albums.set_loading(false);
-                self.cancel_pending_expand();
-                self.toast_error(format!("Failed to load Albums: {e}"));
-            }
-        }
-        Task::none()
+        self.handle_page_loaded_with::<AlbumsTarget>(result, total_count)
     }
 
     pub(crate) fn handle_albums_loaded(
@@ -173,102 +143,7 @@ impl Nokkvi {
         background: bool,
         anchor_id: Option<String>,
     ) -> Task<Message> {
-        self.library.counts.albums = total_count;
-        match result {
-            Ok(new_albums) => {
-                debug!(
-                    "✅ Loaded {} albums from AlbumsService (total in library: {})",
-                    new_albums.len(),
-                    total_count
-                );
-                if new_albums.len() >= 3 {
-                    debug!(
-                        "📋 First 3 albums: {}, {}, {}",
-                        new_albums[0].name, new_albums[1].name, new_albums[2].name
-                    );
-                }
-                self.library.albums.set_first_page(new_albums, total_count);
-
-                let new_len = self.library.albums.len();
-                if !background {
-                    self.albums_page.common.slot_list.viewport_offset = 0;
-                    self.albums_page.common.slot_list.selected_indices.clear();
-                } else {
-                    // Anchor wins when found; otherwise clamp the existing
-                    // offset so it stays within the new buffer. Without the
-                    // clamp, a shorter post-refresh list leaves viewport_offset
-                    // pointing past the end and every slot falls back to
-                    // `empty_slot()` — borders/backgrounds visible, text/artwork
-                    // blank.
-                    let current = self.albums_page.common.slot_list.viewport_offset;
-                    let new_offset = anchor_id
-                        .as_ref()
-                        .and_then(|id| self.library.albums.iter().position(|a| a.id == *id))
-                        .unwrap_or_else(|| current.min(new_len.saturating_sub(1)));
-                    self.albums_page.common.slot_list.viewport_offset = new_offset;
-                    // Clear stale selected_offset: after re-ordering, the old absolute
-                    // index maps to a different album and would highlight the wrong slot.
-                    self.albums_page.common.slot_list.selected_offset = None;
-                    self.albums_page
-                        .common
-                        .slot_list
-                        .selected_indices
-                        .retain(|&i| i < new_len);
-                }
-                let mut tasks: Vec<Task<Message>> = Vec::new();
-
-                // NOTE: Don't re-focus search field here - text_input maintains its own focus state.
-                // Re-focusing here causes issues when users press Escape (widget unfocuses but we'd re-focus).
-
-                // Load artwork for currently displayed albums using canonical prefetch
-                if let Some(shell) = &self.app_service {
-                    let cached: HashSet<&String> =
-                        self.artwork.album_art.iter().map(|(k, _)| k).collect();
-                    let prefetch_tasks = prefetch_album_artwork_tasks(
-                        &self.albums_page.common.slot_list,
-                        &self.library.albums,
-                        &cached,
-                        shell.albums().clone(),
-                        |album| (album.id.clone(), album.artwork_url.clone()),
-                    );
-                    tasks.extend(prefetch_tasks);
-                }
-
-                // Large artwork for center
-                if let Some(center_idx) = self
-                    .albums_page
-                    .common
-                    .slot_list
-                    .get_center_item_index(self.library.albums.len())
-                    && let Some(album) = self.library.albums.get(center_idx)
-                {
-                    tasks.push(Task::done(Message::Artwork(ArtworkMessage::LoadLarge(
-                        album.id.clone(),
-                    ))));
-                }
-
-                // If a NavigateAndExpandAlbum or CenterOnPlaying chain is in
-                // flight, see whether the first page already contains the
-                // target — found → center (or dispatch FocusAndExpand);
-                // not found → kick the next page or warn.
-                if let Some(task) = self.try_resolve_pending_expand_album() {
-                    tasks.push(task);
-                }
-
-                return Task::batch(tasks);
-            }
-            Err(e) => {
-                if e.contains("Unauthorized") {
-                    self.library.albums.set_loading(false);
-                    return self.handle_session_expired();
-                }
-                error!("Error loading albums: {}", e);
-                self.library.albums.set_loading(false);
-                self.cancel_pending_expand();
-                self.toast_error(format!("Failed to load albums: {e}"));
-            }
-        }
-        Task::none()
+        self.handle_loaded_with::<AlbumsTarget>(result, total_count, background, anchor_id)
     }
 
     pub(crate) fn handle_artwork_loaded(
