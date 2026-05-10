@@ -348,6 +348,7 @@ impl Nokkvi {
                         "visualizer.waves",
                         crate::views::settings::items::SettingValue::Bool(false),
                     );
+                    self.reload_visualizer_config();
                 }
             }
             "visualizer.waves" => {
@@ -378,6 +379,7 @@ impl Nokkvi {
                             unit: "",
                         },
                     );
+                    self.reload_visualizer_config();
                 }
             }
             _ => {}
