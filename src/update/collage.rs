@@ -156,6 +156,72 @@ impl Nokkvi {
         )
     }
 
+    /// Mini-only counterpart to [`handle_load_collage_artwork`] for
+    /// non-centered viewport items, which only display the mini in their
+    /// slot row (the 3×3 collage panel only renders for the centered
+    /// item). Skipping the up-to-9 tile fetches per non-center slot drops
+    /// a worst-case settle from ~250 to ~25 fetches and largely eliminates
+    /// the burst that triggers Navidrome's `getCoverArt` throttle.
+    pub(crate) fn handle_load_collage_mini_artwork<F, Fut>(
+        &mut self,
+        target: CollageTarget,
+        entity_id: String,
+        server_url: String,
+        subsonic_credential: String,
+        cached_album_ids: Vec<String>,
+        fetch_album_ids_fn: F,
+    ) -> Task<Message>
+    where
+        F: FnOnce(nokkvi_data::services::api::client::ApiClient, String, String, String) -> Fut
+            + Send
+            + 'static,
+        Fut: Future<Output = Vec<String>> + Send,
+    {
+        let entity_id_clone = entity_id.clone();
+
+        self.shell_task(
+            move |shell| async move {
+                let auth_vm = shell.auth().clone();
+                let albums_vm = shell.albums().clone();
+
+                let album_ids = if !cached_album_ids.is_empty() {
+                    cached_album_ids
+                } else {
+                    let client = match auth_vm.get_client().await {
+                        Some(c) => c,
+                        None => return (entity_id_clone, None),
+                    };
+                    fetch_album_ids_fn(
+                        client,
+                        server_url,
+                        subsonic_credential,
+                        entity_id_clone.clone(),
+                    )
+                    .await
+                };
+
+                if album_ids.is_empty() {
+                    return (entity_id_clone, None);
+                }
+
+                let mini_handle = albums_vm
+                    .fetch_album_artwork_with_retry(&album_ids[0], Some(300), None)
+                    .await
+                    .ok()
+                    .map(image::Handle::from_bytes);
+
+                (entity_id_clone, mini_handle)
+            },
+            move |(entity_id, mini_handle)| {
+                Message::Artwork(ArtworkMessage::CollageMiniLoaded(
+                    target,
+                    entity_id,
+                    mini_handle,
+                ))
+            },
+        )
+    }
+
     /// Unified album-ID prefetch for collage artwork (genres and playlists).
     ///
     /// Collects items that still need album IDs (`artwork_album_ids` is empty),

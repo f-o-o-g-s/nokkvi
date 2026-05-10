@@ -104,6 +104,26 @@ impl Nokkvi {
                     load_playlist_album_ids,
                 ),
             },
+            ArtworkMessage::LoadCollageMini(target, id, server_url, cred, album_ids) => {
+                match target {
+                    CollageTarget::Genre => self.handle_load_collage_mini_artwork(
+                        target,
+                        id,
+                        server_url,
+                        cred,
+                        album_ids,
+                        load_genre_album_ids,
+                    ),
+                    CollageTarget::Playlist => self.handle_load_collage_mini_artwork(
+                        target,
+                        id,
+                        server_url,
+                        cred,
+                        album_ids,
+                        load_playlist_album_ids,
+                    ),
+                }
+            }
             ArtworkMessage::StartCollagePrefetch(target) => {
                 // Collect items needing album IDs from the appropriate library
                 let items_needing_ids: Vec<(String, String)> = match target {

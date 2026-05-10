@@ -215,13 +215,22 @@ impl Nokkvi {
                 // Load artwork for all visible slot list slots using collage artwork service
                 use crate::services::collage_artwork::{self, CollageArtworkContext};
 
-                if let Ok(_center_index) = playlist_index_str.parse::<usize>()
+                if let Ok(center_index) = playlist_index_str.parse::<usize>()
                     && let Some(shell) = &self.app_service
                 {
                     let total = self.library.playlists.len();
                     if total == 0 {
                         return Task::none();
                     }
+
+                    // Centered playlist gets the full collage fetch (mini +
+                    // 9 tiles for the right-side panel); every other visible
+                    // slot only renders a mini in its slot row.
+                    let center_id = self
+                        .library
+                        .playlists
+                        .get(center_index)
+                        .map(|p| p.id.clone());
 
                     let ctx = CollageArtworkContext {
                         slot_list: &self.playlists_page.common.slot_list,
@@ -235,8 +244,18 @@ impl Nokkvi {
                             &self.library.playlists,
                             &ctx,
                             shell.auth().clone(),
+                            center_id.as_deref(),
                             |a, b, c, d| {
                                 Message::Artwork(ArtworkMessage::LoadCollage(
+                                    CollageTarget::Playlist,
+                                    a,
+                                    b,
+                                    c,
+                                    d,
+                                ))
+                            },
+                            |a, b, c, d| {
+                                Message::Artwork(ArtworkMessage::LoadCollageMini(
                                     CollageTarget::Playlist,
                                     a,
                                     b,

@@ -80,9 +80,13 @@ pub(crate) fn check_cache<T: CollageArtworkItem>(
     CacheCheckResult::NeedNetwork
 }
 
-/// Generate tasks to load visible collage artwork for all 9 slot list slots
+/// Generate tasks to load visible collage artwork for the slot list viewport.
 ///
-/// This handles the core LoadArtwork action pattern shared by genres and playlists.
+/// Splits the fan-out so only the centered item fetches the full 3×3 collage
+/// (which is the only slot that actually renders the right-side panel);
+/// every other visible item fetches its mini only. With a worst-case 25-slot
+/// viewport this drops total request volume from ~250 to ~25 and keeps the
+/// burst well under Navidrome's `getCoverArt` throttle backlog.
 ///
 /// # Returns
 /// A tuple of:
@@ -93,18 +97,23 @@ pub(crate) fn check_cache<T: CollageArtworkItem>(
 /// # Arguments
 /// * `items` - Full list of items
 /// * `ctx` - Context with cache/state references
-/// * `cache_size` - Size suffix for cache keys
 /// * `auth_vm` - Auth view model for fetching credentials
-/// * `create_message` - Closure to create the appropriate Message variant
-pub(crate) fn load_visible_artwork<T, F>(
+/// * `center_id` - ID of the centered slot (gets the full collage fetch);
+///   every other prefetch index gets a mini-only fetch
+/// * `create_full_message` - Closure for the centered item (`LoadCollage`)
+/// * `create_mini_message` - Closure for non-centered items (`LoadCollageMini`)
+pub(crate) fn load_visible_artwork<T, FFull, FMini>(
     items: &[T],
     ctx: &CollageArtworkContext,
     auth_vm: AuthGateway,
-    create_message: F,
+    center_id: Option<&str>,
+    create_full_message: FFull,
+    create_mini_message: FMini,
 ) -> LoadArtworkResult
 where
     T: CollageArtworkItem,
-    F: Fn(String, String, String, Vec<String>) -> Message + Clone + Send + 'static,
+    FFull: Fn(String, String, String, Vec<String>) -> Message + Clone + Send + 'static,
+    FMini: Fn(String, String, String, Vec<String>) -> Message + Clone + Send + 'static,
 {
     let total = items.len();
     if total == 0 {
@@ -127,14 +136,22 @@ where
 
                     let auth_vm_clone = auth_vm.clone();
                     let album_ids = item.artwork_album_ids().to_vec();
-                    let create_msg = create_message.clone();
+                    let is_center = center_id.is_some_and(|cid| cid == id);
+                    let create_full = create_full_message.clone();
+                    let create_mini = create_mini_message.clone();
                     tasks.push(Task::perform(
                         async move {
                             let server_url = auth_vm_clone.get_server_url().await;
                             let subsonic_credential = auth_vm_clone.get_subsonic_credential().await;
-                            (id, server_url, subsonic_credential, album_ids)
+                            (id, server_url, subsonic_credential, album_ids, is_center)
                         },
-                        move |(id, url, cred, album_ids)| create_msg(id, url, cred, album_ids),
+                        move |(id, url, cred, album_ids, is_center)| {
+                            if is_center {
+                                create_full(id, url, cred, album_ids)
+                            } else {
+                                create_mini(id, url, cred, album_ids)
+                            }
+                        },
                     ));
                 }
             }

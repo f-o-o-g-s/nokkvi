@@ -326,13 +326,18 @@ impl Nokkvi {
                 // Load artwork for all visible slot list slots using collage artwork service
                 use crate::services::collage_artwork::{self, CollageArtworkContext};
 
-                if let Ok(_center_index) = genre_index_str.parse::<usize>()
+                if let Ok(center_index) = genre_index_str.parse::<usize>()
                     && let Some(shell) = &self.app_service
                 {
                     let total = self.library.genres.len();
                     if total == 0 {
                         return Task::none();
                     }
+
+                    // Centered genre gets the full collage fetch (mini + 9
+                    // tiles for the right-side panel); every other visible
+                    // slot only renders a mini in its slot row.
+                    let center_id = self.library.genres.get(center_index).map(|g| g.id.clone());
 
                     let ctx = CollageArtworkContext {
                         slot_list: &self.genres_page.common.slot_list,
@@ -346,8 +351,18 @@ impl Nokkvi {
                             &self.library.genres,
                             &ctx,
                             shell.auth().clone(),
+                            center_id.as_deref(),
                             |a, b, c, d| {
                                 Message::Artwork(ArtworkMessage::LoadCollage(
+                                    CollageTarget::Genre,
+                                    a,
+                                    b,
+                                    c,
+                                    d,
+                                ))
+                            },
+                            |a, b, c, d| {
+                                Message::Artwork(ArtworkMessage::LoadCollageMini(
                                     CollageTarget::Genre,
                                     a,
                                     b,

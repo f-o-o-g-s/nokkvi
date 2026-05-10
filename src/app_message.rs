@@ -209,6 +209,10 @@ pub enum ArtworkMessage {
 
     // --- Collage Artwork (Genre / Playlist) ---
     LoadCollage(CollageTarget, String, String, String, Vec<String>),
+    /// Mini-only variant for non-centered viewport items: skips the up-to-9
+    /// collage-tile fetch since only the centered slot displays a 3×3 panel.
+    /// On a typical settle this drops total request volume from ~250 to ~25.
+    LoadCollageMini(CollageTarget, String, String, String, Vec<String>),
     StartCollagePrefetch(CollageTarget),
     CollageAlbumIdsLoaded(CollageTarget, Vec<(String, Vec<String>)>),
     CollageMiniLoaded(CollageTarget, String, Option<image::Handle>),
