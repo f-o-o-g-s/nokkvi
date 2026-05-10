@@ -397,7 +397,9 @@ fn albums_selection_toggle_on_expansion_child_lands_in_selected_indices() {
 
     // Toggle the second child track (flattened index 2).
     let (_, _action) = app.albums_page.update(
-        crate::views::AlbumsMessage::SlotListSelectionToggle(2),
+        crate::views::AlbumsMessage::SlotList(
+            crate::widgets::SlotListPageMessage::SelectionToggle(2),
+        ),
         albums.len(),
         &albums,
     );
@@ -430,7 +432,7 @@ fn albums_select_all_with_expansion_covers_child_indices() {
 
     // Flattened length is 1 parent + 3 children = 4.
     let (_, _action) = app.albums_page.update(
-        crate::views::AlbumsMessage::SlotListSelectAllToggle,
+        crate::views::AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::SelectAllToggle),
         albums.len(),
         &albums,
     );

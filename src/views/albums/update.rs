@@ -30,41 +30,175 @@ impl AlbumsPage {
         ) {
             Ok(result) => result,
             Err(msg) => match msg {
-                AlbumsMessage::SlotListNavigateUp => {
-                    let center = self.expansion.handle_navigate_up(albums, &mut self.common);
-                    match center {
-                        Some(idx) => (
-                            Task::none(),
-                            AlbumsAction::LoadLargeArtwork(idx.to_string()),
-                        ),
-                        None => (Task::none(), AlbumsAction::None),
-                    }
-                }
-                AlbumsMessage::SlotListNavigateDown => {
-                    let center = self
-                        .expansion
-                        .handle_navigate_down(albums, &mut self.common);
-                    match center {
-                        Some(idx) => (
-                            Task::none(),
-                            AlbumsAction::LoadLargeArtwork(idx.to_string()),
-                        ),
-                        None => (Task::none(), AlbumsAction::None),
-                    }
-                }
-                AlbumsMessage::SlotListSetOffset(offset, modifiers) => {
-                    let center = self.expansion.handle_select_offset(
-                        offset,
-                        modifiers,
-                        albums,
-                        &mut self.common,
-                    );
-                    match center {
-                        Some(idx) => (
-                            Task::none(),
-                            AlbumsAction::LoadLargeArtwork(idx.to_string()),
-                        ),
-                        None => (Task::none(), AlbumsAction::None),
+                AlbumsMessage::SlotList(msg) => {
+                    use crate::widgets::SlotListPageMessage;
+                    match msg {
+                        SlotListPageMessage::NavigateUp => {
+                            let center =
+                                self.expansion.handle_navigate_up(albums, &mut self.common);
+                            match center {
+                                Some(idx) => (
+                                    Task::none(),
+                                    AlbumsAction::LoadLargeArtwork(idx.to_string()),
+                                ),
+                                None => (Task::none(), AlbumsAction::None),
+                            }
+                        }
+                        SlotListPageMessage::NavigateDown => {
+                            let center = self
+                                .expansion
+                                .handle_navigate_down(albums, &mut self.common);
+                            match center {
+                                Some(idx) => (
+                                    Task::none(),
+                                    AlbumsAction::LoadLargeArtwork(idx.to_string()),
+                                ),
+                                None => (Task::none(), AlbumsAction::None),
+                            }
+                        }
+                        SlotListPageMessage::SetOffset(offset, modifiers) => {
+                            let center = self.expansion.handle_select_offset(
+                                offset,
+                                modifiers,
+                                albums,
+                                &mut self.common,
+                            );
+                            match center {
+                                Some(idx) => (
+                                    Task::none(),
+                                    AlbumsAction::LoadLargeArtwork(idx.to_string()),
+                                ),
+                                None => (Task::none(), AlbumsAction::None),
+                            }
+                        }
+                        SlotListPageMessage::ScrollSeek(offset) => {
+                            self.expansion
+                                .handle_set_offset(offset, albums, &mut self.common);
+                            (Task::none(), AlbumsAction::None)
+                        }
+                        SlotListPageMessage::ClickPlay(offset) => {
+                            // Set offset then activate (play without focusing)
+                            self.expansion
+                                .handle_set_offset(offset, albums, &mut self.common);
+                            self.update(
+                                AlbumsMessage::SlotList(SlotListPageMessage::ActivateCenter),
+                                total_items,
+                                albums,
+                            )
+                        }
+                        SlotListPageMessage::SelectionToggle(offset) => {
+                            // Slot list indices are flattened (parents + expansion
+                            // children); `total_items` from the dispatcher is the
+                            // base buffer length. Use the flattened length so the
+                            // toggle's bounds check matches what the user sees.
+                            let flattened = self.expansion.flattened_len(albums);
+                            self.common.handle_selection_toggle(offset, flattened);
+                            (Task::none(), AlbumsAction::None)
+                        }
+                        SlotListPageMessage::SelectAllToggle => {
+                            let flattened = self.expansion.flattened_len(albums);
+                            self.common.handle_select_all_toggle(flattened);
+                            (Task::none(), AlbumsAction::None)
+                        }
+                        SlotListPageMessage::ActivateCenter => {
+                            let total = self.expansion.flattened_len(albums);
+                            let center_idx = self.common.get_center_item_index(total);
+                            let target_indices = self
+                                .common
+                                .slot_list
+                                .selected_indices
+                                .iter()
+                                .copied()
+                                .collect::<Vec<_>>();
+
+                            if !target_indices.is_empty() {
+                                use nokkvi_data::types::batch::{BatchItem, BatchPayload};
+                                let payload = target_indices
+                                    .into_iter()
+                                    .filter_map(|i| {
+                                        match self.expansion.get_entry_at(i, albums, |a| &a.id) {
+                                            Some(SlotListEntry::Parent(album)) => {
+                                                Some(BatchItem::Album(album.id.clone()))
+                                            }
+                                            Some(SlotListEntry::Child(song, _)) => {
+                                                let item: nokkvi_data::types::song::Song =
+                                                    song.clone().into();
+                                                Some(BatchItem::Song(Box::new(item)))
+                                            }
+                                            None => None,
+                                        }
+                                    })
+                                    .fold(BatchPayload::new(), |p, item| p.with_item(item));
+                                return (Task::none(), AlbumsAction::PlayBatch(payload));
+                            }
+
+                            if let Some(center_idx) = center_idx {
+                                self.common.slot_list.flash_center();
+                                match self.expansion.get_entry_at(center_idx, albums, |a| &a.id) {
+                                    Some(SlotListEntry::Child(_song, parent_album_id)) => {
+                                        let track_index = self.expansion.count_children_before(
+                                            center_idx,
+                                            albums,
+                                            |a| &a.id,
+                                        );
+                                        (
+                                            Task::none(),
+                                            AlbumsAction::PlayAlbumFromTrack(
+                                                parent_album_id,
+                                                track_index,
+                                            ),
+                                        )
+                                    }
+                                    Some(SlotListEntry::Parent(_)) => (
+                                        Task::none(),
+                                        AlbumsAction::PlayAlbum(center_idx.to_string()),
+                                    ),
+                                    None => (Task::none(), AlbumsAction::None),
+                                }
+                            } else {
+                                (Task::none(), AlbumsAction::None)
+                            }
+                        }
+                        SlotListPageMessage::AddCenterToQueue => {
+                            use nokkvi_data::types::batch::BatchItem;
+
+                            let total = self.expansion.flattened_len(albums);
+                            let target_indices = self.common.get_queue_target_indices(total);
+
+                            if target_indices.is_empty() {
+                                return (Task::none(), AlbumsAction::None);
+                            }
+
+                            let payload =
+                                super::super::expansion::build_batch_payload(target_indices, |i| {
+                                    match self.expansion.get_entry_at(i, albums, |a| &a.id) {
+                                        Some(SlotListEntry::Parent(album)) => {
+                                            Some(BatchItem::Album(album.id.clone()))
+                                        }
+                                        Some(SlotListEntry::Child(song, _)) => {
+                                            let item: nokkvi_data::types::song::Song =
+                                                song.clone().into();
+                                            Some(BatchItem::Song(Box::new(item)))
+                                        }
+                                        None => None,
+                                    }
+                                });
+
+                            (Task::none(), AlbumsAction::AddBatchToQueue(payload))
+                        }
+                        SlotListPageMessage::RefreshViewData => {
+                            (Task::none(), AlbumsAction::RefreshViewData)
+                        }
+                        SlotListPageMessage::CenterOnPlaying => {
+                            (Task::none(), AlbumsAction::CenterOnPlaying)
+                        }
+                        // Sort/search exhaustiveness arms (expansion views don't emit these via SlotList):
+                        SlotListPageMessage::SearchQueryChanged(_)
+                        | SlotListPageMessage::SearchFocused(_)
+                        | SlotListPageMessage::SortModeSelected(_)
+                        | SlotListPageMessage::ToggleSortOrder => {
+                            (Task::none(), AlbumsAction::None)
+                        }
                     }
                 }
                 AlbumsMessage::FocusAndExpand(offset) => {
@@ -91,111 +225,6 @@ impl AlbumsPage {
                         (Task::none(), AlbumsAction::None)
                     }
                 }
-                AlbumsMessage::SlotListScrollSeek(offset) => {
-                    self.expansion
-                        .handle_set_offset(offset, albums, &mut self.common);
-                    (Task::none(), AlbumsAction::None)
-                }
-                AlbumsMessage::SlotListClickPlay(offset) => {
-                    // Set offset then activate (play without focusing)
-                    self.expansion
-                        .handle_set_offset(offset, albums, &mut self.common);
-                    self.update(AlbumsMessage::SlotListActivateCenter, total_items, albums)
-                }
-                AlbumsMessage::SlotListSelectionToggle(offset) => {
-                    // Slot list indices are flattened (parents + expansion
-                    // children); `total_items` from the dispatcher is the
-                    // base buffer length. Use the flattened length so the
-                    // toggle's bounds check matches what the user sees.
-                    let flattened = self.expansion.flattened_len(albums);
-                    self.common.handle_selection_toggle(offset, flattened);
-                    (Task::none(), AlbumsAction::None)
-                }
-                AlbumsMessage::SlotListSelectAllToggle => {
-                    let flattened = self.expansion.flattened_len(albums);
-                    self.common.handle_select_all_toggle(flattened);
-                    (Task::none(), AlbumsAction::None)
-                }
-                AlbumsMessage::SlotListActivateCenter => {
-                    let total = self.expansion.flattened_len(albums);
-                    let center_idx = self.common.get_center_item_index(total);
-                    let target_indices = self
-                        .common
-                        .slot_list
-                        .selected_indices
-                        .iter()
-                        .copied()
-                        .collect::<Vec<_>>();
-
-                    if !target_indices.is_empty() {
-                        use nokkvi_data::types::batch::{BatchItem, BatchPayload};
-                        let payload = target_indices
-                            .into_iter()
-                            .filter_map(|i| {
-                                match self.expansion.get_entry_at(i, albums, |a| &a.id) {
-                                    Some(SlotListEntry::Parent(album)) => {
-                                        Some(BatchItem::Album(album.id.clone()))
-                                    }
-                                    Some(SlotListEntry::Child(song, _)) => {
-                                        let item: nokkvi_data::types::song::Song =
-                                            song.clone().into();
-                                        Some(BatchItem::Song(Box::new(item)))
-                                    }
-                                    None => None,
-                                }
-                            })
-                            .fold(BatchPayload::new(), |p, item| p.with_item(item));
-                        return (Task::none(), AlbumsAction::PlayBatch(payload));
-                    }
-
-                    if let Some(center_idx) = center_idx {
-                        self.common.slot_list.flash_center();
-                        match self.expansion.get_entry_at(center_idx, albums, |a| &a.id) {
-                            Some(SlotListEntry::Child(_song, parent_album_id)) => {
-                                let track_index =
-                                    self.expansion
-                                        .count_children_before(center_idx, albums, |a| &a.id);
-                                (
-                                    Task::none(),
-                                    AlbumsAction::PlayAlbumFromTrack(parent_album_id, track_index),
-                                )
-                            }
-                            Some(SlotListEntry::Parent(_)) => (
-                                Task::none(),
-                                AlbumsAction::PlayAlbum(center_idx.to_string()),
-                            ),
-                            None => (Task::none(), AlbumsAction::None),
-                        }
-                    } else {
-                        (Task::none(), AlbumsAction::None)
-                    }
-                }
-                AlbumsMessage::AddCenterToQueue => {
-                    use nokkvi_data::types::batch::BatchItem;
-
-                    let total = self.expansion.flattened_len(albums);
-                    let target_indices = self.common.get_queue_target_indices(total);
-
-                    if target_indices.is_empty() {
-                        return (Task::none(), AlbumsAction::None);
-                    }
-
-                    let payload = super::super::expansion::build_batch_payload(
-                        target_indices,
-                        |i| match self.expansion.get_entry_at(i, albums, |a| &a.id) {
-                            Some(SlotListEntry::Parent(album)) => {
-                                Some(BatchItem::Album(album.id.clone()))
-                            }
-                            Some(SlotListEntry::Child(song, _)) => {
-                                let item: nokkvi_data::types::song::Song = song.clone().into();
-                                Some(BatchItem::Song(Box::new(item)))
-                            }
-                            None => None,
-                        },
-                    );
-
-                    (Task::none(), AlbumsAction::AddBatchToQueue(payload))
-                }
                 // Data loading messages (handled at root level, no action needed here)
                 AlbumsMessage::ArtworkLoaded(_, _) => (Task::none(), AlbumsAction::None),
                 AlbumsMessage::LargeArtworkLoaded(_, _) => (Task::none(), AlbumsAction::None),
@@ -203,7 +232,6 @@ impl AlbumsPage {
                 // arm exists only for exhaustiveness.
                 AlbumsMessage::SetOpenMenu(_) => (Task::none(), AlbumsAction::None),
                 AlbumsMessage::Roulette => (Task::none(), AlbumsAction::None),
-                AlbumsMessage::RefreshViewData => (Task::none(), AlbumsAction::RefreshViewData),
                 AlbumsMessage::RefreshArtwork(album_id) => {
                     (Task::none(), AlbumsAction::RefreshArtwork(album_id))
                 }
@@ -375,8 +403,6 @@ impl AlbumsPage {
                         },
                     }
                 }
-                // Common arms already handled by macro above
-                AlbumsMessage::CenterOnPlaying => (Task::none(), AlbumsAction::CenterOnPlaying),
                 AlbumsMessage::NavigateAndFilter(view, filter) => {
                     (Task::none(), AlbumsAction::NavigateAndFilter(view, filter))
                 }
@@ -410,7 +436,11 @@ mod tests {
     fn center_on_playing_translates_to_action() {
         let mut page = AlbumsPage::new();
         let empty_albums: Vec<AlbumUIViewData> = vec![];
-        let (_, action) = page.update(AlbumsMessage::CenterOnPlaying, 0, &empty_albums);
+        let (_, action) = page.update(
+            AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::CenterOnPlaying),
+            0,
+            &empty_albums,
+        );
 
         assert!(matches!(action, AlbumsAction::CenterOnPlaying));
     }

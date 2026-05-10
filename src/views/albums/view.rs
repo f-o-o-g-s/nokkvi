@@ -84,15 +84,17 @@ impl AlbumsPage {
             buttons: {
                 let mut btns = vec![
                     HeaderButton::SortToggle(AlbumsMessage::ToggleSortOrder),
-                    HeaderButton::Refresh(AlbumsMessage::RefreshViewData),
+                    HeaderButton::Refresh(AlbumsMessage::SlotList(
+                        crate::widgets::SlotListPageMessage::RefreshViewData,
+                    )),
                 ];
                 // Hidden in the browsing panel — the narrower pane needs the
                 // header space for sort/refresh/columns/search, and the user
                 // already has the main-pane button when they want to center.
                 if !data.in_browsing_panel {
-                    btns.push(HeaderButton::CenterOnPlaying(
-                        AlbumsMessage::CenterOnPlaying,
-                    ));
+                    btns.push(HeaderButton::CenterOnPlaying(AlbumsMessage::SlotList(
+                        crate::widgets::SlotListPageMessage::CenterOnPlaying,
+                    )));
                 }
                 btns.push(HeaderButton::Trailing(column_dropdown));
                 btns
@@ -118,7 +120,7 @@ impl AlbumsPage {
             crate::widgets::slot_list::compose_header_with_select(
                 self.column_visibility.select,
                 self.common.select_all_state(flattened_len),
-                AlbumsMessage::SlotListSelectAllToggle,
+                AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::SelectAllToggle),
                 header,
             )
         };
@@ -173,11 +175,15 @@ impl AlbumsPage {
             &self.common.slot_list,
             &flattened,
             &config,
-            AlbumsMessage::SlotListNavigateUp,
-            AlbumsMessage::SlotListNavigateDown,
+            AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateUp),
+            AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateDown),
             {
                 let total = flattened.len();
-                move |f| AlbumsMessage::SlotListScrollSeek((f * total as f32) as usize)
+                move |f| {
+                    AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::ScrollSeek(
+                        (f * total as f32) as usize,
+                    ))
+                }
             },
             |entry, ctx| match entry {
                 SlotListEntry::Parent(album) => {
@@ -193,7 +199,11 @@ impl AlbumsPage {
                         select_header_visible,
                         ctx.is_selected,
                         ctx.item_index,
-                        AlbumsMessage::SlotListSelectionToggle,
+                        |i| {
+                            AlbumsMessage::SlotList(
+                                crate::widgets::SlotListPageMessage::SelectionToggle(i),
+                            )
+                        },
                         row,
                     )
                 }
@@ -212,7 +222,11 @@ impl AlbumsPage {
                         select_header_visible,
                         ctx.is_selected,
                         ctx.item_index,
-                        AlbumsMessage::SlotListSelectionToggle,
+                        |i| {
+                            AlbumsMessage::SlotList(
+                                crate::widgets::SlotListPageMessage::SelectionToggle(i),
+                            )
+                        },
                         row,
                     )
                 }
@@ -562,13 +576,21 @@ impl AlbumsPage {
 
         let slot_button = button(clickable)
             .on_press(if ctx.modifiers.control() || ctx.modifiers.shift() {
-                AlbumsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
+                AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
+                    ctx.item_index,
+                    ctx.modifiers,
+                ))
             } else if ctx.is_center {
-                AlbumsMessage::SlotListActivateCenter
+                AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::ActivateCenter)
             } else if stable_viewport {
-                AlbumsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
+                AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
+                    ctx.item_index,
+                    ctx.modifiers,
+                ))
             } else {
-                AlbumsMessage::SlotListClickPlay(ctx.item_index)
+                AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::ClickPlay(
+                    ctx.item_index,
+                ))
             })
             .style(|_theme, _status| button::Style {
                 background: None,
@@ -603,11 +625,16 @@ impl AlbumsPage {
             song,
             ctx,
             sub_index_label,
-            AlbumsMessage::SlotListActivateCenter,
+            AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::ActivateCenter),
             if stable_viewport {
-                AlbumsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
+                AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
+                    ctx.item_index,
+                    ctx.modifiers,
+                ))
             } else {
-                AlbumsMessage::SlotListClickPlay(ctx.item_index)
+                AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::ClickPlay(
+                    ctx.item_index,
+                ))
             },
             Some(AlbumsMessage::ClickToggleStar(ctx.item_index)),
             song.artist_id

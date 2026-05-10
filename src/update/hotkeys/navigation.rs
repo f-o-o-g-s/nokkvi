@@ -269,9 +269,11 @@ impl Nokkvi {
                         &self.library.albums,
                         &mut self.albums_page.common,
                     );
-                    Task::done(Message::Albums(views::AlbumsMessage::SlotListSetOffset(
-                        i,
-                        iced::keyboard::Modifiers::default(),
+                    Task::done(Message::Albums(views::AlbumsMessage::SlotList(
+                        crate::widgets::SlotListPageMessage::SetOffset(
+                            i,
+                            iced::keyboard::Modifiers::default(),
+                        ),
                     )))
                 }
                 View::Artists => {

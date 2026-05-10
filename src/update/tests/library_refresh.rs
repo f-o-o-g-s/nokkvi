@@ -261,7 +261,9 @@ fn albums_scroll_seek_does_not_load_artwork_immediately() {
         .collect();
     app.library.albums.set_from_vec(albums);
 
-    let _ = app.handle_albums(crate::views::AlbumsMessage::SlotListScrollSeek(25));
+    let _ = app.handle_albums(crate::views::AlbumsMessage::SlotList(
+        crate::widgets::SlotListPageMessage::ScrollSeek(25),
+    ));
 
     assert_eq!(app.albums_page.common.slot_list.viewport_offset, 25);
     assert_eq!(
@@ -282,7 +284,9 @@ fn albums_scroll_seek_bumps_scroll_generation_id() {
     app.library.albums.set_from_vec(albums);
 
     let initial = app.albums_page.common.slot_list.scroll_generation_id;
-    let _ = app.handle_albums(crate::views::AlbumsMessage::SlotListScrollSeek(5));
+    let _ = app.handle_albums(crate::views::AlbumsMessage::SlotList(
+        crate::widgets::SlotListPageMessage::ScrollSeek(5),
+    ));
 
     assert!(
         app.albums_page.common.slot_list.scroll_generation_id > initial,
@@ -304,7 +308,9 @@ fn albums_seek_settled_dispatches_load_large_artwork_for_centered_album() {
         .collect();
     app.library.albums.set_from_vec(albums);
 
-    let _ = app.handle_albums(crate::views::AlbumsMessage::SlotListScrollSeek(25));
+    let _ = app.handle_albums(crate::views::AlbumsMessage::SlotList(
+        crate::widgets::SlotListPageMessage::ScrollSeek(25),
+    ));
     let gen_id = app.albums_page.common.slot_list.scroll_generation_id;
 
     let _ = app.handle_slot_list_message(SlotListMessage::SeekSettled(View::Albums, gen_id));
@@ -357,10 +363,14 @@ fn albums_seek_settled_skipped_when_generation_id_is_stale() {
         .collect();
     app.library.albums.set_from_vec(albums);
 
-    let _ = app.handle_albums(crate::views::AlbumsMessage::SlotListScrollSeek(5));
+    let _ = app.handle_albums(crate::views::AlbumsMessage::SlotList(
+        crate::widgets::SlotListPageMessage::ScrollSeek(5),
+    ));
     let stale_gen = app.albums_page.common.slot_list.scroll_generation_id;
     // Subsequent scroll bumps gen_id, leaving stale_gen behind.
-    let _ = app.handle_albums(crate::views::AlbumsMessage::SlotListScrollSeek(10));
+    let _ = app.handle_albums(crate::views::AlbumsMessage::SlotList(
+        crate::widgets::SlotListPageMessage::ScrollSeek(10),
+    ));
 
     let _ = app.handle_slot_list_message(SlotListMessage::SeekSettled(View::Albums, stale_gen));
 
