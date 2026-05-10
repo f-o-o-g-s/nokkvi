@@ -19,7 +19,7 @@ use tracing::{debug, trace};
 use crate::{
     Nokkvi, View,
     app_message::{Message, RouletteMessage},
-    state::{FakeoutKeyframe, RouletteState},
+    state::{DecelKeyframe, RouletteState},
     views,
 };
 
@@ -27,18 +27,30 @@ use crate::{
 /// roulette — just dispatch the play immediately.
 const MIN_ITEMS_FOR_SPIN: usize = 3;
 
-/// Total roulette duration budget (main spin + fake-out walk). Variable
-/// per spin so consecutive plays don't feel mechanically identical.
-const TOTAL_DURATION_MIN_MS: u64 = 4400;
-const TOTAL_DURATION_MAX_MS: u64 = 5400;
-/// Floor on the eased main spin alone. Ensures even a long fake-out
-/// can't squeeze the visible deceleration below something legible.
-const MAIN_DURATION_FLOOR_MS: u64 = 2800;
-/// Cruise phase length — how long the wheel spins at constant velocity
-/// before deceleration begins. Jittered per spin so consecutive plays
-/// don't lock onto an identical "spin up, slow down" cadence.
+/// Cruise phase length — how long the wheel scrolls at constant
+/// velocity (continuous interpolation) before discrete-click decel
+/// begins. Jittered per spin so consecutive plays don't lock onto an
+/// identical "spin up, slow down" cadence.
 const CRUISE_DURATION_MIN_MS: u64 = 1300;
 const CRUISE_DURATION_MAX_MS: u64 = 1700;
+/// Decel phase length — how long the audible click cadence takes to
+/// slow from ~20 Hz (cruise-rate-matching first click) down to ~1 Hz
+/// (slot-machine final click). Jittered per spin.
+const DECEL_DURATION_MIN_MS: u64 = 2400;
+const DECEL_DURATION_MAX_MS: u64 = 3200;
+/// Per-spin weight (out of 16) for the "all-decel" variant: skip the
+/// cruise blur and run the entire spin as the discrete-click decel.
+/// Each natural-walk keyframe then advances multiple positions per
+/// click (uniformly distributed over the spin's total step budget) so
+/// the wheel still traverses several revolutions even without a
+/// cruise prelude — the "thrown hard" feel.
+const ALL_DECEL_WEIGHT: u64 = 4;
+/// Number of cubic-distributed keyframes in the natural-walk portion
+/// of the decel phase. With 17 keyframes over 2400–3200 ms the click
+/// holds escalate from ~47 ms (cruise-rate-matching) to ~1190 ms
+/// (slot-machine final click). Pattern variations append 0–2 extra
+/// keyframes after the natural walk for the final wobble.
+const NATURAL_KEYFRAME_COUNT: usize = 17;
 
 impl Nokkvi {
     pub(crate) fn handle_roulette_message(&mut self, msg: RouletteMessage) -> Task<Message> {
@@ -108,46 +120,61 @@ impl Nokkvi {
         }
 
         let revolutions = revolutions_for(total_items);
-        let fakeout_keyframes = build_fakeout_keyframes(target_idx, total_items, &mut rng);
-        // Main spin lands on the first fake-out keyframe, not directly on
-        // `target_idx` — the keyframe walk handles the last few rows with
-        // timed pauses for the slot-machine wobble. When the rolled
-        // pattern is "no fake-out" the first (and only) keyframe is
-        // `target_idx` itself, so the eased spin lands directly on target.
-        let near_miss_offset = fakeout_keyframes.first().map_or(target_idx, |k| k.offset);
-        let forward_diff =
-            (near_miss_offset + total_items - (original_offset % total_items)) % total_items;
-        let main_spin_steps = revolutions * total_items + forward_diff;
+        let pattern = FakeoutPattern::roll(&mut rng);
+        let direction: i32 = if rng.next() & 1 == 0 { 1 } else { -1 };
 
-        // Total budget jittered per spin; main spin claims whatever's
-        // left after the fake-out, with a floor so a chatty fake-out
-        // can't squeeze the deceleration into something abrupt.
-        let total_duration_ms = rng.range_inclusive(TOTAL_DURATION_MIN_MS, TOTAL_DURATION_MAX_MS);
-        let fakeout_total_ms: u64 = fakeout_keyframes
-            .iter()
-            .take(fakeout_keyframes.len().saturating_sub(1))
-            .map(|k| k.duration_ms)
-            .sum();
-        let main_duration_ms = total_duration_ms
-            .saturating_sub(fakeout_total_ms)
-            .max(MAIN_DURATION_FLOOR_MS);
-        let cruise_duration_ms =
-            rng.range_inclusive(CRUISE_DURATION_MIN_MS, CRUISE_DURATION_MAX_MS);
+        // All-decel variant: occasionally zero the cruise so the wheel
+        // runs the entire spin as discrete decel clicks (no continuous
+        // blur). The decel keyframes then absorb every step the cruise
+        // would have walked.
+        let cruise_duration_ms = if rng.next() % 16 < ALL_DECEL_WEIGHT {
+            0
+        } else {
+            rng.range_inclusive(CRUISE_DURATION_MIN_MS, CRUISE_DURATION_MAX_MS)
+        };
+        let decel_duration_ms = rng.range_inclusive(DECEL_DURATION_MIN_MS, DECEL_DURATION_MAX_MS);
+
+        // Natural walk lands one position short of target; the pattern
+        // tail (0–2 extra keyframes) carries the wheel from there onto
+        // target with pattern-specific wobble.
+        let natural_end_offset = (target_idx + total_items - 1) % total_items;
+        let total_natural_steps = revolutions * total_items
+            + ((natural_end_offset + total_items - (original_offset % total_items)) % total_items);
+
+        let cruise_steps = if cruise_duration_ms == 0 {
+            0
+        } else {
+            total_natural_steps.saturating_sub(NATURAL_KEYFRAME_COUNT)
+        };
+        let decel_natural_steps = total_natural_steps - cruise_steps;
+        let cruise_end_offset = (original_offset + cruise_steps) % total_items;
+
+        let decel_keyframes = build_decel_keyframes(
+            cruise_end_offset,
+            target_idx,
+            total_items,
+            decel_natural_steps,
+            decel_duration_ms,
+            pattern,
+            direction,
+            &mut rng,
+        );
 
         debug!(
             "Roulette start: view={:?} total_items={} target={} original_offset={} \
-             revolutions={} main_spin_steps={} main_duration_ms={} \
-             cruise_duration_ms={} fakeout_total_ms={} keyframes={:?}",
+             revolutions={} cruise_steps={} cruise_duration_ms={} \
+             decel_duration_ms={} pattern={:?} direction={} keyframe_count={}",
             view,
             total_items,
             target_idx,
             original_offset,
             revolutions,
-            main_spin_steps,
-            main_duration_ms,
+            cruise_steps,
             cruise_duration_ms,
-            fakeout_total_ms,
-            fakeout_keyframes
+            decel_duration_ms,
+            pattern,
+            direction,
+            decel_keyframes.len()
         );
 
         self.roulette = Some(RouletteState {
@@ -155,10 +182,9 @@ impl Nokkvi {
             total_items,
             original_offset,
             target_idx,
-            main_duration_ms,
             cruise_duration_ms,
-            main_spin_steps,
-            fakeout_keyframes,
+            cruise_steps,
+            decel_keyframes,
             start_time: Instant::now(),
             last_offset: original_offset,
             last_sfx_at: None,
@@ -429,145 +455,267 @@ impl XorShift64 {
     }
 }
 
-/// One of the available fake-out patterns. Each names a distinct shape
-/// for how the wheel approaches `target_idx` after the eased main spin.
+/// Shape of the final wobble after the natural-walk's long terminal
+/// hold at `target - 1`. The natural walk is shared across all
+/// patterns — only the tail keyframes (0–2 entries) and their explicit
+/// holds differ per variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FakeoutPattern {
-    /// No wobble — the eased spin decelerates straight onto the target.
-    /// Picking this occasionally (~20%) keeps the slot-machine feel from
-    /// becoming predictable.
-    None,
-    /// Single near-miss tick: `target ± 1`, then settle.
-    Single,
-    /// Two ticks marching toward the target: `target ± 2`, `target ± 1`,
-    /// then settle. Same direction throughout.
-    Double,
-    /// Overshoot bounce: pass the target by 1, hold, retreat past target
-    /// by 1 in the opposite direction, hold, settle.
+    /// No wobble. Natural walk ends at `target - 1` with a long cubic
+    /// hold, then the terminal keyframe settles straight onto target.
+    /// Most common pick — lets the decel curve speak for itself.
+    CleanLand,
+    /// One extra keyframe at `target + direction` (overshoots target by
+    /// one), held briefly, then settles. The "wheel went a touch too
+    /// far" feel.
     Overshoot,
-    /// Three ticks zigzagging across the target before settling.
-    Zigzag,
+    /// Two extra keyframes: first at `target` itself (a false settle
+    /// — the user thinks the wheel locked), then at `target + direction`
+    /// (overshoot past), then settles. The slot-machine "wait, maybe
+    /// this one… no THIS!" moment of doubt.
+    FalseSettle,
 }
 
 impl FakeoutPattern {
-    /// Roll a weighted pattern. None gets ~20% so the wheel sometimes
-    /// just decelerates cleanly; the wobble patterns share the rest.
+    /// Roll a weighted pattern. CleanLand gets the largest share so
+    /// the cubic decel's long terminal hold is the dominant flavor,
+    /// with overshoot/false-settle as wobble variants.
     fn roll(rng: &mut XorShift64) -> Self {
-        // 16 buckets so the weights stay readable as integer ratios.
         match rng.next() % 16 {
-            0..=2 => Self::None,        // 3/16 ≈ 19%
-            3..=6 => Self::Single,      // 4/16 = 25%
-            7..=9 => Self::Double,      // 3/16 ≈ 19%
-            10..=12 => Self::Overshoot, // 3/16 ≈ 19%
-            _ => Self::Zigzag,          // 3/16 ≈ 19%
+            0..=5 => Self::CleanLand,  // 6/16 = 37.5%
+            6..=10 => Self::Overshoot, // 5/16 ≈ 31%
+            _ => Self::FalseSettle,    // 5/16 ≈ 31%
+        }
+    }
+
+    /// Number of extra keyframes the pattern appends after the natural
+    /// walk and before the terminal keyframe.
+    fn tail_count(self) -> usize {
+        match self {
+            Self::CleanLand => 0,
+            Self::Overshoot => 1,
+            Self::FalseSettle => 2,
         }
     }
 }
 
-/// Build the post-spin fake-out walk. Picks a random pattern + direction
-/// per spin and individually jitters every keyframe's hold duration so
-/// the audible tick spacing varies within a single fake-out as well as
-/// across consecutive spins. The final keyframe is always at
-/// `target_idx` and signals settle.
-fn build_fakeout_keyframes(
+/// Build the decel + fake-out keyframe sequence.
+///
+/// Layout:
+/// 1. `NATURAL_KEYFRAME_COUNT` natural-walk keyframes with cubic-
+///    distributed holds. In cruise mode each advances 1 position;
+///    in all-decel mode each advances `natural_steps / N` (with
+///    remainder front-loaded so early clicks are slightly chunkier).
+///    The walk lands at `target - 1`.
+/// 2. 0–2 pattern tail keyframes with explicit jittered holds — the
+///    overshoot/false-settle wobble after the natural walk's long
+///    terminal hold.
+/// 3. Terminal keyframe at `target_idx` (duration 0).
+#[allow(clippy::too_many_arguments)]
+fn build_decel_keyframes(
+    cruise_end_offset: usize,
     target_idx: usize,
     total_items: usize,
+    natural_steps: usize,
+    decel_duration_ms: u64,
+    pattern: FakeoutPattern,
+    direction: i32,
     rng: &mut XorShift64,
-) -> Vec<FakeoutKeyframe> {
+) -> Vec<DecelKeyframe> {
     if total_items == 0 {
         return Vec::new();
     }
+    let n = NATURAL_KEYFRAME_COUNT;
+    let mut keyframes = Vec::with_capacity(n + pattern.tail_count() + 1);
 
-    let pattern = FakeoutPattern::roll(rng);
-    let direction: i32 = if rng.next() & 1 == 0 { 1 } else { -1 };
+    // Distribute natural_steps across `n` keyframes. base advance for
+    // most; the first `remainder` keyframes advance `base + 1` so the
+    // sum is exact. Front-loading the remainder means early (fast)
+    // clicks are slightly chunkier than late (slow) clicks, which
+    // reinforces the "audible slowdown" feel — though for cruise mode
+    // base = 1 and remainder = 0 so every click advances exactly 1.
+    let base = natural_steps / n;
+    let remainder = natural_steps - base * n;
 
-    // Per-pattern hold-duration ranges. Each non-terminal keyframe pulls
-    // an independent sample from its band so two ticks within the same
-    // fake-out audibly differ — a uniform 200 ms across every keyframe
-    // sounds robotic.
-    let signed_pattern: Vec<(i32, (u64, u64))> = match pattern {
-        FakeoutPattern::None => vec![],
-        FakeoutPattern::Single => vec![(direction, (220, 380))],
-        FakeoutPattern::Double => vec![(direction * 2, (170, 280)), (direction, (160, 280))],
-        FakeoutPattern::Overshoot => vec![(direction, (160, 260)), (-direction, (200, 320))],
-        FakeoutPattern::Zigzag => vec![
-            (direction * 2, (130, 210)),
-            (-direction, (130, 200)),
-            (direction, (170, 260)),
-        ],
-    };
+    let mut cumulative: usize = 0;
+    for k in 0..n {
+        let advance = if k < remainder { base + 1 } else { base };
+        cumulative += advance;
+        let offset = (cruise_end_offset + cumulative) % total_items;
+        let duration_ms = cubic_hold_ms(k, n, decel_duration_ms);
+        keyframes.push(DecelKeyframe {
+            offset,
+            duration_ms,
+        });
+    }
 
-    let total = total_items as i32;
-    let mut keyframes: Vec<FakeoutKeyframe> = signed_pattern
-        .into_iter()
-        .map(|(signed, (lo, hi))| {
-            let abs = (target_idx as i32 + signed).rem_euclid(total) as usize;
-            FakeoutKeyframe {
-                offset: abs,
-                duration_ms: rng.range_inclusive(lo, hi),
-            }
-        })
-        .collect();
-    // Terminal keyframe always lands on the target. Its `duration_ms`
-    // is unused — `position_at` reports settled the moment we enter it.
-    keyframes.push(FakeoutKeyframe {
+    // Pattern tail — positions and holds vary per variant.
+    let tail_offsets = pattern_tail_offsets(pattern, target_idx, total_items, direction);
+    let tail_holds_ms = pattern_tail_holds(pattern, rng);
+    debug_assert_eq!(tail_offsets.len(), tail_holds_ms.len());
+    for (offset, duration_ms) in tail_offsets.into_iter().zip(tail_holds_ms) {
+        keyframes.push(DecelKeyframe {
+            offset,
+            duration_ms,
+        });
+    }
+
+    // Terminal at target — settles on entry.
+    keyframes.push(DecelKeyframe {
         offset: target_idx,
         duration_ms: 0,
     });
+
     keyframes
+}
+
+/// Hold for keyframe `k` of `n` total, derived from a cubic ease-out
+/// time curve over `duration_ms`. Holds escalate monotonically from
+/// ~D/N² (first) to ~D·∛(1/N) (last). Sums to `duration_ms` across
+/// the sequence (up to per-entry truncation rounding error).
+fn cubic_hold_ms(k: usize, n: usize, duration_ms: u64) -> u64 {
+    if n == 0 {
+        return 0;
+    }
+    let d = duration_ms as f64;
+    let lo = 1.0 - (k as f64) / (n as f64);
+    let hi = (1.0 - ((k + 1) as f64) / (n as f64)).max(0.0);
+    let t_lo = d * (1.0 - lo.cbrt());
+    let t_hi = d * (1.0 - hi.cbrt());
+    (t_hi - t_lo).max(0.0).round() as u64
+}
+
+/// Absolute viewport offsets for the pattern tail keyframes, in walk
+/// order. All offsets are computed modulo `total_items`.
+fn pattern_tail_offsets(
+    pattern: FakeoutPattern,
+    target_idx: usize,
+    total_items: usize,
+    direction: i32,
+) -> Vec<usize> {
+    let off = |signed: i32| {
+        let t = target_idx as i32 + signed;
+        t.rem_euclid(total_items as i32) as usize
+    };
+    match pattern {
+        FakeoutPattern::CleanLand => Vec::new(),
+        FakeoutPattern::Overshoot => vec![off(direction)],
+        FakeoutPattern::FalseSettle => vec![target_idx, off(direction)],
+    }
+}
+
+/// Hold durations for the pattern tail keyframes, in walk order. Each
+/// hold pulls an independent sample from a pattern-specific range so
+/// consecutive plays don't lock onto identical wobble timing.
+fn pattern_tail_holds(pattern: FakeoutPattern, rng: &mut XorShift64) -> Vec<u64> {
+    match pattern {
+        FakeoutPattern::CleanLand => Vec::new(),
+        FakeoutPattern::Overshoot => vec![rng.range_inclusive(400, 700)],
+        FakeoutPattern::FalseSettle => {
+            vec![rng.range_inclusive(380, 550), rng.range_inclusive(450, 650)]
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashSet, time::Duration};
+    use std::time::Duration;
 
     use super::*;
 
-    /// Build a state with a deterministic single-tick fake-out, so
-    /// position-tracking tests can assert exact offsets without
-    /// depending on the random pattern roll.
-    fn state_with_fixed_fakeout(
-        total_items: usize,
-        original: usize,
-        target: usize,
-    ) -> RouletteState {
+    /// Build a deterministic cruise-mode state landing on `target` with
+    /// a known single-pattern (CleanLand) tail. Used by position-
+    /// tracking tests that need exact offsets without depending on the
+    /// random pattern roll.
+    fn cruise_state(total_items: usize, original: usize, target: usize) -> RouletteState {
         let revs = revolutions_for(total_items);
-        let near_miss = (target + total_items - 1) % total_items;
-        let forward_diff = (near_miss + total_items - (original % total_items)) % total_items;
-        let main_spin_steps = revs * total_items + forward_diff;
+        let natural_end = (target + total_items - 1) % total_items;
+        let total_natural_steps = revs * total_items
+            + ((natural_end + total_items - (original % total_items)) % total_items);
+        let cruise_steps = total_natural_steps - NATURAL_KEYFRAME_COUNT;
+        let cruise_end_offset = (original + cruise_steps) % total_items;
+        let mut rng = XorShift64(0xDEAD_BEEF_DEAD_BEEF);
+        let decel_keyframes = build_decel_keyframes(
+            cruise_end_offset,
+            target,
+            total_items,
+            NATURAL_KEYFRAME_COUNT,
+            2800,
+            FakeoutPattern::CleanLand,
+            1,
+            &mut rng,
+        );
         RouletteState {
             view: View::Albums,
             total_items,
             original_offset: original,
             target_idx: target,
-            main_duration_ms: 4000,
             cruise_duration_ms: 1500,
-            main_spin_steps,
-            fakeout_keyframes: vec![
-                FakeoutKeyframe {
-                    offset: near_miss,
-                    duration_ms: 220,
-                },
-                FakeoutKeyframe {
-                    offset: target,
-                    duration_ms: 0,
-                },
-            ],
+            cruise_steps,
+            decel_keyframes,
             start_time: Instant::now(),
             last_offset: original,
             last_sfx_at: None,
         }
     }
 
-    /// Sample `n` keyframe builds. Stagger calls by 1 ms purely as
-    /// defense against same-nanosecond clock reads on virtualised CI;
-    /// the xorshift seed mixer should already protect against fixed
-    /// points.
-    fn sample_keyframes(target: usize, total: usize, n: usize) -> Vec<Vec<FakeoutKeyframe>> {
+    /// All-decel-mode counterpart of `cruise_state`. cruise_duration is
+    /// zero, decel keyframes absorb every position.
+    fn all_decel_state(total_items: usize, original: usize, target: usize) -> RouletteState {
+        let revs = revolutions_for(total_items);
+        let natural_end = (target + total_items - 1) % total_items;
+        let total_natural_steps = revs * total_items
+            + ((natural_end + total_items - (original % total_items)) % total_items);
+        let mut rng = XorShift64(0xCAFE_BABE_CAFE_BABE);
+        let decel_keyframes = build_decel_keyframes(
+            original,
+            target,
+            total_items,
+            total_natural_steps,
+            2800,
+            FakeoutPattern::CleanLand,
+            1,
+            &mut rng,
+        );
+        RouletteState {
+            view: View::Albums,
+            total_items,
+            original_offset: original,
+            target_idx: target,
+            cruise_duration_ms: 0,
+            cruise_steps: 0,
+            decel_keyframes,
+            start_time: Instant::now(),
+            last_offset: original,
+            last_sfx_at: None,
+        }
+    }
+
+    /// Collect `n` decel-keyframe builds with the RNG re-seeded between
+    /// calls. Stagger by 1 ms to keep the seed-mixer happy on virtualised
+    /// CI where consecutive `SystemTime::now()` reads may land in the
+    /// same nanosecond bucket.
+    fn sample_builds(
+        target: usize,
+        total: usize,
+        n: usize,
+    ) -> Vec<(FakeoutPattern, Vec<DecelKeyframe>)> {
         let mut out = Vec::with_capacity(n);
         for _ in 0..n {
             let mut rng = XorShift64::seeded_now();
-            out.push(build_fakeout_keyframes(target, total, &mut rng));
+            let pattern = FakeoutPattern::roll(&mut rng);
+            let direction: i32 = if rng.next() & 1 == 0 { 1 } else { -1 };
+            let kfs = build_decel_keyframes(
+                0,
+                target,
+                total,
+                NATURAL_KEYFRAME_COUNT,
+                2800,
+                pattern,
+                direction,
+                &mut rng,
+            );
+            out.push((pattern, kfs));
             std::thread::sleep(Duration::from_millis(1));
         }
         out
@@ -575,113 +723,316 @@ mod tests {
 
     #[test]
     fn position_at_zero_returns_original_offset() {
-        let state = state_with_fixed_fakeout(100, 5, 73);
+        let state = cruise_state(100, 5, 73);
         let (offset, settled) = state.position_at(state.start_time);
         assert_eq!(offset, 5);
         assert!(!settled);
     }
 
     #[test]
+    fn position_at_mid_cruise_advances_proportionally() {
+        // Halfway through the 1500ms cruise the wheel should be roughly
+        // halfway through cruise_steps positions. Exact offset is
+        // (original + cruise_steps/2) mod total_items.
+        let state = cruise_state(100, 0, 50);
+        let mid = state.start_time + Duration::from_millis(state.cruise_duration_ms / 2);
+        let (offset, settled) = state.position_at(mid);
+        assert!(!settled);
+        let expected = state.cruise_steps / 2 % state.total_items;
+        // Allow small slack for f32 rounding in the proportional math.
+        let diff = (offset as i64 - expected as i64).abs();
+        assert!(
+            diff <= 1,
+            "mid-cruise offset {offset} should be near {expected} (diff <= 1)"
+        );
+    }
+
+    #[test]
+    fn position_at_cruise_end_returns_first_decel_keyframe() {
+        let state = cruise_state(100, 0, 50);
+        let cruise_end = state.start_time + Duration::from_millis(state.cruise_duration_ms);
+        let (offset, settled) = state.position_at(cruise_end);
+        assert!(!settled);
+        assert_eq!(
+            offset, state.decel_keyframes[0].offset,
+            "first sample after cruise must land on the first decel keyframe"
+        );
+    }
+
+    #[test]
     fn position_settles_on_target_after_full_duration() {
-        let state = state_with_fixed_fakeout(100, 5, 73);
-        let total_fakeout: u64 = state
-            .fakeout_keyframes
+        let state = cruise_state(100, 5, 73);
+        let total_decel: u64 = state
+            .decel_keyframes
             .iter()
-            .take(state.fakeout_keyframes.len() - 1)
+            .take(state.decel_keyframes.len() - 1)
             .map(|k| k.duration_ms)
             .sum();
         let after =
-            state.start_time + Duration::from_millis(state.main_duration_ms + total_fakeout + 50);
+            state.start_time + Duration::from_millis(state.cruise_duration_ms + total_decel + 200);
         let (offset, settled) = state.position_at(after);
-        assert!(settled, "spin should be settled after main + fake-out");
+        assert!(settled, "spin should be settled after cruise + decel");
         assert_eq!(offset, 73, "settled offset must equal target_idx");
     }
 
     #[test]
-    fn position_during_first_keyframe_holds_near_miss() {
-        let state = state_with_fixed_fakeout(100, 0, 50);
-        let mid_keyframe = state.start_time + Duration::from_millis(state.main_duration_ms + 100);
-        let (offset, settled) = state.position_at(mid_keyframe);
+    fn position_during_keyframe_hold_returns_that_keyframe_offset() {
+        let state = cruise_state(100, 0, 50);
+        // Halfway through the first decel keyframe's hold.
+        let half = state.decel_keyframes[0].duration_ms / 2;
+        let probe = state.start_time + Duration::from_millis(state.cruise_duration_ms + half);
+        let (offset, settled) = state.position_at(probe);
         assert!(!settled);
-        assert_eq!(offset, state.fakeout_keyframes[0].offset);
+        assert_eq!(offset, state.decel_keyframes[0].offset);
     }
 
     #[test]
-    fn fakeout_can_be_skipped_entirely() {
-        // None weight is ~3/16, so across 200 rolls the probability of
-        // never producing a no-fakeout spin is vanishingly small.
-        let samples = sample_keyframes(50, 100, 200);
-        let saw_no_fakeout = samples
+    fn all_decel_state_starts_with_first_click() {
+        // In all-decel mode the first click fires immediately at t=0:
+        // the wheel snaps from `original_offset` to the first decel
+        // keyframe's offset (= original + advance_0). This is the
+        // "thrown hard, ratcheting down" feel — no cruise pause.
+        let state = all_decel_state(100, 7, 60);
+        let (offset, settled) = state.position_at(state.start_time);
+        assert_eq!(offset, state.decel_keyframes[0].offset);
+        assert!(!settled);
+        assert_ne!(
+            offset, 7,
+            "all-decel must have moved at t=0 (first click fired)"
+        );
+    }
+
+    #[test]
+    fn all_decel_state_settles_on_target() {
+        let state = all_decel_state(100, 7, 60);
+        let total_decel: u64 = state
+            .decel_keyframes
             .iter()
-            .any(|kf| kf.len() == 1 && kf.last().map(|k| k.offset) == Some(50));
-        assert!(
-            saw_no_fakeout,
-            "rolling 200 spins must occasionally produce no fake-out"
-        );
+            .take(state.decel_keyframes.len() - 1)
+            .map(|k| k.duration_ms)
+            .sum();
+        let after = state.start_time + Duration::from_millis(total_decel + 200);
+        let (offset, settled) = state.position_at(after);
+        assert!(settled);
+        assert_eq!(offset, 60);
     }
 
     #[test]
-    fn fakeout_overshoots_and_undershoots_across_rolls() {
-        let samples = sample_keyframes(50, 100, 200);
-        let mut saw_overshoot = false;
-        let mut saw_undershoot = false;
-        for kf in &samples {
-            // Skip terminal keyframe (always = target).
-            for k in &kf[..kf.len() - 1] {
-                if k.offset > 50 {
-                    saw_overshoot = true;
-                }
-                if k.offset < 50 {
-                    saw_undershoot = true;
-                }
-            }
+    fn cubic_hold_ms_escalates_monotonically() {
+        let n = NATURAL_KEYFRAME_COUNT;
+        let holds: Vec<u64> = (0..n).map(|k| cubic_hold_ms(k, n, 3000)).collect();
+        for w in holds.windows(2) {
+            assert!(
+                w[1] >= w[0],
+                "cubic holds must escalate monotonically: {holds:?}"
+            );
         }
-        assert!(saw_overshoot, "fake-out should sometimes overshoot target");
+        // First hold should be ~50ms, last should be ~1190ms for N=17 D=3000.
         assert!(
-            saw_undershoot,
-            "fake-out should sometimes undershoot target"
+            holds[0] < 80,
+            "first hold should be cruise-rate-matching, got {}",
+            holds[0]
+        );
+        assert!(
+            holds[n - 1] > 900,
+            "last hold should be slot-machine-slow, got {}",
+            holds[n - 1]
         );
     }
 
     #[test]
-    fn fakeout_always_settles_on_target() {
-        for kf in sample_keyframes(42, 100, 50) {
+    fn cubic_hold_ms_sums_close_to_duration() {
+        // Per-keyframe truncation accumulates; total should be within
+        // N rounding ulps of `duration_ms`.
+        let n = NATURAL_KEYFRAME_COUNT;
+        let total: u64 = (0..n).map(|k| cubic_hold_ms(k, n, 3000)).sum();
+        let diff = (total as i64 - 3000).abs();
+        assert!(
+            diff <= (n as i64),
+            "sum of cubic holds {total} should be within {n} ms of duration"
+        );
+    }
+
+    #[test]
+    fn build_decel_keyframes_terminal_is_target() {
+        let mut rng = XorShift64(0x1234);
+        let kfs = build_decel_keyframes(
+            0,
+            42,
+            100,
+            NATURAL_KEYFRAME_COUNT,
+            2800,
+            FakeoutPattern::CleanLand,
+            1,
+            &mut rng,
+        );
+        assert_eq!(kfs.last().map(|k| k.offset), Some(42));
+        assert_eq!(kfs.last().map(|k| k.duration_ms), Some(0));
+    }
+
+    #[test]
+    fn cruise_mode_natural_walk_advances_one_per_keyframe() {
+        // With natural_steps == N each keyframe should advance exactly
+        // one position from the previous.
+        let mut rng = XorShift64(0x5678);
+        let kfs = build_decel_keyframes(
+            10,
+            10 + NATURAL_KEYFRAME_COUNT,
+            1000,
+            NATURAL_KEYFRAME_COUNT,
+            2800,
+            FakeoutPattern::CleanLand,
+            1,
+            &mut rng,
+        );
+        // First N keyframes are the natural walk; offsets should be
+        // 11, 12, ..., 10 + N.
+        for (i, kf) in kfs.iter().take(NATURAL_KEYFRAME_COUNT).enumerate() {
+            assert_eq!(kf.offset, 11 + i);
+        }
+    }
+
+    #[test]
+    fn all_decel_natural_walk_advances_sum_to_natural_steps() {
+        // With natural_steps spread across N keyframes, the cumulative
+        // advance from cruise_end_offset to the last natural-walk
+        // keyframe must equal natural_steps. The caller computes
+        // natural_steps so this offset lands at target-1.
+        let mut rng = XorShift64(0x9ABC);
+        let total = 1000;
+        let original = 0;
+        let target = 99;
+        let revolutions = 3;
+        let natural_end = (target + total - 1) % total; // 98
+        let natural_steps =
+            revolutions * total + (natural_end + total - (original % total)) % total;
+        let kfs = build_decel_keyframes(
+            original,
+            target,
+            total,
+            natural_steps,
+            2800,
+            FakeoutPattern::CleanLand,
+            1,
+            &mut rng,
+        );
+        let last_natural = kfs[NATURAL_KEYFRAME_COUNT - 1];
+        assert_eq!(
+            last_natural.offset, natural_end,
+            "natural walk's last keyframe must sit at target-1"
+        );
+    }
+
+    #[test]
+    fn pattern_tail_lengths_match_keyframe_counts() {
+        let mut rng = XorShift64(0xDEAD);
+        for pattern in [
+            FakeoutPattern::CleanLand,
+            FakeoutPattern::Overshoot,
+            FakeoutPattern::FalseSettle,
+        ] {
+            let kfs = build_decel_keyframes(
+                0,
+                50,
+                100,
+                NATURAL_KEYFRAME_COUNT,
+                2800,
+                pattern,
+                1,
+                &mut rng,
+            );
             assert_eq!(
-                kf.last().map(|k| k.offset),
-                Some(42),
-                "every fake-out must terminate on target"
+                kfs.len(),
+                NATURAL_KEYFRAME_COUNT + pattern.tail_count() + 1,
+                "pattern {pattern:?} must produce N + tail + terminal keyframes"
             );
         }
     }
 
     #[test]
-    fn fakeout_keyframes_wrap_around_list_boundaries() {
-        // target = 0 with negative offsets must wrap to total_items - 1,
-        // not produce a value >= total_items or panic.
-        for kf in sample_keyframes(0, 50, 50) {
-            for k in &kf {
-                assert!(k.offset < 50, "every keyframe offset must stay in range");
+    fn false_settle_visits_target_as_non_terminal() {
+        // FalseSettle's tail is [target, target+direction] — the first
+        // tail keyframe is the iconic "false settle" hold ON target.
+        let mut rng = XorShift64(0xBEEF);
+        let kfs = build_decel_keyframes(
+            0,
+            50,
+            100,
+            NATURAL_KEYFRAME_COUNT,
+            2800,
+            FakeoutPattern::FalseSettle,
+            1,
+            &mut rng,
+        );
+        // Non-terminal keyframe at NATURAL_KEYFRAME_COUNT (first pattern
+        // tail entry) should be target itself.
+        assert_eq!(
+            kfs[NATURAL_KEYFRAME_COUNT].offset, 50,
+            "FalseSettle must hold on target as the first tail keyframe"
+        );
+        // Second tail entry should be target+direction.
+        assert_eq!(kfs[NATURAL_KEYFRAME_COUNT + 1].offset, 51);
+    }
+
+    #[test]
+    fn overshoot_jumps_past_target_then_settles() {
+        let mut rng = XorShift64(0xF00D);
+        let kfs = build_decel_keyframes(
+            0,
+            50,
+            100,
+            NATURAL_KEYFRAME_COUNT,
+            2800,
+            FakeoutPattern::Overshoot,
+            1,
+            &mut rng,
+        );
+        // Single tail keyframe at target+direction; then terminal at target.
+        assert_eq!(kfs[NATURAL_KEYFRAME_COUNT].offset, 51);
+        assert_eq!(kfs.last().map(|k| k.offset), Some(50));
+    }
+
+    #[test]
+    fn keyframes_always_land_on_target() {
+        for (_pattern, kfs) in sample_builds(42, 100, 60) {
+            assert_eq!(
+                kfs.last().map(|k| k.offset),
+                Some(42),
+                "every spin must terminate on target"
+            );
+        }
+    }
+
+    #[test]
+    fn keyframes_stay_in_range_across_wrap() {
+        // target = 0 — every offset must remain < total_items.
+        for (_pattern, kfs) in sample_builds(0, 50, 40) {
+            for kf in &kfs {
+                assert!(kf.offset < 50, "every keyframe offset must stay in range");
             }
         }
     }
 
     #[test]
-    fn fakeout_keyframe_holds_are_individually_jittered() {
-        // Within multi-keyframe patterns the per-keyframe holds must
-        // sample independently — otherwise every tick at the end sounds
-        // metronomic. Across 80 rolls we should observe at least one
-        // multi-keyframe fake-out whose non-terminal holds are distinct.
-        let samples = sample_keyframes(50, 100, 80);
-        let saw_distinct_holds = samples.iter().any(|kf| {
-            if kf.len() < 3 {
-                return false;
+    fn all_three_patterns_appear_across_rolls() {
+        // Across 200 rolls each pattern (weights 5/16, 5/16, 6/16) must
+        // show up. P(zero of any one) < (10/16)^200 < 1e-39.
+        let samples = sample_builds(50, 100, 200);
+        let mut saw_clean = false;
+        let mut saw_overshoot = false;
+        let mut saw_false_settle = false;
+        for (p, _) in &samples {
+            match p {
+                FakeoutPattern::CleanLand => saw_clean = true,
+                FakeoutPattern::Overshoot => saw_overshoot = true,
+                FakeoutPattern::FalseSettle => saw_false_settle = true,
             }
-            let holds: HashSet<u64> = kf[..kf.len() - 1].iter().map(|k| k.duration_ms).collect();
-            holds.len() >= 2
-        });
+        }
+        assert!(saw_clean, "CleanLand must be rolled across 200 spins");
+        assert!(saw_overshoot, "Overshoot must be rolled across 200 spins");
         assert!(
-            saw_distinct_holds,
-            "multi-keyframe fake-outs must sometimes have distinct per-tick holds"
+            saw_false_settle,
+            "FalseSettle must be rolled across 200 spins"
         );
     }
 
