@@ -456,7 +456,9 @@ impl Nokkvi {
                     self,
                     msg,
                     handle_radios,
-                    crate::views::RadiosMessage::SlotListScrollSeek(_),
+                    crate::views::RadiosMessage::SlotList(
+                        crate::widgets::SlotListPageMessage::ScrollSeek(_)
+                    ),
                     View::Radios
                 )
             }

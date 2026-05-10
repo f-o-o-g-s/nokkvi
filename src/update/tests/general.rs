@@ -339,8 +339,12 @@ fn radios_play_filtered_station_plays_correct_station() {
 
     app.library.radio_stations = vec![s1, s2];
 
-    let _ = app.handle_radios(RadiosMessage::SearchQueryChanged("soma".to_string()));
-    let _ = app.handle_radios(RadiosMessage::SlotListClickPlay(0));
+    let _ = app.handle_radios(RadiosMessage::SlotList(
+        crate::widgets::SlotListPageMessage::SearchQueryChanged("soma".to_string()),
+    ));
+    let _ = app.handle_radios(RadiosMessage::SlotList(
+        crate::widgets::SlotListPageMessage::ClickPlay(0),
+    ));
 
     match &app.active_playback {
         crate::state::ActivePlayback::Radio(state) => {

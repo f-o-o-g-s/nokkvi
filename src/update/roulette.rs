@@ -346,9 +346,9 @@ impl Nokkvi {
                     .common
                     .handle_set_offset(target_idx, total_items);
                 self.radios_page.common.slot_list.flash_center();
-                Task::done(Message::Radios(
-                    views::RadiosMessage::SlotListActivateCenter,
-                ))
+                Task::done(Message::Radios(views::RadiosMessage::SlotList(
+                    crate::widgets::SlotListPageMessage::ActivateCenter,
+                )))
             }
             View::Genres => {
                 let Some(genre) = self.library.genres.get(target_idx) else {

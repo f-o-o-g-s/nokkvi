@@ -13,7 +13,7 @@ use nokkvi_data::types::radio_station::RadioStation;
 use crate::{
     app_message::Message,
     widgets::{
-        self, SlotListPageState,
+        self, SlotListPageMessage, SlotListPageState,
         slot_list_page::SlotListPageAction,
         view_header::{HeaderButton, SortMode, ViewHeaderConfig},
     },
@@ -54,22 +54,13 @@ pub struct RadiosViewData<'a> {
 /// Messages for local radio page interactions
 #[derive(Debug, Clone)]
 pub enum RadiosMessage {
-    // Slot list navigation
-    SlotListNavigateUp,
-    SlotListNavigateDown,
-    SlotListSetOffset(usize, iced::keyboard::Modifiers),
-    SlotListScrollSeek(usize),
-    SlotListActivateCenter, // Enter → play radio station
-    SlotListClickPlay(usize),
+    // Slot-list navigation, activation, sort, search — all carried through the
+    // shared SlotListPageMessage enum and dispatched via common.handle().
+    SlotList(crate::widgets::SlotListPageMessage),
+
+    // Per-view: station identity matters for auto-scroll
     FocusCurrentPlaying(String), // Auto-scroll slot list to center currently playing station (station_id)
 
-    // View header
-    SortModeSelected(SortMode),
-    ToggleSortOrder,
-    SearchQueryChanged(String),
-    SearchFocused(bool),
-    RefreshViewData,
-    CenterOnPlaying,
     /// Sort dropdown's "Roulette" entry was selected — intercepted at the
     /// root handler before the page's `update` runs.
     Roulette,
@@ -144,76 +135,45 @@ impl RadiosPage {
 
         match message {
             // -----------------------------------------------------------------
-            // Slot list navigation — flat list, no expansion
+            // Slot-list navigation, activation, sort, search
             // -----------------------------------------------------------------
-            RadiosMessage::SlotListNavigateUp => {
-                self.common.handle_navigate_up(total);
-                (Task::none(), RadiosAction::None)
-            }
-            RadiosMessage::SlotListNavigateDown => {
-                self.common.handle_navigate_down(total);
-                (Task::none(), RadiosAction::None)
-            }
-            RadiosMessage::SlotListSetOffset(offset, modifiers) => {
-                self.common.handle_slot_click(offset, total, modifiers);
-                (Task::none(), RadiosAction::None)
-            }
-            RadiosMessage::SlotListScrollSeek(offset) => {
-                self.common.handle_set_offset(offset, total);
-                (Task::none(), RadiosAction::None)
-            }
-            RadiosMessage::SlotListClickPlay(offset) => {
-                self.common.handle_set_offset(offset, total);
-                self.update(RadiosMessage::SlotListActivateCenter, stations)
-            }
-            RadiosMessage::FocusCurrentPlaying(station_id) => {
-                (Task::none(), RadiosAction::FocusOnStation(station_id))
-            }
-            RadiosMessage::SlotListActivateCenter => {
-                if let Some(center_idx) = self.common.get_center_item_index(total)
-                    && let Some(station) = stations.get(center_idx)
-                {
-                    self.common.slot_list.flash_center();
-                    return (
-                        Task::none(),
-                        RadiosAction::PlayRadioStation(station.clone()),
-                    );
-                }
-                (Task::none(), RadiosAction::None)
-            }
-
-            // -----------------------------------------------------------------
-            // View header — sort/search/refresh
-            // Uses SlotListPageAction enum, not Option
-            // -----------------------------------------------------------------
-            RadiosMessage::SortModeSelected(mode) => {
-                match self.common.handle_sort_mode_selected(mode) {
-                    SlotListPageAction::SortModeChanged(m) => {
-                        (Task::none(), RadiosAction::SortModeChanged(m))
+            RadiosMessage::SlotList(msg) => {
+                match self.common.handle(msg, total) {
+                    SlotListPageAction::ActivateCenter => {
+                        if let Some(center_idx) = self.common.get_center_item_index(total)
+                            && let Some(station) = stations.get(center_idx)
+                        {
+                            self.common.slot_list.flash_center();
+                            return (
+                                Task::none(),
+                                RadiosAction::PlayRadioStation(station.clone()),
+                            );
+                        }
+                        (Task::none(), RadiosAction::None)
                     }
-                    _ => (Task::none(), RadiosAction::None),
-                }
-            }
-            RadiosMessage::ToggleSortOrder => match self.common.handle_toggle_sort_order() {
-                SlotListPageAction::SortOrderChanged(a) => {
-                    (Task::none(), RadiosAction::SortOrderChanged(a))
-                }
-                _ => (Task::none(), RadiosAction::None),
-            },
-            RadiosMessage::SearchQueryChanged(query) => {
-                match self.common.handle_search_query_changed(query, total) {
                     SlotListPageAction::SearchChanged(q) => {
                         (Task::none(), RadiosAction::SearchChanged(q))
                     }
-                    _ => (Task::none(), RadiosAction::None),
+                    SlotListPageAction::SortModeChanged(m) => {
+                        (Task::none(), RadiosAction::SortModeChanged(m))
+                    }
+                    SlotListPageAction::SortOrderChanged(b) => {
+                        (Task::none(), RadiosAction::SortOrderChanged(b))
+                    }
+                    SlotListPageAction::RefreshViewData => {
+                        (Task::none(), RadiosAction::RefreshViewData)
+                    }
+                    SlotListPageAction::CenterOnPlaying => {
+                        (Task::none(), RadiosAction::CenterOnPlaying)
+                    }
+                    SlotListPageAction::None => (Task::none(), RadiosAction::None),
+                    SlotListPageAction::AddCenterToQueue => (Task::none(), RadiosAction::None), // Radios doesn't queue
                 }
             }
-            RadiosMessage::SearchFocused(focused) => {
-                self.common.handle_search_focused(focused);
-                (Task::none(), RadiosAction::None)
+
+            RadiosMessage::FocusCurrentPlaying(station_id) => {
+                (Task::none(), RadiosAction::FocusOnStation(station_id))
             }
-            RadiosMessage::RefreshViewData => (Task::none(), RadiosAction::RefreshViewData),
-            RadiosMessage::CenterOnPlaying => (Task::none(), RadiosAction::CenterOnPlaying),
 
             RadiosMessage::AddRadioStation => (Task::none(), RadiosAction::AddRadioStation),
 
@@ -255,13 +215,23 @@ impl RadiosPage {
             total_count: data.total_station_count,
             item_type: "stations",
             search_input_id: crate::views::RADIOS_SEARCH_ID,
-            on_view_selected: Box::new(RadiosMessage::SortModeSelected),
+            on_view_selected: Box::new(|m| {
+                RadiosMessage::SlotList(SlotListPageMessage::SortModeSelected(m))
+            }),
             show_search: true,
-            on_search_change: Box::new(RadiosMessage::SearchQueryChanged),
+            on_search_change: Box::new(|q| {
+                RadiosMessage::SlotList(SlotListPageMessage::SearchQueryChanged(q))
+            }),
             buttons: vec![
-                HeaderButton::SortToggle(RadiosMessage::ToggleSortOrder),
-                HeaderButton::Refresh(RadiosMessage::RefreshViewData),
-                HeaderButton::CenterOnPlaying(RadiosMessage::CenterOnPlaying),
+                HeaderButton::SortToggle(RadiosMessage::SlotList(
+                    SlotListPageMessage::ToggleSortOrder,
+                )),
+                HeaderButton::Refresh(RadiosMessage::SlotList(
+                    SlotListPageMessage::RefreshViewData,
+                )),
+                HeaderButton::CenterOnPlaying(RadiosMessage::SlotList(
+                    SlotListPageMessage::CenterOnPlaying,
+                )),
                 HeaderButton::Add("Add Station", RadiosMessage::AddRadioStation),
             ],
             on_roulette: Some(RadiosMessage::Roulette),
@@ -304,11 +274,15 @@ impl RadiosPage {
             &self.common.slot_list,
             stations,
             &config,
-            RadiosMessage::SlotListNavigateUp,
-            RadiosMessage::SlotListNavigateDown,
+            RadiosMessage::SlotList(SlotListPageMessage::NavigateUp),
+            RadiosMessage::SlotList(SlotListPageMessage::NavigateDown),
             {
                 let total = stations.len();
-                move |f| RadiosMessage::SlotListScrollSeek((f * total as f32) as usize)
+                move |f| {
+                    RadiosMessage::SlotList(SlotListPageMessage::ScrollSeek(
+                        (f * total as f32) as usize,
+                    ))
+                }
             },
             |station, ctx| {
                 // Gemini: This is a minimal functional renderer. Polish as desired.
@@ -366,11 +340,14 @@ impl RadiosPage {
 
                 // Click handler: center slot → activate (play), other → focus
                 let click_msg = if ctx.is_center {
-                    RadiosMessage::SlotListActivateCenter
+                    RadiosMessage::SlotList(SlotListPageMessage::ActivateCenter)
                 } else if data.stable_viewport {
-                    RadiosMessage::SlotListSetOffset(ctx.item_index, data.modifiers)
+                    RadiosMessage::SlotList(SlotListPageMessage::SetOffset(
+                        ctx.item_index,
+                        data.modifiers,
+                    ))
                 } else {
-                    RadiosMessage::SlotListClickPlay(ctx.item_index)
+                    RadiosMessage::SlotList(SlotListPageMessage::ClickPlay(ctx.item_index))
                 };
 
                 let slot_button: Element<'a, RadiosMessage> =
@@ -447,11 +424,15 @@ impl super::ViewPage for RadiosPage {
     }
 
     fn sort_mode_selected_message(&self, mode: SortMode) -> Option<Message> {
-        Some(Message::Radios(RadiosMessage::SortModeSelected(mode)))
+        Some(Message::Radios(RadiosMessage::SlotList(
+            crate::widgets::SlotListPageMessage::SortModeSelected(mode),
+        )))
     }
 
     fn toggle_sort_order_message(&self) -> Message {
-        Message::Radios(RadiosMessage::ToggleSortOrder)
+        Message::Radios(RadiosMessage::SlotList(
+            crate::widgets::SlotListPageMessage::ToggleSortOrder,
+        ))
     }
 
     fn reload_message(&self) -> Option<Message> {
@@ -459,9 +440,11 @@ impl super::ViewPage for RadiosPage {
     }
 
     fn synth_set_offset_message(&self, offset: usize) -> Option<Message> {
-        Some(Message::Radios(RadiosMessage::SlotListSetOffset(
-            offset,
-            iced::keyboard::Modifiers::default(),
+        Some(Message::Radios(RadiosMessage::SlotList(
+            crate::widgets::SlotListPageMessage::SetOffset(
+                offset,
+                iced::keyboard::Modifiers::default(),
+            ),
         )))
     }
 }
