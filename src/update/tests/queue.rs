@@ -386,12 +386,14 @@ fn albums_selection_toggle_on_expansion_child_lands_in_selected_indices() {
     app.library.albums.set_from_vec(albums.clone());
 
     // Expand album a1 with two tracks. Flattened: [a1=0, t1=1, t2=2, a2=3].
-    let tracks = vec![
-        make_song("t1", "Track 1", "Artist"),
-        make_song("t2", "Track 2", "Artist"),
-    ];
-    app.albums_page.expansion.expanded_id = Some("a1".to_string());
-    app.albums_page.expansion.children = tracks;
+    expand_albums_with(
+        &mut app,
+        "a1",
+        vec![
+            make_song("t1", "Track 1", "Artist"),
+            make_song("t2", "Track 2", "Artist"),
+        ],
+    );
 
     // Toggle the second child track (flattened index 2).
     let (_, _action) = app.albums_page.update(
@@ -416,12 +418,15 @@ fn albums_select_all_with_expansion_covers_child_indices() {
     let albums = vec![make_album("a1", "Album 1", "Artist")];
     app.library.albums.set_from_vec(albums.clone());
 
-    app.albums_page.expansion.expanded_id = Some("a1".to_string());
-    app.albums_page.expansion.children = vec![
-        make_song("t1", "Track 1", "Artist"),
-        make_song("t2", "Track 2", "Artist"),
-        make_song("t3", "Track 3", "Artist"),
-    ];
+    expand_albums_with(
+        &mut app,
+        "a1",
+        vec![
+            make_song("t1", "Track 1", "Artist"),
+            make_song("t2", "Track 2", "Artist"),
+            make_song("t3", "Track 3", "Artist"),
+        ],
+    );
 
     // Flattened length is 1 parent + 3 children = 4.
     let (_, _action) = app.albums_page.update(
@@ -462,11 +467,14 @@ fn playlists_selection_toggle_on_expansion_child_lands_in_selected_indices() {
         .append_page(playlists.clone(), playlists.len());
 
     // Expand playlist p1. Flattened: [p1=0, t1=1, t2=2].
-    app.playlists_page.expansion.expanded_id = Some("p1".to_string());
-    app.playlists_page.expansion.children = vec![
-        make_song("t1", "Track 1", "Artist"),
-        make_song("t2", "Track 2", "Artist"),
-    ];
+    expand_playlists_with(
+        &mut app,
+        "p1",
+        vec![
+            make_song("t1", "Track 1", "Artist"),
+            make_song("t2", "Track 2", "Artist"),
+        ],
+    );
 
     let (_, _action) = app.playlists_page.update(
         crate::views::PlaylistsMessage::SlotListSelectionToggle(2),
@@ -491,11 +499,14 @@ fn artists_selection_toggle_on_album_child_lands_in_selected_indices() {
     app.library.artists.set_from_vec(artists.clone());
 
     // Outer expansion: artist ar1 → 2 albums. Flattened: [ar1=0, a1=1, a2=2].
-    app.artists_page.expansion.expanded_id = Some("ar1".to_string());
-    app.artists_page.expansion.children = vec![
-        make_album("a1", "Album 1", "Artist 1"),
-        make_album("a2", "Album 2", "Artist 1"),
-    ];
+    expand_artists_with(
+        &mut app,
+        "ar1",
+        vec![
+            make_album("a1", "Album 1", "Artist 1"),
+            make_album("a2", "Album 2", "Artist 1"),
+        ],
+    );
 
     let (_, _action) = app.artists_page.update(
         crate::views::ArtistsMessage::SlotListSelectionToggle(2),
@@ -520,11 +531,14 @@ fn genres_selection_toggle_on_album_child_lands_in_selected_indices() {
     app.library.genres.set_from_vec(genres.clone());
 
     // Outer expansion: genre g1 → 2 albums. Flattened: [g1=0, a1=1, a2=2].
-    app.genres_page.expansion.expanded_id = Some("g1".to_string());
-    app.genres_page.expansion.children = vec![
-        make_album("a1", "Album 1", "Artist"),
-        make_album("a2", "Album 2", "Artist"),
-    ];
+    expand_genres_with(
+        &mut app,
+        "g1",
+        vec![
+            make_album("a1", "Album 1", "Artist"),
+            make_album("a2", "Album 2", "Artist"),
+        ],
+    );
 
     let (_, _action) = app.genres_page.update(
         crate::views::GenresMessage::SlotListSelectionToggle(2),

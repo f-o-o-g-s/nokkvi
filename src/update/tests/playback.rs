@@ -1,6 +1,5 @@
 //! Tests for playback transport, modes, volume, and crossfade update handlers.
 
-use super::general::make_settings_view_data;
 use crate::{View, app_message::PlaybackStateUpdate, test_helpers::*};
 
 // ============================================================================

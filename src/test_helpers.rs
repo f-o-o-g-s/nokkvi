@@ -284,6 +284,110 @@ pub(crate) fn songs_indexed(n: usize) -> Vec<SongUIViewData> {
         .collect()
 }
 
+// ============================================================================
+// Expansion setup helpers
+// ============================================================================
+//
+// Collapse the 3-line inline expansion setup (expanded_id + parent_offset +
+// children) that appeared across navigation.rs, queue.rs, and star_rating.rs.
+// Each helper mirrors the struct's own field order; parent_offset is always 0
+// for test setups (the render path doesn't run in tests).
+
+/// Set up an Albums expansion with the given id and child tracks.
+pub(crate) fn expand_albums_with(app: &mut Nokkvi, id: &str, children: Vec<SongUIViewData>) {
+    app.albums_page.expansion.expanded_id = Some(id.into());
+    app.albums_page.expansion.parent_offset = 0;
+    app.albums_page.expansion.children = children;
+}
+
+/// Set up an Artists expansion with the given id and child albums.
+pub(crate) fn expand_artists_with(app: &mut Nokkvi, id: &str, children: Vec<AlbumUIViewData>) {
+    app.artists_page.expansion.expanded_id = Some(id.into());
+    app.artists_page.expansion.parent_offset = 0;
+    app.artists_page.expansion.children = children;
+}
+
+/// Set up a Genres expansion with the given id and child albums.
+pub(crate) fn expand_genres_with(app: &mut Nokkvi, id: &str, children: Vec<AlbumUIViewData>) {
+    app.genres_page.expansion.expanded_id = Some(id.into());
+    app.genres_page.expansion.parent_offset = 0;
+    app.genres_page.expansion.children = children;
+}
+
+/// Set up a Playlists expansion with the given id and child tracks.
+pub(crate) fn expand_playlists_with(app: &mut Nokkvi, id: &str, children: Vec<SongUIViewData>) {
+    app.playlists_page.expansion.expanded_id = Some(id.into());
+    app.playlists_page.expansion.parent_offset = 0;
+    app.playlists_page.expansion.children = children;
+}
+
+// ============================================================================
+// Settings view data helper
+// ============================================================================
+
+/// Build a minimal SettingsViewData for testing.
+/// Only the structure matters — values are defaults/dummies.
+pub(crate) fn make_settings_view_data() -> crate::views::SettingsViewData {
+    crate::views::SettingsViewData {
+        visualizer_config: crate::visualizer_config::VisualizerConfig::default(),
+        theme_file: nokkvi_data::types::theme_file::ThemeFile::default(),
+        active_theme_stem: String::new(),
+        window_height: 800.0,
+        hotkey_config: nokkvi_data::types::hotkey_config::HotkeyConfig::default(),
+        server_url: String::new(),
+        username: String::new(),
+        is_light_mode: false,
+        scrobbling_enabled: true,
+        scrobble_threshold: 0.50,
+        start_view: "Queue".to_string(),
+        stable_viewport: true,
+        auto_follow_playing: true,
+        enter_behavior: "PlayAll",
+        local_music_path: String::new(),
+        library_page_size: "Default",
+        show_album_artists_only: true,
+        suppress_library_refresh_toasts: false,
+        show_tray_icon: false,
+        close_to_tray: false,
+        rounded_mode: false,
+        nav_layout: "Top",
+        nav_display_mode: "IconsAndLabels",
+        track_info_display: "Full",
+        slot_row_height: "Default",
+        opacity_gradient: true,
+        slot_text_links: true,
+        crossfade_enabled: false,
+        crossfade_duration_secs: 5,
+        volume_normalization: "Off",
+        normalization_level: "Standard",
+        replay_gain_preamp_db: 0,
+        replay_gain_fallback_db: 0,
+        replay_gain_fallback_to_agc: false,
+        replay_gain_prevent_clipping: true,
+        default_playlist_name: String::new(),
+        quick_add_to_playlist: false,
+        queue_show_default_playlist: false,
+        horizontal_volume: false,
+        font_family: String::new(),
+        strip_show_title: true,
+        strip_show_artist: true,
+        strip_show_album: true,
+        strip_show_format_info: true,
+        strip_merged_mode: false,
+        strip_show_labels: true,
+        strip_separator: "Dot ·",
+        strip_click_action: "CenterOnPlaying",
+        albums_artwork_overlay: true,
+        artists_artwork_overlay: true,
+        songs_artwork_overlay: true,
+        playlists_artwork_overlay: true,
+        artwork_column_mode: "Auto",
+        artwork_column_stretch_fit: "Cover",
+        verbose_config: false,
+        artwork_resolution: "Default",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
