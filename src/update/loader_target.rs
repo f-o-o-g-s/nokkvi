@@ -329,9 +329,12 @@ impl LoaderTarget for GenresTarget {
             ArtworkMessage::StartCollagePrefetch(CollageTarget::Genre),
         )));
         if !app.library.genres.is_empty() {
-            tasks.push(Task::done(Message::Genres(
-                views::GenresMessage::SlotListSetOffset(0, iced::keyboard::Modifiers::default()),
-            )));
+            tasks.push(Task::done(Message::Genres(views::GenresMessage::SlotList(
+                crate::widgets::SlotListPageMessage::SetOffset(
+                    0,
+                    iced::keyboard::Modifiers::default(),
+                ),
+            ))));
         }
         tasks
     }

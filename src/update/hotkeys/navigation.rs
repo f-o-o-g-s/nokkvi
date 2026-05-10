@@ -299,9 +299,11 @@ impl Nokkvi {
                         &self.library.genres,
                         &mut self.genres_page.common,
                     );
-                    Task::done(Message::Genres(views::GenresMessage::SlotListSetOffset(
-                        i,
-                        iced::keyboard::Modifiers::default(),
+                    Task::done(Message::Genres(views::GenresMessage::SlotList(
+                        crate::widgets::SlotListPageMessage::SetOffset(
+                            i,
+                            iced::keyboard::Modifiers::default(),
+                        ),
                     )))
                 }
                 View::Radios => {

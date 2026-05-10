@@ -136,7 +136,10 @@ impl Nokkvi {
         self.play_view_sfx(
             matches!(
                 msg,
-                GenresMessage::SlotListNavigateUp | GenresMessage::SlotListNavigateDown
+                GenresMessage::SlotList(
+                    crate::widgets::SlotListPageMessage::NavigateUp
+                        | crate::widgets::SlotListPageMessage::NavigateDown
+                )
             ),
             matches!(
                 msg,

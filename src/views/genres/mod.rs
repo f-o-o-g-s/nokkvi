@@ -82,20 +82,8 @@ pub struct GenresViewData<'a> {
 /// Messages for local genre page interactions
 #[derive(Debug, Clone)]
 pub enum GenresMessage {
-    // Slot list navigation
-    SlotListNavigateUp,
-    SlotListNavigateDown,
-    SlotListSetOffset(usize, iced::keyboard::Modifiers),
-    SlotListScrollSeek(usize),
-    SlotListActivateCenter,
-    SlotListClickPlay(usize), // Click non-center to play directly (skip focus)
-    /// Click on a row's leading select checkbox — toggles `item_index` in
-    /// `selected_indices`. No play/highlight side effects.
-    SlotListSelectionToggle(usize),
-    /// Click on the tri-state "select all" header — fills selection with
-    /// every visible row, or clears if every visible row is already selected.
-    SlotListSelectAllToggle,
-    AddCenterToQueue, // Add all songs from centered genre to queue (Shift+Q)
+    // Slot list navigation (consolidated)
+    SlotList(crate::widgets::SlotListPageMessage),
 
     // Mouse click on heart
     ClickToggleStar(usize), // item_index
@@ -120,8 +108,6 @@ pub enum GenresMessage {
     ToggleSortOrder,
     SearchQueryChanged(String),
     SearchFocused(bool),
-    RefreshViewData,
-    CenterOnPlaying,
     /// Sort dropdown's "Roulette" entry was selected — intercepted at the
     /// root handler before the page's `update` runs.
     Roulette,
@@ -238,7 +224,9 @@ impl super::ViewPage for GenresPage {
     }
 
     fn add_to_queue_message(&self) -> Option<Message> {
-        Some(Message::Genres(GenresMessage::AddCenterToQueue))
+        Some(Message::Genres(GenresMessage::SlotList(
+            crate::widgets::SlotListPageMessage::AddToQueue,
+        )))
     }
     fn expand_center_message(&self) -> Option<Message> {
         // ExpandCenter on a 2nd-tier album row routes through `update()`'s
@@ -251,9 +239,11 @@ impl super::ViewPage for GenresPage {
     }
 
     fn synth_set_offset_message(&self, offset: usize) -> Option<Message> {
-        Some(Message::Genres(GenresMessage::SlotListSetOffset(
-            offset,
-            iced::keyboard::Modifiers::default(),
+        Some(Message::Genres(GenresMessage::SlotList(
+            crate::widgets::SlotListPageMessage::SetOffset(
+                offset,
+                iced::keyboard::Modifiers::default(),
+            ),
         )))
     }
 }

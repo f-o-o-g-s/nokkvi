@@ -43,6 +43,25 @@ impl Default for SlotListPageState {
     }
 }
 
+/// Common navigation messages shared by all slot-list-based views.
+///
+/// Views wrap these in their own message enum as a `SlotList(SlotListPageMessage)` variant,
+/// so the view's message type stays closed while navigation handling is consolidated.
+#[derive(Debug, Clone)]
+pub enum SlotListPageMessage {
+    NavigateUp,
+    NavigateDown,
+    SetOffset(usize, iced::keyboard::Modifiers),
+    ScrollSeek(usize),
+    ActivateCenter,
+    ClickPlay(usize),
+    SelectionToggle(usize),
+    SelectAllToggle,
+    AddToQueue,
+    Refresh,
+    CenterOnPlaying,
+}
+
 ///
 /// Views should wrap these in their own action enum, e.g.:
 /// ```
