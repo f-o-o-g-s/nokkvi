@@ -118,13 +118,17 @@ struct DisplayBuffers {
 
 impl DisplayBuffers {
     fn new(bar_count: usize) -> Self {
-        Self {
+        let s = Self {
             bars: vec![0.0; bar_count],
             peak_bars: vec![0.0; bar_count],
             peak_alphas: vec![1.0; bar_count],
             flash_intensities: vec![0.0; bar_count],
             dirty: false,
-        }
+        };
+        debug_assert_eq!(s.bars.len(), s.peak_bars.len());
+        debug_assert_eq!(s.bars.len(), s.peak_alphas.len());
+        debug_assert_eq!(s.bars.len(), s.flash_intensities.len());
+        s
     }
 
     fn resize(&mut self, bar_count: usize) {
@@ -132,6 +136,9 @@ impl DisplayBuffers {
         self.peak_bars = vec![0.0; bar_count];
         self.peak_alphas = vec![1.0; bar_count];
         self.flash_intensities = vec![0.0; bar_count];
+        debug_assert_eq!(self.bars.len(), self.peak_bars.len());
+        debug_assert_eq!(self.bars.len(), self.peak_alphas.len());
+        debug_assert_eq!(self.bars.len(), self.flash_intensities.len());
     }
 
     fn clear(&mut self) {
@@ -165,15 +172,18 @@ const PEAK_INITIAL_VELOCITY: f64 = 0.01;
 
 impl PeakState {
     fn new(bar_count: usize) -> Self {
-        Self {
+        let s = Self {
             hold_times: vec![Duration::ZERO; bar_count],
             velocities: vec![PEAK_INITIAL_VELOCITY; bar_count],
-        }
+        };
+        debug_assert_eq!(s.hold_times.len(), s.velocities.len());
+        s
     }
 
     fn resize(&mut self, bar_count: usize) {
         self.hold_times = vec![Duration::ZERO; bar_count];
         self.velocities = vec![PEAK_INITIAL_VELOCITY; bar_count];
+        debug_assert_eq!(self.hold_times.len(), self.velocities.len());
     }
 }
 
@@ -189,14 +199,19 @@ struct EffectState {
 
 impl EffectState {
     fn new(bar_count: usize) -> Self {
-        Self {
+        let s = Self {
             prev_bars: vec![0.0; bar_count],
             elapsed_time: 0.0,
-        }
+        };
+        // EffectState currently has only one per-bar Vec; assert included for
+        // consistency so a future addition triggers the same pattern.
+        debug_assert_eq!(s.prev_bars.len(), bar_count);
+        s
     }
 
     fn resize(&mut self, bar_count: usize) {
         self.prev_bars = vec![0.0; bar_count];
+        debug_assert_eq!(self.prev_bars.len(), bar_count);
     }
 
     fn clear(&mut self, bar_count: usize) {
@@ -651,7 +666,12 @@ impl VisualizerState {
                     };
 
                     let chunk_duration = Duration::from_micros(16670);
-                    let safe_len = visual_count.min(output.len()).min(display.peak_bars.len());
+                    let safe_len = visual_count
+                        .min(output.len())
+                        .min(display.peak_bars.len())
+                        .min(display.peak_alphas.len())
+                        .min(peaks.hold_times.len())
+                        .min(peaks.velocities.len());
 
                     // Using explicit index loop: we need `i` to cross-reference output[], display.peak_bars[],
                     // peaks.hold_times[], peaks.velocities[], and display.peak_alphas[] simultaneously.
