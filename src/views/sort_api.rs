@@ -82,34 +82,98 @@ pub(crate) fn sort_mode_to_api_string(view: View, sort_mode: SortMode) -> &'stat
     }
 }
 
+/// Returns the sort modes available for the given view.
+///
+/// Single source of truth for per-view sort options. The match is exhaustive
+/// over every `View` variant — adding a new `View` without extending this
+/// function is a compile error.
+pub(crate) fn sort_modes_for_view(view: View) -> &'static [SortMode] {
+    use SortMode as S;
+    match view {
+        View::Albums => &[
+            S::RecentlyAdded,
+            S::RecentlyPlayed,
+            S::MostPlayed,
+            S::Favorited,
+            S::Random,
+            S::Name,
+            S::AlbumArtist,
+            S::Artist,
+            S::ReleaseYear,
+            S::SongCount,
+            S::Duration,
+            S::Rating,
+            S::Genre,
+        ],
+        View::Artists => &[
+            S::Name,
+            S::Favorited,
+            S::MostPlayed,
+            S::AlbumCount,
+            S::SongCount,
+            S::Rating,
+            S::Random,
+        ],
+        View::Songs => &[
+            S::RecentlyAdded,
+            S::RecentlyPlayed,
+            S::MostPlayed,
+            S::Favorited,
+            S::Random,
+            S::Title,
+            S::Album,
+            S::Artist,
+            S::AlbumArtist,
+            S::ReleaseYear,
+            S::Duration,
+            S::Bpm,
+            S::Channels,
+            S::Genre,
+            S::Rating,
+            S::Comment,
+        ],
+        View::Genres => &[S::Name, S::AlbumCount, S::SongCount, S::Random],
+        View::Playlists => &[S::Name, S::SongCount, S::Duration, S::UpdatedAt, S::Random],
+        View::Queue => &[],
+        View::Radios => &[],
+        View::Settings => &[],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Every variant in a view's `*_OPTIONS` array must resolve to a
-    /// non-empty API string. This catches a sort variant being added to
-    /// OPTIONS without a corresponding API mapping.
+    /// Every variant in a view's sort options must resolve to a non-empty API
+    /// string. Catches a sort variant added to options without an API mapping.
     #[test]
     fn every_view_option_has_api_string() {
-        for &mode in SortMode::ALBUM_OPTIONS {
+        for &mode in sort_modes_for_view(View::Albums) {
             let s = sort_mode_to_api_string(View::Albums, mode);
             assert!(!s.is_empty(), "Albums + {mode:?} returned empty string");
         }
-        for &mode in SortMode::ARTIST_OPTIONS {
+        for &mode in sort_modes_for_view(View::Artists) {
             let s = sort_mode_to_api_string(View::Artists, mode);
             assert!(!s.is_empty(), "Artists + {mode:?} returned empty string");
         }
-        for &mode in SortMode::SONG_OPTIONS {
+        for &mode in sort_modes_for_view(View::Songs) {
             let s = sort_mode_to_api_string(View::Songs, mode);
             assert!(!s.is_empty(), "Songs + {mode:?} returned empty string");
         }
-        for &mode in SortMode::GENRE_OPTIONS {
+        for &mode in sort_modes_for_view(View::Genres) {
             let s = sort_mode_to_api_string(View::Genres, mode);
             assert!(!s.is_empty(), "Genres + {mode:?} returned empty string");
         }
-        for &mode in SortMode::PLAYLIST_OPTIONS {
+        for &mode in sort_modes_for_view(View::Playlists) {
             let s = sort_mode_to_api_string(View::Playlists, mode);
             assert!(!s.is_empty(), "Playlists + {mode:?} returned empty string");
+        }
+    }
+
+    #[test]
+    fn sort_options_table_covers_all_views() {
+        for view in View::ALL {
+            let _ = sort_modes_for_view(*view);
         }
     }
 

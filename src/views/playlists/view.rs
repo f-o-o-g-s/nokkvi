@@ -97,8 +97,6 @@ fn playlist_entry_view<'a, Message: Clone + 'a>(
 impl PlaylistsPage {
     /// Build the view
     pub fn view<'a>(&'a self, data: PlaylistsViewData<'a>) -> Element<'a, PlaylistsMessage> {
-        use crate::widgets::view_header::SortMode;
-
         let chip: Element<'a, PlaylistsMessage> =
             crate::widgets::default_playlist_chip::default_playlist_chip(
                 data.default_playlist_name,
@@ -169,7 +167,7 @@ impl PlaylistsPage {
 
         let header = widgets::view_header::view_header(
             self.common.current_sort_mode,
-            SortMode::PLAYLIST_OPTIONS,
+            crate::views::sort_api::sort_modes_for_view(crate::View::Playlists),
             self.common.sort_ascending,
             &self.common.search_query,
             data.playlists.len(),

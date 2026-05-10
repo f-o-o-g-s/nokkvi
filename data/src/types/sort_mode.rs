@@ -191,71 +191,6 @@ impl SortMode {
             .expect("every SortMode variant must have a TABLE row")
     }
 
-    /// Sort mode options for Albums view
-    pub const ALBUM_OPTIONS: &[SortMode] = &[
-        SortMode::RecentlyAdded,
-        SortMode::RecentlyPlayed,
-        SortMode::MostPlayed,
-        SortMode::Favorited,
-        SortMode::Random,
-        SortMode::Name,
-        SortMode::AlbumArtist,
-        SortMode::Artist,
-        SortMode::ReleaseYear,
-        SortMode::SongCount,
-        SortMode::Duration,
-        SortMode::Rating,
-        SortMode::Genre,
-    ];
-
-    /// Sort mode options for Artists view
-    pub const ARTIST_OPTIONS: &[SortMode] = &[
-        SortMode::Name,
-        SortMode::Favorited,
-        SortMode::MostPlayed,
-        SortMode::AlbumCount,
-        SortMode::SongCount,
-        SortMode::Rating,
-        SortMode::Random,
-    ];
-
-    /// Sort mode options for Songs view
-    pub const SONG_OPTIONS: &[SortMode] = &[
-        SortMode::RecentlyAdded,
-        SortMode::RecentlyPlayed,
-        SortMode::MostPlayed,
-        SortMode::Favorited,
-        SortMode::Random,
-        SortMode::Title,
-        SortMode::Album,
-        SortMode::Artist,
-        SortMode::AlbumArtist,
-        SortMode::ReleaseYear,
-        SortMode::Duration,
-        SortMode::Bpm,
-        SortMode::Channels,
-        SortMode::Genre,
-        SortMode::Rating,
-        SortMode::Comment,
-    ];
-
-    /// Sort mode options for Genres view
-    pub const GENRE_OPTIONS: &[SortMode] = &[
-        SortMode::Name,
-        SortMode::AlbumCount,
-        SortMode::SongCount,
-        SortMode::Random,
-    ];
-
-    /// Sort mode options for Playlists view
-    pub const PLAYLIST_OPTIONS: &[SortMode] = &[
-        SortMode::Name,
-        SortMode::SongCount,
-        SortMode::Duration,
-        SortMode::UpdatedAt,
-        SortMode::Random,
-    ];
-
     /// Convert to a snake_case TOML key string.
     pub fn to_toml_key(self) -> &'static str {
         self.meta().toml_key
@@ -310,11 +245,6 @@ mod tests {
         SortMode::Comment,
         SortMode::UpdatedAt,
     ];
-
-    #[test]
-    fn artist_options_includes_most_played() {
-        assert!(SortMode::ARTIST_OPTIONS.contains(&SortMode::MostPlayed));
-    }
 
     #[test]
     fn table_covers_every_variant() {

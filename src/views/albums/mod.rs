@@ -253,7 +253,7 @@ impl super::ViewPage for AlbumsPage {
     }
 
     fn sort_mode_options(&self) -> Option<&'static [SortMode]> {
-        Some(SortMode::ALBUM_OPTIONS)
+        Some(super::sort_api::sort_modes_for_view(crate::View::Albums))
     }
     fn sort_mode_selected_message(&self, mode: SortMode) -> Option<Message> {
         Some(Message::Albums(AlbumsMessage::SortModeSelected(mode)))

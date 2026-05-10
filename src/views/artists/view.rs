@@ -82,7 +82,7 @@ impl ArtistsPage {
 
         let header = widgets::view_header::view_header(
             self.common.current_sort_mode,
-            SortMode::ARTIST_OPTIONS,
+            crate::views::sort_api::sort_modes_for_view(crate::View::Artists),
             self.common.sort_ascending,
             &self.common.search_query,
             data.artists.len(),

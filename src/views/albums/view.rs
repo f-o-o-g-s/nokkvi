@@ -80,7 +80,7 @@ impl AlbumsPage {
 
         let header = widgets::view_header::view_header(
             self.common.current_sort_mode,
-            SortMode::ALBUM_OPTIONS,
+            crate::views::sort_api::sort_modes_for_view(crate::View::Albums),
             self.common.sort_ascending,
             &self.common.search_query,
             data.albums.len(),

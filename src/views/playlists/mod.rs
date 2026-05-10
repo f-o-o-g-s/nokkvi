@@ -246,7 +246,7 @@ impl super::ViewPage for PlaylistsPage {
     }
 
     fn sort_mode_options(&self) -> Option<&'static [SortMode]> {
-        Some(SortMode::PLAYLIST_OPTIONS)
+        Some(super::sort_api::sort_modes_for_view(crate::View::Playlists))
     }
     fn sort_mode_selected_message(&self, mode: SortMode) -> Option<Message> {
         Some(Message::Playlists(PlaylistsMessage::SortModeSelected(mode)))

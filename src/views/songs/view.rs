@@ -74,7 +74,7 @@ impl SongsPage {
 
         let header = widgets::view_header::view_header(
             self.common.current_sort_mode,
-            SortMode::SONG_OPTIONS,
+            crate::views::sort_api::sort_modes_for_view(crate::View::Songs),
             self.common.sort_ascending,
             &self.common.search_query,
             data.songs.len(),

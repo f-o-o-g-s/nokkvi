@@ -228,7 +228,7 @@ impl super::ViewPage for GenresPage {
     }
 
     fn sort_mode_options(&self) -> Option<&'static [SortMode]> {
-        Some(SortMode::GENRE_OPTIONS)
+        Some(super::sort_api::sort_modes_for_view(crate::View::Genres))
     }
     fn sort_mode_selected_message(&self, mode: SortMode) -> Option<Message> {
         Some(Message::Genres(GenresMessage::SortModeSelected(mode)))

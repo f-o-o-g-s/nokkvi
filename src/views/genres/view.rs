@@ -17,8 +17,6 @@ use crate::widgets;
 impl GenresPage {
     /// Build the view
     pub fn view<'a>(&'a self, data: GenresViewData<'a>) -> Element<'a, GenresMessage> {
-        use crate::widgets::view_header::SortMode;
-
         let column_dropdown: Element<'a, GenresMessage> = {
             use crate::widgets::checkbox_dropdown::checkbox_dropdown;
             let items: Vec<(super::GenresColumn, &'static str, bool)> = vec![
@@ -70,7 +68,7 @@ impl GenresPage {
 
         let header = widgets::view_header::view_header(
             self.common.current_sort_mode,
-            SortMode::GENRE_OPTIONS,
+            crate::views::sort_api::sort_modes_for_view(crate::View::Genres),
             self.common.sort_ascending,
             &self.common.search_query,
             data.genres.len(),
