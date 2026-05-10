@@ -50,7 +50,9 @@ pub(crate) use eq_modal::{EqModalMessage, PresetChoice, eq_modal_overlay};
 pub(crate) use nav_bar::{NavBarMessage, NavBarViewData, NavView, nav_bar};
 pub(crate) use player_bar::{PlayerBarMessage, PlayerBarViewData, player_bar};
 pub(crate) use side_nav_bar::{SideNavBarData, side_nav_bar};
-pub(crate) use slot_list_page::{SlotListPageAction, SlotListPageState};
+pub(crate) use slot_list_page::{
+    SlotListPageAction, SlotListPageHandleAction, SlotListPageMessage, SlotListPageState,
+};
 pub(crate) use slot_list_view::SlotListView;
 pub(crate) use volume_slider::{SliderVariant, volume_slider};
 

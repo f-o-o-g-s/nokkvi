@@ -69,21 +69,27 @@ impl SongsPage {
             data.total_song_count,
             "songs",
             crate::views::SONGS_SEARCH_ID,
-            SongsMessage::SortModeSelected,
-            Some(SongsMessage::ToggleSortOrder),
-            Some(SongsMessage::RefreshViewData),
+            |m| SongsMessage::SlotList(crate::widgets::SlotListPageMessage::SortModeSelected(m)),
+            Some(SongsMessage::SlotList(
+                crate::widgets::SlotListPageMessage::ToggleSortOrder,
+            )),
+            Some(SongsMessage::SlotList(
+                crate::widgets::SlotListPageMessage::RefreshViewData,
+            )),
             // Hidden in the browsing panel — the narrower pane needs the
             // header space for sort/refresh/columns/search, and the user
             // already has the main-pane button when they want to center.
             if data.in_browsing_panel {
                 None
             } else {
-                Some(SongsMessage::CenterOnPlaying)
+                Some(SongsMessage::SlotList(
+                    crate::widgets::SlotListPageMessage::CenterOnPlaying,
+                ))
             },
             None,                  // on_add
             Some(column_dropdown), // trailing_button
             true,                  // show_search
-            SongsMessage::SearchQueryChanged,
+            |q| SongsMessage::SlotList(crate::widgets::SlotListPageMessage::SearchQueryChanged(q)),
             // Roulette is main-pane only — see Albums view for rationale.
             if data.in_browsing_panel {
                 None
@@ -98,7 +104,7 @@ impl SongsPage {
         let header = crate::widgets::slot_list::compose_header_with_select(
             self.column_visibility.select,
             self.common.select_all_state(data.songs.len()),
-            SongsMessage::SlotListSelectAllToggle,
+            SongsMessage::SlotList(crate::widgets::SlotListPageMessage::SelectAllToggle),
             header,
         );
 
@@ -149,11 +155,15 @@ impl SongsPage {
             &self.common.slot_list,
             songs,
             &config,
-            SongsMessage::SlotListNavigateUp,
-            SongsMessage::SlotListNavigateDown,
+            SongsMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateUp),
+            SongsMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateDown),
             {
                 let total = songs.len();
-                move |f| SongsMessage::SlotListScrollSeek((f * total as f32) as usize)
+                move |f| {
+                    SongsMessage::SlotList(crate::widgets::SlotListPageMessage::ScrollSeek(
+                        (f * total as f32) as usize,
+                    ))
+                }
             },
             |song, ctx| {
                 // Clone all data from song at the start to avoid lifetime issues
@@ -424,13 +434,21 @@ impl SongsPage {
 
                 let slot_button = button(clickable)
                     .on_press(if ctx.modifiers.control() || ctx.modifiers.shift() {
-                        SongsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
+                        SongsMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
+                            ctx.item_index,
+                            ctx.modifiers,
+                        ))
                     } else if ctx.is_center {
-                        SongsMessage::SlotListActivateCenter
+                        SongsMessage::SlotList(crate::widgets::SlotListPageMessage::ActivateCenter)
                     } else if data.stable_viewport {
-                        SongsMessage::SlotListSetOffset(ctx.item_index, ctx.modifiers)
+                        SongsMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
+                            ctx.item_index,
+                            ctx.modifiers,
+                        ))
                     } else {
-                        SongsMessage::SlotListClickPlay(ctx.item_index)
+                        SongsMessage::SlotList(crate::widgets::SlotListPageMessage::ClickPlay(
+                            ctx.item_index,
+                        ))
                     })
                     .style(|_theme, _status| button::Style {
                         background: None,
@@ -454,7 +472,11 @@ impl SongsPage {
                     select_header_visible,
                     ctx.is_selected,
                     ctx.item_index,
-                    SongsMessage::SlotListSelectionToggle,
+                    |i| {
+                        SongsMessage::SlotList(
+                            crate::widgets::SlotListPageMessage::SelectionToggle(i),
+                        )
+                    },
                     cm_row,
                 )
             },

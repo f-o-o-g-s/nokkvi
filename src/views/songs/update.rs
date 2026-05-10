@@ -8,7 +8,7 @@ use iced::Task;
 use nokkvi_data::backend::songs::SongUIViewData;
 
 use super::{SongsAction, SongsMessage, SongsPage};
-use crate::widgets::view_header::SortMode;
+use crate::widgets::{SlotListPageHandleAction, view_header::SortMode};
 
 impl SongsPage {
     /// Update internal state and return actions for root
@@ -20,102 +20,94 @@ impl SongsPage {
         let total_items = songs.len();
 
         match message {
-            SongsMessage::SlotListNavigateUp => {
-                self.common.handle_navigate_up(total_items);
-                if let Some(center_idx) = self.common.get_center_item_index(total_items)
-                    && let Some(song) = songs.get(center_idx)
-                    && let Some(album_id) = &song.album_id
-                {
-                    return (
-                        Task::none(),
-                        SongsAction::LoadLargeArtwork(album_id.clone()),
-                    );
-                }
-                (Task::none(), SongsAction::None)
-            }
-            SongsMessage::SlotListNavigateDown => {
-                self.common.handle_navigate_down(total_items);
-                if let Some(center_idx) = self.common.get_center_item_index(total_items)
-                    && let Some(song) = songs.get(center_idx)
-                    && let Some(album_id) = &song.album_id
-                {
-                    return (
-                        Task::none(),
-                        SongsAction::LoadLargeArtwork(album_id.clone()),
-                    );
-                }
-                (Task::none(), SongsAction::None)
-            }
-            SongsMessage::SlotListSetOffset(offset, modifiers) => {
-                self.common
-                    .handle_slot_click(offset, total_items, modifiers);
-                if let Some(center_idx) = self.common.get_center_item_index(total_items)
-                    && let Some(song) = songs.get(center_idx)
-                    && let Some(album_id) = &song.album_id
-                {
-                    return (
-                        Task::none(),
-                        SongsAction::LoadLargeArtwork(album_id.clone()),
-                    );
-                }
-                (Task::none(), SongsAction::None)
-            }
-            SongsMessage::SlotListScrollSeek(offset) => {
-                self.common.handle_set_offset(offset, total_items);
-                (Task::none(), SongsAction::None)
-            }
-            SongsMessage::SlotListActivateCenter => {
-                if !self.common.slot_list.selected_indices.is_empty() {
-                    use nokkvi_data::types::batch::{BatchItem, BatchPayload};
-                    let payload = self
-                        .common
-                        .slot_list
-                        .selected_indices
-                        .iter()
-                        .filter_map(|&index| {
-                            songs.get(index).map(|s| {
-                                let item: nokkvi_data::types::song::Song = s.clone().into();
-                                BatchItem::Song(Box::new(item))
-                            })
-                        })
-                        .fold(BatchPayload::new(), |p, i| p.with_item(i));
-                    (Task::none(), SongsAction::PlayBatch(payload))
-                } else if let Some(center_idx) = self.common.get_center_item_index(total_items) {
-                    self.common.slot_list.flash_center();
-                    (Task::none(), SongsAction::PlaySongFromIndex(center_idx))
-                } else {
-                    (Task::none(), SongsAction::None)
-                }
-            }
-            SongsMessage::SlotListClickPlay(offset) => {
-                self.common.handle_set_offset(offset, total_items);
-                self.update(SongsMessage::SlotListActivateCenter, songs)
-            }
-            SongsMessage::SlotListSelectionToggle(offset) => {
-                self.common.handle_selection_toggle(offset, total_items);
-                (Task::none(), SongsAction::None)
-            }
-            SongsMessage::SlotListSelectAllToggle => {
-                self.common.handle_select_all_toggle(total_items);
-                (Task::none(), SongsAction::None)
-            }
-            SongsMessage::AddCenterToQueue => {
-                use nokkvi_data::types::batch::BatchItem;
+            SongsMessage::SlotList(msg) => {
+                use crate::widgets::SlotListPageMessage;
 
-                let target_indices = self.common.get_queue_target_indices(total_items);
+                // For navigate up/down and set-offset, we need to trigger artwork loading
+                // after the state mutation. Detect these cases before delegating.
+                let needs_artwork_load = matches!(
+                    msg,
+                    SlotListPageMessage::NavigateUp
+                        | SlotListPageMessage::NavigateDown
+                        | SlotListPageMessage::SetOffset(_, _)
+                );
 
-                if target_indices.is_empty() {
-                    return (Task::none(), SongsAction::None);
+                match self.common.handle(msg, total_items) {
+                    SlotListPageHandleAction::ActivateCenter => {
+                        if !self.common.slot_list.selected_indices.is_empty() {
+                            use nokkvi_data::types::batch::{BatchItem, BatchPayload};
+                            let payload = self
+                                .common
+                                .slot_list
+                                .selected_indices
+                                .iter()
+                                .filter_map(|&index| {
+                                    songs.get(index).map(|s| {
+                                        let item: nokkvi_data::types::song::Song = s.clone().into();
+                                        BatchItem::Song(Box::new(item))
+                                    })
+                                })
+                                .fold(BatchPayload::new(), |p, i| p.with_item(i));
+                            (Task::none(), SongsAction::PlayBatch(payload))
+                        } else if let Some(center_idx) =
+                            self.common.get_center_item_index(total_items)
+                        {
+                            self.common.slot_list.flash_center();
+                            (Task::none(), SongsAction::PlaySongFromIndex(center_idx))
+                        } else {
+                            (Task::none(), SongsAction::None)
+                        }
+                    }
+                    SlotListPageHandleAction::AddCenterToQueue => {
+                        use nokkvi_data::types::batch::BatchItem;
+
+                        let target_indices = self.common.get_queue_target_indices(total_items);
+
+                        if target_indices.is_empty() {
+                            return (Task::none(), SongsAction::None);
+                        }
+
+                        let payload =
+                            super::super::expansion::build_batch_payload(target_indices, |i| {
+                                songs.get(i).map(|s| {
+                                    let item: nokkvi_data::types::song::Song = s.clone().into();
+                                    BatchItem::Song(Box::new(item))
+                                })
+                            });
+
+                        (Task::none(), SongsAction::AddBatchToQueue(payload))
+                    }
+                    SlotListPageHandleAction::SearchChanged(q) => {
+                        (Task::none(), SongsAction::SearchChanged(q))
+                    }
+                    SlotListPageHandleAction::SortModeChanged(m) => {
+                        (Task::none(), SongsAction::SortModeChanged(m))
+                    }
+                    SlotListPageHandleAction::SortOrderChanged(b) => {
+                        (Task::none(), SongsAction::SortOrderChanged(b))
+                    }
+                    SlotListPageHandleAction::RefreshViewData => {
+                        (Task::none(), SongsAction::RefreshViewData)
+                    }
+                    SlotListPageHandleAction::CenterOnPlaying => {
+                        (Task::none(), SongsAction::CenterOnPlaying)
+                    }
+                    SlotListPageHandleAction::None => {
+                        // For navigation/set-offset actions, trigger artwork load for the
+                        // new center item if one is now in focus.
+                        if needs_artwork_load
+                            && let Some(center_idx) = self.common.get_center_item_index(total_items)
+                            && let Some(song) = songs.get(center_idx)
+                            && let Some(album_id) = &song.album_id
+                        {
+                            return (
+                                Task::none(),
+                                SongsAction::LoadLargeArtwork(album_id.clone()),
+                            );
+                        }
+                        (Task::none(), SongsAction::None)
+                    }
                 }
-
-                let payload = super::super::expansion::build_batch_payload(target_indices, |i| {
-                    songs.get(i).map(|s| {
-                        let item: nokkvi_data::types::song::Song = s.clone().into();
-                        BatchItem::Song(Box::new(item))
-                    })
-                });
-
-                (Task::none(), SongsAction::AddBatchToQueue(payload))
             }
 
             SongsMessage::ClickSetRating(item_index, rating) => {
@@ -140,34 +132,6 @@ impl SongsPage {
                 }
                 (Task::none(), SongsAction::None)
             }
-            SongsMessage::SortModeSelected(sort_mode) => {
-                use crate::widgets::SlotListPageAction;
-                match self.common.handle_sort_mode_selected(sort_mode) {
-                    SlotListPageAction::SortModeChanged(vt) => {
-                        (Task::none(), SongsAction::SortModeChanged(vt))
-                    }
-                    _ => (Task::none(), SongsAction::None),
-                }
-            }
-            SongsMessage::ToggleSortOrder => {
-                use crate::widgets::SlotListPageAction;
-                match self.common.handle_toggle_sort_order() {
-                    SlotListPageAction::SortOrderChanged(ascending) => {
-                        (Task::none(), SongsAction::SortOrderChanged(ascending))
-                    }
-                    _ => (Task::none(), SongsAction::None),
-                }
-            }
-            SongsMessage::SearchQueryChanged(query) => {
-                use crate::widgets::SlotListPageAction;
-                match self.common.handle_search_query_changed(query, total_items) {
-                    SlotListPageAction::SearchChanged(q) => {
-                        (Task::none(), SongsAction::SearchChanged(q))
-                    }
-                    _ => (Task::none(), SongsAction::None),
-                }
-            }
-
             SongsMessage::ContextMenuAction(clicked_idx, entry) => {
                 use nokkvi_data::types::batch::BatchItem;
 
@@ -239,11 +203,9 @@ impl SongsPage {
                 // Intercepted at root before reaching this update; never reached.
                 (Task::none(), SongsAction::None)
             }
-            SongsMessage::RefreshViewData => (Task::none(), SongsAction::RefreshViewData),
             SongsMessage::RefreshArtwork(album_id) => {
                 (Task::none(), SongsAction::RefreshArtwork(album_id))
             }
-            SongsMessage::CenterOnPlaying => (Task::none(), SongsAction::CenterOnPlaying),
             SongsMessage::NavigateAndFilter(view, filter) => {
                 (Task::none(), SongsAction::NavigateAndFilter(view, filter))
             }
@@ -303,6 +265,22 @@ mod tests {
         assert!(matches!(
             action,
             SongsAction::ColumnVisibilityChanged(SongsColumn::Genre, true)
+        ));
+    }
+
+    #[test]
+    fn songs_slot_list_sort_mode_selected_updates_state_and_emits_action() {
+        use crate::widgets::{SlotListPageMessage, view_header::SortMode};
+        let mut page = SongsPage::default();
+        let empty: Vec<SongUIViewData> = vec![];
+        let (_t, action) = page.update(
+            SongsMessage::SlotList(SlotListPageMessage::SortModeSelected(SortMode::MostPlayed)),
+            &empty,
+        );
+        assert_eq!(page.common.current_sort_mode, SortMode::MostPlayed);
+        assert!(matches!(
+            action,
+            SongsAction::SortModeChanged(SortMode::MostPlayed)
         ));
     }
 }

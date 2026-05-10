@@ -413,7 +413,9 @@ impl Nokkvi {
                     self,
                     msg,
                     handle_songs,
-                    crate::views::SongsMessage::SlotListScrollSeek(_),
+                    crate::views::SongsMessage::SlotList(
+                        crate::widgets::SlotListPageMessage::ScrollSeek(_)
+                    ),
                     View::Songs
                 )
             }

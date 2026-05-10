@@ -90,20 +90,8 @@ pub struct SongsViewData<'a> {
 /// Messages for local song page interactions
 #[derive(Debug, Clone)]
 pub enum SongsMessage {
-    // Slot list navigation
-    SlotListNavigateUp,
-    SlotListNavigateDown,
-    SlotListSetOffset(usize, iced::keyboard::Modifiers),
-    SlotListScrollSeek(usize),
-    SlotListActivateCenter,
-    SlotListClickPlay(usize), // Click non-center to play directly (skip focus)
-    /// Click on a row's leading select checkbox — toggles `item_index` in
-    /// `selected_indices`. No play/highlight side effects.
-    SlotListSelectionToggle(usize),
-    /// Click on the tri-state "select all" header — fills selection with
-    /// every visible row, or clears if every visible row is already selected.
-    SlotListSelectAllToggle,
-    AddCenterToQueue, // Add centered song to queue (Shift+Q)
+    /// Unified slot-list navigation and header actions (Pattern B — no expansion).
+    SlotList(crate::widgets::SlotListPageMessage),
 
     // Mouse click on star/heart (item_index, value)
     ClickSetRating(usize, usize), // (item_index, rating 1-5)
@@ -112,13 +100,6 @@ pub enum SongsMessage {
     // Context menu
     ContextMenuAction(usize, crate::widgets::context_menu::LibraryContextEntry),
 
-    // View header
-    SortModeSelected(crate::widgets::view_header::SortMode),
-    ToggleSortOrder,
-    SearchQueryChanged(String),
-
-    RefreshViewData,
-    CenterOnPlaying,
     /// Sort dropdown's "Roulette" entry was selected — intercepted at the
     /// root handler before the page's `update` runs.
     Roulette,
@@ -218,23 +199,31 @@ impl super::ViewPage for SongsPage {
         Some(super::sort_api::sort_modes_for_view(crate::View::Songs))
     }
     fn sort_mode_selected_message(&self, mode: SortMode) -> Option<Message> {
-        Some(Message::Songs(SongsMessage::SortModeSelected(mode)))
+        Some(Message::Songs(SongsMessage::SlotList(
+            crate::widgets::SlotListPageMessage::SortModeSelected(mode),
+        )))
     }
     fn toggle_sort_order_message(&self) -> Message {
-        Message::Songs(SongsMessage::ToggleSortOrder)
+        Message::Songs(SongsMessage::SlotList(
+            crate::widgets::SlotListPageMessage::ToggleSortOrder,
+        ))
     }
 
     fn add_to_queue_message(&self) -> Option<Message> {
-        Some(Message::Songs(SongsMessage::AddCenterToQueue))
+        Some(Message::Songs(SongsMessage::SlotList(
+            crate::widgets::SlotListPageMessage::AddCenterToQueue,
+        )))
     }
     fn reload_message(&self) -> Option<Message> {
         Some(Message::LoadSongs)
     }
 
     fn synth_set_offset_message(&self, offset: usize) -> Option<Message> {
-        Some(Message::Songs(SongsMessage::SlotListSetOffset(
-            offset,
-            iced::keyboard::Modifiers::default(),
+        Some(Message::Songs(SongsMessage::SlotList(
+            crate::widgets::SlotListPageMessage::SetOffset(
+                offset,
+                iced::keyboard::Modifiers::default(),
+            ),
         )))
     }
 }

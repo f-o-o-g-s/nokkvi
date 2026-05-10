@@ -157,7 +157,10 @@ impl Nokkvi {
         self.play_view_sfx(
             matches!(
                 msg,
-                SongsMessage::SlotListNavigateUp | SongsMessage::SlotListNavigateDown
+                SongsMessage::SlotList(
+                    crate::widgets::SlotListPageMessage::NavigateUp
+                        | crate::widgets::SlotListPageMessage::NavigateDown
+                )
             ),
             false,
         );

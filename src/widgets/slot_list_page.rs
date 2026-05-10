@@ -5,6 +5,50 @@
 
 use crate::widgets::{SlotListView, view_header::SortMode};
 
+/// Unified input message for slot-list page navigation and header actions.
+///
+/// Views wrap this in their own message variant, e.g.:
+/// ```ignore
+/// pub enum SongsMessage {
+///     SlotList(SlotListPageMessage),
+///     // … view-specific variants
+/// }
+/// ```
+/// and dispatch via `common.handle(msg, total)`.
+#[derive(Debug, Clone)]
+pub enum SlotListPageMessage {
+    NavigateUp,
+    NavigateDown,
+    SetOffset(usize, iced::keyboard::Modifiers),
+    ScrollSeek(usize),
+    ActivateCenter,
+    ClickPlay(usize),
+    SelectionToggle(usize),
+    SelectAllToggle,
+    AddCenterToQueue,
+    RefreshViewData,
+    CenterOnPlaying,
+    SortModeSelected(SortMode),
+    ToggleSortOrder,
+    SearchQueryChanged(String),
+}
+
+/// Return value of `SlotListPageState::handle()`.
+///
+/// `None` means all state mutations were local to `SlotListPageState`
+/// and no action needs to bubble further.
+#[derive(Debug, Clone)]
+pub enum SlotListPageHandleAction {
+    ActivateCenter,
+    AddCenterToQueue,
+    SearchChanged(String),
+    SortModeChanged(SortMode),
+    SortOrderChanged(bool),
+    RefreshViewData,
+    CenterOnPlaying,
+    None,
+}
+
 /// Common state shared by all slot-list-based views
 #[derive(Debug)]
 pub struct SlotListPageState {
@@ -273,6 +317,90 @@ impl SlotListPageState {
     /// Handle search focus change
     pub fn handle_search_focused(&mut self, focused: bool) {
         self.search_input_focused = focused;
+    }
+
+    /// Unified dispatch for all `SlotListPageMessage` variants.
+    ///
+    /// Handles all navigation and header actions in one place. Views that
+    /// use Pattern B (no expansion) can replace their entire navigation/sort/
+    /// search match block with a single arm:
+    ///
+    /// ```ignore
+    /// SongsMessage::SlotList(msg) => {
+    ///     let total = songs.len();
+    ///     match self.songs_page.common.handle(msg, total) {
+    ///         SlotListPageHandleAction::ActivateCenter => { /* play logic */ }
+    ///         SlotListPageHandleAction::AddCenterToQueue => { /* queue logic */ }
+    ///         SlotListPageHandleAction::SearchChanged(q) => (Task::none(), SongsAction::SearchChanged(q)),
+    ///         SlotListPageHandleAction::SortModeChanged(m) => (Task::none(), SongsAction::SortModeChanged(m)),
+    ///         SlotListPageHandleAction::SortOrderChanged(b) => (Task::none(), SongsAction::SortOrderChanged(b)),
+    ///         SlotListPageHandleAction::RefreshViewData => (Task::none(), SongsAction::RefreshViewData),
+    ///         SlotListPageHandleAction::CenterOnPlaying => (Task::none(), SongsAction::CenterOnPlaying),
+    ///         SlotListPageHandleAction::None => (Task::none(), SongsAction::None),
+    ///     }
+    /// }
+    /// ```
+    pub fn handle(
+        &mut self,
+        msg: SlotListPageMessage,
+        total_items: usize,
+    ) -> SlotListPageHandleAction {
+        match msg {
+            SlotListPageMessage::NavigateUp => {
+                self.handle_navigate_up(total_items);
+                SlotListPageHandleAction::None
+            }
+            SlotListPageMessage::NavigateDown => {
+                self.handle_navigate_down(total_items);
+                SlotListPageHandleAction::None
+            }
+            SlotListPageMessage::SetOffset(offset, modifiers) => {
+                self.handle_slot_click(offset, total_items, modifiers);
+                SlotListPageHandleAction::None
+            }
+            SlotListPageMessage::ScrollSeek(offset) => {
+                self.handle_set_offset(offset, total_items);
+                SlotListPageHandleAction::None
+            }
+            SlotListPageMessage::ActivateCenter => SlotListPageHandleAction::ActivateCenter,
+            SlotListPageMessage::ClickPlay(offset) => {
+                self.handle_set_offset(offset, total_items);
+                SlotListPageHandleAction::ActivateCenter
+            }
+            SlotListPageMessage::SelectionToggle(offset) => {
+                self.handle_selection_toggle(offset, total_items);
+                SlotListPageHandleAction::None
+            }
+            SlotListPageMessage::SelectAllToggle => {
+                self.handle_select_all_toggle(total_items);
+                SlotListPageHandleAction::None
+            }
+            SlotListPageMessage::AddCenterToQueue => SlotListPageHandleAction::AddCenterToQueue,
+            SlotListPageMessage::RefreshViewData => SlotListPageHandleAction::RefreshViewData,
+            SlotListPageMessage::CenterOnPlaying => SlotListPageHandleAction::CenterOnPlaying,
+            SlotListPageMessage::SortModeSelected(sort_mode) => {
+                match self.handle_sort_mode_selected(sort_mode) {
+                    SlotListPageAction::SortModeChanged(vt) => {
+                        SlotListPageHandleAction::SortModeChanged(vt)
+                    }
+                    _ => SlotListPageHandleAction::None,
+                }
+            }
+            SlotListPageMessage::ToggleSortOrder => match self.handle_toggle_sort_order() {
+                SlotListPageAction::SortOrderChanged(asc) => {
+                    SlotListPageHandleAction::SortOrderChanged(asc)
+                }
+                _ => SlotListPageHandleAction::None,
+            },
+            SlotListPageMessage::SearchQueryChanged(query) => {
+                match self.handle_search_query_changed(query, total_items) {
+                    SlotListPageAction::SearchChanged(q) => {
+                        SlotListPageHandleAction::SearchChanged(q)
+                    }
+                    _ => SlotListPageHandleAction::None,
+                }
+            }
+        }
     }
 
     /// Get the currently centered item index.

@@ -330,7 +330,9 @@ fn songs_seek_settled_dispatches_load_large_artwork_for_centered_song_album() {
             .collect(),
     );
 
-    let _ = app.handle_songs(crate::views::SongsMessage::SlotListScrollSeek(25));
+    let _ = app.handle_songs(crate::views::SongsMessage::SlotList(
+        crate::widgets::SlotListPageMessage::ScrollSeek(25),
+    ));
     let gen_id = app.songs_page.common.slot_list.scroll_generation_id;
 
     let _ = app.handle_slot_list_message(SlotListMessage::SeekSettled(View::Songs, gen_id));

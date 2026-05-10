@@ -317,7 +317,9 @@ impl Nokkvi {
                     .common
                     .handle_set_offset(target_idx, total_items);
                 self.songs_page.common.slot_list.flash_center();
-                Task::done(Message::Songs(views::SongsMessage::SlotListActivateCenter))
+                Task::done(Message::Songs(views::SongsMessage::SlotList(
+                    crate::widgets::SlotListPageMessage::ActivateCenter,
+                )))
             }
             View::Albums => {
                 self.albums_page
