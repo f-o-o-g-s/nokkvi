@@ -501,22 +501,7 @@ impl Nokkvi {
                 );
             }
             AlbumsAction::AddBatchToQueue(payload) => {
-                let len = payload.items.len();
-                debug!(" Adding batch of {} items to queue", len);
-                if let Some(pos) = self.pending_queue_insert_position.take() {
-                    return self.shell_fire_and_forget_task(
-                        move |shell| async move {
-                            shell.insert_batch_at_position(payload, pos).await
-                        },
-                        format!("Inserted {} items at position {}", len, pos + 1),
-                        "insert batch to queue",
-                    );
-                }
-                return self.shell_fire_and_forget_task(
-                    move |shell| async move { shell.add_batch_to_queue(payload).await },
-                    format!("Added {len} items to queue"),
-                    "add batch to queue",
-                );
+                return self.add_or_insert_batch_to_queue_task(payload);
             }
             AlbumsAction::PlayBatch(payload) => {
                 let len = payload.items.len();
@@ -680,28 +665,15 @@ impl Nokkvi {
                 return self.set_item_rating_task(item_id, kind, new_rating, current);
             }
             AlbumsAction::ToggleStar(item_id, kind, star) => {
-                let optimistic_msg = Self::starred_revert_message(item_id.clone(), kind, star);
-                return Task::batch(vec![
-                    Task::done(optimistic_msg),
-                    self.star_item_task(item_id, kind, star),
-                ]);
+                return self.toggle_star_with_revert_task(item_id, kind, star);
             }
             AlbumsAction::AddBatchToPlaylist(payload) => {
                 return self.handle_add_batch_to_playlist(payload);
             }
             AlbumsAction::PlayNext(id) => {
-                // To support PlayNext for albums, we just wrap it into a BatchItem
                 use nokkvi_data::types::batch::{BatchItem, BatchPayload};
                 let payload = BatchPayload::new().with_item(BatchItem::Album(id));
-
-                if self.modes.random {
-                    self.toast_warn("Shuffle is on — next tracks will be random, not these");
-                }
-                return self.shell_fire_and_forget_task(
-                    move |shell| async move { shell.play_next_batch(payload).await },
-                    "Added batch to play next".to_string(),
-                    "play next batch",
-                );
+                return self.play_next_batch_task(payload);
             }
             AlbumsAction::ShowInfo(item) => {
                 return self.update(Message::InfoModal(

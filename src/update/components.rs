@@ -815,6 +815,20 @@ impl Nokkvi {
         })
     }
 
+    /// Toggle a star on any item, applying an optimistic UI update that reverts on API failure.
+    pub(crate) fn toggle_star_with_revert_task(
+        &self,
+        id: String,
+        kind: ItemKind,
+        star: bool,
+    ) -> Task<Message> {
+        let optimistic_msg = Self::starred_revert_message(id.clone(), kind, star);
+        Task::batch(vec![
+            Task::done(optimistic_msg),
+            self.star_item_task(id, kind, star),
+        ])
+    }
+
     /// Build the appropriate rating-updated message for a given item kind.
     /// Used to revert optimistic rating updates on API failure.
     pub(crate) fn rating_revert_message(id: String, kind: ItemKind, rating: u32) -> Message {
@@ -926,6 +940,44 @@ impl Nokkvi {
                 Ok(songs.into_iter().map(|s| s.id).collect())
             },
             "resolve batch for playlist",
+        )
+    }
+
+    /// Enqueue a batch, inserting at a drag-drop position when one is pending.
+    ///
+    /// Takes `pending_queue_insert_position` via `take()` — the position is consumed
+    /// even when the insert path is not taken, so callers must not pre-take it.
+    pub(crate) fn add_or_insert_batch_to_queue_task(
+        &mut self,
+        payload: nokkvi_data::types::batch::BatchPayload,
+    ) -> Task<Message> {
+        let len = payload.items.len();
+        if let Some(pos) = self.pending_queue_insert_position.take() {
+            return self.shell_fire_and_forget_task(
+                move |shell| async move { shell.insert_batch_at_position(payload, pos).await },
+                format!("Inserted {len} items at position {}", pos + 1),
+                "insert batch to queue",
+            );
+        }
+        self.shell_fire_and_forget_task(
+            move |shell| async move { shell.add_batch_to_queue(payload).await },
+            format!("Added {len} items to queue"),
+            "add batch to queue",
+        )
+    }
+
+    /// Fire a play-next-batch task, warning if shuffle is active.
+    pub(crate) fn play_next_batch_task(
+        &mut self,
+        payload: nokkvi_data::types::batch::BatchPayload,
+    ) -> Task<Message> {
+        if self.modes.random {
+            self.toast_warn("Shuffle is on — next tracks will be random, not these");
+        }
+        self.shell_fire_and_forget_task(
+            move |shell| async move { shell.play_next_batch(payload).await },
+            "Added batch to play next".to_string(),
+            "play next batch",
         )
     }
 
