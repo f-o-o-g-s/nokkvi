@@ -428,6 +428,7 @@ impl PlaylistsPage {
             slot_list_content,
             artwork_content,
             Some(PlaylistsMessage::ArtworkColumnDrag),
+            Some(PlaylistsMessage::ArtworkColumnVerticalDrag),
         )
     }
 

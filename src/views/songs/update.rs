@@ -199,7 +199,7 @@ impl SongsPage {
             // arm exists only for exhaustiveness.
             SongsMessage::SetOpenMenu(_) => (Task::none(), SongsAction::None),
             SongsMessage::Roulette => (Task::none(), SongsAction::None),
-            SongsMessage::ArtworkColumnDrag(_) => {
+            SongsMessage::ArtworkColumnDrag(_) | SongsMessage::ArtworkColumnVerticalDrag(_) => {
                 // Intercepted at root before reaching this update; never reached.
                 (Task::none(), SongsAction::None)
             }

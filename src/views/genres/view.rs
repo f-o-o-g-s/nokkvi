@@ -265,6 +265,7 @@ impl GenresPage {
             slot_list_content,
             artwork_content,
             Some(GenresMessage::ArtworkColumnDrag),
+            Some(GenresMessage::ArtworkColumnVerticalDrag),
         )
     }
 

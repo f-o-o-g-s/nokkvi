@@ -379,6 +379,7 @@ impl AlbumsPage {
             slot_list_content,
             artwork_content,
             Some(AlbumsMessage::ArtworkColumnDrag),
+            Some(AlbumsMessage::ArtworkColumnVerticalDrag),
         )
     }
 

@@ -613,6 +613,7 @@ impl SongsPage {
             slot_list_content,
             artwork_content,
             Some(SongsMessage::ArtworkColumnDrag),
+            Some(SongsMessage::ArtworkColumnVerticalDrag),
         )
     }
 }

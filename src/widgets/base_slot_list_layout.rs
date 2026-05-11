@@ -192,7 +192,40 @@ pub(crate) fn resolve_artwork_layout(config: &BaseSlotListLayoutConfig) -> Optio
                 orientation: ArtworkOrientation::Horizontal,
             })
         }
+        ArtworkColumnMode::AlwaysVerticalNative => Some(ArtworkLayout {
+            extent: always_vertical_extent(config.window_height),
+            panel_kind: PanelKind::Square,
+            orientation: ArtworkOrientation::Vertical,
+        }),
+        ArtworkColumnMode::AlwaysVerticalStretched => {
+            let fit = match theme::artwork_column_stretch_fit() {
+                ArtworkStretchFit::Cover => ContentFit::Cover,
+                ArtworkStretchFit::Fill => ContentFit::Fill,
+            };
+            Some(ArtworkLayout {
+                extent: always_vertical_extent(config.window_height),
+                panel_kind: PanelKind::Stretched { fit },
+                orientation: ArtworkOrientation::Vertical,
+            })
+        }
     }
+}
+
+/// Resolve the artwork-row extent for the Always-Vertical* modes from the
+/// window height and the user's `artwork_vertical_height_pct` atomic.
+///
+/// Clamps into `[1.0, min(ARTWORK_MAX_SIZE, window_height - bottom_pad - MIN_SLOT_LIST_HEIGHT)]`
+/// so the slot list always retains at least `MIN_SLOT_LIST_HEIGHT` pixels
+/// beneath the artwork — the user opted into vertical, but the slot list
+/// can never disappear entirely. Letterboxing of the panel itself (when
+/// `extent > inset_width` or `< inset_width`) is intentional in always
+/// vertical modes; the user gave up the no-letterbox guarantee in
+/// exchange for a fixed-height artwork.
+fn always_vertical_extent(window_height: f32) -> f32 {
+    let raw = window_height * theme::artwork_vertical_height_pct();
+    let upper = ARTWORK_MAX_SIZE
+        .min((window_height - VERTICAL_ARTWORK_BOTTOM_PAD - MIN_SLOT_LIST_HEIGHT).max(1.0));
+    raw.clamp(1.0, upper)
 }
 
 /// Extra slot-list chrome consumed when the artwork is vertically stacked
@@ -200,10 +233,23 @@ pub(crate) fn resolve_artwork_layout(config: &BaseSlotListLayoutConfig) -> Optio
 /// works in absolute pixels — without this adjustment, slot rows would render
 /// too tall and overflow behind the vertical artwork. Returns 0 in every
 /// other configuration (Horizontal, hidden, `show_artwork_column = false`).
+///
+/// In `AlwaysVerticalNative` / `AlwaysVerticalStretched` modes the vertical
+/// drag handle sits between the artwork and the slot list, so its 6 px
+/// thickness is added on top of `extent + bottom_pad`.
 pub(crate) fn vertical_artwork_chrome(config: &BaseSlotListLayoutConfig) -> f32 {
     match resolve_artwork_layout(config) {
         Some(layout) if layout.orientation == ArtworkOrientation::Vertical => {
-            layout.extent + VERTICAL_ARTWORK_BOTTOM_PAD
+            let handle = if matches!(
+                theme::artwork_column_mode(),
+                ArtworkColumnMode::AlwaysVerticalNative
+                    | ArtworkColumnMode::AlwaysVerticalStretched
+            ) {
+                crate::widgets::artwork_split_handle_vertical::HANDLE_HEIGHT
+            } else {
+                0.0
+            };
+            layout.extent + VERTICAL_ARTWORK_BOTTOM_PAD + handle
         }
         _ => 0.0,
     }
@@ -267,17 +313,18 @@ pub(crate) fn base_slot_list_empty_artwork<'a, Message: 'a>(
 /// Create a single-image artwork panel (used by albums, songs, queue, artists).
 ///
 /// Mode-aware:
-/// - `Auto` / `AlwaysNative` → responsive `Length::Shrink` resolving to a
-///   `min(w, h)` square (preserves original layout exactly: column shrinks to
-///   the square's natural size, no horizontal letterbox gap).
-/// - `AlwaysStretched` → responsive `Length::Fill` with image filling the
-///   parent rect via the configured `ContentFit`.
+/// - `Auto` / `AlwaysNative` / `AlwaysVerticalNative` → responsive
+///   `Length::Shrink` resolving to a `min(w, h)` square (preserves the
+///   original layout exactly: column shrinks to the square's natural size,
+///   no horizontal letterbox gap).
+/// - `AlwaysStretched` / `AlwaysVerticalStretched` → responsive `Length::Fill`
+///   with image filling the parent rect via the configured `ContentFit`.
 pub(crate) fn single_artwork_panel<'a, Message: 'a>(
     artwork_handle: Option<&'a iced::widget::image::Handle>,
 ) -> Element<'a, Message> {
     if matches!(
         theme::artwork_column_mode(),
-        ArtworkColumnMode::AlwaysStretched
+        ArtworkColumnMode::AlwaysStretched | ArtworkColumnMode::AlwaysVerticalStretched
     ) {
         let fit = match theme::artwork_column_stretch_fit() {
             ArtworkStretchFit::Cover => ContentFit::Cover,
@@ -576,37 +623,59 @@ pub(crate) fn base_slot_list_layout<'a, Message: 'a>(
     base_slot_list_layout_with_handle::<
         Message,
         fn(crate::widgets::artwork_split_handle::DragEvent) -> Message,
-    >(config, header, slot_list_content, artwork_content, None)
+        fn(crate::widgets::artwork_split_handle_vertical::DragEvent) -> Message,
+    >(
+        config,
+        header,
+        slot_list_content,
+        artwork_content,
+        None,
+        None,
+    )
 }
 
-/// Variant of [`base_slot_list_layout`] that also renders a drag handle between
-/// the slot list and artwork columns. The handle is only drawn in always
-/// modes (Native/Stretched); in Auto/Never it is suppressed regardless of the
-/// `on_drag` parameter.
-pub(crate) fn base_slot_list_layout_with_handle<'a, Message, F>(
+/// Variant of [`base_slot_list_layout`] that also renders drag handles
+/// alongside the artwork. The horizontal handle (`on_drag`) draws in the
+/// `AlwaysNative` / `AlwaysStretched` modes; the vertical handle
+/// (`on_drag_vertical`) draws in the `AlwaysVerticalNative` /
+/// `AlwaysVerticalStretched` modes. Auto modes — including the
+/// portrait-fallback vertical layout — suppress both handles since the
+/// resolver picks the extent itself.
+pub(crate) fn base_slot_list_layout_with_handle<'a, Message, F, G>(
     config: &BaseSlotListLayoutConfig,
     header: Element<'a, Message>,
     slot_list_content: Element<'a, Message>,
     artwork_content: Option<Element<'a, Message>>,
     on_drag: Option<F>,
+    on_drag_vertical: Option<G>,
 ) -> Element<'a, Message>
 where
     Message: 'a,
     F: Fn(crate::widgets::artwork_split_handle::DragEvent) -> Message + Clone + 'a,
+    G: Fn(crate::widgets::artwork_split_handle_vertical::DragEvent) -> Message + Clone + 'a,
 {
     let layout = resolve_artwork_layout(config);
 
     if let (Some(layout), Some(artwork)) = (layout, artwork_content) {
         match layout.orientation {
             ArtworkOrientation::Horizontal => {
+                // Always-Vertical* modes never resolve to Horizontal; the
+                // vertical drag callback is intentionally dropped.
+                let _ = on_drag_vertical;
                 horizontal_layout(config, layout, header, slot_list_content, artwork, on_drag)
             }
             ArtworkOrientation::Vertical => {
-                // Auto-mode portrait fallback never reaches the drag handle;
-                // it's a property of Always modes which always resolve to
-                // Horizontal. The `on_drag` argument is intentionally dropped.
+                // Auto-mode portrait fallback never opts into the horizontal
+                // drag handle; it's a property of Always-Horizontal modes.
                 let _ = on_drag;
-                vertical_layout(config, layout, header, slot_list_content, artwork)
+                vertical_layout(
+                    config,
+                    layout,
+                    header,
+                    slot_list_content,
+                    artwork,
+                    on_drag_vertical,
+                )
             }
         }
     } else {
@@ -704,22 +773,33 @@ where
     .into()
 }
 
-/// Auto-mode portrait fallback — artwork stacked above the slot list,
-/// inset by `VERTICAL_ARTWORK_SIDE_PAD` left and right so its edges line up
-/// with the slot rows, and `VERTICAL_ARTWORK_BOTTOM_PAD` below to create a
-/// clean gap before the list starts. Top padding stays 0 because the view
-/// header above already provides vertical breathing room.
-fn vertical_layout<'a, Message: 'a>(
+/// Vertical layout — artwork stacked above the slot list, inset by
+/// `VERTICAL_ARTWORK_SIDE_PAD` left and right so its edges line up with the
+/// slot rows, and `VERTICAL_ARTWORK_BOTTOM_PAD` below to create a clean gap
+/// before the list starts. Top padding stays 0 because the view header above
+/// already provides vertical breathing room.
+///
+/// Used by both the Auto-mode portrait fallback (no drag handle) and the
+/// `AlwaysVerticalNative` / `AlwaysVerticalStretched` modes (with a
+/// horizontal-bar drag handle below the artwork).
+fn vertical_layout<'a, Message, G>(
     config: &BaseSlotListLayoutConfig,
     layout: ArtworkLayout,
     header: Element<'a, Message>,
     slot_list_content: Element<'a, Message>,
     artwork: Element<'a, Message>,
-) -> Element<'a, Message> {
-    // Inner panel for the centered square artwork. The responsive widget
-    // inside resolves to a `min(w, h)` square; with `extent == inset_width`
-    // (guaranteed by the resolver), the square exactly fills this panel —
-    // no `bg0_soft` letterbox sides visible.
+    on_drag_vertical: Option<G>,
+) -> Element<'a, Message>
+where
+    Message: 'a,
+    G: Fn(crate::widgets::artwork_split_handle_vertical::DragEvent) -> Message + Clone + 'a,
+{
+    // Inner panel for the artwork. In `Square` panel kinds the responsive
+    // widget inside resolves to a `min(w, h)` square; in `Stretched` it
+    // fills the rect via ContentFit. The vertical Auto-mode resolver
+    // guarantees `extent == inset_width` so Square fills without
+    // letterboxing; Always-Vertical* modes accept letterboxing as the
+    // user-opted-in tradeoff for a fixed-height artwork.
     let artwork_panel = container(artwork)
         .width(Length::Fill)
         .height(Length::Fixed(layout.extent))
@@ -730,10 +810,44 @@ fn vertical_layout<'a, Message: 'a>(
             ..Default::default()
         });
 
+    // Drag handle only in Always-Vertical* modes — Auto's vertical fallback
+    // sizes the artwork itself and suppresses the handle.
+    let mode = theme::artwork_column_mode();
+    let is_always_vertical = matches!(
+        mode,
+        ArtworkColumnMode::AlwaysVerticalNative | ArtworkColumnMode::AlwaysVerticalStretched
+    );
+    let handle: Option<Element<'a, Message>> = if is_always_vertical {
+        on_drag_vertical.map(|f| {
+            crate::widgets::artwork_split_handle_vertical::artwork_split_handle_vertical_element(
+                config.window_height,
+                f,
+            )
+        })
+    } else {
+        None
+    };
+    let handle_height = if handle.is_some() {
+        crate::widgets::artwork_split_handle_vertical::HANDLE_HEIGHT
+    } else {
+        0.0
+    };
+
+    // Artwork + optional drag handle inside the same inset wrapper so the
+    // handle aligns with the slot rows' L/R padding.
+    let inset_inner: Element<'a, Message> = if let Some(h) = handle {
+        column![artwork_panel, h]
+            .width(Length::Fill)
+            .spacing(0)
+            .into()
+    } else {
+        artwork_panel.into()
+    };
+
     // Outer wrapper that paints the slot-list `bg0_hard` background in the
     // left/right/bottom inset, so the artwork sits inside a margin that
     // visually matches the slot rows' inset.
-    let artwork_side = container(artwork_panel)
+    let artwork_side = container(inset_inner)
         .width(Length::Fill)
         .padding(iced::Padding {
             top: 0.0,
@@ -746,15 +860,16 @@ fn vertical_layout<'a, Message: 'a>(
     // Pin the slot-list rect to a Fixed height that matches what
     // `SlotListConfig::with_dynamic_slots` budgeted for. The view passes
     // its slot-list chrome via `config.slot_list_chrome`; subtracting that
-    // plus the artwork side (`extent + bottom_pad`) from `window_height`
-    // yields the exact slot-list rect the slot-count math expects. Using
-    // `Fill` here lets iced's flex layout drift by a few pixels and
-    // produce a partial slot at the bottom — Fixed locks the rect to the
-    // slot math.
+    // plus the artwork side (`extent + bottom_pad + optional handle`) from
+    // `window_height` yields the exact slot-list rect the slot-count math
+    // expects. Using `Fill` here lets iced's flex layout drift by a few
+    // pixels and produce a partial slot at the bottom — Fixed locks the
+    // rect to the slot math.
     let slot_list_height = (config.window_height
         - config.slot_list_chrome
         - layout.extent
-        - VERTICAL_ARTWORK_BOTTOM_PAD)
+        - VERTICAL_ARTWORK_BOTTOM_PAD
+        - handle_height)
         .max(0.0);
 
     let slot_list_pinned = container(slot_list_content)
@@ -801,6 +916,7 @@ mod tests {
         theme::set_artwork_column_stretch_fit(ArtworkStretchFit::Cover);
         theme::set_artwork_column_width_pct(0.40);
         theme::set_artwork_auto_max_pct(0.40);
+        theme::set_artwork_vertical_height_pct(0.40);
     }
 
     #[test]
@@ -1009,6 +1125,103 @@ mod tests {
         assert!((theme::artwork_auto_max_pct() - 0.30).abs() < 1e-6);
         theme::set_artwork_auto_max_pct(0.99);
         assert!((theme::artwork_auto_max_pct() - 0.70).abs() < 1e-6);
+        reset_atomics();
+    }
+
+    #[test]
+    fn always_vertical_native_returns_vertical_square_on_landscape() {
+        let _g = lock_atomics();
+        reset_atomics();
+        theme::set_artwork_column_mode(ArtworkColumnMode::AlwaysVerticalNative);
+        let l = resolve_artwork_layout(&cfg(1920.0, 1080.0, true)).expect("should show");
+        assert_eq!(l.orientation, ArtworkOrientation::Vertical);
+        assert!(matches!(l.panel_kind, PanelKind::Square));
+        // 1080 × 0.40 = 432; upper = min(MAX_SIZE, 1080 - 10 - 400) = min(1000, 670) = 670.
+        assert!((l.extent - 432.0).abs() < 1e-3);
+        reset_atomics();
+    }
+
+    #[test]
+    fn always_vertical_native_stays_vertical_on_portrait() {
+        let _g = lock_atomics();
+        reset_atomics();
+        // Same portrait dims that Auto-mode would reject for letterbox —
+        // Always-Vertical* accepts letterboxing as the opt-in tradeoff.
+        theme::set_artwork_column_mode(ArtworkColumnMode::AlwaysVerticalNative);
+        let l = resolve_artwork_layout(&cfg(766.0, 1370.0, true)).expect("should show");
+        assert_eq!(l.orientation, ArtworkOrientation::Vertical);
+        // 1370 × 0.40 = 548; upper = min(1000, 1370 - 10 - 400) = min(1000, 960) = 960.
+        assert!((l.extent - 548.0).abs() < 1e-3);
+        reset_atomics();
+    }
+
+    #[test]
+    fn always_vertical_stretched_returns_vertical_stretched_kind() {
+        let _g = lock_atomics();
+        reset_atomics();
+        theme::set_artwork_column_mode(ArtworkColumnMode::AlwaysVerticalStretched);
+        theme::set_artwork_column_stretch_fit(ArtworkStretchFit::Fill);
+        let l = resolve_artwork_layout(&cfg(1920.0, 1080.0, true)).expect("should show");
+        assert_eq!(l.orientation, ArtworkOrientation::Vertical);
+        assert!(matches!(
+            l.panel_kind,
+            PanelKind::Stretched {
+                fit: ContentFit::Fill
+            }
+        ));
+        reset_atomics();
+    }
+
+    #[test]
+    fn always_vertical_extent_tracks_user_pct() {
+        let _g = lock_atomics();
+        reset_atomics();
+        theme::set_artwork_column_mode(ArtworkColumnMode::AlwaysVerticalNative);
+        theme::set_artwork_vertical_height_pct(0.40);
+        let l = resolve_artwork_layout(&cfg(1920.0, 1500.0, true)).expect("should show");
+        assert!((l.extent - 600.0).abs() < 1e-3); // 1500 × 0.40
+        theme::set_artwork_vertical_height_pct(0.60);
+        let l = resolve_artwork_layout(&cfg(1920.0, 1500.0, true)).expect("should show");
+        assert!((l.extent - 900.0).abs() < 1e-3); // 1500 × 0.60
+        reset_atomics();
+    }
+
+    #[test]
+    fn always_vertical_extent_clamped_to_preserve_slot_list_floor() {
+        let _g = lock_atomics();
+        reset_atomics();
+        theme::set_artwork_column_mode(ArtworkColumnMode::AlwaysVerticalNative);
+        theme::set_artwork_vertical_height_pct(0.80);
+        // 1000 × 0.80 = 800. Upper = min(1000, 1000 - 10 - 400) = 590.
+        // Result clamps to 590 so the slot list keeps 400 px.
+        let l = resolve_artwork_layout(&cfg(800.0, 1000.0, true)).expect("should show");
+        assert!((l.extent - 590.0).abs() < 1e-3);
+        reset_atomics();
+    }
+
+    #[test]
+    fn always_vertical_chrome_includes_handle_height() {
+        let _g = lock_atomics();
+        reset_atomics();
+        theme::set_artwork_column_mode(ArtworkColumnMode::AlwaysVerticalNative);
+        theme::set_artwork_vertical_height_pct(0.40);
+        // 1500 × 0.40 = 600; chrome = 600 + bottom_pad + handle_height.
+        let chrome = vertical_artwork_chrome(&cfg(1920.0, 1500.0, true));
+        let expected = 600.0
+            + VERTICAL_ARTWORK_BOTTOM_PAD
+            + crate::widgets::artwork_split_handle_vertical::HANDLE_HEIGHT;
+        assert!((chrome - expected).abs() < 1e-3);
+        reset_atomics();
+    }
+
+    #[test]
+    fn theme_atomic_clamps_vertical_height_pct_into_safe_range() {
+        let _g = lock_atomics();
+        reset_atomics();
+        theme::set_artwork_vertical_height_pct(0.001);
+        assert!((theme::artwork_vertical_height_pct() - 0.10).abs() < 1e-6);
+        theme::set_artwork_vertical_height_pct(0.99);
+        assert!((theme::artwork_vertical_height_pct() - 0.80).abs() < 1e-6);
         reset_atomics();
     }
 

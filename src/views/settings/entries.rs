@@ -102,6 +102,7 @@ impl SettingsPage {
                     artwork_column_mode: data.artwork_column_mode,
                     artwork_column_stretch_fit: data.artwork_column_stretch_fit,
                     artwork_auto_max_pct: data.artwork_auto_max_pct,
+                    artwork_vertical_height_pct: data.artwork_vertical_height_pct,
                 };
                 items::build_interface_items(&idata)
             }

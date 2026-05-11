@@ -443,6 +443,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_artwork_vertical_height_pct(&mut self, pct: f32) -> Result<()> {
+        self.settings.player.artwork_vertical_height_pct = pct.clamp(0.10, 0.80);
+        self.save()
+    }
+
     pub fn set_strip_click_action(&mut self, action: StripClickAction) -> Result<()> {
         self.settings.player.strip_click_action = action;
         self.save()

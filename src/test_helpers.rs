@@ -384,6 +384,7 @@ pub(crate) fn make_settings_view_data() -> crate::views::SettingsViewData {
         artwork_column_mode: "Auto",
         artwork_column_stretch_fit: "Cover",
         artwork_auto_max_pct: 0.40,
+        artwork_vertical_height_pct: 0.40,
         verbose_config: false,
         artwork_resolution: "Default",
     }

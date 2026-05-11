@@ -60,6 +60,8 @@ pub struct InterfaceSettingsData<'a> {
     pub artwork_column_stretch_fit: &'a str,
     /// Auto-mode max artwork fraction of the window's short axis (0.30..=0.70).
     pub artwork_auto_max_pct: f64,
+    /// Always-Vertical artwork height as a fraction of window height (0.10..=0.80).
+    pub artwork_vertical_height_pct: f64,
 }
 
 /// Data needed by the Playback tab builder.

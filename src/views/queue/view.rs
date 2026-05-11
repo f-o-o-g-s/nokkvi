@@ -1054,6 +1054,7 @@ impl QueuePage {
             slot_list_content,
             artwork_content,
             Some(QueueMessage::ArtworkColumnDrag),
+            Some(QueueMessage::ArtworkColumnVerticalDrag),
         )
     }
 }

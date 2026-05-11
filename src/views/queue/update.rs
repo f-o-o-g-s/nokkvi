@@ -85,7 +85,7 @@ impl QueuePage {
             // arm exists only for exhaustiveness.
             QueueMessage::SetOpenMenu(_) => (Task::none(), QueueAction::None),
             QueueMessage::Roulette => (Task::none(), QueueAction::None),
-            QueueMessage::ArtworkColumnDrag(_) => {
+            QueueMessage::ArtworkColumnDrag(_) | QueueMessage::ArtworkColumnVerticalDrag(_) => {
                 // Intercepted at root before reaching this update; never reached.
                 (Task::none(), QueueAction::None)
             }

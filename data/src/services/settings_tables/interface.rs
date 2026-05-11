@@ -273,10 +273,18 @@ define_settings! {
                 category: "Artwork Column",
                 subtitle: Some(
                     "Auto: hides on narrow windows · Always: drag the handle to resize · \
+                     Always (Vertical): stack artwork above the slot list · \
                      Never: hidden everywhere",
                 ),
                 default: "Auto",
-                options: &["Auto", "Always (Native)", "Always (Stretched)", "Never"],
+                options: &[
+                    "Auto",
+                    "Always (Native)",
+                    "Always (Stretched)",
+                    "Always (Vertical Native)",
+                    "Always (Vertical Stretched)",
+                    "Never",
+                ],
                 read_field: |d| d.artwork_column_mode,
             },
         },
@@ -308,6 +316,25 @@ define_settings! {
                 default: 0.40_f64,
                 min: 0.30_f64, max: 0.70_f64, step: 0.05_f64, unit: "",
                 read_field: |d| d.artwork_auto_max_pct,
+            },
+        },
+        ArtworkVerticalHeightPctSetting {
+            key: "general.artwork_vertical_height_pct",
+            value_type: Float,
+            setter: |mgr, v: f64| mgr.set_artwork_vertical_height_pct(v as f32),
+            toml_apply: |ts, p| p.artwork_vertical_height_pct = ts.artwork_vertical_height_pct,
+            read: |src, out| out.artwork_vertical_height_pct = src.artwork_vertical_height_pct,
+            ui_meta: {
+                label: "Always-Vertical artwork height",
+                category: "Artwork Column",
+                subtitle: Some(
+                    "Fraction of window height used by the stacked artwork in \
+                     Always (Vertical Native / Stretched) modes · drag the handle \
+                     below the artwork for live resize",
+                ),
+                default: 0.40_f64,
+                min: 0.10_f64, max: 0.80_f64, step: 0.05_f64, unit: "",
+                read_field: |d| d.artwork_vertical_height_pct,
             },
         },
     ]
@@ -357,18 +384,19 @@ mod tests {
             artwork_column_mode: "Auto",
             artwork_column_stretch_fit: "Cover",
             artwork_auto_max_pct: 0.40,
+            artwork_vertical_height_pct: 0.40,
         }
     }
 
-    /// 12 entries get ui_meta — 5 Layout + 1 Views + 4 Metadata Strip + 2
-    /// Artwork Column (mode dropdown + auto-max-pct slider). The 8 ToggleSet
-    /// sub-keys (`strip_show_*`, `*_artwork_overlay`) and the conditional
-    /// `artwork_column_stretch_fit` stay hand-written in the UI items builder.
+    /// 13 entries get ui_meta — 5 Layout + 1 Views + 4 Metadata Strip + 3
+    /// Artwork Column (mode dropdown + auto-max-pct slider + vertical-height
+    /// slider). The 8 ToggleSet sub-keys (`strip_show_*`, `*_artwork_overlay`)
+    /// and the conditional `artwork_column_stretch_fit` stay hand-written.
     #[test]
-    fn build_interface_tab_settings_items_emits_twelve_rows() {
+    fn build_interface_tab_settings_items_emits_thirteen_rows() {
         let data = default_interface_data();
         let entries = build_interface_tab_settings_items(&data);
-        assert_eq!(entries.len(), 12);
+        assert_eq!(entries.len(), 13);
         for e in &entries {
             assert!(matches!(e, SettingsEntry::Item(_)));
         }
@@ -431,7 +459,14 @@ mod tests {
             "general.artwork_column_mode",
             SettingValue::Enum {
                 val: "Always (Stretched)".to_string(),
-                options: vec!["Auto", "Always (Native)", "Always (Stretched)", "Never"],
+                options: vec![
+                    "Auto",
+                    "Always (Native)",
+                    "Always (Stretched)",
+                    "Always (Vertical Native)",
+                    "Always (Vertical Stretched)",
+                    "Never",
+                ],
             },
             &mut mgr,
         );
@@ -516,7 +551,8 @@ mod tests {
         assert!(keys.contains(&"general.strip_separator"));
         assert!(keys.contains(&"general.playlists_artwork_overlay"));
         assert!(keys.contains(&"general.artwork_auto_max_pct"));
-        assert_eq!(keys.len(), 21);
+        assert!(keys.contains(&"general.artwork_vertical_height_pct"));
+        assert_eq!(keys.len(), 22);
     }
 
     /// Read-side: `dump_interface_tab_player_settings` copies the migrated

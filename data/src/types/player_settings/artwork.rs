@@ -81,12 +81,21 @@ pub enum ArtworkColumnMode {
     /// list width drops below 800px. Panel always square. (Default.)
     #[default]
     Auto,
-    /// Column has a user-defined width; image stays square inside it,
-    /// letterboxed vertically when the column is taller than wide.
+    /// Right-hand column has a user-defined width; image stays square inside
+    /// it, letterboxed vertically when the column is taller than wide.
     AlwaysNative,
-    /// Column has a user-defined width; image fills the column non-square
-    /// using the configured fit mode (Cover or Fill).
+    /// Right-hand column has a user-defined width; image fills the column
+    /// non-square using the configured fit mode (Cover or Fill).
     AlwaysStretched,
+    /// Artwork stacked above the slot list with a user-defined height
+    /// (`artwork_vertical_height_pct`). Image stays square inside the
+    /// allotted rect; letterboxing is allowed (user opted into vertical).
+    AlwaysVerticalNative,
+    /// Artwork stacked above the slot list with a user-defined height; image
+    /// fills the allotted rect via the configured stretch fit. Letterboxing
+    /// of source pixels happens inside the image via Cover/Fill rather than
+    /// inside the panel via bg0_soft bars.
+    AlwaysVerticalStretched,
     /// Column hidden everywhere.
     Never,
 }
@@ -97,6 +106,8 @@ impl ArtworkColumnMode {
         match label {
             "Always (Native)" => Self::AlwaysNative,
             "Always (Stretched)" => Self::AlwaysStretched,
+            "Always (Vertical Native)" => Self::AlwaysVerticalNative,
+            "Always (Vertical Stretched)" => Self::AlwaysVerticalStretched,
             "Never" => Self::Never,
             _ => Self::Auto,
         }
@@ -108,6 +119,8 @@ impl ArtworkColumnMode {
             Self::Auto => "Auto",
             Self::AlwaysNative => "Always (Native)",
             Self::AlwaysStretched => "Always (Stretched)",
+            Self::AlwaysVerticalNative => "Always (Vertical Native)",
+            Self::AlwaysVerticalStretched => "Always (Vertical Stretched)",
             Self::Never => "Never",
         }
     }
@@ -119,6 +132,8 @@ impl std::fmt::Display for ArtworkColumnMode {
             Self::Auto => write!(f, "auto"),
             Self::AlwaysNative => write!(f, "always_native"),
             Self::AlwaysStretched => write!(f, "always_stretched"),
+            Self::AlwaysVerticalNative => write!(f, "always_vertical_native"),
+            Self::AlwaysVerticalStretched => write!(f, "always_vertical_stretched"),
             Self::Never => write!(f, "never"),
         }
     }

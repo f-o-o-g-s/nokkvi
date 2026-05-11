@@ -78,6 +78,7 @@ impl Nokkvi {
             artwork_column_mode: crate::theme::artwork_column_mode().as_label(),
             artwork_column_stretch_fit: crate::theme::artwork_column_stretch_fit().as_label(),
             artwork_auto_max_pct: f64::from(crate::theme::artwork_auto_max_pct()),
+            artwork_vertical_height_pct: f64::from(crate::theme::artwork_vertical_height_pct()),
             verbose_config: self.verbose_config,
             artwork_resolution: self.artwork_resolution.as_label(),
         }

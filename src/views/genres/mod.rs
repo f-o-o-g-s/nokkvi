@@ -122,6 +122,8 @@ pub enum GenresMessage {
     SetOpenMenu(Option<crate::app_message::OpenMenu>),
     /// Artwork column drag handle event — intercepted at root, page never sees it.
     ArtworkColumnDrag(crate::widgets::artwork_split_handle::DragEvent),
+    /// Always-Vertical artwork drag handle event — intercepted at root.
+    ArtworkColumnVerticalDrag(crate::widgets::artwork_split_handle::DragEvent),
     /// Toggle a genres column's visibility (currently only Thumbnail).
     ToggleColumnVisible(GenresColumn),
 }

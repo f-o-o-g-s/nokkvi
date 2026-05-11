@@ -324,6 +324,7 @@ mod tests {
             artwork_column_mode: "Auto",
             artwork_column_stretch_fit: "Cover",
             artwork_auto_max_pct: 0.40,
+            artwork_vertical_height_pct: 0.40,
         };
         let entries = build_interface_items(&data);
 
@@ -334,8 +335,8 @@ mod tests {
         );
         assert_eq!(
             count_items(&entries),
-            15,
-            "Expected 15 items (... + show_labels, field_separator, artwork_column_mode, auto_max_pct); stretched mode adds the fit knob"
+            16,
+            "Expected 16 items (... + show_labels, field_separator, artwork_column_mode, auto_max_pct, vertical_height_pct); stretched mode adds the fit knob"
         );
     }
 
@@ -365,9 +366,10 @@ mod tests {
             artwork_column_mode: "Always (Stretched)",
             artwork_column_stretch_fit: "Cover",
             artwork_auto_max_pct: 0.40,
+            artwork_vertical_height_pct: 0.40,
         };
         let entries = build_interface_items(&data);
-        assert_eq!(count_items(&entries), 16);
+        assert_eq!(count_items(&entries), 17);
     }
 
     #[test]
@@ -587,6 +589,7 @@ mod tests {
             artwork_column_mode: "Auto",
             artwork_column_stretch_fit: "Cover",
             artwork_auto_max_pct: 0.40,
+            artwork_vertical_height_pct: 0.40,
         };
         let playback = crate::views::settings::items_playback::PlaybackSettingsData {
             crossfade_enabled: false,

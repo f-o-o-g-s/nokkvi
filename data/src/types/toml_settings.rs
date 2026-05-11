@@ -145,6 +145,14 @@ pub struct TomlSettings {
     /// the horizontal candidate and the portrait-fallback vertical candidate.
     #[serde(default = "default_artwork_auto_max_pct", serialize_with = "round_f32")]
     pub artwork_auto_max_pct: f32,
+    /// Always-Vertical artwork height as a fraction of window height
+    /// (0.10..=0.80). Default 0.40. Consulted by the AlwaysVerticalNative /
+    /// AlwaysVerticalStretched resolver branches.
+    #[serde(
+        default = "default_artwork_vertical_height_pct",
+        serialize_with = "round_f32"
+    )]
+    pub artwork_vertical_height_pct: f32,
 
     // -- Behavior --
     pub stable_viewport: bool,
@@ -240,6 +248,10 @@ fn default_artwork_auto_max_pct() -> f32 {
     0.40
 }
 
+fn default_artwork_vertical_height_pct() -> f32 {
+    0.40
+}
+
 /// Serialize an f32 rounded to 4 decimal places to avoid f32→f64 representation noise
 /// (e.g. 0.8999999761581421 → 0.9).
 fn round_f32<S: Serializer>(val: &f32, s: S) -> Result<S::Ok, S::Error> {
@@ -327,6 +339,7 @@ impl Default for TomlSettings {
             artwork_column_stretch_fit: ArtworkStretchFit::default(),
             artwork_column_width_pct: default_artwork_column_width_pct(),
             artwork_auto_max_pct: default_artwork_auto_max_pct(),
+            artwork_vertical_height_pct: default_artwork_vertical_height_pct(),
             stable_viewport: true,
             auto_follow_playing: true,
             light_mode: false,
@@ -441,6 +454,7 @@ impl TomlSettings {
             artwork_column_stretch_fit: ps.artwork_column_stretch_fit,
             artwork_column_width_pct: ps.artwork_column_width_pct,
             artwork_auto_max_pct: ps.artwork_auto_max_pct,
+            artwork_vertical_height_pct: ps.artwork_vertical_height_pct,
             stable_viewport: ps.stable_viewport,
             auto_follow_playing: ps.auto_follow_playing,
             light_mode: false, // Will be read from theme.light_mode or fresh default

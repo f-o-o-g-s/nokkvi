@@ -240,6 +240,10 @@ pub struct PlayerSettings {
     /// (0.30..=0.70). Drives both the horizontal candidate and the
     /// portrait-fallback vertical candidate in the Auto resolver.
     pub artwork_auto_max_pct: f32,
+    /// Always-Vertical artwork height as a fraction of window height
+    /// (0.10..=0.80). Drives `AlwaysVerticalNative` and
+    /// `AlwaysVerticalStretched` modes.
+    pub artwork_vertical_height_pct: f32,
 
     // -- System tray --
     /// Whether to register a StatusNotifierItem tray icon on the session bus.

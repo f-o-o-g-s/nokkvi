@@ -379,6 +379,11 @@ pub struct PlayerSettings {
     /// horizontal candidate and the portrait-fallback vertical candidate.
     #[serde(default = "default_artwork_auto_max_pct")]
     pub artwork_auto_max_pct: f32,
+    /// Always-Vertical artwork height as a fraction of window height
+    /// (0.10..=0.80). Default 0.40. Consulted by the AlwaysVerticalNative /
+    /// AlwaysVerticalStretched resolver branches.
+    #[serde(default = "default_artwork_vertical_height_pct")]
+    pub artwork_vertical_height_pct: f32,
 
     // -- System tray --
     /// Whether to register a system tray (StatusNotifierItem) icon.
@@ -397,6 +402,10 @@ fn default_artwork_column_width_pct() -> f32 {
 }
 
 fn default_artwork_auto_max_pct() -> f32 {
+    0.40
+}
+
+fn default_artwork_vertical_height_pct() -> f32 {
     0.40
 }
 
@@ -551,6 +560,7 @@ impl Default for PlayerSettings {
             artwork_column_stretch_fit: ArtworkStretchFit::default(),
             artwork_column_width_pct: default_artwork_column_width_pct(),
             artwork_auto_max_pct: default_artwork_auto_max_pct(),
+            artwork_vertical_height_pct: default_artwork_vertical_height_pct(),
             show_tray_icon: false,
             close_to_tray: false,
         }

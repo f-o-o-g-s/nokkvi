@@ -84,6 +84,8 @@ pub enum SimilarMessage {
     SetOpenMenu(Option<crate::app_message::OpenMenu>),
     /// Artwork column drag handle event — intercepted at root, page never sees it.
     ArtworkColumnDrag(crate::widgets::artwork_split_handle::DragEvent),
+    /// Always-Vertical artwork drag handle event — intercepted at root.
+    ArtworkColumnVerticalDrag(crate::widgets::artwork_split_handle::DragEvent),
 }
 
 /// Actions that bubble up to root for global state mutation
@@ -135,7 +137,7 @@ impl SimilarPage {
             // Routed up to root in `handle_similar` before this match runs;
             // arm exists only for exhaustiveness.
             SimilarMessage::SetOpenMenu(_) => (Task::none(), SimilarAction::None),
-            SimilarMessage::ArtworkColumnDrag(_) => {
+            SimilarMessage::ArtworkColumnDrag(_) | SimilarMessage::ArtworkColumnVerticalDrag(_) => {
                 // Intercepted at root before reaching this update; never reached.
                 (Task::none(), SimilarAction::None)
             }
@@ -605,6 +607,7 @@ impl SimilarPage {
             slot_list_content,
             artwork_content,
             Some(SimilarMessage::ArtworkColumnDrag),
+            Some(SimilarMessage::ArtworkColumnVerticalDrag),
         )
     }
 }

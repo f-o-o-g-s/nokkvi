@@ -142,10 +142,14 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
         },
         take("general.artwork_column_mode"),
         take("general.artwork_auto_max_pct"),
+        take("general.artwork_vertical_height_pct"),
     ];
 
-    // Stretched-only knob: image fit applies only when the column is stretched.
-    if data.artwork_column_mode == "Always (Stretched)" {
+    // Stretched-only knob: image fit applies only when the column is
+    // stretched (horizontal or vertical).
+    if data.artwork_column_mode == "Always (Stretched)"
+        || data.artwork_column_mode == "Always (Vertical Stretched)"
+    {
         items.push(SettingItem::enum_val(
             meta!(
                 "general.artwork_column_stretch_fit",

@@ -238,6 +238,10 @@ impl SettingsService {
         /// Set the Auto-mode max artwork fraction (0.30..=0.70)
         set_artwork_auto_max_pct, f32
     );
+    delegate_setter!(
+        /// Set the Always-Vertical artwork height fraction (0.10..=0.80)
+        set_artwork_vertical_height_pct, f32
+    );
 
     // -- Per-view column visibility --
     delegate_setter!(set_queue_show_stars, bool);

@@ -107,9 +107,11 @@ struct UiModeFlags {
     songs_artwork_overlay: AtomicBool,
     /// Whether the metadata text overlay is rendered on the large artwork in Playlists view
     playlists_artwork_overlay: AtomicBool,
-    /// Artwork column display mode: 0=Auto, 1=AlwaysNative, 2=AlwaysStretched, 3=Never
+    /// Artwork column display mode: 0=Auto, 1=AlwaysNative, 2=AlwaysStretched,
+    /// 3=Never, 4=AlwaysVerticalNative, 5=AlwaysVerticalStretched.
     artwork_column_mode: AtomicU8,
-    /// Artwork stretch fit when column mode is AlwaysStretched: 0=Cover, 1=Fill
+    /// Artwork stretch fit when column mode is AlwaysStretched or
+    /// AlwaysVerticalStretched: 0=Cover, 1=Fill.
     artwork_column_stretch_fit: AtomicU8,
     /// Artwork column width as fraction of window width (f32 bits, 0.05..=0.80)
     artwork_column_width_pct: AtomicU32,
@@ -118,6 +120,10 @@ struct UiModeFlags {
     /// base_slot_list_layout.rs to size both the horizontal candidate and the
     /// vertical-portrait fallback.
     artwork_auto_max_pct: AtomicU32,
+    /// Always-Vertical artwork height as fraction of window height
+    /// (f32 bits, 0.10..=0.80). Read by the Always-Vertical resolver branch
+    /// in base_slot_list_layout.rs to size the stacked artwork.
+    artwork_vertical_height_pct: AtomicU32,
 }
 
 static UI_MODE: UiModeFlags = UiModeFlags {
@@ -148,6 +154,8 @@ static UI_MODE: UiModeFlags = UiModeFlags {
     artwork_column_width_pct: AtomicU32::new(0x3ECC_CCCD),
     // f32::to_bits(0.40) = 0x3ECCCCCD — default Auto-mode max percent.
     artwork_auto_max_pct: AtomicU32::new(0x3ECC_CCCD),
+    // f32::to_bits(0.40) = 0x3ECCCCCD — default Always-Vertical height pct.
+    artwork_vertical_height_pct: AtomicU32::new(0x3ECC_CCCD),
 };
 
 /// Reload theme from theme file (hot-reload support).
@@ -722,6 +730,8 @@ pub(crate) fn artwork_column_mode() -> ArtworkColumnMode {
         1 => ArtworkColumnMode::AlwaysNative,
         2 => ArtworkColumnMode::AlwaysStretched,
         3 => ArtworkColumnMode::Never,
+        4 => ArtworkColumnMode::AlwaysVerticalNative,
+        5 => ArtworkColumnMode::AlwaysVerticalStretched,
         _ => ArtworkColumnMode::Auto,
     }
 }
@@ -734,6 +744,8 @@ pub(crate) fn set_artwork_column_mode(mode: ArtworkColumnMode) {
         ArtworkColumnMode::AlwaysNative => 1,
         ArtworkColumnMode::AlwaysStretched => 2,
         ArtworkColumnMode::Never => 3,
+        ArtworkColumnMode::AlwaysVerticalNative => 4,
+        ArtworkColumnMode::AlwaysVerticalStretched => 5,
     };
     UI_MODE.artwork_column_mode.store(val, Ordering::Relaxed);
 }
@@ -788,6 +800,22 @@ pub(crate) fn set_artwork_auto_max_pct(pct: f32) {
     let clamped = pct.clamp(0.30, 0.70);
     UI_MODE
         .artwork_auto_max_pct
+        .store(clamped.to_bits(), Ordering::Relaxed);
+}
+
+/// Returns the Always-Vertical artwork height fraction (0.10..=0.80). Read
+/// by the resolver for AlwaysVerticalNative and AlwaysVerticalStretched.
+#[inline]
+pub(crate) fn artwork_vertical_height_pct() -> f32 {
+    f32::from_bits(UI_MODE.artwork_vertical_height_pct.load(Ordering::Relaxed))
+}
+
+/// Set the Always-Vertical artwork height fraction. Clamps into [0.10, 0.80].
+#[inline]
+pub(crate) fn set_artwork_vertical_height_pct(pct: f32) {
+    let clamped = pct.clamp(0.10, 0.80);
+    UI_MODE
+        .artwork_vertical_height_pct
         .store(clamped.to_bits(), Ordering::Relaxed);
 }
 

@@ -393,6 +393,7 @@ impl ArtistsPage {
             slot_list_content,
             artwork_content,
             Some(ArtistsMessage::ArtworkColumnDrag),
+            Some(ArtistsMessage::ArtworkColumnVerticalDrag),
         )
     }
 
