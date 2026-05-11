@@ -10,11 +10,22 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+### Removed
+
+## v0.3.15 — 2026-05-10
+
+### Changed
+
+- Memory usage on long sessions roughly halves. The glibc malloc-arena cap is now set to 2 at startup, so freed pages return to the OS instead of getting parked in per-tokio-worker arenas; a typical session now sits around 450–700 MiB resident over a day of playback instead of climbing past 1 GiB.
+- Log files are dramatically smaller. The per-tick render and stream-health heartbeats — together about 58% of a typical session's log volume — are off at the default level (stream-health still emits on underruns or empty buffers), and a handful of UI focus, task-start, and duplicate-layer lines moved to trace. A 60-minute session now produces roughly a quarter as many lines with the same diagnostic content.
+- New `RUST_LOG` escape hatch is documented for verbose bug-report logs (e.g. `RUST_LOG=trace nokkvi`). The build doc's stale log-path reference is corrected to `~/.local/state/nokkvi/nokkvi.log`.
+
+### Fixed
+
 - Cold-start visit to Genres no longer briefly shows slot thumbnails and then drops them to gray — the eager collage mini prefetch that evicted visible-viewport entries from the bounded artwork LRU is gone.
 - Scrollbar drag or rapid scroll on Genres / Playlists no longer leaves the right-side 3×3 collage panel showing gray tiles — collage fetches retry on Navidrome's request-throttle 429s, a per-app concurrent-fetch cap (16) keeps bursts under the server's backlog, and only the centered slot fans out the full 9-tile collage instead of every visible row.
 - Right-side artwork panel now keeps up with rapid viewport changes — holding Tab, dragging the scrollbar, or letting a roulette spin decelerate through slots refreshes the panel each time the centered slot changes (instead of staying stuck on whatever was cached when the motion started), and during fast cruise the slot-list mini fills in as a blurry placeholder until the full-res image arrives.
-
-### Removed
+- Subsonic auth tokens no longer appear in the local log file — four log call sites that emitted the full Navidrome stream URL now strip the `s=`/`t=` salt-and-MD5 pair used for authentication. The rest of the URL (track id, username, API version, client) is preserved so logs stay useful for bug reports.
 
 ## v0.3.14 — 2026-05-10
 
