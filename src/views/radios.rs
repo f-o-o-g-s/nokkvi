@@ -237,11 +237,19 @@ impl RadiosPage {
             on_roulette: Some(RadiosMessage::Roulette),
         });
 
+        use crate::widgets::slot_list::{
+            SLOT_LIST_SLOT_PADDING, SlotListConfig, SlotListSlotStyle, chrome_height_with_header,
+            slot_list_text_column, slot_list_view_with_scroll,
+        };
+
+        let slot_list_chrome = chrome_height_with_header();
+
         use crate::widgets::base_slot_list_layout::BaseSlotListLayoutConfig;
         let layout_config = BaseSlotListLayoutConfig {
             window_width: data.window_width,
             window_height: data.window_height,
             show_artwork_column: false, // No artwork for radio stations
+            slot_list_chrome,
         };
 
         if data.loading {
@@ -256,15 +264,8 @@ impl RadiosPage {
             );
         }
 
-        // Configure slot list
-        use crate::widgets::slot_list::{
-            SLOT_LIST_SLOT_PADDING, SlotListConfig, SlotListSlotStyle, chrome_height_with_header,
-            slot_list_text_column, slot_list_view_with_scroll,
-        };
-
-        let config =
-            SlotListConfig::with_dynamic_slots(data.window_height, chrome_height_with_header())
-                .with_modifiers(data.modifiers);
+        let config = SlotListConfig::with_dynamic_slots(data.window_height, slot_list_chrome)
+            .with_modifiers(data.modifiers);
 
         let stations = data.stations.as_ref();
         let open_menu_for_rows = data.open_menu;

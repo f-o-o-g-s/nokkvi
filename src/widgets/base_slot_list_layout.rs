@@ -11,11 +11,11 @@ use nokkvi_data::types::player_settings::{ArtworkColumnMode, ArtworkStretchFit};
 
 use crate::theme;
 
-/// Wrap an artwork panel element with a 1px `bg3` stripe on its left edge,
-/// visually separating it from the slot list column.
+/// Wrap an artwork panel element with a 2 px `bg1` stripe on its left edge,
+/// visually separating it from the slot list column in Horizontal mode.
 fn with_left_stripe<'a, Message: 'a>(artwork: Element<'a, Message>) -> Element<'a, Message> {
     let stripe = container(iced::widget::Space::new())
-        .width(Length::Fixed(2.0))
+        .width(Length::Fixed(HORIZONTAL_ARTWORK_STRIPE))
         .height(Length::Fill)
         .style(|_| container::Style {
             background: Some(theme::bg1().into()),
@@ -33,6 +33,13 @@ pub(crate) fn artwork_outer_bg() -> Color {
 /// Minimum slot list width before artwork column hides (Auto mode only)
 pub(crate) const MIN_SLOT_LIST_WIDTH: f32 = 800.0;
 
+/// Minimum slot list height before the vertical Auto-mode fallback hides the
+/// stacked artwork. Mirrors `MIN_SLOT_LIST_WIDTH` on the vertical axis but
+/// uses a smaller floor — the player bar + view header already eat ~150 px of
+/// chrome, so requiring 400 px below the artwork keeps room for a handful of
+/// slot rows at the comfortable target row height.
+pub(crate) const MIN_SLOT_LIST_HEIGHT: f32 = 400.0;
+
 /// Maximum artwork panel size as percentage of window width (for width-based calculation)
 pub(crate) const ARTWORK_MAX_WIDTH_PERCENT: f32 = 0.40;
 
@@ -42,12 +49,36 @@ pub(crate) const ARTWORK_SQUARE_WINDOW_PERCENT: f32 = 0.60;
 /// Maximum artwork panel size in pixels
 pub(crate) const ARTWORK_MAX_SIZE: f32 = 1000.0;
 
+/// Thickness of the `bg1` divider on the left edge of the artwork column in
+/// Horizontal orientation. Vertical orientation uses padding-based separation
+/// instead (see `VERTICAL_ARTWORK_BOTTOM_PAD`).
+pub(crate) const HORIZONTAL_ARTWORK_STRIPE: f32 = 2.0;
+
+/// Left/right inset for the Vertical-orientation artwork — matches the 10 px
+/// horizontal padding `slot_list_background_container` applies to the slot
+/// list, so the artwork's edges line up vertically with the slot rows.
+pub(crate) const VERTICAL_ARTWORK_SIDE_PAD: f32 = 10.0;
+
+/// Bottom inset for the Vertical-orientation artwork — matches
+/// `SLOT_LIST_CONTAINER_PADDING` (10 px) so the gap below the artwork mirrors
+/// the gap above the player bar. Top inset is 0 because the view header
+/// already provides vertical breathing room.
+pub(crate) const VERTICAL_ARTWORK_BOTTOM_PAD: f32 = 10.0;
+
 /// Configuration for base slot list layout
 #[derive(Debug, Clone)]
 pub(crate) struct BaseSlotListLayoutConfig {
     pub window_width: f32,
     pub window_height: f32,
     pub show_artwork_column: bool,
+    /// Slot-list chrome the view passes to `SlotListConfig::with_dynamic_slots`
+    /// (i.e. `chrome_height_with_select_header(select_visible)`). The vertical
+    /// orientation uses this to pin the slot-list rect to a Fixed height that
+    /// exactly matches the slot-count math — without it, iced's flex layout
+    /// can give the slot list a few pixels more than `with_dynamic_slots`
+    /// expected, producing a partial slot at the bottom. Horizontal /
+    /// Always-mode layouts ignore this field.
+    pub slot_list_chrome: f32,
 }
 
 /// How the image renders inside the artwork column.
@@ -62,18 +93,34 @@ pub(crate) enum PanelKind {
     Stretched { fit: ContentFit },
 }
 
-/// Resolved layout for the artwork column.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct ArtworkLayout {
-    /// Outer column width (the row gives this many pixels to the artwork side).
-    pub column_width: f32,
-    /// How the panel image renders inside that column.
-    pub panel_kind: PanelKind,
+/// Where the artwork panel sits relative to the slot list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ArtworkOrientation {
+    /// Artwork in a column to the right of the slot list (default). Used by
+    /// every mode except the Auto-mode portrait fallback.
+    Horizontal,
+    /// Artwork stacked above the slot list. Auto mode only — triggered when
+    /// the horizontal candidate would leave < `MIN_SLOT_LIST_WIDTH` for the
+    /// list and the window is taller than it is wide.
+    Vertical,
 }
 
-/// Resolve the artwork-column layout from window size, view config, and the
-/// user's display-mode atomic. Returns `None` when the column should not be
-/// shown (Never mode, Auto leftover < 800px, or `show_artwork_column = false`).
+/// Resolved layout for the artwork panel.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ArtworkLayout {
+    /// Size of the artwork panel in the constraining direction:
+    /// column width in `Horizontal`, row height in `Vertical`.
+    pub extent: f32,
+    /// How the panel image renders inside its allotted rect.
+    pub panel_kind: PanelKind,
+    /// Side of the slot list the artwork occupies.
+    pub orientation: ArtworkOrientation,
+}
+
+/// Resolve the artwork-panel layout from window size, view config, and the
+/// user's display-mode atomic. Returns `None` when the panel should not be
+/// shown (Never mode, Auto with neither horizontal nor vertical fit, or
+/// `show_artwork_column = false`).
 pub(crate) fn resolve_artwork_layout(config: &BaseSlotListLayoutConfig) -> Option<ArtworkLayout> {
     if !config.show_artwork_column {
         return None;
@@ -82,31 +129,60 @@ pub(crate) fn resolve_artwork_layout(config: &BaseSlotListLayoutConfig) -> Optio
     match theme::artwork_column_mode() {
         ArtworkColumnMode::Never => None,
         ArtworkColumnMode::Auto => {
-            // Match QML BaseSlotListView.qml formula (lines 453-456)
+            // Horizontal candidate — original QML BaseSlotListView formula.
             let width_based_size =
                 (config.window_width * ARTWORK_MAX_WIDTH_PERCENT).min(ARTWORK_MAX_SIZE);
             let height_based_size = config.window_height;
             let is_square_window = height_based_size >= width_based_size;
 
-            let square_size = if is_square_window {
+            let h_square = if is_square_window {
                 height_based_size.min(config.window_width * ARTWORK_SQUARE_WINDOW_PERCENT)
             } else {
                 width_based_size.min(height_based_size)
             };
 
-            let remaining_slot_list_width = config.window_width - square_size;
-            if remaining_slot_list_width < MIN_SLOT_LIST_WIDTH {
-                return None;
+            if config.window_width - h_square >= MIN_SLOT_LIST_WIDTH {
+                return Some(ArtworkLayout {
+                    extent: h_square,
+                    panel_kind: PanelKind::Square,
+                    orientation: ArtworkOrientation::Horizontal,
+                });
             }
 
-            Some(ArtworkLayout {
-                column_width: square_size,
-                panel_kind: PanelKind::Square,
-            })
+            // Horizontal doesn't fit. Try the vertical fallback on portrait
+            // windows: mirror the formula on the other axis. The artwork is
+            // inset by `VERTICAL_ARTWORK_SIDE_PAD` on each side to line up
+            // with the slot rows, so the available width for the square is
+            // `window_width - 2 * pad`. Only triggers when the height-based
+            // square is at least that wide — otherwise the panel would show
+            // `bg0_soft` letterbox bars inside the inset, which looks
+            // awkward; hide instead.
+            if config.window_height > config.window_width {
+                let inset_width = (config.window_width - 2.0 * VERTICAL_ARTWORK_SIDE_PAD).max(0.0);
+                let v_square_uncapped =
+                    (config.window_height * ARTWORK_MAX_WIDTH_PERCENT).min(ARTWORK_MAX_SIZE);
+
+                if v_square_uncapped >= inset_width {
+                    let v_square = inset_width.min(ARTWORK_MAX_SIZE);
+
+                    if config.window_height - v_square - VERTICAL_ARTWORK_BOTTOM_PAD
+                        >= MIN_SLOT_LIST_HEIGHT
+                    {
+                        return Some(ArtworkLayout {
+                            extent: v_square,
+                            panel_kind: PanelKind::Square,
+                            orientation: ArtworkOrientation::Vertical,
+                        });
+                    }
+                }
+            }
+
+            None
         }
         ArtworkColumnMode::AlwaysNative => Some(ArtworkLayout {
-            column_width: always_column_width(config.window_width),
+            extent: always_column_width(config.window_width),
             panel_kind: PanelKind::Square,
+            orientation: ArtworkOrientation::Horizontal,
         }),
         ArtworkColumnMode::AlwaysStretched => {
             let fit = match theme::artwork_column_stretch_fit() {
@@ -114,10 +190,25 @@ pub(crate) fn resolve_artwork_layout(config: &BaseSlotListLayoutConfig) -> Optio
                 ArtworkStretchFit::Fill => ContentFit::Fill,
             };
             Some(ArtworkLayout {
-                column_width: always_column_width(config.window_width),
+                extent: always_column_width(config.window_width),
                 panel_kind: PanelKind::Stretched { fit },
+                orientation: ArtworkOrientation::Horizontal,
             })
         }
+    }
+}
+
+/// Extra slot-list chrome consumed when the artwork is vertically stacked
+/// above the list. Slot-list row math (`SlotListConfig::with_dynamic_slots`)
+/// works in absolute pixels — without this adjustment, slot rows would render
+/// too tall and overflow behind the vertical artwork. Returns 0 in every
+/// other configuration (Horizontal, hidden, `show_artwork_column = false`).
+pub(crate) fn vertical_artwork_chrome(config: &BaseSlotListLayoutConfig) -> f32 {
+    match resolve_artwork_layout(config) {
+        Some(layout) if layout.orientation == ArtworkOrientation::Vertical => {
+            layout.extent + VERTICAL_ARTWORK_BOTTOM_PAD
+        }
+        _ => 0.0,
     }
 }
 
@@ -509,75 +600,18 @@ where
     let layout = resolve_artwork_layout(config);
 
     if let (Some(layout), Some(artwork)) = (layout, artwork_content) {
-        let mode = theme::artwork_column_mode();
-        let is_always = matches!(
-            mode,
-            ArtworkColumnMode::AlwaysNative | ArtworkColumnMode::AlwaysStretched
-        );
-
-        // In Auto mode, pass the artwork through directly so the row sizes
-        // itself to the panel's natural square (the panel's responsive
-        // returns a Fixed-size square via Length::Shrink). In always modes,
-        // wrap with Length::Fixed(column_width) so the user-tuned width is
-        // authoritative — the panel inside will square or stretch to fit.
-        let artwork_side_inner: Element<'a, Message> = if is_always {
-            container(artwork)
-                .width(Length::Fixed(layout.column_width))
-                .height(Length::Fill)
-                .align_x(Alignment::Center)
-                .align_y(Alignment::Center)
-                .style(|_| container::Style {
-                    background: Some(artwork_outer_bg().into()),
-                    ..Default::default()
-                })
-                .into()
-        } else {
-            artwork
-        };
-
-        // Drag handle only in always modes — suppressed in Auto.
-        let handle: Option<Element<'a, Message>> = if is_always {
-            on_drag.map(|f| {
-                crate::widgets::artwork_split_handle::artwork_split_handle_element(
-                    config.window_width,
-                    f,
-                )
-            })
-        } else {
-            None
-        };
-
-        let artwork_side: Element<'a, Message> = if let Some(handle_elem) = handle {
-            row![
-                handle_elem,
-                container(iced::widget::Space::new())
-                    .width(Length::Fixed(2.0))
-                    .height(Length::Fill)
-                    .style(|_| container::Style {
-                        background: Some(theme::bg1().into()),
-                        ..Default::default()
-                    }),
-                artwork_side_inner
-            ]
-            .spacing(0)
-            .height(Length::Fill)
-            .into()
-        } else {
-            with_left_stripe(artwork_side_inner)
-        };
-
-        row![
-            column![header, slot_list_content]
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .spacing(0),
-            artwork_side
-        ]
-        .align_y(Alignment::Start)
-        .spacing(0)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+        match layout.orientation {
+            ArtworkOrientation::Horizontal => {
+                horizontal_layout(config, layout, header, slot_list_content, artwork, on_drag)
+            }
+            ArtworkOrientation::Vertical => {
+                // Auto-mode portrait fallback never reaches the drag handle;
+                // it's a property of Always modes which always resolve to
+                // Horizontal. The `on_drag` argument is intentionally dropped.
+                let _ = on_drag;
+                vertical_layout(config, layout, header, slot_list_content, artwork)
+            }
+        }
     } else {
         // Single column: just slot list
         column![header, slot_list_content]
@@ -586,6 +620,155 @@ where
             .spacing(0)
             .into()
     }
+}
+
+/// Original horizontal layout — artwork in a right-hand column, drag handle
+/// available in Always modes.
+fn horizontal_layout<'a, Message, F>(
+    config: &BaseSlotListLayoutConfig,
+    layout: ArtworkLayout,
+    header: Element<'a, Message>,
+    slot_list_content: Element<'a, Message>,
+    artwork: Element<'a, Message>,
+    on_drag: Option<F>,
+) -> Element<'a, Message>
+where
+    Message: 'a,
+    F: Fn(crate::widgets::artwork_split_handle::DragEvent) -> Message + Clone + 'a,
+{
+    let mode = theme::artwork_column_mode();
+    let is_always = matches!(
+        mode,
+        ArtworkColumnMode::AlwaysNative | ArtworkColumnMode::AlwaysStretched
+    );
+
+    // In Auto mode, pass the artwork through directly so the row sizes
+    // itself to the panel's natural square (the panel's responsive
+    // returns a Fixed-size square via Length::Shrink). In always modes,
+    // wrap with Length::Fixed(extent) so the user-tuned width is
+    // authoritative — the panel inside will square or stretch to fit.
+    let artwork_side_inner: Element<'a, Message> = if is_always {
+        container(artwork)
+            .width(Length::Fixed(layout.extent))
+            .height(Length::Fill)
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center)
+            .style(|_| container::Style {
+                background: Some(artwork_outer_bg().into()),
+                ..Default::default()
+            })
+            .into()
+    } else {
+        artwork
+    };
+
+    // Drag handle only in always modes — suppressed in Auto.
+    let handle: Option<Element<'a, Message>> = if is_always {
+        on_drag.map(|f| {
+            crate::widgets::artwork_split_handle::artwork_split_handle_element(
+                config.window_width,
+                f,
+            )
+        })
+    } else {
+        None
+    };
+
+    let artwork_side: Element<'a, Message> = if let Some(handle_elem) = handle {
+        row![
+            handle_elem,
+            container(iced::widget::Space::new())
+                .width(Length::Fixed(HORIZONTAL_ARTWORK_STRIPE))
+                .height(Length::Fill)
+                .style(|_| container::Style {
+                    background: Some(theme::bg1().into()),
+                    ..Default::default()
+                }),
+            artwork_side_inner
+        ]
+        .spacing(0)
+        .height(Length::Fill)
+        .into()
+    } else {
+        with_left_stripe(artwork_side_inner)
+    };
+
+    row![
+        column![header, slot_list_content]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .spacing(0),
+        artwork_side
+    ]
+    .align_y(Alignment::Start)
+    .spacing(0)
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
+}
+
+/// Auto-mode portrait fallback — artwork stacked above the slot list,
+/// inset by `VERTICAL_ARTWORK_SIDE_PAD` left and right so its edges line up
+/// with the slot rows, and `VERTICAL_ARTWORK_BOTTOM_PAD` below to create a
+/// clean gap before the list starts. Top padding stays 0 because the view
+/// header above already provides vertical breathing room.
+fn vertical_layout<'a, Message: 'a>(
+    config: &BaseSlotListLayoutConfig,
+    layout: ArtworkLayout,
+    header: Element<'a, Message>,
+    slot_list_content: Element<'a, Message>,
+    artwork: Element<'a, Message>,
+) -> Element<'a, Message> {
+    // Inner panel for the centered square artwork. The responsive widget
+    // inside resolves to a `min(w, h)` square; with `extent == inset_width`
+    // (guaranteed by the resolver), the square exactly fills this panel —
+    // no `bg0_soft` letterbox sides visible.
+    let artwork_panel = container(artwork)
+        .width(Length::Fill)
+        .height(Length::Fixed(layout.extent))
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .style(|_| container::Style {
+            background: Some(artwork_outer_bg().into()),
+            ..Default::default()
+        });
+
+    // Outer wrapper that paints the slot-list `bg0_hard` background in the
+    // left/right/bottom inset, so the artwork sits inside a margin that
+    // visually matches the slot rows' inset.
+    let artwork_side = container(artwork_panel)
+        .width(Length::Fill)
+        .padding(iced::Padding {
+            top: 0.0,
+            right: VERTICAL_ARTWORK_SIDE_PAD,
+            bottom: VERTICAL_ARTWORK_BOTTOM_PAD,
+            left: VERTICAL_ARTWORK_SIDE_PAD,
+        })
+        .style(theme::container_bg0_hard);
+
+    // Pin the slot-list rect to a Fixed height that matches what
+    // `SlotListConfig::with_dynamic_slots` budgeted for. The view passes
+    // its slot-list chrome via `config.slot_list_chrome`; subtracting that
+    // plus the artwork side (`extent + bottom_pad`) from `window_height`
+    // yields the exact slot-list rect the slot-count math expects. Using
+    // `Fill` here lets iced's flex layout drift by a few pixels and
+    // produce a partial slot at the bottom — Fixed locks the rect to the
+    // slot math.
+    let slot_list_height = (config.window_height
+        - config.slot_list_chrome
+        - layout.extent
+        - VERTICAL_ARTWORK_BOTTOM_PAD)
+        .max(0.0);
+
+    let slot_list_pinned = container(slot_list_content)
+        .width(Length::Fill)
+        .height(Length::Fixed(slot_list_height));
+
+    column![header, artwork_side, slot_list_pinned]
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .spacing(0)
+        .into()
 }
 
 #[cfg(test)]
@@ -609,6 +792,10 @@ mod tests {
             window_width: w,
             window_height: h,
             show_artwork_column: show,
+            // Tests for `resolve_artwork_layout` / `vertical_artwork_chrome`
+            // don't care about the slot-list rect — they exercise the
+            // artwork-resolution math only.
+            slot_list_chrome: 0.0,
         }
     }
 
@@ -625,15 +812,51 @@ mod tests {
         // Wide landscape: 1920 wide → leftover = 1920 - min(768, 1080) = 1152 ≥ 800
         let l = resolve_artwork_layout(&cfg(1920.0, 1080.0, true)).expect("should show");
         assert!(matches!(l.panel_kind, PanelKind::Square));
-        assert!(l.column_width > 0.0);
+        assert_eq!(l.orientation, ArtworkOrientation::Horizontal);
+        assert!(l.extent > 0.0);
     }
 
     #[test]
-    fn auto_narrow_window_hides() {
+    fn auto_narrow_landscape_window_hides() {
         let _g = lock_atomics();
         reset_atomics();
-        // 1100 wide → max width-based = 440, leftover = 660 < 800 → hide
+        // 1100 × 800 → leftover width too small AND not portrait → hide
         assert!(resolve_artwork_layout(&cfg(1100.0, 800.0, true)).is_none());
+    }
+
+    #[test]
+    fn auto_tall_skinny_window_returns_vertical_inset_to_slot_list_padding() {
+        let _g = lock_atomics();
+        reset_atomics();
+        // Very tall + skinny window: 530 × 1430. Inset width = 530 - 20 = 510.
+        // height × 0.40 = 572 ≥ 510 so the artwork fills the inset width with
+        // no letterbox. extent = min(510, 1000) = 510. Leftover height
+        // 1430 - 510 - 10 = 910 ≥ 400.
+        let l = resolve_artwork_layout(&cfg(530.0, 1430.0, true)).expect("should show");
+        assert_eq!(l.orientation, ArtworkOrientation::Vertical);
+        assert!(matches!(l.panel_kind, PanelKind::Square));
+        assert!((l.extent - 510.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn auto_portrait_hides_when_artwork_would_letterbox() {
+        let _g = lock_atomics();
+        reset_atomics();
+        // 766 × 1370 is portrait but height × 0.40 = 548 < inset width
+        // (766 - 20 = 746), so the height-based square wouldn't fill the
+        // inset — the panel would show `bg0_soft` bars on the sides inside
+        // the inset. Hide instead of showing the letterboxed panel.
+        assert!(resolve_artwork_layout(&cfg(766.0, 1370.0, true)).is_none());
+    }
+
+    #[test]
+    fn auto_portrait_hides_when_list_too_short() {
+        let _g = lock_atomics();
+        reset_atomics();
+        // 220 × 500: passes the letterbox check (500 × 0.40 = 200 ≥ inset
+        // 220 - 20 = 200) but leftover height 500 - 200 - 10 = 290 <
+        // MIN_SLOT_LIST_HEIGHT (400) → hide.
+        assert!(resolve_artwork_layout(&cfg(220.0, 500.0, true)).is_none());
     }
 
     #[test]
@@ -659,8 +882,9 @@ mod tests {
         theme::set_artwork_column_mode(ArtworkColumnMode::AlwaysNative);
         theme::set_artwork_column_width_pct(0.30);
         let l = resolve_artwork_layout(&cfg(1000.0, 800.0, true)).expect("should show");
-        assert!((l.column_width - 300.0).abs() < 1e-3);
+        assert!((l.extent - 300.0).abs() < 1e-3);
         assert!(matches!(l.panel_kind, PanelKind::Square));
+        assert_eq!(l.orientation, ArtworkOrientation::Horizontal);
         reset_atomics();
     }
 
@@ -677,6 +901,7 @@ mod tests {
                 fit: ContentFit::Fill
             }
         ));
+        assert_eq!(l.orientation, ArtworkOrientation::Horizontal);
         reset_atomics();
     }
 
@@ -691,6 +916,21 @@ mod tests {
     }
 
     #[test]
+    fn always_modes_stay_horizontal_on_portrait() {
+        let _g = lock_atomics();
+        reset_atomics();
+        // Same portrait dims as the Auto vertical test — Always modes ignore
+        // the orientation fallback and keep the right-hand column.
+        theme::set_artwork_column_mode(ArtworkColumnMode::AlwaysNative);
+        let l = resolve_artwork_layout(&cfg(766.0, 1370.0, true)).expect("should show");
+        assert_eq!(l.orientation, ArtworkOrientation::Horizontal);
+        theme::set_artwork_column_mode(ArtworkColumnMode::AlwaysStretched);
+        let l = resolve_artwork_layout(&cfg(766.0, 1370.0, true)).expect("should show");
+        assert_eq!(l.orientation, ArtworkOrientation::Horizontal);
+        reset_atomics();
+    }
+
+    #[test]
     fn always_column_width_clamped_below_max_size() {
         let _g = lock_atomics();
         reset_atomics();
@@ -698,7 +938,7 @@ mod tests {
         theme::set_artwork_column_width_pct(0.80);
         // Width 4000 × 0.80 = 3200, clamped to ARTWORK_MAX_SIZE (1000)
         let l = resolve_artwork_layout(&cfg(4000.0, 1080.0, true)).expect("should show");
-        assert!((l.column_width - ARTWORK_MAX_SIZE).abs() < 1e-3);
+        assert!((l.extent - ARTWORK_MAX_SIZE).abs() < 1e-3);
         reset_atomics();
     }
 
@@ -710,8 +950,44 @@ mod tests {
         theme::set_artwork_column_width_pct(0.80);
         // Window 600 × 0.80 = 480, below ARTWORK_MAX_SIZE so stays at 480.
         let l = resolve_artwork_layout(&cfg(600.0, 800.0, true)).expect("should show");
-        assert!((l.column_width - 480.0).abs() < 1e-3);
+        assert!((l.extent - 480.0).abs() < 1e-3);
         reset_atomics();
+    }
+
+    #[test]
+    fn vertical_artwork_chrome_returns_zero_on_landscape() {
+        let _g = lock_atomics();
+        reset_atomics();
+        // Landscape Auto resolves to Horizontal — no extra slot-list chrome.
+        assert_eq!(vertical_artwork_chrome(&cfg(1920.0, 1080.0, true)), 0.0);
+    }
+
+    #[test]
+    fn vertical_artwork_chrome_returns_extent_plus_bottom_pad_on_tall_skinny() {
+        let _g = lock_atomics();
+        reset_atomics();
+        // Tall-skinny Auto resolves to Vertical with extent = inset width.
+        // Chrome = extent + VERTICAL_ARTWORK_BOTTOM_PAD.
+        let chrome = vertical_artwork_chrome(&cfg(530.0, 1430.0, true));
+        assert!((chrome - (510.0 + VERTICAL_ARTWORK_BOTTOM_PAD)).abs() < 1e-3);
+    }
+
+    #[test]
+    fn vertical_artwork_chrome_returns_zero_when_portrait_would_letterbox() {
+        let _g = lock_atomics();
+        reset_atomics();
+        // 766 × 1370 is portrait but not tall-skinny enough to fill the
+        // window width — the helper must return 0 so the slot list doesn't
+        // budget chrome for an artwork that isn't going to render.
+        assert_eq!(vertical_artwork_chrome(&cfg(766.0, 1370.0, true)), 0.0);
+    }
+
+    #[test]
+    fn vertical_artwork_chrome_zero_when_hidden() {
+        let _g = lock_atomics();
+        reset_atomics();
+        // show_artwork_column = false: no chrome regardless of dims.
+        assert_eq!(vertical_artwork_chrome(&cfg(530.0, 1430.0, false)), 0.0);
     }
 
     #[test]

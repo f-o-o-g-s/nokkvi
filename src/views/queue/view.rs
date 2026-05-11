@@ -480,25 +480,6 @@ impl QueuePage {
             header,
         );
 
-        // Create layout config BEFORE empty checks to route empty states through
-        // base_slot_list_layout, preserving the widget tree structure and search focus
-        use crate::widgets::base_slot_list_layout::BaseSlotListLayoutConfig;
-        let layout_config = BaseSlotListLayoutConfig {
-            window_width: data.window_width,
-            window_height: data.window_height,
-            show_artwork_column: true,
-        };
-
-        // If no songs in filtered results, show appropriate message (like albums view)
-        if data.queue_songs.is_empty() {
-            let message = if data.total_queue_count == 0 {
-                "Queue is empty."
-            } else {
-                "No songs match your search."
-            };
-            return widgets::base_slot_list_empty_state(header, message, &layout_config);
-        }
-
         // Configure slot list with queue-specific chrome height (with view header now)
         // Edit mode adds a 44px bar + context bar adds 32px bar; account for the tallest so
         // the last slot isn't shorter than the rest.
@@ -520,8 +501,34 @@ impl QueuePage {
         } else {
             chrome_height
         };
-        let config = SlotListConfig::with_dynamic_slots(data.window_height, chrome_height)
-            .with_modifiers(data.modifiers);
+
+        // Create layout config BEFORE empty checks to route empty states through
+        // base_slot_list_layout, preserving the widget tree structure and search focus
+        use crate::widgets::base_slot_list_layout::BaseSlotListLayoutConfig;
+        let layout_config = BaseSlotListLayoutConfig {
+            window_width: data.window_width,
+            window_height: data.window_height,
+            show_artwork_column: true,
+            slot_list_chrome: chrome_height,
+        };
+
+        // If no songs in filtered results, show appropriate message (like albums view)
+        if data.queue_songs.is_empty() {
+            let message = if data.total_queue_count == 0 {
+                "Queue is empty."
+            } else {
+                "No songs match your search."
+            };
+            return widgets::base_slot_list_empty_state(header, message, &layout_config);
+        }
+
+        let vertical_artwork_chrome =
+            crate::widgets::base_slot_list_layout::vertical_artwork_chrome(&layout_config);
+        let config = SlotListConfig::with_dynamic_slots(
+            data.window_height,
+            chrome_height + vertical_artwork_chrome,
+        )
+        .with_modifiers(data.modifiers);
 
         // Capture values needed in closure
         let _scale_factor = data.scale_factor;

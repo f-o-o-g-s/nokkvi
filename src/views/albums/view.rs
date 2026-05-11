@@ -125,6 +125,13 @@ impl AlbumsPage {
             )
         };
 
+        use crate::widgets::slot_list::{
+            SlotListConfig, chrome_height_with_select_header, slot_list_view_with_scroll,
+        };
+
+        let select_header_visible = self.column_visibility.select;
+        let slot_list_chrome = chrome_height_with_select_header(select_header_visible);
+
         // Create layout config BEFORE empty checks to route empty states through
         // base_slot_list_layout, preserving the widget tree structure and search focus
         use crate::widgets::base_slot_list_layout::BaseSlotListLayoutConfig;
@@ -132,6 +139,7 @@ impl AlbumsPage {
             window_width: data.window_width,
             window_height: data.window_height,
             show_artwork_column: true,
+            slot_list_chrome,
         };
 
         // If loading, show header with loading message
@@ -148,15 +156,11 @@ impl AlbumsPage {
             );
         }
 
-        // Configure slot list with albums-specific chrome height (has view header)
-        use crate::widgets::slot_list::{
-            SlotListConfig, chrome_height_with_select_header, slot_list_view_with_scroll,
-        };
-
-        let select_header_visible = self.column_visibility.select;
+        let vertical_artwork_chrome =
+            crate::widgets::base_slot_list_layout::vertical_artwork_chrome(&layout_config);
         let config = SlotListConfig::with_dynamic_slots(
             data.window_height,
-            chrome_height_with_select_header(select_header_visible),
+            slot_list_chrome + vertical_artwork_chrome,
         )
         .with_modifiers(data.modifiers);
 
