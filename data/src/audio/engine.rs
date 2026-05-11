@@ -750,19 +750,22 @@ impl CustomAudioEngine {
                         let buffered = guard.buffer_count();
                         let (ur_count, ur_peak, ur_total) = guard.underrun_stats();
                         drop(guard);
-                        let sec_rem = buffered as f32 / 88_200.0;
-                        let peak_ms = ur_peak as f32 / 88.2;
-                        tracing::info!(
-                            "🔌 [STREAM HEALTH] Buffer: {} ({:.1}s) | Underruns: {} (peak {:.0}ms) | Silence: {} | EmptyBufs: {} | HW: {} LW: {}",
-                            buffered,
-                            sec_rem,
-                            ur_count,
-                            peak_ms,
-                            ur_total,
-                            empty_buffer_count,
-                            high_watermark,
-                            low_watermark,
-                        );
+                        // Emit only on anomaly — silent ticks are noise.
+                        if ur_count > 0 || empty_buffer_count > 0 {
+                            let sec_rem = buffered as f32 / 88_200.0;
+                            let peak_ms = ur_peak as f32 / 88.2;
+                            tracing::debug!(
+                                "🔌 [STREAM HEALTH] Buffer: {} ({:.1}s) | Underruns: {} (peak {:.0}ms) | Silence: {} | EmptyBufs: {} | HW: {} LW: {}",
+                                buffered,
+                                sec_rem,
+                                ur_count,
+                                peak_ms,
+                                ur_total,
+                                empty_buffer_count,
+                                high_watermark,
+                                low_watermark,
+                            );
+                        }
                         empty_buffer_count = 0;
                         last_heartbeat = std::time::Instant::now();
                     }

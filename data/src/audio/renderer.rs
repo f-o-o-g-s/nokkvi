@@ -268,7 +268,7 @@ impl AudioRenderer {
         force_reload: bool,
         prev_format: Option<&AudioFormat>,
     ) -> Result<()> {
-        debug!(
+        trace!(
             "📡 Renderer::init() format={:?}, force_reload={}, output={}, primary={}",
             format,
             force_reload,
@@ -932,7 +932,7 @@ impl AudioRenderer {
         static TICK_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let tick = TICK_COUNT.fetch_add(1, Ordering::Relaxed);
         if tick.is_multiple_of(250) {
-            debug!(
+            trace!(
                 "🔍 [RENDER_TICK #{tick}] playing={}, paused={}, eof={}, buf_empty={}, \
                  buf_count={}, primary={}, xfade_active={}, xfade_armed={}, finished={}",
                 self.playing,

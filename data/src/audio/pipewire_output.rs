@@ -115,7 +115,7 @@ impl NativePipeWireSink {
                 let _volume_receiver =
                     volume_rx.attach(mainloop.loop_(), move |linear_vol: f32| {
                         let vol = linear_vol.clamp(0.0, 1.0);
-                        tracing::debug!(
+                        tracing::trace!(
                             "🔊 PipeWire IPC: Setting channelVolumes to [{:.3}, {:.3}]",
                             vol,
                             vol
