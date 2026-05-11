@@ -54,7 +54,7 @@ cargo build
 
 The app will show a login screen on first launch. Enter your Navidrome server URL, username, and password. The config directory and `config.toml` are created automatically.
 
-Application logs are written to `~/.config/nokkvi/nokkvi.log`.
+Application logs are written to `~/.local/state/nokkvi/nokkvi.log` (truncated on every launch). See [debug logging](CONTRIBUTING.md#debug-logging) in CONTRIBUTING.md for the `RUST_LOG` escape hatch when filing bug reports.
 
 Built-in themes are automatically seeded to `~/.config/nokkvi/themes/` on first launch. To change themes, open **Settings → Theme** and pick from the list.
 

@@ -45,6 +45,17 @@ Formatting uses **nightly rustfmt** with a custom `rustfmt.toml` (100-char lines
 - Breaking the TEA pattern (every view uses The Elm Architecture)
 - `.unwrap()` in production code
 
+## Debug logging
+
+Nokkvi writes a per-session log to `~/.local/state/nokkvi/nokkvi.log` (truncated on each launch). For deeper debugging, set `RUST_LOG` before launching:
+
+```bash
+RUST_LOG=trace nokkvi
+RUST_LOG=nokkvi_data::audio=trace,nokkvi=debug nokkvi   # narrower
+```
+
+Attach the log file when filing an issue.
+
 ## Submitting Changes
 
 1. Fork the repo and create a feature branch

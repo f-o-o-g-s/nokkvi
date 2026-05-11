@@ -74,7 +74,7 @@ cargo build --release                           # build
 ./install.sh                                    # install binary, .desktop, icon
 ```
 
-The binary goes to `target/release/nokkvi`; `install.sh` copies it to `~/.local/bin/nokkvi` with the desktop entry and icon. Config lives in `~/.config/nokkvi/`; runtime state and logs live in `~/.local/state/nokkvi/`.
+The binary goes to `target/release/nokkvi`; `install.sh` copies it to `~/.local/bin/nokkvi` with the desktop entry and icon. Config lives in `~/.config/nokkvi/`; runtime state and logs live in `~/.local/state/nokkvi/`. See [debug logging](CONTRIBUTING.md#debug-logging) for the `RUST_LOG` escape hatch when filing bug reports.
 
 More detail in the docs:
 - [Installation](https://f-o-o-g-s.github.io/nokkvi-docs/guides/installation/)
