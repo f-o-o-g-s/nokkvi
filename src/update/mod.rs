@@ -511,7 +511,7 @@ impl Nokkvi {
                 match status {
                     TaskStatus::Running => {
                         // Optional: update active progress list or show a toast
-                        tracing::debug!(" [TASK] {} is running", handle.name);
+                        tracing::trace!(" [TASK] {} is running", handle.name);
                     }
                     TaskStatus::Completed => {
                         tracing::debug!(" [TASK] {} completed", handle.name);

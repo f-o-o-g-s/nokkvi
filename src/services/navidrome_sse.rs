@@ -4,7 +4,7 @@
 //! When a `refreshResource` event is received, emits `SseEvent::LibraryChanged`
 //! to trigger a transparent background UI refresh.
 
-use std::{sync::OnceLock, time::Duration};
+use std::{collections::HashSet, sync::OnceLock, time::Duration};
 
 use futures::StreamExt;
 use iced::task::{Never, Sipper, sipper};
@@ -12,8 +12,9 @@ use nokkvi_data::{
     backend::auth::AuthGateway,
     services::navidrome_events::{NavidromeEvent, parse_sse_event},
 };
+use parking_lot::Mutex as ParkingMutex;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 /// Connection parameters for the SSE stream
 #[derive(Clone)]
@@ -23,6 +24,11 @@ pub(crate) struct SseConnectionInfo {
 }
 
 static SSE_CONNECTION_INFO: OnceLock<Mutex<Option<SseConnectionInfo>>> = OnceLock::new();
+
+/// Tracks SSE event names already logged at debug for this session. Navidrome emits
+/// recurring unknown events (e.g. `nowPlayingCount`); gating prevents log spam while
+/// still surfacing the first occurrence of any new event type as a useful diagnostic.
+static SEEN_UNKNOWN_SSE_EVENTS: OnceLock<ParkingMutex<HashSet<String>>> = OnceLock::new();
 
 /// Register connection details. Called once from handle_login_result.
 pub(crate) fn register(info: SseConnectionInfo) {
@@ -177,7 +183,20 @@ pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
                                                         info!(" [SSE] Server restarted");
                                                     }
                                                     NavidromeEvent::Unknown(t) => {
-                                                        debug!(" [SSE] Unknown event: {}", t);
+                                                        let seen = SEEN_UNKNOWN_SSE_EVENTS
+                                                            .get_or_init(|| {
+                                                                ParkingMutex::new(HashSet::new())
+                                                            });
+                                                        let first_time =
+                                                            seen.lock().insert(t.clone());
+                                                        if first_time {
+                                                            debug!(
+                                                                " [SSE] Unknown event (first occurrence): {}",
+                                                                t
+                                                            );
+                                                        } else {
+                                                            trace!(" [SSE] Unknown event: {}", t);
+                                                        }
                                                     }
                                                 }
                                             }

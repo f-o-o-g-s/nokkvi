@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use tokio::sync::{OnceCell, Semaphore};
-use tracing::debug;
+use tracing::trace;
 
 use crate::{
     backend::auth::AuthGateway,
@@ -457,7 +457,7 @@ impl AlbumsService {
 
                 // Set the total_count reactive property
                 self.total_count.set(total_count as i32);
-                debug!(
+                trace!(
                     " AlbumsService.load_raw_albums_page: offset={}, limit={}, got={}, total={}",
                     offset,
                     limit,

@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use tokio::sync::OnceCell;
-use tracing::debug;
+use tracing::trace;
 
 use crate::{
     backend::auth::AuthGateway,
@@ -210,7 +210,7 @@ impl ArtistsService {
         {
             Ok((artists, total_count)) => {
                 self.total_count.set(total_count as i32);
-                debug!(
+                trace!(
                     " ArtistsService.load_raw_artists_page: offset={}, limit={}, got={}, total={}",
                     offset,
                     limit,

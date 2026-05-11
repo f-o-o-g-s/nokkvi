@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use iced::Task;
-use tracing::debug;
+use tracing::{debug, trace};
 
 use crate::{
     Nokkvi, View,
@@ -479,7 +479,7 @@ impl Nokkvi {
             return;
         }
 
-        debug!(
+        trace!(
             "🎯 [FOCUS] Index changed: {:?} -> {:?}",
             self.last_queue_current_index, current_index
         );
@@ -493,7 +493,7 @@ impl Nokkvi {
             && self.current_view == View::Queue
             && self.auto_follow_playing
         {
-            debug!(
+            trace!(
                 "🎯 [FOCUS] Triggering FocusCurrentPlaying({}) with queue reload",
                 idx
             );
