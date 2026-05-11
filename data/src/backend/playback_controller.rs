@@ -19,6 +19,7 @@ use crate::{
         playback::{QueueNavigator, RemovalAftermath},
         task_manager::TaskManager,
     },
+    utils::url_redaction::redact_subsonic_url,
 };
 
 /// PlaybackController — Owns the audio engine and queue navigator.
@@ -570,7 +571,10 @@ impl PlaybackController {
                     .store_prepared_decoder(decoder, url_for_task.clone(), rg_for_task)
                     .await;
                 drop(engine);
-                debug!(" [GAPLESS] Prepared next track: {}", url_for_task);
+                debug!(
+                    " [GAPLESS] Prepared next track: {}",
+                    redact_subsonic_url(&url_for_task)
+                );
 
                 Ok::<_, anyhow::Error>(())
             });

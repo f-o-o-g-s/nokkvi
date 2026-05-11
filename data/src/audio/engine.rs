@@ -7,7 +7,10 @@ use anyhow::Result;
 use parking_lot::Mutex as PlMutex;
 use tracing::{debug, error, trace, warn};
 
-use crate::audio::{AudioDecoder, AudioFormat, AudioRenderer, DecodeLoopHandle, SourceGeneration};
+use crate::{
+    audio::{AudioDecoder, AudioFormat, AudioRenderer, DecodeLoopHandle, SourceGeneration},
+    utils::url_redaction::redact_subsonic_url,
+};
 
 /// Convert S16 (i16) PCM bytes to f32 samples normalized to [-1.0, 1.0].
 /// The decoder always produces S16 via `RawSampleBuffer::<i16>`.
@@ -282,7 +285,10 @@ impl CustomAudioEngine {
 
     /// Set source URL
     pub async fn set_source(&mut self, source: String) {
-        trace!(" AudioEngine: set_source called with: {}", source);
+        trace!(
+            " AudioEngine: set_source called with: {}",
+            redact_subsonic_url(&source)
+        );
         if self.source == source {
             trace!(" AudioEngine: source unchanged, returning early");
             return;
@@ -377,7 +383,9 @@ impl CustomAudioEngine {
     pub async fn play(&mut self) -> Result<()> {
         debug!(
             "🎵 AudioEngine: play() called, source: '{}', playing: {}, paused: {}",
-            self.source, self.playing, self.paused
+            redact_subsonic_url(&self.source),
+            self.playing,
+            self.paused
         );
         if self.source.is_empty() {
             trace!(" AudioEngine: ERROR - cannot play, source is empty");
@@ -1148,7 +1156,7 @@ impl CustomAudioEngine {
 
     /// Load track
     pub async fn load_track(&mut self, url: &str) {
-        debug!(" AudioEngine: loading track: {}", url);
+        debug!(" AudioEngine: loading track: {}", redact_subsonic_url(url));
         self.set_source(url.to_string()).await;
     }
 
