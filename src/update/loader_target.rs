@@ -438,7 +438,7 @@ impl Nokkvi {
         match result {
             Ok(items) => {
                 debug!(
-                    "✅ Loaded {} {}s (total: {})",
+                    "✅ Loaded {} {} (total: {})",
                     items.len(),
                     T::entity_label(),
                     total_count
