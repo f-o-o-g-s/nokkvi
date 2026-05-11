@@ -374,6 +374,11 @@ pub struct PlayerSettings {
     /// Only consulted in always modes.
     #[serde(default = "default_artwork_column_width_pct")]
     pub artwork_column_width_pct: f32,
+    /// Auto-mode max artwork size as a fraction of the window's short axis
+    /// (0.30..=0.70). Default 0.40. The Auto resolver uses this for both the
+    /// horizontal candidate and the portrait-fallback vertical candidate.
+    #[serde(default = "default_artwork_auto_max_pct")]
+    pub artwork_auto_max_pct: f32,
 
     // -- System tray --
     /// Whether to register a system tray (StatusNotifierItem) icon.
@@ -388,6 +393,10 @@ pub struct PlayerSettings {
 }
 
 fn default_artwork_column_width_pct() -> f32 {
+    0.40
+}
+
+fn default_artwork_auto_max_pct() -> f32 {
     0.40
 }
 
@@ -541,6 +550,7 @@ impl Default for PlayerSettings {
             artwork_column_mode: ArtworkColumnMode::default(),
             artwork_column_stretch_fit: ArtworkStretchFit::default(),
             artwork_column_width_pct: default_artwork_column_width_pct(),
+            artwork_auto_max_pct: default_artwork_auto_max_pct(),
             show_tray_icon: false,
             close_to_tray: false,
         }

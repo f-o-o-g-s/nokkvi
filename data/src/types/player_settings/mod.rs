@@ -236,6 +236,10 @@ pub struct PlayerSettings {
     /// Artwork column width as a fraction of window width (0.05..=0.80).
     /// Only consulted in `AlwaysNative` / `AlwaysStretched` modes.
     pub artwork_column_width_pct: f32,
+    /// Auto-mode max artwork fraction of the window's short axis
+    /// (0.30..=0.70). Drives both the horizontal candidate and the
+    /// portrait-fallback vertical candidate in the Auto resolver.
+    pub artwork_auto_max_pct: f32,
 
     // -- System tray --
     /// Whether to register a StatusNotifierItem tray icon on the session bus.

@@ -101,6 +101,7 @@ impl SettingsPage {
                     playlists_artwork_overlay: data.playlists_artwork_overlay,
                     artwork_column_mode: data.artwork_column_mode,
                     artwork_column_stretch_fit: data.artwork_column_stretch_fit,
+                    artwork_auto_max_pct: data.artwork_auto_max_pct,
                 };
                 items::build_interface_items(&idata)
             }

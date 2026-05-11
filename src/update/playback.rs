@@ -1300,6 +1300,7 @@ impl Nokkvi {
         crate::theme::set_artwork_column_mode(settings.artwork_column_mode);
         crate::theme::set_artwork_column_stretch_fit(settings.artwork_column_stretch_fit);
         crate::theme::set_artwork_column_width_pct(settings.artwork_column_width_pct);
+        crate::theme::set_artwork_auto_max_pct(settings.artwork_auto_max_pct);
 
         // Sync volume to MPRIS D-Bus (prevents initial 100% jump on first playerctl command)
         if let Some(ref conn) = self.mpris_connection {

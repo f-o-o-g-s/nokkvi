@@ -58,6 +58,8 @@ pub struct InterfaceSettingsData<'a> {
     pub artwork_column_mode: &'a str,
     /// Artwork column stretch fit label (Cover / Fill) — only consumed when mode is stretched.
     pub artwork_column_stretch_fit: &'a str,
+    /// Auto-mode max artwork fraction of the window's short axis (0.30..=0.70).
+    pub artwork_auto_max_pct: f64,
 }
 
 /// Data needed by the Playback tab builder.

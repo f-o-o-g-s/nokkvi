@@ -438,6 +438,11 @@ impl SettingsManager {
         self.save()
     }
 
+    pub fn set_artwork_auto_max_pct(&mut self, pct: f32) -> Result<()> {
+        self.settings.player.artwork_auto_max_pct = pct.clamp(0.30, 0.70);
+        self.save()
+    }
+
     pub fn set_strip_click_action(&mut self, action: StripClickAction) -> Result<()> {
         self.settings.player.strip_click_action = action;
         self.save()

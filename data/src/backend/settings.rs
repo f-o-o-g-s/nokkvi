@@ -234,6 +234,10 @@ impl SettingsService {
         /// Set the artwork column width fraction (0.05..=0.80)
         set_artwork_column_width_pct, f32
     );
+    delegate_setter!(
+        /// Set the Auto-mode max artwork fraction (0.30..=0.70)
+        set_artwork_auto_max_pct, f32
+    );
 
     // -- Per-view column visibility --
     delegate_setter!(set_queue_show_stars, bool);

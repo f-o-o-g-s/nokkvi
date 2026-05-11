@@ -140,6 +140,11 @@ pub struct TomlSettings {
         serialize_with = "round_f32"
     )]
     pub artwork_column_width_pct: f32,
+    /// Auto-mode max artwork size as a fraction of the window's short axis
+    /// (0.30..=0.70). Default 0.40. Consulted by the Auto resolver for both
+    /// the horizontal candidate and the portrait-fallback vertical candidate.
+    #[serde(default = "default_artwork_auto_max_pct", serialize_with = "round_f32")]
+    pub artwork_auto_max_pct: f32,
 
     // -- Behavior --
     pub stable_viewport: bool,
@@ -231,6 +236,10 @@ fn default_artwork_column_width_pct() -> f32 {
     0.40
 }
 
+fn default_artwork_auto_max_pct() -> f32 {
+    0.40
+}
+
 /// Serialize an f32 rounded to 4 decimal places to avoid f32→f64 representation noise
 /// (e.g. 0.8999999761581421 → 0.9).
 fn round_f32<S: Serializer>(val: &f32, s: S) -> Result<S::Ok, S::Error> {
@@ -317,6 +326,7 @@ impl Default for TomlSettings {
             artwork_column_mode: ArtworkColumnMode::default(),
             artwork_column_stretch_fit: ArtworkStretchFit::default(),
             artwork_column_width_pct: default_artwork_column_width_pct(),
+            artwork_auto_max_pct: default_artwork_auto_max_pct(),
             stable_viewport: true,
             auto_follow_playing: true,
             light_mode: false,
@@ -430,6 +440,7 @@ impl TomlSettings {
             artwork_column_mode: ps.artwork_column_mode,
             artwork_column_stretch_fit: ps.artwork_column_stretch_fit,
             artwork_column_width_pct: ps.artwork_column_width_pct,
+            artwork_auto_max_pct: ps.artwork_auto_max_pct,
             stable_viewport: ps.stable_viewport,
             auto_follow_playing: ps.auto_follow_playing,
             light_mode: false, // Will be read from theme.light_mode or fresh default

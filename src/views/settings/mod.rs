@@ -312,6 +312,7 @@ pub(crate) struct SettingsViewData {
     pub playlists_artwork_overlay: bool,
     pub artwork_column_mode: &'static str,
     pub artwork_column_stretch_fit: &'static str,
+    pub artwork_auto_max_pct: f64,
     pub verbose_config: bool,
     pub artwork_resolution: &'static str,
 }

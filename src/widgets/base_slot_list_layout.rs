@@ -40,9 +40,6 @@ pub(crate) const MIN_SLOT_LIST_WIDTH: f32 = 800.0;
 /// slot rows at the comfortable target row height.
 pub(crate) const MIN_SLOT_LIST_HEIGHT: f32 = 400.0;
 
-/// Maximum artwork panel size as percentage of window width (for width-based calculation)
-pub(crate) const ARTWORK_MAX_WIDTH_PERCENT: f32 = 0.40;
-
 /// Maximum artwork panel size as percentage of window width (for square windows)
 pub(crate) const ARTWORK_SQUARE_WINDOW_PERCENT: f32 = 0.60;
 
@@ -129,9 +126,10 @@ pub(crate) fn resolve_artwork_layout(config: &BaseSlotListLayoutConfig) -> Optio
     match theme::artwork_column_mode() {
         ArtworkColumnMode::Never => None,
         ArtworkColumnMode::Auto => {
-            // Horizontal candidate — original QML BaseSlotListView formula.
-            let width_based_size =
-                (config.window_width * ARTWORK_MAX_WIDTH_PERCENT).min(ARTWORK_MAX_SIZE);
+            // Horizontal candidate — original QML BaseSlotListView formula,
+            // with the max-percent factor lifted to a user-tunable atomic.
+            let auto_max_pct = theme::artwork_auto_max_pct();
+            let width_based_size = (config.window_width * auto_max_pct).min(ARTWORK_MAX_SIZE);
             let height_based_size = config.window_height;
             let is_square_window = height_based_size >= width_based_size;
 
@@ -159,8 +157,7 @@ pub(crate) fn resolve_artwork_layout(config: &BaseSlotListLayoutConfig) -> Optio
             // awkward; hide instead.
             if config.window_height > config.window_width {
                 let inset_width = (config.window_width - 2.0 * VERTICAL_ARTWORK_SIDE_PAD).max(0.0);
-                let v_square_uncapped =
-                    (config.window_height * ARTWORK_MAX_WIDTH_PERCENT).min(ARTWORK_MAX_SIZE);
+                let v_square_uncapped = (config.window_height * auto_max_pct).min(ARTWORK_MAX_SIZE);
 
                 if v_square_uncapped >= inset_width {
                     let v_square = inset_width.min(ARTWORK_MAX_SIZE);
@@ -803,6 +800,7 @@ mod tests {
         theme::set_artwork_column_mode(ArtworkColumnMode::Auto);
         theme::set_artwork_column_stretch_fit(ArtworkStretchFit::Cover);
         theme::set_artwork_column_width_pct(0.40);
+        theme::set_artwork_auto_max_pct(0.40);
     }
 
     #[test]
@@ -999,6 +997,34 @@ mod tests {
         assert!((theme::artwork_column_width_pct() - 0.05).abs() < 1e-6);
         theme::set_artwork_column_width_pct(0.99);
         assert!((theme::artwork_column_width_pct() - 0.80).abs() < 1e-6);
+        reset_atomics();
+    }
+
+    #[test]
+    fn theme_atomic_clamps_auto_max_pct_into_safe_range() {
+        let _g = lock_atomics();
+        reset_atomics();
+        // Out of range — atomic clamps to [0.30, 0.70].
+        theme::set_artwork_auto_max_pct(0.001);
+        assert!((theme::artwork_auto_max_pct() - 0.30).abs() < 1e-6);
+        theme::set_artwork_auto_max_pct(0.99);
+        assert!((theme::artwork_auto_max_pct() - 0.70).abs() < 1e-6);
+        reset_atomics();
+    }
+
+    #[test]
+    fn auto_vertical_fallback_threshold_tracks_user_max_pct() {
+        let _g = lock_atomics();
+        reset_atomics();
+        // 766 × 1370 at default 0.40 → height × pct = 548 < inset width
+        // (766 - 20 = 746), so the resolver hides (letterbox guard).
+        assert!(resolve_artwork_layout(&cfg(766.0, 1370.0, true)).is_none());
+        // Bumping the user pct to 0.70 → height × pct = 959 ≥ inset 746, so
+        // the vertical candidate now fills the inset and the panel shows.
+        theme::set_artwork_auto_max_pct(0.70);
+        let l = resolve_artwork_layout(&cfg(766.0, 1370.0, true)).expect("should show");
+        assert_eq!(l.orientation, ArtworkOrientation::Vertical);
+        assert!((l.extent - 746.0).abs() < 1e-3);
         reset_atomics();
     }
 }

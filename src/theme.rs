@@ -113,6 +113,11 @@ struct UiModeFlags {
     artwork_column_stretch_fit: AtomicU8,
     /// Artwork column width as fraction of window width (f32 bits, 0.05..=0.80)
     artwork_column_width_pct: AtomicU32,
+    /// Auto-mode max artwork size as fraction of window short axis
+    /// (f32 bits, 0.30..=0.70). Read by the Auto-mode resolver in
+    /// base_slot_list_layout.rs to size both the horizontal candidate and the
+    /// vertical-portrait fallback.
+    artwork_auto_max_pct: AtomicU32,
 }
 
 static UI_MODE: UiModeFlags = UiModeFlags {
@@ -141,6 +146,8 @@ static UI_MODE: UiModeFlags = UiModeFlags {
     artwork_column_stretch_fit: AtomicU8::new(0), // Cover
     // f32::to_bits(0.40) = 0x3ECCCCCD
     artwork_column_width_pct: AtomicU32::new(0x3ECC_CCCD),
+    // f32::to_bits(0.40) = 0x3ECCCCCD — default Auto-mode max percent.
+    artwork_auto_max_pct: AtomicU32::new(0x3ECC_CCCD),
 };
 
 /// Reload theme from theme file (hot-reload support).
@@ -764,6 +771,23 @@ pub(crate) fn set_artwork_column_width_pct(pct: f32) {
     let clamped = pct.clamp(0.05, 0.80);
     UI_MODE
         .artwork_column_width_pct
+        .store(clamped.to_bits(), Ordering::Relaxed);
+}
+
+/// Returns the Auto-mode max artwork fraction (0.30..=0.70). The resolver
+/// uses this for both the horizontal candidate and the portrait-fallback
+/// vertical candidate.
+#[inline]
+pub(crate) fn artwork_auto_max_pct() -> f32 {
+    f32::from_bits(UI_MODE.artwork_auto_max_pct.load(Ordering::Relaxed))
+}
+
+/// Set the Auto-mode max artwork fraction. Clamps into [0.30, 0.70].
+#[inline]
+pub(crate) fn set_artwork_auto_max_pct(pct: f32) {
+    let clamped = pct.clamp(0.30, 0.70);
+    UI_MODE
+        .artwork_auto_max_pct
         .store(clamped.to_bits(), Ordering::Relaxed);
 }
 

@@ -293,6 +293,23 @@ define_settings! {
             toml_apply: |ts, p| p.artwork_column_stretch_fit = ts.artwork_column_stretch_fit,
             read: |src, out| out.artwork_column_stretch_fit = src.artwork_column_stretch_fit,
         },
+        ArtworkAutoMaxPctSetting {
+            key: "general.artwork_auto_max_pct",
+            value_type: Float,
+            setter: |mgr, v: f64| mgr.set_artwork_auto_max_pct(v as f32),
+            toml_apply: |ts, p| p.artwork_auto_max_pct = ts.artwork_auto_max_pct,
+            read: |src, out| out.artwork_auto_max_pct = src.artwork_auto_max_pct,
+            ui_meta: {
+                label: "Auto-mode artwork size",
+                category: "Artwork Column",
+                subtitle: Some(
+                    "Maximum fraction of the window's short axis the Auto-mode artwork can grow to",
+                ),
+                default: 0.40_f64,
+                min: 0.30_f64, max: 0.70_f64, step: 0.05_f64, unit: "",
+                read_field: |d| d.artwork_auto_max_pct,
+            },
+        },
     ]
 }
 
@@ -339,18 +356,19 @@ mod tests {
             playlists_artwork_overlay: true,
             artwork_column_mode: "Auto",
             artwork_column_stretch_fit: "Cover",
+            artwork_auto_max_pct: 0.40,
         }
     }
 
-    /// 11 entries get ui_meta — 5 Layout + 1 Views + 4 Metadata Strip + 1
-    /// Artwork Column. The 8 ToggleSet sub-keys (`strip_show_*`,
-    /// `*_artwork_overlay`) and the conditional `artwork_column_stretch_fit`
-    /// stay hand-written in the UI items builder.
+    /// 12 entries get ui_meta — 5 Layout + 1 Views + 4 Metadata Strip + 2
+    /// Artwork Column (mode dropdown + auto-max-pct slider). The 8 ToggleSet
+    /// sub-keys (`strip_show_*`, `*_artwork_overlay`) and the conditional
+    /// `artwork_column_stretch_fit` stay hand-written in the UI items builder.
     #[test]
-    fn build_interface_tab_settings_items_emits_eleven_rows() {
+    fn build_interface_tab_settings_items_emits_twelve_rows() {
         let data = default_interface_data();
         let entries = build_interface_tab_settings_items(&data);
-        assert_eq!(entries.len(), 11);
+        assert_eq!(entries.len(), 12);
         for e in &entries {
             assert!(matches!(e, SettingsEntry::Item(_)));
         }
@@ -497,7 +515,8 @@ mod tests {
         assert!(keys.contains(&"general.nav_layout"));
         assert!(keys.contains(&"general.strip_separator"));
         assert!(keys.contains(&"general.playlists_artwork_overlay"));
-        assert_eq!(keys.len(), 20);
+        assert!(keys.contains(&"general.artwork_auto_max_pct"));
+        assert_eq!(keys.len(), 21);
     }
 
     /// Read-side: `dump_interface_tab_player_settings` copies the migrated
