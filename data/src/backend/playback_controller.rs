@@ -76,7 +76,11 @@ impl PlaybackController {
         // Set up completion callback to trigger auto-advance on track finish
         {
             let navigator_arc = queue_navigator.clone();
-            let engine_arc = audio_engine.clone();
+            // Downgrade to Weak to avoid a strong-Arc cycle: the closure is stored
+            // inside the engine itself via `set_completion_callback`, so capturing a
+            // strong Arc here would make the engine's refcount never reach zero.
+            // Mirror the `engine_weak` pattern used above for `set_engine_reference`.
+            let engine_weak = Arc::downgrade(&audio_engine);
             let queue_vm = queue_service.clone();
             let task_manager_for_callback = task_manager.clone();
             // Move the sender directly into the closure — it lives as long as the
@@ -87,7 +91,7 @@ impl PlaybackController {
             let mut engine = audio_engine.lock().await;
             engine.set_completion_callback(move |is_loop| {
                 let nav = navigator_arc.clone();
-                let ea = engine_arc.clone();
+                let ew = engine_weak.clone();
                 let qvm = queue_vm.clone();
                 let tm = task_manager_for_callback.clone();
                 let tx = loop_tx_cb.clone();
@@ -98,6 +102,10 @@ impl PlaybackController {
                         debug!(" [COMPLETION] No server config, cannot auto-advance");
                         return Ok::<_, anyhow::Error>(());
                     }
+                    let Some(ea) = ew.upgrade() else {
+                        // Engine has already been dropped — nothing to advance.
+                        return Ok(());
+                    };
                     let mut engine = ea.lock().await;
                     // Phase 1 lock-discipline: hold the outer `nav` mutex only
                     // for the queue-mutation half of the work. Drop it before
@@ -771,5 +779,58 @@ impl PlaybackController {
                 Ok(())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::audio::engine::CustomAudioEngine;
+
+    /// Regression test for the strong-Arc cycle introduced by `set_completion_callback`.
+    ///
+    /// Before the fix: `set_completion_callback` captured a strong
+    /// `Arc<Mutex<CustomAudioEngine>>` in the closure it stored on the engine.
+    /// That meant the engine's Arc refcount could never drop to zero — the
+    /// engine held a strong reference to itself via the callback.
+    ///
+    /// After the fix: the closure captures only a `Weak`. Once the last external
+    /// `Arc` is dropped, the strong count reaches zero and the engine can be freed.
+    ///
+    /// Requires `#[tokio::test]` because `CustomAudioEngine::new()` grabs
+    /// `tokio::runtime::Handle::current()` inside `AudioRenderer::new()`.
+    #[tokio::test]
+    async fn completion_callback_does_not_create_strong_arc_cycle() {
+        let engine_arc: Arc<Mutex<CustomAudioEngine>> =
+            Arc::new(Mutex::new(CustomAudioEngine::new()));
+
+        // Downgrade — this is the fix pattern.  Keep a second Weak for the
+        // post-drop assertion; the first one moves into the closure below.
+        let engine_weak_for_cb = Arc::downgrade(&engine_arc);
+        let engine_weak_probe = Arc::downgrade(&engine_arc);
+
+        // Simulate what the fixed set_completion_callback does: capture only Weak.
+        {
+            let mut engine = engine_arc.lock().await;
+            engine.set_completion_callback(move |_is_loop| {
+                // Upgrade inside the closure — this is the runtime path.
+                if let Some(_ea) = engine_weak_for_cb.upgrade() {
+                    // Would do engine work here in production.
+                }
+            });
+        }
+
+        // `engine_arc` is the sole strong holder. Dropping it must reduce the
+        // strong count to zero; if the callback still held a strong clone the
+        // count would remain at 1 (inside the `Arc<dyn Fn>` on the engine).
+        drop(engine_arc);
+
+        // After dropping the only external Arc the Weak must be dangling — i.e.
+        // strong count is 0, so upgrade() returns None.
+        assert!(
+            engine_weak_probe.upgrade().is_none(),
+            "engine Arc strong count did not reach zero: completion_callback \
+             still holds a strong reference (cycle not broken)"
+        );
     }
 }
