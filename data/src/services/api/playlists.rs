@@ -173,123 +173,7 @@ impl PlaylistsApiService {
             };
 
             for entry in entries {
-                // Parse each entry as a Song matching Song model fields
-                let song = crate::types::song::Song {
-                    id: entry
-                        .get("id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default()
-                        .to_string(),
-                    title: entry
-                        .get("title")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default()
-                        .to_string(),
-                    artist: entry
-                        .get("artist")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default()
-                        .to_string(),
-                    artist_id: entry
-                        .get("artistId")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    album: entry
-                        .get("album")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default()
-                        .to_string(),
-                    album_id: entry
-                        .get("albumId")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    cover_art: entry
-                        .get("coverArt")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    duration: entry.get("duration").and_then(|v| v.as_i64()).unwrap_or(0) as u32,
-                    track: entry
-                        .get("track")
-                        .and_then(|v| v.as_i64())
-                        .map(|v| v as u32),
-                    disc: entry
-                        .get("discNumber")
-                        .and_then(|v| v.as_i64())
-                        .map(|v| v as u32),
-                    year: entry.get("year").and_then(|v| v.as_i64()).map(|v| v as u32),
-                    genre: entry
-                        .get("genre")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    path: entry
-                        .get("path")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default()
-                        .to_string(),
-                    size: entry.get("size").and_then(|v| v.as_u64()).unwrap_or(0),
-                    bitrate: entry
-                        .get("bitRate")
-                        .and_then(|v| v.as_i64())
-                        .map(|v| v as u32),
-                    starred: entry.get("starred").and_then(|v| v.as_str()).is_some(),
-                    play_count: entry
-                        .get("playCount")
-                        .and_then(|v| v.as_i64())
-                        .map(|v| v as u32),
-                    bpm: entry.get("bpm").and_then(|v| v.as_i64()).map(|v| v as u32),
-                    channels: entry
-                        .get("channelCount")
-                        .and_then(|v| v.as_i64())
-                        .map(|v| v as u32),
-                    comment: entry
-                        .get("comment")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    rating: entry
-                        .get("userRating")
-                        .and_then(|v| v.as_i64())
-                        .map(|v| v as u32),
-                    album_artist: entry
-                        .get("albumArtist")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    suffix: entry
-                        .get("suffix")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    sample_rate: entry
-                        .get("samplingRate")
-                        .and_then(|v| v.as_i64())
-                        .map(|v| v as u32),
-                    created_at: entry
-                        .get("createdAt")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    play_date: entry
-                        .get("playDate")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    compilation: entry.get("compilation").and_then(|v| v.as_bool()),
-                    bit_depth: entry
-                        .get("bitDepth")
-                        .and_then(|v| v.as_i64())
-                        .map(|v| v as u32),
-                    updated_at: entry
-                        .get("updatedAt")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
-                    replay_gain: entry
-                        .get("replayGain")
-                        .map(|rg| crate::types::song::ReplayGain {
-                            album_gain: rg.get("albumGain").and_then(|v| v.as_f64()),
-                            track_gain: rg.get("trackGain").and_then(|v| v.as_f64()),
-                            album_peak: rg.get("albumPeak").and_then(|v| v.as_f64()),
-                            track_peak: rg.get("trackPeak").and_then(|v| v.as_f64()),
-                        }),
-                    original_position: None, // Set by QueueManager::set_queue/add_songs
-                    tags: None,
-                    participants: None,
-                };
+                let song = parse_subsonic_song_entry(entry)?;
                 songs.push(song);
             }
         }
@@ -495,5 +379,151 @@ impl Clone for PlaylistsApiService {
             server_url: self.server_url.clone(),
             subsonic_credential: self.subsonic_credential.clone(),
         }
+    }
+}
+
+/// Parse a single Subsonic `getPlaylist` entry into a `Song`.
+///
+/// Subsonic uses different field names than the Navidrome native API
+/// (`track` vs `trackNumber`, `channelCount` vs `channels`, `samplingRate`
+/// vs `sampleRate`, `userRating` vs `rating`). The canonical `Song` struct
+/// declares `#[serde(alias = ...)]` for the Subsonic spellings, so a single
+/// `serde_json::from_value` call deserializes both shapes.
+fn parse_subsonic_song_entry(entry: serde_json::Value) -> Result<crate::types::song::Song> {
+    serde_json::from_value::<crate::types::song::Song>(entry)
+        .context("Failed to deserialize Subsonic playlist song entry")
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    /// Real-shape Subsonic `getPlaylist` entry — uses Subsonic field names
+    /// (`track`, `channelCount`, `samplingRate`, `userRating`) which differ
+    /// from the canonical Navidrome native names.
+    #[test]
+    fn parses_subsonic_entry_with_subsonic_field_names() {
+        let entry = json!({
+            "id": "song-1",
+            "title": "Karma Police",
+            "artist": "Radiohead",
+            "album": "OK Computer",
+            "albumId": "album-1",
+            "duration": 263,
+            "track": 6,
+            "discNumber": 1,
+            "year": 1997,
+            "bitRate": 320,
+            "channelCount": 2,
+            "samplingRate": 44100,
+            "userRating": 4,
+            "suffix": "flac",
+            "path": "radiohead/ok-computer/06-karma-police.flac",
+            "size": 30_000_000_u64,
+            "starred": "2024-01-15T12:00:00Z"
+        });
+
+        let song = parse_subsonic_song_entry(entry).expect("should parse Subsonic entry");
+
+        assert_eq!(song.id, "song-1");
+        assert_eq!(song.title, "Karma Police");
+        assert_eq!(
+            song.track,
+            Some(6),
+            "Subsonic `track` must populate Song.track"
+        );
+        assert_eq!(
+            song.channels,
+            Some(2),
+            "Subsonic `channelCount` must populate Song.channels"
+        );
+        assert_eq!(
+            song.sample_rate,
+            Some(44100),
+            "Subsonic `samplingRate` must populate Song.sample_rate"
+        );
+        assert_eq!(
+            song.rating,
+            Some(4),
+            "Subsonic `userRating` must populate Song.rating"
+        );
+        assert!(song.starred, "non-empty `starred` string must be true");
+    }
+
+    /// Empty `starred` string is how Subsonic encodes "not starred" for some
+    /// shapes — the canonical `deserialize_starred` returns false for empty
+    /// strings, and the playlist parser must agree.
+    #[test]
+    fn empty_starred_string_is_not_starred() {
+        let entry = json!({
+            "id": "song-2",
+            "title": "No Surprises",
+            "artist": "Radiohead",
+            "album": "OK Computer",
+            "duration": 229,
+            "starred": ""
+        });
+
+        let song = parse_subsonic_song_entry(entry).expect("should parse entry");
+        assert!(
+            !song.starred,
+            "empty `starred` string must deserialize to false (matches deserialize_starred)"
+        );
+    }
+
+    /// When Navidrome includes `tags` / `participants` on a playlist entry
+    /// (info-modal data), the parser must surface them — the previous
+    /// hand-rolled parser hard-coded both to `None`.
+    #[test]
+    fn tags_and_participants_round_trip_when_present() {
+        let entry = json!({
+            "id": "song-3",
+            "title": "Lucky",
+            "artist": "Radiohead",
+            "album": "OK Computer",
+            "duration": 259,
+            "starred": false,
+            "tags": {
+                "barcode": ["724385522925"],
+                "isrc": ["GBAYE9700116"]
+            },
+            "participants": {
+                "composer": [
+                    { "id": "p1", "name": "Thom Yorke", "subRole": null }
+                ],
+                "producer": [
+                    { "id": "p2", "name": "Nigel Godrich" }
+                ]
+            }
+        });
+
+        let song = parse_subsonic_song_entry(entry).expect("should parse entry");
+
+        let tags = song.tags.as_ref().expect("tags must be present");
+        assert_eq!(
+            tags.get("barcode").map(|v| v.as_slice()),
+            Some(&["724385522925".to_string()][..])
+        );
+        assert_eq!(
+            tags.get("isrc").map(|v| v.as_slice()),
+            Some(&["GBAYE9700116".to_string()][..])
+        );
+
+        let participants = song
+            .participants
+            .as_ref()
+            .expect("participants must be present");
+        let composers = participants
+            .get("composer")
+            .expect("composer participants must be present");
+        assert_eq!(composers.len(), 1);
+        assert_eq!(composers[0].name, "Thom Yorke");
+        let producers = participants
+            .get("producer")
+            .expect("producer participants must be present");
+        assert_eq!(producers.len(), 1);
+        assert_eq!(producers[0].name, "Nigel Godrich");
     }
 }
