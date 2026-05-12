@@ -2114,6 +2114,42 @@ impl Drop for CustomAudioEngine {
     }
 }
 
+impl CustomAudioEngine {
+    /// Signal the engine to stop all active audio work and prepare for process
+    /// exit. This is the **async** counterpart to `Drop` — it performs the same
+    /// cleanup steps explicitly so the caller can impose a deadline via
+    /// `tokio::time::timeout` rather than relying on Drop timing.
+    ///
+    /// Sequence:
+    /// 1. Supersede the decode-loop generation counter — the running loop will
+    ///    see the mismatch within its next 5 ms sleep and exit cooperatively.
+    /// 2. Stop and join the render std::thread (bounded — the loop sleeps 20 ms
+    ///    and checks the atomic flag each tick, so join returns in ≤ 40 ms).
+    /// 3. Stop the audio renderer (sets `stopped=true` on every StreamingSource,
+    ///    making PipeWire emit silence instead of draining the ring buffer).
+    ///
+    /// The `AsyncNetworkBuffer` tokio task exits implicitly: once the decode loop
+    /// superseded in step 1 stops calling `read_buffer`, the sync channel's
+    /// receiver side is effectively drained no further; the F4 `CancellationToken`
+    /// fires on the producer side within its next 15 s read timeout. This method
+    /// does **not** await that exit — the bounded timeout in the caller handles it.
+    ///
+    /// Idempotent: calling twice does not panic (supersede is monotonic, joining
+    /// a completed thread is a no-op, renderer stop is idempotent).
+    pub fn request_shutdown(&mut self) {
+        debug!(" [ENGINE] request_shutdown: superseding decode loop");
+        self.decode_loop.supersede();
+
+        debug!(" [ENGINE] request_shutdown: stopping render thread");
+        self.stop_render_thread();
+
+        debug!(" [ENGINE] request_shutdown: stopping renderer");
+        self.renderer.lock().stop();
+
+        debug!(" [ENGINE] request_shutdown: complete");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2372,5 +2408,58 @@ mod tests {
             "timeout should not overshoot by more than 100 ms, got {:?}",
             elapsed
         );
+    }
+    // =========================================================================
+    // F2 — request_shutdown tests
+    // =========================================================================
+
+    /// `request_shutdown` must complete (not hang) well under any reasonable
+    /// wall-clock budget. A fresh engine has no running decode loop and no
+    /// render thread, so this should be near-instant; we allow 1 s to give
+    /// CI headroom on slow machines.
+    ///
+    /// Requires a tokio runtime because `CustomAudioEngine::new()` captures
+    /// `tokio::runtime::Handle::current()` inside `AudioRenderer::new()`.
+    #[tokio::test]
+    async fn request_shutdown_completes_within_timeout() {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        let mut engine = CustomAudioEngine::new();
+        engine.request_shutdown();
+        assert!(
+            std::time::Instant::now() < deadline,
+            "request_shutdown took longer than 1 s"
+        );
+    }
+
+    /// Superseding the decode-loop generation is the primary signal that the
+    /// decode loop should exit. After `request_shutdown`, the generation
+    /// counter must be strictly greater than the initial value of 0.
+    ///
+    /// Requires a tokio runtime — see `request_shutdown_completes_within_timeout`.
+    #[tokio::test]
+    async fn request_shutdown_supersedes_decode_loop() {
+        let mut engine = CustomAudioEngine::new();
+        let gen_before = engine.decode_loop.current();
+        engine.request_shutdown();
+        let gen_after = engine.decode_loop.current();
+        assert!(
+            gen_after > gen_before,
+            "generation must advance after request_shutdown (before={gen_before}, after={gen_after})"
+        );
+    }
+
+    /// Calling `request_shutdown` twice must not panic. The generation counter
+    /// is monotonically increasing, the render-thread join is idempotent (join
+    /// on a completed thread returns immediately, and `take()` on a consumed
+    /// `Option<JoinHandle>` returns `None`), and `renderer.stop()` is
+    /// idempotent.
+    ///
+    /// Requires a tokio runtime — see `request_shutdown_completes_within_timeout`.
+    #[tokio::test]
+    async fn request_shutdown_is_idempotent() {
+        let mut engine = CustomAudioEngine::new();
+        engine.request_shutdown();
+        // Must not panic:
+        engine.request_shutdown();
     }
 }

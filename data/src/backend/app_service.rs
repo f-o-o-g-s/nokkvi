@@ -869,6 +869,40 @@ impl AppService {
 }
 
 // =============================================================================
+// === Shutdown ===
+// =============================================================================
+impl AppService {
+    /// Signal everything to stop before the process exits.
+    ///
+    /// Fans out to:
+    /// 1. `CustomAudioEngine::request_shutdown` — supersedes the decode-loop
+    ///    generation counter, joins the render thread, and stops the renderer.
+    ///    The engine mutex is held only for the duration of this synchronous
+    ///    call; no network I/O occurs here.
+    /// 2. `TaskManager::shutdown` — fires the shared `CancellationToken` so
+    ///    every `select!`-wrapped task unwinds cooperatively.
+    ///
+    /// The caller is responsible for wrapping this in a `tokio::time::timeout`
+    /// (recommended ≤ 750 ms) so a slow engine mutex acquisition or a stuck
+    /// blocking worker cannot defer window close beyond user patience.
+    ///
+    /// Idempotent: generation supersede is monotonic; `CancellationToken::cancel`
+    /// is a no-op when already cancelled.
+    pub async fn request_shutdown(&self) {
+        debug!(" [APP SERVICE] request_shutdown: locking audio engine");
+        let engine_arc = self.audio_engine();
+        let mut engine = engine_arc.lock().await;
+        engine.request_shutdown();
+        drop(engine);
+
+        debug!(" [APP SERVICE] request_shutdown: cancelling task manager");
+        self.task_manager.shutdown();
+
+        debug!(" [APP SERVICE] request_shutdown: done");
+    }
+}
+
+// =============================================================================
 // === Library orchestrator accessor ===
 // =============================================================================
 impl AppService {
