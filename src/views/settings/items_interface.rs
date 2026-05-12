@@ -1,15 +1,21 @@
 //! Interface tab setting entries — layout, display, and metadata strip.
 //!
-//! 11 flat rows come from `define_settings!` via
-//! `build_interface_tab_settings_items`. Section headers, the two ToggleSet
+//! 13 flat rows come from `define_settings!` via
+//! `build_interface_tab_settings_items` (5 Layout + 1 Views + 4 Metadata
+//! Strip + 3 Artwork Column: mode dropdown, `artwork_auto_max_pct` slider,
+//! `artwork_vertical_height_pct` slider). Section headers, the two ToggleSet
 //! rows (`__toggle_artwork_overlays`, `__toggle_strip_fields`), the
 //! theme-routed `font_family` text row, and the conditional
-//! `general.artwork_column_stretch_fit` knob (only shown when
-//! `artwork_column_mode == "Always (Stretched)"`) stay hand-written.
+//! `general.artwork_column_stretch_fit` knob (shown when
+//! `ArtworkColumnMode::is_stretched()` — i.e. either horizontal or vertical
+//! stretched mode) stay hand-written.
 
 // See `items_general.rs` for why the data struct lives in the data crate.
-use nokkvi_data::services::settings_tables::interface::build_interface_tab_settings_items;
 pub(crate) use nokkvi_data::types::settings_data::InterfaceSettingsData;
+use nokkvi_data::{
+    services::settings_tables::interface::build_interface_tab_settings_items,
+    types::player_settings::ArtworkColumnMode,
+};
 
 use super::items::{SettingItem, SettingsEntry};
 
@@ -147,9 +153,7 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
 
     // Stretched-only knob: image fit applies only when the column is
     // stretched (horizontal or vertical).
-    if data.artwork_column_mode == "Always (Stretched)"
-        || data.artwork_column_mode == "Always (Vertical Stretched)"
-    {
+    if ArtworkColumnMode::from_label(data.artwork_column_mode).is_stretched() {
         items.push(SettingItem::enum_val(
             meta!(
                 "general.artwork_column_stretch_fit",
