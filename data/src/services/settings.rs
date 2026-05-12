@@ -434,17 +434,29 @@ impl SettingsManager {
     }
 
     pub fn set_artwork_column_width_pct(&mut self, pct: f32) -> Result<()> {
-        self.settings.player.artwork_column_width_pct = pct.clamp(0.05, 0.80);
+        use crate::types::player_settings::{
+            ARTWORK_COLUMN_WIDTH_PCT_MAX, ARTWORK_COLUMN_WIDTH_PCT_MIN,
+        };
+        self.settings.player.artwork_column_width_pct =
+            pct.clamp(ARTWORK_COLUMN_WIDTH_PCT_MIN, ARTWORK_COLUMN_WIDTH_PCT_MAX);
         self.save()
     }
 
     pub fn set_artwork_auto_max_pct(&mut self, pct: f32) -> Result<()> {
-        self.settings.player.artwork_auto_max_pct = pct.clamp(0.30, 0.70);
+        use crate::types::player_settings::{ARTWORK_AUTO_MAX_PCT_MAX, ARTWORK_AUTO_MAX_PCT_MIN};
+        self.settings.player.artwork_auto_max_pct =
+            pct.clamp(ARTWORK_AUTO_MAX_PCT_MIN, ARTWORK_AUTO_MAX_PCT_MAX);
         self.save()
     }
 
     pub fn set_artwork_vertical_height_pct(&mut self, pct: f32) -> Result<()> {
-        self.settings.player.artwork_vertical_height_pct = pct.clamp(0.10, 0.80);
+        use crate::types::player_settings::{
+            ARTWORK_VERTICAL_HEIGHT_PCT_MAX, ARTWORK_VERTICAL_HEIGHT_PCT_MIN,
+        };
+        self.settings.player.artwork_vertical_height_pct = pct.clamp(
+            ARTWORK_VERTICAL_HEIGHT_PCT_MIN,
+            ARTWORK_VERTICAL_HEIGHT_PCT_MAX,
+        );
         self.save()
     }
 

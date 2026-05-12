@@ -1,6 +1,29 @@
 //! Artwork settings — resolution, column display mode, stretch fit.
+//!
+//! Single source of truth for default and clamp ranges of the three artwork
+//! percent knobs. Every consumer (serde defaults in `types/settings.rs` and
+//! `types/toml_settings.rs`, the `SettingsManager` setter clamps in
+//! `services/settings.rs`, the `define_settings!` ui_meta in
+//! `services/settings_tables/interface.rs`, the UI-crate theme atomic init
+//! and clamps in `src/theme.rs`) must reference these constants.
 
 use serde::{Deserialize, Serialize};
+
+// Column-width slider (drives `AlwaysNative` / `AlwaysStretched` modes).
+pub const ARTWORK_COLUMN_WIDTH_PCT_DEFAULT: f32 = 0.40;
+pub const ARTWORK_COLUMN_WIDTH_PCT_MIN: f32 = 0.05;
+pub const ARTWORK_COLUMN_WIDTH_PCT_MAX: f32 = 0.80;
+
+// Auto-mode max-percent slider.
+pub const ARTWORK_AUTO_MAX_PCT_DEFAULT: f32 = 0.40;
+pub const ARTWORK_AUTO_MAX_PCT_MIN: f32 = 0.30;
+pub const ARTWORK_AUTO_MAX_PCT_MAX: f32 = 0.70;
+
+// Always-Vertical height slider (drives `AlwaysVerticalNative` /
+// `AlwaysVerticalStretched` modes).
+pub const ARTWORK_VERTICAL_HEIGHT_PCT_DEFAULT: f32 = 0.40;
+pub const ARTWORK_VERTICAL_HEIGHT_PCT_MIN: f32 = 0.10;
+pub const ARTWORK_VERTICAL_HEIGHT_PCT_MAX: f32 = 0.80;
 
 /// Artwork resolution for the large artwork panel.
 ///
@@ -123,6 +146,35 @@ impl ArtworkColumnMode {
             Self::AlwaysVerticalStretched => "Always (Vertical Stretched)",
             Self::Never => "Never",
         }
+    }
+
+    /// True for any "Stretched" variant — the image fills the panel via the
+    /// configured `ArtworkStretchFit` (Cover or Fill) rather than being
+    /// rendered square with letterboxing.
+    pub fn is_stretched(self) -> bool {
+        matches!(self, Self::AlwaysStretched | Self::AlwaysVerticalStretched)
+    }
+
+    /// True for any "Vertical" variant — artwork stacks above the slot list
+    /// instead of sitting to its right.
+    pub fn is_vertical(self) -> bool {
+        matches!(
+            self,
+            Self::AlwaysVerticalNative | Self::AlwaysVerticalStretched
+        )
+    }
+
+    /// True for any non-vertical "Always" variant — artwork sits to the
+    /// right of the slot list at a user-defined column width.
+    pub fn is_always_horizontal(self) -> bool {
+        matches!(self, Self::AlwaysNative | Self::AlwaysStretched)
+    }
+
+    /// True for any "Always" variant (horizontal or vertical, native or
+    /// stretched) — i.e. the artwork panel is forced visible and the resize
+    /// handle is drawn.
+    pub fn is_always_visible(self) -> bool {
+        self.is_always_horizontal() || self.is_vertical()
     }
 }
 
