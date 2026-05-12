@@ -9,9 +9,10 @@ All notable changes to this project will be documented in this file.
 - Auto mode now stacks the artwork above the slot list on portrait windows where the horizontal column would crowd the rows. The stacked artwork aligns with the slot rows' inset and only appears when the window is tall and narrow enough for it to fill the inset edge-to-edge, so the panel never shows bg-color bars inside the pane.
 - "Auto-mode artwork size" slider in Settings → Interface → Artwork Column (0.30–0.70 in 5% steps, default 0.40) grows or shrinks the Auto-mode artwork — affects both the horizontal column and the portrait-fallback vertical artwork.
 - Two new "Always (Vertical Native)" and "Always (Vertical Stretched)" artwork-column modes — both stack a fixed-height artwork above the slot list with a horizontal drag handle below the artwork for live resize, controlled by the new "Always-Vertical artwork height" slider (0.10–0.80, default 0.40). Unlike Auto, these modes allow letterboxing as the deliberate tradeoff for "always show big artwork above the list" regardless of window orientation.
-- Click the "X songs" count on an Artists or Genres row to jump to the Songs view scoped to that artist or genre. Songs load via a server-side filter on the artist or genre, so the result is the full backing catalog (e.g. all 391 Black Metal songs) — not just titles whose text happens to match the name. Matches the existing click affordance on the "X albums" cell, and is gated by the same Settings → Theme "slot text links" toggle.
 
 ### Changed
+
+- The "X songs" count on Artists and Genres rows is now clickable — clicking it jumps to the Songs view scoped to that artist or genre. Songs load via a server-side filter, so the result is the full backing catalog (e.g. all 391 Black Metal songs) rather than what a text search for the name would have matched. Matches the existing click affordance on the sibling "X albums" cell, and is gated by the same Settings → Theme "slot text links" toggle.
 
 ### Fixed
 
