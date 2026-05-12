@@ -464,7 +464,7 @@ impl Nokkvi {
             .style(|_theme: &iced::Theme| iced::widget::container::Style {
                 background: Some(crate::theme::accent().into()),
                 border: iced::Border {
-                    radius: 8.0.into(),
+                    radius: crate::theme::ui_border_radius(),
                     ..Default::default()
                 },
                 ..Default::default()
