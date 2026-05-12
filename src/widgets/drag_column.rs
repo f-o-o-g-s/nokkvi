@@ -516,7 +516,7 @@ where
                                         renderer::Quad {
                                             bounds: pill_rect,
                                             border: iced::Border {
-                                                radius: 8.0.into(),
+                                                radius: crate::theme::ui_border_radius(),
                                                 ..Default::default()
                                             },
                                             ..Default::default()
