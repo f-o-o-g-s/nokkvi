@@ -78,6 +78,33 @@ pub(crate) fn rope_stroke_for(boat_h: f32) -> f32 {
     (boat_h * 0.025).clamp(1.5, 3.5)
 }
 
+/// Compute the visualizer waveform's baseline Y (pixel where `y_ratio = 0`
+/// sits) and amplitude scale (pixel span between `y_ratio = 0` and
+/// `y_ratio = 1`) for the boat's wave-riding math. Centralizes the
+/// geometry difference between normal and mirrored line modes so the
+/// boat render path and any future mirror-aware logic stay in lockstep.
+///
+/// In normal mode the line is drawn from the canvas bottom upward, so
+/// baseline = `area_height` and the full canvas height is available for
+/// amplitude. In mirrored mode the line draws symmetrically from the
+/// canvas vertical center, so baseline = `area_height * 0.5` and only
+/// the upper half is available (`scale = area_height * 0.5`). The lower
+/// half is a literal reflection in `visualizer/shaders/lines.wgsl`'s
+/// vertex shader; the boat doesn't ride on it yet.
+///
+/// Matches the shader's `get_point()` geometry modulo the small
+/// `max_expansion` AA padding (a ~4–12 px inset on the drawable range)
+/// — the boat elides that inset because at the boat's Y-spring
+/// damping it's not visually distinguishable from the unpadded
+/// formula.
+pub(crate) fn wave_baseline_and_scale(area_height: f32, mirror: bool) -> (f32, f32) {
+    if mirror {
+        (area_height * 0.5, area_height * 0.5)
+    } else {
+        (area_height, area_height)
+    }
+}
+
 // --- physics tuning constants ---------------------------------------------
 //
 // All forces operate in normalized ratio-space (`x_ratio` ∈ [0, 1], time in

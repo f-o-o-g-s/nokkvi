@@ -365,6 +365,7 @@ impl Nokkvi {
             let cfg = self.visualizer_config.read();
             let height_percent = cfg.height_percent;
             let viz_opacity = cfg.opacity;
+            let lines_mirror = cfg.lines.mirror;
             drop(cfg);
 
             let visualizer_height = widgets::visualizer::visualizer_area_height(
@@ -399,6 +400,7 @@ impl Nokkvi {
                         self.window.width,
                         visualizer_height,
                         viz_opacity,
+                        lines_mirror,
                     ),
                 ]
                 .width(Length::Fill)

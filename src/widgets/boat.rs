@@ -68,7 +68,7 @@
 mod boat_physics;
 pub(crate) use boat_physics::{
     ANCHOR_HEIGHT_MULTIPLE_OF_BOAT, BOAT_SINK_FRACTION, BOAT_WRAP_MARGIN_BOAT_WIDTHS, BoatState,
-    MusicSignals, boat_pixel_size, effective_bars, rope_stroke_for, step,
+    MusicSignals, boat_pixel_size, effective_bars, rope_stroke_for, step, wave_baseline_and_scale,
 };
 use iced::{
     Color, Element, Event, Length, Point, Rectangle, Size, Vector,
@@ -297,6 +297,13 @@ where
 /// fades together with the bars/lines underneath rather than punching
 /// through at full alpha when the user dims the visualizer.
 ///
+/// `mirror` mirrors `cfg.lines.mirror`: when `true`, the boat rides on
+/// the upper wave whose baseline is at the canvas's vertical center
+/// (matching the shader's mirrored-line geometry). When `false`, the
+/// baseline is the canvas bottom and the full canvas height is available
+/// for amplitude. Routed through `wave_baseline_and_scale()` so the boat
+/// always stays clamped to the actual rendered line.
+///
 /// Layout: a fixed-size `container.clip(true)` framing the visualizer area,
 /// containing a single `OverflowPin`-positioned boat sprite at
 /// `(target_x, target_y)`. `target_x` may extend past either edge by up to
@@ -333,6 +340,7 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
     area_width: f32,
     area_height: f32,
     opacity: f32,
+    mirror: bool,
 ) -> Element<'a, M> {
     // The handler is responsible for calling `cache_handle_for(tilt,
     // facing)` on the first visible tick, so by the time we render the
@@ -360,21 +368,24 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
     let pad_x = (container_w - boat_w) * 0.5;
     let pad_y = (container_h - boat_h) * 0.5;
 
-    // Pixel offsets within the visualizer area. The waterline is
-    // `(1 - y_ratio) * area_height` from the top (visualizer draws upward
-    // from the bottom). `BOAT_SINK_FRACTION` of the boat's height sits below
-    // the waterline; the rest sits above. `OverflowPin` accepts negative
-    // `target_x` directly, so we don't clamp it here — the outer clip
-    // handles the off-screen portion. `target_y` keeps its `.max(0.0)`
-    // because Y has no wrap (wave height is bounded), so the overlap-above
-    // case really is just "nudge against the top edge".
+    // Pixel offsets within the visualizer area. The waterline sits at
+    // `baseline_y - y_ratio · scale`: in normal mode the baseline is the
+    // canvas bottom (`area_height`) and amplitude spans the full canvas;
+    // in mirrored mode the baseline is the canvas center and amplitude
+    // spans only the upper half. `BOAT_SINK_FRACTION` of the boat's
+    // height sits below the waterline; the rest sits above. `OverflowPin`
+    // accepts negative `target_x` directly, so we don't clamp it here —
+    // the outer clip handles the off-screen portion. `target_y` keeps
+    // its `.max(0.0)` because Y has no wrap (wave height is bounded), so
+    // the overlap-above case really is just "nudge against the top edge".
     //
     // `target_x` / `target_y` describe where the boat *content* lands.
     // The container is shifted left/up by the half-padding so the content
     // remains at those coordinates regardless of the surrounding margin.
     let cx = state.x_ratio * area_width;
     let target_x = cx - boat_w * 0.5;
-    let line_y = area_height * (1.0 - state.y_ratio);
+    let (baseline_y, wave_scale) = wave_baseline_and_scale(area_height, mirror);
+    let line_y = baseline_y - state.y_ratio * wave_scale;
     let target_y = (line_y - boat_h + boat_h * BOAT_SINK_FRACTION).max(0.0);
 
     let pin_at = |x: f32| {
