@@ -152,6 +152,13 @@ impl Nokkvi {
             }
         );
 
+        let label = if new_starred {
+            "★ Starred"
+        } else {
+            "☆ Unstarred"
+        };
+        self.toast_success(format!("{label}: {}", info.name));
+
         self.toggle_star_with_revert_task(info.id, info.kind, new_starred)
     }
 
@@ -359,6 +366,8 @@ impl Nokkvi {
             "  Setting rating for {} {}: {} -> {}",
             info.kind, display_name, current_rating, new_rating
         );
+
+        self.toast_success(format!("⭐ Rated {display_name}: {new_rating}/5"));
 
         self.set_item_rating_task(info.id, info.kind, new_rating as usize, current_rating)
     }
