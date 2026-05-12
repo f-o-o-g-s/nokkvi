@@ -179,21 +179,6 @@ pub(crate) fn make_genre(id: &str, name: &str) -> nokkvi_data::backend::genres::
     }
 }
 
-/// Create a `RadioStation` with the given fields, defaulting the rest.
-#[allow(dead_code)]
-pub(crate) fn make_radio_station(
-    id: &str,
-    name: &str,
-    stream_url: &str,
-) -> nokkvi_data::types::radio_station::RadioStation {
-    nokkvi_data::types::radio_station::RadioStation {
-        id: id.to_string(),
-        name: name.to_string(),
-        stream_url: stream_url.to_string(),
-        home_page_url: None,
-    }
-}
-
 // ============================================================================
 // Bulk fixtures for the album/artist/genre/song tri-mirror tests
 // ============================================================================

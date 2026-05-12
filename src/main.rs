@@ -898,14 +898,6 @@ impl Nokkvi {
             nokkvi_data::types::toast::ToastLevel::Error,
         ));
     }
-
-    #[allow(dead_code)]
-    pub(crate) fn should_scrobble_current_track(&self) -> bool {
-        self.active_playback.is_queue()
-            && self
-                .scrobble
-                .should_scrobble(self.playback.duration, self.scrobble_threshold)
-    }
 }
 
 // ============================================================================
