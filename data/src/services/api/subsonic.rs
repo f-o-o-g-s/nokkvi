@@ -8,6 +8,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 
+use crate::types::error::NokkviError;
+
 /// Send a POST request to a Subsonic REST API endpoint.
 ///
 /// Credentials and standard parameters are sent as `application/x-www-form-urlencoded`
@@ -73,6 +75,27 @@ pub async fn subsonic_post_ok(
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
 
+    check_subsonic_response_status(status, &body, operation_label)
+}
+
+/// Apply Subsonic response status/body policy.
+///
+/// Pure (no I/O) so it can be unit-tested without an HTTP server. Returns:
+/// - `Err(NokkviError::Unauthorized)` for HTTP 401, so the UI drops to login on
+///   JWT expiry (mirrors [`crate::services::api::client::ApiClient`]).
+/// - `Err(anyhow!(...))` for any other non-2xx status.
+/// - `Err(anyhow!(...))` when the body wraps a Subsonic-envelope error
+///   (`subsonic-response.status == "failed"`) inside an HTTP 200.
+/// - `Ok(())` otherwise.
+fn check_subsonic_response_status(
+    status: reqwest::StatusCode,
+    body: &str,
+    operation_label: &str,
+) -> Result<()> {
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return Err(NokkviError::Unauthorized.into());
+    }
+
     if !status.is_success() {
         return Err(anyhow::anyhow!(
             "{operation_label}: HTTP {status}, body: {body}"
@@ -80,7 +103,7 @@ pub async fn subsonic_post_ok(
     }
 
     // Subsonic API wraps errors inside a 200 OK response — check the inner status
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body)
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(body)
         && let Some(subsonic) = json.get("subsonic-response")
         && subsonic.get("status").and_then(|s| s.as_str()) == Some("failed")
     {
@@ -112,7 +135,10 @@ pub fn build_subsonic_url(
 
 #[cfg(test)]
 mod tests {
+    use reqwest::StatusCode;
+
     use super::*;
+    use crate::types::error::NokkviError;
 
     #[test]
     fn test_build_subsonic_url() {
@@ -126,5 +152,66 @@ mod tests {
             url,
             "http://localhost:4533/rest/star?id=song123&u=admin&p=enc:hex123&f=json&v=1.8.0&c=nokkvi"
         );
+    }
+
+    /// HTTP 401 from a Subsonic mutation endpoint must downcast to
+    /// [`NokkviError::Unauthorized`] so the UI can drop to login.
+    ///
+    /// Mirrors [`crate::services::api::client::ApiClient`]'s discipline; without
+    /// this routing, star/unstar/setRating + radio CRUD + replace_playlist_tracks
+    /// surface a generic toast on JWT expiry instead of returning to the login screen.
+    #[test]
+    fn check_subsonic_response_status_routes_401_to_unauthorized() {
+        let err = check_subsonic_response_status(StatusCode::UNAUTHORIZED, "", "star song")
+            .expect_err("401 must produce an error");
+
+        let nokkvi_err = err
+            .downcast_ref::<NokkviError>()
+            .expect("401 should downcast to NokkviError");
+        assert!(
+            matches!(nokkvi_err, NokkviError::Unauthorized),
+            "expected NokkviError::Unauthorized, got {nokkvi_err:?}"
+        );
+    }
+
+    /// Non-401 HTTP failures must keep the existing descriptive error format.
+    #[test]
+    fn check_subsonic_response_status_500_returns_generic_error() {
+        let err = check_subsonic_response_status(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "server boom",
+            "star song",
+        )
+        .expect_err("500 must produce an error");
+
+        // Not a NokkviError — caller's downcast for Unauthorized must miss.
+        assert!(err.downcast_ref::<NokkviError>().is_none());
+
+        let msg = format!("{err}");
+        assert!(msg.contains("star song"), "missing label in: {msg}");
+        assert!(msg.contains("500"), "missing status in: {msg}");
+        assert!(msg.contains("server boom"), "missing body in: {msg}");
+    }
+
+    /// HTTP 200 with a healthy Subsonic envelope returns `Ok(())`.
+    #[test]
+    fn check_subsonic_response_status_ok_envelope_is_ok() {
+        let body = r#"{"subsonic-response":{"status":"ok","version":"1.8.0"}}"#;
+        let result = check_subsonic_response_status(StatusCode::OK, body, "star song");
+        assert!(result.is_ok(), "expected Ok, got {result:?}");
+    }
+
+    /// HTTP 200 with a `failed` Subsonic envelope surfaces the inner error message.
+    #[test]
+    fn check_subsonic_response_status_failed_envelope_returns_error() {
+        let body = r#"{"subsonic-response":{"status":"failed","error":{"code":70,"message":"Song not found"}}}"#;
+        let err = check_subsonic_response_status(StatusCode::OK, body, "star song")
+            .expect_err("failed envelope must produce an error");
+
+        // Envelope failures stay as plain anyhow errors (not session-expiry).
+        assert!(err.downcast_ref::<NokkviError>().is_none());
+        let msg = format!("{err}");
+        assert!(msg.contains("star song"));
+        assert!(msg.contains("Song not found"));
     }
 }
