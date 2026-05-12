@@ -65,7 +65,19 @@ pub(crate) const VERTICAL_ARTWORK_BOTTOM_PAD: f32 = 10.0;
 /// Configuration for base slot list layout
 #[derive(Debug, Clone)]
 pub(crate) struct BaseSlotListLayoutConfig {
+    /// Content-pane width — the horizontal extent the view's widgets
+    /// actually get to fill. In Top / None nav layouts this equals the
+    /// window width; in Side nav it's already had the 30 px sidebar
+    /// subtracted upstream (`Nokkvi::content_pane_width` in `app_view.rs`).
+    /// Split-view callers multiply the pane width by their split fraction
+    /// before passing it in. The resolver, `always_column_width`, and the
+    /// drag handle all treat this as the available horizontal budget — if
+    /// a caller passes the raw window width, the Auto-mode vertical
+    /// fallback over-sizes the artwork square and the panel letterboxes
+    /// inside the pane.
     pub window_width: f32,
+    /// Content-pane height — the vertical extent the view's widgets get.
+    /// Top nav steals height (subtracted upstream); Side / None do not.
     pub window_height: f32,
     pub show_artwork_column: bool,
     /// Slot-list chrome the view passes to `SlotListConfig::with_dynamic_slots`

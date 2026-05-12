@@ -89,6 +89,29 @@ impl Nokkvi {
     // SECTION: View Functions
     // =========================================================================
 
+    /// Horizontal extent of the content pane — everything inside the outer
+    /// chrome that the per-view widgets render into.
+    ///
+    /// In `NavLayout::Side` the vertical sidebar consumes 30 px on the left
+    /// (`SIDE_NAV_WIDTH` + 2 px border) and the views must size their
+    /// artwork-resolver math, drag handles, and slot-list rects against the
+    /// REMAINING width. Top / None nav layouts subtract nothing and this
+    /// returns the raw window width.
+    ///
+    /// Use this in place of `self.window.width` whenever a value flows
+    /// into `BaseSlotListLayoutConfig.window_width` or a view-data
+    /// `window_width` field — otherwise the Auto-mode portrait fallback
+    /// shows top/bottom letterbox bars and the horizontal candidate
+    /// over-counts the leftover slot-list width by 30 px.
+    fn content_pane_width(&self) -> f32 {
+        let nav_chrome = if crate::theme::is_side_nav() {
+            crate::widgets::side_nav_bar::SIDE_NAV_WIDTH + 2.0
+        } else {
+            0.0
+        };
+        (self.window.width - nav_chrome).max(0.0)
+    }
+
     /// Root view dispatcher.
     ///
     /// Daemon-mode signature: `_window` is unused (single window only).
@@ -562,12 +585,7 @@ impl Nokkvi {
                 let slot_step = row_height + slot_spacing;
 
                 // Account for side nav bar when computing X offsets for the drop indicator.
-                let is_side_nav = crate::theme::is_side_nav();
-                let sidebar_width = if is_side_nav {
-                    crate::widgets::side_nav_bar::SIDE_NAV_WIDTH + 2.0 // +2 for border
-                } else {
-                    0.0
-                };
+                let sidebar_width = self.window.width - self.content_pane_width();
 
                 let slot_list_start_y = crate::widgets::slot_list::queue_slot_list_start_y(
                     edit_bar_height,
@@ -743,7 +761,7 @@ impl Nokkvi {
                 queue_songs: filtered_queue_songs,
                 album_art: &self.artwork.album_art_snapshot,
                 large_artwork,
-                window_width: self.window.width * 0.55,
+                window_width: self.content_pane_width() * 0.55,
                 window_height: self.window.height,
                 scale_factor: self.window.scale_factor,
                 modifiers: self.window.keyboard_modifiers,
@@ -833,7 +851,7 @@ impl Nokkvi {
                             album_art: &self.artwork.album_art_snapshot,
                             large_artwork,
                             dominant_colors: &self.artwork.album_dominant_colors_snapshot,
-                            window_width: self.window.width * 0.45,
+                            window_width: self.content_pane_width() * 0.45,
                             window_height: browser_height,
                             scale_factor: self.window.scale_factor,
                             modifiers: self.window.keyboard_modifiers,
@@ -859,7 +877,7 @@ impl Nokkvi {
                             album_art: &self.artwork.album_art_snapshot,
                             large_artwork,
                             dominant_colors: &self.artwork.album_dominant_colors_snapshot,
-                            window_width: self.window.width * 0.45,
+                            window_width: self.content_pane_width() * 0.45,
                             window_height: browser_height,
                             scale_factor: self.window.scale_factor,
                             modifiers: self.window.keyboard_modifiers,
@@ -882,7 +900,7 @@ impl Nokkvi {
                             album_art: &self.artwork.album_art_snapshot,
                             large_artwork,
                             dominant_colors: &self.artwork.album_dominant_colors_snapshot,
-                            window_width: self.window.width * 0.45,
+                            window_width: self.content_pane_width() * 0.45,
                             window_height: browser_height,
                             scale_factor: self.window.scale_factor,
                             modifiers: self.window.keyboard_modifiers,
@@ -904,7 +922,7 @@ impl Nokkvi {
                             genre_artwork: &self.artwork.genre.mini_snapshot,
                             genre_collage_artwork: &self.artwork.genre.collage_snapshot,
                             album_art: &self.artwork.album_art_snapshot,
-                            window_width: self.window.width * 0.45,
+                            window_width: self.content_pane_width() * 0.45,
                             window_height: browser_height,
                             scale_factor: self.window.scale_factor,
                             modifiers: self.window.keyboard_modifiers,
@@ -929,7 +947,7 @@ impl Nokkvi {
                             songs,
                             album_art: &self.artwork.album_art_snapshot,
                             large_artwork,
-                            window_width: self.window.width * 0.45,
+                            window_width: self.content_pane_width() * 0.45,
                             window_height: browser_height,
                             scale_factor: self.window.scale_factor,
                             modifiers: self.window.keyboard_modifiers,
@@ -972,7 +990,7 @@ impl Nokkvi {
                     album_art: &self.artwork.album_art_snapshot,
                     large_artwork,
                     dominant_colors: &self.artwork.album_dominant_colors_snapshot,
-                    window_width: self.window.width,
+                    window_width: self.content_pane_width(),
                     window_height: self.window.height,
                     scale_factor: self.window.scale_factor,
                     modifiers: self.window.keyboard_modifiers,
@@ -995,7 +1013,7 @@ impl Nokkvi {
                     queue_songs: filtered_queue_songs,
                     album_art: &self.artwork.album_art_snapshot,
                     large_artwork,
-                    window_width: self.window.width,
+                    window_width: self.content_pane_width(),
                     window_height: self.window.height,
                     scale_factor: self.window.scale_factor,
                     modifiers: self.window.keyboard_modifiers,
@@ -1028,7 +1046,7 @@ impl Nokkvi {
                     album_art: &self.artwork.album_art_snapshot,
                     large_artwork,
                     dominant_colors: &self.artwork.album_dominant_colors_snapshot,
-                    window_width: self.window.width,
+                    window_width: self.content_pane_width(),
                     window_height: self.window.height,
                     scale_factor: self.window.scale_factor,
                     modifiers: self.window.keyboard_modifiers,
@@ -1050,7 +1068,7 @@ impl Nokkvi {
                     album_art: &self.artwork.album_art_snapshot,
                     large_artwork,
                     dominant_colors: &self.artwork.album_dominant_colors_snapshot,
-                    window_width: self.window.width,
+                    window_width: self.content_pane_width(),
                     window_height: self.window.height,
                     scale_factor: self.window.scale_factor,
                     modifiers: self.window.keyboard_modifiers,
@@ -1072,7 +1090,7 @@ impl Nokkvi {
                     genre_artwork: &self.artwork.genre.mini_snapshot,
                     genre_collage_artwork: &self.artwork.genre.collage_snapshot,
                     album_art: &self.artwork.album_art_snapshot,
-                    window_width: self.window.width,
+                    window_width: self.content_pane_width(),
                     window_height: self.window.height,
                     scale_factor: self.window.scale_factor,
                     modifiers: self.window.keyboard_modifiers,
@@ -1093,7 +1111,7 @@ impl Nokkvi {
                     playlists: &self.library.playlists,
                     playlist_artwork: &self.artwork.playlist.mini_snapshot,
                     playlist_collage_artwork: &self.artwork.playlist.collage_snapshot,
-                    window_width: self.window.width,
+                    window_width: self.content_pane_width(),
                     window_height: self.window.height,
                     scale_factor: self.window.scale_factor,
                     modifiers: self.window.keyboard_modifiers,
@@ -1118,7 +1136,7 @@ impl Nokkvi {
                 let filtered_stations = self.filter_radio_stations();
                 let view_data = views::RadiosViewData {
                     stations: filtered_stations,
-                    window_width: self.window.width,
+                    window_width: self.content_pane_width(),
                     window_height: self.window.height,
                     scale_factor: self.window.scale_factor,
                     loading: false, // TODO: add loading state for radio stations
