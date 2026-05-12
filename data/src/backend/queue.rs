@@ -221,14 +221,14 @@ impl QueueService {
     pub async fn move_item(&self, from: usize, to: usize) -> Result<()> {
         let mut qm = self.queue_manager.lock().await;
         qm.move_item(from, to)?;
-        Ok(())
+        self.refresh_from_locked_manager(&qm).await
     }
 
     /// Remove a song from the queue by index
     pub async fn remove_song(&self, index: usize) -> Result<()> {
         let mut qm = self.queue_manager.lock().await;
         qm.remove_song(index)?;
-        Ok(())
+        self.refresh_from_locked_manager(&qm).await
     }
 
     /// Remove a batch of songs from the queue by ID. Index-immune — pass the
@@ -237,7 +237,7 @@ impl QueueService {
     pub async fn remove_songs_by_ids(&self, ids: &[String]) -> Result<()> {
         let mut qm = self.queue_manager.lock().await;
         qm.remove_songs_by_ids(ids)?;
-        Ok(())
+        self.refresh_from_locked_manager(&qm).await
     }
 
     /// Insert songs at a specific position in the queue (cross-pane drag drop)
@@ -268,12 +268,13 @@ impl QueueService {
     /// reactives (`songs`, `current_index`, `total_count`) atomically given
     /// an already-held queue lock.
     ///
-    /// All four mutators (`add_songs`, `set_queue`, `insert_songs_at`,
-    /// `refresh_from_queue`) acquire the queue lock once, mutate (or skip
-    /// mutation), then call this method to project — so a concurrent task
-    /// cannot mutate the queue between the mutation and the projection.
-    /// Closes the 1-tick projection race the previous unlock-then-relock
-    /// pattern allowed.
+    /// All six mutators (`set_queue`, `add_songs`, `insert_songs_at`,
+    /// `move_item`, `remove_song`, `remove_songs_by_ids`) — plus
+    /// `refresh_from_queue` for direct projection — acquire the queue lock
+    /// once, mutate (or skip mutation), then call this method to project,
+    /// so a concurrent task cannot mutate the queue between the mutation
+    /// and the projection. Closes the 1-tick projection race the previous
+    /// unlock-then-relock pattern allowed.
     ///
     /// Lock order: caller already holds `queue_manager`; this method then
     /// acquires `auth_gateway` via `get_server_config()`. The same order is
@@ -471,5 +472,97 @@ mod tests {
         assert_eq!(service.songs.get().len(), 2);
         assert_eq!(service.current_index.get(), 0);
         assert_eq!(service.total_count.get(), 2);
+    }
+
+    /// `remove_song` must project all three reactives atomically — closing
+    /// the gap left after Tier 0 #0.4 fixed only the append/insert/set
+    /// mutators. Removing before the playhead shifts `current_index` back to
+    /// keep tracking the playing song, per `QueueManager::remove_song`'s
+    /// contract.
+    #[tokio::test(flavor = "current_thread")]
+    async fn remove_song_projects_reactives_after_mutation() {
+        let (service, _temp) = make_service();
+        service
+            .set_queue(make_songs(&["a", "b", "c", "d"]), Some(2))
+            .await
+            .expect("set_queue");
+        assert_eq!(service.total_count.get(), 4);
+        assert_eq!(service.current_index.get(), 2);
+
+        service.remove_song(0).await.expect("remove_song");
+
+        assert_eq!(
+            service.total_count.get(),
+            3,
+            "remove_song must update total_count to reflect the shorter queue"
+        );
+        assert_eq!(
+            service.current_index.get(),
+            1,
+            "removing before the playhead must shift current_index back by one"
+        );
+        assert_eq!(service.songs.get().len(), 3);
+    }
+
+    /// `remove_songs_by_ids` must project all three reactives atomically.
+    /// Removing two ids before the playhead shifts `current_index` back by
+    /// the count actually removed.
+    #[tokio::test(flavor = "current_thread")]
+    async fn remove_songs_by_ids_projects_reactives_after_mutation() {
+        let (service, _temp) = make_service();
+        service
+            .set_queue(make_songs(&["a", "b", "c", "d", "e"]), Some(3))
+            .await
+            .expect("set_queue");
+        assert_eq!(service.total_count.get(), 5);
+        assert_eq!(service.current_index.get(), 3);
+
+        service
+            .remove_songs_by_ids(&["a".to_string(), "b".to_string()])
+            .await
+            .expect("remove_songs_by_ids");
+
+        assert_eq!(
+            service.total_count.get(),
+            3,
+            "remove_songs_by_ids must update total_count to reflect the batch removal"
+        );
+        assert_eq!(
+            service.current_index.get(),
+            1,
+            "removing two ids before the playhead must shift current_index back by two"
+        );
+        assert_eq!(service.songs.get().len(), 3);
+    }
+
+    /// `move_item` must project all three reactives atomically. When the
+    /// playing song itself is moved, `current_index` follows it to the new
+    /// position, per `QueueManager::move_item`'s contract.
+    #[tokio::test(flavor = "current_thread")]
+    async fn move_item_projects_reactives_after_mutation() {
+        let (service, _temp) = make_service();
+        service
+            .set_queue(make_songs(&["a", "b", "c", "d"]), Some(0))
+            .await
+            .expect("set_queue");
+        assert_eq!(service.total_count.get(), 4);
+        assert_eq!(service.current_index.get(), 0);
+
+        // Move the playing song (at index 0) to the back. `move_item`
+        // computes `insert_at = to - 1` when moving forward, so the playing
+        // song lands at index 2 (in a 4-song queue, `to = 3` → `insert_at = 2`).
+        service.move_item(0, 3).await.expect("move_item");
+
+        assert_eq!(
+            service.total_count.get(),
+            4,
+            "move_item must not change total_count"
+        );
+        assert_eq!(
+            service.current_index.get(),
+            2,
+            "moving the playing song must update current_index to its new position"
+        );
+        assert_eq!(service.songs.get().len(), 4);
     }
 }
