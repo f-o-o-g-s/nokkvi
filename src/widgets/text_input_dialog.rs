@@ -8,7 +8,9 @@
 
 use iced::{
     Alignment, Element, Length,
-    widget::{button, checkbox, column, combo_box, container, row, text, text_input},
+    widget::{
+        button, checkbox, column, combo_box, container, mouse_area, opaque, row, text, text_input,
+    },
 };
 
 use crate::theme;
@@ -644,21 +646,25 @@ pub(crate) fn text_input_dialog_overlay<'a>(
         })
         .width(Length::Shrink);
 
-    // Center the dialog in a full-screen semi-transparent backdrop
-    let backdrop = container(dialog_box)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .align_x(Alignment::Center)
-        .align_y(Alignment::Center)
-        .style(|_theme| {
-            // Semi-transparent backdrop using theme bg color (works in light mode too)
-            let mut bg = theme::bg0_hard();
-            bg.a = 0.6;
-            container::Style {
-                background: Some(bg.into()),
-                ..Default::default()
-            }
-        });
+    // ── Backdrop + opaque wrapper (prevents click-through) ───────
+    // Backdrop click fires Cancel — matches about/info/eq modal pattern.
+    let backdrop = mouse_area(
+        container(opaque(dialog_box))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center)
+            .style(|_theme| {
+                // Semi-transparent backdrop using theme bg color (works in light mode too)
+                let mut bg = theme::bg0_hard();
+                bg.a = 0.6;
+                container::Style {
+                    background: Some(bg.into()),
+                    ..Default::default()
+                }
+            }),
+    )
+    .on_press(TextInputDialogMessage::Cancel);
 
-    Some(backdrop.into())
+    Some(opaque(backdrop))
 }
