@@ -33,7 +33,7 @@ struct Config {
     led_segment_height: f32,  // Height of each LED segment in pixels
     led_border_opacity: f32,  // 0.0 = transparent, 1.0 = opaque (border opacity in LED mode)
     border_opacity: f32,      // 0.0 = transparent, 1.0 = opaque (border opacity in non-LED mode)
-    gradient_mode: u32,          // 0 = static, 2 = wave, 3 = shimmer, 4 = energy
+    gradient_mode: u32,          // 0 = static, 2 = wave, 3 = shimmer, 4 = energy, 5 = alternate (1 is intentionally unused)
     peak_gradient_mode: u32,  // 0=static, 1=cycle, 2=height, 3=match
     peak_mode: u32,           // 0=none, 1=fade, 2=fall, 3=fall_accel, 4=fall_fade
     peak_hold_time: f32,      // Time in seconds for peak to hold
@@ -812,10 +812,16 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
             base_pos = clamped_y;
         }
         
-        // Choose color based on gradient mode, using orientation-aware base position
+        // Choose color based on gradient mode, using orientation-aware base position.
+        //
+        // gradient_mode discriminants: 0=static, 2=wave, 3=shimmer, 4=energy, 5=alternate.
+        // 1u is intentionally unused — see BarsConfig::get_gradient_mode_value in
+        // src/visualizer_config.rs. Group G #3 will replace this with a typed enum.
+        // The bars_gradient_mode_never_emits_dead_1u test pins the emitted set so a
+        // future agent who picks 1u as a discriminant fails before shipping a dead branch.
         let gradient_mode = uniforms.config.gradient_mode;
         var base_color: vec4<f32>;
-        
+
         if (gradient_mode == 0u) {
             base_color = get_gradient_color(base_pos);
         } else if (gradient_mode == 2u) {
