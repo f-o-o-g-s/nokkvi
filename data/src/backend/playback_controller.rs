@@ -439,8 +439,6 @@ impl PlaybackController {
         };
 
         let effect = queue_manager.set_repeat(next_repeat)?;
-        queue_manager.clear_queued();
-        queue_manager.save_order()?;
         drop(queue_manager);
 
         // Invalidate engine-level gapless prep (stale after mode change)
