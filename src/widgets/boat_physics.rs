@@ -824,7 +824,20 @@ pub(crate) fn step(
             state.secs_until_next_anchor =
                 lerp(ANCHOR_INTERVAL_MIN_SECS, ANCHOR_INTERVAL_MAX_SECS, r);
         }
-    } else if !in_margin {
+    } else if !in_margin && !state.inverted {
+        // V1 punt: anchor + rope physics assumes the boat sits above
+        // the wave line (rope hangs down to a sprite on the canvas
+        // floor). When `state.inverted` is true the boat is rendered
+        // upside-down on the lower wave, so a fresh anchor would have
+        // nowhere sensible to live geometrically. Skip the countdown
+        // entirely while inverted; the timer resumes ticking on the
+        // next wrap that toggles `inverted` back to false. The
+        // "rendering only meaningful when mirror is on" caveat that
+        // applies to `inverted` elsewhere also applies here: in
+        // non-mirror sessions the flag will flip-flop with wraps but
+        // suppress no anchors that would have otherwise looked good
+        // (anchors land identically on either side of the toggle in
+        // the non-mirror render path).
         let in_safe_zone = state.x_ratio > ANCHOR_SAFE_LO && state.x_ratio < ANCHOR_SAFE_HI;
         state.secs_until_next_anchor -= dt_secs;
         if state.secs_until_next_anchor <= 0.0 && in_safe_zone {
@@ -1007,7 +1020,38 @@ pub(crate) fn step(
     // margin-specific force.
     let span = 1.0 + 2.0 * state.x_wrap_margin;
     let raw_x = state.x_ratio + state.x_velocity * dt_secs;
+    // Detect an off-screen wrap before applying `rem_euclid`. A wrap
+    // fires when the unwrapped position falls outside the extended
+    // wrap span. We toggle `state.inverted` on every wrap so each
+    // tack-and-wrap cycle alternates the boat between the upper and
+    // lower wave in mirrored line mode. The toggle happens
+    // unconditionally — `step()` doesn't know about the mirror flag,
+    // and that's fine: the render path ignores `inverted` outside
+    // mirrored mode, so a no-op toggle in non-mirror sessions has no
+    // visible effect.
+    //
+    // If a wrap toggles `inverted` to `true` while an anchor is
+    // active, lift the anchor immediately. The anchor + rope physics
+    // is designed for a boat sitting above the line; retrofitting
+    // it for the inverted geometry is a V2 concern. Lifting on the
+    // toggle is the simplest correct behavior — the boat resumes
+    // sailing on the lower wave with a clean state, and the next
+    // anchor countdown gets reseeded so the boat doesn't immediately
+    // drop again. (Conversely, a wrap that toggles `inverted` from
+    // true to false while anchored is impossible: anchor firing is
+    // suppressed while inverted, so an anchor active at a wrap-time
+    // can only have been started in the upright state.)
+    let wrapped_off_screen = raw_x < -state.x_wrap_margin || raw_x >= 1.0 + state.x_wrap_margin;
     state.x_ratio = (raw_x + state.x_wrap_margin).rem_euclid(span) - state.x_wrap_margin;
+    if wrapped_off_screen {
+        state.inverted = !state.inverted;
+        if state.inverted && state.anchor_remaining_secs > 0.0 {
+            state.anchor_remaining_secs = 0.0;
+            let r = next_rand_unit(&mut state.rng_state);
+            state.secs_until_next_anchor =
+                lerp(ANCHOR_INTERVAL_MIN_SECS, ANCHOR_INTERVAL_MAX_SECS, r);
+        }
+    }
 
     // Tack countdown. Only ticks while the boat is in the visible area
     // and not anchored — a tack mid-margin would have sail thrust briefly

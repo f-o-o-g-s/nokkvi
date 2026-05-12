@@ -2444,3 +2444,216 @@ fn step_anchor_suppresses_music_thrust() {
         state.x_velocity
     );
 }
+
+// --- inverted-on-wrap (mirrored line mode affordance) ---------------------
+
+/// A rightward wrap must toggle `state.inverted`. The boat starts near
+/// the right wrap edge with rightward momentum; a single big step
+/// pushes it past the margin and into the wrap path. The flag toggles
+/// on every wrap unconditionally — `step()` doesn't know about the
+/// mirror flag, so the render path is responsible for ignoring the
+/// flag outside mirrored line mode.
+#[test]
+fn step_wrap_toggles_inverted_on_right_edge() {
+    let bars = vec![0.5; 16];
+    let mut state = BoatState {
+        x_ratio: 1.04,
+        x_velocity: MAX_X_V,
+        facing: 1.0,
+        x_wrap_margin: 0.05,
+        rng_state: 0x12345,
+        secs_until_next_tack: 1e6,
+        secs_until_next_anchor: 1e6,
+        inverted: false,
+        ..Default::default()
+    };
+    step(
+        &mut state,
+        Duration::from_millis(500),
+        &bars,
+        false,
+        MusicSignals::default(),
+    );
+    assert!(
+        state.inverted,
+        "right-edge wrap must flip inverted from false to true \
+         (got inverted = {}, x_ratio = {}, x_velocity = {})",
+        state.inverted, state.x_ratio, state.x_velocity
+    );
+    // Sanity: a wrap actually fired (boat re-entered the left side).
+    assert!(
+        state.x_ratio < 0.5,
+        "precondition: boat must have wrapped through the right edge \
+         to land near 0 (got x_ratio = {})",
+        state.x_ratio
+    );
+}
+
+/// A leftward wrap must toggle `state.inverted`. Mirror of the
+/// right-edge case: boat near the left wrap edge with leftward
+/// momentum; a single big step pushes it past the margin and the
+/// flag flips.
+#[test]
+fn step_wrap_toggles_inverted_on_left_edge() {
+    let bars = vec![0.5; 16];
+    let mut state = BoatState {
+        x_ratio: -0.04,
+        x_velocity: -MAX_X_V,
+        facing: -1.0,
+        x_wrap_margin: 0.05,
+        rng_state: 0x12345,
+        secs_until_next_tack: 1e6,
+        secs_until_next_anchor: 1e6,
+        inverted: false,
+        ..Default::default()
+    };
+    step(
+        &mut state,
+        Duration::from_millis(500),
+        &bars,
+        false,
+        MusicSignals::default(),
+    );
+    assert!(
+        state.inverted,
+        "left-edge wrap must flip inverted from false to true \
+         (got inverted = {}, x_ratio = {}, x_velocity = {})",
+        state.inverted, state.x_ratio, state.x_velocity
+    );
+    assert!(
+        state.x_ratio > 0.5,
+        "precondition: boat must have wrapped through the left edge \
+         to land near 1 (got x_ratio = {})",
+        state.x_ratio
+    );
+}
+
+/// Two consecutive wraps must toggle `inverted` back to its starting
+/// state. Confirms the toggle is symmetric rather than a latch — every
+/// tack-and-wrap cycle alternates the boat between upper and lower
+/// wave in mirrored line mode.
+#[test]
+fn step_two_wraps_restore_inverted_to_starting_value() {
+    let bars = vec![0.5; 16];
+    let mut state = BoatState {
+        x_ratio: 1.04,
+        x_velocity: MAX_X_V,
+        facing: 1.0,
+        x_wrap_margin: 0.05,
+        rng_state: 0x12345,
+        secs_until_next_tack: 1e6,
+        secs_until_next_anchor: 1e6,
+        inverted: false,
+        ..Default::default()
+    };
+    step(
+        &mut state,
+        Duration::from_millis(500),
+        &bars,
+        false,
+        MusicSignals::default(),
+    );
+    assert!(state.inverted, "first wrap should have flipped to true");
+    // Push past the left wrap edge for the second wrap.
+    state.x_ratio = -0.04;
+    state.x_velocity = -MAX_X_V;
+    state.facing = -1.0;
+    step(
+        &mut state,
+        Duration::from_millis(500),
+        &bars,
+        false,
+        MusicSignals::default(),
+    );
+    assert!(
+        !state.inverted,
+        "second wrap must flip inverted back to false (got inverted = {})",
+        state.inverted
+    );
+}
+
+/// While `state.inverted` is true, the anchor-firing countdown must
+/// not fire even when all other preconditions are met (safe-zone
+/// position, countdown elapsed, boat in the visible area). V1 punts
+/// on anchor + rope geometry for inverted boats; the rendering would
+/// have the rope reaching out from an upside-down sprite to a
+/// floor-bound anchor, which doesn't read.
+#[test]
+fn step_anchor_does_not_fire_while_inverted() {
+    let bars = vec![0.5; 16];
+    let mut state = BoatState {
+        x_ratio: 0.5, // mid-canvas, well inside the safe zone
+        facing: 1.0,
+        rng_state: 0x12345,
+        secs_until_next_tack: 1e6,
+        // Pre-arm: would fire next tick if the inverted gate didn't hold.
+        secs_until_next_anchor: 0.001,
+        inverted: true,
+        ..Default::default()
+    };
+    step(
+        &mut state,
+        Duration::from_millis(16),
+        &bars,
+        false,
+        MusicSignals::default(),
+    );
+    assert_eq!(
+        state.anchor_remaining_secs, 0.0,
+        "anchor must NOT fire while inverted (got anchor_remaining_secs = {})",
+        state.anchor_remaining_secs
+    );
+}
+
+/// A wrap that flips `inverted` from false to true while an anchor is
+/// active must lift the anchor on the same tick. The rope physics is
+/// not retrofit for inverted boats in V1, so an anchor must never
+/// survive the toggle. The countdown to the next anchor is reseeded
+/// so the boat doesn't immediately drop again on the next tick.
+#[test]
+fn step_wrap_lifts_active_anchor_when_toggling_inverted() {
+    let bars = vec![0.5; 16];
+    let mut state = BoatState {
+        x_ratio: 1.04,
+        x_velocity: MAX_X_V,
+        facing: 1.0,
+        x_wrap_margin: 0.05,
+        rng_state: 0x12345,
+        secs_until_next_tack: 1e6,
+        // Active anchor with plenty of time remaining; the lift logic
+        // must zero it out on the wrap.
+        anchor_remaining_secs: 8.0,
+        // Pre-set so we can check the reseed lands in [MIN, MAX].
+        secs_until_next_anchor: 0.0,
+        inverted: false,
+        ..Default::default()
+    };
+    step(
+        &mut state,
+        Duration::from_millis(500),
+        &bars,
+        false,
+        MusicSignals::default(),
+    );
+    assert!(
+        state.inverted,
+        "precondition: the wrap must have toggled inverted to true \
+         (got inverted = {}, x_ratio = {})",
+        state.inverted, state.x_ratio
+    );
+    assert_eq!(
+        state.anchor_remaining_secs, 0.0,
+        "active anchor must be lifted on the wrap that toggles \
+         inverted to true (got anchor_remaining_secs = {})",
+        state.anchor_remaining_secs
+    );
+    assert!(
+        (ANCHOR_INTERVAL_MIN_SECS..=ANCHOR_INTERVAL_MAX_SECS)
+            .contains(&state.secs_until_next_anchor),
+        "next-anchor countdown must be reseeded into [{}, {}] after \
+         the lift (got secs_until_next_anchor = {})",
+        ANCHOR_INTERVAL_MIN_SECS,
+        ANCHOR_INTERVAL_MAX_SECS,
+        state.secs_until_next_anchor,
+    );
+}
