@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.3.16 — 2026-05-12
+
+### Added
+
 - Auto mode now stacks the artwork above the slot list on portrait windows where the horizontal column would crowd the rows. The stacked artwork aligns with the slot rows' inset and only appears when the window is tall and narrow enough for it to fill the inset edge-to-edge, so the panel never shows bg-color bars inside the pane.
 - "Auto-mode artwork size" slider in Settings → Interface → Artwork Column (0.30–0.70 in 5% steps, default 0.40) grows or shrinks the Auto-mode artwork — affects both the horizontal column and the portrait-fallback vertical artwork.
 - Two new "Always (Vertical Native)" and "Always (Vertical Stretched)" artwork-column modes — both stack a fixed-height artwork above the slot list with a horizontal drag handle below the artwork for live resize, controlled by the new "Always-Vertical artwork height" slider (0.10–0.80, default 0.40). Unlike Auto, these modes allow letterboxing as the deliberate tradeoff for "always show big artwork above the list" regardless of window orientation.
@@ -39,8 +49,6 @@ All notable changes to this project will be documented in this file.
 - Surfing boat now rides the actual wave line when the lines visualizer is in mirrored mode — the boat's vertical math was anchored to the canvas bottom while the rendered wave baseline sat at the canvas vertical center, so the boat floated roughly half a canvas height below the line it was meant to surf. The dropped anchor and its rope likewise now sit on that centerline baseline instead of stretching from the boat (at center) all the way down through the lower-half reflection to the canvas floor.
 - Starring with Shift+L and bumping a rating with Shift+± via hotkey now confirm with a success toast again — the toasts were silently dropped during a recent hotkey refactor that routed both handlers through the shared optimistic-update helpers, so the only feedback you got was the optimistic star/rating fill plus the boundary-skip "Rating already at 5/5" toast when you pressed past the cap.
 - Failed album-tracks fetch on album expansion now drops to the login screen on session expiry (HTTP 401) or surfaces the error as a toast, instead of leaving the row collapsed with no feedback — completes the parity with artist, genre, and playlist expansion, which had already received this treatment in a prior audit.
-
-### Removed
 
 ## v0.3.15 — 2026-05-10
 
