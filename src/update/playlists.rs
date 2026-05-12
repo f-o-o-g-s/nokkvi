@@ -96,6 +96,7 @@ impl Nokkvi {
                 if let Some(task) = self.guard_play_action() {
                     return task;
                 }
+                self.enter_new_playback_context();
                 // Browsing panel: redirect play → add to queue
                 if self.browsing_panel.is_some() {
                     let name = self

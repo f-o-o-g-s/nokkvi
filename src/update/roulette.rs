@@ -76,7 +76,11 @@ impl Nokkvi {
         }
 
         // Block plays during playlist edit mode the same way every other
-        // play handler does.
+        // play handler does. Skip `enter_new_playback_context()` here — the
+        // per-view settle dispatch (`roulette_settle_play`) routes through
+        // each view's own play handler, which calls the helper when the play
+        // replaces the queue. Calling it up-front would clear the loaded
+        // playlist header for Queue-view roulette, which is an in-queue play.
         if let Some(task) = self.guard_play_action() {
             return task;
         }

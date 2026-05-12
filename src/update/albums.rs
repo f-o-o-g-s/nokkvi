@@ -434,6 +434,7 @@ impl Nokkvi {
                 if let Some(task) = self.guard_play_action() {
                     return task;
                 }
+                self.enter_new_playback_context();
                 // Browsing panel: redirect play → add to queue
                 if self.browsing_panel.is_some() {
                     // Check if this was triggered by a cross-pane drag drop with a target position
@@ -596,6 +597,7 @@ impl Nokkvi {
                 if let Some(task) = self.guard_play_action() {
                     return task;
                 }
+                self.enter_new_playback_context();
                 // Browsing panel: redirect play → add song to queue
                 if self.browsing_panel.is_some() {
                     let song_id = self

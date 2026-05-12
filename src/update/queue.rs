@@ -155,7 +155,10 @@ impl Nokkvi {
 
         match action {
             QueueAction::PlaySong(index) => {
-                // Guard: block during playlist edit mode + transition radio → queue
+                // Guard: block during playlist edit mode + transition radio → queue.
+                // Deliberately omit `enter_new_playback_context()` — this path only
+                // moves the current-track pointer; queue contents (and the loaded
+                // playlist header) must survive.
                 if let Some(task) = self.guard_play_action() {
                     return task;
                 }

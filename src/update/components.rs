@@ -244,10 +244,17 @@ impl Nokkvi {
 
     /// Guard a play action against playlist edit mode.
     ///
-    /// Call this after the browsing panel check in every Play* handler.
-    /// Returns `Some(Task::none())` with a warning toast if in playlist
-    /// edit mode (play would replace the queue being edited).
-    /// Returns `None` and clears `active_playlist_name` if play should proceed.
+    /// Universal block/transition checks every Play* handler needs:
+    /// returns `Some(Task::none())` with a warning toast when in playlist
+    /// edit mode (play would replace the queue being edited), or transitions
+    /// radio playback back to queue mode when active. Returns `None` to let
+    /// the caller proceed.
+    ///
+    /// Play actions that **replace queue contents** (album/artist/genre/
+    /// playlist/song/batch/roulette) should additionally call
+    /// [`Self::enter_new_playback_context`]. Play actions that only advance
+    /// the playback pointer within the existing queue (`PlaySong` inside the
+    /// queue view) must NOT — doing so clears the loaded-playlist header.
     pub(crate) fn guard_play_action(&mut self) -> Option<Task<Message>> {
         if self.playlist_edit.is_some() {
             self.toast_warn("Cannot play — would replace the playlist being edited");
@@ -261,11 +268,20 @@ impl Nokkvi {
             self.active_playback = crate::state::ActivePlayback::Queue;
             // Engine stop is handled by the play action that follows
         }
+        None
+    }
+
+    /// Reset state tied to the *previous* playback context.
+    ///
+    /// Call from play handlers that mutate the queue (replace, append-and-play,
+    /// roulette pick, batch play). Skip from `QueueAction::PlaySong` — that
+    /// path only moves the current-track pointer and must preserve the loaded
+    /// playlist header.
+    pub(crate) fn enter_new_playback_context(&mut self) {
         // Cancel any in-progress progressive queue loading target so the header
         // doesn't show a stale "X of Y" count from a superseded play action.
         self.library.queue_loading_target = None;
         self.clear_active_playlist();
-        None
     }
 
     /// Clear the active playlist context and persist the change.
