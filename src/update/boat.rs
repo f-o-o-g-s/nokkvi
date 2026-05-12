@@ -136,6 +136,15 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
         bar_energy,
     };
     boat::step(&mut app.boat, dt, bars, angular, music);
+    // `step()` is mirror-unaware and toggles `inverted` on every wrap so
+    // mirrored mode gets the alternating top/bottom-wave surf. Outside
+    // mirrored mode the renderer always draws upright, but the anchor-
+    // firing guard in `step()` keys on `inverted` and would otherwise
+    // freeze the countdown during every other wrap cycle — clear the
+    // flag here so non-mirror sessions see the documented anchor cadence.
+    if !lines_mirror {
+        app.boat.inverted = false;
+    }
     app.boat.visible = true;
     // Pre-build (and cache) the SVG handle for the current quantized
     // tilt + facing + inverted so the immutable `view()` render path
