@@ -70,8 +70,9 @@ impl<'a> QueueOrchestrator<'a> {
         let current_idx = self.queue.current_index().await;
         let target = current_idx.map_or(0, |i| i + 1);
 
+        // `insert_songs_at` now refreshes all three reactives atomically under
+        // the same queue lock — no separate `refresh_from_queue` needed.
         self.queue.insert_songs_at(target, songs).await?;
-        self.queue.refresh_from_queue().await?;
         debug!(
             "⏭ Inserted {} songs as play-next at position {}",
             count, target
