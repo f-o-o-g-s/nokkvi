@@ -26,6 +26,13 @@ use crate::theme;
 /// Width of the side nav bar (px)
 pub(crate) const SIDE_NAV_WIDTH: f32 = 28.0;
 
+/// Width of the side-nav border (`bg0_hard` rule on the right edge).
+pub(crate) const SIDE_NAV_BORDER: f32 = 2.0;
+
+/// Total horizontal footprint of the side-nav bar (icons + border).
+/// Must match the outer container width at line ~365.
+pub(crate) const SIDE_NAV_TOTAL_WIDTH: f32 = SIDE_NAV_WIDTH + SIDE_NAV_BORDER;
+
 /// Height allocated for each tab button (enough for rotated text)
 const TAB_HEIGHT: f32 = 72.0;
 
@@ -362,7 +369,7 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
         .spacing(0)
         .height(Length::Fill),
     )
-    .width(Length::Fixed(SIDE_NAV_WIDTH + 2.0))
+    .width(Length::Fixed(SIDE_NAV_TOTAL_WIDTH))
     .height(Length::Fill)
     .into()
 }
