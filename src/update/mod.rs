@@ -620,12 +620,6 @@ impl Nokkvi {
             Message::SimilarSongsLoaded(generation, result, label) => {
                 self.handle_similar_songs_loaded(generation, result, label)
             }
-            Message::ArtworkColumnDragChange(pct) => self.handle_artwork_column_drag(
-                crate::widgets::artwork_split_handle::DragEvent::Change(pct),
-            ),
-            Message::ArtworkColumnDragCommit(pct) => self.handle_artwork_column_drag(
-                crate::widgets::artwork_split_handle::DragEvent::Commit(pct),
-            ),
 
             // -----------------------------------------------------------------
             // Surfing-Boat Overlay (lines mode)
