@@ -13,7 +13,7 @@ use std::sync::{
 };
 
 use anyhow::Result;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 use tracing::{debug, trace, warn};
 
 use crate::{
@@ -126,6 +126,13 @@ pub struct AudioRenderer {
     /// Software volume is kept at 1.0 during normal playback; crossfade
     /// ramps use only the fade factor (PipeWire applies user volume on top).
     pw_volume_active: bool,
+
+    /// Shared notify primitive passed to every `StreamingSource` created by
+    /// this renderer.  Fired every `CONSUMED_NOTIFY_STRIDE` real samples; the
+    /// decode loop awaits it instead of busy-sleeping when `push_slice`
+    /// returns 0 (ring buffer full).  A single `Arc` survives across seek /
+    /// stream-recreation so the decode loop never needs to re-capture it.
+    consumed_notify: Arc<Notify>,
 }
 
 // ---- Volume normalization setters (outside the main impl for visibility) ----
@@ -239,7 +246,16 @@ impl AudioRenderer {
             current_replay_gain: None,
             eq_state: None,
             pw_volume_active: false,
+            consumed_notify: Arc::new(Notify::new()),
         }
+    }
+
+    /// Return the consume-notify primitive so the decode loop can await it.
+    ///
+    /// The returned `Arc` is stable across seek / stream-recreation; the decode
+    /// loop captures it once at spawn time and never needs to refresh it.
+    pub fn consumed_notify(&self) -> &Arc<Notify> {
+        &self.consumed_notify
     }
 
     /// Sealed setter — the only path to install the engine back-link, the
@@ -344,6 +360,7 @@ impl AudioRenderer {
             self.stream_volume(),
             norm,
             self.eq_state.clone(),
+            self.consumed_notify.clone(),
         );
 
         debug!(
@@ -523,6 +540,7 @@ impl AudioRenderer {
                 self.stream_volume(),
                 norm,
                 self.eq_state.clone(),
+                self.consumed_notify.clone(),
             );
             self.primary_stream = Some(stream);
             // Keep current_replay_gain consistent — don't blow it away.
@@ -728,6 +746,7 @@ impl AudioRenderer {
             0.0, // Start silent, volume will ramp up
             cf_norm,
             self.eq_state.clone(),
+            self.consumed_notify.clone(),
         );
 
         self.crossfade_state = CrossfadeState::Active {

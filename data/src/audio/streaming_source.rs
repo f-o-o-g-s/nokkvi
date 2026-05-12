@@ -15,6 +15,7 @@ use std::{
 
 use ringbuf::{HeapCons, traits::Consumer};
 use rodio::Source;
+use tokio::sync::Notify;
 
 /// Atomic f32 helpers using bit-level transmutation.
 fn store_f32(atomic: &AtomicU32, value: f32) {
@@ -59,6 +60,12 @@ pub struct StreamHandle {
     pub(super) peak_underrun_samples: Arc<AtomicU64>,
     /// Total silence samples emitted due to empty ring buffer.
     pub(super) total_silence_samples: Arc<AtomicU64>,
+    /// Fired whenever samples are consumed from the ring buffer.
+    ///
+    /// The decode loop's write-retry path awaits this instead of busy-sleeping,
+    /// so it wakes as soon as the renderer drains space — and stays asleep
+    /// for the full timeout while paused (renderer not consuming → no fires).
+    pub(super) consumed_notify: Arc<Notify>,
 }
 
 impl StreamHandle {
@@ -115,6 +122,16 @@ impl StreamHandle {
     pub fn resume(&self) {
         self.paused.store(false, Ordering::Release);
     }
+
+    /// Return a reference to the consumed-samples notify primitive.
+    ///
+    /// The decode loop captures this at spawn time and awaits it (with a
+    /// timeout) when `push_slice` returns 0. The notifier fires periodically
+    /// while samples are being consumed; it is silent while the stream is
+    /// paused or stopped, letting the decode loop sleep cheaply.
+    pub fn consumed_notify(&self) -> &Arc<Notify> {
+        &self.consumed_notify
+    }
 }
 
 /// Visualizer callback type — receives a batch of f32 samples and the sample rate.
@@ -155,7 +172,18 @@ pub struct StreamingSource {
     eq: Option<super::eq::EqProcessor>,
     /// Consecutive silence samples emitted (ring buffer empty). Used for underrun tracking.
     consecutive_silence: u64,
+    /// Samples consumed since the last `consumed_notify` fire.
+    /// We fire the notify every `CONSUMED_NOTIFY_STRIDE` real samples to wake
+    /// the decode loop's write-retry path without per-sample overhead.
+    samples_since_notify: u32,
 }
+
+/// Stride (in samples) between consecutive `consumed_notify` fires.
+///
+/// At 48 kHz stereo the audio callback pulls ~1920 samples per 20 ms tick.
+/// Firing every 512 samples (~5 ms) gives the decode loop a tight enough
+/// wake-up granularity without calling `notify_one` per-sample.
+const CONSUMED_NOTIFY_STRIDE: u32 = 512;
 
 impl StreamingSource {
     /// Create a new streaming source.
@@ -164,6 +192,9 @@ impl StreamingSource {
     /// - `channels`: Number of audio channels.
     /// - `sample_rate`: Sample rate in Hz.
     /// - `visualizer`: Shared callback slot for tapping samples (can be set later).
+    /// - `consumed_notify`: Notify primitive fired every `CONSUMED_NOTIFY_STRIDE` samples.
+    ///   The decode loop awaits this (with a timeout) instead of busy-sleeping when the
+    ///   ring buffer is full — it wakes as soon as there is space to write.
     pub fn new(
         consumer: HeapCons<f32>,
         channels: NonZero<u16>,
@@ -171,6 +202,7 @@ impl StreamingSource {
         visualizer: SharedVisualizerCallback,
         initial_volume: f32,
         eq_state: Option<super::eq::EqState>,
+        consumed_notify: Arc<Notify>,
     ) -> (Self, StreamHandle) {
         let volume = initial_volume.clamp(0.0, 1.0);
         let handle = StreamHandle {
@@ -181,6 +213,7 @@ impl StreamingSource {
             underrun_count: Arc::new(AtomicU64::new(0)),
             peak_underrun_samples: Arc::new(AtomicU64::new(0)),
             total_silence_samples: Arc::new(AtomicU64::new(0)),
+            consumed_notify,
         };
 
         // ~5ms time constant for volume smoothing (avoids crossfade crackle).
@@ -207,6 +240,7 @@ impl StreamingSource {
             smoothing_coeff,
             eq,
             consecutive_silence: 0,
+            samples_since_notify: 0,
         };
 
         (source, handle)
@@ -274,6 +308,18 @@ impl Iterator for StreamingSource {
                 }
             }
             self.consecutive_silence = 0;
+
+            // Notify the decode loop every CONSUMED_NOTIFY_STRIDE real samples.
+            // The loop awaits this notify (with a 500 ms timeout) instead of
+            // busy-sleeping when push_slice returns 0 (ring buffer full).
+            // While paused the renderer emits silence without consuming, so the
+            // notify never fires and the decode loop sleeps for the full timeout —
+            // eliminating the 5 ms livelock observed during paused radio streams.
+            self.samples_since_notify += 1;
+            if self.samples_since_notify >= CONSUMED_NOTIFY_STRIDE {
+                self.samples_since_notify = 0;
+                self.handle.consumed_notify.notify_one();
+            }
         } else {
             self.consecutive_silence += 1;
             self.handle

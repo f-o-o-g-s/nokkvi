@@ -570,6 +570,11 @@ impl CustomAudioEngine {
         let source_generation = self.source_generation.clone();
         let reconnect_url = self.source.clone();
 
+        // Capture the renderer's consume-notify so the write-retry loop can
+        // await it instead of busy-sleeping. The Arc is stable across seek /
+        // stream-recreation, so a single capture here is always valid.
+        let consumed_notify = renderer.lock().consumed_notify().clone();
+
         // Clear EOF flag — this decoder is starting fresh
         self.decoder_eof.store(false, Ordering::Release);
 
@@ -719,7 +724,22 @@ impl CustomAudioEngine {
 
                         if written < samples_to_write.len() {
                             samples_to_write = &samples_to_write[written..];
-                            tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
+                            // Ring buffer is full (or partially so). Instead of busy-sleeping
+                            // every 5 ms, wait for the renderer to consume samples.
+                            //
+                            // When playing:  StreamingSource::next() fires consumed_notify every
+                            //   ~512 samples (~5 ms at 48 kHz stereo) → we wake up promptly.
+                            // When paused:   renderer emits silence without consuming the ring
+                            //   buffer → consumed_notify never fires → timeout elapses → we
+                            //   re-check generation and sleep again. 500 ms per cycle ≈ 2
+                            //   wake-ups/s instead of 200 wake-ups/s — no more livelock.
+                            // On supersede:  generation check fires immediately after the timeout
+                            //   (or after a spurious wake), bounding exit latency to ≤500 ms.
+                            let _ = tokio::time::timeout(
+                                tokio::time::Duration::from_millis(500),
+                                consumed_notify.notified(),
+                            )
+                            .await;
                         } else {
                             break;
                         }
@@ -2175,5 +2195,182 @@ mod tests {
         assert!(slot.decoder.is_none());
         assert!(slot.source.is_empty());
         assert!(!slot.prepared);
+    }
+
+    // -----------------------------------------------------------------------
+    // F3: pause-aware decode-loop — consumed_notify unit tests
+    //
+    // These tests exercise the Notify primitive added to StreamingSource
+    // without requiring a live PipeWire device or a real HTTP radio stream.
+    // The integration behaviour (decode loop sleeping during pause) follows
+    // directly from: paused → no consume → no notify fire → 500 ms timeout.
+    // -----------------------------------------------------------------------
+
+    /// Build a minimal `StreamingSource` backed by a filled ring buffer so we
+    /// can drive `next()` manually in tests.
+    fn make_source_with_data(
+        samples: usize,
+        paused: bool,
+    ) -> (
+        crate::audio::streaming_source::StreamingSource,
+        crate::audio::streaming_source::StreamHandle,
+    ) {
+        use std::{num::NonZero, sync::Arc};
+
+        use ringbuf::{HeapRb, traits::Split};
+        use tokio::sync::Notify;
+
+        use crate::audio::streaming_source::{SharedVisualizerCallback, StreamingSource};
+
+        let rb = HeapRb::<f32>::new(samples.max(1));
+        let (mut producer, consumer) = rb.split();
+        {
+            use ringbuf::traits::Producer;
+            let data: Vec<f32> = (0..samples).map(|i| i as f32 * 0.001).collect();
+            producer.push_slice(&data);
+        }
+
+        let viz: SharedVisualizerCallback = Arc::new(parking_lot::RwLock::new(None));
+        let notify = Arc::new(Notify::new());
+
+        let (source, handle) = StreamingSource::new(
+            consumer,
+            NonZero::new(2).unwrap(),
+            NonZero::new(48000).unwrap(),
+            viz,
+            1.0,
+            None,
+            notify,
+        );
+
+        if paused {
+            handle.pause();
+        }
+
+        (source, handle)
+    }
+
+    /// While playing, `consumed_notify` fires once every CONSUMED_NOTIFY_STRIDE
+    /// samples (512).  After consuming 1024 samples we expect exactly 2 fires
+    /// stored as permits in the `Notify`.
+    ///
+    /// `Notify` coalesces into a single stored permit, so we verify by
+    /// observing that at least one `notified()` future completes immediately
+    /// (i.e., a permit was set), which proves the notify fired at least once.
+    #[tokio::test]
+    async fn streaming_source_fires_consumed_notify_while_playing() {
+        // Fill ring with 1024 samples — enough for 2 STRIDE boundaries.
+        let (mut source, handle) = make_source_with_data(1024, false);
+
+        // Drain all samples.
+        for _ in 0..1024 {
+            let _ = source.next();
+        }
+
+        // At least one notify permit must be stored (fired at sample 512 or 1023).
+        let fired = tokio::time::timeout(
+            tokio::time::Duration::from_millis(1),
+            handle.consumed_notify().notified(),
+        )
+        .await;
+        assert!(
+            fired.is_ok(),
+            "consumed_notify should have fired after consuming ≥512 real samples"
+        );
+    }
+
+    /// While paused, `StreamingSource::next()` returns silence without consuming
+    /// from the ring buffer.  `consumed_notify` must NOT fire — the decode loop
+    /// relies on this silence to sleep cheaply for the full 500 ms timeout
+    /// instead of busy-waking every 5 ms.
+    #[tokio::test]
+    async fn streaming_source_does_not_fire_consumed_notify_while_paused() {
+        // Ring has samples but the source is paused — next() returns silence.
+        let (mut source, handle) = make_source_with_data(2048, true);
+
+        // Pull many samples — all should be silence (paused), none consumed.
+        for _ in 0..2048 {
+            let s = source
+                .next()
+                .expect("paused source should return Some(0.0)");
+            assert_eq!(s, 0.0, "paused source must emit silence");
+        }
+
+        // The notify must NOT have fired — no permit stored.
+        let fired = tokio::time::timeout(
+            tokio::time::Duration::from_millis(1),
+            handle.consumed_notify().notified(),
+        )
+        .await;
+        assert!(
+            fired.is_err(),
+            "consumed_notify must not fire while the stream is paused"
+        );
+    }
+
+    /// Unpause wakes the waiting side: pause → consume silence (no fire) →
+    /// resume → consume real samples → notify fires.
+    #[tokio::test]
+    async fn streaming_source_fires_consumed_notify_after_unpause() {
+        let (mut source, handle) = make_source_with_data(1024, true);
+
+        // Drain while paused — no fires.
+        for _ in 0..512 {
+            let _ = source.next();
+        }
+        // No permit yet.
+        let still_silent = tokio::time::timeout(
+            tokio::time::Duration::from_millis(1),
+            handle.consumed_notify().notified(),
+        )
+        .await;
+        assert!(still_silent.is_err(), "no fire expected while paused");
+
+        // Resume and drain 512 real samples — exactly one STRIDE → one fire.
+        handle.resume();
+        for _ in 0..512 {
+            let _ = source.next();
+        }
+
+        let woke = tokio::time::timeout(
+            tokio::time::Duration::from_millis(10),
+            handle.consumed_notify().notified(),
+        )
+        .await;
+        assert!(
+            woke.is_ok(),
+            "consumed_notify must fire after resuming and consuming ≥512 samples"
+        );
+    }
+
+    /// The write-retry timeout (500 ms) bounds the decode loop's exit latency
+    /// when its generation is superseded while it is waiting on the notify.
+    ///
+    /// We simulate this by verifying that a `timeout(500ms, notified())` on an
+    /// Arc<Notify> that nobody fires resolves within 600 ms.
+    #[tokio::test]
+    async fn write_retry_timeout_bounds_supersede_exit_latency() {
+        use std::sync::Arc;
+
+        use tokio::sync::Notify;
+
+        let notify = Arc::new(Notify::new());
+        let start = std::time::Instant::now();
+
+        // Nobody fires the notify — should time out at 500 ms.
+        let _ =
+            tokio::time::timeout(tokio::time::Duration::from_millis(500), notify.notified()).await;
+
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed >= tokio::time::Duration::from_millis(490),
+            "timeout should have elapsed ~500 ms, got {:?}",
+            elapsed
+        );
+        assert!(
+            elapsed < tokio::time::Duration::from_millis(600),
+            "timeout should not overshoot by more than 100 ms, got {:?}",
+            elapsed
+        );
     }
 }

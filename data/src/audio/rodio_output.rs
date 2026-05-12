@@ -4,11 +4,12 @@
 //! implementation. Uses a shared `Mixer` (from the app-wide `MixerDeviceSink`)
 //! to add streaming sources. All audio (music + SFX) flows through one cpal stream.
 
-use std::num::NonZero;
+use std::{num::NonZero, sync::Arc};
 
 use anyhow::Result;
 use ringbuf::{HeapRb, traits::Split};
 use rodio::mixer::Mixer;
+use tokio::sync::Notify;
 use tracing::{debug, info};
 
 use super::streaming_source::{SharedVisualizerCallback, StreamHandle, StreamingSource};
@@ -123,6 +124,8 @@ impl RodioOutput {
     /// - `initial_volume`: Starting volume (0.0–1.0).
     /// - `norm`: Resolved normalization decision for this stream
     ///   (off, AGC at target level, or static linear gain).
+    /// - `consumed_notify`: Notify primitive fired every ~512 consumed samples.
+    ///   The decode loop awaits this to avoid busy-sleeping when the ring is full.
     pub fn create_stream(
         &self,
         sample_rate: u32,
@@ -130,6 +133,7 @@ impl RodioOutput {
         initial_volume: f32,
         norm: super::NormalizationConfig,
         eq_state: Option<super::eq::EqState>,
+        consumed_notify: Arc<Notify>,
     ) -> ActiveStream {
         // Create lock-free ring buffer
         let rb = HeapRb::<f32>::new(RING_BUFFER_CAPACITY);
@@ -147,6 +151,7 @@ impl RodioOutput {
             self.visualizer_callback.clone(),
             initial_volume,
             eq_state,
+            consumed_notify,
         );
 
         // Pre-mixer chain. The peak limiter sits at the end of every variant so
