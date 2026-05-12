@@ -15,6 +15,10 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - Side nav layout no longer letterboxes the Auto-mode portrait artwork on top and bottom — the artwork resolver was sizing against the full window width instead of the available content pane (which has the 30 px sidebar subtracted). The same correction tightens the horizontal Auto candidate's auto-hide threshold by 30 px in Side layouts so the column hides at the right point.
+- View header now sits between the vertical artwork and the slot list it controls in Auto portrait fallback and Always-Vertical modes — previously it floated at the top of the pane disconnected from its list. Padding around the artwork is now even on all three exposed sides so the gap before the header is a single natural inset rather than a doubled one.
+- Toggling between artwork-column modes mid-session no longer drops focus from the active text input — the slot-list layout keeps a stable root widget across the off / horizontal / vertical branches instead of switching widget types underneath the focused field.
+- Strip Merged mode now applies to radio playback in both the player-bar metadata strip and the top nav-bar — toggling Merged with a station playing produces a single merged marquee (station → playing title → artist, with URL fallback) instead of being silently ignored.
+- Top nav-bar's columnar radio ICY title is now labeled "playing:" to match the player-bar strip — the bar previously labeled the same data "title:", colliding with the regular track-title label and swapping captions for the same field when Merged was toggled.
 
 ### Removed
 
