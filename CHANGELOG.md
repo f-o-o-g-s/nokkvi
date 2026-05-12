@@ -19,6 +19,9 @@ All notable changes to this project will be documented in this file.
 - Toggling between artwork-column modes mid-session no longer drops focus from the active text input — the slot-list layout keeps a stable root widget across the off / horizontal / vertical branches instead of switching widget types underneath the focused field.
 - Strip Merged mode now applies to radio playback in both the player-bar metadata strip and the top nav-bar — toggling Merged with a station playing produces a single merged marquee (station → playing title → artist, with URL fallback) instead of being silently ignored.
 - Top nav-bar's columnar radio ICY title is now labeled "playing:" to match the player-bar strip — the bar previously labeled the same data "title:", colliding with the regular track-title label and swapping captions for the same field when Merged was toggled.
+- Closing the window after pausing a radio stream no longer hangs the app — the radio buffer producer no longer parks the tokio blocking pool on a full channel, and shutdown now runs a bounded async cleanup of in-flight tasks before exiting.
+- Paused radio playback no longer keeps the audio decode loop spinning at ~200 wake-ups per second — the loop now sleeps on a consume-notified rendezvous and idles at ~2 wake-ups per second while paused, cutting CPU and battery use during paused radio to near-zero.
+- Radio streams now detect stalled or half-open server connections within ~15 seconds via per-read and TCP-keepalive timeouts, replacing the previous indefinite wait that could leave the player wedged on a silently-dropped Icecast connection.
 
 ### Removed
 
