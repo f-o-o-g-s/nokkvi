@@ -33,11 +33,9 @@ rodio = { git = "https://github.com/RustAudio/rodio.git", rev = "7e9ba6dd", defa
 ringbuf = "0.4"
 rustfft = "6"
 redb = "3.1.1"
-httpdate = "1.0.3"
 font-kit = "0.14"
 parking_lot = "0.12.5"
 bincode-next = { version = "2.1", features = ["serde"] }
-lru = "0.16"
 thiserror = "2"
 num-complex = "0.4"
 icy-metadata = "0.6.0"

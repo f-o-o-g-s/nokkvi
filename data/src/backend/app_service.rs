@@ -692,7 +692,6 @@ impl AppService {
 // === Queue orchestrator accessor ===
 impl AppService {
     /// Borrow-handle for queue-mutation verbs. Holds no state.
-    #[allow(dead_code)] // First production caller arrives in Lane C (play_* delegators).
     pub(crate) fn queue_orchestrator(&self) -> crate::backend::QueueOrchestrator<'_> {
         crate::backend::QueueOrchestrator::new(&self.queue_service, &self.playback)
     }
@@ -872,18 +871,10 @@ impl AppService {
 // =============================================================================
 // === Library orchestrator accessor ===
 // =============================================================================
-//
-// Kept in its own `impl` block so the parallel `queue_orchestrator()` accessor
-// (Lane B) lands at a different file location and the two diffs rebase cleanly.
 impl AppService {
     /// Borrow-handle for entity-to-songs resolution. Holds no state; the
     /// returned orchestrator borrows the underlying services for the
     /// duration of the call chain.
-    ///
-    /// Lane A is purely additive — Lanes C/D migrate the existing `play_*` /
-    /// `add_*_to_queue` / `play_next_*` method bodies onto this accessor, at
-    /// which point it stops looking dead.
-    #[allow(dead_code)]
     pub(crate) fn library_orchestrator(&self) -> crate::backend::LibraryOrchestrator<'_> {
         crate::backend::LibraryOrchestrator::new(
             &self.auth_gateway,
