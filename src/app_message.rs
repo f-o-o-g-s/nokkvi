@@ -581,8 +581,16 @@ pub enum Message {
     /// Hotkey config updated after async persistence (hot-reload)
     HotkeyConfigUpdated(nokkvi_data::types::hotkey_config::HotkeyConfig),
     NoOp,
-    /// Quit application (from hamburger menu)
+    /// Quit application (from hamburger menu or tray)
     QuitApp,
+    /// Async shutdown sequence completed — proceed to iced::exit().
+    ///
+    /// Dispatched by the `WindowCloseRequested` handler after the bounded
+    /// `request_shutdown` future resolves (or times out). The message exists
+    /// so the shutdown async work can be wrapped in `Task::perform` and have
+    /// a typed completion callback, keeping `iced::exit()` in the normal
+    /// message-dispatch path.
+    ShutdownComplete,
     /// Toggle light/dark mode (from hamburger menu)
     ToggleLightMode,
     /// View sort preferences loaded from app.redb

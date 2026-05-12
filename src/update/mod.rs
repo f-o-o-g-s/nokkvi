@@ -357,6 +357,11 @@ impl Nokkvi {
             Message::HotkeyConfigUpdated(config) => self.handle_hotkey_config_updated(config),
             Message::NoOp => Task::none(),
             Message::QuitApp => iced::exit(),
+            // Async shutdown sequence completed (or timed out) — now exit.
+            // This is the normal completion of WindowCloseRequested → begin_shutdown.
+            // QuitApp (tray Quit / hamburger Quit) also lands at iced::exit()
+            // directly since those paths don't go through the async sequence.
+            Message::ShutdownComplete => iced::exit(),
             Message::PlaySfx(sfx_type) => self.handle_play_sfx(sfx_type),
 
             // -----------------------------------------------------------------

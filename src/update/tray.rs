@@ -16,10 +16,17 @@
 //! "no windows" as an exit condition. Audio / MPRIS / tray subscriptions
 //! all keep running while the window is gone.
 
+use std::time::Duration;
+
 use iced::{Task, window};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::{Message, Nokkvi, app_message::PlaybackMessage, services::tray::TrayEvent};
+
+/// Maximum wall-clock time we are willing to spend in `request_shutdown` before
+/// abandoning and proceeding to `iced::exit()` anyway. The OS cleans up after
+/// process exit, so an incomplete shutdown is always better than a stuck UI.
+const SHUTDOWN_BUDGET: Duration = Duration::from_millis(750);
 
 impl Nokkvi {
     /// Handle a tray menu activation or icon click.
@@ -45,10 +52,16 @@ impl Nokkvi {
     }
 
     /// Window close (X button) interception. Destroys the window into the
-    /// tray when `show_tray_icon && close_to_tray`, otherwise quits.
+    /// tray when `show_tray_icon && close_to_tray`, otherwise begins the
+    /// bounded async shutdown sequence and then exits.
     ///
     /// Destroying (vs. hiding) is required for Wayland — see the module
     /// docs above.
+    ///
+    /// On the quit path, `Task::perform` runs `AppService::request_shutdown`
+    /// under a `SHUTDOWN_BUDGET` timeout. The callback always dispatches
+    /// `Message::ShutdownComplete` regardless of whether the timeout fired —
+    /// the OS reaps anything left after process exit anyway.
     pub fn handle_window_close_requested(&mut self, id: window::Id) -> Task<Message> {
         if self.show_tray_icon && self.close_to_tray {
             debug!(" Close requested → destroying window (will reopen via tray)");
@@ -56,8 +69,38 @@ impl Nokkvi {
             self.main_window_id = None;
             window::close(id)
         } else {
-            debug!(" Close requested → quitting app");
-            Task::done(Message::QuitApp)
+            debug!(" Close requested → beginning bounded shutdown sequence");
+            self.begin_shutdown()
+        }
+    }
+
+    /// Fire the async shutdown future and map its completion to
+    /// [`Message::ShutdownComplete`].
+    ///
+    /// If `app_service` is not yet initialised (e.g. window closed during
+    /// login), the task completes immediately with no engine work to do.
+    fn begin_shutdown(&self) -> Task<Message> {
+        if let Some(service) = self.app_service.clone() {
+            Task::perform(
+                async move {
+                    match tokio::time::timeout(SHUTDOWN_BUDGET, service.request_shutdown()).await {
+                        Ok(()) => {
+                            debug!(" [SHUTDOWN] Completed within budget");
+                        }
+                        Err(_elapsed) => {
+                            warn!(
+                                " [SHUTDOWN] Timed out after {}ms — proceeding to exit",
+                                SHUTDOWN_BUDGET.as_millis()
+                            );
+                        }
+                    }
+                },
+                |()| Message::ShutdownComplete,
+            )
+        } else {
+            // No active session — nothing to clean up.
+            debug!(" [SHUTDOWN] No active app_service — exiting immediately");
+            Task::done(Message::ShutdownComplete)
         }
     }
 
