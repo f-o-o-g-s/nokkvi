@@ -43,7 +43,10 @@ pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEnt
         },
         take("general.start_view"),
         take("general.enter_behavior"),
-        take("general.local_music_path"),
+        // Local music path opens a free-text input dialog (see
+        // settings/mod.rs::SettingsAction::OpenTextInput) so the renderer
+        // should show the "Enter ↵" affordance on this row.
+        take("general.local_music_path").with_enter_hint(),
         take("general.library_page_size"),
         take("general.artwork_resolution"),
         take("general.show_album_artists_only"),

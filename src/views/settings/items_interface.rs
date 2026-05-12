@@ -102,7 +102,8 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
             ),
             font_display,
             "(system default)",
-        ),
+        )
+        .with_enter_hint(),
         // --- Metadata Strip ---
         SettingsEntry::Header {
             label: "Metadata Strip",

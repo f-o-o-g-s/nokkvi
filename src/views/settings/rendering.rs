@@ -20,6 +20,25 @@ use crate::{embedded_svg, theme, widgets::slot_list};
 // Shared Helpers
 // ============================================================================
 
+/// Whether a `SettingItem` should render the "Enter ↵" affordance when it is
+/// the centered (selected) row.
+///
+/// Two activation patterns trigger the hint:
+/// - **Always-interactive value types**: Hotkey / HexColor / ColorArray rows
+///   always require Enter to activate edit / capture mode.
+/// - **Opt-in dialog rows**: any item whose builder called
+///   [`SettingsEntry::with_enter_hint`] — used by `Text` rows that open a
+///   picker or text input dialog (font picker, local-music-path text input,
+///   default playlist picker). Reading the flag here avoids stale
+///   string-match drift between key strings declared in `items_*.rs` and a
+///   hardcoded match arm in the renderer.
+pub(crate) fn item_needs_enter_hint(item: &SettingItem) -> bool {
+    matches!(
+        item.value,
+        SettingValue::Hotkey(_) | SettingValue::HexColor(_) | SettingValue::ColorArray(_)
+    ) || item.needs_enter_hint
+}
+
 /// Transparent button style — no background, no border. Used for clickable
 /// slots that should look like plain content, not raised buttons.
 pub(crate) fn transparent_button_style(
@@ -464,15 +483,10 @@ fn render_item_slot<'a>(
             .clip(true)
             .align_y(Alignment::Center);
 
-        // Determine if this item needs an "Enter ↵" hint:
-        // Hotkey, HexColor, ColorArray always need Enter to activate.
-        // Specific Text items (font picker, local music path) also need Enter.
-        let needs_enter_hint = matches!(
-            item.value,
-            SettingValue::Hotkey(_) | SettingValue::HexColor(_) | SettingValue::ColorArray(_)
-        ) || (matches!(item.value, SettingValue::Text(_))
-            && matches!(key_ref, "theme.font.family" | "general.local_music_path"));
-        let show_hint = needs_enter_hint && ctx.is_center && !is_editing && !ctx.is_capturing;
+        // Determine if this item needs an "Enter ↵" hint. See
+        // [`item_needs_enter_hint`] for the rule.
+        let show_hint =
+            item_needs_enter_hint(item) && ctx.is_center && !is_editing && !ctx.is_capturing;
 
         // Value column (right 65%)
         let value_display =
@@ -1235,4 +1249,80 @@ pub(crate) fn render_font_slot<'a>(
         .padding(0)
         .width(Length::Fill)
         .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::borrow::Cow;
+
+    use super::*;
+
+    /// Construct a bare `SettingItem` for predicate tests, with all defaults
+    /// (`needs_enter_hint = false`, `is_theme_key = false`, no subtitle, no
+    /// icon). Callers tweak whichever fields the test asserts against.
+    fn bare_item(key: &'static str, value: SettingValue) -> SettingItem {
+        let default = value.clone();
+        SettingItem {
+            key: Cow::Borrowed(key),
+            label: key.to_string(),
+            category: "Test",
+            value,
+            default,
+            label_icon: None,
+            subtitle: None,
+            is_theme_key: false,
+            needs_enter_hint: false,
+        }
+    }
+
+    #[test]
+    fn enter_hint_unconditional_for_hotkey_hexcolor_colorarray() {
+        let hotkey = bare_item("k.hotkey", SettingValue::Hotkey("Ctrl+P".to_string()));
+        let hex = bare_item("k.hex", SettingValue::HexColor("#abcdef".to_string()));
+        let arr = bare_item(
+            "k.arr",
+            SettingValue::ColorArray(vec!["#000000".to_string()]),
+        );
+        assert!(item_needs_enter_hint(&hotkey));
+        assert!(item_needs_enter_hint(&hex));
+        assert!(item_needs_enter_hint(&arr));
+    }
+
+    #[test]
+    fn enter_hint_off_by_default_for_plain_text_and_scalars() {
+        let bool_item = bare_item("k.bool", SettingValue::Bool(true));
+        let text_item = bare_item("k.text", SettingValue::Text("hi".to_string()));
+        let float_item = bare_item(
+            "k.float",
+            SettingValue::Float {
+                val: 0.0,
+                min: 0.0,
+                max: 1.0,
+                step: 0.1,
+                unit: "",
+            },
+        );
+        assert!(!item_needs_enter_hint(&bool_item));
+        assert!(!item_needs_enter_hint(&text_item));
+        assert!(!item_needs_enter_hint(&float_item));
+    }
+
+    /// Regression guard for tier-0 defect #0.3 — a `Text` row marked with
+    /// `needs_enter_hint = true` (via `SettingsEntry::with_enter_hint`) must
+    /// trigger the affordance regardless of its key. Replaces the previous
+    /// `matches!(key, "theme.font.family" | ...)` string match which silently
+    /// dropped `font_family` and `general.default_playlist_name`.
+    #[test]
+    fn enter_hint_opts_in_via_needs_enter_hint_flag() {
+        let mut text_item = bare_item("font_family", SettingValue::Text("Sans".to_string()));
+        assert!(
+            !item_needs_enter_hint(&text_item),
+            "default Text item must not show hint"
+        );
+        text_item.needs_enter_hint = true;
+        assert!(
+            item_needs_enter_hint(&text_item),
+            "Text item opted in via flag must show hint"
+        );
+    }
 }
