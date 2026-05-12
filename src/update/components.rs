@@ -35,6 +35,21 @@ use crate::{
     widgets::{SlotListPageState, SlotListView, view_header::SortMode},
 };
 
+/// Map an `anyhow::Error` chain to [`Message::SessionExpired`] when its
+/// underlying cause is [`NokkviError::Unauthorized`] — the canonical
+/// "JWT expired, drop to login" signal. Returns `None` for any other error,
+/// so callers fall through to their normal error-toast path.
+///
+/// Pair partner of `subsonic_post_ok` / `ApiClient::{get,post_json,put_json,
+/// delete}`, which route HTTP 401 → `NokkviError::Unauthorized` at the API
+/// boundary. This helper consolidates the inverse: catching the typed error
+/// inside `Result<_, anyhow::Error>` results bubbled back to UI handlers.
+pub(crate) fn session_expired_message(e: &anyhow::Error) -> Option<Message> {
+    e.downcast_ref::<NokkviError>()
+        .is_some_and(|err| matches!(err, NokkviError::Unauthorized))
+        .then_some(Message::SessionExpired)
+}
+
 /// Bundled params for a paginated library fetch (Albums, Artists, Songs).
 ///
 /// Built once at the call site from the page's common state via
@@ -348,10 +363,8 @@ impl Nokkvi {
                 move |result| match result {
                     Ok(()) => Message::SwitchView(View::Queue),
                     Err(e) => {
-                        if e.downcast_ref::<NokkviError>()
-                            .is_some_and(|err| matches!(err, NokkviError::Unauthorized))
-                        {
-                            return Message::SessionExpired;
+                        if let Some(msg) = session_expired_message(&e) {
+                            return msg;
                         }
                         error!(" Failed to play {}: {}", entity_name, e);
                         Message::Toast(crate::app_message::ToastMessage::Push(
@@ -405,10 +418,8 @@ impl Nokkvi {
                         ))
                     }
                     Err(e) => {
-                        if e.downcast_ref::<NokkviError>()
-                            .is_some_and(|err| matches!(err, NokkviError::Unauthorized))
-                        {
-                            return Message::SessionExpired;
+                        if let Some(msg) = session_expired_message(&e) {
+                            return msg;
                         }
                         error!(" Failed to add {} to queue: {}", entity_name, e);
                         Message::Toast(crate::app_message::ToastMessage::Push(
@@ -470,10 +481,8 @@ impl Nokkvi {
                         ))
                     }
                     Err(e) => {
-                        if e.downcast_ref::<NokkviError>()
-                            .is_some_and(|err| matches!(err, NokkviError::Unauthorized))
-                        {
-                            return Message::SessionExpired;
+                        if let Some(msg) = session_expired_message(&e) {
+                            return msg;
                         }
                         error!(" Failed to insert {} to queue: {}", entity_name, e);
                         Message::Toast(crate::app_message::ToastMessage::Push(
@@ -539,10 +548,8 @@ impl Nokkvi {
         self.shell_task(action_fn, move |result| match result {
             Ok(()) => success_msg,
             Err(e) => {
-                if e.downcast_ref::<NokkviError>()
-                    .is_some_and(|err| matches!(err, NokkviError::Unauthorized))
-                {
-                    return Message::SessionExpired;
+                if let Some(msg) = session_expired_message(&e) {
+                    return msg;
                 }
                 error!(" Failed to {}: {}", error_ctx, e);
                 Message::Toast(crate::app_message::ToastMessage::Push(
@@ -579,10 +586,8 @@ impl Nokkvi {
                 ))
             }
             Err(e) => {
-                if e.downcast_ref::<NokkviError>()
-                    .is_some_and(|err| matches!(err, NokkviError::Unauthorized))
-                {
-                    return Message::SessionExpired;
+                if let Some(msg) = session_expired_message(&e) {
+                    return msg;
                 }
                 error!(" Failed to {}: {}", error_ctx, e);
                 Message::Toast(crate::app_message::ToastMessage::Push(
@@ -622,10 +627,8 @@ impl Nokkvi {
                     Box::new(Message::LoadRadioStations),
                 )),
                 Err(e) => {
-                    if e.downcast_ref::<NokkviError>()
-                        .is_some_and(|err| matches!(err, NokkviError::Unauthorized))
-                    {
-                        return Message::SessionExpired;
+                    if let Some(msg) = session_expired_message(&e) {
+                        return msg;
                     }
                     tracing::error!(" Failed to {}: {e}", error_ctx);
                     Message::Toast(crate::app_message::ToastMessage::Push(
@@ -778,10 +781,8 @@ impl Nokkvi {
             },
             move |result| {
                 if let Err(e) = result {
-                    if e.downcast_ref::<NokkviError>()
-                        .is_some_and(|err| matches!(err, NokkviError::Unauthorized))
-                    {
-                        return Message::SessionExpired;
+                    if let Some(msg) = session_expired_message(&e) {
+                        return msg;
                     }
                     error!(" Failed to {} {}: {}", action, kind, e);
                     // Revert optimistic update by emitting the original starred state
@@ -881,10 +882,8 @@ impl Nokkvi {
             move |result| match result {
                 Ok(()) => Message::NoOp,
                 Err(e) => {
-                    if e.downcast_ref::<NokkviError>()
-                        .is_some_and(|err| matches!(err, NokkviError::Unauthorized))
-                    {
-                        return Message::SessionExpired;
+                    if let Some(msg) = session_expired_message(&e) {
+                        return msg;
                     }
                     error!(" Failed to set rating: {}", e);
                     Self::rating_revert_message(revert_id, kind, current_rating)
@@ -991,10 +990,8 @@ impl Nokkvi {
                 Message::PlaylistsFetchedForAddToPlaylist(playlists, song_ids)
             }
             Err(e) => {
-                if e.downcast_ref::<NokkviError>()
-                    .is_some_and(|err| matches!(err, NokkviError::Unauthorized))
-                {
-                    return Message::SessionExpired;
+                if let Some(msg) = session_expired_message(&e) {
+                    return msg;
                 }
                 tracing::error!("Failed to {error_ctx}: {e}");
                 Message::Toast(crate::app_message::ToastMessage::Push(

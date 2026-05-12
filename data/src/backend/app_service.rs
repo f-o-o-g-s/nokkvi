@@ -843,7 +843,9 @@ impl AppService {
     /// [`crate::services::playback::decide_removal_aftermath`] whether the
     /// engine needs to swap sources or stop, and execute that plan via
     /// [`PlaybackController::apply_removal_aftermath`]. The reactive UI
-    /// projection is refreshed last so all three sources of truth agree.
+    /// projection happens atomically inside `remove_songs_by_ids`; the
+    /// aftermath step does engine/navigator work only and never mutates
+    /// the queue, so no trailing refresh is needed.
     pub async fn remove_queue_songs(&self, ids: &[String]) -> Result<()> {
         if ids.is_empty() {
             return Ok(());
@@ -863,7 +865,6 @@ impl AppService {
 
         self.playback.apply_removal_aftermath(plan).await?;
 
-        self.queue_service.refresh_from_queue().await?;
         Ok(())
     }
 }
