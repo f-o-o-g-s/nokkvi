@@ -410,13 +410,19 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
     let mut overlay = Stack::new().push(pin_at(target_x));
 
     // Anchor sprite + rope canvas: only rendered while anchored. The
-    // anchor sprite sits at the bottom of the visualizer area, pinned
-    // to the x where the boat dropped the anchor — it does NOT move
-    // with the boat, so wave-driven Y-bobbing leaves the anchor
-    // planted on the floor while the boat rides above it. The rope is
-    // a curved canvas path drawn from the boat's bottom-center to the
-    // top of the anchor's ring; its bend is driven by `anchor_sway`,
-    // which the physics still oscillates from local wave amplitude.
+    // anchor sprite sits on the wave's baseline — the canvas bottom in
+    // normal mode, the canvas vertical center in mirrored mode — pinned
+    // to the x where the boat dropped the anchor. It does NOT move with
+    // the boat, so wave-driven Y-bobbing leaves the anchor planted on
+    // the floor while the boat rides above it. Reusing `baseline_y`
+    // from the boat positioning math above keeps the anchor on the
+    // same "floor" the boat is riding; pinning to `area_height`
+    // unconditionally would stretch the rope across the lower-half
+    // reflection in mirrored mode, which reads as a rendering bug. The
+    // rope is a curved canvas path drawn from the boat's bottom-center
+    // to the top of the anchor's ring; its bend is driven by
+    // `anchor_sway`, which the physics still oscillates from local
+    // wave amplitude.
     if state.anchor_remaining_secs > 0.0 {
         let anchor_handle = state.cached_anchor_handle().unwrap_or_else(|| {
             let bytes = crate::embedded_svg::themed_anchor_svg().into_bytes();
@@ -428,7 +434,7 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
         let anchor_total_h = boat_h * ANCHOR_HEIGHT_MULTIPLE_OF_BOAT;
         let anchor_total_w = anchor_total_h; // lucide anchor's viewBox is square
         let anchor_left_x = state.anchor_drop_x * area_width - anchor_total_w * 0.5;
-        let anchor_top_y = area_height - anchor_total_h;
+        let anchor_top_y = baseline_y - anchor_total_h;
 
         overlay = overlay.push(
             OverflowPin::new(
