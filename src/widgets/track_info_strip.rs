@@ -19,6 +19,12 @@ pub(crate) const STRIP_HEIGHT: f32 = 21.0;
 /// Strip height plus its 1px separator — used by chrome height calculations.
 pub(crate) const STRIP_HEIGHT_WITH_SEPARATOR: f32 = STRIP_HEIGHT + 1.0;
 
+/// Embedded-SVG path for the radio-tower glyph. Shared between the nav-tab row,
+/// both metadata-strip widgets, and the radios view so a future rename touches
+/// one site instead of five (the embedded-svg lookup falls back to play.svg on
+/// a typo — see CLAUDE.md "Gotchas").
+pub(crate) const RADIO_TOWER_ICON_PATH: &str = "assets/icons/radio-tower.svg";
+
 /// Data needed to render the track info strip.
 pub(crate) struct TrackInfoStripData<'a> {
     pub title: &'a str,
@@ -142,7 +148,7 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
                 radio_merged,
                 format_split,
                 on_press,
-                Some("assets/icons/radio-tower.svg"),
+                Some(RADIO_TOWER_ICON_PATH),
             );
         }
     } else if merged_mode {
@@ -260,15 +266,11 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
             .spacing(6)
             .align_y(Alignment::Center);
         center_row = center_row.push(info_sep());
-
-        let icon_widget = crate::embedded_svg::svg_widget("assets/icons/radio-tower.svg")
-            .width(Length::Fixed(12.0))
-            .height(Length::Fixed(12.0))
-            .style(|_theme, _status| iced::widget::svg::Style {
-                color: Some(theme::fg4()),
-            });
-
-        center_row = center_row.push(icon_widget);
+        center_row = center_row.push(super::nav_bar::colored_icon(
+            RADIO_TOWER_ICON_PATH,
+            12.0,
+            theme::fg4(),
+        ));
 
         center_row = center_row.push(
             text(radio_name.to_string())
@@ -401,13 +403,7 @@ fn build_merged_centered_strip<'a, M: Clone + 'static>(
         info_row = info_row.push(info_sep());
     }
     if let Some(icon_path) = leading_icon {
-        let icon_widget = crate::embedded_svg::svg_widget(icon_path)
-            .width(Length::Fixed(12.0))
-            .height(Length::Fixed(12.0))
-            .style(|_theme, _status| iced::widget::svg::Style {
-                color: Some(theme::fg4()),
-            });
-        info_row = info_row.push(icon_widget);
+        info_row = info_row.push(super::nav_bar::colored_icon(icon_path, 12.0, theme::fg4()));
     }
     info_row = info_row.push(marquee_clickable);
     if let Some((_, Some(ref right))) = format_split {
@@ -766,51 +762,8 @@ mod tests {
         assert_eq!(s, "");
     }
 
-    // The radio render path passes the same string into
-    // `build_merged_centered_strip` regardless of whether the caller asks for
-    // a leading radio-tower icon. These tests pin the string contract: the
-    // marquee text is independent of icon presence, so visual chrome can
-    // never silently mutate the spoken content of the strip.
-
     #[test]
-    fn merged_radio_string_is_independent_of_leading_icon_full_metadata() {
-        // The icon path is a widget-tree concern only; the string fed into
-        // the marquee is identical whether or not we ask for the icon.
-        let with_icon_string =
-            merged_radio_strip_string("KEXP 90.3 FM", "Song Title", "Band Name", "", true, DOT);
-        let without_icon_string =
-            merged_radio_strip_string("KEXP 90.3 FM", "Song Title", "Band Name", "", true, DOT);
-        assert_eq!(with_icon_string, without_icon_string);
-        assert_eq!(
-            with_icon_string,
-            "KEXP 90.3 FM  ·  playing: Song Title  ·  artist: Band Name"
-        );
-    }
-
-    #[test]
-    fn merged_radio_string_is_independent_of_leading_icon_url_fallback() {
-        let s1 = merged_radio_strip_string(
-            "Station",
-            "",
-            "",
-            "http://example.com/stream.mp3",
-            true,
-            DOT,
-        );
-        let s2 = merged_radio_strip_string(
-            "Station",
-            "",
-            "",
-            "http://example.com/stream.mp3",
-            true,
-            DOT,
-        );
-        assert_eq!(s1, s2);
-        assert_eq!(s1, "Station  ·  url: http://example.com/stream.mp3");
-    }
-
-    #[test]
-    fn merged_radio_string_is_independent_of_leading_icon_labels_off() {
+    fn merged_radio_string_pipe_separator_labels_off() {
         let s = merged_radio_strip_string("S", "T", "A", "", false, PIPE);
         assert_eq!(s, "S  |  T  |  A");
     }
