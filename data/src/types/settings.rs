@@ -398,15 +398,15 @@ pub struct PlayerSettings {
 }
 
 fn default_artwork_column_width_pct() -> f32 {
-    0.40
+    crate::types::player_settings::ARTWORK_COLUMN_WIDTH_PCT_DEFAULT
 }
 
 fn default_artwork_auto_max_pct() -> f32 {
-    0.40
+    crate::types::player_settings::ARTWORK_AUTO_MAX_PCT_DEFAULT
 }
 
 fn default_artwork_vertical_height_pct() -> f32 {
-    0.40
+    crate::types::player_settings::ARTWORK_VERTICAL_HEIGHT_PCT_DEFAULT
 }
 
 fn default_eq_gains() -> [f32; 10] {

@@ -13,8 +13,10 @@ use crate::{
     define_settings,
     types::{
         player_settings::{
-            ArtworkColumnMode, ArtworkStretchFit, NavDisplayMode, NavLayout, SlotRowHeight,
-            StripClickAction, StripSeparator, TrackInfoDisplay,
+            ARTWORK_AUTO_MAX_PCT_DEFAULT, ARTWORK_AUTO_MAX_PCT_MAX, ARTWORK_AUTO_MAX_PCT_MIN,
+            ARTWORK_VERTICAL_HEIGHT_PCT_DEFAULT, ARTWORK_VERTICAL_HEIGHT_PCT_MAX,
+            ARTWORK_VERTICAL_HEIGHT_PCT_MIN, ArtworkColumnMode, ArtworkStretchFit, NavDisplayMode,
+            NavLayout, SlotRowHeight, StripClickAction, StripSeparator, TrackInfoDisplay,
         },
         setting_def::Tab,
         settings_data::InterfaceSettingsData,
@@ -313,8 +315,10 @@ define_settings! {
                 subtitle: Some(
                     "Maximum fraction of the window's short axis the Auto-mode artwork can grow to",
                 ),
-                default: 0.40_f64,
-                min: 0.30_f64, max: 0.70_f64, step: 0.05_f64, unit: "",
+                default: f64::from(ARTWORK_AUTO_MAX_PCT_DEFAULT),
+                min: f64::from(ARTWORK_AUTO_MAX_PCT_MIN),
+                max: f64::from(ARTWORK_AUTO_MAX_PCT_MAX),
+                step: 0.05_f64, unit: "",
                 read_field: |d| d.artwork_auto_max_pct,
             },
         },
@@ -332,8 +336,10 @@ define_settings! {
                      Always (Vertical Native / Stretched) modes · drag the handle \
                      below the artwork for live resize",
                 ),
-                default: 0.40_f64,
-                min: 0.10_f64, max: 0.80_f64, step: 0.05_f64, unit: "",
+                default: f64::from(ARTWORK_VERTICAL_HEIGHT_PCT_DEFAULT),
+                min: f64::from(ARTWORK_VERTICAL_HEIGHT_PCT_MIN),
+                max: f64::from(ARTWORK_VERTICAL_HEIGHT_PCT_MAX),
+                step: 0.05_f64, unit: "",
                 read_field: |d| d.artwork_vertical_height_pct,
             },
         },

@@ -150,12 +150,18 @@ static UI_MODE: UiModeFlags = UiModeFlags {
     playlists_artwork_overlay: AtomicBool::new(true),
     artwork_column_mode: AtomicU8::new(0),        // Auto
     artwork_column_stretch_fit: AtomicU8::new(0), // Cover
-    // f32::to_bits(0.40) = 0x3ECCCCCD
-    artwork_column_width_pct: AtomicU32::new(0x3ECC_CCCD),
-    // f32::to_bits(0.40) = 0x3ECCCCCD — default Auto-mode max percent.
-    artwork_auto_max_pct: AtomicU32::new(0x3ECC_CCCD),
-    // f32::to_bits(0.40) = 0x3ECCCCCD — default Always-Vertical height pct.
-    artwork_vertical_height_pct: AtomicU32::new(0x3ECC_CCCD),
+    // Initial values mirror the data-crate defaults in
+    // `nokkvi_data::types::player_settings::artwork`. `f32::to_bits` is `const`
+    // so the bit pattern is derived at compile time — no magic hex.
+    artwork_column_width_pct: AtomicU32::new(
+        nokkvi_data::types::player_settings::ARTWORK_COLUMN_WIDTH_PCT_DEFAULT.to_bits(),
+    ),
+    artwork_auto_max_pct: AtomicU32::new(
+        nokkvi_data::types::player_settings::ARTWORK_AUTO_MAX_PCT_DEFAULT.to_bits(),
+    ),
+    artwork_vertical_height_pct: AtomicU32::new(
+        nokkvi_data::types::player_settings::ARTWORK_VERTICAL_HEIGHT_PCT_DEFAULT.to_bits(),
+    ),
 };
 
 /// Reload theme from theme file (hot-reload support).
@@ -721,7 +727,19 @@ pub(crate) fn set_playlists_artwork_overlay(enabled: bool) {
 // Artwork Column Layout
 // ============================================================================
 
-use nokkvi_data::types::player_settings::{ArtworkColumnMode, ArtworkStretchFit};
+use nokkvi_data::types::player_settings::{
+    ARTWORK_AUTO_MAX_PCT_MAX, ARTWORK_AUTO_MAX_PCT_MIN, ARTWORK_COLUMN_WIDTH_PCT_MAX,
+    ARTWORK_COLUMN_WIDTH_PCT_MIN, ARTWORK_VERTICAL_HEIGHT_PCT_MAX, ARTWORK_VERTICAL_HEIGHT_PCT_MIN,
+    ArtworkColumnMode, ArtworkStretchFit,
+};
+
+// Encoding NOTE: the atomic uses 0=Auto, 1=AlwaysNative, 2=AlwaysStretched,
+// 3=Never (kept where it is for redb back-compat — do not renumber even
+// though `Never` sits awkwardly between the two Always-mode clusters),
+// 4=AlwaysVerticalNative, 5=AlwaysVerticalStretched. New variants must be
+// appended at 6+; the load `match` falls back to `Auto` for unknown values
+// and the store `match` is enum-exhaustive (so adding a variant forces a
+// compile error here).
 
 /// Returns the active artwork column display mode.
 #[inline]
@@ -777,10 +795,10 @@ pub(crate) fn artwork_column_width_pct() -> f32 {
     f32::from_bits(UI_MODE.artwork_column_width_pct.load(Ordering::Relaxed))
 }
 
-/// Set the artwork column width fraction. Clamps into [0.05, 0.80].
+/// Set the artwork column width fraction. Clamps into the data-crate range.
 #[inline]
 pub(crate) fn set_artwork_column_width_pct(pct: f32) {
-    let clamped = pct.clamp(0.05, 0.80);
+    let clamped = pct.clamp(ARTWORK_COLUMN_WIDTH_PCT_MIN, ARTWORK_COLUMN_WIDTH_PCT_MAX);
     UI_MODE
         .artwork_column_width_pct
         .store(clamped.to_bits(), Ordering::Relaxed);
@@ -794,10 +812,10 @@ pub(crate) fn artwork_auto_max_pct() -> f32 {
     f32::from_bits(UI_MODE.artwork_auto_max_pct.load(Ordering::Relaxed))
 }
 
-/// Set the Auto-mode max artwork fraction. Clamps into [0.30, 0.70].
+/// Set the Auto-mode max artwork fraction. Clamps into the data-crate range.
 #[inline]
 pub(crate) fn set_artwork_auto_max_pct(pct: f32) {
-    let clamped = pct.clamp(0.30, 0.70);
+    let clamped = pct.clamp(ARTWORK_AUTO_MAX_PCT_MIN, ARTWORK_AUTO_MAX_PCT_MAX);
     UI_MODE
         .artwork_auto_max_pct
         .store(clamped.to_bits(), Ordering::Relaxed);
@@ -810,10 +828,13 @@ pub(crate) fn artwork_vertical_height_pct() -> f32 {
     f32::from_bits(UI_MODE.artwork_vertical_height_pct.load(Ordering::Relaxed))
 }
 
-/// Set the Always-Vertical artwork height fraction. Clamps into [0.10, 0.80].
+/// Set the Always-Vertical artwork height fraction. Clamps into the data-crate range.
 #[inline]
 pub(crate) fn set_artwork_vertical_height_pct(pct: f32) {
-    let clamped = pct.clamp(0.10, 0.80);
+    let clamped = pct.clamp(
+        ARTWORK_VERTICAL_HEIGHT_PCT_MIN,
+        ARTWORK_VERTICAL_HEIGHT_PCT_MAX,
+    );
     UI_MODE
         .artwork_vertical_height_pct
         .store(clamped.to_bits(), Ordering::Relaxed);

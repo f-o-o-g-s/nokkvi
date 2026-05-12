@@ -6,6 +6,7 @@
 //! drifted (e.g. `general.rs` covers server version, light mode, task manager,
 //! radios, and auth).
 
+mod artwork_drag;
 mod boat;
 mod components;
 mod default_playlist_picker;
