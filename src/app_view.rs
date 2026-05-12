@@ -364,6 +364,7 @@ impl Nokkvi {
             // can derive the same value without duplicating the curve.
             let cfg = self.visualizer_config.read();
             let height_percent = cfg.height_percent;
+            let viz_opacity = cfg.opacity;
             drop(cfg);
 
             let visualizer_height = widgets::visualizer::visualizer_area_height(
@@ -397,6 +398,7 @@ impl Nokkvi {
                         &self.boat,
                         self.window.width,
                         visualizer_height,
+                        viz_opacity,
                     ),
                 ]
                 .width(Length::Fill)

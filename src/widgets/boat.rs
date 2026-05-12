@@ -292,6 +292,11 @@ where
 /// area the boat rides over. They size the outer clipping container and let
 /// us compute the boat's pixel position from `(x_ratio, y_ratio)`.
 ///
+/// `opacity` is the global visualizer opacity (`cfg.opacity`) — applied to
+/// the boat sprite, the anchor sprite, and the rope so the whole overlay
+/// fades together with the bars/lines underneath rather than punching
+/// through at full alpha when the user dims the visualizer.
+///
 /// Layout: a fixed-size `container.clip(true)` framing the visualizer area,
 /// containing a single `OverflowPin`-positioned boat sprite at
 /// `(target_x, target_y)`. `target_x` may extend past either edge by up to
@@ -327,6 +332,7 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
     state: &BoatState,
     area_width: f32,
     area_height: f32,
+    opacity: f32,
 ) -> Element<'a, M> {
     // The handler is responsible for calling `cache_handle_for(tilt,
     // facing)` on the first visible tick, so by the time we render the
@@ -376,7 +382,8 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
             container(
                 Svg::new(handle.clone())
                     .width(Length::Fill)
-                    .height(Length::Fill),
+                    .height(Length::Fill)
+                    .opacity(opacity),
             )
             .width(Length::Fixed(container_w))
             .height(Length::Fixed(container_h)),
@@ -417,7 +424,8 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
                 container(
                     Svg::new(anchor_handle)
                         .width(Length::Fill)
-                        .height(Length::Fill),
+                        .height(Length::Fill)
+                        .opacity(opacity),
                 )
                 .width(Length::Fixed(anchor_total_w))
                 .height(Length::Fixed(anchor_total_h)),
@@ -435,7 +443,7 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
         let viz_colors = crate::theme::get_visualizer_colors();
         let rope_color =
             parse_hex_color(&viz_colors.border_color).unwrap_or(Color::from_rgb(0.5, 0.5, 0.5));
-        let rope_alpha = viz_colors.border_opacity;
+        let rope_alpha = viz_colors.border_opacity * opacity;
 
         let boat_bottom_x = cx;
         let boat_bottom_y = target_y + boat_h - boat_h * BOAT_SINK_FRACTION;
