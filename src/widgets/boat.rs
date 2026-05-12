@@ -348,11 +348,21 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
     // somehow precedes the tick OR if the theme just changed and the next
     // BoatTick hasn't refreshed the cache yet — in either case we ship a
     // fresh-rotation, fresh-color frame rather than a stale one.
+    // The cache key tracks `inverted` only when the mirror flag is on —
+    // outside mirrored line mode the renderer always draws the upright
+    // sprite (see the `target_y` branch below), so the cache must
+    // resolve to the upright entry regardless of what the physics has
+    // left in `state.inverted` from a prior mirrored run.
+    let render_inverted = mirror && state.inverted;
     let handle = state
-        .cached_handle_for(state.tilt, state.facing)
+        .cached_handle_for(state.tilt, state.facing, render_inverted)
         .unwrap_or_else(|| {
-            let bytes =
-                crate::embedded_svg::themed_boat_svg(state.tilt, state.facing < 0.0).into_bytes();
+            let bytes = crate::embedded_svg::themed_boat_svg(
+                state.tilt,
+                state.facing < 0.0,
+                render_inverted,
+            )
+            .into_bytes();
             svg::Handle::from_memory(bytes)
         });
     let (boat_w, boat_h) = boat_pixel_size(area_height);
@@ -385,8 +395,40 @@ pub(crate) fn boat_overlay<'a, M: 'a>(
     let cx = state.x_ratio * area_width;
     let target_x = cx - boat_w * 0.5;
     let (baseline_y, wave_scale) = wave_baseline_and_scale(area_height, mirror);
-    let line_y = baseline_y - state.y_ratio * wave_scale;
-    let target_y = (line_y - boat_h + boat_h * BOAT_SINK_FRACTION).max(0.0);
+    // Inverted-boat affordance (mirrored line mode only): when
+    // `state.inverted` flips on after an off-screen wrap, render the
+    // boat upside-down on the LOWER wave (the shader-mirrored
+    // reflection of the upper wave). Outside mirrored mode the lower
+    // wave doesn't exist, so `inverted` is ignored at the render path
+    // and we fall through to the normal-mode geometry regardless of
+    // what the physics happened to leave in the flag (the physics
+    // toggles it on every wrap unconditionally — see `step()`).
+    //
+    // Two geometric reflections at once:
+    // - `line_y` flips around `baseline_y`: the upper wave is at
+    //   `baseline_y - y_ratio·wave_scale`, the lower wave is at
+    //   `baseline_y + y_ratio·wave_scale`. Both forms collapse to
+    //   `baseline_y` at `y_ratio = 0`.
+    // - `target_y` reflects the boat's sink fraction around `line_y`.
+    //   Normal mode places sprite top at `line_y - boat_h*(1 - sink)`
+    //   so `boat_h*sink` of the sprite hangs below the line (in
+    //   water). Inverted mode places sprite top at
+    //   `line_y - boat_h*sink` so `boat_h*sink` of the sprite extends
+    //   ABOVE the line (toward the canvas center, which is "in
+    //   water" for the lower wave's reflected geometry); the rest of
+    //   the sprite (`boat_h*(1 - sink)`) hangs below in pixel coords
+    //   (in air, away from center). The SVG itself is baked with a
+    //   `scale(1, -1)` around the viewBox center via
+    //   `themed_boat_svg(..., vertical_flip = true)` so the hull
+    //   visually points down, matching the surf-the-lower-wave
+    //   intuition.
+    let target_y = if render_inverted {
+        let line_y = baseline_y + state.y_ratio * wave_scale;
+        line_y - boat_h * BOAT_SINK_FRACTION
+    } else {
+        let line_y = baseline_y - state.y_ratio * wave_scale;
+        (line_y - boat_h + boat_h * BOAT_SINK_FRACTION).max(0.0)
+    };
 
     let pin_at = |x: f32| {
         OverflowPin::new(

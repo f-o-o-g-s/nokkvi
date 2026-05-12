@@ -33,13 +33,13 @@ fn cache_handle_for_rebuilds_when_active_theme_changes() {
     let mut state = BoatState::default();
     let initial_mode = crate::theme::is_light_mode();
 
-    let id_before = state.cache_handle_for(0.0, 1.0).id();
+    let id_before = state.cache_handle_for(0.0, 1.0, false).id();
 
     // Flip light/dark — `themed_boat_svg()` now substitutes different
     // colors, so a freshly-built handle has different bytes (and id).
     crate::theme::set_light_mode(!initial_mode);
 
-    let id_after = state.cache_handle_for(0.0, 1.0).id();
+    let id_after = state.cache_handle_for(0.0, 1.0, false).id();
 
     // Restore before any assertion fires so a panic still leaves global
     // state clean for other tests in this group.
@@ -60,8 +60,8 @@ fn cache_handle_for_returns_cached_when_theme_unchanged() {
     let _guard = THEME_MUTATION_LOCK.lock();
 
     let mut state = BoatState::default();
-    let id1 = state.cache_handle_for(0.0, 1.0).id();
-    let id2 = state.cache_handle_for(0.0, 1.0).id();
+    let id1 = state.cache_handle_for(0.0, 1.0, false).id();
+    let id2 = state.cache_handle_for(0.0, 1.0, false).id();
     assert_eq!(
         id1, id2,
         "two consecutive cache_handle_for calls at the same orientation \
@@ -77,10 +77,10 @@ fn cache_handle_for_returns_distinct_handles_per_orientation() {
     let _guard = THEME_MUTATION_LOCK.lock();
 
     let mut state = BoatState::default();
-    let upright_right = state.cache_handle_for(0.0, 1.0).id();
-    let upright_left = state.cache_handle_for(0.0, -1.0).id();
-    let tilted_right = state.cache_handle_for(0.15, 1.0).id();
-    let tilted_left = state.cache_handle_for(0.15, -1.0).id();
+    let upright_right = state.cache_handle_for(0.0, 1.0, false).id();
+    let upright_left = state.cache_handle_for(0.0, -1.0, false).id();
+    let tilted_right = state.cache_handle_for(0.15, 1.0, false).id();
+    let tilted_left = state.cache_handle_for(0.15, -1.0, false).id();
 
     assert_ne!(
         upright_right, upright_left,
@@ -116,8 +116,8 @@ fn cache_handle_for_quantizes_close_angles_to_one_entry() {
 
     let mut state = BoatState::default();
     // 0.001 rad ≈ 0.057°, well below the 0.5° quantization step.
-    let id_a = state.cache_handle_for(0.000, 1.0).id();
-    let id_b = state.cache_handle_for(0.001, 1.0).id();
+    let id_a = state.cache_handle_for(0.000, 1.0, false).id();
+    let id_b = state.cache_handle_for(0.001, 1.0, false).id();
     assert_eq!(
         id_a, id_b,
         "angles within one quantization step must collapse to the \
@@ -141,12 +141,12 @@ fn cached_handle_for_misses_then_hits_after_caching() {
 
     let mut state = BoatState::default();
     assert!(
-        state.cached_handle_for(0.0, 1.0).is_none(),
+        state.cached_handle_for(0.0, 1.0, false).is_none(),
         "empty cache must miss for any orientation"
     );
-    let primed = state.cache_handle_for(0.0, 1.0).id();
+    let primed = state.cache_handle_for(0.0, 1.0, false).id();
     let looked_up = state
-        .cached_handle_for(0.0, 1.0)
+        .cached_handle_for(0.0, 1.0, false)
         .expect("cache primed by cache_handle_for")
         .id();
     assert_eq!(

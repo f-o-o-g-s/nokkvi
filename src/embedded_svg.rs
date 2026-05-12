@@ -91,24 +91,36 @@ const BOAT_STROKE_WIDTH_SVG_UNITS: f32 = 1.5;
 pub(crate) const BOAT_VIEWBOX_PAD_FRACTION: f32 = 0.15;
 
 /// Return the themed logo SVG with a tilt rotation, optional horizontal
-/// mirror, and a theme-matched stroke baked into its path data — used by
-/// the boat overlay.
+/// mirror, optional vertical flip, and a theme-matched stroke baked into
+/// its path data — used by the boat overlay.
 ///
 /// The logo's viewBox is `60 89.5 80 80` (x range `[60, 140]`, y range
 /// `[89.5, 169.5]`, center `(100, 129.5)`). All paths get wrapped in a
-/// single `<g transform="...">` whose composition is rotate-then-mirror
-/// (rightmost SVG transform applies first to coordinates):
+/// single `<g transform="...">` whose composition is vertical-flip then
+/// rotate then horizontal-mirror (rightmost SVG transform applies first
+/// to coordinates):
 ///
 /// - `scale(-1, 1)` then `translate(200, 0)` reflects every point `x` to
 ///   `200 - x`, mapping viewBox edges `60 ↔ 140` and leaving the center
 ///   fixed — that's the horizontal flip used when sailing leftward so
 ///   the sail catches wind from behind regardless of travel direction.
-/// - `rotate(deg, 100, 129.5)` then rotates the (possibly mirrored)
-///   geometry around the viewBox center by `deg` degrees. SVG rotate is
-///   clockwise for positive degrees in screen coords (Y down), matching
-///   iced's rotation convention — so the tilt sign computed in
+/// - `rotate(deg, 100, 129.5)` then rotates the (possibly horizontally
+///   mirrored) geometry around the viewBox center by `deg` degrees. SVG
+///   rotate is clockwise for positive degrees in screen coords (Y down),
+///   matching iced's rotation convention — so the tilt sign computed in
 ///   `widgets/boat.rs::step()` (negative for "bow up uphill rightward")
 ///   carries through unchanged after `f32::to_degrees()`.
+/// - `scale(1, -1)` then `translate(0, 259)` finally reflects every
+///   point `y` to `259 - y`, mapping viewBox edges `89.5 ↔ 169.5` and
+///   leaving the center fixed — that's the vertical flip used by the
+///   "inverted boat surfs the lower wave" affordance in mirrored line
+///   mode. Applied OUTSIDE the rotation so the upright boat's
+///   already-rotated geometry is reflected through the horizontal
+///   centerline at the very end; what was bow-up-on-the-right reads as
+///   bow-down-on-the-right after the flip, which is the correct lean
+///   for an inverted boat sitting on the lower wave (whose local slope
+///   is the negation of the upper wave's slope the physics actually
+///   sampled).
 ///
 /// The whole point of baking the rotation into the SVG (rather than
 /// passing it to `iced::widget::Svg::rotation()`) is to stay in vector
@@ -126,7 +138,7 @@ pub(crate) const BOAT_VIEWBOX_PAD_FRACTION: f32 = 0.15;
 /// `BoatState::clear_if_theme_changed` — both the fill and stroke colors
 /// are read from `crate::theme`, which bumps `theme_generation()` on any
 /// reload or light/dark flip.
-pub(crate) fn themed_boat_svg(angle_radians: f32, mirrored: bool) -> String {
+pub(crate) fn themed_boat_svg(angle_radians: f32, mirrored: bool, vertical_flip: bool) -> String {
     let viz_colors = crate::theme::get_visualizer_colors();
     let stroke_attrs = format!(
         "stroke=\"{stroke}\" stroke-width=\"{width}\" stroke-opacity=\"{opacity}\" stroke-linejoin=\"round\" ",
@@ -154,9 +166,23 @@ pub(crate) fn themed_boat_svg(angle_radians: f32, mirrored: bool) -> String {
 
     let degrees = angle_radians.to_degrees();
     let nonzero_rotation = degrees.abs() > 1e-4;
-    if nonzero_rotation || mirrored {
+    if nonzero_rotation || mirrored || vertical_flip {
+        // Compose transforms in the order they should be applied to the
+        // local coordinate system (leftmost first). SVG applies them
+        // right-to-left to a point's coordinates, so the rightmost
+        // transform (horizontal mirror) is the innermost in the
+        // geometry stack, and the leftmost (vertical flip) is the
+        // outermost. That ordering is what makes the inverted-boat
+        // tilt read correctly on the lower wave (see the
+        // `vertical_flip` bullet in the function's docstring).
         let mut transform = String::new();
+        if vertical_flip {
+            transform.push_str("translate(0 259) scale(1 -1)");
+        }
         if nonzero_rotation {
+            if !transform.is_empty() {
+                transform.push(' ');
+            }
             transform.push_str(&format!("rotate({degrees} 100 129.5)"));
         }
         if mirrored {
@@ -345,7 +371,7 @@ mod tests {
     #[test]
     fn themed_boat_svg_bakes_theme_stroke_into_every_path() {
         let viz = crate::theme::get_visualizer_colors();
-        let out = themed_boat_svg(0.0, false);
+        let out = themed_boat_svg(0.0, false, false);
         assert!(
             out.contains(&format!("stroke=\"{}\"", viz.border_color)),
             "stroke color must come from the active theme's border_color \
@@ -378,7 +404,7 @@ mod tests {
     /// we just confirm the keyword and the pivot are present.
     #[test]
     fn themed_boat_svg_bakes_rotation_around_viewbox_center() {
-        let out = themed_boat_svg(0.1, false);
+        let out = themed_boat_svg(0.1, false, false);
         assert!(
             out.contains("<g transform=\""),
             "rotated boat must wrap content in a <g transform=...>"
@@ -402,7 +428,7 @@ mod tests {
     /// boats while exactly upright.
     #[test]
     fn themed_boat_svg_mirror_only_omits_rotate() {
-        let out = themed_boat_svg(0.0, true);
+        let out = themed_boat_svg(0.0, true, false);
         assert!(
             out.contains("translate(200 0) scale(-1 1)"),
             "mirrored boat must apply the horizontal-flip transform"
@@ -411,6 +437,75 @@ mod tests {
             !out.contains("rotate("),
             "zero rotation must not emit rotate(...)"
         );
+    }
+
+    /// `vertical_flip = true` with zero rotation and no horizontal mirror
+    /// must produce just the vertical-flip transform. Confirms the path
+    /// used by inverted boats surfing the lower wave while exactly
+    /// upright and facing right.
+    #[test]
+    fn themed_boat_svg_vertical_flip_only_emits_y_reflection() {
+        let out = themed_boat_svg(0.0, false, true);
+        assert!(
+            out.contains("translate(0 259) scale(1 -1)"),
+            "vertically flipped boat must apply the y-reflection transform"
+        );
+        assert!(
+            !out.contains("rotate("),
+            "zero rotation must not emit rotate(...)"
+        );
+        assert!(
+            !out.contains("translate(200 0) scale(-1 1)"),
+            "no horizontal mirror requested — must not emit the x-flip"
+        );
+    }
+
+    /// All three transforms requested together must compose in the
+    /// vertical-flip → rotate → horizontal-mirror order (leftmost
+    /// applied last to a point's coords). Locks the geometry stack for
+    /// the inverted + tilted + leftward-sailing boat.
+    #[test]
+    fn themed_boat_svg_all_three_transforms_compose_in_order() {
+        let out = themed_boat_svg(0.1, true, true);
+        let g = out
+            .find("<g transform=\"")
+            .expect("transform group must exist when any transform is requested");
+        let close = out[g..]
+            .find('"')
+            .and_then(|i| out[g + i + 1..].find('"').map(|j| g + i + 1 + j))
+            .expect("transform attribute must close");
+        let transform = &out[g + "<g transform=\"".len()..close];
+        let v_idx = transform
+            .find("translate(0 259) scale(1 -1)")
+            .expect("vertical flip must be present");
+        let r_idx = transform.find("rotate(").expect("rotation must be present");
+        let m_idx = transform
+            .find("translate(200 0) scale(-1 1)")
+            .expect("horizontal mirror must be present");
+        assert!(
+            v_idx < r_idx && r_idx < m_idx,
+            "transform order must be vertical-flip, then rotate, then \
+             horizontal-mirror (got {transform:?})"
+        );
+    }
+
+    /// Distinct boolean combinations must produce distinct SVG bytes —
+    /// that's what makes the `(tilt, facing<0, inverted)` cache key in
+    /// `BoatState::cache_handle_for` actually discriminate the four
+    /// orientations. A shared-output bug would have two cache entries
+    /// silently rendering the same boat.
+    #[test]
+    fn themed_boat_svg_distinct_bytes_per_flip_combination() {
+        let upright = themed_boat_svg(0.0, false, false);
+        let mirrored = themed_boat_svg(0.0, true, false);
+        let inverted = themed_boat_svg(0.0, false, true);
+        let both = themed_boat_svg(0.0, true, true);
+        assert_ne!(upright, mirrored);
+        assert_ne!(upright, inverted);
+        assert_ne!(upright, both);
+        assert_ne!(mirrored, inverted);
+        assert_ne!(mirrored, both);
+        assert_ne!(inverted, both);
     }
 
     /// The themed anchor SVG must carry the active theme's border color

@@ -34,6 +34,7 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
     let cfg_boat_on = cfg.lines.boat;
     let angular = cfg.lines.style.eq_ignore_ascii_case("angular");
     let height_percent = cfg.height_percent;
+    let lines_mirror = cfg.lines.mirror;
     drop(cfg);
 
     let visible = in_lines_mode && cfg_boat_on;
@@ -56,10 +57,15 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
         app.boat.visible = true;
         app.boat.last_tick = None;
         // Keep the current orientation's handle warm while paused so the
-        // frozen frame doesn't re-rasterize on resume.
+        // frozen frame doesn't re-rasterize on resume. The cached
+        // `inverted` flag mirrors the render-time check in `boat.rs`:
+        // outside mirrored line mode the renderer always draws the
+        // upright sprite, so prewarming a flipped handle would waste a
+        // cache slot.
         let tilt = app.boat.tilt;
         let facing = app.boat.facing;
-        let _ = app.boat.cache_handle_for(tilt, facing);
+        let render_inverted = lines_mirror && app.boat.inverted;
+        let _ = app.boat.cache_handle_for(tilt, facing, render_inverted);
         return Task::none();
     }
 
@@ -132,17 +138,22 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
     boat::step(&mut app.boat, dt, bars, angular, music);
     app.boat.visible = true;
     // Pre-build (and cache) the SVG handle for the current quantized
-    // tilt + facing so the immutable `view()` render path can clone it
-    // cheaply. The cache is keyed by `(quantized_tilt_index, mirrored)`,
-    // so each visibly-distinct orientation pays a one-time resvg cost
-    // and every subsequent tick at that same quantized angle is a free
-    // hashmap lookup. While anchored, also prime the single themed
-    // anchor handle so the doodad's render path is the same cheap
-    // lookup (the anchor sprite doesn't rotate — the rope's swing
-    // lives in the canvas path, not in the SVG).
+    // tilt + facing + inverted so the immutable `view()` render path
+    // can clone it cheaply. The cache is keyed by
+    // `(quantized_tilt_index, mirrored, inverted)`, so each
+    // visibly-distinct orientation pays a one-time resvg cost and
+    // every subsequent tick at that same quantized angle is a free
+    // hashmap lookup. `render_inverted` mirrors the renderer's gate
+    // (only meaningful when mirrored line mode is on) so we don't
+    // burn a cache slot on a flipped sprite that would never be
+    // displayed. While anchored, also prime the single themed anchor
+    // handle so the doodad's render path is the same cheap lookup
+    // (the anchor sprite doesn't rotate — the rope's swing lives in
+    // the canvas path, not in the SVG).
     let tilt = app.boat.tilt;
     let facing = app.boat.facing;
-    let _ = app.boat.cache_handle_for(tilt, facing);
+    let render_inverted = lines_mirror && app.boat.inverted;
+    let _ = app.boat.cache_handle_for(tilt, facing, render_inverted);
     if app.boat.anchor_remaining_secs > 0.0 {
         let _ = app.boat.cache_anchor_handle();
     }

@@ -523,7 +523,19 @@ pub struct BoatState {
     /// what the in-crate physics tests rely on (they construct `BoatState`
     /// directly without going through the handler).
     pub x_wrap_margin: f32,
-    pub tilt_handles: HashMap<(i16, bool), svg::Handle>,
+    /// "Inverted boat surfs the lower wave" affordance for mirrored line
+    /// mode. Toggled on every off-screen X wrap in `step()`, so each
+    /// tack-and-wrap cycle alternates the boat between the upper and
+    /// lower wave reflections. Only visually meaningful when the
+    /// renderer is rendering with `mirror = true`: outside mirrored
+    /// line mode the lower wave doesn't exist, so the render path
+    /// ignores `inverted` and draws the boat upright on the canvas
+    /// bottom regardless. Anchor firing is suppressed while `inverted`,
+    /// and a wrap that flips this from `false` to `true` while an
+    /// anchor is active lifts the anchor immediately (V1 punts on
+    /// inverted + rope-physics geometry).
+    pub inverted: bool,
+    pub tilt_handles: HashMap<(i16, bool, bool), svg::Handle>,
     /// Single themed anchor-body SVG, rebuilt only on theme change.
     /// (The anchor doesn't rotate — the rope's sway lives in the canvas
     /// path, not the SVG, so we don't need a per-quantized-angle map
@@ -562,36 +574,51 @@ impl BoatState {
         }
     }
 
-    /// Build (and cache) the boat SVG handle for the given tilt + facing,
-    /// returning a clone of the cached handle. The tilt is quantized to
-    /// `TILT_QUANT_DEG`-degree steps so the cache stays bounded; the
-    /// requested radians are dequantized back before being baked into the
-    /// SVG, so the handle's rotation is exactly what the cache key
-    /// represents (no per-frame drift).
-    pub(crate) fn cache_handle_for(&mut self, tilt: f32, facing: f32) -> svg::Handle {
+    /// Build (and cache) the boat SVG handle for the given orientation
+    /// (tilt, facing, inverted), returning a clone of the cached
+    /// handle. The tilt is quantized to `TILT_QUANT_DEG`-degree steps
+    /// so the cache stays bounded; the requested radians are
+    /// dequantized back before being baked into the SVG, so the
+    /// handle's rotation is exactly what the cache key represents (no
+    /// per-frame drift). `inverted` extends the key so a flipped-on-
+    /// wrap boat doesn't reuse the upright cache entry; the SVG body
+    /// bakes a `scale(1, -1)` transform on top of any rotate or
+    /// horizontal-mirror when this is true.
+    pub(crate) fn cache_handle_for(
+        &mut self,
+        tilt: f32,
+        facing: f32,
+        inverted: bool,
+    ) -> svg::Handle {
         self.clear_if_theme_changed();
-        let key = (quantize_tilt(tilt), facing < 0.0);
+        let key = (quantize_tilt(tilt), facing < 0.0, inverted);
         if let Some(h) = self.tilt_handles.get(&key) {
             return h.clone();
         }
         let bytes =
-            crate::embedded_svg::themed_boat_svg(dequantize_tilt(key.0), key.1).into_bytes();
+            crate::embedded_svg::themed_boat_svg(dequantize_tilt(key.0), key.1, key.2).into_bytes();
         let h = svg::Handle::from_memory(bytes);
         self.tilt_handles.insert(key, h.clone());
         h
     }
 
-    /// Look up a cached handle for the given tilt + facing without
-    /// mutating state. Returns `None` when the theme has advanced past
-    /// the cache, when nothing is cached yet for this orientation, or
-    /// when the boat hasn't ticked since `Default`. The render path uses
-    /// this and falls back to an inline rebuild on miss.
-    pub(crate) fn cached_handle_for(&self, tilt: f32, facing: f32) -> Option<svg::Handle> {
+    /// Look up a cached handle for the given tilt + facing + inverted
+    /// without mutating state. Returns `None` when the theme has
+    /// advanced past the cache, when nothing is cached yet for this
+    /// orientation, or when the boat hasn't ticked since `Default`. The
+    /// render path uses this and falls back to an inline rebuild on
+    /// miss.
+    pub(crate) fn cached_handle_for(
+        &self,
+        tilt: f32,
+        facing: f32,
+        inverted: bool,
+    ) -> Option<svg::Handle> {
         let current_gen = crate::theme::theme_generation();
         if self.handle_generation != current_gen {
             return None;
         }
-        let key = (quantize_tilt(tilt), facing < 0.0);
+        let key = (quantize_tilt(tilt), facing < 0.0, inverted);
         self.tilt_handles.get(&key).cloned()
     }
 
