@@ -22,6 +22,7 @@ All notable changes to this project will be documented in this file.
 - Closing the window after pausing a radio stream no longer hangs the app — the radio buffer producer no longer parks the tokio blocking pool on a full channel, and shutdown now runs a bounded async cleanup of in-flight tasks before exiting.
 - Paused radio playback no longer keeps the audio decode loop spinning at ~200 wake-ups per second — the loop now sleeps on a consume-notified rendezvous and idles at ~2 wake-ups per second while paused, cutting CPU and battery use during paused radio to near-zero.
 - Radio streams now detect stalled or half-open server connections within ~15 seconds via per-read and TCP-keepalive timeouts, replacing the previous indefinite wait that could leave the player wedged on a silently-dropped Icecast connection.
+- Clicking an artist, album, or genre link in the queue view now lands the auto-expanded row at the top of the visible list in vertical artwork modes (Always-Vertical Native / Stretched and Auto's portrait fallback). Previously the row ended up above the viewport so you had to scroll up to find it — the stored slot count wasn't being refreshed when the artwork stacked above the slot list, leaving the centering math off by several rows.
 
 ### Removed
 

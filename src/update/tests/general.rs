@@ -439,3 +439,111 @@ fn task_status_changed_success_no_toast() {
 }
 
 // ============================================================================
+// Slot count resync — vertical artwork modes (update/window.rs)
+// ============================================================================
+
+/// Toggling between horizontal and vertical artwork column modes changed the
+/// rendered slot count, but `page.slot_count` was only re-synced on window
+/// resize (using horizontal-mode chrome). After switching to a vertical mode
+/// the stored value stayed at the horizontal slot count, so
+/// `pending_expand_resolve`'s `idx + center_slot` math (driven by the stored
+/// count) placed the auto-expanded row above the visible viewport — the user
+/// had to scroll up to find the row that should have landed at slot 0.
+///
+/// `resync_slot_counts` now includes `vertical_artwork_chrome` in the
+/// `with_dynamic_slots` calculation, and `handle_player_settings_loaded`
+/// calls it after the artwork-mode atomic flips.
+mod slot_count_resync {
+    use std::sync::{Mutex, MutexGuard};
+
+    use nokkvi_data::types::player_settings::{ArtworkColumnMode, ArtworkStretchFit};
+
+    use crate::{test_helpers::test_app, theme};
+
+    // Shared lock with the other test modules that mutate theme atomics —
+    // a stray `set_artwork_column_mode` in a sibling test must not race
+    // against our reads here. The lock itself is local, but every test
+    // that reads `theme::artwork_column_mode()` takes it.
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn lock_atomics() -> MutexGuard<'static, ()> {
+        TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn reset_atomics() {
+        theme::set_artwork_column_mode(ArtworkColumnMode::Auto);
+        theme::set_artwork_column_stretch_fit(ArtworkStretchFit::Cover);
+        theme::set_artwork_column_width_pct(0.40);
+        theme::set_artwork_auto_max_pct(0.40);
+        theme::set_artwork_vertical_height_pct(0.40);
+    }
+
+    #[test]
+    fn resync_shrinks_slot_count_when_switching_to_vertical_mode() {
+        let _g = lock_atomics();
+        reset_atomics();
+
+        let mut app = test_app();
+        // 1280×800 landscape — wide enough for the horizontal layout to keep
+        // a 9-ish slot count, but a vertical artwork ~320 px will visibly eat
+        // into the slot count when stacked above the list.
+        app.window.width = 1280.0;
+        app.window.height = 800.0;
+
+        theme::set_artwork_column_mode(ArtworkColumnMode::AlwaysNative);
+        app.resync_slot_counts();
+        let horizontal = app.albums_page.common.slot_list.slot_count;
+
+        theme::set_artwork_column_mode(ArtworkColumnMode::AlwaysVerticalNative);
+        app.resync_slot_counts();
+        let vertical = app.albums_page.common.slot_list.slot_count;
+
+        assert!(
+            vertical < horizontal,
+            "vertical artwork stacks above the slot list, so the slot count \
+             must shrink — got vertical={vertical}, horizontal={horizontal}"
+        );
+
+        // Cleanup: leave the atomic in a neutral state for sibling tests.
+        reset_atomics();
+    }
+
+    #[test]
+    fn resync_applies_to_every_library_page() {
+        let _g = lock_atomics();
+        reset_atomics();
+
+        let mut app = test_app();
+        app.window.width = 1280.0;
+        app.window.height = 800.0;
+
+        theme::set_artwork_column_mode(ArtworkColumnMode::AlwaysVerticalNative);
+        app.resync_slot_counts();
+
+        let albums = app.albums_page.common.slot_list.slot_count;
+        let artists = app.artists_page.common.slot_list.slot_count;
+        let songs = app.songs_page.common.slot_list.slot_count;
+        let genres = app.genres_page.common.slot_list.slot_count;
+        let playlists = app.playlists_page.common.slot_list.slot_count;
+        let queue = app.queue_page.common.slot_list.slot_count;
+
+        // All six library pages share the same standard chrome — verify the
+        // helper wrote the same vertical-aware value to all of them, not just
+        // the page that happens to be visible.
+        assert_eq!(albums, artists);
+        assert_eq!(albums, songs);
+        assert_eq!(albums, genres);
+        assert_eq!(albums, playlists);
+        assert_eq!(albums, queue);
+        // And the value must come from a real `with_dynamic_slots` calc, not
+        // the `9` default `SlotListView::new()` left behind.
+        assert_ne!(
+            albums, 9,
+            "expected vertical-mode resync to overwrite the default 9"
+        );
+
+        reset_atomics();
+    }
+}
+
+// ============================================================================

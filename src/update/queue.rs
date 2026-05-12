@@ -142,11 +142,10 @@ impl Nokkvi {
         }
 
         // Keep slot_count in sync with the rendered slot list so drag index
-        // translation uses the correct effective_center.
-        use crate::widgets::slot_list::{SlotListConfig, chrome_height_with_header};
-        let config =
-            SlotListConfig::with_dynamic_slots(self.window.height, chrome_height_with_header());
-        self.queue_page.common.slot_list.slot_count = config.slot_count;
+        // translation uses the correct effective_center. Routes through the
+        // vertical-aware resync so the queue's stored slot_count matches the
+        // actual rendered count even when artwork is stacked above the list.
+        self.resync_slot_counts();
 
         // IMPORTANT: Use filtered queue for all operations since slot list indices are relative to filtered list.
         // `.into_owned()` is required here because this mutable handler needs to mutate `self` later.

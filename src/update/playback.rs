@@ -1303,6 +1303,14 @@ impl Nokkvi {
         crate::theme::set_artwork_auto_max_pct(settings.artwork_auto_max_pct);
         crate::theme::set_artwork_vertical_height_pct(settings.artwork_vertical_height_pct);
 
+        // Vertical artwork modes (and Auto's portrait fallback) stack the
+        // artwork above the slot list, shrinking the available height and
+        // therefore the rendered slot count. Every page's stored slot_count
+        // must follow — otherwise `pending_expand_resolve`'s center math
+        // uses a slot count that doesn't match what's visible and the
+        // auto-expanded row lands above the viewport.
+        self.resync_slot_counts();
+
         // Sync volume to MPRIS D-Bus (prevents initial 100% jump on first playerctl command)
         if let Some(ref conn) = self.mpris_connection {
             conn.set_volume(f64::from(settings.volume));

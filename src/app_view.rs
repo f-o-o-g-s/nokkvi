@@ -103,7 +103,7 @@ impl Nokkvi {
     /// `window_width` field — otherwise the Auto-mode portrait fallback
     /// shows top/bottom letterbox bars and the horizontal candidate
     /// over-counts the leftover slot-list width by the side-nav footprint.
-    fn content_pane_width(&self) -> f32 {
+    pub(crate) fn content_pane_width(&self) -> f32 {
         let nav_chrome = if crate::theme::is_side_nav() {
             crate::widgets::side_nav_bar::SIDE_NAV_TOTAL_WIDTH
         } else {

@@ -29,19 +29,44 @@ impl Nokkvi {
         // Recompute dynamic slot count for the new window size and sync it
         // to every view's SlotListView. Without this, prefetch_indices() uses
         // a stale slot_count (default 9) and under-fetches artwork for tall windows.
-        use crate::widgets::slot_list::{SlotListConfig, chrome_height_with_header};
-        let config = SlotListConfig::with_dynamic_slots(height, chrome_height_with_header());
-        let sc = config.slot_count;
+        self.resync_slot_counts();
+
+        // Re-prefetch mini artwork for the active view since more slots may
+        // now be visible.
+        self.prefetch_viewport_artwork()
+    }
+
+    /// Recompute every page's `slot_count` to match what the view actually
+    /// renders given the current window dimensions AND the active artwork
+    /// column mode. Vertical artwork modes (and Auto's portrait fallback)
+    /// stack the artwork above the slot list, eating ~`layout.extent` + pad
+    /// pixels from the available height — without re-syncing here, the
+    /// stored slot_count stays at the horizontal-layout value and
+    /// `pending_expand_resolve` lands the auto-expanded row above the visible
+    /// viewport (the row only the user can rescue with a manual scroll).
+    pub(crate) fn resync_slot_counts(&mut self) {
+        use crate::widgets::{
+            base_slot_list_layout::{BaseSlotListLayoutConfig, vertical_artwork_chrome},
+            slot_list::{SlotListConfig, chrome_height_with_header},
+        };
+
+        let standard_chrome = chrome_height_with_header();
+        let layout = BaseSlotListLayoutConfig {
+            window_width: self.content_pane_width(),
+            window_height: self.window.height,
+            show_artwork_column: true,
+            slot_list_chrome: standard_chrome,
+        };
+        let vertical = vertical_artwork_chrome(&layout);
+        let sc = SlotListConfig::with_dynamic_slots(self.window.height, standard_chrome + vertical)
+            .slot_count;
+
         self.albums_page.common.slot_list.slot_count = sc;
         self.artists_page.common.slot_list.slot_count = sc;
         self.songs_page.common.slot_list.slot_count = sc;
         self.genres_page.common.slot_list.slot_count = sc;
         self.playlists_page.common.slot_list.slot_count = sc;
         self.queue_page.common.slot_list.slot_count = sc;
-
-        // Re-prefetch mini artwork for the active view since more slots may
-        // now be visible.
-        self.prefetch_viewport_artwork()
     }
 
     /// Prefetch mini artwork for whatever slots are currently visible in the
