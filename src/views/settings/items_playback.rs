@@ -135,7 +135,8 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
                 data.default_playlist_name
             },
             "Not set",
-        ),
+        )
+        .with_enter_hint(),
         take("general.queue_show_default_playlist"),
     ]);
 

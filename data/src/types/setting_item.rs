@@ -48,6 +48,13 @@ pub struct SettingItem {
     /// True when the key targets the active theme file (`dark.*` / `light.*`).
     /// False means the key targets config.toml.
     pub is_theme_key: bool,
+    /// True when activating this row opens a dialog/picker/sub-list and the
+    /// renderer should display an "Enter ↵" affordance. Always-interactive
+    /// value types (Hotkey / HexColor / ColorArray) get the hint
+    /// unconditionally; this flag is for `Text` rows whose activation behavior
+    /// can't be inferred from the value type alone (font picker, local music
+    /// path text input, default playlist picker).
+    pub needs_enter_hint: bool,
 }
 
 impl SettingItem {
@@ -62,6 +69,7 @@ impl SettingItem {
             label_icon: None,
             subtitle: m.subtitle,
             is_theme_key: false,
+            needs_enter_hint: false,
         })
     }
 
@@ -231,6 +239,21 @@ impl SettingsEntry {
     pub fn with_theme_key(mut self) -> Self {
         if let SettingsEntry::Item(ref mut item) = self {
             item.is_theme_key = true;
+        }
+        self
+    }
+
+    /// Mark the item as opening a dialog/picker on Enter, so the renderer
+    /// shows the "Enter ↵" affordance. No-op on headers.
+    ///
+    /// Always-interactive value types (Hotkey / HexColor / ColorArray) get
+    /// the hint unconditionally from the renderer — call this only for
+    /// `Text` rows whose activation behavior isn't inferable from the value
+    /// type alone (font picker, local-music-path text input, default
+    /// playlist picker).
+    pub fn with_enter_hint(mut self) -> Self {
+        if let SettingsEntry::Item(ref mut item) = self {
+            item.needs_enter_hint = true;
         }
         self
     }

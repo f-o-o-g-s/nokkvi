@@ -710,6 +710,7 @@ mod tests {
                 label_icon: None,
                 subtitle: None,
                 is_theme_key: false,
+                needs_enter_hint: false,
             }),
             SettingsEntry::Item(SettingItem {
                 key: crate::visualizer_config::keys::WAVES.into(),
@@ -720,6 +721,7 @@ mod tests {
                 label_icon: None,
                 subtitle: None,
                 is_theme_key: false,
+                needs_enter_hint: false,
             }),
         ];
 
