@@ -75,7 +75,7 @@ AppService (orchestrator)
 └── TaskManager              — centralized spawn tracking + status channel for UI notifications
 ```
 
-The Navidrome SSE subscriber lives in the **UI crate** (`src/services/navidrome_sse.rs`) and parses events with `data/src/services/navidrome_events.rs::parse_sse_event()`; it is not part of `AppService`. There is no centralized `ArtworkPrefetch` component — artwork prefetching is dispatched ad-hoc through `TaskManager::spawn_cancellable` from update handlers.
+The Navidrome SSE subscriber lives in the **UI crate** (`src/services/navidrome_sse.rs`) and parses events with `data/src/services/navidrome_events.rs::parse_sse_event()`; it is not part of `AppService`. There is no centralized `ArtworkPrefetch` component — artwork prefetching is dispatched ad-hoc via Iced `Task::perform` calls from update handlers (see `src/update/components.rs`); it does not go through `TaskManager`.
 
 - **`PagedBuffer<T>`** (`data/src/types/paged_buffer.rs`) replaces `Vec<T>` for all library data. `Deref<Target = [T]>` makes it drop-in. Load state via `set_loading()` / `needs_fetch()`. Always call `set_loading(true)` before dispatching a page fetch — otherwise rapid scroll triggers duplicate fetches.
 - **Persistence**: `redb` (`app.redb`) for queue/session/structured state via `services/state_storage.rs`; TOML (`config.toml`) for user-editable config via `services/toml_settings_io.rs` and `src/config_writer.rs`. **Routing matters**: `update_config_value()` writes `config.toml`; `update_theme_value()` writes the active theme file in `~/.config/nokkvi/themes/`. Misrouting silently overwrites the wrong file.
