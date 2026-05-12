@@ -39,19 +39,40 @@ pub(crate) fn register(info: SseConnectionInfo) {
     }
 }
 
+/// Structured payload carrying the resource kinds Navidrome reports as changed.
+///
+/// Built by the SSE consumer from `NavidromeEvent::RefreshResource`'s raw
+/// `HashMap<String, Vec<String>>` so the update layer can branch on which
+/// entity caches actually need a reload. Navidrome currently emits `album`,
+/// `artist`, `song`, `library`, `user`, and `plugin` resource kinds; the
+/// `playlist` and `genre` fields are populated forward-compat if/when the
+/// server starts emitting those keys (the parser already extracts them).
+///
+/// `is_wildcard = true` corresponds to the `{"*": "*"}` payload (full scan).
+/// In that case every kind is considered changed and all id vectors are empty.
+/// Per `gotchas.md`, consumers must still skip per-album artwork eviction on
+/// wildcards to avoid a mass re-download of every cached cover.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LibraryChange {
+    pub album_ids: Vec<String>,
+    pub artist_ids: Vec<String>,
+    pub song_ids: Vec<String>,
+    pub playlist_ids: Vec<String>,
+    pub genre_ids: Vec<String>,
+    pub is_wildcard: bool,
+}
+
 /// Events yielded to the iced runloop
 #[derive(Debug, Clone)]
 pub(crate) enum SseEvent {
     /// Library scan emitted a refreshResource event.
     ///
-    /// `album_ids` carries the IDs whose data/artwork the server says changed.
-    /// `is_wildcard` is `true` when the payload was `{"*": "*"}` (full scan)
-    /// — consumers should reload slot lists but skip per-album artwork eviction
-    /// to avoid mass re-downloads.
-    LibraryChanged {
-        album_ids: Vec<String>,
-        is_wildcard: bool,
-    },
+    /// The payload enumerates which resource kinds the server reports as
+    /// changed; `handle_library_changed` branches on each `*_ids` / `is_wildcard`
+    /// to reload only the caches that received SSE notifications. Wildcard
+    /// (full-scan) payloads still reload slot lists but skip per-album
+    /// artwork eviction — see `LibraryChange` docs.
+    LibraryChanged(LibraryChange),
 }
 
 /// Start the SSE subscription loop
@@ -149,22 +170,42 @@ pub(crate) fn run() -> impl Sipper<Never, SseEvent> {
                                             if !event_type.is_empty() {
                                                 match parse_sse_event(&event_type, &data) {
                                                     NavidromeEvent::RefreshResource {
-                                                        resources,
+                                                        mut resources,
                                                         is_wildcard,
                                                     } => {
-                                                        let album_ids = resources
-                                                            .get("album")
-                                                            .cloned()
-                                                            .unwrap_or_default();
+                                                        let take = |resources: &mut std::collections::HashMap<String, Vec<String>>, key: &str| {
+                                                            resources.remove(key).unwrap_or_default()
+                                                        };
+                                                        let change = LibraryChange {
+                                                            album_ids: take(
+                                                                &mut resources,
+                                                                "album",
+                                                            ),
+                                                            artist_ids: take(
+                                                                &mut resources,
+                                                                "artist",
+                                                            ),
+                                                            song_ids: take(&mut resources, "song"),
+                                                            playlist_ids: take(
+                                                                &mut resources,
+                                                                "playlist",
+                                                            ),
+                                                            genre_ids: take(
+                                                                &mut resources,
+                                                                "genre",
+                                                            ),
+                                                            is_wildcard,
+                                                        };
                                                         debug!(
-                                                            " [SSE] refreshResource — wildcard={is_wildcard}, album_ids={}",
-                                                            album_ids.len()
+                                                            " [SSE] refreshResource — wildcard={is_wildcard}, albums={}, artists={}, songs={}, playlists={}, genres={}",
+                                                            change.album_ids.len(),
+                                                            change.artist_ids.len(),
+                                                            change.song_ids.len(),
+                                                            change.playlist_ids.len(),
+                                                            change.genre_ids.len(),
                                                         );
                                                         output
-                                                            .send(SseEvent::LibraryChanged {
-                                                                album_ids,
-                                                                is_wildcard,
-                                                            })
+                                                            .send(SseEvent::LibraryChanged(change))
                                                             .await;
                                                     }
                                                     NavidromeEvent::ScanStatus {
