@@ -24,6 +24,7 @@ Things that shaped this project:
 - **[Feishin](https://github.com/jeffvli/feishin)**: Referenced heavily for Navidrome API coverage and enums.
 - **[mpd](https://github.com/MusicPlayerDaemon/MPD)**: Shaped the queue and consume logic.
 - **[fooyin](https://github.com/fooyin/fooyin)**: Referenced for the native PipeWire implementation.
+- **[cava](https://github.com/karlstav/cava)**: The visualizer DSP (`spectrum.rs`) is a Rust port of cavacore, and the Monstercat smoothing filter is ported from cava.c.
 - **[StepMania](https://github.com/stepmania/stepmania)**: Inspired the drill-down settings navigation.
 - **Vim**: Inspired the color schemes and keyboard-first approach.
 
