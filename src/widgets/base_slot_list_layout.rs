@@ -258,7 +258,7 @@ pub(crate) fn vertical_artwork_chrome(config: &BaseSlotListLayoutConfig) -> f32 
                 ArtworkColumnMode::AlwaysVerticalNative
                     | ArtworkColumnMode::AlwaysVerticalStretched
             ) {
-                crate::widgets::artwork_split_handle_vertical::HANDLE_HEIGHT
+                crate::widgets::artwork_split_handle::HANDLE_THICKNESS
             } else {
                 0.0
             };
@@ -636,7 +636,7 @@ pub(crate) fn base_slot_list_layout<'a, Message: 'a>(
     base_slot_list_layout_with_handle::<
         Message,
         fn(crate::widgets::artwork_split_handle::DragEvent) -> Message,
-        fn(crate::widgets::artwork_split_handle_vertical::DragEvent) -> Message,
+        fn(crate::widgets::artwork_split_handle::DragEvent) -> Message,
     >(
         config,
         header,
@@ -665,7 +665,7 @@ pub(crate) fn base_slot_list_layout_with_handle<'a, Message, F, G>(
 where
     Message: 'a,
     F: Fn(crate::widgets::artwork_split_handle::DragEvent) -> Message + Clone + 'a,
-    G: Fn(crate::widgets::artwork_split_handle_vertical::DragEvent) -> Message + Clone + 'a,
+    G: Fn(crate::widgets::artwork_split_handle::DragEvent) -> Message + Clone + 'a,
 {
     let layout = resolve_artwork_layout(config);
 
@@ -744,7 +744,7 @@ where
     // Drag handle only in always modes — suppressed in Auto.
     let handle: Option<Element<'a, Message>> = if is_always {
         on_drag.map(|f| {
-            crate::widgets::artwork_split_handle::artwork_split_handle_element(
+            crate::widgets::artwork_split_handle::artwork_split_handle_horizontal_element(
                 config.window_width,
                 f,
             )
@@ -807,7 +807,7 @@ fn vertical_layout<'a, Message, G>(
 ) -> Element<'a, Message>
 where
     Message: 'a,
-    G: Fn(crate::widgets::artwork_split_handle_vertical::DragEvent) -> Message + Clone + 'a,
+    G: Fn(crate::widgets::artwork_split_handle::DragEvent) -> Message + Clone + 'a,
 {
     // Inner panel for the artwork. In `Square` panel kinds the responsive
     // widget inside resolves to a `min(w, h)` square; in `Stretched` it
@@ -834,7 +834,7 @@ where
     );
     let handle: Option<Element<'a, Message>> = if is_always_vertical {
         on_drag_vertical.map(|f| {
-            crate::widgets::artwork_split_handle_vertical::artwork_split_handle_vertical_element(
+            crate::widgets::artwork_split_handle::artwork_split_handle_vertical_element(
                 config.window_height,
                 f,
             )
@@ -843,7 +843,7 @@ where
         None
     };
     let handle_height = if handle.is_some() {
-        crate::widgets::artwork_split_handle_vertical::HANDLE_HEIGHT
+        crate::widgets::artwork_split_handle::HANDLE_THICKNESS
     } else {
         0.0
     };
@@ -1224,7 +1224,7 @@ mod tests {
         let chrome = vertical_artwork_chrome(&cfg(1920.0, 1500.0, true));
         let expected = 600.0
             + VERTICAL_ARTWORK_TOP_PAD
-            + crate::widgets::artwork_split_handle_vertical::HANDLE_HEIGHT;
+            + crate::widgets::artwork_split_handle::HANDLE_THICKNESS;
         assert!((chrome - expected).abs() < 1e-3);
         reset_atomics();
     }
