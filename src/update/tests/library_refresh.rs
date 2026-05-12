@@ -1,6 +1,15 @@
 //! Tests for library refresh, viewport clamp, and seek-driven artwork load update handlers.
 
-use crate::{View, test_helpers::*};
+use crate::{View, services::navidrome_sse::LibraryChange, test_helpers::*};
+
+/// Construct a wildcard (full-scan) library change — every kind treated as
+/// changed, no ids carried.
+fn wildcard_change() -> LibraryChange {
+    LibraryChange {
+        is_wildcard: true,
+        ..Default::default()
+    }
+}
 
 // Library Refresh Toast Suppression (library_refresh.rs)
 // ============================================================================
@@ -11,7 +20,7 @@ fn library_refreshed_emits_toast_by_default() {
     assert!(!app.suppress_library_refresh_toasts);
     assert!(app.toast.toasts.is_empty());
 
-    let _ = app.handle_library_changed(Vec::new(), true);
+    let _ = app.handle_library_changed(wildcard_change());
 
     assert_eq!(
         app.toast.toasts.len(),
@@ -33,13 +42,289 @@ fn library_refreshed_suppresses_toast_when_flag_set() {
     app.suppress_library_refresh_toasts = true;
     assert!(app.toast.toasts.is_empty());
 
-    let _ = app.handle_library_changed(Vec::new(), true);
+    let _ = app.handle_library_changed(wildcard_change());
 
     assert!(
         app.toast.toasts.is_empty(),
         "No toast should be pushed when suppress_library_refresh_toasts is true"
     );
 }
+
+// ============================================================================
+// Resource-kind routing (Tier 0 defect #0.7)
+//
+// The SSE consumer used to extract only `resources.get("album")` and discard
+// every other kind. `handle_library_changed` then reloaded artists/albums/songs
+// unconditionally on ANY LibraryChanged, while playlists and genres never
+// reloaded from SSE at all. These tests pin the per-kind branching so a
+// future refactor can't quietly regress the routing.
+//
+// Observable state: each entity reload calls `library.<kind>.set_loading(true)`
+// before dispatching the async fetch, so `is_loading()` is the cheap, sync
+// signal that the branch fired. The buffer-non-empty gate is preserved (the
+// reload only runs for views the user has visited), so each test seeds a
+// non-empty buffer first.
+// ============================================================================
+
+/// Construct a library change that flags only the given resource kinds. Each
+/// kind gets a single placeholder id so the per-kind branch in
+/// `handle_library_changed` fires; pass `[]` to leave a kind empty.
+fn change_with(
+    albums: &[&str],
+    artists: &[&str],
+    songs: &[&str],
+    playlists: &[&str],
+    genres: &[&str],
+) -> LibraryChange {
+    let v = |s: &[&str]| s.iter().map(|x| (*x).to_string()).collect::<Vec<_>>();
+    LibraryChange {
+        album_ids: v(albums),
+        artist_ids: v(artists),
+        song_ids: v(songs),
+        playlist_ids: v(playlists),
+        genre_ids: v(genres),
+        is_wildcard: false,
+    }
+}
+
+/// Seed every entity buffer with one indexed item — keeps the
+/// non-empty gate happy for all five kinds in a single helper.
+fn seed_all(app: &mut crate::Nokkvi) {
+    seed_albums(app, vec![make_album("a0", "Album 0", "Artist")]);
+    seed_artists(app, vec![make_artist("ar0", "Artist 0")]);
+    seed_songs(app, vec![make_song("s0", "Song 0", "Artist")]);
+    app.library
+        .playlists
+        .set_from_vec(vec![nokkvi_data::backend::playlists::PlaylistUIViewData {
+            id: "p0".into(),
+            name: "Playlist 0".into(),
+            comment: String::new(),
+            duration: 0.0,
+            song_count: 0,
+            owner_name: String::new(),
+            public: false,
+            updated_at: String::new(),
+            artwork_album_ids: Vec::new(),
+            searchable_lower: String::new(),
+        }]);
+    seed_genres(app, vec![make_genre("g0", "Genre 0")]);
+}
+
+/// Snapshot every entity buffer's loading flag so we can assert which kinds
+/// the handler kicked into a refresh.
+struct LoadingSnapshot {
+    albums: bool,
+    artists: bool,
+    songs: bool,
+    playlists: bool,
+    genres: bool,
+}
+
+fn snapshot(app: &crate::Nokkvi) -> LoadingSnapshot {
+    LoadingSnapshot {
+        albums: app.library.albums.is_loading(),
+        artists: app.library.artists.is_loading(),
+        songs: app.library.songs.is_loading(),
+        playlists: app.library.playlists.is_loading(),
+        genres: app.library.genres.is_loading(),
+    }
+}
+
+#[test]
+fn library_refresh_album_only_reloads_albums_only() {
+    let mut app = test_app();
+    seed_all(&mut app);
+
+    let _ = app.handle_library_changed(change_with(&["a1"], &[], &[], &[], &[]));
+
+    let s = snapshot(&app);
+    assert!(s.albums, "album-only SSE should kick the albums reload");
+    assert!(!s.artists, "album-only SSE must not reload artists");
+    assert!(!s.songs, "album-only SSE must not reload songs");
+    assert!(!s.playlists, "album-only SSE must not reload playlists");
+    assert!(!s.genres, "album-only SSE must not reload genres");
+}
+
+#[test]
+fn library_refresh_artist_only_reloads_artists_only() {
+    let mut app = test_app();
+    seed_all(&mut app);
+
+    let _ = app.handle_library_changed(change_with(&[], &["ar1"], &[], &[], &[]));
+
+    let s = snapshot(&app);
+    assert!(s.artists, "artist-only SSE should kick the artists reload");
+    assert!(!s.albums, "artist-only SSE must not reload albums");
+    assert!(!s.songs, "artist-only SSE must not reload songs");
+    assert!(!s.playlists, "artist-only SSE must not reload playlists");
+    assert!(!s.genres, "artist-only SSE must not reload genres");
+}
+
+#[test]
+fn library_refresh_song_only_reloads_songs_only() {
+    let mut app = test_app();
+    seed_all(&mut app);
+
+    let _ = app.handle_library_changed(change_with(&[], &[], &["s1"], &[], &[]));
+
+    let s = snapshot(&app);
+    assert!(s.songs, "song-only SSE should kick the songs reload");
+    assert!(!s.albums, "song-only SSE must not reload albums");
+    assert!(!s.artists, "song-only SSE must not reload artists");
+    assert!(!s.playlists, "song-only SSE must not reload playlists");
+    assert!(!s.genres, "song-only SSE must not reload genres");
+}
+
+#[test]
+fn library_refresh_playlist_only_reloads_playlists_only() {
+    let mut app = test_app();
+    seed_all(&mut app);
+
+    let _ = app.handle_library_changed(change_with(&[], &[], &[], &["p1"], &[]));
+
+    let s = snapshot(&app);
+    assert!(
+        s.playlists,
+        "playlist-only SSE should kick the playlists reload"
+    );
+    assert!(!s.albums, "playlist-only SSE must not reload albums");
+    assert!(!s.artists, "playlist-only SSE must not reload artists");
+    assert!(!s.songs, "playlist-only SSE must not reload songs");
+    assert!(!s.genres, "playlist-only SSE must not reload genres");
+}
+
+#[test]
+fn library_refresh_genre_only_reloads_genres_only() {
+    let mut app = test_app();
+    seed_all(&mut app);
+
+    let _ = app.handle_library_changed(change_with(&[], &[], &[], &[], &["g1"]));
+
+    let s = snapshot(&app);
+    assert!(s.genres, "genre-only SSE should kick the genres reload");
+    assert!(!s.albums, "genre-only SSE must not reload albums");
+    assert!(!s.artists, "genre-only SSE must not reload artists");
+    assert!(!s.songs, "genre-only SSE must not reload songs");
+    assert!(!s.playlists, "genre-only SSE must not reload playlists");
+}
+
+#[test]
+fn library_refresh_album_and_playlist_reloads_both() {
+    let mut app = test_app();
+    seed_all(&mut app);
+
+    let _ = app.handle_library_changed(change_with(&["a1"], &[], &[], &["p1"], &[]));
+
+    let s = snapshot(&app);
+    assert!(s.albums, "mixed payload should reload albums");
+    assert!(s.playlists, "mixed payload should reload playlists");
+    assert!(!s.artists, "unflagged kind (artists) must not reload");
+    assert!(!s.songs, "unflagged kind (songs) must not reload");
+    assert!(!s.genres, "unflagged kind (genres) must not reload");
+}
+
+#[test]
+fn library_refresh_wildcard_reloads_all_kinds() {
+    let mut app = test_app();
+    seed_all(&mut app);
+
+    let _ = app.handle_library_changed(wildcard_change());
+
+    let s = snapshot(&app);
+    assert!(s.albums, "wildcard should reload albums");
+    assert!(s.artists, "wildcard should reload artists");
+    assert!(s.songs, "wildcard should reload songs");
+    assert!(s.playlists, "wildcard should reload playlists");
+    assert!(s.genres, "wildcard should reload genres");
+}
+
+#[test]
+fn library_refresh_wildcard_skips_artwork_refetch() {
+    // Gotcha: `LibraryChanged { is_wildcard: true }` must NOT emit per-album
+    // RefreshAlbumArtworkSilent — it would re-download every cached cover.
+    // We can't observe the dispatched Tasks directly, but we CAN observe that
+    // the "Updated artwork for N album(s)" toast does not fire (it only fires
+    // when the artwork-refetch branch enqueued at least one task).
+    let mut app = test_app();
+    seed_all(&mut app);
+    // Prime the album_art LRU so any album_id would otherwise count as
+    // "in UI" and trip the artwork refresh.
+    app.artwork.album_art.put(
+        "a0".to_string(),
+        iced::widget::image::Handle::from_bytes(vec![]),
+    );
+
+    let _ = app.handle_library_changed(wildcard_change());
+
+    let updated_artwork_toast = app
+        .toast
+        .toasts
+        .iter()
+        .find(|t| t.message.contains("Updated artwork for"));
+    assert!(
+        updated_artwork_toast.is_none(),
+        "wildcard SSE must not trigger artwork re-fetch (would mass-redownload)"
+    );
+}
+
+#[test]
+fn library_refresh_skips_kinds_with_empty_buffers() {
+    // First-launch state: nothing has been loaded yet. SSE arrives. The
+    // non-empty gate protects against starting reloads for views the user
+    // hasn't visited — they'll fetch fresh on first entry.
+    let mut app = test_app();
+    // Deliberately do NOT seed any buffers.
+
+    let _ = app.handle_library_changed(wildcard_change());
+
+    let s = snapshot(&app);
+    assert!(!s.albums, "empty albums buffer should skip reload");
+    assert!(!s.artists, "empty artists buffer should skip reload");
+    assert!(!s.songs, "empty songs buffer should skip reload");
+    assert!(!s.playlists, "empty playlists buffer should skip reload");
+    assert!(!s.genres, "empty genres buffer should skip reload");
+}
+
+#[test]
+fn library_refresh_skips_random_sort_for_paginated_kinds() {
+    // Random-sort SSE protection (per gotchas.md): a background reload during
+    // Random sort would return a new random order, corrupting the artwork ref
+    // and jarring the user mid-browse. The user can press F5 to re-randomize
+    // intentionally. Applies to the three paged kinds (albums/artists/songs);
+    // playlists and genres don't have a Random sort mode so they always run.
+    let mut app = test_app();
+    seed_all(&mut app);
+    app.albums_page.common.current_sort_mode = SortMode::Random;
+    app.artists_page.common.current_sort_mode = SortMode::Random;
+    app.songs_page.common.current_sort_mode = SortMode::Random;
+
+    let _ = app.handle_library_changed(wildcard_change());
+
+    let s = snapshot(&app);
+    assert!(
+        !s.albums,
+        "albums random-sort must skip SSE-driven background reload"
+    );
+    assert!(
+        !s.artists,
+        "artists random-sort must skip SSE-driven background reload"
+    );
+    assert!(
+        !s.songs,
+        "songs random-sort must skip SSE-driven background reload"
+    );
+    assert!(
+        s.playlists,
+        "playlists have no random sort and should still reload on wildcard"
+    );
+    assert!(
+        s.genres,
+        "genres have no random sort and should still reload on wildcard"
+    );
+}
+
+// Bring SortMode into scope for the random-sort test above.
+use crate::widgets::view_header::SortMode;
 
 // ============================================================================
 // Albums library-refresh: viewport reconciliation (PROMPT 16)
