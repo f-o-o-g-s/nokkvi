@@ -6,9 +6,15 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Auto mode now stacks the artwork above the slot list on portrait windows where the horizontal column would crowd the rows. The stacked artwork aligns with the slot rows' inset and only appears when the window is tall and narrow enough for it to fill the inset edge-to-edge, so the panel never shows bg-color bars inside the pane.
+- "Auto-mode artwork size" slider in Settings → Interface → Artwork Column (0.30–0.70 in 5% steps, default 0.40) grows or shrinks the Auto-mode artwork — affects both the horizontal column and the portrait-fallback vertical artwork.
+- Two new "Always (Vertical Native)" and "Always (Vertical Stretched)" artwork-column modes — both stack a fixed-height artwork above the slot list with a horizontal drag handle below the artwork for live resize, controlled by the new "Always-Vertical artwork height" slider (0.10–0.80, default 0.40). Unlike Auto, these modes allow letterboxing as the deliberate tradeoff for "always show big artwork above the list" regardless of window orientation.
+
 ### Changed
 
 ### Fixed
+
+- Side nav layout no longer letterboxes the Auto-mode portrait artwork on top and bottom — the artwork resolver was sizing against the full window width instead of the available content pane (which has the 30 px sidebar subtracted). The same correction tightens the horizontal Auto candidate's auto-hide threshold by 30 px in Side layouts so the column hides at the right point.
 
 ### Removed
 
