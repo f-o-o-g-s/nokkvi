@@ -251,20 +251,28 @@ fn always_vertical_extent(window_height: f32) -> f32 {
 /// drag handle sits between the artwork and the slot list, so its 6 px
 /// thickness is added on top of `extent + bottom_pad`.
 pub(crate) fn vertical_artwork_chrome(config: &BaseSlotListLayoutConfig) -> f32 {
+    // Spell every arm out so a future `ArtworkOrientation` variant forces a
+    // compile error here — matches the workspace's
+    // `match_wildcard_for_single_variants = "deny"` discipline.
     match resolve_artwork_layout(config) {
-        Some(layout) if layout.orientation == ArtworkOrientation::Vertical => {
-            let handle = if matches!(
-                theme::artwork_column_mode(),
-                ArtworkColumnMode::AlwaysVerticalNative
-                    | ArtworkColumnMode::AlwaysVerticalStretched
-            ) {
+        None
+        | Some(ArtworkLayout {
+            orientation: ArtworkOrientation::Horizontal,
+            ..
+        }) => 0.0,
+        Some(
+            layout @ ArtworkLayout {
+                orientation: ArtworkOrientation::Vertical,
+                ..
+            },
+        ) => {
+            let handle = if theme::artwork_column_mode().is_vertical() {
                 crate::widgets::artwork_split_handle::HANDLE_THICKNESS
             } else {
                 0.0
             };
             layout.extent + VERTICAL_ARTWORK_TOP_PAD + handle
         }
-        _ => 0.0,
     }
 }
 
@@ -335,10 +343,7 @@ pub(crate) fn base_slot_list_empty_artwork<'a, Message: 'a>(
 pub(crate) fn single_artwork_panel<'a, Message: 'a>(
     artwork_handle: Option<&'a iced::widget::image::Handle>,
 ) -> Element<'a, Message> {
-    if matches!(
-        theme::artwork_column_mode(),
-        ArtworkColumnMode::AlwaysStretched | ArtworkColumnMode::AlwaysVerticalStretched
-    ) {
+    if theme::artwork_column_mode().is_stretched() {
         let fit = match theme::artwork_column_stretch_fit() {
             ArtworkStretchFit::Cover => ContentFit::Cover,
             ArtworkStretchFit::Fill => ContentFit::Fill,
@@ -692,8 +697,16 @@ where
             }
         }
     } else {
-        // Single column: just slot list
-        column![header, slot_list_content]
+        // Single column: just slot list. Wrap in an outer column so the root
+        // widget type matches horizontal_layout / vertical_layout — switching
+        // artwork-mode mid-session keeps text_input focus alive. See CLAUDE.md
+        // "Render output" gotcha.
+        let inner = column![header, slot_list_content]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .spacing(0);
+
+        column![inner]
             .width(Length::Fill)
             .height(Length::Fill)
             .spacing(0)
@@ -715,11 +728,7 @@ where
     Message: 'a,
     F: Fn(crate::widgets::artwork_split_handle::DragEvent) -> Message + Clone + 'a,
 {
-    let mode = theme::artwork_column_mode();
-    let is_always = matches!(
-        mode,
-        ArtworkColumnMode::AlwaysNative | ArtworkColumnMode::AlwaysStretched
-    );
+    let is_always = theme::artwork_column_mode().is_always_horizontal();
 
     // In Auto mode, pass the artwork through directly so the row sizes
     // itself to the panel's natural square (the panel's responsive
@@ -772,7 +781,11 @@ where
         with_left_stripe(artwork_side_inner)
     };
 
-    row![
+    // Wrap the inner row in an outer column so every base_slot_list_layout
+    // branch (horizontal, vertical, no-artwork) returns the same root widget
+    // type — switching artwork-mode mid-session keeps text_input focus alive.
+    // See CLAUDE.md "Render output" gotcha.
+    let inner = row![
         column![header, slot_list_content]
             .width(Length::Fill)
             .height(Length::Fill)
@@ -782,8 +795,13 @@ where
     .align_y(Alignment::Start)
     .spacing(0)
     .width(Length::Fill)
-    .height(Length::Fill)
-    .into()
+    .height(Length::Fill);
+
+    column![inner]
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .spacing(0)
+        .into()
 }
 
 /// Vertical layout — artwork stacked above the slot list, inset by
@@ -827,11 +845,7 @@ where
 
     // Drag handle only in Always-Vertical* modes — Auto's vertical fallback
     // sizes the artwork itself and suppresses the handle.
-    let mode = theme::artwork_column_mode();
-    let is_always_vertical = matches!(
-        mode,
-        ArtworkColumnMode::AlwaysVerticalNative | ArtworkColumnMode::AlwaysVerticalStretched
-    );
+    let is_always_vertical = theme::artwork_column_mode().is_vertical();
     let handle: Option<Element<'a, Message>> = if is_always_vertical {
         on_drag_vertical.map(|f| {
             crate::widgets::artwork_split_handle::artwork_split_handle_vertical_element(
@@ -891,7 +905,16 @@ where
         .width(Length::Fill)
         .height(Length::Fixed(slot_list_height));
 
-    column![artwork_side, header, slot_list_pinned]
+    // Wrap the inner column in an outer column so every base_slot_list_layout
+    // branch returns the same root widget type — switching artwork-mode
+    // mid-session keeps text_input focus alive. See CLAUDE.md "Render output"
+    // gotcha.
+    let inner = column![artwork_side, header, slot_list_pinned]
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .spacing(0);
+
+    column![inner]
         .width(Length::Fill)
         .height(Length::Fill)
         .spacing(0)
