@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - Auto mode now stacks the artwork above the slot list on portrait windows where the horizontal column would crowd the rows. The stacked artwork aligns with the slot rows' inset and only appears when the window is tall and narrow enough for it to fill the inset edge-to-edge, so the panel never shows bg-color bars inside the pane.
 - "Auto-mode artwork size" slider in Settings → Interface → Artwork Column (0.30–0.70 in 5% steps, default 0.40) grows or shrinks the Auto-mode artwork — affects both the horizontal column and the portrait-fallback vertical artwork.
 - Two new "Always (Vertical Native)" and "Always (Vertical Stretched)" artwork-column modes — both stack a fixed-height artwork above the slot list with a horizontal drag handle below the artwork for live resize, controlled by the new "Always-Vertical artwork height" slider (0.10–0.80, default 0.40). Unlike Auto, these modes allow letterboxing as the deliberate tradeoff for "always show big artwork above the list" regardless of window orientation.
+- Surfing boat in the lines visualizer's mirrored mode now flips upside-down on each off-screen wrap and surfs the bottom (reflected) wave on the next leg, alternating between the upper and lower halves of the visualizer each wrap-cycle. The anchor stays out of the water while the boat is inverted and resumes dropping once the boat flips upright again.
 
 ### Changed
 
@@ -35,6 +36,7 @@ All notable changes to this project will be documented in this file.
 - Renaming a playlist (and any other text-input dialog) now dismisses when you click outside the dialog box, matching the about / info / EQ modal behavior. Clicks on the input field or the OK / Cancel buttons are absorbed and don't bubble to the backdrop.
 - Loaded playlist header in the queue view now survives play actions that don't replace queue contents — clicking play on a song already in the queue, or rolling Queue-view roulette (Ctrl+R), no longer drops the playlist name/comment bar. The play guard was clearing the loaded-playlist context for every play action, including ones that only advance the playback pointer within the existing queue.
 - Surfing boat, anchor, and rope now fade with the Settings → Visualizer → Visualizer Opacity slider — the SVG sprites and the rope canvas previously drew at full alpha regardless of the slider, so dimming the visualizer left the boat punching through at 1.0 alpha while the bars/lines underneath fell away.
+- Surfing boat now rides the actual wave line when the lines visualizer is in mirrored mode — the boat's vertical math was anchored to the canvas bottom while the rendered wave baseline sat at the canvas vertical center, so the boat floated roughly half a canvas height below the line it was meant to surf. The dropped anchor and its rope likewise now sit on that centerline baseline instead of stretching from the boat (at center) all the way down through the lower-half reflection to the canvas floor.
 
 ### Removed
 
