@@ -402,7 +402,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // irrelevant — all user-enabled fields stay visible regardless of window
     // width.  In non-merged mode fields are separate labeled elements that each
     // need their own lane, so the responsive breakpoints still apply.
-    let merged_mode_active = data.radio_name.is_none() && theme::strip_merged_mode();
+    let merged_mode_active = theme::strip_merged_mode();
 
     let show_title = show_nav_metadata
         && (merged_mode_active || data.window_width >= BREAKPOINT_SHOW_TITLE)
@@ -480,56 +480,88 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             let mut has_prev_field = false;
 
             if let Some(radio_name) = &data.radio_name {
-                info_row = info_row.push(info_sep());
-
-                let icon_widget = crate::embedded_svg::svg_widget("assets/icons/radio-tower.svg")
-                    .width(Length::Fixed(12.0))
-                    .height(Length::Fixed(12.0))
-                    .style(|_theme, _status| iced::widget::svg::Style {
-                        color: Some(theme::fg4()),
-                    });
-
-                info_row = info_row.push(icon_widget);
-
-                info_row = info_row.push(
-                    text(radio_name.clone())
-                        .size(12.0)
-                        .font(Font {
-                            weight: Weight::Bold,
-                            ..theme::ui_font()
-                        })
-                        .color(theme::now_playing_color()),
-                );
-
                 let icy_title = data.icy_title.as_deref().unwrap_or("");
                 let icy_artist = data.icy_artist.as_deref().unwrap_or("");
+                let radio_url = data.radio_url.as_deref().unwrap_or("");
 
-                if !icy_title.is_empty() {
-                    info_row = info_row.push(info_sep());
-                    info_row = info_row.push(info_field(
-                        "title:",
-                        icy_title.to_string(),
-                        theme::accent_bright(),
-                    ));
-                }
+                let radio_icon = || {
+                    crate::embedded_svg::svg_widget("assets/icons/radio-tower.svg")
+                        .width(Length::Fixed(12.0))
+                        .height(Length::Fixed(12.0))
+                        .style(|_theme, _status| iced::widget::svg::Style {
+                            color: Some(theme::fg4()),
+                        })
+                };
 
-                if !icy_artist.is_empty() {
+                if theme::strip_merged_mode() {
+                    // Merged radio: single marquee containing station + ICY fields,
+                    // bracketed by separators with the radio-tower icon prepended.
                     info_row = info_row.push(info_sep());
-                    info_row = info_row.push(info_field(
-                        "artist:",
-                        icy_artist.to_string(),
-                        theme::selected_color(),
-                    ));
-                }
+                    info_row = info_row.push(radio_icon());
 
-                if icy_title.is_empty()
-                    && icy_artist.is_empty()
-                    && let Some(url) = &data.radio_url
-                {
+                    let merged = super::track_info_strip::merged_radio_strip_string(
+                        radio_name,
+                        icy_title,
+                        icy_artist,
+                        radio_url,
+                        show_labels,
+                        theme::strip_separator().as_join_str(),
+                    );
+                    if !merged.is_empty() {
+                        info_row = info_row.push(
+                            iced::widget::row![
+                                super::marquee_text::marquee_text(merged)
+                                    .size(10.0)
+                                    .font(theme::ui_font())
+                                    .color(theme::selected_color())
+                                    .align_x(iced::alignment::Horizontal::Center),
+                            ]
+                            .align_y(Alignment::Center)
+                            .width(Length::Fill),
+                        );
+                    }
                     info_row = info_row.push(info_sep());
-                    info_row = info_row.push(info_field("url:", url.clone(), theme::fg2()));
+                } else {
+                    info_row = info_row.push(info_sep());
+                    info_row = info_row.push(radio_icon());
+
+                    info_row = info_row.push(
+                        text(radio_name.clone())
+                            .size(12.0)
+                            .font(Font {
+                                weight: Weight::Bold,
+                                ..theme::ui_font()
+                            })
+                            .color(theme::now_playing_color()),
+                    );
+
+                    if !icy_title.is_empty() {
+                        info_row = info_row.push(info_sep());
+                        info_row = info_row.push(info_field(
+                            "title:",
+                            icy_title.to_string(),
+                            theme::accent_bright(),
+                        ));
+                    }
+
+                    if !icy_artist.is_empty() {
+                        info_row = info_row.push(info_sep());
+                        info_row = info_row.push(info_field(
+                            "artist:",
+                            icy_artist.to_string(),
+                            theme::selected_color(),
+                        ));
+                    }
+
+                    if icy_title.is_empty()
+                        && icy_artist.is_empty()
+                        && let Some(url) = &data.radio_url
+                    {
+                        info_row = info_row.push(info_sep());
+                        info_row = info_row.push(info_field("url:", url.clone(), theme::fg2()));
+                    }
+                    info_row = info_row.push(info_sep());
                 }
-                info_row = info_row.push(info_sep());
             } else if theme::strip_merged_mode() {
                 let merged = super::track_info_strip::merged_strip_string(
                     show_title,
