@@ -879,15 +879,17 @@ impl AppService {
     ///    generation counter, joins the render thread, and stops the renderer.
     ///    The engine mutex is held only for the duration of this synchronous
     ///    call; no network I/O occurs here.
-    /// 2. `TaskManager::shutdown` — fires the shared `CancellationToken` so
-    ///    every `select!`-wrapped task unwinds cooperatively.
+    /// 2. `TaskManager::shutdown_all` — fires the shared `CancellationToken` and
+    ///    awaits tracked `JoinHandle`s up to a 500 ms internal budget, aborting
+    ///    stragglers. The 500 ms sits inside the caller's 750 ms outer budget.
     ///
     /// The caller is responsible for wrapping this in a `tokio::time::timeout`
     /// (recommended ≤ 750 ms) so a slow engine mutex acquisition or a stuck
     /// blocking worker cannot defer window close beyond user patience.
     ///
     /// Idempotent: generation supersede is monotonic; `CancellationToken::cancel`
-    /// is a no-op when already cancelled.
+    /// is a no-op when already cancelled; `shutdown_all` on a drained `JoinSet`
+    /// returns 0 without panicking.
     pub async fn request_shutdown(&self) {
         debug!(" [APP SERVICE] request_shutdown: locking audio engine");
         let engine_arc = self.audio_engine();
@@ -895,10 +897,12 @@ impl AppService {
         engine.request_shutdown();
         drop(engine);
 
-        debug!(" [APP SERVICE] request_shutdown: cancelling task manager");
-        self.task_manager.shutdown();
-
-        debug!(" [APP SERVICE] request_shutdown: done");
+        debug!(" [APP SERVICE] request_shutdown: awaiting task manager drain");
+        let clean = self
+            .task_manager
+            .shutdown_all(std::time::Duration::from_millis(500))
+            .await;
+        debug!(" [APP SERVICE] request_shutdown: {clean} tasks finished cleanly");
     }
 }
 
