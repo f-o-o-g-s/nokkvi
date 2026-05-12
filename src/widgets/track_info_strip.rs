@@ -519,6 +519,55 @@ pub(crate) fn merged_strip_string(
     .collect()
 }
 
+/// Build the merged-mode metadata string for radio playback.
+///
+/// Order: station name → ICY title → ICY artist. With `show_labels` the
+/// ICY fields render as `playing: <value>` / `artist: <value>`; the station
+/// name has no label (mirrors the columnar radio layout which renders it
+/// bold without a prefix). When both ICY fields are empty, falls back to
+/// `url: <radio_url>` if a URL is provided. Empty parts are skipped so the
+/// result never contains orphan separators.
+// dead-code allow: helper is staged for parallel render-site lanes that
+// consume it next; allow is removed once both lanes land.
+#[allow(dead_code)]
+pub(crate) fn merged_radio_strip_string(
+    station_name: &str,
+    icy_title: &str,
+    icy_artist: &str,
+    radio_url: &str,
+    show_labels: bool,
+    join: &str,
+) -> String {
+    let mut parts: Vec<String> = Vec::new();
+
+    if !station_name.is_empty() {
+        parts.push(station_name.to_string());
+    }
+    if !icy_title.is_empty() {
+        parts.push(if show_labels {
+            format!("playing: {icy_title}")
+        } else {
+            icy_title.to_string()
+        });
+    }
+    if !icy_artist.is_empty() {
+        parts.push(if show_labels {
+            format!("artist: {icy_artist}")
+        } else {
+            icy_artist.to_string()
+        });
+    }
+    if icy_title.is_empty() && icy_artist.is_empty() && !radio_url.is_empty() {
+        parts.push(if show_labels {
+            format!("url: {radio_url}")
+        } else {
+            radio_url.to_string()
+        });
+    }
+
+    parts.join(join)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -607,5 +656,80 @@ mod tests {
         assert!(segments.is_empty());
         let segments = build_now_playing_segments("", "", "", true, true, true, true, DOT);
         assert!(segments.is_empty());
+    }
+
+    #[test]
+    fn merged_radio_string_full_metadata_with_labels() {
+        let s = merged_radio_strip_string("KEXP 90.3 FM", "Song Title", "Band Name", "", true, DOT);
+        assert_eq!(
+            s,
+            "KEXP 90.3 FM  ·  playing: Song Title  ·  artist: Band Name"
+        );
+    }
+
+    #[test]
+    fn merged_radio_string_full_metadata_without_labels() {
+        let s =
+            merged_radio_strip_string("KEXP 90.3 FM", "Song Title", "Band Name", "", false, DOT);
+        assert_eq!(s, "KEXP 90.3 FM  ·  Song Title  ·  Band Name");
+    }
+
+    #[test]
+    fn merged_radio_string_only_station_when_no_icy_no_url() {
+        let s = merged_radio_strip_string("KEXP 90.3 FM", "", "", "", true, DOT);
+        assert_eq!(s, "KEXP 90.3 FM");
+    }
+
+    #[test]
+    fn merged_radio_string_url_fallback_when_no_icy() {
+        let s = merged_radio_strip_string(
+            "KEXP 90.3 FM",
+            "",
+            "",
+            "http://example.com/stream.mp3",
+            true,
+            DOT,
+        );
+        assert_eq!(s, "KEXP 90.3 FM  ·  url: http://example.com/stream.mp3");
+    }
+
+    #[test]
+    fn merged_radio_string_url_suppressed_when_icy_present() {
+        let s = merged_radio_strip_string(
+            "KEXP 90.3 FM",
+            "Song Title",
+            "",
+            "http://example.com/stream.mp3",
+            true,
+            DOT,
+        );
+        assert_eq!(s, "KEXP 90.3 FM  ·  playing: Song Title");
+    }
+
+    #[test]
+    fn merged_radio_string_skips_empty_icy_artist_without_orphan_separator() {
+        let s = merged_radio_strip_string("Station", "Title", "", "", true, DOT);
+        assert_eq!(s, "Station  ·  playing: Title");
+
+        let s = merged_radio_strip_string("Station", "", "Artist", "", true, DOT);
+        assert_eq!(s, "Station  ·  artist: Artist");
+    }
+
+    #[test]
+    fn merged_radio_string_uses_supplied_separator() {
+        let s = merged_radio_strip_string("S", "T", "A", "", true, PIPE);
+        assert_eq!(s, "S  |  playing: T  |  artist: A");
+    }
+
+    #[test]
+    fn merged_radio_string_empty_station_drops_leading_separator() {
+        let s = merged_radio_strip_string("", "Title", "Artist", "", true, DOT);
+        assert_eq!(s, "playing: Title  ·  artist: Artist");
+    }
+
+    #[test]
+    fn merged_radio_string_all_empty_returns_empty() {
+        let s = merged_radio_strip_string("", "", "", "", true, DOT);
+        assert_eq!(s, "");
     }
 }
