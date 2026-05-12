@@ -538,7 +538,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                     if !icy_title.is_empty() {
                         info_row = info_row.push(info_sep());
                         info_row = info_row.push(info_field(
-                            "title:",
+                            "playing:",
                             icy_title.to_string(),
                             theme::accent_bright(),
                         ));
