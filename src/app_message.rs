@@ -523,13 +523,13 @@ pub enum Message {
     // --- Data Loading ---
     /// SSE: Navidrome library scan completed with changes.
     ///
-    /// `album_ids` carries the album IDs the server reports as changed. Empty
-    /// alongside `is_wildcard = true` (full-scan signal) — handlers should reload
-    /// slot lists either way but skip per-album artwork eviction on wildcards.
-    LibraryChanged {
-        album_ids: Vec<String>,
-        is_wildcard: bool,
-    },
+    /// Structured payload enumerating each resource kind the server reports
+    /// as changed (album / artist / song / playlist / genre + wildcard flag).
+    /// `handle_library_changed` branches on `affects_*` so only the caches
+    /// that received SSE notifications reload. Wildcard (full-scan) payloads
+    /// reload every kind but still skip per-album artwork eviction to avoid
+    /// mass re-downloads.
+    LibraryChanged(crate::services::navidrome_sse::LibraryChange),
     LoadAlbums,
     LoadQueue,
     LoadArtists,

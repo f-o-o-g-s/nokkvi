@@ -586,13 +586,9 @@ impl Nokkvi {
 
         let sse_sub =
             iced::Subscription::run(services::navidrome_sse::run).map(|event| match event {
-                services::navidrome_sse::SseEvent::LibraryChanged {
-                    album_ids,
-                    is_wildcard,
-                } => Message::LibraryChanged {
-                    album_ids,
-                    is_wildcard,
-                },
+                services::navidrome_sse::SseEvent::LibraryChanged(change) => {
+                    Message::LibraryChanged(change)
+                }
             });
 
         let task_status_sub = iced::Subscription::run(services::task_subscription::run)

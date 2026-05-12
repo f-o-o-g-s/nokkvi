@@ -44,7 +44,7 @@ pub struct Song {
     #[serde(rename = "duration", default)]
     #[serde(deserialize_with = "deserialize_duration")]
     pub duration: u32, // seconds
-    #[serde(rename = "trackNumber")]
+    #[serde(rename = "trackNumber", alias = "track")]
     pub track: Option<u32>,
     #[serde(rename = "discNumber")]
     pub disc: Option<u32>,
@@ -66,17 +66,17 @@ pub struct Song {
     // Additional fields for songs view sorting
     #[serde(rename = "bpm")]
     pub bpm: Option<u32>,
-    #[serde(rename = "channels")]
+    #[serde(rename = "channels", alias = "channelCount")]
     pub channels: Option<u32>,
     #[serde(rename = "comment")]
     pub comment: Option<String>,
-    #[serde(rename = "rating")]
+    #[serde(rename = "rating", alias = "userRating")]
     pub rating: Option<u32>,
     #[serde(rename = "albumArtist")]
     pub album_artist: Option<String>,
     #[serde(rename = "suffix")]
     pub suffix: Option<String>,
-    #[serde(rename = "sampleRate")]
+    #[serde(rename = "sampleRate", alias = "samplingRate")]
     pub sample_rate: Option<u32>,
     #[serde(rename = "createdAt")]
     pub created_at: Option<String>,

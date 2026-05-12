@@ -451,6 +451,113 @@ mod tests {
         assert_eq!(count_items(&entries), 12);
     }
 
+    /// Find the first `SettingItem` matching `key` and assert it carries the
+    /// "Enter ↵" dialog/picker flag (`needs_enter_hint == true`). Used by the
+    /// regression tests below for tier-0 defect #0.3.
+    fn assert_entry_needs_enter_hint(entries: &[SettingsEntry], key: &str) {
+        let found = entries
+            .iter()
+            .find_map(|e| match e {
+                SettingsEntry::Item(it) if it.key.as_ref() == key => Some(it),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing settings entry for key {key}"));
+        assert!(
+            found.needs_enter_hint,
+            "Expected SettingItem '{key}' to have needs_enter_hint=true (dialog/picker row should show \"Enter ↵\" affordance)"
+        );
+    }
+
+    /// Regression test for tier-0 defect #0.3 — the Font Family row in the
+    /// Interface tab opens a picker on Enter, so the renderer must show the
+    /// "Enter ↵" hint when it is centered. Prior to the fix, the renderer
+    /// gated the hint on a dead-letter key string (`theme.font.family`)
+    /// instead of the live key (`font_family`), silently dropping the
+    /// affordance.
+    #[test]
+    fn interface_items_font_family_has_enter_hint() {
+        use super::super::items_interface::{InterfaceSettingsData, build_interface_items};
+        let data = InterfaceSettingsData {
+            nav_layout: "Top",
+            nav_display_mode: "Text Only",
+            track_info_display: "Off",
+            slot_row_height: "Default",
+            horizontal_volume: false,
+            slot_text_links: true,
+            font_family: "",
+            strip_show_title: true,
+            strip_show_artist: true,
+            strip_show_album: true,
+            strip_show_format_info: true,
+            strip_merged_mode: false,
+            strip_show_labels: true,
+            strip_separator: "Dot ·",
+            strip_click_action: "Go to Queue",
+            albums_artwork_overlay: true,
+            artists_artwork_overlay: true,
+            songs_artwork_overlay: true,
+            playlists_artwork_overlay: true,
+            artwork_column_mode: "Auto",
+            artwork_column_stretch_fit: "Cover",
+            artwork_auto_max_pct: 0.40,
+            artwork_vertical_height_pct: 0.40,
+        };
+        let entries = build_interface_items(&data);
+        assert_entry_needs_enter_hint(&entries, "font_family");
+    }
+
+    /// Regression test for tier-0 defect #0.3 — the Default Playlist row in
+    /// the Playback tab opens the default-playlist picker on Enter.
+    /// Previously the renderer's hint gate omitted this key entirely.
+    #[test]
+    fn playback_items_default_playlist_name_has_enter_hint() {
+        use super::super::items_playback::{PlaybackSettingsData, build_playback_items};
+        let data = PlaybackSettingsData {
+            crossfade_enabled: false,
+            crossfade_duration_secs: 5,
+            volume_normalization: "Off",
+            normalization_level: "Normal",
+            replay_gain_preamp_db: 0,
+            replay_gain_fallback_db: 0,
+            replay_gain_fallback_to_agc: false,
+            replay_gain_prevent_clipping: true,
+            scrobbling_enabled: true,
+            scrobble_threshold: 0.50,
+            quick_add_to_playlist: false,
+            default_playlist_name: "",
+            queue_show_default_playlist: false,
+        };
+        let entries = build_playback_items(&data);
+        assert_entry_needs_enter_hint(&entries, "general.default_playlist_name");
+    }
+
+    /// Regression test for tier-0 defect #0.3 — the Local Music Path row in
+    /// the General tab opens a free-text input dialog on Enter. This row
+    /// was the only one of the three that *did* render the hint pre-fix
+    /// (the renderer's string match included it); the test guards against
+    /// future regressions when the structural flag replaces the match.
+    #[test]
+    fn general_items_local_music_path_has_enter_hint() {
+        let data = GeneralSettingsData {
+            server_url: "http://localhost:4533",
+            username: "admin",
+            start_view: "Queue",
+            stable_viewport: true,
+            auto_follow_playing: true,
+            enter_behavior: "Play All",
+            local_music_path: "",
+            verbose_config: false,
+            library_page_size: "Default (500)",
+            artwork_resolution: "Default (1000px)",
+            show_album_artists_only: true,
+            suppress_library_refresh_toasts: false,
+            show_tray_icon: false,
+            close_to_tray: false,
+        };
+        let entries = build_general_items(&data);
+        assert_entry_needs_enter_hint(&entries, "general.local_music_path");
+    }
+
     #[test]
     fn setting_value_increment_decrement_roundtrip() {
         // Float

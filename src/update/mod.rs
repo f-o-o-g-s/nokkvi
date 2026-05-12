@@ -114,10 +114,7 @@ impl Nokkvi {
             // Navigation
             // -----------------------------------------------------------------
             Message::SwitchView(view) => self.handle_switch_view(view),
-            Message::LibraryChanged {
-                album_ids,
-                is_wildcard,
-            } => self.handle_library_changed(album_ids, is_wildcard),
+            Message::LibraryChanged(change) => self.handle_library_changed(change),
             Message::NavigateAndFilter(view, filter) => {
                 self.handle_navigate_and_filter(view, filter)
             }

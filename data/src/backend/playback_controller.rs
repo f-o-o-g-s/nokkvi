@@ -438,9 +438,10 @@ impl PlaybackController {
             RepeatMode::Playlist => RepeatMode::None,
         };
 
+        // `set_repeat` commits via `QueueWriteGuard::commit_save_order`, which
+        // already calls `clear_queued()` + `save_order()` under the guard.
+        // Calling them again here would be redundant work.
         let effect = queue_manager.set_repeat(next_repeat)?;
-        queue_manager.clear_queued();
-        queue_manager.save_order()?;
         drop(queue_manager);
 
         // Invalidate engine-level gapless prep (stale after mode change)

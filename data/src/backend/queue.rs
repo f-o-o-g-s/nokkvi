@@ -116,26 +116,8 @@ impl QueueService {
 
     /// Initialize the viewmodel by loading persisted queue data into reactive properties
     pub async fn initialize(&self) -> Result<()> {
-        // Get persisted queue data
         let queue_manager = self.queue_manager.lock().await;
-
-        // Get server config for UI transformation
-        let (server_url, subsonic_credential) = self.get_server_config().await;
-
-        // Transform songs for UI directly from pool (no intermediate clone)
-        let ui_data =
-            Self::transform_songs_from_pool(&queue_manager, &server_url, &subsonic_credential);
-        let song_count = ui_data.len();
-        self.songs.set(ui_data);
-
-        // Set current index
-        let current_index = queue_manager.get_queue().current_index.unwrap_or(0);
-        self.current_index.set(current_index as i32);
-
-        // Set total count
-        self.total_count.set(song_count as i32);
-
-        Ok(())
+        self.refresh_from_locked_manager(&queue_manager).await
     }
 
     /// Get songs UI data (reactive property)
@@ -145,38 +127,16 @@ impl QueueService {
 
     /// Add songs to the queue
     pub async fn add_songs(&self, songs: Vec<Song>) -> Result<()> {
-        {
-            let mut queue_manager = self.queue_manager.lock().await;
-            queue_manager.add_songs(songs)?;
-        }
-
-        // Update reactive properties (ViewModel responsibility)
-        let (server_url, subsonic_credential) = self.get_server_config().await;
-        let queue_manager = self.queue_manager.lock().await;
-        let ui_data =
-            Self::transform_songs_from_pool(&queue_manager, &server_url, &subsonic_credential);
-        self.songs.set(ui_data);
-        Ok(())
+        let mut queue_manager = self.queue_manager.lock().await;
+        queue_manager.add_songs(songs)?;
+        self.refresh_from_locked_manager(&queue_manager).await
     }
 
     /// Set the queue (replace all songs)
     pub async fn set_queue(&self, songs: Vec<Song>, current_index: Option<usize>) -> Result<()> {
-        {
-            let mut queue_manager = self.queue_manager.lock().await;
-            queue_manager.set_queue(songs, current_index)?;
-        }
-
-        // Update reactive properties (ViewModel responsibility)
-        let (server_url, subsonic_credential) = self.get_server_config().await;
-        let queue_manager = self.queue_manager.lock().await;
-        let ui_data =
-            Self::transform_songs_from_pool(&queue_manager, &server_url, &subsonic_credential);
-        let song_count = ui_data.len();
-        self.songs.set(ui_data);
-        self.current_index.set(current_index.unwrap_or(0) as i32);
-        self.total_count.set(song_count as i32);
-
-        Ok(())
+        let mut queue_manager = self.queue_manager.lock().await;
+        queue_manager.set_queue(songs, current_index)?;
+        self.refresh_from_locked_manager(&queue_manager).await
     }
 
     /// Helper to get server URL and credential
@@ -282,18 +242,9 @@ impl QueueService {
 
     /// Insert songs at a specific position in the queue (cross-pane drag drop)
     pub async fn insert_songs_at(&self, index: usize, songs: Vec<Song>) -> Result<()> {
-        {
-            let mut queue_manager = self.queue_manager.lock().await;
-            queue_manager.insert_songs_at(index, songs)?;
-        }
-
-        // Update reactive properties (ViewModel responsibility)
-        let (server_url, subsonic_credential) = self.get_server_config().await;
-        let queue_manager = self.queue_manager.lock().await;
-        let ui_data =
-            Self::transform_songs_from_pool(&queue_manager, &server_url, &subsonic_credential);
-        self.songs.set(ui_data);
-        Ok(())
+        let mut queue_manager = self.queue_manager.lock().await;
+        queue_manager.insert_songs_at(index, songs)?;
+        self.refresh_from_locked_manager(&queue_manager).await
     }
 
     /// Get the current playing index
@@ -302,20 +253,38 @@ impl QueueService {
         qm.get_queue().current_index
     }
 
-    /// Refresh reactive properties from current queue state
-    /// This is needed when the queue is modified externally (e.g., consume mode)
+    /// Refresh reactive properties from current queue state.
+    ///
+    /// Used when the queue is mutated through `QueueManager` directly (e.g.,
+    /// consume mode advancing the playhead) without going through one of the
+    /// `QueueService` mutators. Acquires the queue lock and delegates to the
+    /// canonical projection step.
     pub async fn refresh_from_queue(&self) -> Result<()> {
         let queue_manager = self.queue_manager.lock().await;
-        let queue = queue_manager.get_queue();
+        self.refresh_from_locked_manager(&queue_manager).await
+    }
 
-        // Update reactive properties from pool (no intermediate clone)
+    /// Canonical projection step: read queue state and set all three
+    /// reactives (`songs`, `current_index`, `total_count`) atomically given
+    /// an already-held queue lock.
+    ///
+    /// All four mutators (`add_songs`, `set_queue`, `insert_songs_at`,
+    /// `refresh_from_queue`) acquire the queue lock once, mutate (or skip
+    /// mutation), then call this method to project — so a concurrent task
+    /// cannot mutate the queue between the mutation and the projection.
+    /// Closes the 1-tick projection race the previous unlock-then-relock
+    /// pattern allowed.
+    ///
+    /// Lock order: caller already holds `queue_manager`; this method then
+    /// acquires `auth_gateway` via `get_server_config()`. The same order is
+    /// established codebase-wide — do not invert.
+    async fn refresh_from_locked_manager(&self, qm: &QueueManager) -> Result<()> {
         let (server_url, subsonic_credential) = self.get_server_config().await;
-        let ui_data =
-            Self::transform_songs_from_pool(&queue_manager, &server_url, &subsonic_credential);
+        let ui_data = Self::transform_songs_from_pool(qm, &server_url, &subsonic_credential);
         let song_count = ui_data.len();
         self.songs.set(ui_data);
 
-        let current_index = queue.current_index.unwrap_or(0) as i32;
+        let current_index = qm.get_queue().current_index.unwrap_or(0) as i32;
         self.current_index.set(current_index);
         self.total_count.set(song_count as i32);
 
@@ -326,5 +295,181 @@ impl QueueService {
         );
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::{
+        backend::auth::AuthGateway, services::state_storage::StateStorage, types::song::Song,
+    };
+
+    /// Construct a `QueueService` backed by tempfile storage and an empty
+    /// `AuthGateway`. Mirrors the fixture in `queue_orchestrator.rs::tests`.
+    fn make_service() -> (QueueService, TempDir) {
+        let temp = TempDir::new().expect("temp dir");
+        let storage = StateStorage::new(temp.path().join("queue.redb")).expect("storage");
+        let auth = AuthGateway::new().expect("auth gateway");
+        let service = QueueService::new(auth, storage).expect("queue service");
+        (service, temp)
+    }
+
+    fn make_songs(ids: &[&str]) -> Vec<Song> {
+        ids.iter()
+            .map(|id| Song::test_default(id, &format!("Song {id}")))
+            .collect()
+    }
+
+    /// `add_songs` must update `total_count` to match the new queue length,
+    /// not leave it stale until the next full refresh.
+    #[tokio::test(flavor = "current_thread")]
+    async fn add_songs_updates_total_count() {
+        let (service, _temp) = make_service();
+        service
+            .set_queue(make_songs(&["a", "b"]), Some(0))
+            .await
+            .expect("set_queue");
+        assert_eq!(service.total_count.get(), 2);
+
+        service
+            .add_songs(make_songs(&["c", "d", "e"]))
+            .await
+            .expect("add_songs");
+
+        assert_eq!(
+            service.total_count.get(),
+            5,
+            "add_songs must update total_count to match the new queue length"
+        );
+        assert_eq!(service.songs.get().len(), 5);
+    }
+
+    /// `add_songs` must not disturb `current_index` — appended songs land
+    /// after the playhead, so the playing position is unchanged.
+    #[tokio::test(flavor = "current_thread")]
+    async fn add_songs_preserves_current_index() {
+        let (service, _temp) = make_service();
+        service
+            .set_queue(make_songs(&["a", "b", "c", "d"]), Some(2))
+            .await
+            .expect("set_queue");
+        assert_eq!(service.current_index.get(), 2);
+
+        service
+            .add_songs(make_songs(&["x", "y"]))
+            .await
+            .expect("add_songs");
+
+        assert_eq!(
+            service.current_index.get(),
+            2,
+            "add_songs must not shift current_index"
+        );
+    }
+
+    /// `insert_songs_at` must update `total_count` to match the new queue length.
+    #[tokio::test(flavor = "current_thread")]
+    async fn insert_songs_at_updates_total_count() {
+        let (service, _temp) = make_service();
+        service
+            .set_queue(make_songs(&["a", "b", "c"]), Some(0))
+            .await
+            .expect("set_queue");
+        assert_eq!(service.total_count.get(), 3);
+
+        service
+            .insert_songs_at(1, make_songs(&["x", "y"]))
+            .await
+            .expect("insert_songs_at");
+
+        assert_eq!(
+            service.total_count.get(),
+            5,
+            "insert_songs_at must update total_count to match the new queue length"
+        );
+        assert_eq!(service.songs.get().len(), 5);
+    }
+
+    /// `insert_songs_at` before the playhead must shift `current_index` forward
+    /// to keep tracking the same playing song — mirroring
+    /// `QueueManager::insert_songs_at`'s contract.
+    #[tokio::test(flavor = "current_thread")]
+    async fn insert_songs_at_before_current_shifts_index() {
+        let (service, _temp) = make_service();
+        service
+            .set_queue(make_songs(&["a", "b", "c", "d"]), Some(3))
+            .await
+            .expect("set_queue");
+        assert_eq!(service.current_index.get(), 3);
+
+        service
+            .insert_songs_at(1, make_songs(&["x", "y"]))
+            .await
+            .expect("insert_songs_at");
+
+        assert_eq!(
+            service.current_index.get(),
+            5,
+            "inserting before the playhead must shift current_index forward by the insert count"
+        );
+    }
+
+    /// `insert_songs_at` after the playhead must leave `current_index` alone.
+    #[tokio::test(flavor = "current_thread")]
+    async fn insert_songs_at_after_current_preserves_index() {
+        let (service, _temp) = make_service();
+        service
+            .set_queue(make_songs(&["a", "b", "c"]), Some(1))
+            .await
+            .expect("set_queue");
+        assert_eq!(service.current_index.get(), 1);
+
+        service
+            .insert_songs_at(3, make_songs(&["x"]))
+            .await
+            .expect("insert_songs_at");
+
+        assert_eq!(
+            service.current_index.get(),
+            1,
+            "inserting after the playhead must not shift current_index"
+        );
+    }
+
+    /// `set_queue` continues to set all three reactives atomically (regression
+    /// guard for the projection-after-mutation refactor).
+    #[tokio::test(flavor = "current_thread")]
+    async fn set_queue_sets_all_three_reactives() {
+        let (service, _temp) = make_service();
+        service
+            .set_queue(make_songs(&["a", "b", "c"]), Some(1))
+            .await
+            .expect("set_queue");
+
+        assert_eq!(service.songs.get().len(), 3);
+        assert_eq!(service.current_index.get(), 1);
+        assert_eq!(service.total_count.get(), 3);
+    }
+
+    /// `refresh_from_queue` continues to set all three reactives atomically
+    /// (regression guard — `refresh_from_queue` becomes a thin wrapper around
+    /// the canonical projection step).
+    #[tokio::test(flavor = "current_thread")]
+    async fn refresh_from_queue_sets_all_three_reactives() {
+        let (service, _temp) = make_service();
+        service
+            .set_queue(make_songs(&["a", "b"]), Some(0))
+            .await
+            .expect("set_queue");
+
+        // Sanity: refresh after a mutation leaves the projection consistent.
+        service.refresh_from_queue().await.expect("refresh");
+
+        assert_eq!(service.songs.get().len(), 2);
+        assert_eq!(service.current_index.get(), 0);
+        assert_eq!(service.total_count.get(), 2);
     }
 }

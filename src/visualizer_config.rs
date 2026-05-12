@@ -247,7 +247,12 @@ impl Default for BarsConfig {
 }
 
 impl BarsConfig {
-    /// Get the gradient mode as u32 for shader (0=static, 2=wave, 3=shimmer, 4=energy, 5=alternate)
+    /// Get the gradient mode as u32 for shader (0=static, 2=wave, 3=shimmer, 4=energy, 5=alternate).
+    ///
+    /// `1u` is intentionally absent from the emitted set — `bars.wgsl` does not branch on it
+    /// and would silently fall through to the static gradient. See Tier 0 #0.10 in the
+    /// 2026-05-11 audit roadmap; the `bars_gradient_mode_never_emits_dead_1u` test below
+    /// pins this so a future agent who adds a `1`-valued arm fails immediately.
     pub fn get_gradient_mode_value(&self) -> u32 {
         match self.gradient_mode.to_lowercase().as_str() {
             "static" => 0,
@@ -762,4 +767,66 @@ pub(crate) fn config_watcher_subscription() -> impl futures::Stream<Item = Optio
         state.last_check = Instant::now();
         Some((result, state))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pins the `BarsConfig::get_gradient_mode_value` emitted u32 set so a future agent
+    /// who adds an arm returning `1` fails immediately — `bars.wgsl` has no branch for
+    /// `1u` and would silently fall through to the static gradient. See Tier 0 #0.10 in
+    /// the 2026-05-11 audit roadmap.
+    #[test]
+    fn bars_gradient_mode_never_emits_dead_1u() {
+        // Every defined label (the only inputs reachable from the TOML config + UI dropdown).
+        let labels = ["static", "wave", "shimmer", "energy", "alternate"];
+        for label in labels {
+            let cfg = BarsConfig {
+                gradient_mode: label.to_string(),
+                ..Default::default()
+            };
+            let value = cfg.get_gradient_mode_value();
+            assert_ne!(
+                value, 1,
+                "gradient_mode label {label:?} emits 1u, which is dead in bars.wgsl",
+            );
+        }
+
+        // The unknown-label fallback must also avoid 1u.
+        let cfg = BarsConfig {
+            gradient_mode: "this-is-not-a-real-mode".to_string(),
+            ..Default::default()
+        };
+        assert_ne!(
+            cfg.get_gradient_mode_value(),
+            1,
+            "default fallback for unknown gradient_mode label emits dead 1u",
+        );
+    }
+
+    /// Pins the exact emitted set so a renumbering that shifts a mode onto 1u is caught.
+    /// This is intentionally redundant with the test above — together they cover both
+    /// "no arm maps to 1" and "the full set is what bars.wgsl branches on".
+    #[test]
+    fn bars_gradient_mode_emits_expected_discriminants() {
+        let expected: &[(&str, u32)] = &[
+            ("static", 0),
+            ("wave", 2),
+            ("shimmer", 3),
+            ("energy", 4),
+            ("alternate", 5),
+        ];
+        for (label, want) in expected {
+            let cfg = BarsConfig {
+                gradient_mode: (*label).to_string(),
+                ..Default::default()
+            };
+            assert_eq!(
+                cfg.get_gradient_mode_value(),
+                *want,
+                "gradient_mode {label:?} should emit {want}u",
+            );
+        }
+    }
 }
