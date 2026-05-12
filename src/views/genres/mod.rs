@@ -248,6 +248,10 @@ impl super::ViewPage for GenresPage {
             ),
         )))
     }
+
+    fn slot_list_message(&self, msg: crate::widgets::SlotListPageMessage) -> Message {
+        Message::Genres(GenresMessage::SlotList(msg))
+    }
 }
 
 #[cfg(test)]

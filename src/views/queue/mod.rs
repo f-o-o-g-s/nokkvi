@@ -258,6 +258,10 @@ impl super::ViewPage for QueuePage {
 
     // Queue items are already in the queue, so add_to_queue_message returns None (default).
     // Queue has no reload_message (client-side filtering, no server fetch needed on Escape).
+
+    fn slot_list_message(&self, msg: SlotListPageMessage) -> Message {
+        Message::Queue(QueueMessage::SlotList(msg))
+    }
 }
 
 #[cfg(test)]

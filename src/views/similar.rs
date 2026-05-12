@@ -643,6 +643,10 @@ impl super::ViewPage for SimilarPage {
             SlotListPageMessage::AddCenterToQueue,
         )))
     }
+
+    fn slot_list_message(&self, msg: SlotListPageMessage) -> Message {
+        Message::Similar(SimilarMessage::SlotList(msg))
+    }
 }
 
 #[cfg(test)]

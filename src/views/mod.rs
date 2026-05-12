@@ -33,7 +33,7 @@ pub(crate) use songs::{SongsAction, SongsMessage, SongsPage, SongsViewData};
 
 use crate::{
     app_message::Message,
-    widgets::{SlotListPageState, view_header::SortMode},
+    widgets::{SlotListPageMessage, SlotListPageState, view_header::SortMode},
 };
 
 // ============================================================================
@@ -103,6 +103,21 @@ pub(crate) trait ViewPage {
     fn synth_set_offset_message(&self, _offset: usize) -> Option<Message> {
         None
     }
+
+    /// Wrap a [`SlotListPageMessage`] in this view's outer [`Message`] variant.
+    ///
+    /// The slot-list dispatch family (`handle_slot_list_navigate_up` /
+    /// `_navigate_down` / `_set_offset` / `_activate_center` in `slot_list.rs`,
+    /// `roulette_settle_play` in `roulette.rs`, and `handle_center_on_playing`
+    /// in `hotkeys/navigation.rs`) routes the same `SlotListPageMessage` to
+    /// each view via `view_page(view).map(|p| p.slot_list_message(msg))`. The
+    /// no-default declaration makes "added a new ViewPage impl, forgot the
+    /// SlotList wrapper" a compile error.
+    ///
+    /// Settings is not a slot-list view and does not implement `ViewPage`; its
+    /// per-handler special case wraps directly in `SettingsMessage::SlotList*`
+    /// variants instead.
+    fn slot_list_message(&self, msg: SlotListPageMessage) -> Message;
 }
 
 // ============================================================================

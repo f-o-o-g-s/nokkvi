@@ -269,6 +269,10 @@ impl super::ViewPage for AlbumsPage {
             ),
         )))
     }
+
+    fn slot_list_message(&self, msg: crate::widgets::SlotListPageMessage) -> Message {
+        Message::Albums(AlbumsMessage::SlotList(msg))
+    }
 }
 
 #[cfg(test)]

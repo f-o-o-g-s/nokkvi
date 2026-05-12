@@ -1,6 +1,12 @@
 //! Tests for slot-list navigation and page-load error update handlers.
 
-use crate::{View, test_helpers::*};
+use crate::{
+    View,
+    app_message::Message,
+    test_helpers::*,
+    views::{self, ViewPage},
+    widgets::SlotListPageMessage,
+};
 
 // SlotListDown Unfocuses Search (slot_list.rs)
 // ============================================================================
@@ -119,6 +125,113 @@ fn playlists_loaded_error_clears_loading() {
         !app.library.playlists.is_loading(),
         "loading flag should be cleared on error"
     );
+}
+
+// ============================================================================
+// ViewPage::slot_list_message — per-view wrapping pins
+// ============================================================================
+//
+// Each test asserts the trait impl wraps `SlotListPageMessage` in the correct
+// outer `Message::<View>(<View>Message::SlotList(...))` variant. The wraps
+// are one-line impls per view; the tests guard against typo regressions
+// (e.g. an impl accidentally wrapping in the wrong outer variant) and pin
+// the compile-time-enforced "added new view, must implement slot_list_message"
+// contract.
+
+#[test]
+fn albums_slot_list_message_wraps_in_albums_variant() {
+    let app = test_app();
+    let msg = app
+        .albums_page
+        .slot_list_message(SlotListPageMessage::NavigateUp);
+    assert!(matches!(
+        msg,
+        Message::Albums(views::AlbumsMessage::SlotList(SlotListPageMessage::NavigateUp))
+    ));
+}
+
+#[test]
+fn artists_slot_list_message_wraps_in_artists_variant() {
+    let app = test_app();
+    let msg = app
+        .artists_page
+        .slot_list_message(SlotListPageMessage::NavigateDown);
+    assert!(matches!(
+        msg,
+        Message::Artists(views::ArtistsMessage::SlotList(SlotListPageMessage::NavigateDown))
+    ));
+}
+
+#[test]
+fn songs_slot_list_message_wraps_in_songs_variant() {
+    let app = test_app();
+    let msg = app
+        .songs_page
+        .slot_list_message(SlotListPageMessage::ActivateCenter);
+    assert!(matches!(
+        msg,
+        Message::Songs(views::SongsMessage::SlotList(SlotListPageMessage::ActivateCenter))
+    ));
+}
+
+#[test]
+fn genres_slot_list_message_wraps_in_genres_variant() {
+    let app = test_app();
+    let msg = app
+        .genres_page
+        .slot_list_message(SlotListPageMessage::NavigateUp);
+    assert!(matches!(
+        msg,
+        Message::Genres(views::GenresMessage::SlotList(SlotListPageMessage::NavigateUp))
+    ));
+}
+
+#[test]
+fn playlists_slot_list_message_wraps_in_playlists_variant() {
+    let app = test_app();
+    let msg = app
+        .playlists_page
+        .slot_list_message(SlotListPageMessage::NavigateDown);
+    assert!(matches!(
+        msg,
+        Message::Playlists(views::PlaylistsMessage::SlotList(SlotListPageMessage::NavigateDown))
+    ));
+}
+
+#[test]
+fn queue_slot_list_message_wraps_in_queue_variant() {
+    let app = test_app();
+    let msg = app
+        .queue_page
+        .slot_list_message(SlotListPageMessage::ActivateCenter);
+    assert!(matches!(
+        msg,
+        Message::Queue(views::QueueMessage::SlotList(SlotListPageMessage::ActivateCenter))
+    ));
+}
+
+#[test]
+fn radios_slot_list_message_wraps_in_radios_variant() {
+    let app = test_app();
+    let msg = app
+        .radios_page
+        .slot_list_message(SlotListPageMessage::NavigateUp);
+    assert!(matches!(
+        msg,
+        Message::Radios(views::RadiosMessage::SlotList(SlotListPageMessage::NavigateUp))
+    ));
+}
+
+#[test]
+fn similar_slot_list_message_wraps_in_similar_variant() {
+    let app = test_app();
+    let msg = app
+        .similar_page
+        .slot_list_message(SlotListPageMessage::NavigateDown);
+    assert!(matches!(
+        msg,
+        Message::Similar(views::SimilarMessage::SlotList(SlotListPageMessage::NavigateDown))
+    ));
 }
 
 // ============================================================================
