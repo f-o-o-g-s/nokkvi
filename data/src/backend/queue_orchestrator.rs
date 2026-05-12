@@ -18,7 +18,6 @@ pub struct QueueOrchestrator<'a> {
 }
 
 impl<'a> QueueOrchestrator<'a> {
-    #[allow(dead_code)] // First production caller arrives in Lane C; tests exercise it now.
     pub(crate) fn new(queue: &'a QueueService, playback: &'a PlaybackController) -> Self {
         Self { queue, playback }
     }

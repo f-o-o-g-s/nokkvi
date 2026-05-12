@@ -34,10 +34,6 @@ pub struct LibraryOrchestrator<'a> {
 }
 
 impl<'a> LibraryOrchestrator<'a> {
-    // Lane A is purely additive — Lanes C/D wire `AppService::library_orchestrator()`
-    // into the existing `play_*` / `add_*_to_queue` / `play_next_*` method bodies,
-    // at which point the constructor stops looking dead.
-    #[allow(dead_code)]
     pub(crate) fn new(
         auth: &'a AuthGateway,
         albums: &'a AlbumsService,
