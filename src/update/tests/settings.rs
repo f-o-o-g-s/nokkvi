@@ -254,3 +254,76 @@ fn player_settings_loaded_playlists_artwork_overlay_flips_atomic() {
 
     crate::theme::set_playlists_artwork_overlay(prior);
 }
+
+// ============================================================================
+// Restore-defaults sentinel routing (Tier 0 #0.2)
+// ============================================================================
+//
+// The Hotkeys tab "Restore Defaults" row uses the key `__restore_all_hotkeys`,
+// which is intercepted by `is_restore_key` (matches any `__restore_*` prefix)
+// and routed into `handle_restore_defaults`. That function must early-return
+// `OpenResetHotkeysDialog` for the all-hotkeys sentinel rather than falling
+// through to the HexColor scan path (which is intended for color-group resets
+// like `__restore_bg` / `__restore_accent`).
+
+#[test]
+fn handle_restore_defaults_all_hotkeys_opens_reset_dialog() {
+    use crate::views::settings::SettingsAction;
+
+    let mut app = test_app();
+    let action = app
+        .settings_page
+        .handle_restore_defaults("__restore_all_hotkeys");
+
+    assert!(
+        matches!(action, SettingsAction::OpenResetHotkeysDialog),
+        "__restore_all_hotkeys must route to OpenResetHotkeysDialog, got {action:?}"
+    );
+}
+
+#[test]
+fn handle_restore_defaults_visualizer_opens_reset_dialog() {
+    // Non-regression: __restore_visualizer must still open its dialog.
+    use crate::views::settings::SettingsAction;
+
+    let mut app = test_app();
+    let action = app
+        .settings_page
+        .handle_restore_defaults("__restore_visualizer");
+
+    assert!(
+        matches!(action, SettingsAction::OpenResetVisualizerDialog),
+        "__restore_visualizer must route to OpenResetVisualizerDialog, got {action:?}"
+    );
+}
+
+#[test]
+fn handle_restore_defaults_theme_returns_restore_color_group() {
+    // Non-regression: __restore_theme must still return RestoreColorGroup
+    // (with empty entries — the side effect is on-disk restore via presets).
+    use crate::views::settings::SettingsAction;
+
+    let mut app = test_app();
+    let action = app.settings_page.handle_restore_defaults("__restore_theme");
+
+    assert!(
+        matches!(action, SettingsAction::RestoreColorGroup { .. }),
+        "__restore_theme must route to RestoreColorGroup, got {action:?}"
+    );
+}
+
+#[test]
+fn handle_restore_defaults_color_group_with_no_cached_entries_returns_none() {
+    // Non-regression: when called with a generic __restore_* color key
+    // (e.g. __restore_bg) and no HexColor entries cached, the function
+    // returns SettingsAction::None — the HexColor scan path is preserved.
+    use crate::views::settings::SettingsAction;
+
+    let mut app = test_app();
+    let action = app.settings_page.handle_restore_defaults("__restore_bg");
+
+    assert!(
+        matches!(action, SettingsAction::None),
+        "__restore_bg with no cached HexColor entries must return None, got {action:?}"
+    );
+}

@@ -656,7 +656,10 @@ impl SettingsPage {
                         Some(SettingsEntry::Item(item)) => {
                             let key_ref = item.key.clone();
                             match key_ref.as_ref() {
-                                // Restore-defaults sentinels
+                                // Restore-defaults sentinels (including
+                                // `__restore_all_hotkeys` — routed via
+                                // `handle_restore_defaults`, see that function
+                                // for the sentinel-specific dispatch).
                                 k if items::is_restore_key(k) => {
                                     return self.handle_restore_defaults(k);
                                 }
@@ -672,10 +675,6 @@ impl SettingsPage {
                                         "__action_logout" => SettingsAction::Logout,
                                         _ => SettingsAction::None,
                                     };
-                                }
-                                // Special: reset all hotkeys (opens confirmation dialog)
-                                "__restore_all_hotkeys" => {
-                                    return SettingsAction::OpenResetHotkeysDialog;
                                 }
                                 _ => {
                                     match &item.value {
@@ -956,7 +955,20 @@ impl SettingsPage {
 
     /// Collect (key, default_hex) pairs for a __restore_* group key.
     /// Walks the cached entries and collects all HexColor items in the same category.
-    fn handle_restore_defaults(&mut self, restore_key: &str) -> SettingsAction {
+    ///
+    /// Sentinel-specific branches run before the generic HexColor scan so that
+    /// keys without color entries (e.g. `__restore_all_hotkeys`) still route to
+    /// the right action — the prefix check in the EditActivate match
+    /// (`is_restore_key`) funnels every `__restore_*` key through here, so this
+    /// function is the single source of truth for restore-defaults routing.
+    pub(crate) fn handle_restore_defaults(&mut self, restore_key: &str) -> SettingsAction {
+        // Special: __restore_all_hotkeys opens the reset-hotkeys confirmation
+        // dialog. The Hotkeys tab has no HexColor entries, so the generic scan
+        // below would otherwise fall through to `SettingsAction::None`.
+        if restore_key == "__restore_all_hotkeys" {
+            return SettingsAction::OpenResetHotkeysDialog;
+        }
+
         // Special: __restore_theme restores the active built-in theme to its original
         if restore_key == "__restore_theme" {
             let stem = presets::active_theme_stem();
