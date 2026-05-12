@@ -34,6 +34,7 @@ All notable changes to this project will be documented in this file.
 - Settings → Interface "Font Family" row and Settings → Playback "Default Playlist Name" row now show the "Enter ↵" hint that signals Enter opens the picker dialog — previously only the local-music-path row had the affordance even though all three rows behave the same way.
 - Renaming a playlist (and any other text-input dialog) now dismisses when you click outside the dialog box, matching the about / info / EQ modal behavior. Clicks on the input field or the OK / Cancel buttons are absorbed and don't bubble to the backdrop.
 - Loaded playlist header in the queue view now survives play actions that don't replace queue contents — clicking play on a song already in the queue, or rolling Queue-view roulette (Ctrl+R), no longer drops the playlist name/comment bar. The play guard was clearing the loaded-playlist context for every play action, including ones that only advance the playback pointer within the existing queue.
+- Surfing boat, anchor, and rope now fade with the Settings → Visualizer → Visualizer Opacity slider — the SVG sprites and the rope canvas previously drew at full alpha regardless of the slider, so dimming the visualizer left the boat punching through at 1.0 alpha while the bars/lines underneath fell away.
 
 ### Removed
 
