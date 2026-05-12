@@ -121,7 +121,11 @@ pub(crate) const NAV_TABS: &[(&str, &str, NavView)] = &[
     ("Songs", "assets/icons/music.svg", NavView::Songs),
     ("Genres", "assets/icons/tags.svg", NavView::Genres),
     ("Playlists", "assets/icons/list.svg", NavView::Playlists),
-    ("Radio", "assets/icons/radio-tower.svg", NavView::Radios),
+    (
+        "Radio",
+        super::track_info_strip::RADIO_TOWER_ICON_PATH,
+        NavView::Radios,
+    ),
 ];
 
 /// Flat-mode tab button style (filled accent background when active, bg0_hard idle).
@@ -485,15 +489,14 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                 let radio_url = data.radio_url.as_deref().unwrap_or("");
 
                 let radio_icon = || {
-                    crate::embedded_svg::svg_widget("assets/icons/radio-tower.svg")
-                        .width(Length::Fixed(12.0))
-                        .height(Length::Fixed(12.0))
-                        .style(|_theme, _status| iced::widget::svg::Style {
-                            color: Some(theme::fg4()),
-                        })
+                    colored_icon(
+                        super::track_info_strip::RADIO_TOWER_ICON_PATH,
+                        12.0,
+                        theme::fg4(),
+                    )
                 };
 
-                if theme::strip_merged_mode() {
+                if merged_mode_active {
                     // Merged radio: single marquee containing station + ICY fields,
                     // bracketed by separators with the radio-tower icon prepended.
                     info_row = info_row.push(info_sep());
@@ -562,7 +565,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                     }
                     info_row = info_row.push(info_sep());
                 }
-            } else if theme::strip_merged_mode() {
+            } else if merged_mode_active {
                 let merged = super::track_info_strip::merged_strip_string(
                     show_title,
                     show_artist,

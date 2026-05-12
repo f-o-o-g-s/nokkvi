@@ -299,12 +299,14 @@ impl RadiosPage {
 
                 // Radio tower icon — tinted to match slot text color
                 let radio_icon = container(
-                    crate::embedded_svg::svg_widget("assets/icons/radio-tower.svg")
-                        .width(Length::Fixed(m.title_size))
-                        .height(Length::Fixed(m.title_size))
-                        .style(move |_, _| iced::widget::svg::Style {
-                            color: Some(style.text_color),
-                        }),
+                    crate::embedded_svg::svg_widget(
+                        crate::widgets::track_info_strip::RADIO_TOWER_ICON_PATH,
+                    )
+                    .width(Length::Fixed(m.title_size))
+                    .height(Length::Fixed(m.title_size))
+                    .style(move |_, _| iced::widget::svg::Style {
+                        color: Some(style.text_color),
+                    }),
                 )
                 .align_y(Alignment::Center)
                 .align_x(Alignment::Center);
