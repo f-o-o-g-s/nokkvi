@@ -170,6 +170,14 @@ struct PeakState {
 
 const PEAK_INITIAL_VELOCITY: f64 = 0.01;
 
+/// Minimum delta above the current peak required to register a "new" peak.
+///
+/// Tiny rises (≤ 0.001) instead fall through to the invariant clamp, which
+/// bumps the peak up without resetting hold/velocity/alpha to fresh values
+/// — a deliberate "refresh" that extends an existing peak rather than
+/// re-arming it.
+const PEAK_UPDATE_THRESHOLD: f64 = 0.001;
+
 impl PeakState {
     fn new(bar_count: usize) -> Self {
         let s = Self {
@@ -239,6 +247,109 @@ impl ProcessingState {
 
     fn clear(&mut self, _bar_count: usize) {
         self.processed_samples = 0;
+    }
+}
+
+// ========================================
+// Peak Decay Helper (shared by tick() and decay_peaks())
+// ========================================
+
+/// Apply one column's worth of peak state evolution: new-peak detection,
+/// hold-time countdown, decay step (per `peak_mode`), and the invariant
+/// clamp that pins `peak_bars[i] >= bar`.
+///
+/// Designed so `tick()` (FFT thread, has fresh bar values) and
+/// `decay_peaks()` (currently no in-tree call sites; UI-thread API for
+/// callers that animate peaks without re-running the FFT) can share the
+/// exact same per-column state machine. The behavior split is driven by
+/// `output_at_i`:
+///
+/// * `Some(bar)` — full fidelity: detect new peaks above the threshold,
+///   decay if eligible, then clamp up to `bar` so a rising bar mid-decay
+///   immediately re-arms the peak.
+/// * `None` — no current bar available (e.g. animating between FFT
+///   frames): skip both the new-peak detection and the invariant clamp,
+///   only run the hold-tick / decay portion. The clamp omission is a
+///   latent correctness compromise — the peak can decay below the bar
+///   until the next call with `Some(bar)` corrects it. Acceptable for
+///   short animation ticks; flag if a caller ever has bar values and
+///   forgets to thread them through.
+#[allow(clippy::too_many_arguments)]
+fn apply_peak_decay_step(
+    display: &mut DisplayBuffers,
+    peaks: &mut PeakState,
+    i: usize,
+    output_at_i: Option<f64>,
+    peak_mode: u32,
+    fade_rate: f64,
+    peak_constant_velocity: f64,
+    peak_falloff_multiplier: f64,
+    peak_hold_duration: Duration,
+    tick_duration: Duration,
+) {
+    // New-peak detection — only meaningful when we have a current bar value.
+    if let Some(bar) = output_at_i
+        && bar > display.peak_bars[i] + PEAK_UPDATE_THRESHOLD
+    {
+        display.peak_bars[i] = bar;
+        peaks.hold_times[i] = peak_hold_duration;
+        peaks.velocities[i] = PEAK_INITIAL_VELOCITY;
+        display.peak_alphas[i] = 1.0;
+        return;
+    }
+
+    if peaks.hold_times[i] > Duration::ZERO {
+        peaks.hold_times[i] = peaks.hold_times[i].saturating_sub(tick_duration);
+    } else if display.peak_bars[i] > 0.0 || display.peak_alphas[i] > 0.0 {
+        match peak_mode {
+            1 => {
+                // Fade mode
+                display.peak_alphas[i] = (display.peak_alphas[i] - fade_rate).max(0.0);
+                if display.peak_alphas[i] <= 0.0 {
+                    display.peak_bars[i] = 0.0;
+                }
+            }
+            2 => {
+                // Fall mode
+                let new_peak = display.peak_bars[i] - peak_constant_velocity;
+                display.peak_bars[i] = if new_peak <= 0.0 { 0.0 } else { new_peak };
+            }
+            3 => {
+                // Fall_accel mode
+                let new_peak = display.peak_bars[i] - peaks.velocities[i];
+                let new_velocity = peaks.velocities[i] * peak_falloff_multiplier;
+                if new_peak <= 0.0 {
+                    display.peak_bars[i] = 0.0;
+                    peaks.velocities[i] = PEAK_INITIAL_VELOCITY;
+                } else {
+                    display.peak_bars[i] = new_peak;
+                    peaks.velocities[i] = new_velocity;
+                }
+            }
+            _ => {
+                // Fall_fade mode: fall at constant speed + fade opacity
+                let new_peak = display.peak_bars[i] - peak_constant_velocity;
+                display.peak_alphas[i] = (display.peak_alphas[i] - fade_rate).max(0.0);
+                if new_peak <= 0.0 || display.peak_alphas[i] <= 0.0 {
+                    display.peak_bars[i] = 0.0;
+                    display.peak_alphas[i] = 0.0;
+                } else {
+                    display.peak_bars[i] = new_peak;
+                }
+            }
+        }
+    }
+
+    // Invariant: peak must never be below the current bar value.
+    // During decay (fade/fall/fall_accel), the bar can rise back up past
+    // the decaying peak. Clamp the peak up and reset its state.
+    if let Some(bar) = output_at_i
+        && display.peak_bars[i] < bar
+    {
+        display.peak_bars[i] = bar;
+        peaks.hold_times[i] = peak_hold_duration;
+        peaks.velocities[i] = PEAK_INITIAL_VELOCITY;
+        display.peak_alphas[i] = 1.0;
     }
 }
 
@@ -652,7 +763,6 @@ impl VisualizerState {
                         return true; // Skip peak update if lock contended
                     };
 
-                    const PEAK_UPDATE_THRESHOLD: f64 = 0.001;
                     // Scale velocities by peak_fall_speed (5 = baseline)
                     let speed_scale = peak_fall_speed as f64 / 5.0;
                     let peak_falloff_multiplier = 1.0 + (0.05 * speed_scale);
@@ -673,71 +783,19 @@ impl VisualizerState {
                         .min(peaks.hold_times.len())
                         .min(peaks.velocities.len());
 
-                    // Using explicit index loop: we need `i` to cross-reference output[], display.peak_bars[],
-                    // peaks.hold_times[], peaks.velocities[], and display.peak_alphas[] simultaneously.
-                    #[allow(clippy::needless_range_loop)]
-                    for i in 0..safe_len {
-                        if output[i] > display.peak_bars[i] + PEAK_UPDATE_THRESHOLD {
-                            display.peak_bars[i] = output[i];
-                            peaks.hold_times[i] = peak_hold_duration;
-                            peaks.velocities[i] = PEAK_INITIAL_VELOCITY;
-                            display.peak_alphas[i] = 1.0;
-                        } else if peaks.hold_times[i] > Duration::ZERO {
-                            peaks.hold_times[i] =
-                                peaks.hold_times[i].saturating_sub(chunk_duration);
-                        } else if display.peak_bars[i] > 0.0 || display.peak_alphas[i] > 0.0 {
-                            match peak_mode {
-                                1 => {
-                                    // Fade mode
-                                    display.peak_alphas[i] =
-                                        (display.peak_alphas[i] - fade_rate_per_frame).max(0.0);
-                                    if display.peak_alphas[i] <= 0.0 {
-                                        display.peak_bars[i] = 0.0;
-                                    }
-                                }
-                                2 => {
-                                    // Fall mode
-                                    let new_peak = display.peak_bars[i] - peak_constant_velocity;
-                                    display.peak_bars[i] =
-                                        if new_peak <= 0.0 { 0.0 } else { new_peak };
-                                }
-                                3 => {
-                                    // Fall_accel mode
-                                    let new_peak = display.peak_bars[i] - peaks.velocities[i];
-                                    let new_velocity =
-                                        peaks.velocities[i] * peak_falloff_multiplier;
-                                    if new_peak <= 0.0 {
-                                        display.peak_bars[i] = 0.0;
-                                        peaks.velocities[i] = PEAK_INITIAL_VELOCITY;
-                                    } else {
-                                        display.peak_bars[i] = new_peak;
-                                        peaks.velocities[i] = new_velocity;
-                                    }
-                                }
-                                _ => {
-                                    // Fall_fade mode: fall at constant speed + fade opacity
-                                    let new_peak = display.peak_bars[i] - peak_constant_velocity;
-                                    display.peak_alphas[i] =
-                                        (display.peak_alphas[i] - fade_rate_per_frame).max(0.0);
-                                    if new_peak <= 0.0 || display.peak_alphas[i] <= 0.0 {
-                                        display.peak_bars[i] = 0.0;
-                                        display.peak_alphas[i] = 0.0;
-                                    } else {
-                                        display.peak_bars[i] = new_peak;
-                                    }
-                                }
-                            }
-                        }
-
-                        // Invariant: peak must never be below the current bar value.
-                        // During decay (fade/fall/fall_accel), the bar can rise back up
-                        // past the decaying peak. Clamp the peak up and reset its state.
-                        if display.peak_bars[i] < output[i] {
-                            display.peak_bars[i] = output[i];
-                            peaks.hold_times[i] = peak_hold_duration;
-                            peaks.velocities[i] = PEAK_INITIAL_VELOCITY;
-                            display.peak_alphas[i] = 1.0;
-                        }
+                    for (i, &bar) in output.iter().enumerate().take(safe_len) {
+                        apply_peak_decay_step(
+                            &mut display,
+                            &mut peaks,
+                            i,
+                            Some(bar),
+                            peak_mode,
+                            fade_rate_per_frame,
+                            peak_constant_velocity,
+                            peak_falloff_multiplier,
+                            peak_hold_duration,
+                            chunk_duration,
+                        );
                     }
                 } else {
                     // peak_mode == 0 ("none"): clear any lingering peak data
@@ -941,11 +999,20 @@ impl VisualizerState {
         );
     }
 
-    /// Decay peaks based on configured peak_mode
+    /// Decay peaks based on configured peak_mode.
+    ///
+    /// This is a UI-thread entry point for animating peaks between FFT
+    /// frames. Currently has no in-tree call sites — it's part of the
+    /// public widget API surface. Because callers here don't have access
+    /// to the current bar values, the invariant clamp (peak >= bar) is
+    /// skipped (`output = None` in `apply_peak_decay_step`). If a future
+    /// caller has bar values, thread them through as `Some(bar)` to get
+    /// the same fidelity as `tick()`.
     pub(crate) fn decay_peaks(&self, delta_time: Duration) {
         let cfg = self.config.read();
-        let (peak_mode, peak_fade_time_ms, peak_fall_speed) = (
+        let (peak_mode, peak_hold_time_ms, peak_fade_time_ms, peak_fall_speed) = (
             cfg.bars.get_peak_mode_value(),
+            cfg.bars.peak_hold_time,
             cfg.bars.peak_fade_time,
             cfg.bars.peak_fall_speed,
         );
@@ -966,48 +1033,31 @@ impl VisualizerState {
             0.1
         };
 
+        let peak_hold_duration = Duration::from_millis(u64::from(peak_hold_time_ms));
+
         let mut display = self.display.lock();
         let mut peaks = self.peaks.lock();
 
-        for i in 0..display.peak_bars.len() {
-            if peaks.hold_times[i] > Duration::ZERO {
-                peaks.hold_times[i] = peaks.hold_times[i].saturating_sub(delta_time);
-            } else if display.peak_bars[i] > 0.0 || display.peak_alphas[i] > 0.0 {
-                match peak_mode {
-                    1 => {
-                        display.peak_alphas[i] = (display.peak_alphas[i] - fade_rate).max(0.0);
-                        if display.peak_alphas[i] <= 0.0 {
-                            display.peak_bars[i] = 0.0;
-                        }
-                    }
-                    2 => {
-                        let new_peak = display.peak_bars[i] - peak_constant_velocity;
-                        display.peak_bars[i] = if new_peak <= 0.0 { 0.0 } else { new_peak };
-                    }
-                    3 => {
-                        let new_peak = display.peak_bars[i] - peaks.velocities[i];
-                        let new_velocity = peaks.velocities[i] * peak_falloff_multiplier;
-                        if new_peak <= 0.0 {
-                            display.peak_bars[i] = 0.0;
-                            peaks.velocities[i] = PEAK_INITIAL_VELOCITY;
-                        } else {
-                            display.peak_bars[i] = new_peak;
-                            peaks.velocities[i] = new_velocity;
-                        }
-                    }
-                    _ => {
-                        // Fall_fade mode: fall at constant speed + fade opacity
-                        let new_peak = display.peak_bars[i] - peak_constant_velocity;
-                        display.peak_alphas[i] = (display.peak_alphas[i] - fade_rate).max(0.0);
-                        if new_peak <= 0.0 || display.peak_alphas[i] <= 0.0 {
-                            display.peak_bars[i] = 0.0;
-                            display.peak_alphas[i] = 0.0;
-                        } else {
-                            display.peak_bars[i] = new_peak;
-                        }
-                    }
-                }
-            }
+        let safe_len = display
+            .peak_bars
+            .len()
+            .min(display.peak_alphas.len())
+            .min(peaks.hold_times.len())
+            .min(peaks.velocities.len());
+
+        for i in 0..safe_len {
+            apply_peak_decay_step(
+                &mut display,
+                &mut peaks,
+                i,
+                None,
+                peak_mode,
+                fade_rate,
+                peak_constant_velocity,
+                peak_falloff_multiplier,
+                peak_hold_duration,
+                delta_time,
+            );
         }
     }
 
@@ -1242,5 +1292,325 @@ impl std::fmt::Debug for VisualizerState {
             .field("bar_count", &self.bar_count())
             .field("dirty", &self.is_dirty())
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for `apply_peak_decay_step`.
+    //!
+    //! Pin the math of each `peak_mode` and the invariant clamp so a
+    //! refactor of either `tick()` or `decay_peaks()` cannot silently
+    //! drift them apart again. Operates on `DisplayBuffers` / `PeakState`
+    //! directly — no locks, no FFT, no engine.
+    use std::time::Duration;
+
+    use super::*;
+
+    const HOLD: Duration = Duration::from_millis(500);
+    const TICK: Duration = Duration::from_micros(16670);
+
+    fn fixtures(peak: f64, alpha: f64, velocity: f64) -> (DisplayBuffers, PeakState) {
+        let mut display = DisplayBuffers::new(1);
+        let mut peaks = PeakState::new(1);
+        display.peak_bars[0] = peak;
+        display.peak_alphas[0] = alpha;
+        peaks.hold_times[0] = Duration::ZERO;
+        peaks.velocities[0] = velocity;
+        (display, peaks)
+    }
+
+    /// Fade mode (peak_mode = 1): alpha decreases by fade_rate; peak_bars
+    /// only zeroes when alpha hits 0. Bars value is untouched by the
+    /// decay step itself.
+    #[test]
+    fn peak_mode_1_fade_decrements_alpha() {
+        let (mut display, mut peaks) = fixtures(0.5, 1.0, PEAK_INITIAL_VELOCITY);
+        apply_peak_decay_step(
+            &mut display,
+            &mut peaks,
+            0,
+            None,
+            /* peak_mode */ 1,
+            /* fade_rate */ 0.25,
+            /* peak_constant_velocity */ 0.02,
+            /* peak_falloff_multiplier */ 1.05,
+            HOLD,
+            TICK,
+        );
+        assert!((display.peak_alphas[0] - 0.75).abs() < 1e-9);
+        assert!((display.peak_bars[0] - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn peak_mode_1_fade_zeros_bar_when_alpha_exhausted() {
+        let (mut display, mut peaks) = fixtures(0.5, 0.1, PEAK_INITIAL_VELOCITY);
+        apply_peak_decay_step(
+            &mut display,
+            &mut peaks,
+            0,
+            None,
+            1,
+            0.25, // alpha drops to -0.15, clamped to 0
+            0.02,
+            1.05,
+            HOLD,
+            TICK,
+        );
+        assert!((display.peak_alphas[0] - 0.0).abs() < 1e-9);
+        assert!((display.peak_bars[0] - 0.0).abs() < 1e-9);
+    }
+
+    /// Fall mode (peak_mode = 2): subtract constant velocity, floor at 0.
+    #[test]
+    fn peak_mode_2_fall_subtracts_constant_velocity() {
+        let (mut display, mut peaks) = fixtures(0.5, 1.0, PEAK_INITIAL_VELOCITY);
+        apply_peak_decay_step(
+            &mut display,
+            &mut peaks,
+            0,
+            None,
+            2,
+            0.25,
+            /* peak_constant_velocity */ 0.02,
+            1.05,
+            HOLD,
+            TICK,
+        );
+        assert!((display.peak_bars[0] - 0.48).abs() < 1e-9);
+    }
+
+    #[test]
+    fn peak_mode_2_fall_floors_at_zero() {
+        let (mut display, mut peaks) = fixtures(0.01, 1.0, PEAK_INITIAL_VELOCITY);
+        apply_peak_decay_step(
+            &mut display,
+            &mut peaks,
+            0,
+            None,
+            2,
+            0.25,
+            0.02,
+            1.05,
+            HOLD,
+            TICK,
+        );
+        assert!((display.peak_bars[0] - 0.0).abs() < 1e-9);
+    }
+
+    /// Fall_accel mode (peak_mode = 3): subtract velocity, accelerate by
+    /// peak_falloff_multiplier each step. Reset to initial velocity on
+    /// hitting zero.
+    #[test]
+    fn peak_mode_3_fall_accel_uses_and_increases_velocity() {
+        let (mut display, mut peaks) = fixtures(0.5, 1.0, 0.05);
+        apply_peak_decay_step(
+            &mut display,
+            &mut peaks,
+            0,
+            None,
+            3,
+            0.25,
+            0.02,
+            1.05,
+            HOLD,
+            TICK,
+        );
+        // peak_bars[0] = 0.5 - 0.05 = 0.45
+        // velocities[0] = 0.05 * 1.05 = 0.0525
+        assert!((display.peak_bars[0] - 0.45).abs() < 1e-9);
+        assert!((peaks.velocities[0] - 0.0525).abs() < 1e-9);
+    }
+
+    #[test]
+    fn peak_mode_3_fall_accel_resets_velocity_on_floor() {
+        let (mut display, mut peaks) = fixtures(0.01, 1.0, 0.1);
+        apply_peak_decay_step(
+            &mut display,
+            &mut peaks,
+            0,
+            None,
+            3,
+            0.25,
+            0.02,
+            1.05,
+            HOLD,
+            TICK,
+        );
+        assert!((display.peak_bars[0] - 0.0).abs() < 1e-9);
+        assert!((peaks.velocities[0] - PEAK_INITIAL_VELOCITY).abs() < 1e-9);
+    }
+
+    /// Fall_fade mode (peak_mode = 4, the `_` arm): combined constant
+    /// fall and alpha fade. Both must hit zero (or the bar floor) for
+    /// the peak to fully reset.
+    #[test]
+    fn peak_mode_4_fall_fade_decrements_both() {
+        let (mut display, mut peaks) = fixtures(0.5, 1.0, PEAK_INITIAL_VELOCITY);
+        apply_peak_decay_step(
+            &mut display,
+            &mut peaks,
+            0,
+            None,
+            4,
+            0.25,
+            0.02,
+            1.05,
+            HOLD,
+            TICK,
+        );
+        assert!((display.peak_bars[0] - 0.48).abs() < 1e-9);
+        assert!((display.peak_alphas[0] - 0.75).abs() < 1e-9);
+    }
+
+    #[test]
+    fn peak_mode_4_fall_fade_zeros_both_on_alpha_exhaust() {
+        let (mut display, mut peaks) = fixtures(0.5, 0.1, PEAK_INITIAL_VELOCITY);
+        apply_peak_decay_step(
+            &mut display,
+            &mut peaks,
+            0,
+            None,
+            4,
+            0.25,
+            0.02,
+            1.05,
+            HOLD,
+            TICK,
+        );
+        assert!((display.peak_bars[0] - 0.0).abs() < 1e-9);
+        assert!((display.peak_alphas[0] - 0.0).abs() < 1e-9);
+    }
+
+    /// Invariant clamp: when the helper is called with `Some(bar)` and
+    /// bar > peak_bars (post-decay), peak_bars must be lifted back up to
+    /// bar and the hold/velocity/alpha state re-armed. This is the bug
+    /// that was missing from the old `decay_peaks()` and only present in
+    /// `tick()`.
+    #[test]
+    fn clamp_lifts_peak_back_up_when_bar_rises_during_fall() {
+        let (mut display, mut peaks) = fixtures(0.5, 1.0, PEAK_INITIAL_VELOCITY);
+        // Decay step would set peak_bars to 0.48; bar value 0.8 should
+        // clamp it back up to 0.8 and re-arm.
+        apply_peak_decay_step(
+            &mut display,
+            &mut peaks,
+            0,
+            Some(0.8),
+            2,
+            0.25,
+            0.02,
+            1.05,
+            HOLD,
+            TICK,
+        );
+        // Note: the 0.8 input also exceeds peak_bars (0.5) by more than
+        // PEAK_UPDATE_THRESHOLD, so the new-peak path fires first and
+        // short-circuits. Either path lands on the same final state.
+        assert!((display.peak_bars[0] - 0.8).abs() < 1e-9);
+        assert_eq!(peaks.hold_times[0], HOLD);
+        assert!((peaks.velocities[0] - PEAK_INITIAL_VELOCITY).abs() < 1e-9);
+        assert!((display.peak_alphas[0] - 1.0).abs() < 1e-9);
+    }
+
+    /// Tiny rise (within threshold) falls through new-peak detection
+    /// and is caught by the clamp instead. Verifies the clamp's role
+    /// when output > peak_bars but ≤ peak_bars + PEAK_UPDATE_THRESHOLD.
+    #[test]
+    fn clamp_handles_sub_threshold_rise_during_fall() {
+        let (mut display, mut peaks) = fixtures(0.5, 1.0, PEAK_INITIAL_VELOCITY);
+        // bar = 0.5005 — above peak (0.5) by 0.0005, below threshold (0.001).
+        // Decay step (mode 2) runs: peak_bars → 0.48. Then clamp fires.
+        apply_peak_decay_step(
+            &mut display,
+            &mut peaks,
+            0,
+            Some(0.5005),
+            2,
+            0.25,
+            0.02,
+            1.05,
+            HOLD,
+            TICK,
+        );
+        assert!((display.peak_bars[0] - 0.5005).abs() < 1e-9);
+        assert_eq!(peaks.hold_times[0], HOLD);
+        assert!((peaks.velocities[0] - PEAK_INITIAL_VELOCITY).abs() < 1e-9);
+        assert!((display.peak_alphas[0] - 1.0).abs() < 1e-9);
+    }
+
+    /// With `output = None`, the clamp must NOT fire. After one decay
+    /// step in fall mode, peak_bars reflects only the decay — there is
+    /// no bar value to clamp against. This pins the latent-bug behavior
+    /// of `decay_peaks()` so a future agent who wires up real bar values
+    /// notices the missing clamp.
+    #[test]
+    fn none_output_skips_clamp() {
+        let (mut display, mut peaks) = fixtures(0.5, 1.0, PEAK_INITIAL_VELOCITY);
+        apply_peak_decay_step(
+            &mut display,
+            &mut peaks,
+            0,
+            None,
+            2,
+            0.25,
+            0.02,
+            1.05,
+            HOLD,
+            TICK,
+        );
+        // Only the decay step ran: 0.5 - 0.02 = 0.48. No clamp to 0.8 or
+        // anything else — that would require a bar value to clamp against.
+        assert!((display.peak_bars[0] - 0.48).abs() < 1e-9);
+    }
+
+    /// New-peak detection: when `Some(bar)` is supplied and bar exceeds
+    /// peak_bars by more than PEAK_UPDATE_THRESHOLD, the helper short-
+    /// circuits — it sets peak_bars = bar, re-arms hold/velocity/alpha,
+    /// and skips the decay match entirely.
+    #[test]
+    fn new_peak_path_short_circuits_decay() {
+        let (mut display, mut peaks) = fixtures(0.5, 0.3, 0.07);
+        apply_peak_decay_step(
+            &mut display,
+            &mut peaks,
+            0,
+            Some(0.9),
+            3,
+            0.25,
+            0.02,
+            1.05,
+            HOLD,
+            TICK,
+        );
+        // peak_bars set to 0.9; alpha re-armed to 1.0; velocity reset.
+        assert!((display.peak_bars[0] - 0.9).abs() < 1e-9);
+        assert!((display.peak_alphas[0] - 1.0).abs() < 1e-9);
+        assert!((peaks.velocities[0] - PEAK_INITIAL_VELOCITY).abs() < 1e-9);
+        assert_eq!(peaks.hold_times[0], HOLD);
+    }
+
+    /// Hold countdown: when hold_times[i] > 0 and no new-peak fires, the
+    /// hold is decremented by tick_duration and the decay match is
+    /// skipped. Verifies the gating between hold-tick and decay branches.
+    #[test]
+    fn hold_branch_decrements_hold_and_skips_decay() {
+        let (mut display, mut peaks) = fixtures(0.5, 1.0, PEAK_INITIAL_VELOCITY);
+        peaks.hold_times[0] = Duration::from_millis(100);
+        apply_peak_decay_step(
+            &mut display,
+            &mut peaks,
+            0,
+            None,
+            2,
+            0.25,
+            0.02,
+            1.05,
+            HOLD,
+            Duration::from_millis(16),
+        );
+        // peak_bars unchanged (decay skipped); hold decremented by 16ms.
+        assert!((display.peak_bars[0] - 0.5).abs() < 1e-9);
+        assert_eq!(peaks.hold_times[0], Duration::from_millis(84));
     }
 }
