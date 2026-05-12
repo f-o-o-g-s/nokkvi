@@ -345,11 +345,21 @@ impl GenresPage {
                 20,
             ));
         }
+        // Click → scoped Songs view filtered to this genre. Per the existing
+        // `LibraryFilter::GenreId` convention (Navidrome uses the genre *name*
+        // as the wire-level filter key), both fields carry the name.
         if self.column_visibility.songcount {
             use crate::widgets::slot_list::slot_list_metadata_column;
+            let scope_msg = GenresMessage::NavigateAndFilter(
+                crate::View::Songs,
+                nokkvi_data::types::filter::LibraryFilter::GenreId {
+                    id: genre.name.clone(),
+                    name: genre.name.clone(),
+                },
+            );
             content = content.push(slot_list_metadata_column(
                 format!("{} songs", genre.song_count),
-                None,
+                Some(scope_msg),
                 metadata_size,
                 style,
                 20,

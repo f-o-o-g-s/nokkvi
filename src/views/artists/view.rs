@@ -547,12 +547,19 @@ impl ArtistsPage {
             ));
         }
 
-        // Song Count column.
+        // Song Count column. Click → scoped Songs view filtered to this artist.
         if show_songcount {
             use crate::widgets::slot_list::slot_list_metadata_column;
+            let scope_msg = ArtistsMessage::NavigateAndFilter(
+                crate::View::Songs,
+                nokkvi_data::types::filter::LibraryFilter::ArtistId {
+                    id: artist.id.clone(),
+                    name: artist.name.clone(),
+                },
+            );
             content_row = content_row.push(slot_list_metadata_column(
                 format!("{song_count} songs"),
-                None,
+                Some(scope_msg),
                 metadata_size,
                 style,
                 SONGCOUNT_PORTION,

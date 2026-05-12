@@ -326,6 +326,65 @@ fn albums_page_navigate_and_filter_returns_action() {
     }
 }
 
+#[test]
+fn artists_page_navigate_and_filter_returns_action() {
+    let mut app = test_app();
+    let (_, action) = app.artists_page.update(
+        crate::views::ArtistsMessage::NavigateAndFilter(
+            View::Songs,
+            nokkvi_data::types::filter::LibraryFilter::ArtistId {
+                id: "artist-uuid".to_string(),
+                name: "Daft Punk".to_string(),
+            },
+        ),
+        0,
+        &[],
+    );
+    match action {
+        crate::views::ArtistsAction::NavigateAndFilter(v, f) => {
+            assert_eq!(v, View::Songs);
+            match f {
+                nokkvi_data::types::filter::LibraryFilter::ArtistId { id, name } => {
+                    assert_eq!(id, "artist-uuid");
+                    assert_eq!(name, "Daft Punk");
+                }
+                _ => panic!("Expected ArtistId filter"),
+            }
+        }
+        _ => panic!("Expected NavigateAndFilter action"),
+    }
+}
+
+#[test]
+fn genres_page_navigate_and_filter_returns_action() {
+    let mut app = test_app();
+    let (_, action) = app.genres_page.update(
+        crate::views::GenresMessage::NavigateAndFilter(
+            View::Songs,
+            nokkvi_data::types::filter::LibraryFilter::GenreId {
+                id: "Black Metal".to_string(),
+                name: "Black Metal".to_string(),
+            },
+        ),
+        0,
+        &[],
+    );
+    match action {
+        crate::views::GenresAction::NavigateAndFilter(v, f) => {
+            assert_eq!(v, View::Songs);
+            match f {
+                nokkvi_data::types::filter::LibraryFilter::GenreId { id, name } => {
+                    // Navidrome wire convention: genre name carried in both fields.
+                    assert_eq!(id, "Black Metal");
+                    assert_eq!(name, "Black Metal");
+                }
+                _ => panic!("Expected GenreId filter"),
+            }
+        }
+        _ => panic!("Expected NavigateAndFilter action"),
+    }
+}
+
 // ============================================================================
 // Navigate-and-Expand-Album (album-text click → Albums view + auto-expand)
 // ============================================================================
