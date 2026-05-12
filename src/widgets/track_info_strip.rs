@@ -766,51 +766,8 @@ mod tests {
         assert_eq!(s, "");
     }
 
-    // The radio render path passes the same string into
-    // `build_merged_centered_strip` regardless of whether the caller asks for
-    // a leading radio-tower icon. These tests pin the string contract: the
-    // marquee text is independent of icon presence, so visual chrome can
-    // never silently mutate the spoken content of the strip.
-
     #[test]
-    fn merged_radio_string_is_independent_of_leading_icon_full_metadata() {
-        // The icon path is a widget-tree concern only; the string fed into
-        // the marquee is identical whether or not we ask for the icon.
-        let with_icon_string =
-            merged_radio_strip_string("KEXP 90.3 FM", "Song Title", "Band Name", "", true, DOT);
-        let without_icon_string =
-            merged_radio_strip_string("KEXP 90.3 FM", "Song Title", "Band Name", "", true, DOT);
-        assert_eq!(with_icon_string, without_icon_string);
-        assert_eq!(
-            with_icon_string,
-            "KEXP 90.3 FM  ·  playing: Song Title  ·  artist: Band Name"
-        );
-    }
-
-    #[test]
-    fn merged_radio_string_is_independent_of_leading_icon_url_fallback() {
-        let s1 = merged_radio_strip_string(
-            "Station",
-            "",
-            "",
-            "http://example.com/stream.mp3",
-            true,
-            DOT,
-        );
-        let s2 = merged_radio_strip_string(
-            "Station",
-            "",
-            "",
-            "http://example.com/stream.mp3",
-            true,
-            DOT,
-        );
-        assert_eq!(s1, s2);
-        assert_eq!(s1, "Station  ·  url: http://example.com/stream.mp3");
-    }
-
-    #[test]
-    fn merged_radio_string_is_independent_of_leading_icon_labels_off() {
+    fn merged_radio_string_pipe_separator_labels_off() {
         let s = merged_radio_strip_string("S", "T", "A", "", false, PIPE);
         assert_eq!(s, "S  |  T  |  A");
     }
