@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
-use parking_lot::RwLock;
+use anyhow::{Context, Result, anyhow};
+use parking_lot::{Mutex, RwLock};
 use reqwest::Client;
-use tracing::debug;
+use tracing::{debug, warn};
 use url::Url;
 
 use crate::types::error::NokkviError;
@@ -11,6 +11,27 @@ use crate::types::error::NokkviError;
 /// Callback invoked when a refreshed JWT is received from the server.
 /// Called with the new token string so callers can persist it to redb.
 pub type TokenRefreshCallback = Arc<dyn Fn(&str) + Send + Sync>;
+
+/// Persistence policy: write the rotated JWT to redb only when the
+/// currently-stored token's remaining lifetime drops below this fraction of
+/// the *new* token's full lifetime. Expresses the actual invariant — "the
+/// stored token must not be unusably close to expiry on resume" — without
+/// committing to any magic wall-clock constant that would need re-tuning per
+/// Navidrome `SessionTimeout`.
+///
+/// Concrete behavior:
+/// - On default Navidrome (`SessionTimeout = 48h`): persists roughly once
+///   every 43 h of active use (4.8 h margin = 10 % of 48 h).
+/// - On the documented nokkvi recommendation (`SessionTimeout = 8760h`):
+///   persists roughly once a year (876 h margin = 10 % of 8760 h).
+/// - On a 5-minute SessionTimeout: persists every ~4.5 min (30 s margin).
+///
+/// Empirically validated: Navidrome's `JWTRefresher` (`server/auth.go:283`)
+/// signs `now + SessionTimeout` deterministically, so concurrent identical
+/// requests within the same wall-second get identical rotated tokens — the
+/// dedup branch below collapses those bursts to a single persistence-decision
+/// pass without the policy ever firing twice.
+const PERSIST_LIFETIME_PCT: i64 = 10;
 
 pub struct ApiClient {
     client: Arc<Client>,
@@ -21,6 +42,13 @@ pub struct ApiClient {
     token: Arc<RwLock<String>>,
     /// Optional callback invoked when token is refreshed, for persistence.
     on_token_refresh: Option<TokenRefreshCallback>,
+    /// Unix-seconds `exp` claim of the token currently in redb. Compared
+    /// against the rotated token's `exp` on every refresh to decide whether
+    /// to persist. Shared across `Clone` so every route through this client
+    /// agrees on what's stored. `None` means "we couldn't decode the initial
+    /// token" — the next rotation that *can* be decoded will persist and
+    /// seed this.
+    persisted_exp: Arc<Mutex<Option<i64>>>,
 }
 
 impl ApiClient {
@@ -31,11 +59,18 @@ impl ApiClient {
             .build()
             .expect("Failed to build HTTP client");
 
+        // Seed `persisted_exp` from the token we were constructed with. On a
+        // fresh login the saved redb token == this token, so reading its exp
+        // gives us the authoritative "what's currently persisted" timestamp.
+        // On a logout/empty-string init, decode fails and we leave None.
+        let initial_exp = decode_jwt_exp(&token).ok();
+
         Self {
             client: Arc::new(client),
             base_url,
             token: Arc::new(RwLock::new(token)),
             on_token_refresh: None,
+            persisted_exp: Arc::new(Mutex::new(initial_exp)),
         }
     }
 
@@ -53,8 +88,60 @@ impl Clone for ApiClient {
             base_url: self.base_url.clone(),
             token: self.token.clone(),
             on_token_refresh: self.on_token_refresh.clone(),
+            persisted_exp: self.persisted_exp.clone(),
         }
     }
+}
+
+/// Decode a JWT's `exp` claim (RFC 7519, registered claim). Returns the
+/// unix-seconds timestamp as i64. Does NOT verify the signature — the server
+/// already verified the token by accepting the request.
+fn decode_jwt_exp(jwt: &str) -> Result<i64> {
+    let payload = jwt
+        .split('.')
+        .nth(1)
+        .context("token is not in JWT header.payload.signature form")?;
+    let bytes = decode_base64url(payload).context("JWT payload is not valid base64url")?;
+    let v: serde_json::Value =
+        serde_json::from_slice(&bytes).context("JWT payload is not valid JSON")?;
+    v.get("exp")
+        .and_then(|x| x.as_i64())
+        .context("JWT payload has no numeric `exp` claim")
+}
+
+/// Minimal base64url decoder (RFC 4648 §5, no padding). Inlined to avoid
+/// pulling `base64` in as a direct workspace dependency for this single use.
+fn decode_base64url(input: &str) -> Result<Vec<u8>> {
+    let mut out = Vec::with_capacity(input.len() * 3 / 4);
+    let mut buf: u32 = 0;
+    let mut bits: u32 = 0;
+    for byte in input.bytes() {
+        let v: u32 = match byte {
+            b'A'..=b'Z' => (byte - b'A') as u32,
+            b'a'..=b'z' => (byte - b'a' + 26) as u32,
+            b'0'..=b'9' => (byte - b'0' + 52) as u32,
+            b'-' => 62,
+            b'_' => 63,
+            b'=' => continue,
+            _ => return Err(anyhow!("invalid base64url byte: 0x{byte:02x}")),
+        };
+        buf = (buf << 6) | v;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
+            buf &= (1 << bits) - 1;
+        }
+    }
+    Ok(out)
+}
+
+/// Current wall-clock time as unix seconds. Saturates to 0 on a time-travel
+/// system clock (pre-epoch) — same fallback as redb / serde defaults.
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
 }
 
 impl ApiClient {
@@ -72,30 +159,86 @@ impl ApiClient {
     /// Navidrome's JWTRefresher middleware returns a fresh token in the
     /// `X-ND-Authorization` header on every authenticated response.
     fn intercept_token_refresh(&self, response: &reqwest::Response) {
-        if let Some(header_value) = response.headers().get("x-nd-authorization")
-            && let Ok(new_token) = header_value.to_str()
-        {
-            // Strip "Bearer " prefix if present
-            let token_str = new_token.strip_prefix("Bearer ").unwrap_or(new_token);
+        let Some(header_value) = response.headers().get("x-nd-authorization") else {
+            return;
+        };
+        let Ok(new_token) = header_value.to_str() else {
+            return;
+        };
+        // Strip "Bearer " prefix if present
+        let token_str = new_token.strip_prefix("Bearer ").unwrap_or(new_token);
+        self.apply_refreshed_token(token_str);
+    }
 
-            // Only update if the token actually changed
-            {
-                let current = self.token.read();
-                if *current == token_str {
-                    return;
-                }
+    /// Apply a refreshed token: atomically dedup-check and swap the in-memory
+    /// value, then decide whether to persist based on how close the
+    /// currently-stored token is to its `exp`.
+    ///
+    /// Split out from `intercept_token_refresh` so the dedup + persistence
+    /// policy is unit-testable without constructing a `reqwest::Response`.
+    fn apply_refreshed_token(&self, token_str: &str) {
+        // Atomic dedup + swap under a single write lock. The previous
+        // implementation took a read lock for the dedup check, dropped it,
+        // then acquired a separate write lock — a TOCTOU race where N
+        // concurrent responses each saw the same "stale" current value and
+        // each fired the persistence callback.
+        let changed = {
+            let mut current = self.token.write();
+            if *current == token_str {
+                false
+            } else {
+                *current = token_str.to_string();
+                true
             }
+        };
+        if !changed {
+            return;
+        }
 
-            debug!("JWT refreshed from server response header");
-            {
-                let mut token = self.token.write();
-                *token = token_str.to_string();
-            }
+        debug!("JWT refreshed from server response header");
 
-            // Notify callback for persistence (e.g., save to redb)
-            if let Some(ref callback) = self.on_token_refresh {
-                callback(token_str);
+        // Decide persistence by comparing the *stored* token's remaining
+        // lifetime against a fraction of the *new* token's full lifetime.
+        // Both numbers come from the JWTs themselves, so the policy
+        // self-adapts to the server's `SessionTimeout` without any
+        // client-side magic constant.
+        let new_exp = match decode_jwt_exp(token_str) {
+            Ok(e) => e,
+            Err(e) => {
+                // We can't reason about lifetimes without `exp`. Preserve
+                // whatever is currently in redb (which we know decoded fine
+                // at construction time, or is whatever a previous successful
+                // rotation persisted) rather than overwriting it with a
+                // token whose claims we can't parse.
+                warn!("Could not decode refreshed JWT exp claim: {e}; skipping persistence");
+                return;
             }
+        };
+
+        let now = unix_now();
+        // `new_lifetime` is the rotated token's full validity window, used
+        // as the basis for the safety margin. `.max(1)` guards a corner case
+        // where the server's clock thinks the token already expired
+        // (shouldn't happen in practice; defensive).
+        let new_lifetime = (new_exp - now).max(1);
+        let margin = (new_lifetime * PERSIST_LIFETIME_PCT) / 100;
+
+        let should_persist = {
+            let mut persisted = self.persisted_exp.lock();
+            let stored_remaining = persisted.map(|p| p - now).unwrap_or(0);
+            if stored_remaining < margin {
+                *persisted = Some(new_exp);
+                true
+            } else {
+                false
+            }
+        };
+        if !should_persist {
+            return;
+        }
+
+        if let Some(ref callback) = self.on_token_refresh {
+            callback(token_str);
         }
     }
 
@@ -288,6 +431,21 @@ impl ApiClient {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn current_token(&self) -> String {
+        self.token.read().clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_persisted_exp(&self, exp: Option<i64>) {
+        *self.persisted_exp.lock() = exp;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn persisted_exp_snapshot(&self) -> Option<i64> {
+        *self.persisted_exp.lock()
+    }
+
     /// Make a DELETE request to the Navidrome REST API
     pub async fn delete(&self, endpoint: &str) -> Result<()> {
         let url = self
@@ -316,5 +474,268 @@ impl ApiClient {
                 "API DELETE {endpoint} failed with status {status}: {body}"
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    use super::*;
+
+    /// Tiny base64url encoder for the test-fixture path only. Mirrors RFC
+    /// 4648 §5 (no padding), same alphabet as `decode_base64url`.
+    fn encode_base64url(input: &[u8]) -> String {
+        const ALPHABET: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+        let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+        let mut buf: u32 = 0;
+        let mut bits: u32 = 0;
+        for &b in input {
+            buf = (buf << 8) | b as u32;
+            bits += 8;
+            while bits >= 6 {
+                bits -= 6;
+                out.push(ALPHABET[((buf >> bits) & 0x3F) as usize] as char);
+            }
+        }
+        if bits > 0 {
+            out.push(ALPHABET[((buf << (6 - bits)) & 0x3F) as usize] as char);
+        }
+        out
+    }
+
+    /// Build a minimal JWT-shaped string with the given `exp`. Only the
+    /// payload's `exp` claim is consulted by `decode_jwt_exp`; header and
+    /// signature are placeholders.
+    fn jwt_with_exp(exp: i64) -> String {
+        let payload = serde_json::json!({ "exp": exp });
+        let payload_b64 = encode_base64url(payload.to_string().as_bytes());
+        format!("hdr.{payload_b64}.sig")
+    }
+
+    #[test]
+    fn base64url_roundtrip_matches_inline_decoder() {
+        // The fixture encoder must produce bytes the production decoder
+        // can read back; otherwise jwt_with_exp tests pass for the wrong
+        // reason. Cover a few edge lengths (1, 2, 3-byte tails).
+        for sample in [
+            b"".as_slice(),
+            b"x",
+            b"xy",
+            b"xyz",
+            b"hello world",
+            br#"{"exp":1234567890}"#,
+        ] {
+            let encoded = encode_base64url(sample);
+            let decoded = decode_base64url(&encoded).unwrap();
+            assert_eq!(decoded, sample);
+        }
+    }
+
+    fn make_client(token: &str) -> ApiClient {
+        let url = Url::parse("http://example.test/").unwrap();
+        ApiClient::new(url, token.to_string())
+    }
+
+    fn counting_callback() -> (Arc<AtomicUsize>, TokenRefreshCallback) {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let counter_cb = counter.clone();
+        let cb: TokenRefreshCallback = Arc::new(move |_| {
+            counter_cb.fetch_add(1, Ordering::SeqCst);
+        });
+        (counter, cb)
+    }
+
+    #[test]
+    fn refresh_with_new_token_updates_in_memory_token() {
+        let (_counter, cb) = counting_callback();
+        let stored = jwt_with_exp(unix_now() + 3600);
+        let mut client = make_client(&stored);
+        client.set_on_token_refresh(cb);
+
+        let rotated = jwt_with_exp(unix_now() + 3600 + 60);
+        client.apply_refreshed_token(&rotated);
+
+        // In-memory token swaps regardless of persistence decision so
+        // subsequent outgoing requests use the freshest credential.
+        assert_eq!(client.current_token(), rotated);
+    }
+
+    #[test]
+    fn refresh_with_same_token_skips_callback_and_keeps_stored_exp() {
+        let (counter, cb) = counting_callback();
+        let exp = unix_now() + 3600;
+        let token = jwt_with_exp(exp);
+        let mut client = make_client(&token);
+        client.set_on_token_refresh(cb);
+
+        client.apply_refreshed_token(&token);
+
+        assert_eq!(counter.load(Ordering::SeqCst), 0, "dedup must hold");
+        assert_eq!(client.persisted_exp_snapshot(), Some(exp));
+    }
+
+    #[test]
+    fn fresh_stored_token_skips_persist() {
+        // 48 h SessionTimeout, stored token has the full window remaining —
+        // far inside the safety margin (10 % of 48 h = 4.8 h).
+        let (counter, cb) = counting_callback();
+        let now = unix_now();
+        let stored = jwt_with_exp(now + 48 * 3600);
+        let mut client = make_client(&stored);
+        client.set_on_token_refresh(cb);
+
+        // Server rotates: new token has full lifetime, stored still has
+        // nearly full lifetime. Policy: stored_remaining >> margin → no
+        // persist.
+        let rotated = jwt_with_exp(now + 48 * 3600 + 1);
+        client.apply_refreshed_token(&rotated);
+
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            0,
+            "healthy stored token must not trigger a persist"
+        );
+    }
+
+    #[test]
+    fn stale_stored_token_triggers_persist_and_updates_persisted_exp() {
+        // 48 h SessionTimeout, stored token has 1 h remaining (well below
+        // the 4.8 h margin).
+        let (counter, cb) = counting_callback();
+        let now = unix_now();
+        let stored = jwt_with_exp(now + 3600);
+        let mut client = make_client(&stored);
+        client.set_on_token_refresh(cb);
+
+        let new_exp = now + 48 * 3600;
+        let rotated = jwt_with_exp(new_exp);
+        client.apply_refreshed_token(&rotated);
+
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            1,
+            "near-expiry stored token must trigger a persist"
+        );
+        assert_eq!(
+            client.persisted_exp_snapshot(),
+            Some(new_exp),
+            "persisted_exp must reflect the freshly-written token"
+        );
+    }
+
+    #[test]
+    fn very_long_session_timeout_persists_rarely() {
+        // 8760 h (1 year) SessionTimeout. Stored token has 364 d remaining —
+        // 10 % margin is ~36.5 d. 364 d > 36.5 d → no persist.
+        let (counter, cb) = counting_callback();
+        let now = unix_now();
+        let stored = jwt_with_exp(now + 364 * 86400);
+        let mut client = make_client(&stored);
+        client.set_on_token_refresh(cb);
+
+        let rotated = jwt_with_exp(now + 365 * 86400);
+        client.apply_refreshed_token(&rotated);
+
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            0,
+            "year-long session must not persist on steady-state rotation"
+        );
+    }
+
+    #[test]
+    fn decode_failure_preserves_existing_persisted_exp() {
+        // Stored token decodes fine and seeds persisted_exp. The rotated
+        // value is malformed — policy is to leave the stored value alone
+        // rather than overwrite with something we can't reason about.
+        let (counter, cb) = counting_callback();
+        let stored_exp = unix_now() + 3600;
+        let stored = jwt_with_exp(stored_exp);
+        let mut client = make_client(&stored);
+        client.set_on_token_refresh(cb);
+
+        client.apply_refreshed_token("not-a-jwt");
+
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            0,
+            "undecodable refreshed token must not fire the persistence callback"
+        );
+        assert_eq!(
+            client.persisted_exp_snapshot(),
+            Some(stored_exp),
+            "persisted_exp must remain anchored to the last good token"
+        );
+        // In-memory token still updates so the next outgoing request at
+        // least gets a chance — if the token really is broken, the next
+        // 401 will trigger re-auth.
+        assert_eq!(client.current_token(), "not-a-jwt");
+    }
+
+    #[test]
+    fn concurrent_burst_with_identical_rotated_token_persists_once() {
+        // Mirrors the empirically-observed Navidrome behavior: 64 concurrent
+        // requests with the same input token all receive the *same* rotated
+        // token (per-second deterministic signing). The atomic dedup-and-
+        // swap means thread-1 wins the swap, the other 63 see `current ==
+        // token_str` and short-circuit.
+        let now = unix_now();
+        // Stored is stale enough that the FIRST thread will persist.
+        let stored = jwt_with_exp(now + 60);
+        let (counter, cb) = counting_callback();
+        let mut client = make_client(&stored);
+        client.set_on_token_refresh(cb);
+        let client = Arc::new(client);
+
+        let rotated = jwt_with_exp(now + 48 * 3600);
+        let mut handles = Vec::new();
+        for _ in 0..64 {
+            let c = client.clone();
+            let t = rotated.clone();
+            handles.push(std::thread::spawn(move || c.apply_refreshed_token(&t)));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            1,
+            "64 concurrent identical-token refreshes must collapse to one persist"
+        );
+    }
+
+    #[test]
+    fn unparseable_initial_token_leaves_persisted_exp_unseeded() {
+        // Construction with an empty / malformed token leaves persisted_exp
+        // as None — the first decodable rotation will then unconditionally
+        // persist (stored_remaining defaults to 0, < any positive margin)
+        // and seed the field.
+        let (counter, cb) = counting_callback();
+        let mut client = make_client("");
+        assert_eq!(client.persisted_exp_snapshot(), None);
+        client.set_on_token_refresh(cb);
+
+        let now = unix_now();
+        let rotated = jwt_with_exp(now + 48 * 3600);
+        client.apply_refreshed_token(&rotated);
+
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
+        assert_eq!(client.persisted_exp_snapshot(), Some(now + 48 * 3600));
+    }
+
+    #[test]
+    fn set_persisted_exp_helper_round_trips() {
+        // Sanity check on the test helper itself.
+        let client = make_client(&jwt_with_exp(unix_now() + 60));
+        client.set_persisted_exp(Some(12345));
+        assert_eq!(client.persisted_exp_snapshot(), Some(12345));
+        client.set_persisted_exp(None);
+        assert_eq!(client.persisted_exp_snapshot(), None);
     }
 }
