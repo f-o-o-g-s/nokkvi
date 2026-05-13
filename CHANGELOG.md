@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Queue counter, displayed track list, and current-track highlight now refresh immediately after removing songs from the queue (right-click, multi-select delete, Ctrl+D) or dragging songs to reorder within the queue — previously these stayed on stale values until the next queue refresh fired. Closes the parallel projection race to the v0.3.16 fix that covered append / "play next" splice.
+
 ### Removed
 
 ## v0.3.16 — 2026-05-12
