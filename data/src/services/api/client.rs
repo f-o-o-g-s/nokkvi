@@ -13,25 +13,43 @@ use crate::types::error::NokkviError;
 pub type TokenRefreshCallback = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// Persistence policy: write the rotated JWT to redb only when the
-/// currently-stored token's remaining lifetime drops below this fraction of
-/// the *new* token's full lifetime. Expresses the actual invariant — "the
-/// stored token must not be unusably close to expiry on resume" — without
-/// committing to any magic wall-clock constant that would need re-tuning per
-/// Navidrome `SessionTimeout`.
+/// currently-stored token's remaining lifetime drops below a safety margin
+/// derived from the *new* token's full lifetime. Expresses the actual
+/// invariant — "the stored token must not be unusably close to expiry on
+/// resume" — without committing to any magic wall-clock constant that would
+/// need re-tuning per Navidrome `SessionTimeout`.
 ///
-/// Concrete behavior:
-/// - On default Navidrome (`SessionTimeout = 48h`): persists roughly once
-///   every 43 h of active use (4.8 h margin = 10 % of 48 h).
-/// - On the documented nokkvi recommendation (`SessionTimeout = 8760h`):
-///   persists roughly once a year (876 h margin = 10 % of 8760 h).
-/// - On a 5-minute SessionTimeout: persists every ~4.5 min (30 s margin).
+/// The margin is a 3-way clamp:
 ///
-/// Empirically validated: Navidrome's `JWTRefresher` (`server/auth.go:283`)
-/// signs `now + SessionTimeout` deterministically, so concurrent identical
-/// requests within the same wall-second get identical rotated tokens — the
-/// dedup branch below collapses those bursts to a single persistence-decision
-/// pass without the policy ever firing twice.
+/// 1. **Preferred**: `PERSIST_LIFETIME_PCT %` of the rotated token's full
+///    lifetime. Adapts naturally across `SessionTimeout` configurations
+///    spanning many orders of magnitude.
+/// 2. **Floor**: at least `MIN_MARGIN_FLOOR_SECS`. Protects users on shorter
+///    `SessionTimeout` from a "close nokkvi, reopen tomorrow" failure
+///    where the stored token has rotated in memory but not been written —
+///    guaranteeing at least this much grace on close.
+/// 3. **Ceiling**: at most `MAX_MARGIN_LIFETIME_PCT %` of the lifetime.
+///    Protects users on very short `SessionTimeout` (e.g., 5 min) from the
+///    floor producing a margin larger than the token's own lifetime, which
+///    would force a persist on every rotation.
+///
+/// Concrete behavior across realistic `SessionTimeout` values:
+///
+/// | SessionTimeout |  Margin | ~persists per active hour |
+/// | ---           |  ---    | ---                       |
+/// | 5 min          |  150 s  | ~24                       |
+/// | 1 hour         |  30 min | ~2                        |
+/// | 48 hours (default) | 24 h | ~0.04 (one per day)      |
+/// | 8760 hours (1 year) | 36.5 d | ~0.0001 (one per year) |
+///
+/// Empirically validated against a live Navidrome (`SessionTimeout = 8760h`):
+/// the server signs `now + SessionTimeout` deterministically, so concurrent
+/// identical requests within the same wall-second receive identical rotated
+/// tokens — the dedup branch below collapses those bursts to a single
+/// persistence-decision pass without the policy ever firing twice.
 const PERSIST_LIFETIME_PCT: i64 = 10;
+const MIN_MARGIN_FLOOR_SECS: i64 = 24 * 3600;
+const MAX_MARGIN_LIFETIME_PCT: i64 = 50;
 
 pub struct ApiClient {
     client: Arc<Client>,
@@ -221,7 +239,12 @@ impl ApiClient {
         // where the server's clock thinks the token already expired
         // (shouldn't happen in practice; defensive).
         let new_lifetime = (new_exp - now).max(1);
-        let margin = (new_lifetime * PERSIST_LIFETIME_PCT) / 100;
+        let preferred = (new_lifetime * PERSIST_LIFETIME_PCT) / 100;
+        let ceiling = (new_lifetime * MAX_MARGIN_LIFETIME_PCT) / 100;
+        // Clamp order: take the larger of preferred / floor (we want at
+        // least the floor of safety), then cap at the ceiling (we don't want
+        // the floor to exceed half the token's own lifetime).
+        let margin = preferred.max(MIN_MARGIN_FLOOR_SECS).min(ceiling);
 
         let should_persist = {
             let mut persisted = self.persisted_exp.lock();
@@ -605,7 +628,7 @@ mod tests {
     #[test]
     fn stale_stored_token_triggers_persist_and_updates_persisted_exp() {
         // 48 h SessionTimeout, stored token has 1 h remaining (well below
-        // the 4.8 h margin).
+        // the 24 h floor margin).
         let (counter, cb) = counting_callback();
         let now = unix_now();
         let stored = jwt_with_exp(now + 3600);
@@ -625,6 +648,87 @@ mod tests {
             client.persisted_exp_snapshot(),
             Some(new_exp),
             "persisted_exp must reflect the freshly-written token"
+        );
+    }
+
+    #[test]
+    fn default_48h_session_close_grace_floor_kicks_in() {
+        // 48 h SessionTimeout, stored token has 23 h remaining — under the
+        // 24 h floor (the bare 10 % rule would only require 4.8 h margin
+        // and would skip this persist, leaving the user with <24 h of
+        // stored grace at app-close time).
+        let (counter, cb) = counting_callback();
+        let now = unix_now();
+        let stored = jwt_with_exp(now + 23 * 3600);
+        let mut client = make_client(&stored);
+        client.set_on_token_refresh(cb);
+
+        let new_exp = now + 48 * 3600;
+        client.apply_refreshed_token(&jwt_with_exp(new_exp));
+
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            1,
+            "23 h remaining on a 48 h session must persist (floor = 24 h)"
+        );
+    }
+
+    #[test]
+    fn default_48h_session_above_floor_skips_persist() {
+        // Just above the 24 h floor — confirms we don't persist on every
+        // rotation for default-config users.
+        let (counter, cb) = counting_callback();
+        let now = unix_now();
+        let stored = jwt_with_exp(now + 25 * 3600);
+        let mut client = make_client(&stored);
+        client.set_on_token_refresh(cb);
+
+        client.apply_refreshed_token(&jwt_with_exp(now + 48 * 3600));
+
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            0,
+            "25 h remaining on a 48 h session is above the 24 h floor"
+        );
+    }
+
+    #[test]
+    fn short_session_timeout_ceiling_prevents_persist_storm() {
+        // 5-minute SessionTimeout. Without the 50 % ceiling, the 24 h floor
+        // would exceed the entire token lifetime, forcing a persist on
+        // every rotation. With the ceiling, margin = 50 % * 300 s = 150 s.
+        // Stored token at 200 s remaining → above 150 s → no persist.
+        let (counter, cb) = counting_callback();
+        let now = unix_now();
+        let stored = jwt_with_exp(now + 200);
+        let mut client = make_client(&stored);
+        client.set_on_token_refresh(cb);
+
+        client.apply_refreshed_token(&jwt_with_exp(now + 300));
+
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            0,
+            "200 s > 150 s margin (50 % of 300 s) — no persist on 5 min session"
+        );
+    }
+
+    #[test]
+    fn short_session_timeout_below_ceiling_persists() {
+        // Same 5-minute SessionTimeout, but stored has 100 s remaining —
+        // below the 150 s ceiling-clamped margin.
+        let (counter, cb) = counting_callback();
+        let now = unix_now();
+        let stored = jwt_with_exp(now + 100);
+        let mut client = make_client(&stored);
+        client.set_on_token_refresh(cb);
+
+        client.apply_refreshed_token(&jwt_with_exp(now + 300));
+
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            1,
+            "100 s remaining < 150 s margin — must persist"
         );
     }
 
