@@ -11,7 +11,7 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 - **Queue remove uses song IDs, not indices**: `QueueAction::RemoveFromQueue` / `PlayNext` carry `Vec<String>` of song IDs. `track_number` cannot be used to map filtered display index → backend queue index because it drifts after any optimistic in-place mutation or client-side sort. Convert at the view boundary; everything downstream goes through `QueueManager::remove_song_by_id` / `remove_songs_by_ids`.
 - **Stale multi-selection across refreshes**: `handle_queue_loaded` and `apply_queue_sort` clear `selected_indices` + `anchor_index`. Without this, indices kept pointing at whatever rows occupied those positions after a consume-mode auto-advance / external refresh — different songs.
 - **Three sources of truth for "what's playing"**: `QueueManager.current_index`, `QueueNavigator.current_song_id`, and the engine's active source. The remove path uses `decide_removal_aftermath` (pure) → `PlaybackController::apply_removal_aftermath` to keep all three in sync; never bypass it. History append is intentionally skipped on remove (the song was deleted, not skipped past).
-- **Queue peek/transition**: track transitions go `peek_next_song()` → `transition_to_queued()`. Use `set_current_index()` ONLY for non-transition updates (play-from-here).
+- **Queue peek/transition**: track transitions go `peek_next_song()` → `transition_to_queued()`. Use `reposition_to_index()` ONLY for non-transition updates (play-from-here).
 - **Progressive queue generation**: `ProgressiveQueueAppendPage` chains check `progressive_queue_generation` before appending — stale chains silently stop.
 - **Play button cold-start**: uses `get_effective_center_index` (selected track), not `queue_songs.first()`.
 - **Gapless re-peek on mutation**: a queue mutation between gapless prep and `on_track_finished` calls `clear_queued()`, so `transition_to_queued()` would return `None`. The navigator re-peeks when `queued.is_none() && !needs_load` before transitioning.
@@ -49,7 +49,7 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 - **Stale gapless prep on mode toggles**: mode toggle handlers call `reset_next_track()` to clear the prepared decoder and disarm the crossfade trigger.
 - **Pre-volume visualizer samples**: visualizer receives raw samples before volume multiplication, scaled to S16 range. FFT input is volume-independent.
 - **Track-completion lock**: the navigator releases its lock across engine I/O during track completion — do not re-introduce a held lock.
-- **ReplayGain stash**: prefer `engine.load_track_with_rg(source, decoder, rg)` — the atomic three-step that bundles `set_pending_replay_gain` + `reset_next_track` + `set_source` so a load can't be interleaved. Use `set_pending_crossfade_replay_gain()` for the crossfade decoder before its stream is built.
+- **ReplayGain stash**: prefer `engine.load_track_with_rg(url, rg)` — the atomic pair that stashes ReplayGain on the renderer and then calls `set_source(url)` so a load can't be interleaved. Use `set_pending_crossfade_replay_gain()` for the crossfade decoder before its stream is built.
 - **Repeat track replay**: `on_track_finished` natively supports repeat-track via seek-to-start. Manual skip (next/prev) bypasses repeat-track.
 
 ## Config & Persistence

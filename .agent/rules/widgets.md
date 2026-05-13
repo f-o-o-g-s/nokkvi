@@ -45,6 +45,10 @@ Custom `iced::advanced` seekable widget. `Vec<OverlaySegment>` for scrolling col
 | About Modal | `about_modal.rs` | Metadata + diagnostics, theme-adaptive logo, Ko-fi tip link |
 | Text Input Dialog | `text_input_dialog.rs` | Modal text input or confirmation. Save Queue uses `combo_box` |
 | EQ Slider | `eq_slider.rs` | Vertical ±15 dB slider for 10-band EQ |
+| EQ Modal | `eq_modal.rs` | 10-band EQ overlay with preset picker (`update/eq_modal.rs`) |
+| Slot List Page | `slot_list_page.rs` | `SlotListPageState` + unified `SlotListPageMessage` dispatcher |
+| Slot List View | `slot_list_view.rs` | Scroll-position state owned by the view (decoupled from `SlotListPageState`) |
+| Visualizer | `visualizer/` | Pipeline + shader + wgsl modules (see `.agent/rules/visualizer.md`) |
 | Drag Column | `drag_column.rs` | In-queue drag-and-drop reorder (multi-selection batch aware) |
 | Format Info | `format_info.rs` | Codec / bitrate split-string helper |
 | Hamburger Menu | `hamburger_menu.rs` | App menu (quit, light/dark toggle, about) |
@@ -55,7 +59,7 @@ Custom `iced::advanced` seekable widget. `Vec<OverlaySegment>` for scrolling col
 | Artwork Split Handle | `artwork_split_handle.rs` | Draggable separator for artwork-column width |
 | Default Playlist Chip | `default_playlist_chip.rs` | Pin-icon button in the Playlists/Queue header — opens the picker |
 | Default Playlist Picker | `default_playlist_picker.rs` | Modal overlay (font-picker pattern) to pick the default playlist; state lives on `Nokkvi.default_playlist_picker` |
-| Boat | `boat.rs` | Surfing-boat overlay for lines-mode visualizer. CPU-only — reads the shared bar buffer the shader already consumes |
+| Boat | `boat.rs` (+ `boat_physics.rs` / `boat_tests.rs`) | Surfing-boat overlay for lines-mode visualizer. CPU-only — reads the shared bar buffer the shader already consumes |
 
 ## 3D Buttons
 

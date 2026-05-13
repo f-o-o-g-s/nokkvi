@@ -32,7 +32,7 @@ One native PipeWire stream via a shared `rodio::Mixer`:
 
 ## Critical Rules
 
-- **Track changes**: create fresh decoders **before** locking the engine; release the engine lock during decoder operations. Use `engine.load_track_with_rg(source, decoder, rg)` — the atomic three-step that replaces the historical `set_pending_replay_gain` + `reset_next_track` + `set_source` sequence.
+- **Track changes**: create fresh decoders **before** locking the engine; release the engine lock during decoder operations. Use `engine.load_track_with_rg(url, rg)` — the atomic pair that stashes ReplayGain on the renderer and then calls `set_source(url)`, replacing the historical `set_pending_replay_gain` + `load_track` / `set_source` pairing in `PlaybackController`.
 - **`SourceGeneration`**: typed atomic counter; `bump_for_user_action()` on every user-driven source change. The renderer snapshots `current()` before releasing the engine lock and discards stale completion callbacks.
 - **Mode toggle reset**: `reset_next_track()` clears the prepared decoder and disarms crossfade on shuffle / repeat / consume toggle. Mode toggles return `ModeToggleEffect` (currently a no-op type) so the controller chains the reset uniformly.
 - **Track-completion path**: the playback navigator releases its lock across engine I/O — do not re-introduce a held lock around `transition_to_queued()` / `set_source()`.
@@ -48,7 +48,7 @@ Dual-path: PipeWire native (preferred) or software fallback.
 
 ## Volume Normalization & ReplayGain
 
-`VolumeNormalizationMode`: `Off`, `Agc`, `ReplayGainTrack`, `ReplayGainAlbum`. Settings under General → Application include preamp dB, fallback dB, fallback-to-AGC, prevent-clipping. Renderer reads `volume_normalization_mode` and resolves a gain factor; `RodioOutput` applies it via `source.amplify(gain).limit(LimitSettings::dynamic_content())`. Primary loads stash incoming-track ReplayGain via `load_track_with_rg(source, decoder, rg)`; the crossfade decoder uses `set_pending_crossfade_replay_gain()` before its stream is built — both paths land the right factor at stream creation.
+`VolumeNormalizationMode`: `Off`, `Agc`, `ReplayGainTrack`, `ReplayGainAlbum`. Settings under General → Application include preamp dB, fallback dB, fallback-to-AGC, prevent-clipping. Renderer reads `volume_normalization_mode` and resolves a gain factor; `RodioOutput` applies it via `source.amplify(gain).limit(LimitSettings::dynamic_content())`. Primary loads stash incoming-track ReplayGain via `load_track_with_rg(url, rg)`; the crossfade decoder uses `set_pending_crossfade_replay_gain()` before its stream is built — both paths land the right factor at stream creation.
 
 ## Equalizer
 

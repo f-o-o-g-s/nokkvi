@@ -16,7 +16,7 @@ All slot-list-based views implement `ViewPage` (in `views/mod.rs`) — explicit 
 
 Every per-view `*Message` enum carries a `SlotList(SlotListPageMessage)` variant as the unified slot-list carrier. This replaced the old per-view flat variants (`SetSearch`, `SetScrollOffset`, `NavigateUp`, `NavigateDown`, etc.). All slot-list state mutations route through `SlotListPageMessage`.
 
-Pages on `Nokkvi`: Login, Albums, Artists, Genres, Playlists, Queue, Songs, Radios, Settings, Similar.
+Pages on `Nokkvi`: Login, Albums, Artists, Genres, Playlists, Queue, Songs, Radios, Settings, Similar. Similar has no `View` enum variant — it only renders inside the browsing panel.
 
 ## SlotListPageState
 
@@ -60,7 +60,7 @@ Generic `ExpansionState<C>` + `SlotListEntry<P, C>`. When active, sort/search ma
 
 **Multi-select column**: opt-in `{view}_show_select` flag adds a per-row checkbox + tri-state "select all" header bar to every slot-list view. Helpers `wrap_with_select_column()` and `compose_header_with_select()` (`widgets/slot_list.rs`) keep per-view plumbing minimal; the checkbox state mirrors `selected_indices` regardless of how membership was set.
 
-**Genre column** (Queue / Songs): stacks under the album when both columns are visible, takes over the album slot at album-size font when album is hidden. Auto-shows when sort = Genre (mirrors how the plays column auto-shows on MostPlayed sort).
+**Genre column** (Queue): stacks under the album when both columns are visible, takes over the album slot at album-size font when album is hidden. Auto-shows when sort = Genre (mirrors how the plays column auto-shows on MostPlayed sort).
 
 ## Context Menus & Toasts
 

@@ -135,7 +135,7 @@ Test placement: `update/tests.rs` for handler tests; inline `#[cfg(test)] mod te
 - **Artwork**: use `iced::widget::image::Handle::from_bytes(data)` for refreshable artwork — `Handle::from_path` keys on path and produces stale GPU textures when the file is overwritten. After every `put()` / `get()` on the artwork LRU, call `refresh_large_artwork_snapshot()` so `ViewData.large_artwork` borrows the new map.
 - **Queue artwork URLs**: queue song mini thumbnails MUST request 80px using `album_id` to hit the prefetch cache; large artwork fallback MUST construct the full-size URL (`size=1000`) — never reuse the 80px URL.
 - **Filtered queue indices**: when a search is active, slot-list indices are relative to `filtered_songs`. Always map through the filtered view before doing queue mutations.
-- **Queue navigation**: use `peek_next_song()` → `transition_to_queued()` for transitions. Use `set_current_index()` ONLY for non-transition updates like play-from-here.
+- **Queue navigation**: use `peek_next_song()` → `transition_to_queued()` for transitions. Use `reposition_to_index()` ONLY for non-transition updates like play-from-here.
 - **`HoverOverlay` wraps containers, never native buttons** — buttons capture `ButtonPressed` early. Pattern: `mouse_area(HoverOverlay::new(container(...))).on_press(msg)`.
 - **`guard_play_action()` at the top of every play handler** — protects against split-view + playlist-edit conflicts.
 - **Config-watcher feedback loops**: `suppress_config_reload()` blocks the file watcher's reflection, but GUI-initiated theme/visualizer writes need a manual `ThemeConfigReloaded` trigger after the write.
@@ -155,8 +155,6 @@ For the full set of rules and patterns, see `.agent/rules/` (loaded contextually
 - `new-feature-checklist.md` — end-to-end checklist for new features
 
 Workflows in `.agent/workflows/` (`build-test.md`, `commit.md`, `new-view.md`, `package.md`, `sync-rules.md`) document concrete procedures.
-
-`.agent/audit-progress.md` tracks completion status of the 2026-05-07 audit (`~/nokkvi-audit-results/_SYNTHESIS.md`). Read it before starting any item from §3/§4/§5/§7 — the source reports describe the world at audit time, the progress doc describes the world now.
 
 ## Commit conventions
 
