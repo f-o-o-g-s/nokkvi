@@ -1413,9 +1413,6 @@ pub(crate) fn primary_slot_click_message(
 /// deliberately omitted is the center-click play path (`ActivateCenter`)
 /// and the legacy click-to-play path (`ClickPlay`) — see the file-level
 /// doc comment on `views/similar.rs` for the rationale.
-// `dead_code` allows the function to exist before commit 3 wires it into
-// Similar's slot button.
-#[allow(dead_code)]
 pub(crate) fn highlight_only_slot_click_message(
     item_index: usize,
     modifiers: iced::keyboard::Modifiers,
@@ -1449,9 +1446,6 @@ pub(crate) fn primary_slot_button<'a, M: Clone + 'a>(
 /// Wrap a pre-styled clickable container in the canonical slot-row button
 /// with always-`SetOffset` dispatch — Similar's intentional highlight-only
 /// contract. See [`highlight_only_slot_click_message`].
-// `dead_code` allows the helper to exist before commit 3 migrates
-// `views/similar.rs` onto it.
-#[allow(dead_code)]
 pub(crate) fn highlight_only_slot_button<'a, M: Clone + 'a>(
     content: impl Into<Element<'a, M>>,
     ctx: &SlotListRowContext,
