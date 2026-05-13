@@ -7,10 +7,13 @@
 
 use iced::{
     Color, Element, Length, Padding,
-    widget::{column, container, mouse_area},
+    widget::{button, column, container, mouse_area},
 };
 
-use crate::{theme, widgets::SlotListView};
+use crate::{
+    theme,
+    widgets::{SlotListPageMessage, SlotListView},
+};
 
 /// Pre-computed font and sizing metrics for slot list rows.
 ///
@@ -1364,6 +1367,114 @@ pub(crate) fn slot_list_background_container<'a, Message: 'a>(
         .into()
 }
 
+/// Resolve the `SlotListPageMessage` a primary slot-row click should
+/// dispatch, given modifier state, whether the row is centered, and the
+/// `stable_viewport` user setting.
+///
+/// Precedence (the single source of truth for 7 slot-list views — Albums,
+/// Artists, Genres, Playlists, Queue, Songs, Radios):
+///
+/// 1. `ctrl|shift` → `SetOffset(item_index, modifiers)` so
+///    `SlotListPageState::handle_slot_click` runs its multi-select branches
+///    (ctrl-toggle, shift-range).
+/// 2. `is_center` → `ActivateCenter` (play in place).
+/// 3. `stable_viewport` → `SetOffset(item_index, modifiers)` (highlight
+///    without moving the viewport — modifiers are empty in this branch,
+///    so handle_slot_click takes its no-mods single-select path).
+/// 4. Otherwise → `ClickPlay(item_index)` (legacy click-to-play: move
+///    viewport AND play).
+///
+/// Pure function — no Iced widget construction. Exercised exhaustively by
+/// the unit tests in this module, then composed by [`primary_slot_button`]
+/// to build the actual `on_press` payload. Similar uses the variant in
+/// [`highlight_only_slot_click_message`].
+pub(crate) fn primary_slot_click_message(
+    item_index: usize,
+    is_center: bool,
+    modifiers: iced::keyboard::Modifiers,
+    stable_viewport: bool,
+) -> SlotListPageMessage {
+    if modifiers.control() || modifiers.shift() {
+        SlotListPageMessage::SetOffset(item_index, modifiers)
+    } else if is_center {
+        SlotListPageMessage::ActivateCenter
+    } else if stable_viewport {
+        SlotListPageMessage::SetOffset(item_index, modifiers)
+    } else {
+        SlotListPageMessage::ClickPlay(item_index)
+    }
+}
+
+/// Resolve the `SlotListPageMessage` for the Similar view's intentional
+/// highlight-only click contract: always `SetOffset(item_index, modifiers)`.
+///
+/// Modifier pass-through preserves ctrl-toggle / shift-range selection
+/// (those branches still fire inside `handle_slot_click`). What's
+/// deliberately omitted is the center-click play path (`ActivateCenter`)
+/// and the legacy click-to-play path (`ClickPlay`) — see the file-level
+/// doc comment on `views/similar.rs` for the rationale.
+pub(crate) fn highlight_only_slot_click_message(
+    item_index: usize,
+    modifiers: iced::keyboard::Modifiers,
+) -> SlotListPageMessage {
+    SlotListPageMessage::SetOffset(item_index, modifiers)
+}
+
+/// Wrap a pre-styled clickable container in the canonical slot-row button
+/// with the 4-arm modifier-aware click dispatch. Used by 7 slot-list views
+/// (Albums, Artists, Genres, Playlists, Queue, Songs, Radios). See
+/// [`primary_slot_click_message`] for the precedence rule.
+///
+/// `wrap` lifts a `SlotListPageMessage` into the caller's outer message
+/// type, typically `AlbumsMessage::SlotList` / `QueueMessage::SlotList` /
+/// etc.
+pub(crate) fn primary_slot_button<'a, M: Clone + 'a>(
+    content: impl Into<Element<'a, M>>,
+    ctx: &SlotListRowContext,
+    stable_viewport: bool,
+    wrap: impl Fn(SlotListPageMessage) -> M,
+) -> Element<'a, M> {
+    let msg = primary_slot_click_message(
+        ctx.item_index,
+        ctx.is_center,
+        ctx.modifiers,
+        stable_viewport,
+    );
+    make_slot_button(content, wrap(msg))
+}
+
+/// Wrap a pre-styled clickable container in the canonical slot-row button
+/// with always-`SetOffset` dispatch — Similar's intentional highlight-only
+/// contract. See [`highlight_only_slot_click_message`].
+pub(crate) fn highlight_only_slot_button<'a, M: Clone + 'a>(
+    content: impl Into<Element<'a, M>>,
+    ctx: &SlotListRowContext,
+    wrap: impl Fn(SlotListPageMessage) -> M,
+) -> Element<'a, M> {
+    let msg = highlight_only_slot_click_message(ctx.item_index, ctx.modifiers);
+    make_slot_button(content, wrap(msg))
+}
+
+// Shared visual contract for both primary and highlight-only slot buttons:
+// transparent background, no border, zero padding, fills width. Splitting
+// the visual chrome out of the dispatch helpers keeps one source of truth
+// so a future style tweak lands in both ladders.
+fn make_slot_button<'a, M: Clone + 'a>(
+    content: impl Into<Element<'a, M>>,
+    on_press: M,
+) -> Element<'a, M> {
+    button(content)
+        .on_press(on_press)
+        .style(|_theme, _status| button::Style {
+            background: None,
+            border: iced::Border::default(),
+            ..Default::default()
+        })
+        .padding(0)
+        .width(Length::Fill)
+        .into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1649,5 +1760,200 @@ mod tests {
         let d2 = focused_bg(2);
         assert_eq!((d0.r, d0.g, d0.b), (d1.r, d1.g, d1.b));
         assert_eq!((d1.r, d1.g, d1.b), (d2.r, d2.g, d2.b));
+    }
+
+    // ========================================================================
+    // primary_slot_click_message — 4-arm ladder precedence
+    // ========================================================================
+    //
+    // Pins the precedence rule used by 7 slot-list views (Albums, Artists,
+    // Genres, Playlists, Queue, Songs, Radios). The audit flagged this
+    // ladder as HIGH RISK because reordering arms silently inverts user-
+    // facing click semantics. These tests are the regression net.
+
+    use iced::keyboard::Modifiers;
+
+    #[test]
+    fn primary_click_center_no_mods_activates_center() {
+        // Arm 2: is_center beats stable_viewport, plays in place.
+        let m = primary_slot_click_message(5, true, Modifiers::default(), true);
+        assert!(matches!(m, SlotListPageMessage::ActivateCenter));
+    }
+
+    #[test]
+    fn primary_click_non_center_stable_viewport_highlights() {
+        // Arm 3: stable_viewport with non-center click sets viewport offset
+        // without playing — modifiers are empty so handle_slot_click takes
+        // its single-select branch.
+        let m = primary_slot_click_message(5, false, Modifiers::default(), true);
+        match m {
+            SlotListPageMessage::SetOffset(idx, mods) => {
+                assert_eq!(idx, 5);
+                assert!(mods.is_empty(), "no-mods click must pass empty modifiers");
+            }
+            other => panic!("expected SetOffset(5, empty), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn primary_click_non_center_legacy_uses_click_play() {
+        // Arm 4: legacy mode (stable_viewport=false) on non-center click
+        // dispatches ClickPlay — the historical click-to-play behavior.
+        let m = primary_slot_click_message(5, false, Modifiers::default(), false);
+        assert!(matches!(m, SlotListPageMessage::ClickPlay(5)));
+    }
+
+    #[test]
+    fn primary_click_ctrl_overrides_center_for_multi_select() {
+        // Arm 1: ctrl beats is_center so multi-select toggle still works
+        // when the user ctrl-clicks the centered row.
+        let m = primary_slot_click_message(5, true, Modifiers::CTRL, true);
+        match m {
+            SlotListPageMessage::SetOffset(idx, mods) => {
+                assert_eq!(idx, 5);
+                assert!(mods.control() && !mods.shift());
+            }
+            other => panic!("expected SetOffset with CTRL, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn primary_click_shift_overrides_center_for_range_select() {
+        let m = primary_slot_click_message(5, true, Modifiers::SHIFT, true);
+        match m {
+            SlotListPageMessage::SetOffset(idx, mods) => {
+                assert_eq!(idx, 5);
+                assert!(mods.shift() && !mods.control());
+            }
+            other => panic!("expected SetOffset with SHIFT, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn primary_click_ctrl_overrides_legacy_click_play() {
+        // Even in legacy mode (stable_viewport=false), ctrl must still
+        // route to multi-select rather than ClickPlay — otherwise ctrl+click
+        // would play a song instead of toggling its selection.
+        let m = primary_slot_click_message(7, false, Modifiers::CTRL, false);
+        match m {
+            SlotListPageMessage::SetOffset(idx, mods) => {
+                assert_eq!(idx, 7);
+                assert!(mods.control());
+            }
+            other => panic!("expected SetOffset with CTRL in legacy mode, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn primary_click_ctrl_plus_shift_routes_through_set_offset() {
+        // Bitflag union pass-through: both modifier bits reach handle_slot_click.
+        let m = primary_slot_click_message(3, false, Modifiers::CTRL | Modifiers::SHIFT, true);
+        match m {
+            SlotListPageMessage::SetOffset(idx, mods) => {
+                assert_eq!(idx, 3);
+                assert!(mods.control() && mods.shift());
+            }
+            other => panic!("expected SetOffset with CTRL|SHIFT, got {other:?}"),
+        }
+    }
+
+    // ========================================================================
+    // highlight_only_slot_click_message — Similar's intentional 1-arm variant
+    // ========================================================================
+    //
+    // Always SetOffset(item_index, modifiers). Center clicks deliberately do
+    // not play; multi-select still works because modifiers pass through.
+
+    #[test]
+    fn highlight_only_no_mods_sets_offset() {
+        let m = highlight_only_slot_click_message(3, Modifiers::default());
+        match m {
+            SlotListPageMessage::SetOffset(idx, mods) => {
+                assert_eq!(idx, 3);
+                assert!(mods.is_empty());
+            }
+            other => panic!("expected SetOffset(3, empty), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn highlight_only_center_click_does_not_play() {
+        // Distinguishes Similar from the primary ladder: even with is_center
+        // semantics the helper does NOT emit ActivateCenter. We exercise this
+        // by noting the helper has no is_center input — same call regardless.
+        let m = highlight_only_slot_click_message(0, Modifiers::default());
+        assert!(
+            !matches!(m, SlotListPageMessage::ActivateCenter),
+            "highlight-only must never dispatch ActivateCenter"
+        );
+        assert!(
+            !matches!(m, SlotListPageMessage::ClickPlay(_)),
+            "highlight-only must never dispatch ClickPlay"
+        );
+    }
+
+    #[test]
+    fn highlight_only_passes_ctrl_through_for_multi_select() {
+        let m = highlight_only_slot_click_message(3, Modifiers::CTRL);
+        match m {
+            SlotListPageMessage::SetOffset(idx, mods) => {
+                assert_eq!(idx, 3);
+                assert!(mods.control());
+            }
+            other => panic!("expected SetOffset with CTRL, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn highlight_only_passes_shift_through_for_range_select() {
+        let m = highlight_only_slot_click_message(3, Modifiers::SHIFT);
+        match m {
+            SlotListPageMessage::SetOffset(idx, mods) => {
+                assert_eq!(idx, 3);
+                assert!(mods.shift());
+            }
+            other => panic!("expected SetOffset with SHIFT, got {other:?}"),
+        }
+    }
+
+    // ========================================================================
+    // primary_slot_button / highlight_only_slot_button — compile-time exercise
+    // ========================================================================
+    //
+    // The Element-returning helpers are exercised at runtime by every
+    // migrated view, but commits 1→3 are sequenced so commit 1 needs an
+    // in-module call site to keep dead_code analysis quiet. These tests do
+    // exactly that — construct an Element via each helper and drop it.
+
+    fn dummy_row_context(is_center: bool, modifiers: Modifiers) -> SlotListRowContext {
+        SlotListRowContext {
+            item_index: 0,
+            is_center,
+            is_selected: false,
+            has_multi_selection: false,
+            opacity: 1.0,
+            scale_factor: 1.0,
+            row_height: 70.0,
+            modifiers,
+            metrics: SlotListRowMetrics::from_row(70.0, 1.0),
+        }
+    }
+
+    #[test]
+    fn primary_slot_button_builds_an_element() {
+        let ctx = dummy_row_context(false, Modifiers::default());
+        let _: Element<'_, ()> = primary_slot_button(
+            iced::widget::text("row"),
+            &ctx,
+            true, // stable_viewport
+            |_msg| (),
+        );
+    }
+
+    #[test]
+    fn highlight_only_slot_button_builds_an_element() {
+        let ctx = dummy_row_context(true, Modifiers::default());
+        let _: Element<'_, ()> =
+            highlight_only_slot_button(iced::widget::text("row"), &ctx, |_msg| ());
     }
 }

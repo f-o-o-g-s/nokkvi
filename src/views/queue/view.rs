@@ -6,7 +6,7 @@
 
 use iced::{
     Alignment, Element, Length,
-    widget::{Row, Space, button, column, container, mouse_area, row},
+    widget::{Row, Space, column, container, mouse_area, row},
 };
 use nokkvi_data::backend::queue::QueueSongUIViewData;
 
@@ -802,31 +802,12 @@ impl QueuePage {
                     .width(Length::Fill);
 
                 // Make it interactive
-                let slot_button = button(clickable)
-                    .on_press(if ctx.modifiers.control() || ctx.modifiers.shift() {
-                        QueueMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
-                            ctx.item_index,
-                            ctx.modifiers,
-                        ))
-                    } else if ctx.is_center {
-                        QueueMessage::SlotList(crate::widgets::SlotListPageMessage::ActivateCenter)
-                    } else if stable_viewport {
-                        QueueMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
-                            ctx.item_index,
-                            ctx.modifiers,
-                        ))
-                    } else {
-                        QueueMessage::SlotList(crate::widgets::SlotListPageMessage::ClickPlay(
-                            ctx.item_index,
-                        ))
-                    })
-                    .style(|_theme, _status| button::Style {
-                        background: None,
-                        border: iced::Border::default(),
-                        ..Default::default()
-                    })
-                    .padding(0)
-                    .width(Length::Fill);
+                let slot_button = crate::widgets::slot_list::primary_slot_button(
+                    clickable,
+                    &ctx,
+                    stable_viewport,
+                    QueueMessage::SlotList,
+                );
 
                 // Wrap in context menu
                 use crate::widgets::context_menu::{context_menu, menu_button, menu_separator};

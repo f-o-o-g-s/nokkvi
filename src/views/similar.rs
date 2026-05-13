@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use iced::{
     Alignment, Element, Length, Task,
-    widget::{button, container, image},
+    widget::{container, image},
 };
 use nokkvi_data::{types::song::Song, utils::formatters};
 
@@ -549,18 +549,11 @@ impl SimilarPage {
                     .style(move |_theme| style.to_container_style())
                     .width(Length::Fill);
 
-                let slot_button = button(clickable)
-                    .on_press(SimilarMessage::SlotList(SlotListPageMessage::SetOffset(
-                        ctx.item_index,
-                        ctx.modifiers,
-                    )))
-                    .style(|_theme, _status| button::Style {
-                        background: None,
-                        border: iced::Border::default(),
-                        ..Default::default()
-                    })
-                    .padding(0)
-                    .width(Length::Fill);
+                let slot_button = crate::widgets::slot_list::highlight_only_slot_button(
+                    clickable,
+                    &ctx,
+                    SimilarMessage::SlotList,
+                );
 
                 use crate::widgets::context_menu::{similar_entries, wrap_similar_row};
                 let cm_row = wrap_similar_row(
