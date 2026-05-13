@@ -20,7 +20,6 @@ use crate::{
     Nokkvi, View,
     app_message::{Message, RouletteMessage},
     state::{DecelKeyframe, RouletteState},
-    views,
 };
 
 /// Below this item count the spin animation is too short to feel like a
@@ -300,59 +299,16 @@ impl Nokkvi {
     }
 
     fn roulette_view_viewport_offset(&self, view: View) -> Option<usize> {
-        match view {
-            View::Queue => Some(self.queue_page.common.slot_list.viewport_offset),
-            View::Songs => Some(self.songs_page.common.slot_list.viewport_offset),
-            View::Albums => Some(self.albums_page.common.slot_list.viewport_offset),
-            View::Artists => Some(self.artists_page.common.slot_list.viewport_offset),
-            View::Genres => Some(self.genres_page.common.slot_list.viewport_offset),
-            View::Playlists => Some(self.playlists_page.common.slot_list.viewport_offset),
-            View::Radios => Some(self.radios_page.common.slot_list.viewport_offset),
-            View::Settings => None,
-        }
+        self.view_page(view)
+            .map(|p| p.common().slot_list.viewport_offset)
     }
 
     /// Move the slot list viewport on `view` to `offset`. Uses
     /// `handle_set_offset` (clears `selected_offset`, records scroll) so the
     /// transient scrollbar fades correctly while the wheel spins.
     pub(crate) fn roulette_apply_offset(&mut self, view: View, offset: usize, total_items: usize) {
-        match view {
-            View::Queue => {
-                self.queue_page
-                    .common
-                    .handle_set_offset(offset, total_items);
-            }
-            View::Songs => {
-                self.songs_page
-                    .common
-                    .handle_set_offset(offset, total_items);
-            }
-            View::Albums => {
-                self.albums_page
-                    .common
-                    .handle_set_offset(offset, total_items);
-            }
-            View::Artists => {
-                self.artists_page
-                    .common
-                    .handle_set_offset(offset, total_items);
-            }
-            View::Genres => {
-                self.genres_page
-                    .common
-                    .handle_set_offset(offset, total_items);
-            }
-            View::Playlists => {
-                self.playlists_page
-                    .common
-                    .handle_set_offset(offset, total_items);
-            }
-            View::Radios => {
-                self.radios_page
-                    .common
-                    .handle_set_offset(offset, total_items);
-            }
-            View::Settings => {}
+        if let Some(page) = self.view_page_mut(view) {
+            page.common_mut().handle_set_offset(offset, total_items);
         }
     }
 
@@ -367,51 +323,6 @@ impl Nokkvi {
         total_items: usize,
     ) -> Task<Message> {
         match view {
-            View::Queue => {
-                self.queue_page
-                    .common
-                    .handle_set_offset(target_idx, total_items);
-                self.queue_page.common.slot_list.flash_center();
-                Task::done(Message::Queue(views::QueueMessage::SlotList(
-                    crate::widgets::SlotListPageMessage::ActivateCenter,
-                )))
-            }
-            View::Songs => {
-                self.songs_page
-                    .common
-                    .handle_set_offset(target_idx, total_items);
-                self.songs_page.common.slot_list.flash_center();
-                Task::done(Message::Songs(views::SongsMessage::SlotList(
-                    crate::widgets::SlotListPageMessage::ActivateCenter,
-                )))
-            }
-            View::Albums => {
-                self.albums_page
-                    .common
-                    .handle_set_offset(target_idx, total_items);
-                self.albums_page.common.slot_list.flash_center();
-                Task::done(Message::Albums(views::AlbumsMessage::SlotList(
-                    crate::widgets::SlotListPageMessage::ActivateCenter,
-                )))
-            }
-            View::Playlists => {
-                self.playlists_page
-                    .common
-                    .handle_set_offset(target_idx, total_items);
-                self.playlists_page.common.slot_list.flash_center();
-                Task::done(Message::Playlists(views::PlaylistsMessage::SlotList(
-                    crate::widgets::SlotListPageMessage::ActivateCenter,
-                )))
-            }
-            View::Radios => {
-                self.radios_page
-                    .common
-                    .handle_set_offset(target_idx, total_items);
-                self.radios_page.common.slot_list.flash_center();
-                Task::done(Message::Radios(views::RadiosMessage::SlotList(
-                    crate::widgets::SlotListPageMessage::ActivateCenter,
-                )))
-            }
             View::Genres => {
                 let Some(genre) = self.library.genres.get(target_idx) else {
                     return Task::none();
@@ -437,6 +348,15 @@ impl Nokkvi {
                 )
             }
             View::Settings => Task::none(),
+            other => {
+                let Some(page) = self.view_page_mut(other) else {
+                    return Task::none();
+                };
+                let common = page.common_mut();
+                common.handle_set_offset(target_idx, total_items);
+                common.slot_list.flash_center();
+                Task::done(page.slot_list_message(crate::widgets::SlotListPageMessage::ActivateCenter))
+            }
         }
     }
 }
