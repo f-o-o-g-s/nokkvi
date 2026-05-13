@@ -473,4 +473,8 @@ impl super::ViewPage for RadiosPage {
             ),
         )))
     }
+
+    fn slot_list_message(&self, msg: crate::widgets::SlotListPageMessage) -> Message {
+        Message::Radios(RadiosMessage::SlotList(msg))
+    }
 }

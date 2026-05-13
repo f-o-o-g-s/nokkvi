@@ -133,28 +133,10 @@ impl Nokkvi {
         // Play tab navigation sound
         self.sfx_engine.play(audio::SfxType::Tab);
         match self.current_view {
-            View::Albums => Task::done(Message::Albums(views::AlbumsMessage::SlotList(
-                crate::widgets::SlotListPageMessage::NavigateUp,
-            ))),
-            View::Artists => Task::done(Message::Artists(views::ArtistsMessage::SlotList(
-                crate::widgets::SlotListPageMessage::NavigateUp,
-            ))),
-            View::Queue => Task::done(Message::Queue(views::QueueMessage::SlotList(
-                crate::widgets::SlotListPageMessage::NavigateUp,
-            ))),
-            View::Songs => Task::done(Message::Songs(views::SongsMessage::SlotList(
-                crate::widgets::SlotListPageMessage::NavigateUp,
-            ))),
-            View::Genres => Task::done(Message::Genres(views::GenresMessage::SlotList(
-                crate::widgets::SlotListPageMessage::NavigateUp,
-            ))),
-            View::Playlists => Task::done(Message::Playlists(views::PlaylistsMessage::SlotList(
-                crate::widgets::SlotListPageMessage::NavigateUp,
-            ))),
-            View::Radios => Task::done(Message::Radios(views::RadiosMessage::SlotList(
-                crate::widgets::SlotListPageMessage::NavigateUp,
-            ))),
             View::Settings => Task::done(Message::Settings(views::SettingsMessage::SlotListUp)),
+            other => self.view_page(other).map_or_else(Task::none, |p| {
+                Task::done(p.slot_list_message(crate::widgets::SlotListPageMessage::NavigateUp))
+            }),
         }
     }
 
@@ -188,82 +170,30 @@ impl Nokkvi {
         // Play tab navigation sound
         self.sfx_engine.play(audio::SfxType::Tab);
         let nav_task = match self.current_view {
-            View::Albums => Task::done(Message::Albums(views::AlbumsMessage::SlotList(
-                crate::widgets::SlotListPageMessage::NavigateDown,
-            ))),
-            View::Artists => Task::done(Message::Artists(views::ArtistsMessage::SlotList(
-                crate::widgets::SlotListPageMessage::NavigateDown,
-            ))),
-            View::Queue => Task::done(Message::Queue(views::QueueMessage::SlotList(
-                crate::widgets::SlotListPageMessage::NavigateDown,
-            ))),
-            View::Songs => Task::done(Message::Songs(views::SongsMessage::SlotList(
-                crate::widgets::SlotListPageMessage::NavigateDown,
-            ))),
-            View::Genres => Task::done(Message::Genres(views::GenresMessage::SlotList(
-                crate::widgets::SlotListPageMessage::NavigateDown,
-            ))),
-            View::Playlists => Task::done(Message::Playlists(views::PlaylistsMessage::SlotList(
-                crate::widgets::SlotListPageMessage::NavigateDown,
-            ))),
-            View::Radios => Task::done(Message::Radios(views::RadiosMessage::SlotList(
-                crate::widgets::SlotListPageMessage::NavigateDown,
-            ))),
             View::Settings => Task::done(Message::Settings(views::SettingsMessage::SlotListDown)),
+            other => self.view_page(other).map_or_else(Task::none, |p| {
+                Task::done(p.slot_list_message(crate::widgets::SlotListPageMessage::NavigateDown))
+            }),
         };
         Task::batch([unfocus_task, nav_task])
     }
 
     fn handle_slot_list_set_offset(&mut self, offset: usize) -> Task<Message> {
         match self.current_view {
-            View::Albums => Task::done(Message::Albums(views::AlbumsMessage::SlotList(
-                crate::widgets::SlotListPageMessage::SetOffset(
-                    offset,
-                    iced::keyboard::Modifiers::default(),
-                ),
-            ))),
-            View::Artists => Task::done(Message::Artists(views::ArtistsMessage::SlotList(
-                crate::widgets::SlotListPageMessage::SetOffset(
-                    offset,
-                    iced::keyboard::Modifiers::default(),
-                ),
-            ))),
-            View::Queue => Task::done(Message::Queue(views::QueueMessage::SlotList(
-                crate::widgets::SlotListPageMessage::SetOffset(
-                    offset,
-                    iced::keyboard::Modifiers::default(),
-                ),
-            ))),
-            View::Songs => Task::done(Message::Songs(views::SongsMessage::SlotList(
-                crate::widgets::SlotListPageMessage::SetOffset(
-                    offset,
-                    iced::keyboard::Modifiers::default(),
-                ),
-            ))),
-            View::Genres => Task::done(Message::Genres(views::GenresMessage::SlotList(
-                crate::widgets::SlotListPageMessage::SetOffset(
-                    offset,
-                    iced::keyboard::Modifiers::default(),
-                ),
-            ))),
-            View::Playlists => Task::done(Message::Playlists(views::PlaylistsMessage::SlotList(
-                crate::widgets::SlotListPageMessage::SetOffset(
-                    offset,
-                    iced::keyboard::Modifiers::default(),
-                ),
-            ))),
-            View::Radios => Task::done(Message::Radios(views::RadiosMessage::SlotList(
-                crate::widgets::SlotListPageMessage::SetOffset(
-                    offset,
-                    iced::keyboard::Modifiers::default(),
-                ),
-            ))),
             View::Settings => Task::done(Message::Settings(
                 views::SettingsMessage::SlotListSetOffset(
                     offset,
                     iced::keyboard::Modifiers::default(),
                 ),
             )),
+            other => self.view_page(other).map_or_else(Task::none, |p| {
+                Task::done(
+                    p.slot_list_message(crate::widgets::SlotListPageMessage::SetOffset(
+                        offset,
+                        iced::keyboard::Modifiers::default(),
+                    )),
+                )
+            }),
         }
     }
 
@@ -310,28 +240,10 @@ impl Nokkvi {
             }
         }
         match self.current_view {
-            View::Albums => Task::done(Message::Albums(views::AlbumsMessage::SlotList(
-                crate::widgets::SlotListPageMessage::ActivateCenter,
-            ))),
-            View::Artists => Task::done(Message::Artists(views::ArtistsMessage::SlotList(
-                crate::widgets::SlotListPageMessage::ActivateCenter,
-            ))),
-            View::Queue => Task::done(Message::Queue(views::QueueMessage::SlotList(
-                crate::widgets::SlotListPageMessage::ActivateCenter,
-            ))),
-            View::Songs => Task::done(Message::Songs(views::SongsMessage::SlotList(
-                crate::widgets::SlotListPageMessage::ActivateCenter,
-            ))),
-            View::Genres => Task::done(Message::Genres(views::GenresMessage::SlotList(
-                crate::widgets::SlotListPageMessage::ActivateCenter,
-            ))),
-            View::Playlists => Task::done(Message::Playlists(views::PlaylistsMessage::SlotList(
-                crate::widgets::SlotListPageMessage::ActivateCenter,
-            ))),
-            View::Radios => Task::done(Message::Radios(views::RadiosMessage::SlotList(
-                crate::widgets::SlotListPageMessage::ActivateCenter,
-            ))),
             View::Settings => Task::done(Message::Settings(views::SettingsMessage::EditActivate)),
+            other => self.view_page(other).map_or_else(Task::none, |p| {
+                Task::done(p.slot_list_message(crate::widgets::SlotListPageMessage::ActivateCenter))
+            }),
         }
     }
 }

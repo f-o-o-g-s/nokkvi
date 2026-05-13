@@ -264,4 +264,8 @@ impl super::ViewPage for PlaylistsPage {
             ),
         )))
     }
+
+    fn slot_list_message(&self, msg: crate::widgets::SlotListPageMessage) -> Message {
+        Message::Playlists(PlaylistsMessage::SlotList(msg))
+    }
 }
