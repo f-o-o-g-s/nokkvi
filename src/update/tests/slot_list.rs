@@ -146,7 +146,9 @@ fn albums_slot_list_message_wraps_in_albums_variant() {
         .slot_list_message(SlotListPageMessage::NavigateUp);
     assert!(matches!(
         msg,
-        Message::Albums(views::AlbumsMessage::SlotList(SlotListPageMessage::NavigateUp))
+        Message::Albums(views::AlbumsMessage::SlotList(
+            SlotListPageMessage::NavigateUp
+        ))
     ));
 }
 
@@ -158,7 +160,9 @@ fn artists_slot_list_message_wraps_in_artists_variant() {
         .slot_list_message(SlotListPageMessage::NavigateDown);
     assert!(matches!(
         msg,
-        Message::Artists(views::ArtistsMessage::SlotList(SlotListPageMessage::NavigateDown))
+        Message::Artists(views::ArtistsMessage::SlotList(
+            SlotListPageMessage::NavigateDown
+        ))
     ));
 }
 
@@ -170,7 +174,9 @@ fn songs_slot_list_message_wraps_in_songs_variant() {
         .slot_list_message(SlotListPageMessage::ActivateCenter);
     assert!(matches!(
         msg,
-        Message::Songs(views::SongsMessage::SlotList(SlotListPageMessage::ActivateCenter))
+        Message::Songs(views::SongsMessage::SlotList(
+            SlotListPageMessage::ActivateCenter
+        ))
     ));
 }
 
@@ -182,7 +188,9 @@ fn genres_slot_list_message_wraps_in_genres_variant() {
         .slot_list_message(SlotListPageMessage::NavigateUp);
     assert!(matches!(
         msg,
-        Message::Genres(views::GenresMessage::SlotList(SlotListPageMessage::NavigateUp))
+        Message::Genres(views::GenresMessage::SlotList(
+            SlotListPageMessage::NavigateUp
+        ))
     ));
 }
 
@@ -194,7 +202,9 @@ fn playlists_slot_list_message_wraps_in_playlists_variant() {
         .slot_list_message(SlotListPageMessage::NavigateDown);
     assert!(matches!(
         msg,
-        Message::Playlists(views::PlaylistsMessage::SlotList(SlotListPageMessage::NavigateDown))
+        Message::Playlists(views::PlaylistsMessage::SlotList(
+            SlotListPageMessage::NavigateDown
+        ))
     ));
 }
 
@@ -206,7 +216,9 @@ fn queue_slot_list_message_wraps_in_queue_variant() {
         .slot_list_message(SlotListPageMessage::ActivateCenter);
     assert!(matches!(
         msg,
-        Message::Queue(views::QueueMessage::SlotList(SlotListPageMessage::ActivateCenter))
+        Message::Queue(views::QueueMessage::SlotList(
+            SlotListPageMessage::ActivateCenter
+        ))
     ));
 }
 
@@ -218,7 +230,9 @@ fn radios_slot_list_message_wraps_in_radios_variant() {
         .slot_list_message(SlotListPageMessage::NavigateUp);
     assert!(matches!(
         msg,
-        Message::Radios(views::RadiosMessage::SlotList(SlotListPageMessage::NavigateUp))
+        Message::Radios(views::RadiosMessage::SlotList(
+            SlotListPageMessage::NavigateUp
+        ))
     ));
 }
 
@@ -230,7 +244,9 @@ fn similar_slot_list_message_wraps_in_similar_variant() {
         .slot_list_message(SlotListPageMessage::NavigateDown);
     assert!(matches!(
         msg,
-        Message::Similar(views::SimilarMessage::SlotList(SlotListPageMessage::NavigateDown))
+        Message::Similar(views::SimilarMessage::SlotList(
+            SlotListPageMessage::NavigateDown
+        ))
     ));
 }
 

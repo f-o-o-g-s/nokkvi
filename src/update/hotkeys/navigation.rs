@@ -254,16 +254,13 @@ impl Nokkvi {
             if let Some(page) = self.current_view_page_mut() {
                 page.common_mut().clear_multi_selection();
             }
+            // Pre-mutation phase: each view computes its own total / runs
+            // its expansion-aware offset adjustment. This stays per-view —
+            // not addressed by `slot_list_message`.
             match self.current_view {
                 View::Queue => {
                     let total = self.filter_queue_songs().len();
                     self.queue_page.common.handle_set_offset(i, total);
-                    Task::done(Message::Queue(views::QueueMessage::SlotList(
-                        crate::widgets::SlotListPageMessage::SetOffset(
-                            i,
-                            iced::keyboard::Modifiers::default(),
-                        ),
-                    )))
                 }
                 View::Albums => {
                     self.albums_page.expansion.handle_set_offset(
@@ -271,12 +268,6 @@ impl Nokkvi {
                         &self.library.albums,
                         &mut self.albums_page.common,
                     );
-                    Task::done(Message::Albums(views::AlbumsMessage::SlotList(
-                        crate::widgets::SlotListPageMessage::SetOffset(
-                            i,
-                            iced::keyboard::Modifiers::default(),
-                        ),
-                    )))
                 }
                 View::Artists => {
                     self.artists_page.expansion.handle_set_offset(
@@ -284,22 +275,10 @@ impl Nokkvi {
                         &self.library.artists,
                         &mut self.artists_page.common,
                     );
-                    Task::done(Message::Artists(views::ArtistsMessage::SlotList(
-                        crate::widgets::SlotListPageMessage::SetOffset(
-                            i,
-                            iced::keyboard::Modifiers::default(),
-                        ),
-                    )))
                 }
                 View::Songs => {
                     let total = self.library.songs.len();
                     self.songs_page.common.handle_set_offset(i, total);
-                    Task::done(Message::Songs(views::SongsMessage::SlotList(
-                        crate::widgets::SlotListPageMessage::SetOffset(
-                            i,
-                            iced::keyboard::Modifiers::default(),
-                        ),
-                    )))
                 }
                 View::Genres => {
                     self.genres_page.expansion.handle_set_offset(
@@ -307,25 +286,24 @@ impl Nokkvi {
                         &self.library.genres,
                         &mut self.genres_page.common,
                     );
-                    Task::done(Message::Genres(views::GenresMessage::SlotList(
-                        crate::widgets::SlotListPageMessage::SetOffset(
-                            i,
-                            iced::keyboard::Modifiers::default(),
-                        ),
-                    )))
                 }
                 View::Radios => {
                     let total = self.library.radio_stations.len();
                     self.radios_page.common.handle_set_offset(i, total);
-                    Task::done(Message::Radios(views::RadiosMessage::SlotList(
-                        crate::widgets::SlotListPageMessage::SetOffset(
+                }
+                View::Playlists | View::Settings => return Task::none(),
+            }
+            // Dispatch phase: uniform via `slot_list_message` so the
+            // per-view handler's artwork-loading code still runs.
+            self.view_page(self.current_view)
+                .map_or_else(Task::none, |p| {
+                    Task::done(
+                        p.slot_list_message(crate::widgets::SlotListPageMessage::SetOffset(
                             i,
                             iced::keyboard::Modifiers::default(),
-                        ),
-                    )))
-                }
-                View::Playlists | View::Settings => Task::none(),
-            }
+                        )),
+                    )
+                })
         } else {
             // Item not in loaded buffer — start a center-only find chain that
             // clears the active search, restarts pagination from offset 0,
