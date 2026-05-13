@@ -7,7 +7,7 @@
 
 use iced::{
     Alignment, Element, Length,
-    widget::{Row, button, container},
+    widget::{Row, container},
 };
 use nokkvi_data::utils::formatters;
 
@@ -445,31 +445,12 @@ impl SongsPage {
                     .style(move |_theme| style.to_container_style())
                     .width(Length::Fill);
 
-                let slot_button = button(clickable)
-                    .on_press(if ctx.modifiers.control() || ctx.modifiers.shift() {
-                        SongsMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
-                            ctx.item_index,
-                            ctx.modifiers,
-                        ))
-                    } else if ctx.is_center {
-                        SongsMessage::SlotList(crate::widgets::SlotListPageMessage::ActivateCenter)
-                    } else if data.stable_viewport {
-                        SongsMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
-                            ctx.item_index,
-                            ctx.modifiers,
-                        ))
-                    } else {
-                        SongsMessage::SlotList(crate::widgets::SlotListPageMessage::ClickPlay(
-                            ctx.item_index,
-                        ))
-                    })
-                    .style(|_theme, _status| button::Style {
-                        background: None,
-                        border: iced::Border::default(),
-                        ..Default::default()
-                    })
-                    .padding(0)
-                    .width(Length::Fill);
+                let slot_button = crate::widgets::slot_list::primary_slot_button(
+                    clickable,
+                    &ctx,
+                    data.stable_viewport,
+                    SongsMessage::SlotList,
+                );
 
                 use crate::widgets::context_menu::{song_entries_with_folder, wrap_library_row};
                 let cm_row = wrap_library_row(

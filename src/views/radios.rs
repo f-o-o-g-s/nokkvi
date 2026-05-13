@@ -3,10 +3,7 @@
 //! Flat slot list for internet radio stations. No expansion, no artwork, no star/rating.
 //! Activating a station transitions to ActivePlayback::Radio and plays the stream URL.
 
-use iced::{
-    Alignment, Element, Length, Task,
-    widget::{button, container},
-};
+use iced::{Alignment, Element, Length, Task, widget::container};
 use nokkvi_data::types::radio_station::RadioStation;
 
 use crate::{
@@ -348,29 +345,12 @@ impl RadiosPage {
                     .style(move |_theme| style.to_container_style())
                     .width(Length::Fill);
 
-                let slot_button = button(clickable)
-                    .on_press(if ctx.modifiers.control() || ctx.modifiers.shift() {
-                        RadiosMessage::SlotList(SlotListPageMessage::SetOffset(
-                            ctx.item_index,
-                            ctx.modifiers,
-                        ))
-                    } else if ctx.is_center {
-                        RadiosMessage::SlotList(SlotListPageMessage::ActivateCenter)
-                    } else if data.stable_viewport {
-                        RadiosMessage::SlotList(SlotListPageMessage::SetOffset(
-                            ctx.item_index,
-                            ctx.modifiers,
-                        ))
-                    } else {
-                        RadiosMessage::SlotList(SlotListPageMessage::ClickPlay(ctx.item_index))
-                    })
-                    .style(|_theme, _status| button::Style {
-                        background: None,
-                        border: iced::Border::default(),
-                        ..Default::default()
-                    })
-                    .padding(0)
-                    .width(Length::Fill);
+                let slot_button = crate::widgets::slot_list::primary_slot_button(
+                    clickable,
+                    &ctx,
+                    data.stable_viewport,
+                    RadiosMessage::SlotList,
+                );
 
                 let cm_id = crate::app_message::ContextMenuId::RadioRow(ctx.item_index);
                 let (cm_open, cm_position) =

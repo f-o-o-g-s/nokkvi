@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use iced::{
     Alignment, Element, Length,
-    widget::{Row, button, container, image},
+    widget::{Row, container, image},
 };
 use nokkvi_data::{
     backend::{albums::AlbumUIViewData, songs::SongUIViewData},
@@ -588,31 +588,12 @@ impl AlbumsPage {
             .style(move |_theme| style.to_container_style())
             .width(Length::Fill);
 
-        let slot_button = button(clickable)
-            .on_press(if ctx.modifiers.control() || ctx.modifiers.shift() {
-                AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
-                    ctx.item_index,
-                    ctx.modifiers,
-                ))
-            } else if ctx.is_center {
-                AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::ActivateCenter)
-            } else if stable_viewport {
-                AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
-                    ctx.item_index,
-                    ctx.modifiers,
-                ))
-            } else {
-                AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::ClickPlay(
-                    ctx.item_index,
-                ))
-            })
-            .style(|_theme, _status| button::Style {
-                background: None,
-                border: iced::Border::default(),
-                ..Default::default()
-            })
-            .padding(0)
-            .width(Length::Fill);
+        let slot_button = crate::widgets::slot_list::primary_slot_button(
+            clickable,
+            ctx,
+            stable_viewport,
+            AlbumsMessage::SlotList,
+        );
 
         use crate::widgets::context_menu::{library_entries_with_folder, wrap_library_row};
         wrap_library_row(

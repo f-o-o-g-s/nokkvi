@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use iced::{
     Alignment, Element, Length,
-    widget::{button, container, image},
+    widget::{container, image},
 };
 use nokkvi_data::{
     backend::{playlists::PlaylistUIViewData, songs::SongUIViewData},
@@ -611,31 +611,12 @@ impl PlaylistsPage {
             .style(move |_theme| style.to_container_style())
             .width(Length::Fill);
 
-        let slot_button = button(clickable)
-            .on_press(if ctx.modifiers.control() || ctx.modifiers.shift() {
-                PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
-                    ctx.item_index,
-                    ctx.modifiers,
-                ))
-            } else if ctx.is_center {
-                PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::ActivateCenter)
-            } else if stable_viewport {
-                PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
-                    ctx.item_index,
-                    ctx.modifiers,
-                ))
-            } else {
-                PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::ClickPlay(
-                    ctx.item_index,
-                ))
-            })
-            .style(|_theme, _status| button::Style {
-                background: None,
-                border: iced::Border::default(),
-                ..Default::default()
-            })
-            .padding(0)
-            .width(Length::Fill);
+        let slot_button = crate::widgets::slot_list::primary_slot_button(
+            clickable,
+            ctx,
+            stable_viewport,
+            PlaylistsMessage::SlotList,
+        );
 
         use crate::widgets::context_menu::{context_menu, open_state_for};
         let item_idx = ctx.item_index;

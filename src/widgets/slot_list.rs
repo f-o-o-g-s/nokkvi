@@ -1388,10 +1388,6 @@ pub(crate) fn slot_list_background_container<'a, Message: 'a>(
 /// the unit tests in this module, then composed by [`primary_slot_button`]
 /// to build the actual `on_press` payload. Similar uses the variant in
 /// [`highlight_only_slot_click_message`].
-// `dead_code` allows the function to exist before commit 2 wires it into
-// the 7 parent slot-list views; cleared automatically as soon as a caller
-// lands.
-#[allow(dead_code)]
 pub(crate) fn primary_slot_click_message(
     item_index: usize,
     is_center: bool,
@@ -1435,9 +1431,6 @@ pub(crate) fn highlight_only_slot_click_message(
 /// `wrap` lifts a `SlotListPageMessage` into the caller's outer message
 /// type, typically `AlbumsMessage::SlotList` / `QueueMessage::SlotList` /
 /// etc.
-// `dead_code` allows the helper to exist before commit 2 migrates the
-// 7 parent slot-button call sites.
-#[allow(dead_code)]
 pub(crate) fn primary_slot_button<'a, M: Clone + 'a>(
     content: impl Into<Element<'a, M>>,
     ctx: &SlotListRowContext,
@@ -1472,10 +1465,6 @@ pub(crate) fn highlight_only_slot_button<'a, M: Clone + 'a>(
 // transparent background, no border, zero padding, fills width. Splitting
 // the visual chrome out of the dispatch helpers keeps one source of truth
 // so a future style tweak lands in both ladders.
-//
-// `dead_code` allows the helper to exist before commits 2/3 migrate the
-// public wrappers' call sites.
-#[allow(dead_code)]
 fn make_slot_button<'a, M: Clone + 'a>(
     content: impl Into<Element<'a, M>>,
     on_press: M,
