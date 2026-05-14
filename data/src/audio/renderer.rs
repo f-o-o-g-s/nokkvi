@@ -431,6 +431,30 @@ impl AudioRenderer {
             self.primary_stream.is_some(),
         );
 
+        // Always reset the completion + EOF flags BEFORE the early-return.
+        //
+        // `load_prepared_track`'s format-change path (`force_reload=true`)
+        // calls us while `self.playing=true` is still set from the previous
+        // track — so without these unconditional resets, the previous track's
+        // `finished_called=true` (set by the render_tick gate when its decoder
+        // hit EOF) leaks into the new track. The new track's gate condition
+        // `!self.finished_called && eof && buf_empty` is then permanently
+        // blocked when the new track's decoder EOFs, `on_renderer_finished`
+        // is never called, and playback silently halts.
+        //
+        // `start_decoding_loop()` independently resets `decoder_eof`, but it
+        // can't reset `finished_called` (cross-module concern). So the leak
+        // was specifically of `finished_called`. Resetting both here for
+        // symmetry — they belong together as "new track lifecycle starts".
+        //
+        // Reproduces with: stereo → mono → stereo natural auto-advance, no
+        // `engine.seek()` between tracks (since `renderer.seek` also resets
+        // `finished_called` and accidentally masks the leak). Discovered via
+        // an overnight burn-in on 2026-05-14 where playback halted at queue
+        // index 2870/13473 on a 1ch → 2ch transition after ~5 minutes.
+        self.finished_called = false;
+        self.decoder_eof.store(false, Ordering::Release);
+
         if self.playing && !self.paused {
             trace!("▶ Renderer::start() already playing, returning early");
             return;
@@ -438,11 +462,6 @@ impl AudioRenderer {
 
         self.playing = true;
         self.paused = false;
-        self.finished_called = false;
-        // CRITICAL: Reset decoder_eof HERE, not just in start_decoding_loop().
-        // Without this, the render thread can see stale decoder_eof=true between
-        // renderer.start() and start_decoding_loop(), triggering false track completion.
-        self.decoder_eof.store(false, Ordering::Release);
 
         // Ensure streams are unpaused (the `paused` atomic on each StreamHandle
         // must be cleared — otherwise the source returns silence).
