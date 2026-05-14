@@ -11,6 +11,9 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - Queue counter, displayed track list, and current-track highlight now refresh immediately after removing songs from the queue (right-click, multi-select delete, Ctrl+D) or dragging songs to reorder within the queue — previously these stayed on stale values until the next queue refresh fired. Closes the parallel projection race to the v0.3.16 fix that covered append / "play next" splice.
+- Local-storage write volume during typical browsing dropped to roughly zero. The JWT-refresh interceptor was firing a burst of ~130 redb disk writes per Navidrome library-refresh (SSE `refreshResource`) event because every concurrent paged-loader response took the same check-then-write path. The check is now folded into the same write-lock critical section as the in-memory swap, and persistence is gated by whether the stored token is actually near expiry (decoded from its `exp` claim) rather than a wall-clock throttle — steady-state browsing produces zero writes.
+- Re-opening nokkvi the day after closing it no longer prompts for a fresh login on default Navidrome installs (48-hour `SessionTimeout`). The token-persistence margin was a flat 10% of the new token's lifetime, leaving as little as ~5 hours of stored grace at close time; it's now clamped to at least 24 hours so a typical close-then-reopen-tomorrow flow always has a valid stored token to resume from.
+- Playback no longer silently halts when auto-advancing past a track whose successor has a different channel count (e.g. mono → stereo). A stale completion flag from the previous track's EOF was leaking past the start of the new track and permanently blocking its own completion gate, so the engine would play the new track in full and then never advance to the one after. Surfaced by an overnight burn-in where a 13,473-song queue stopped at index 2870.
 
 ### Removed
 
