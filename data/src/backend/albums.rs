@@ -8,11 +8,11 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use tokio::sync::{OnceCell, Semaphore};
+use tokio::sync::Semaphore;
 use tracing::trace;
 
 use crate::{
-    backend::auth::AuthGateway,
+    backend::{auth::AuthGateway, lazy_authed_service::LazyAuthedService},
     services::api::albums::AlbumsApiService,
     types::{album::Album, reactive::ReactiveInt},
 };
@@ -214,8 +214,9 @@ const ARTWORK_CONCURRENCY_LIMIT: usize = 16;
 
 #[derive(Clone)]
 pub struct AlbumsService {
-    // API service (lazily initialized on first use after login)
-    albums_service: Arc<OnceCell<AlbumsApiService>>,
+    /// Lazily-initialized API service paired with its shared `AuthGateway`.
+    /// Built on first `get_service()` call via `AlbumsApiService::new`.
+    inner: LazyAuthedService<AlbumsApiService>,
 
     // Reactive properties
     pub total_count: ReactiveInt,
@@ -229,9 +230,6 @@ pub struct AlbumsService {
     /// Per-process gate that bounds concurrent in-flight artwork fetches —
     /// see [`ARTWORK_CONCURRENCY_LIMIT`].
     artwork_semaphore: Arc<Semaphore>,
-
-    // Dependencies
-    auth_gateway: Arc<OnceCell<AuthGateway>>,
 }
 
 impl Default for AlbumsService {
@@ -243,11 +241,10 @@ impl Default for AlbumsService {
 impl AlbumsService {
     pub fn new() -> Self {
         Self {
-            albums_service: Arc::new(OnceCell::new()),
+            inner: LazyAuthedService::new(AlbumsApiService::new),
             total_count: ReactiveInt::new(0),
             artwork_client: Arc::new(reqwest::Client::new()),
             artwork_semaphore: Arc::new(Semaphore::new(ARTWORK_CONCURRENCY_LIMIT)),
-            auth_gateway: Arc::new(OnceCell::new()),
         }
     }
 
@@ -385,27 +382,14 @@ impl AlbumsService {
     ///
     /// Stores the `AuthGateway` reference. The inner `AlbumsApiService` is
     /// lazily initialized on first API call via [`get_service()`].
-    pub fn with_auth(self, auth: AuthGateway) -> Self {
-        let _ = self.auth_gateway.set(auth);
+    pub fn with_auth(mut self, auth: AuthGateway) -> Self {
+        self.inner = self.inner.with_auth(auth);
         self
     }
 
     /// Get the initialized API service, lazily creating it on first call.
-    ///
-    /// Uses `OnceCell::get_or_try_init` for atomic init-once semantics
-    /// and lock-free reads on subsequent calls.
     async fn get_service(&self) -> Result<&AlbumsApiService> {
-        self.albums_service
-            .get_or_try_init(|| async {
-                let auth = self.auth_gateway.get().ok_or_else(|| {
-                    anyhow::anyhow!("AlbumsService not initialized. Please authenticate first.")
-                })?;
-                let client = auth.get_client().await.ok_or_else(|| {
-                    anyhow::anyhow!("AlbumsService not initialized. Please authenticate first.")
-                })?;
-                Ok(AlbumsApiService::new(client))
-            })
-            .await
+        self.inner.get().await
     }
 
     /// Load albums and return raw Album structs (first page only).
@@ -477,19 +461,15 @@ impl AlbumsService {
 
     /// Get server configuration for artwork URLs
     pub async fn get_server_config(&self) -> (String, String) {
-        if let Some(auth) = self.auth_gateway.get() {
-            auth.server_config().await
-        } else {
-            (String::new(), String::new())
-        }
+        self.inner.server_config().await
     }
 
     /// Load all songs for an album
     /// Returns Vec<Song> for adding to queue
     pub async fn load_album_songs(&self, album_id: &str) -> Result<Vec<crate::types::song::Song>> {
         let auth = self
-            .auth_gateway
-            .get()
+            .inner
+            .auth()
             .ok_or_else(|| anyhow::anyhow!("Not authenticated"))?;
 
         let client = auth

@@ -2,14 +2,13 @@
 //!
 //! Manages song data loading and transformation for the Songs view.
 
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use anyhow::Result;
-use tokio::sync::OnceCell;
-use tracing::debug;
+use tracing::trace;
 
 use crate::{
-    backend::auth::AuthGateway,
+    backend::{auth::AuthGateway, lazy_authed_service::LazyAuthedService},
     services::api::songs::SongsApiService,
     types::{reactive::ReactiveInt, song::Song},
 };
@@ -183,14 +182,12 @@ impl From<SongUIViewData> for Song {
 
 #[derive(Clone)]
 pub struct SongsService {
-    // Service layer (lazily initialized on first use after login)
-    songs_service: Arc<OnceCell<SongsApiService>>,
+    /// Lazily-initialized API service paired with its shared `AuthGateway`.
+    /// Built on first `get_service()` call via `SongsApiService::new`.
+    inner: LazyAuthedService<SongsApiService>,
 
     // Reactive properties
     pub total_count: ReactiveInt,
-
-    // Dependencies
-    auth_gateway: Arc<OnceCell<AuthGateway>>,
 }
 
 impl Default for SongsService {
@@ -202,31 +199,20 @@ impl Default for SongsService {
 impl SongsService {
     pub fn new() -> Self {
         Self {
-            songs_service: Arc::new(OnceCell::new()),
+            inner: LazyAuthedService::new(SongsApiService::new),
             total_count: ReactiveInt::new(0),
-            auth_gateway: Arc::new(OnceCell::new()),
         }
     }
 
     /// Associate an authentication gateway.
-    pub fn with_auth(self, auth: AuthGateway) -> Self {
-        let _ = self.auth_gateway.set(auth);
+    pub fn with_auth(mut self, auth: AuthGateway) -> Self {
+        self.inner = self.inner.with_auth(auth);
         self
     }
 
     /// Get the initialized API service, lazily creating it on first call.
     async fn get_service(&self) -> Result<&SongsApiService> {
-        self.songs_service
-            .get_or_try_init(|| async {
-                let auth = self.auth_gateway.get().ok_or_else(|| {
-                    anyhow::anyhow!("SongsService not initialized. Please authenticate first.")
-                })?;
-                let client = auth.get_client().await.ok_or_else(|| {
-                    anyhow::anyhow!("SongsService not initialized. Please authenticate first.")
-                })?;
-                Ok(SongsApiService::new(client))
-            })
-            .await
+        self.inner.get().await
     }
 
     /// Load songs and return raw Song structs (first page only).
@@ -273,7 +259,7 @@ impl SongsService {
         {
             Ok((songs, total_count)) => {
                 self.total_count.set(total_count as i32);
-                debug!(
+                trace!(
                     " SongsService.load_raw_songs_page: offset={}, limit={}, got={}, total={}",
                     offset,
                     limit,
@@ -293,11 +279,7 @@ impl SongsService {
 
     /// Get server configuration for artwork URLs
     pub async fn get_server_config(&self) -> (String, String) {
-        if let Some(auth) = self.auth_gateway.get() {
-            auth.server_config().await
-        } else {
-            (String::new(), String::new())
-        }
+        self.inner.server_config().await
     }
 
     /// Get extra column data based on current sort mode. Rating, MostPlayed,

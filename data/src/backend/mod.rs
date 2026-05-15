@@ -9,6 +9,7 @@ pub mod app_service;
 pub mod artists;
 pub mod auth;
 pub mod genres;
+pub mod lazy_authed_service;
 pub mod library_orchestrator;
 pub mod playback_controller;
 pub mod playlists;

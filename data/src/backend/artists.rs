@@ -3,14 +3,11 @@
 //! `ArtistsService` loads artists and their albums/songs via the Navidrome API,
 //! projecting `Artist` models into `ArtistUIViewData` for the view layer.
 
-use std::sync::Arc;
-
 use anyhow::Result;
-use tokio::sync::OnceCell;
 use tracing::trace;
 
 use crate::{
-    backend::auth::AuthGateway,
+    backend::{auth::AuthGateway, lazy_authed_service::LazyAuthedService},
     services::api::artists::ArtistsApiService,
     types::{album::Album, artist::Artist, reactive::ReactiveInt},
 };
@@ -103,14 +100,12 @@ impl crate::utils::search::Searchable for ArtistUIViewData {
 
 #[derive(Clone)]
 pub struct ArtistsService {
-    // API service (lazily initialized on first use after login)
-    artists_service: Arc<OnceCell<ArtistsApiService>>,
+    /// Lazily-initialized API service paired with its shared `AuthGateway`.
+    /// Built on first `get_service()` call via `ArtistsApiService::new`.
+    inner: LazyAuthedService<ArtistsApiService>,
 
     // Reactive properties
     pub total_count: ReactiveInt,
-
-    // Dependencies
-    auth_gateway: Arc<OnceCell<AuthGateway>>,
 }
 
 impl Default for ArtistsService {
@@ -122,31 +117,20 @@ impl Default for ArtistsService {
 impl ArtistsService {
     pub fn new() -> Self {
         Self {
-            artists_service: Arc::new(OnceCell::new()),
+            inner: LazyAuthedService::new(ArtistsApiService::new),
             total_count: ReactiveInt::new(0),
-            auth_gateway: Arc::new(OnceCell::new()),
         }
     }
 
     /// Associate an authentication gateway.
-    pub fn with_auth(self, auth: AuthGateway) -> Self {
-        let _ = self.auth_gateway.set(auth);
+    pub fn with_auth(mut self, auth: AuthGateway) -> Self {
+        self.inner = self.inner.with_auth(auth);
         self
     }
 
     /// Get the initialized API service, lazily creating it on first call.
     async fn get_service(&self) -> Result<&ArtistsApiService> {
-        self.artists_service
-            .get_or_try_init(|| async {
-                let auth = self.auth_gateway.get().ok_or_else(|| {
-                    anyhow::anyhow!("ArtistsService not initialized. Please authenticate first.")
-                })?;
-                let client = auth.get_client().await.ok_or_else(|| {
-                    anyhow::anyhow!("ArtistsService not initialized. Please authenticate first.")
-                })?;
-                Ok(ArtistsApiService::new(client))
-            })
-            .await
+        self.inner.get().await
     }
 
     /// Load artists and return raw Artist structs (first page only).
@@ -224,11 +208,7 @@ impl ArtistsService {
 
     /// Get server configuration for artwork URLs
     pub async fn get_server_config(&self) -> (String, String) {
-        if let Some(auth) = self.auth_gateway.get() {
-            auth.server_config().await
-        } else {
-            (String::new(), String::new())
-        }
+        self.inner.server_config().await
     }
 
     /// Load albums for a specific artist
@@ -247,8 +227,8 @@ impl ArtistsService {
 
         // Get auth for songs service
         let auth = self
-            .auth_gateway
-            .get()
+            .inner
+            .auth()
             .ok_or_else(|| anyhow::anyhow!("Not authenticated"))?;
 
         let client = auth
