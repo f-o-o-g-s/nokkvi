@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use anyhow::{Context, Result};
 use tracing::debug;
 
@@ -12,15 +10,14 @@ use crate::{
     types::{album::Album, artist::Artist},
 };
 
+#[derive(Clone)]
 pub struct ArtistsApiService {
-    client: Arc<ApiClient>,
+    client: ApiClient,
 }
 
 impl ArtistsApiService {
-    pub fn new(client: ApiClient, _server_url: String, _subsonic_credential: String) -> Self {
-        Self {
-            client: Arc::new(client),
-        }
+    pub fn new(client: ApiClient) -> Self {
+        Self { client }
     }
 
     /// Load artists from the API
@@ -110,7 +107,6 @@ impl ArtistsApiService {
     /// Load albums for a specific artist
     pub async fn load_artist_albums(&self, artist_id: &str) -> Result<Vec<Album>> {
         // Build query parameters - filter by artist_id
-        let _filter = format!("{{\"artist_id\":\"{artist_id}\"}}");
         let params = vec![
             ("_sort", "max_year"),
             ("_order", "DESC"),
@@ -137,13 +133,5 @@ impl ArtistsApiService {
         );
 
         Ok(albums)
-    }
-}
-
-impl Clone for ArtistsApiService {
-    fn clone(&self) -> Self {
-        Self {
-            client: self.client.clone(),
-        }
     }
 }

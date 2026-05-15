@@ -3,8 +3,6 @@
 //! Provides algorithmic song recommendations via Navidrome's Subsonic-compatible API.
 //! Requires Last.fm or ListenBrainz to be configured on the server.
 
-use std::sync::Arc;
-
 use anyhow::{Context, Result};
 use tracing::debug;
 
@@ -49,21 +47,18 @@ struct TopSongs {
     song: Option<Vec<Song>>,
 }
 
+#[derive(Clone)]
 pub struct SimilarApiService {
-    client: Arc<ApiClient>,
+    client: ApiClient,
     server_url: String,
     subsonic_credential: String,
 }
 
 impl SimilarApiService {
     /// Create with a pre-authenticated ApiClient.
-    pub fn new_with_client(
-        client: ApiClient,
-        server_url: String,
-        subsonic_credential: String,
-    ) -> Self {
+    pub fn new(client: ApiClient, server_url: String, subsonic_credential: String) -> Self {
         Self {
-            client: Arc::new(client),
+            client,
             server_url,
             subsonic_credential,
         }
@@ -140,16 +135,6 @@ impl SimilarApiService {
         );
 
         Ok(songs)
-    }
-}
-
-impl Clone for SimilarApiService {
-    fn clone(&self) -> Self {
-        Self {
-            client: self.client.clone(),
-            server_url: self.server_url.clone(),
-            subsonic_credential: self.subsonic_credential.clone(),
-        }
     }
 }
 

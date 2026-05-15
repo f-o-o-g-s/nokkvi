@@ -75,9 +75,7 @@ impl<'a> LibraryOrchestrator<'a> {
             .get_client()
             .await
             .ok_or_else(|| anyhow::anyhow!("Not authenticated"))?;
-        let server_url = self.auth.get_server_url().await;
-        let subsonic_credential = self.auth.get_subsonic_credential().await;
-        let songs_api = SongsApiService::new(client, server_url, subsonic_credential);
+        let songs_api = SongsApiService::new(client);
         let (songs, _) = songs_api.load_songs_by_genre(genre_name).await?;
         Ok(songs)
     }
@@ -92,8 +90,7 @@ impl<'a> LibraryOrchestrator<'a> {
             .ok_or_else(|| anyhow::anyhow!("Not authenticated"))?;
         let server_url = self.auth.get_server_url().await;
         let subsonic_credential = self.auth.get_subsonic_credential().await;
-        let playlists_api =
-            PlaylistsApiService::new_with_client(client, server_url, subsonic_credential);
+        let playlists_api = PlaylistsApiService::new(client, server_url, subsonic_credential);
         playlists_api.load_playlist_songs(playlist_id).await
     }
 

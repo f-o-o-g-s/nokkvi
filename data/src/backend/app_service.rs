@@ -650,10 +650,26 @@ impl AppService {
     }
 }
 
-macro_rules! api_factory {
+macro_rules! native_api_factory {
     ( $( ($method:ident, $ty:path) ),+ $(,)? ) => {
         $(
-            /// Construct an authenticated API service. Use `.await?` in `shell_task` closures.
+            /// Construct an authenticated Native-API service. Use `.await?` in `shell_task` closures.
+            pub async fn $method(&self) -> anyhow::Result<$ty> {
+                let client = self
+                    .auth_gateway
+                    .get_client()
+                    .await
+                    .ok_or_else(|| anyhow::anyhow!("Not authenticated"))?;
+                Ok(<$ty>::new(client))
+            }
+        )+
+    };
+}
+
+macro_rules! subsonic_api_factory {
+    ( $( ($method:ident, $ty:path) ),+ $(,)? ) => {
+        $(
+            /// Construct an authenticated Subsonic-API service. Use `.await?` in `shell_task` closures.
             pub async fn $method(&self) -> anyhow::Result<$ty> {
                 let client = self
                     .auth_gateway
@@ -662,11 +678,7 @@ macro_rules! api_factory {
                     .ok_or_else(|| anyhow::anyhow!("Not authenticated"))?;
                 let server_url = self.auth_gateway.get_server_url().await;
                 let subsonic_credential = self.auth_gateway.get_subsonic_credential().await;
-                Ok(<$ty>::new_with_client(
-                    client,
-                    server_url,
-                    subsonic_credential,
-                ))
+                Ok(<$ty>::new(client, server_url, subsonic_credential))
             }
         )+
     };
@@ -674,8 +686,9 @@ macro_rules! api_factory {
 
 // === API factory methods ===
 impl AppService {
-    api_factory!(
-        (songs_api, crate::services::api::songs::SongsApiService),
+    native_api_factory!((songs_api, crate::services::api::songs::SongsApiService),);
+
+    subsonic_api_factory!(
         (genres_api, crate::services::api::genres::GenresApiService),
         (
             playlists_api,

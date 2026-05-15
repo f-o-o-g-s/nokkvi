@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use anyhow::{Context, Result};
 use tracing::{debug, trace};
 
@@ -12,24 +10,14 @@ use crate::{
     types::album::Album,
 };
 
+#[derive(Clone)]
 pub struct AlbumsApiService {
-    client: Arc<ApiClient>,
-    server_url: String,
-    subsonic_credential: String,
+    client: ApiClient,
 }
 
 impl AlbumsApiService {
-    pub fn new(client: ApiClient, server_url: String, subsonic_credential: String) -> Self {
-        Self {
-            client: Arc::new(client),
-            server_url,
-            subsonic_credential,
-        }
-    }
-
-    /// Get the HTTP client for making raw requests (e.g., image downloads)
-    pub fn get_http_client(&self) -> Arc<reqwest::Client> {
-        self.client.http_client()
+    pub fn new(client: ApiClient) -> Self {
+        Self { client }
     }
 
     /// Load albums from the API
@@ -114,15 +102,5 @@ impl AlbumsApiService {
         );
 
         Ok((albums, total_count))
-    }
-}
-
-impl Clone for AlbumsApiService {
-    fn clone(&self) -> Self {
-        Self {
-            client: self.client.clone(),
-            server_url: self.server_url.clone(),
-            subsonic_credential: self.subsonic_credential.clone(),
-        }
     }
 }

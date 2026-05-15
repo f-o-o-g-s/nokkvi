@@ -144,13 +144,7 @@ impl ArtistsService {
                 let client = auth.get_client().await.ok_or_else(|| {
                     anyhow::anyhow!("ArtistsService not initialized. Please authenticate first.")
                 })?;
-                let server_url = auth.get_server_url().await;
-                let subsonic_credential = auth.get_subsonic_credential().await;
-                Ok(ArtistsApiService::new(
-                    client,
-                    server_url,
-                    subsonic_credential,
-                ))
+                Ok(ArtistsApiService::new(client))
             })
             .await
     }
@@ -264,14 +258,7 @@ impl ArtistsService {
             .await
             .ok_or_else(|| anyhow::anyhow!("No API client"))?;
 
-        let server_url = auth.get_server_url().await;
-        let subsonic_credential = auth.get_subsonic_credential().await;
-
-        let songs_service = crate::services::api::songs::SongsApiService::new(
-            client,
-            server_url,
-            subsonic_credential,
-        );
+        let songs_service = crate::services::api::songs::SongsApiService::new(client);
 
         // Load songs from all albums
         let mut all_songs = Vec::new();

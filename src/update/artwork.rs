@@ -21,7 +21,7 @@ async fn load_genre_album_ids(
     subsonic_credential: String,
     entity_id: String,
 ) -> Vec<String> {
-    let service = nokkvi_data::services::api::genres::GenresApiService::new_with_client(
+    let service = nokkvi_data::services::api::genres::GenresApiService::new(
         client,
         server_url,
         subsonic_credential,
@@ -40,7 +40,7 @@ async fn load_playlist_album_ids(
     subsonic_credential: String,
     entity_id: String,
 ) -> Vec<String> {
-    let service = nokkvi_data::services::api::playlists::PlaylistsApiService::new_with_client(
+    let service = nokkvi_data::services::api::playlists::PlaylistsApiService::new(
         client,
         server_url,
         subsonic_credential,

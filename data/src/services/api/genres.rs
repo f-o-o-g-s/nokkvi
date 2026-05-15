@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use anyhow::{Context, Result};
 use tracing::{debug, warn};
@@ -38,21 +38,18 @@ struct SubsonicGenre {
     album_count: Option<u32>,
 }
 
+#[derive(Clone)]
 pub struct GenresApiService {
-    client: Arc<ApiClient>,
+    client: ApiClient,
     server_url: String,
     subsonic_credential: String,
 }
 
 impl GenresApiService {
-    /// Create with a pre-authenticated ApiClient
-    pub fn new_with_client(
-        client: ApiClient,
-        server_url: String,
-        subsonic_credential: String,
-    ) -> Self {
+    /// Create with a pre-authenticated ApiClient.
+    pub fn new(client: ApiClient, server_url: String, subsonic_credential: String) -> Self {
         Self {
-            client: Arc::new(client),
+            client,
             server_url,
             subsonic_credential,
         }
@@ -290,15 +287,5 @@ impl GenresApiService {
         );
 
         Ok(albums)
-    }
-}
-
-impl Clone for GenresApiService {
-    fn clone(&self) -> Self {
-        Self {
-            client: self.client.clone(),
-            server_url: self.server_url.clone(),
-            subsonic_credential: self.subsonic_credential.clone(),
-        }
     }
 }

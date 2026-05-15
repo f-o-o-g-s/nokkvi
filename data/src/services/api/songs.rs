@@ -11,6 +11,7 @@ use crate::{
     types::song::Song,
 };
 
+#[derive(Clone)]
 pub struct SongsApiService {
     client: ApiClient,
 }
@@ -29,16 +30,8 @@ struct SongQueryShape<'a> {
 }
 
 impl SongsApiService {
-    pub fn new(client: ApiClient, _server_url: String, _subsonic_credential: String) -> Self {
+    pub fn new(client: ApiClient) -> Self {
         Self { client }
-    }
-
-    pub fn new_with_client(
-        client: ApiClient,
-        server_url: String,
-        subsonic_credential: String,
-    ) -> Self {
-        Self::new(client, server_url, subsonic_credential)
     }
 
     /// Load songs with sorting, filtering, and pagination.

@@ -224,13 +224,7 @@ impl SongsService {
                 let client = auth.get_client().await.ok_or_else(|| {
                     anyhow::anyhow!("SongsService not initialized. Please authenticate first.")
                 })?;
-                let server_url = auth.get_server_url().await;
-                let subsonic_credential = auth.get_subsonic_credential().await;
-                Ok(SongsApiService::new(
-                    client,
-                    server_url,
-                    subsonic_credential,
-                ))
+                Ok(SongsApiService::new(client))
             })
             .await
     }

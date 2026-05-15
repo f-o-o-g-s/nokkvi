@@ -2,8 +2,6 @@
 //!
 //! Handles playlist-related API calls to Navidrome server.
 
-use std::sync::Arc;
-
 use anyhow::{Context, Result};
 use tracing::{debug, warn};
 
@@ -45,21 +43,18 @@ struct SubsonicSongEntry {
     album_id: Option<String>,
 }
 
+#[derive(Clone)]
 pub struct PlaylistsApiService {
-    client: Arc<ApiClient>,
+    client: ApiClient,
     server_url: String,
     subsonic_credential: String,
 }
 
 impl PlaylistsApiService {
-    /// Create with a pre-authenticated ApiClient
-    pub fn new_with_client(
-        client: ApiClient,
-        server_url: String,
-        subsonic_credential: String,
-    ) -> Self {
+    /// Create with a pre-authenticated ApiClient.
+    pub fn new(client: ApiClient, server_url: String, subsonic_credential: String) -> Self {
         Self {
-            client: Arc::new(client),
+            client,
             server_url,
             subsonic_credential,
         }
@@ -251,7 +246,7 @@ impl PlaylistsApiService {
     ) -> Result<String> {
         // Step 1: Create the playlist
         let body = serde_json::json!({ "name": name, "public": public });
-        let response = self.client.post_json("api/playlist", &body).await?;
+        let response = self.client.post_json("/api/playlist", &body).await?;
 
         // Parse the playlist ID from response
         let response_json: serde_json::Value =
@@ -266,7 +261,7 @@ impl PlaylistsApiService {
         if !song_ids.is_empty() {
             let tracks_body = serde_json::json!({ "ids": song_ids });
             self.client
-                .post_json(&format!("api/playlist/{playlist_id}/tracks"), &tracks_body)
+                .post_json(&format!("/api/playlist/{playlist_id}/tracks"), &tracks_body)
                 .await?;
         }
 
@@ -291,7 +286,7 @@ impl PlaylistsApiService {
             None => serde_json::json!({ "name": name, "public": public }),
         };
         self.client
-            .put_json(&format!("api/playlist/{playlist_id}"), &body)
+            .put_json(&format!("/api/playlist/{playlist_id}"), &body)
             .await?;
         Ok(())
     }
@@ -301,7 +296,7 @@ impl PlaylistsApiService {
     /// Uses Navidrome native API: DELETE /api/playlist/:id
     pub async fn delete_playlist(&self, playlist_id: &str) -> Result<()> {
         self.client
-            .delete(&format!("api/playlist/{playlist_id}"))
+            .delete(&format!("/api/playlist/{playlist_id}"))
             .await
     }
 
@@ -315,7 +310,7 @@ impl PlaylistsApiService {
     ) -> Result<()> {
         let body = serde_json::json!({ "ids": song_ids });
         self.client
-            .post_json(&format!("api/playlist/{playlist_id}/tracks"), &body)
+            .post_json(&format!("/api/playlist/{playlist_id}/tracks"), &body)
             .await?;
         Ok(())
     }
@@ -344,16 +339,6 @@ impl PlaylistsApiService {
             "Replace playlist tracks",
         )
         .await
-    }
-}
-
-impl Clone for PlaylistsApiService {
-    fn clone(&self) -> Self {
-        Self {
-            client: self.client.clone(),
-            server_url: self.server_url.clone(),
-            subsonic_credential: self.subsonic_credential.clone(),
-        }
     }
 }
 

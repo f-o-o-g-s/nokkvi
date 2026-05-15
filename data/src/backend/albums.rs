@@ -403,7 +403,7 @@ impl AlbumsService {
                 let client = auth.get_client().await.ok_or_else(|| {
                     anyhow::anyhow!("AlbumsService not initialized. Please authenticate first.")
                 })?;
-                Ok(AlbumsApiService::new(client, String::new(), String::new()))
+                Ok(AlbumsApiService::new(client))
             })
             .await
     }
@@ -499,14 +499,7 @@ impl AlbumsService {
             .await
             .ok_or_else(|| anyhow::anyhow!("No API client"))?;
 
-        let server_url = auth.get_server_url().await;
-        let subsonic_credential = auth.get_subsonic_credential().await;
-
-        let songs_service = crate::services::api::songs::SongsApiService::new(
-            client,
-            server_url,
-            subsonic_credential,
-        );
+        let songs_service = crate::services::api::songs::SongsApiService::new(client);
 
         songs_service.load_album_songs(album_id).await
     }

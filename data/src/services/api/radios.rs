@@ -6,8 +6,6 @@
 //! NOTE from Claude: Built this ahead of Gemini's Phase 4 to unblock
 //! the data crate work. Follows the exact GenresApiService pattern.
 
-use std::sync::Arc;
-
 use anyhow::{Context, Result};
 use tracing::debug;
 
@@ -38,21 +36,18 @@ struct SubsonicRadioStations {
     internet_radio_station: Option<serde_json::Value>,
 }
 
+#[derive(Clone)]
 pub struct RadiosApiService {
-    client: Arc<ApiClient>,
+    client: ApiClient,
     server_url: String,
     subsonic_credential: String,
 }
 
 impl RadiosApiService {
-    /// Create with a pre-authenticated ApiClient
-    pub fn new_with_client(
-        client: ApiClient,
-        server_url: String,
-        subsonic_credential: String,
-    ) -> Self {
+    /// Create with a pre-authenticated ApiClient.
+    pub fn new(client: ApiClient, server_url: String, subsonic_credential: String) -> Self {
         Self {
-            client: Arc::new(client),
+            client,
             server_url,
             subsonic_credential,
         }
@@ -161,15 +156,5 @@ impl RadiosApiService {
             "Failed to update internet radio station",
         )
         .await
-    }
-}
-
-impl Clone for RadiosApiService {
-    fn clone(&self) -> Self {
-        Self {
-            client: self.client.clone(),
-            server_url: self.server_url.clone(),
-            subsonic_credential: self.subsonic_credential.clone(),
-        }
     }
 }
