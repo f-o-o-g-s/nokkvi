@@ -49,6 +49,228 @@ pub(super) fn normalize_hex(hex: &str) -> Option<String> {
     }
 }
 
+/// Pick the right `SettingsAction` write variant for a single setting write.
+///
+/// Precedence: `general.` key prefix wins over the `is_theme_key` flag — a
+/// `general.*` row is always routed to `WriteGeneralSetting` even when the
+/// row also happens to be tagged as a theme-file key (the tag is dead in
+/// that case; see `items_theme.rs`). Non-`general.` keys route to
+/// `WriteConfig` with a `ConfigKey::theme_scalar` when `is_theme` is set, and
+/// `ConfigKey::app_scalar` otherwise.
+///
+/// `description` is only carried on the `WriteConfig` variant — the
+/// `WriteGeneralSetting` arm does not surface a TOML comment because the
+/// general-settings backend stores values in redb, not config.toml.
+pub(crate) fn route_write(
+    key: String,
+    is_theme: bool,
+    value: items::SettingValue,
+    description: Option<String>,
+) -> SettingsAction {
+    if key.starts_with("general.") {
+        return SettingsAction::WriteGeneralSetting { key, value };
+    }
+    let config_key = if is_theme {
+        crate::config_writer::ConfigKey::theme_scalar(key)
+    } else {
+        crate::config_writer::ConfigKey::app_scalar(key)
+    };
+    SettingsAction::WriteConfig {
+        key: config_key,
+        value,
+        description,
+    }
+}
+
+#[cfg(test)]
+mod route_write_tests {
+    use super::{SettingsAction, items::SettingValue, route_write};
+    use crate::config_writer::ConfigKey;
+
+    fn assert_write_general(action: &SettingsAction, expect_key: &str) {
+        match action {
+            SettingsAction::WriteGeneralSetting { key, .. } => {
+                assert_eq!(key, expect_key, "WriteGeneralSetting key mismatch");
+            }
+            other => panic!("expected WriteGeneralSetting, got {other:?}"),
+        }
+    }
+
+    fn assert_write_theme(action: &SettingsAction, expect_key: &str) {
+        match action {
+            SettingsAction::WriteConfig { key, .. } => {
+                assert!(
+                    matches!(key, ConfigKey::Theme(_)),
+                    "expected ConfigKey::Theme, got {key:?}"
+                );
+                assert!(key.is_theme(), "ConfigKey::is_theme() should be true");
+                assert_eq!(key.as_str(), expect_key, "theme key path mismatch");
+            }
+            other => panic!("expected WriteConfig, got {other:?}"),
+        }
+    }
+
+    fn assert_write_app(action: &SettingsAction, expect_key: &str) {
+        match action {
+            SettingsAction::WriteConfig { key, .. } => {
+                assert!(
+                    matches!(key, ConfigKey::AppScalar(_)),
+                    "expected ConfigKey::AppScalar, got {key:?}"
+                );
+                assert!(!key.is_theme(), "ConfigKey::is_theme() should be false");
+                assert_eq!(key.as_str(), expect_key, "app key path mismatch");
+            }
+            other => panic!("expected WriteConfig, got {other:?}"),
+        }
+    }
+
+    // ── general.* short-circuit ─────────────────────────────────────────
+
+    #[test]
+    fn general_prefix_with_theme_flag_routes_to_general() {
+        // Row tagged is_theme_key=true but keyed general.* (light_mode) — the
+        // `with_theme_key()` tag is dead because `general.` wins.
+        let action = route_write(
+            "general.light_mode".to_string(),
+            true,
+            SettingValue::Bool(true),
+            None,
+        );
+        assert_write_general(&action, "general.light_mode");
+    }
+
+    #[test]
+    fn general_prefix_no_theme_flag_routes_to_general() {
+        let action = route_write(
+            "general.rounded_mode".to_string(),
+            false,
+            SettingValue::Bool(true),
+            None,
+        );
+        assert_write_general(&action, "general.rounded_mode");
+    }
+
+    #[test]
+    fn general_prefix_opacity_gradient_routes_to_general() {
+        let action = route_write(
+            "general.opacity_gradient".to_string(),
+            false,
+            SettingValue::Bool(true),
+            None,
+        );
+        assert_write_general(&action, "general.opacity_gradient");
+    }
+
+    #[test]
+    fn general_prefix_toggleset_routes_to_general() {
+        let action = route_write(
+            "general.queue.show_album".to_string(),
+            false,
+            SettingValue::ToggleSet(vec![]),
+            None,
+        );
+        assert_write_general(&action, "general.queue.show_album");
+    }
+
+    // ── theme scalar (is_theme=true, non-general) ───────────────────────
+
+    #[test]
+    fn dark_theme_hexcolor_routes_to_theme_scalar() {
+        let action = route_write(
+            "dark.background.hard".to_string(),
+            true,
+            SettingValue::HexColor("#000000".to_string()),
+            None,
+        );
+        assert_write_theme(&action, "dark.background.hard");
+    }
+
+    #[test]
+    fn light_theme_hexcolor_routes_to_theme_scalar() {
+        let action = route_write(
+            "light.background.hard".to_string(),
+            true,
+            SettingValue::HexColor("#ffffff".to_string()),
+            None,
+        );
+        assert_write_theme(&action, "light.background.hard");
+    }
+
+    // ── app scalar (is_theme=false, non-general) ────────────────────────
+
+    #[test]
+    fn settings_visualizer_bool_routes_to_app_scalar() {
+        let action = route_write(
+            "settings.visualizer.bars".to_string(),
+            false,
+            SettingValue::Bool(true),
+            None,
+        );
+        assert_write_app(&action, "settings.visualizer.bars");
+    }
+
+    #[test]
+    fn settings_queue_enum_routes_to_app_scalar() {
+        let action = route_write(
+            "settings.queue.sort_mode".to_string(),
+            false,
+            SettingValue::Enum {
+                val: "Title".to_string(),
+                options: vec!["Title", "Artist"],
+            },
+            None,
+        );
+        assert_write_app(&action, "settings.queue.sort_mode");
+    }
+
+    // ── HexInputSubmit-style forward protection ─────────────────────────
+
+    #[test]
+    fn hex_input_submit_general_with_theme_flag_short_circuits() {
+        // Forward-protective assertion: today no `general.*` key has a
+        // HexColor row, but if one is ever added, HexInputSubmit must route
+        // through WriteGeneralSetting (not WriteConfig).
+        let action = route_write(
+            "general.foo".to_string(),
+            true,
+            SettingValue::HexColor("#abcdef".to_string()),
+            None,
+        );
+        assert_write_general(&action, "general.foo");
+    }
+
+    // ── description plumbing ────────────────────────────────────────────
+
+    #[test]
+    fn description_is_attached_to_write_config_only() {
+        let action = route_write(
+            "settings.visualizer.bars".to_string(),
+            false,
+            SettingValue::Bool(true),
+            Some("desc".to_string()),
+        );
+        match action {
+            SettingsAction::WriteConfig { description, .. } => {
+                assert_eq!(description.as_deref(), Some("desc"));
+            }
+            other => panic!("expected WriteConfig, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn description_is_ignored_for_general_writes() {
+        let action = route_write(
+            "general.light_mode".to_string(),
+            true,
+            SettingValue::Bool(true),
+            Some("desc".to_string()),
+        );
+        // WriteGeneralSetting carries no description field; confirm the
+        // variant choice ignores it without erroring.
+        assert_write_general(&action, "general.light_mode");
+    }
+}
+
 // ============================================================================
 // Settings Tab Enum
 // ============================================================================
@@ -792,10 +1014,11 @@ impl SettingsPage {
                 {
                     entry.2 = !entry.2;
                     let new_val = entry.2;
-                    return SettingsAction::WriteGeneralSetting {
-                        key: toggle_key,
-                        value: SettingValue::Bool(new_val),
-                    };
+                    let is_theme = item.is_theme_key;
+                    // Route through `route_write` for forward protection: a
+                    // future non-`general.*` toggle badge would land in
+                    // config.toml instead of being silently written to redb.
+                    return route_write(toggle_key, is_theme, SettingValue::Bool(new_val), None);
                 }
                 SettingsAction::None
             }
@@ -826,21 +1049,7 @@ impl SettingsPage {
                                 item_mut.value = default_value.clone();
                             }
                             self.editing_index = None;
-                            if key.starts_with("general.") {
-                                return SettingsAction::WriteGeneralSetting {
-                                    key,
-                                    value: default_value,
-                                };
-                            }
-                            return SettingsAction::WriteConfig {
-                                key: if is_theme {
-                                    crate::config_writer::ConfigKey::theme_scalar(key)
-                                } else {
-                                    crate::config_writer::ConfigKey::app_scalar(key)
-                                },
-                                value: default_value,
-                                description: None,
-                            };
+                            return route_write(key, is_theme, default_value, None);
                         }
                     }
                     // Exit edit mode even if no reset happened
@@ -925,15 +1134,16 @@ impl SettingsPage {
                     // un-registered variant). Broader than `SentinelKind`
                     // on purpose — config writes should never name a sentinel.
                     if !key.is_empty() && !key.starts_with("__") {
-                        return SettingsAction::WriteConfig {
-                            key: if is_theme {
-                                crate::config_writer::ConfigKey::theme_scalar(key)
-                            } else {
-                                crate::config_writer::ConfigKey::app_scalar(key)
-                            },
-                            value: SettingValue::HexColor(normalized),
-                            description: None,
-                        };
+                        // Route through `route_write` so a future
+                        // `general.*` HexColor row short-circuits to
+                        // `WriteGeneralSetting` instead of silently
+                        // landing in config.toml.
+                        return route_write(
+                            key,
+                            is_theme,
+                            SettingValue::HexColor(normalized),
+                            None,
+                        );
                     }
                 }
                 SettingsAction::None
@@ -1184,24 +1394,11 @@ impl SettingsPage {
                 item_mut.value = new_value.clone();
             }
             if !key.is_empty() {
-                if key.starts_with("general.") {
-                    return SettingsAction::WriteGeneralSetting {
-                        key,
-                        value: new_value,
-                    };
-                }
-                return SettingsAction::WriteConfig {
-                    key: if is_theme {
-                        crate::config_writer::ConfigKey::theme_scalar(key)
-                    } else {
-                        crate::config_writer::ConfigKey::app_scalar(key)
-                    },
-                    value: new_value,
-                    description: self.cached_entries.get(edit_idx).and_then(|e| match e {
-                        SettingsEntry::Item(item) => item.subtitle.map(String::from),
-                        SettingsEntry::Header { .. } => None,
-                    }),
-                };
+                let description = self.cached_entries.get(edit_idx).and_then(|e| match e {
+                    SettingsEntry::Item(item) => item.subtitle.map(String::from),
+                    SettingsEntry::Header { .. } => None,
+                });
+                return route_write(key, is_theme, new_value, description);
             }
         }
         SettingsAction::None

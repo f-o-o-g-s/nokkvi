@@ -88,46 +88,37 @@ pub(crate) fn build_theme_items(
         icon: A,
     });
     let theme_val = if is_light_mode { "Light" } else { "Dark" };
-    e.push(
-        SettingItem::enum_val(
-            meta!(
-                "general.light_mode",
-                "Theme Mode",
-                "Appearance",
-                "Switch between dark and light"
-            ),
-            theme_val,
-            "Dark",
-            vec!["Dark", "Light"],
-        )
-        .with_theme_key(),
-    );
-    e.push(
-        SettingItem::bool_val(
-            meta!(
-                "general.rounded_mode",
-                "Rounded Corners",
-                "Appearance",
-                "Apply rounded borders to UI elements"
-            ),
-            rounded_mode,
-            false,
-        )
-        .with_theme_key(),
-    );
-    e.push(
-        SettingItem::bool_val(
-            meta!(
-                "general.opacity_gradient",
-                "Opacity Gradient",
-                "Appearance",
-                "Fade non-center slots in list views"
-            ),
-            opacity_gradient,
-            true,
-        )
-        .with_theme_key(),
-    );
+    e.push(SettingItem::enum_val(
+        meta!(
+            "general.light_mode",
+            "Theme Mode",
+            "Appearance",
+            "Switch between dark and light"
+        ),
+        theme_val,
+        "Dark",
+        vec!["Dark", "Light"],
+    ));
+    e.push(SettingItem::bool_val(
+        meta!(
+            "general.rounded_mode",
+            "Rounded Corners",
+            "Appearance",
+            "Apply rounded borders to UI elements"
+        ),
+        rounded_mode,
+        false,
+    ));
+    e.push(SettingItem::bool_val(
+        meta!(
+            "general.opacity_gradient",
+            "Opacity Gradient",
+            "Appearance",
+            "Fade non-center slots in list views"
+        ),
+        opacity_gradient,
+        true,
+    ));
 
     // ── Background Colors ────────────────────────────────────────────
     e.push(SettingsEntry::Header {
