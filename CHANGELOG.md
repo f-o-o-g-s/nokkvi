@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Settings config-write routing consolidated under typed dispatch.
+
 ### Fixed
 
 ### Removed
