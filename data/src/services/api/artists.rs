@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use rand::seq::SliceRandom;
 use tracing::debug;
 
 use crate::{
-    services::api::client::ApiClient,
+    services::api::{
+        client::ApiClient,
+        sort::{self, SortDomain},
+    },
     types::{album::Album, artist::Artist},
 };
 
@@ -41,8 +43,8 @@ impl ArtistsApiService {
         let actual_sort_mode = if is_random { "name" } else { sort_mode };
 
         // Map viewType to API sort parameter
-        let sort_param = Self::map_sort_mode_to_sort_param(actual_sort_mode);
-        let default_order = Self::get_default_order(actual_sort_mode);
+        let sort_param = sort::map_sort_mode(SortDomain::Artists, actual_sort_mode);
+        let default_order = sort::default_order(SortDomain::Artists, actual_sort_mode);
         let order_param = if sort_order.is_empty() {
             default_order
         } else {
@@ -50,7 +52,7 @@ impl ArtistsApiService {
         };
 
         // Build query parameters
-        let mut params = vec![("_sort", sort_param.as_str()), ("_order", order_param)];
+        let mut params = vec![("_sort", sort_param), ("_order", order_param)];
 
         if album_artists_only {
             params.push(("role", "albumartist"));
@@ -91,8 +93,7 @@ impl ArtistsApiService {
 
         // Client-side shuffle for random view
         if is_random {
-            let mut rng = rand::rng();
-            artists.shuffle(&mut rng);
+            sort::apply_random_shuffle(&mut artists);
             if let Some(first) = artists.first() {
                 debug!(" Random sort - First artist: {}", first.name);
             }
@@ -144,27 +145,6 @@ impl ArtistsApiService {
 
         Ok(albums)
     }
-
-    /// Map viewType to sort parameter
-    fn map_sort_mode_to_sort_param(sort_mode: &str) -> String {
-        match sort_mode {
-            "name" => "name".to_string(),
-            "favorited" => "starred_at".to_string(),
-            "mostPlayed" => "play_count".to_string(),
-            "albumCount" => "album_count".to_string(),
-            "songCount" => "song_count".to_string(),
-            "random" => "name".to_string(), // Random is handled client-side
-            _ => "name".to_string(),
-        }
-    }
-
-    /// Get default sort order for sort mode
-    fn get_default_order(sort_mode: &str) -> &'static str {
-        match sort_mode {
-            "favorited" | "mostPlayed" | "albumCount" | "songCount" => "DESC",
-            _ => "ASC",
-        }
-    }
 }
 
 impl Clone for ArtistsApiService {
@@ -172,23 +152,5 @@ impl Clone for ArtistsApiService {
         Self {
             client: self.client.clone(),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn most_played_maps_to_play_count() {
-        assert_eq!(
-            ArtistsApiService::map_sort_mode_to_sort_param("mostPlayed"),
-            "play_count"
-        );
-    }
-
-    #[test]
-    fn most_played_default_order_is_desc() {
-        assert_eq!(ArtistsApiService::get_default_order("mostPlayed"), "DESC");
     }
 }

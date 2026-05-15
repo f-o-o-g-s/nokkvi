@@ -3,7 +3,13 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use tracing::{debug, trace};
 
-use crate::{services::api::client::ApiClient, types::album::Album};
+use crate::{
+    services::api::{
+        client::ApiClient,
+        sort::{self, SortDomain},
+    },
+    types::album::Album,
+};
 
 pub struct AlbumsApiService {
     client: Arc<ApiClient>,
@@ -39,8 +45,8 @@ impl AlbumsApiService {
         limit: Option<usize>,
     ) -> Result<(Vec<Album>, u32)> {
         // Map viewType to API sort parameter
-        let sort_param = Self::map_sort_mode_to_sort_param(sort_mode);
-        let default_order = Self::get_default_order(sort_mode);
+        let sort_param = sort::map_sort_mode(SortDomain::Albums, sort_mode);
+        let default_order = sort::default_order(SortDomain::Albums, sort_mode);
         let order_param = if sort_order.is_empty() {
             default_order
         } else {
@@ -49,7 +55,7 @@ impl AlbumsApiService {
 
         // Build query parameters
         let mut params = vec![
-            ("_sort", sort_param.as_str()),
+            ("_sort", sort_param),
             ("_order", order_param),
             ("filter", "{}"),
         ];
@@ -117,36 +123,6 @@ impl AlbumsApiService {
 
         Ok((albums, total_count))
     }
-
-    /// Map viewType to sort parameter
-    fn map_sort_mode_to_sort_param(sort_mode: &str) -> String {
-        match sort_mode {
-            "recentlyAdded" => "recently_added".to_string(),
-            "recentlyPlayed" => "play_date".to_string(),
-            "mostPlayed" => "play_count".to_string(),
-            "favorited" => "starred_at".to_string(),
-            "random" => "random".to_string(),
-            "name" => "name".to_string(),
-            "albumArtist" => "album_artist".to_string(),
-            "artist" => "artist".to_string(),
-            "year" => "max_year".to_string(),
-            "songCount" => "songCount".to_string(),
-            "duration" => "duration".to_string(),
-            "rating" => "rating".to_string(),
-            "genre" => "genre".to_string(),
-            "all" => "name".to_string(),
-            _ => "recently_added".to_string(),
-        }
-    }
-
-    /// Get default sort order for sort mode
-    fn get_default_order(sort_mode: &str) -> &'static str {
-        match sort_mode {
-            "recentlyAdded" | "recentlyPlayed" | "mostPlayed" | "favorited" | "year"
-            | "songCount" | "duration" | "rating" => "DESC",
-            _ => "ASC",
-        }
-    }
 }
 
 impl Clone for AlbumsApiService {
@@ -156,23 +132,5 @@ impl Clone for AlbumsApiService {
             server_url: self.server_url.clone(),
             subsonic_credential: self.subsonic_credential.clone(),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn most_played_maps_to_play_count() {
-        assert_eq!(
-            AlbumsApiService::map_sort_mode_to_sort_param("mostPlayed"),
-            "play_count"
-        );
-    }
-
-    #[test]
-    fn most_played_default_order_is_desc() {
-        assert_eq!(AlbumsApiService::get_default_order("mostPlayed"), "DESC");
     }
 }

@@ -1,7 +1,13 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-use crate::{services::api::client::ApiClient, types::song::Song};
+use crate::{
+    services::api::{
+        client::ApiClient,
+        sort::{self, SortDomain},
+    },
+    types::song::Song,
+};
 
 pub struct SongsApiService {
     client: ApiClient,
@@ -37,9 +43,9 @@ impl SongsApiService {
         offset: Option<usize>,
         limit: Option<usize>,
     ) -> Result<(Vec<Song>, usize)> {
-        let sort_param = Self::map_sort_mode_to_sort_param(sort_mode);
+        let sort_param = sort::map_sort_mode(SortDomain::Songs, sort_mode);
         let order = if sort_order.is_empty() {
-            Self::get_default_order(sort_mode)
+            sort::default_order(SortDomain::Songs, sort_mode)
         } else {
             sort_order
         };
@@ -175,38 +181,6 @@ impl SongsApiService {
         Ok((songs, total_count))
     }
 
-    /// Map sort mode to Navidrome API sort parameter
-    fn map_sort_mode_to_sort_param(sort_mode: &str) -> &'static str {
-        match sort_mode {
-            "recentlyAdded" => "createdAt",
-            "recentlyPlayed" => "playDate",
-            "mostPlayed" => "playCount",
-            "favorited" => "starred_at",
-            "random" => "random",
-            "title" => "title",
-            "album" => "album",
-            "artist" => "artist",
-            "albumArtist" => "order_album_artist_name",
-            "year" => "year",
-            "duration" => "duration",
-            "bpm" => "bpm",
-            "channels" => "channels",
-            "genre" => "genre",
-            "rating" => "rating",
-            "comment" => "comment",
-            _ => "createdAt",
-        }
-    }
-
-    /// Get default sort order for sort mode
-    fn get_default_order(sort_mode: &str) -> &'static str {
-        match sort_mode {
-            "recentlyAdded" | "recentlyPlayed" | "mostPlayed" | "favorited" | "year"
-            | "duration" | "bpm" | "channels" | "rating" => "DESC",
-            _ => "ASC",
-        }
-    }
-
     /// Parse response that may be array or object with content
     fn parse_song_response(response_text: &str) -> Result<Vec<Song>> {
         #[derive(Deserialize)]
@@ -238,23 +212,5 @@ impl SongsApiService {
         let songs = Self::parse_song_response(response_text)?;
         let total = total_header.map_or(songs.len(), |t| t as usize);
         Ok((songs, total))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn most_played_maps_to_play_count() {
-        assert_eq!(
-            SongsApiService::map_sort_mode_to_sort_param("mostPlayed"),
-            "playCount"
-        );
-    }
-
-    #[test]
-    fn most_played_default_order_is_desc() {
-        assert_eq!(SongsApiService::get_default_order("mostPlayed"), "DESC");
     }
 }

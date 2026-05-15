@@ -1,10 +1,15 @@
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{Context, Result};
-use rand::seq::SliceRandom;
 use tracing::{debug, warn};
 
-use crate::{services::api::client::ApiClient, types::genre::Genre};
+use crate::{
+    services::api::{
+        client::ApiClient,
+        sort::{self, SortDomain},
+    },
+    types::genre::Genre,
+};
 
 /// Subsonic API response for getGenres
 #[derive(Debug, serde::Deserialize)]
@@ -70,8 +75,8 @@ impl GenresApiService {
         let actual_sort_mode = if is_random { "name" } else { sort_mode };
 
         // Map viewType to API sort parameter
-        let sort_param = Self::map_sort_mode_to_sort_param(actual_sort_mode);
-        let default_order = Self::get_default_order(actual_sort_mode);
+        let sort_param = sort::map_sort_mode(SortDomain::Genres, actual_sort_mode);
+        let default_order = sort::default_order(SortDomain::Genres, actual_sort_mode);
         let order_param = if sort_order.is_empty() {
             default_order
         } else {
@@ -80,7 +85,7 @@ impl GenresApiService {
 
         // Build query parameters for native API
         let mut params = vec![
-            ("_sort", sort_param.as_str()),
+            ("_sort", sort_param),
             ("_order", order_param),
             ("_start", "0"),
             ("_end", "999999"),
@@ -160,8 +165,7 @@ impl GenresApiService {
 
         // Client-side shuffle for random view
         if is_random {
-            let mut rng = rand::rng();
-            merged_genres.shuffle(&mut rng);
+            sort::apply_random_shuffle(&mut merged_genres);
             if let Some(first) = merged_genres.first() {
                 debug!(" Random sort - First genre: {}", first.name);
             }
@@ -218,26 +222,6 @@ impl GenresApiService {
         }
 
         Ok(genres)
-    }
-
-    /// Map viewType to sort parameter
-    fn map_sort_mode_to_sort_param(sort_mode: &str) -> String {
-        match sort_mode {
-            "name" => "name".to_string(),
-            "albumCount" => "album_count".to_string(),
-            "songCount" => "song_count".to_string(),
-            "random" => "name".to_string(), // Random is handled client-side
-            _ => "name".to_string(),
-        }
-    }
-
-    /// Get default sort order for sort mode
-    /// Get the default order for a sort mode
-    fn get_default_order(sort_mode: &str) -> &'static str {
-        match sort_mode {
-            "albumCount" | "songCount" => "DESC",
-            _ => "ASC",
-        }
     }
 
     /// Load albums for a specific genre (for artwork display)
