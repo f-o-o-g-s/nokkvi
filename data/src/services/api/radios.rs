@@ -11,7 +11,10 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use tracing::debug;
 
-use crate::{services::api::client::ApiClient, types::radio_station::RadioStation};
+use crate::{
+    services::api::{client::ApiClient, parse},
+    types::radio_station::RadioStation,
+};
 
 /// Subsonic API response for getInternetRadioStations
 #[derive(Debug, serde::Deserialize)]
@@ -74,12 +77,8 @@ impl RadiosApiService {
             .await
             .context("Failed to read radio stations response")?;
 
-        let parsed: SubsonicRadiosResponse = serde_json::from_str(&body).with_context(|| {
-            format!(
-                "Failed to parse radio stations JSON: {}",
-                &body[..body.len().min(200)]
-            )
-        })?;
+        let parsed: SubsonicRadiosResponse =
+            parse::parse_json_with_preview(&body, "radio stations JSON")?;
 
         let mut stations = Vec::new();
 

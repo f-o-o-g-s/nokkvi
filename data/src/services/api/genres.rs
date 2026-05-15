@@ -6,6 +6,7 @@ use tracing::{debug, warn};
 use crate::{
     services::api::{
         client::ApiClient,
+        parse,
         sort::{self, SortDomain},
     },
     types::genre::Genre,
@@ -195,12 +196,8 @@ impl GenresApiService {
             .await
             .context("Failed to read Subsonic response")?;
 
-        let parsed: SubsonicGenresResponse = serde_json::from_str(&body).with_context(|| {
-            format!(
-                "Failed to parse Subsonic genres response: {}",
-                &body[..body.len().min(200)]
-            )
-        })?;
+        let parsed: SubsonicGenresResponse =
+            parse::parse_json_with_preview(&body, "Subsonic genres response")?;
 
         let mut genres = Vec::new();
 
@@ -283,11 +280,8 @@ impl GenresApiService {
             .await
             .with_context(|| format!("Failed to fetch albums for genre '{genre_name}'"))?;
 
-        let albums: Vec<crate::types::album::Album> = serde_json::from_str(&response_text)
-            .with_context(|| {
-                let preview = response_text.chars().take(500).collect::<String>();
-                format!("Failed to parse genre albums JSON. Preview: {preview}")
-            })?;
+        let albums: Vec<crate::types::album::Album> =
+            parse::parse_json_with_preview(&response_text, "genre albums JSON")?;
 
         debug!(
             " GenresService: Loaded {} albums for genre '{}'",

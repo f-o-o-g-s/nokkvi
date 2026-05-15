@@ -10,6 +10,7 @@ use tracing::{debug, warn};
 use crate::{
     services::api::{
         client::ApiClient,
+        parse,
         sort::{self, SortDomain},
         subsonic,
     },
@@ -152,12 +153,8 @@ impl PlaylistsApiService {
             .await
             .context("Failed to read Subsonic response")?;
 
-        let parsed: serde_json::Value = serde_json::from_str(&body).with_context(|| {
-            format!(
-                "Failed to parse Subsonic playlist response: {}",
-                &body[..body.len().min(200)]
-            )
-        })?;
+        let parsed: serde_json::Value =
+            parse::parse_json_with_preview(&body, "Subsonic playlist response")?;
 
         let mut songs = Vec::new();
 

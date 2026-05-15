@@ -6,6 +6,7 @@ use tracing::debug;
 use crate::{
     services::api::{
         client::ApiClient,
+        parse,
         sort::{self, SortDomain},
     },
     types::{album::Album, artist::Artist},
@@ -85,11 +86,8 @@ impl ArtistsApiService {
             .context("Failed to fetch artists from API")?;
 
         // Parse JSON response as array of artists
-        let mut artists: Vec<Artist> = serde_json::from_str(&response_text).with_context(|| {
-            // Provide better error message with response preview
-            let preview = response_text.chars().take(500).collect::<String>();
-            format!("Failed to parse artists JSON response. Response preview: {preview}")
-        })?;
+        let mut artists: Vec<Artist> =
+            parse::parse_json_with_preview(&response_text, "artists JSON response")?;
 
         // Client-side shuffle for random view
         if is_random {
@@ -132,10 +130,8 @@ impl ArtistsApiService {
             .context("Failed to fetch artist albums from API")?;
 
         // Parse JSON response as array of albums
-        let albums: Vec<Album> = serde_json::from_str(&response_text).with_context(|| {
-            let preview = response_text.chars().take(500).collect::<String>();
-            format!("Failed to parse artist albums JSON response. Response preview: {preview}")
-        })?;
+        let albums: Vec<Album> =
+            parse::parse_json_with_preview(&response_text, "artist albums JSON response")?;
 
         debug!(
             " ArtistsService: Loaded {} albums for artist {}",

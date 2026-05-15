@@ -4,6 +4,7 @@ use serde::Deserialize;
 use crate::{
     services::api::{
         client::ApiClient,
+        parse,
         sort::{self, SortDomain},
     },
     types::song::Song,
@@ -200,8 +201,10 @@ impl SongsApiService {
             return Ok(songs);
         }
 
-        let preview = response_text.chars().take(300).collect::<String>();
-        Err(anyhow::anyhow!("Failed to parse songs response: {preview}"))
+        Err(anyhow::anyhow!(
+            "Failed to parse songs response: {}",
+            parse::preview(response_text)
+        ))
     }
 
     /// Parse response with total count from headers

@@ -8,7 +8,10 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use tracing::debug;
 
-use crate::{services::api::client::ApiClient, types::song::Song};
+use crate::{
+    services::api::{client::ApiClient, parse},
+    types::song::Song,
+};
 
 /// Subsonic response wrapper for `getSimilarSongs2`
 #[derive(Debug, serde::Deserialize)]
@@ -87,12 +90,8 @@ impl SimilarApiService {
             .await
             .context("Failed to read getSimilarSongs2 response")?;
 
-        let parsed: SubsonicSimilarResponse = serde_json::from_str(&body).with_context(|| {
-            format!(
-                "Failed to parse getSimilarSongs2 response: {}",
-                &body[..body.len().min(200)]
-            )
-        })?;
+        let parsed: SubsonicSimilarResponse =
+            parse::parse_json_with_preview(&body, "getSimilarSongs2 response")?;
 
         let songs = parsed
             .subsonic_response
@@ -125,12 +124,8 @@ impl SimilarApiService {
             .await
             .context("Failed to read getTopSongs response")?;
 
-        let parsed: SubsonicTopSongsResponse = serde_json::from_str(&body).with_context(|| {
-            format!(
-                "Failed to parse getTopSongs response: {}",
-                &body[..body.len().min(200)]
-            )
-        })?;
+        let parsed: SubsonicTopSongsResponse =
+            parse::parse_json_with_preview(&body, "getTopSongs response")?;
 
         let songs = parsed
             .subsonic_response

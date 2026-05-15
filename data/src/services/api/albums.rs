@@ -6,6 +6,7 @@ use tracing::{debug, trace};
 use crate::{
     services::api::{
         client::ApiClient,
+        parse,
         sort::{self, SortDomain},
     },
     types::album::Album,
@@ -97,11 +98,8 @@ impl AlbumsApiService {
             .context("Failed to fetch albums from API")?;
 
         // Parse JSON response as array of albums
-        let albums: Vec<Album> = serde_json::from_str(&response_text).with_context(|| {
-            // Provide better error message with response preview
-            let preview = response_text.chars().take(500).collect::<String>();
-            format!("Failed to parse albums JSON response. Response preview: {preview}")
-        })?;
+        let albums: Vec<Album> =
+            parse::parse_json_with_preview(&response_text, "albums JSON response")?;
 
         // Get total count from X-Total-Count header, fallback to albums length
         let total_count = total_count_header.unwrap_or(albums.len() as u32);
