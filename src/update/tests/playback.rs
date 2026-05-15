@@ -202,11 +202,11 @@ fn sfx_volume_changed_sets_state_and_pushes_toast() {
 }
 
 #[test]
-fn volume_released_sets_state_and_pushes_toast() {
+fn volume_committed_sets_state_and_pushes_toast() {
     let mut app = test_app();
     assert!(app.toast.toasts.is_empty());
 
-    let _ = app.handle_volume_released(0.42);
+    let _ = app.handle_volume_committed(0.42);
 
     assert!((app.playback.volume - 0.42).abs() < f32::EPSILON);
     let last = app
@@ -219,8 +219,8 @@ fn volume_released_sets_state_and_pushes_toast() {
 }
 
 #[test]
-fn volume_released_advances_throttle_inside_blocked_window() {
-    // Pin the bug fix: VolumeReleased must always advance the persist throttle
+fn volume_committed_advances_throttle_inside_blocked_window() {
+    // Pin the bug fix: VolumeCommitted must always advance the persist throttle
     // (and dispatch the persist task) even when VolumeChanged would be throttled.
     // Otherwise drag-release values within 500ms of the click-open value
     // never reach disk and are lost on next launch.
@@ -244,15 +244,15 @@ fn volume_released_advances_throttle_inside_blocked_window() {
         "VolumeChanged inside the 500ms window does NOT advance the throttle"
     );
 
-    // VolumeReleased MUST force-advance the throttle (force-persist semantics).
-    let _ = app.handle_volume_released(0.70);
+    // VolumeCommitted MUST force-advance the throttle (force-persist semantics).
+    let _ = app.handle_volume_committed(0.70);
     let t2 = app
         .playback
         .volume_persist_throttle
         .expect("throttle still set");
     assert!(
         t2 > t1,
-        "VolumeReleased advances throttle even inside the blocked window — \
+        "VolumeCommitted advances throttle even inside the blocked window — \
          this is the slider-drag persistence fix"
     );
 
@@ -262,18 +262,18 @@ fn volume_released_advances_throttle_inside_blocked_window() {
 }
 
 #[test]
-fn volume_released_sets_throttle_when_previously_unset() {
-    // Even on the first event in a session (throttle = None), VolumeReleased
+fn volume_committed_sets_throttle_when_previously_unset() {
+    // Even on the first event in a session (throttle = None), VolumeCommitted
     // sets the throttle so subsequent rapid VolumeChanged events get the
     // expected cooldown.
     let mut app = test_app();
     assert!(app.playback.volume_persist_throttle.is_none());
 
-    let _ = app.handle_volume_released(0.55);
+    let _ = app.handle_volume_committed(0.55);
 
     assert!(
         app.playback.volume_persist_throttle.is_some(),
-        "VolumeReleased seeds the throttle from the unset state"
+        "VolumeCommitted seeds the throttle from the unset state"
     );
 }
 

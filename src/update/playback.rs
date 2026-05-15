@@ -980,7 +980,7 @@ impl Nokkvi {
 
     /// Sync the immediate-feedback surfaces for a volume change (UI state,
     /// toast, MPRIS, PipeWire mixer mirror). Shared by [`Self::handle_volume_changed`]
-    /// and [`Self::handle_volume_released`] so the two paths can never drift on
+    /// and [`Self::handle_volume_committed`] so the two paths can never drift on
     /// what "applying" a volume value means.
     fn apply_volume_immediate(&mut self, val: f32) {
         self.playback.volume = val;
@@ -999,7 +999,7 @@ impl Nokkvi {
         // Minimum interval between storage persistence (500ms) - longer than volume updates.
         // Volume changes go directly to PipeWire, but storage persists less frequently to
         // avoid hammering redb during a slider drag. The trailing edge is captured by
-        // VolumeReleased — see [`Self::handle_volume_released`].
+        // VolumeCommitted — see [`Self::handle_volume_committed`].
         const MIN_PERSIST_INTERVAL_MS: u128 = 500;
 
         self.apply_volume_immediate(val);
@@ -1038,12 +1038,13 @@ impl Nokkvi {
         }
     }
 
-    /// Slider drag-release: the user has finished choosing a volume, so this
-    /// value MUST reach disk regardless of the [`Self::handle_volume_changed`]
-    /// throttle. Without this, a click-drag-release that fits inside the 500ms
-    /// throttle window leaves the click-position value as the persisted one
-    /// and silently drops the release-position value on next launch.
-    pub(crate) fn handle_volume_released(&mut self, val: f32) -> Task<Message> {
+    /// User-committed volume value (slider drag-release or wheel notch): a
+    /// discrete, complete gesture whose final value MUST reach disk regardless
+    /// of the [`Self::handle_volume_changed`] throttle. Without this,
+    /// commits that fit inside the 500ms throttle window leave the earlier
+    /// throttle-open value persisted and silently drop the committed value
+    /// on next launch.
+    pub(crate) fn handle_volume_committed(&mut self, val: f32) -> Task<Message> {
         use std::time::Instant;
 
         self.apply_volume_immediate(val);
@@ -1565,7 +1566,7 @@ impl Nokkvi {
             PlaybackMessage::ToggleCrossfade => self.handle_toggle_crossfade(),
             PlaybackMessage::Seek(val) => self.handle_seek(val),
             PlaybackMessage::VolumeChanged(val) => self.handle_volume_changed(val),
-            PlaybackMessage::VolumeReleased(val) => self.handle_volume_released(val),
+            PlaybackMessage::VolumeCommitted(val) => self.handle_volume_committed(val),
             PlaybackMessage::PrepareNextForGapless => self.handle_prepare_next_for_gapless(),
             PlaybackMessage::PlayerSettingsLoaded(settings) => {
                 self.handle_player_settings_loaded(*settings)

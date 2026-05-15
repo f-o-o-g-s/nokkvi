@@ -217,9 +217,11 @@ pub enum PlayerBarMessage {
     PrevTrack,
     Seek(f32),
     VolumeChanged(f32),
-    /// Music volume slider drag was released — fires once with the final value
-    /// so the playback handler can force-persist past the VolumeChanged throttle.
-    VolumeReleased(f32),
+    /// Discrete user-committed volume value from the music slider — drag
+    /// release or wheel notch. Routed to `PlaybackMessage::VolumeCommitted`
+    /// so the playback handler can force-persist past the `VolumeChanged`
+    /// throttle.
+    VolumeCommitted(f32),
     ToggleRandom,
     ToggleRepeat,
     ToggleConsume,
@@ -916,7 +918,8 @@ pub(crate) fn player_bar<'a>(
     let stacked_thickness = 19.0;
 
     let mut vol = widgets::volume_slider(volume, PlayerBarMessage::VolumeChanged)
-        .on_release(PlayerBarMessage::VolumeReleased)
+        .on_release(PlayerBarMessage::VolumeCommitted)
+        .on_scroll(PlayerBarMessage::ScrollVolume)
         .horizontal(is_horizontal);
     if is_horizontal {
         vol = vol.thickness(stacked_thickness);

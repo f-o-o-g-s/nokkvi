@@ -64,10 +64,14 @@ impl Nokkvi {
             }
 
             MprisEvent::SetVolume(volume) => {
-                // Clamp to valid 0.0-1.0 range to prevent playerctl from going above 100%
+                // Clamp to valid 0.0-1.0 range to prevent playerctl from going above 100%.
+                // Route through VolumeCommitted because external D-Bus volume sets
+                // (headset buttons, playerctl, hardware controls) are discrete user
+                // commands, not drag intermediates — they must bypass the 500ms
+                // VolumeChanged throttle so rapid presses don't drop on next launch.
                 let volume_f32 = (volume as f32).clamp(0.0, 1.0);
                 debug!(" MPRIS: SetVolume {volume} → {volume_f32}");
-                Task::done(Message::Playback(PlaybackMessage::VolumeChanged(
+                Task::done(Message::Playback(PlaybackMessage::VolumeCommitted(
                     volume_f32,
                 )))
             }

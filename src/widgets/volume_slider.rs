@@ -71,6 +71,7 @@ pub struct VolumeSlider<'a, Message> {
     volume: f32, // 0.0-1.0
     on_change: Box<dyn Fn(f32) -> Message + 'a>,
     on_release: Option<Box<dyn Fn(f32) -> Message + 'a>>,
+    on_scroll: Option<Box<dyn Fn(f32) -> Message + 'a>>,
     width: f32,
     height: f32,
     variant: SliderVariant,
@@ -86,6 +87,7 @@ impl<'a, Message> VolumeSlider<'a, Message> {
             volume: volume.clamp(0.0, 1.0),
             on_change: Box::new(on_change),
             on_release: None,
+            on_scroll: None,
             width: SLIDER_WIDTH,
             height: SLIDER_HEIGHT,
             variant: SliderVariant::default(),
@@ -109,6 +111,23 @@ impl<'a, Message> VolumeSlider<'a, Message> {
         F: 'a + Fn(f32) -> Message,
     {
         self.on_release = Some(Box::new(on_release));
+        self
+    }
+
+    /// Set the wheel-scroll callback. The argument passed to the callback is
+    /// the **delta** (not the new absolute volume), so the consumer can add it
+    /// to fresh app state at message-handling time. This avoids the staleness
+    /// trap where computing `self.volume + delta` in the widget uses a snapshot
+    /// from the most recent render — two wheel events arriving between renders
+    /// otherwise see the same base and silently overwrite each other.
+    ///
+    /// When unset, wheel events fall back to the absolute computation via
+    /// `on_release` (or `on_change` if `on_release` is also unset).
+    pub fn on_scroll<F>(mut self, on_scroll: F) -> Self
+    where
+        F: 'a + Fn(f32) -> Message,
+    {
+        self.on_scroll = Some(Box::new(on_scroll));
         self
     }
 
@@ -260,16 +279,23 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for VolumeSlider<'_,
                     mouse::ScrollDelta::Lines { y, .. } => y * 0.01, // 1% per line
                     mouse::ScrollDelta::Pixels { y, .. } => y * 0.001, // Finer control for pixels
                 };
-                let new_volume = (self.volume + scroll_delta).clamp(0.0, 1.0);
-                // Each wheel notch is a discrete, complete user gesture (there is
-                // no "still scrolling" state to debounce against), so prefer the
-                // release callback — it bypasses any on_change throttle and
-                // guarantees the final value reaches disk. Callers without an
-                // on_release set fall back to on_change.
-                if let Some(ref on_release) = self.on_release {
-                    shell.publish(on_release(new_volume));
+                // Prefer the delta-based on_scroll callback when wired — it lets
+                // the parent add to fresh app state at handler time. Computing
+                // `self.volume + delta` here would use the constructor-captured
+                // value, which two rapid wheel events between renders would both
+                // see as the same stale base.
+                if let Some(ref on_scroll) = self.on_scroll {
+                    shell.publish(on_scroll(scroll_delta));
                 } else {
-                    shell.publish((self.on_change)(new_volume));
+                    // Fallback for consumers that haven't wired on_scroll: each
+                    // wheel notch is a discrete gesture, so still prefer
+                    // on_release (force-persist) over on_change (throttled).
+                    let new_volume = (self.volume + scroll_delta).clamp(0.0, 1.0);
+                    if let Some(ref on_release) = self.on_release {
+                        shell.publish(on_release(new_volume));
+                    } else {
+                        shell.publish((self.on_change)(new_volume));
+                    }
                 }
                 shell.capture_event();
                 shell.request_redraw();

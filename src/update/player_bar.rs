@@ -26,8 +26,8 @@ impl Nokkvi {
             PlayerBarMessage::VolumeChanged(vol) => {
                 Task::done(Message::Playback(PlaybackMessage::VolumeChanged(vol)))
             }
-            PlayerBarMessage::VolumeReleased(vol) => {
-                Task::done(Message::Playback(PlaybackMessage::VolumeReleased(vol)))
+            PlayerBarMessage::VolumeCommitted(vol) => {
+                Task::done(Message::Playback(PlaybackMessage::VolumeCommitted(vol)))
             }
             PlayerBarMessage::ToggleRandom => {
                 Task::done(Message::Playback(PlaybackMessage::ToggleRandom))
@@ -53,14 +53,9 @@ impl Nokkvi {
             PlayerBarMessage::ToggleCrossfade => {
                 Task::done(Message::Playback(PlaybackMessage::ToggleCrossfade))
             }
-            PlayerBarMessage::ScrollVolume(delta) => {
-                // Wheel scroll anywhere on the player bar is a discrete user
-                // gesture, not a drag — route through VolumeReleased so each
-                // notch force-persists and never gets truncated by the 500ms
-                // VolumeChanged throttle.
-                let new_vol = (self.playback.volume + delta).clamp(0.0, 1.0);
-                Task::done(Message::Playback(PlaybackMessage::VolumeReleased(new_vol)))
-            }
+            PlayerBarMessage::ScrollVolume(delta) => Task::done(
+                scroll_volume_to_committed_message(self.playback.volume, delta),
+            ),
             PlayerBarMessage::OpenSettings => {
                 Task::done(Message::SwitchView(crate::View::Settings))
             }
@@ -76,5 +71,52 @@ impl Nokkvi {
             )),
             PlayerBarMessage::Quit => Task::done(Message::QuitApp),
         }
+    }
+}
+
+/// Map a wheel-scroll delta to the `Message` it should dispatch.
+///
+/// Wheel scroll over the player bar is a discrete user gesture, not a drag —
+/// route through `VolumeCommitted` so each notch force-persists and never
+/// gets truncated by the 500 ms `VolumeChanged` throttle. Extracted as a
+/// free function so tests can pin the routing variant and the clamp
+/// arithmetic without driving the Iced `Task` runtime.
+pub(crate) fn scroll_volume_to_committed_message(current_volume: f32, delta: f32) -> Message {
+    let new_vol = (current_volume + delta).clamp(0.0, 1.0);
+    Message::Playback(PlaybackMessage::VolumeCommitted(new_vol))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn extract_volume(msg: Message) -> f32 {
+        match msg {
+            Message::Playback(PlaybackMessage::VolumeCommitted(v)) => v,
+            other => panic!("expected Message::Playback(VolumeCommitted), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scroll_volume_routes_to_volume_committed() {
+        // Pin the bug-fix invariant: wheel scrolls MUST dispatch
+        // VolumeCommitted (force-persist) rather than VolumeChanged
+        // (throttled). A regression here re-introduces the 500ms
+        // truncation bug for wheel events.
+        let msg = scroll_volume_to_committed_message(0.30, 0.05);
+        let v = extract_volume(msg);
+        assert!((v - 0.35).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn scroll_volume_clamps_at_upper_bound() {
+        let v = extract_volume(scroll_volume_to_committed_message(0.98, 0.05));
+        assert!((v - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn scroll_volume_clamps_at_lower_bound() {
+        let v = extract_volume(scroll_volume_to_committed_message(0.02, -0.05));
+        assert!(v.abs() < f32::EPSILON);
     }
 }

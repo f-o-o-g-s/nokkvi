@@ -97,11 +97,14 @@ pub enum PlaybackMessage {
     ToggleCrossfade,
     Seek(f32),
     VolumeChanged(f32),
-    /// Volume slider drag release — always persists to disk regardless of
-    /// the in-flight 500ms VolumeChanged throttle. Without this, a quick
-    /// click-drag-release that finishes inside the throttle window loses
-    /// the final value on next launch.
-    VolumeReleased(f32),
+    /// Discrete user-committed volume value — always persists to disk
+    /// regardless of the in-flight 500ms `VolumeChanged` throttle. Covers
+    /// slider drag-release (the final cursor position once the user lets
+    /// go) and individual wheel notches (each notch is an atomic gesture
+    /// with no "still scrolling" state). Without bypassing the throttle,
+    /// commits that fit inside the 500ms window silently drop on next
+    /// launch.
+    VolumeCommitted(f32),
     /// Trigger gapless preparation when track is ~80% complete
     PrepareNextForGapless,
     /// Persisted player settings loaded from redb
