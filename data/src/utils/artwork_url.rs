@@ -4,6 +4,8 @@
 //! `AlbumsService::fetch_album_artwork` against the bare reqwest client; there
 //! is no client-side cache, so URL form is the only thing that matters here.
 
+use crate::types::song::Song;
+
 /// Known Subsonic cover art ID prefixes
 const KNOWN_PREFIXES: [&str; 5] = ["al-", "ar-", "mf-", "pl-", "sh-"];
 
@@ -78,6 +80,26 @@ pub fn build_cover_art_url_with_timestamp(
     } else {
         String::new()
     }
+}
+
+/// Build the thumbnail artwork URL for a song.
+///
+/// **Invariant**: uses the song's `album_id`, NOT `song.cover_art`. The
+/// Subsonic API returns `cover_art` as `mf-{mediafile_id}` for playlist
+/// songs, but background prefetch caches thumbnails under
+/// `al-{album_id}_80`. Routing through `cover_art` would create a cache
+/// key mismatch — every playlist song would miss the disk cache,
+/// triggering a network fetch and leaving ~90% of thumbnails blank.
+///
+/// Always uses [`THUMBNAIL_SIZE`].
+pub fn build_song_artwork_url(song: &Song, server_url: &str, subsonic_credential: &str) -> String {
+    let album_id = song.album_id.as_deref().unwrap_or_default();
+    build_cover_art_url(
+        album_id,
+        server_url,
+        subsonic_credential,
+        Some(THUMBNAIL_SIZE),
+    )
 }
 
 /// Build a Subsonic stream URL for audio playback
@@ -194,6 +216,59 @@ mod tests {
             build_stream_url("id", "http://srv", ""),
             "",
             "empty credential"
+        );
+    }
+
+    // ── Per-Song Artwork URL Invariants ──
+
+    #[test]
+    fn song_artwork_url_uses_album_id_when_present() {
+        let mut song = crate::types::song::Song::test_default("track-1", "Song 1");
+        song.album_id = Some("abc".to_string());
+        // Make cover_art a mediafile-prefixed value to prove it is NOT used.
+        song.cover_art = Some("mf-track-1".to_string());
+
+        let actual = build_song_artwork_url(&song, "http://srv", "u=x");
+        let expected = build_cover_art_url("abc", "http://srv", "u=x", Some(THUMBNAIL_SIZE));
+        assert_eq!(actual, expected);
+        assert!(
+            actual.contains("id=al-abc"),
+            "must route through album_id with al- prefix"
+        );
+        assert!(
+            !actual.contains("mf-"),
+            "must NOT use song.cover_art's mf- mediafile id"
+        );
+    }
+
+    #[test]
+    fn song_artwork_url_empty_string_fallback_when_album_id_missing() {
+        let mut song = crate::types::song::Song::test_default("track-2", "Song 2");
+        song.album_id = None;
+        // cover_art set but should still be ignored.
+        song.cover_art = Some("mf-track-2".to_string());
+
+        let actual = build_song_artwork_url(&song, "http://srv", "u=x");
+        let expected = build_cover_art_url("", "http://srv", "u=x", Some(THUMBNAIL_SIZE));
+        assert_eq!(
+            actual, expected,
+            "None album_id must match the empty-string fallback used today"
+        );
+        assert_eq!(
+            actual, "",
+            "empty art_id short-circuits build_cover_art_url to empty"
+        );
+    }
+
+    #[test]
+    fn song_artwork_url_size_is_thumbnail() {
+        let mut song = crate::types::song::Song::test_default("track-3", "Song 3");
+        song.album_id = Some("xyz".to_string());
+
+        let url = build_song_artwork_url(&song, "http://srv", "u=x");
+        assert!(
+            url.contains(&format!("size={THUMBNAIL_SIZE}")),
+            "per-song URL must request THUMBNAIL_SIZE (80px)"
         );
     }
 }
