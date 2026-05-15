@@ -70,6 +70,7 @@ pub(crate) struct State {
 pub struct VolumeSlider<'a, Message> {
     volume: f32, // 0.0-1.0
     on_change: Box<dyn Fn(f32) -> Message + 'a>,
+    on_release: Option<Box<dyn Fn(f32) -> Message + 'a>>,
     width: f32,
     height: f32,
     variant: SliderVariant,
@@ -84,6 +85,7 @@ impl<'a, Message> VolumeSlider<'a, Message> {
         Self {
             volume: volume.clamp(0.0, 1.0),
             on_change: Box::new(on_change),
+            on_release: None,
             width: SLIDER_WIDTH,
             height: SLIDER_HEIGHT,
             variant: SliderVariant::default(),
@@ -94,6 +96,19 @@ impl<'a, Message> VolumeSlider<'a, Message> {
     /// Set the visual theme variant (Music or SFX)
     pub fn variant(mut self, variant: SliderVariant) -> Self {
         self.variant = variant;
+        self
+    }
+
+    /// Set the drag-release callback. The release message is emitted with the
+    /// final drag value when the user lifts the mouse button (or finger) after
+    /// a drag, in addition to the regular `on_change` stream. Use this when
+    /// the consumer needs to distinguish "still dragging" from "drag finished"
+    /// — e.g. to force-persist the final value past a throttle on `on_change`.
+    pub fn on_release<F>(mut self, on_release: F) -> Self
+    where
+        F: 'a + Fn(f32) -> Message,
+    {
+        self.on_release = Some(Box::new(on_release));
         self
     }
 
@@ -202,10 +217,18 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for VolumeSlider<'_,
             | Event::Touch(touch::Event::FingerLifted { .. } | touch::Event::FingerLost { .. })
                 if state.is_dragging =>
             {
-                // Always publish final volume on release to ensure target value is set
+                // Publish final value (if it drifted from the last 2%-threshold
+                // value) so consumers without an on_release callback still see
+                // the trailing edge.
                 if (state.drag_volume - state.last_published_volume).abs() > 0.001 {
                     shell.publish((self.on_change)(state.drag_volume));
                     state.last_published_volume = state.drag_volume;
+                }
+                // Emit the dedicated release signal — consumers use this to
+                // bypass any throttle on `on_change` and guarantee the final
+                // value reaches disk.
+                if let Some(ref on_release) = self.on_release {
+                    shell.publish(on_release(state.drag_volume));
                 }
                 state.is_dragging = false;
             }

@@ -978,25 +978,31 @@ impl Nokkvi {
         )
     }
 
-    pub(crate) fn handle_volume_changed(&mut self, val: f32) -> Task<Message> {
-        use std::time::Instant;
-
-        // Minimum interval between storage persistence (500ms) - longer than volume updates
-        // Volume changes go directly to PipeWire, but storage persists less frequently
-        const MIN_PERSIST_INTERVAL_MS: u128 = 500;
-
-        // Always update UI state immediately for smooth visual feedback
+    /// Sync the immediate-feedback surfaces for a volume change (UI state,
+    /// toast, MPRIS, PipeWire mixer mirror). Shared by [`Self::handle_volume_changed`]
+    /// and [`Self::handle_volume_released`] so the two paths can never drift on
+    /// what "applying" a volume value means.
+    fn apply_volume_immediate(&mut self, val: f32) {
         self.playback.volume = val;
         Self::push_volume_toast(&mut self.toast, "Volume", val);
-
-        // Sync volume to MPRIS D-Bus (this is fast, no throttling needed)
         if let Some(ref conn) = self.mpris_connection {
             conn.set_volume(f64::from(val));
         }
-
         // Mirror volume to PipeWire stream (updates shell mixer display).
         // Non-blocking: sends via pw::channel, processed on the PW thread.
         self.sfx_engine.set_output_volume(val);
+    }
+
+    pub(crate) fn handle_volume_changed(&mut self, val: f32) -> Task<Message> {
+        use std::time::Instant;
+
+        // Minimum interval between storage persistence (500ms) - longer than volume updates.
+        // Volume changes go directly to PipeWire, but storage persists less frequently to
+        // avoid hammering redb during a slider drag. The trailing edge is captured by
+        // VolumeReleased — see [`Self::handle_volume_released`].
+        const MIN_PERSIST_INTERVAL_MS: u128 = 500;
+
+        self.apply_volume_immediate(val);
 
         // Set volume on the audio engine (atomic via rodio stream handle).
         // With rodio, set_volume() is non-blocking — no channel needed.
@@ -1030,6 +1036,26 @@ impl Nokkvi {
                 |_| Message::NoOp,
             )
         }
+    }
+
+    /// Slider drag-release: the user has finished choosing a volume, so this
+    /// value MUST reach disk regardless of the [`Self::handle_volume_changed`]
+    /// throttle. Without this, a click-drag-release that fits inside the 500ms
+    /// throttle window leaves the click-position value as the persisted one
+    /// and silently drops the release-position value on next launch.
+    pub(crate) fn handle_volume_released(&mut self, val: f32) -> Task<Message> {
+        use std::time::Instant;
+
+        self.apply_volume_immediate(val);
+        // Force-advance the throttle so subsequent rapid VolumeChanged events
+        // observe the standard 500ms cooldown from this final value.
+        self.playback.volume_persist_throttle = Some(Instant::now());
+        self.shell_task(
+            move |shell| async move {
+                let _ = shell.set_volume(val).await;
+            },
+            |_| Message::NoOp,
+        )
     }
 
     pub(crate) fn handle_prepare_next_for_gapless(&mut self) -> Task<Message> {
@@ -1539,6 +1565,7 @@ impl Nokkvi {
             PlaybackMessage::ToggleCrossfade => self.handle_toggle_crossfade(),
             PlaybackMessage::Seek(val) => self.handle_seek(val),
             PlaybackMessage::VolumeChanged(val) => self.handle_volume_changed(val),
+            PlaybackMessage::VolumeReleased(val) => self.handle_volume_released(val),
             PlaybackMessage::PrepareNextForGapless => self.handle_prepare_next_for_gapless(),
             PlaybackMessage::PlayerSettingsLoaded(settings) => {
                 self.handle_player_settings_loaded(*settings)

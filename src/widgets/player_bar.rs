@@ -217,6 +217,9 @@ pub enum PlayerBarMessage {
     PrevTrack,
     Seek(f32),
     VolumeChanged(f32),
+    /// Music volume slider drag was released — fires once with the final value
+    /// so the playback handler can force-persist past the VolumeChanged throttle.
+    VolumeReleased(f32),
     ToggleRandom,
     ToggleRepeat,
     ToggleConsume,
@@ -912,8 +915,9 @@ pub(crate) fn player_bar<'a>(
     let stacked_spacing = 4.0;
     let stacked_thickness = 19.0;
 
-    let mut vol =
-        widgets::volume_slider(volume, PlayerBarMessage::VolumeChanged).horizontal(is_horizontal);
+    let mut vol = widgets::volume_slider(volume, PlayerBarMessage::VolumeChanged)
+        .on_release(PlayerBarMessage::VolumeReleased)
+        .horizontal(is_horizontal);
     if is_horizontal {
         vol = vol.thickness(stacked_thickness);
     }

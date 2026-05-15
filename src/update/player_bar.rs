@@ -26,6 +26,9 @@ impl Nokkvi {
             PlayerBarMessage::VolumeChanged(vol) => {
                 Task::done(Message::Playback(PlaybackMessage::VolumeChanged(vol)))
             }
+            PlayerBarMessage::VolumeReleased(vol) => {
+                Task::done(Message::Playback(PlaybackMessage::VolumeReleased(vol)))
+            }
             PlayerBarMessage::ToggleRandom => {
                 Task::done(Message::Playback(PlaybackMessage::ToggleRandom))
             }
