@@ -54,8 +54,12 @@ impl Nokkvi {
                 Task::done(Message::Playback(PlaybackMessage::ToggleCrossfade))
             }
             PlayerBarMessage::ScrollVolume(delta) => {
+                // Wheel scroll anywhere on the player bar is a discrete user
+                // gesture, not a drag — route through VolumeReleased so each
+                // notch force-persists and never gets truncated by the 500ms
+                // VolumeChanged throttle.
                 let new_vol = (self.playback.volume + delta).clamp(0.0, 1.0);
-                Task::done(Message::Playback(PlaybackMessage::VolumeChanged(new_vol)))
+                Task::done(Message::Playback(PlaybackMessage::VolumeReleased(new_vol)))
             }
             PlayerBarMessage::OpenSettings => {
                 Task::done(Message::SwitchView(crate::View::Settings))

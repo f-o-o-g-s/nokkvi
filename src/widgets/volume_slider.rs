@@ -261,7 +261,16 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for VolumeSlider<'_,
                     mouse::ScrollDelta::Pixels { y, .. } => y * 0.001, // Finer control for pixels
                 };
                 let new_volume = (self.volume + scroll_delta).clamp(0.0, 1.0);
-                shell.publish((self.on_change)(new_volume));
+                // Each wheel notch is a discrete, complete user gesture (there is
+                // no "still scrolling" state to debounce against), so prefer the
+                // release callback — it bypasses any on_change throttle and
+                // guarantees the final value reaches disk. Callers without an
+                // on_release set fall back to on_change.
+                if let Some(ref on_release) = self.on_release {
+                    shell.publish(on_release(new_volume));
+                } else {
+                    shell.publish((self.on_change)(new_volume));
+                }
                 shell.capture_event();
                 shell.request_redraw();
             }
