@@ -12,6 +12,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Songs view and per-genre Songs view now load complete libraries instead of stopping at 50_000 rows. The underlying Navidrome request had a hardcoded `_end=50000` sentinel that silently truncated libraries above that size; the load now paginates internally in 5_000-row chunks until the server returns a short page or the cumulative count matches `X-Total-Count`.
+
 ### Removed
 
 ## v0.3.17 — 2026-05-14
