@@ -402,15 +402,10 @@ impl Nokkvi {
             HotkeyMessage::FindSimilar => self.handle_find_similar_for_playing_track(),
             HotkeyMessage::FindTopSongs => self.handle_find_top_songs_for_playing_track(),
             HotkeyMessage::EditValue(up) => self.handle_edit_value(up),
-            HotkeyMessage::RefreshView => match self.current_view {
-                crate::View::Albums => Task::done(Message::LoadAlbums),
-                crate::View::Artists => Task::done(Message::LoadArtists),
-                crate::View::Songs => Task::done(Message::LoadSongs),
-                crate::View::Genres => Task::done(Message::LoadGenres),
-                crate::View::Playlists => Task::done(Message::LoadPlaylists),
-                crate::View::Radios => Task::done(Message::LoadRadioStations),
-                crate::View::Queue | crate::View::Settings => Task::none(),
-            },
+            HotkeyMessage::RefreshView => self
+                .current_view_page()
+                .and_then(|p| p.reload_message())
+                .map_or_else(Task::none, Task::done),
             HotkeyMessage::StartRoulette => Task::done(Message::Roulette(
                 crate::app_message::RouletteMessage::Start(self.current_view),
             )),

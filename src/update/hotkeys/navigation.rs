@@ -318,13 +318,28 @@ impl Nokkvi {
                 " CenterOnPlaying: item not in loaded {:?} buffer — starting center-only find chain",
                 self.current_view
             );
-            match self.current_view {
-                View::Albums => self.start_center_on_playing_album_chain(qs.album_id.clone()),
-                View::Artists => self.start_center_on_playing_artist_chain(qs.artist_id.clone()),
-                View::Songs => self.start_center_on_playing_song_chain(song_id.to_string()),
-                View::Genres => self.start_center_on_playing_genre_chain(qs.genre.clone()),
-                View::Queue | View::Playlists | View::Radios | View::Settings => Task::none(),
-            }
+            let pending = match self.current_view {
+                View::Albums => crate::state::PendingExpand::Album {
+                    album_id: qs.album_id.clone(),
+                    for_browsing_pane: false,
+                },
+                View::Artists => crate::state::PendingExpand::Artist {
+                    artist_id: qs.artist_id.clone(),
+                    for_browsing_pane: false,
+                },
+                View::Songs => crate::state::PendingExpand::Song {
+                    song_id: song_id.to_string(),
+                    for_browsing_pane: false,
+                },
+                View::Genres => crate::state::PendingExpand::Genre {
+                    genre_id: qs.genre.clone(),
+                    for_browsing_pane: false,
+                },
+                View::Queue | View::Playlists | View::Radios | View::Settings => {
+                    return Task::none();
+                }
+            };
+            self.start_center_on_playing_chain(pending)
         }
     }
 

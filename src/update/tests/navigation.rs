@@ -1065,7 +1065,10 @@ fn start_center_on_playing_album_chain_clears_search_and_arms_center_only() {
     app.albums_page.common.search_input_focused = true;
     seed_albums(&mut app, vec![make_album("stale", "Stale", "Artist")]);
 
-    let _ = app.start_center_on_playing_album_chain("a42".to_string());
+    let _ = app.start_center_on_playing_chain(crate::state::PendingExpand::Album {
+        album_id: "a42".to_string(),
+        for_browsing_pane: false,
+    });
 
     assert!(
         app.albums_page.common.search_query.is_empty(),
@@ -1097,7 +1100,10 @@ fn start_center_on_playing_song_chain_installs_song_target() {
     let mut app = test_app();
     app.songs_page.common.search_query = "filter".to_string();
 
-    let _ = app.start_center_on_playing_song_chain("s99".to_string());
+    let _ = app.start_center_on_playing_chain(crate::state::PendingExpand::Song {
+        song_id: "s99".to_string(),
+        for_browsing_pane: false,
+    });
 
     assert!(app.songs_page.common.search_query.is_empty());
     assert!(
@@ -1109,6 +1115,51 @@ fn start_center_on_playing_song_chain_installs_song_target() {
         "expected PendingExpand::Song {{ s99 }}, got {:?}",
         app.pending_expand
     );
+    assert!(app.pending_expand_center_only);
+}
+
+#[test]
+fn start_center_on_playing_chain_installs_artist_target() {
+    let mut app = test_app();
+    app.artists_page.common.search_query = "user typed".to_string();
+    seed_artists(&mut app, vec![make_artist("stale", "Stale Artist")]);
+
+    let _ = app.start_center_on_playing_chain(crate::state::PendingExpand::Artist {
+        artist_id: "ar7".to_string(),
+        for_browsing_pane: false,
+    });
+
+    assert!(app.artists_page.common.search_query.is_empty());
+    assert!(
+        app.library.artists.is_empty(),
+        "buffer must be reset so pagination restarts from offset 0",
+    );
+    assert!(matches!(
+        app.pending_expand,
+        Some(crate::state::PendingExpand::Artist { ref artist_id, for_browsing_pane: false })
+            if artist_id == "ar7"
+    ));
+    assert!(app.pending_expand_center_only);
+}
+
+#[test]
+fn start_center_on_playing_chain_installs_genre_target() {
+    let mut app = test_app();
+    app.genres_page.common.search_query = "user typed".to_string();
+    seed_genres(&mut app, vec![make_genre("stale", "Stale Genre")]);
+
+    let _ = app.start_center_on_playing_chain(crate::state::PendingExpand::Genre {
+        genre_id: "Rock".to_string(),
+        for_browsing_pane: false,
+    });
+
+    assert!(app.genres_page.common.search_query.is_empty());
+    assert!(app.library.genres.is_empty());
+    assert!(matches!(
+        app.pending_expand,
+        Some(crate::state::PendingExpand::Genre { ref genre_id, for_browsing_pane: false })
+            if genre_id == "Rock"
+    ));
     assert!(app.pending_expand_center_only);
 }
 

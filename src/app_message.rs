@@ -486,10 +486,6 @@ pub enum Message {
     BrowserPaneNavigateAndExpandAlbum {
         album_id: String,
     },
-    /// Internal: 2s after `NavigateAndExpandAlbum` fires, this checks whether
-    /// the target is still pending and shows a "Finding album…" toast if so.
-    /// No-op when the find resolved within the threshold.
-    PendingExpandAlbumTimeout(String),
     /// Artist-side mirror of `NavigateAndExpandAlbum`. Routes to the Artists
     /// view, clears search/filter, pages through until the target id
     /// appears, then auto-expands so the artist's albums show inline.
@@ -501,8 +497,6 @@ pub enum Message {
     BrowserPaneNavigateAndExpandArtist {
         artist_id: String,
     },
-    /// Internal 2s "Finding artist…" toast trigger.
-    PendingExpandArtistTimeout(String),
     /// Genre-side mirror — navigate to Genres, find the genre, expand it.
     NavigateAndExpandGenre {
         genre_id: String,
@@ -511,12 +505,11 @@ pub enum Message {
     BrowserPaneNavigateAndExpandGenre {
         genre_id: String,
     },
-    /// Internal 2s "Finding genre…" toast trigger.
-    PendingExpandGenreTimeout(String),
-    /// Internal 2s "Finding song…" toast trigger. Songs only enter the
-    /// find-and-expand chain via the CenterOnPlaying (Shift+C) fallback —
-    /// there is no click-driven navigate-and-expand for songs.
-    PendingExpandSongTimeout(String),
+    /// Internal: 2s after a find-and-expand chain starts, this checks whether
+    /// the carried target is still pending and shows a "Finding {entity}…"
+    /// toast if so. No-op when the find resolved within the threshold.
+    /// Songs only enter the chain via the CenterOnPlaying (Shift+C) fallback.
+    PendingExpandTimeout(crate::state::PendingExpand),
     /// Track info strip was clicked — dispatch depends on strip_click_action setting
     StripClicked,
     /// Track info strip right-click context menu action

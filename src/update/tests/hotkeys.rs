@@ -3,6 +3,99 @@
 use crate::test_helpers::*;
 
 // ============================================================================
+// RefreshView dispatch (hotkeys/mod.rs)
+//
+// After the collapse to `ViewPage::reload_message`, every per-view RefreshView
+// arm became a single helper call. These tests pin that:
+//  - the six views that impl ViewPage and return `Some(Message::Load*)` from
+//    `reload_message()` are reachable through `current_view_page()`;
+//  - Queue (impls ViewPage but inherits the default `None`) and Settings
+//    (no ViewPage impl, returns `None` from `current_view_page()`) yield no
+//    load message.
+// We assert against the trait directly because Task internals aren't
+// observable from a test — the dispatch arm body is `Task::done(reload_message)
+// .unwrap_or_else(Task::none)` so this characterizes the per-view branch
+// without trying to crack open the Task.
+// ============================================================================
+
+fn reload_msg_for(
+    app: &mut crate::Nokkvi,
+    view: crate::View,
+) -> Option<crate::app_message::Message> {
+    app.current_view = view;
+    app.current_view_page().and_then(|p| p.reload_message())
+}
+
+#[test]
+fn refresh_view_albums_yields_loadalbums() {
+    let mut app = test_app();
+    assert!(matches!(
+        reload_msg_for(&mut app, crate::View::Albums),
+        Some(crate::app_message::Message::LoadAlbums)
+    ));
+}
+
+#[test]
+fn refresh_view_artists_yields_loadartists() {
+    let mut app = test_app();
+    assert!(matches!(
+        reload_msg_for(&mut app, crate::View::Artists),
+        Some(crate::app_message::Message::LoadArtists)
+    ));
+}
+
+#[test]
+fn refresh_view_songs_yields_loadsongs() {
+    let mut app = test_app();
+    assert!(matches!(
+        reload_msg_for(&mut app, crate::View::Songs),
+        Some(crate::app_message::Message::LoadSongs)
+    ));
+}
+
+#[test]
+fn refresh_view_genres_yields_loadgenres() {
+    let mut app = test_app();
+    assert!(matches!(
+        reload_msg_for(&mut app, crate::View::Genres),
+        Some(crate::app_message::Message::LoadGenres)
+    ));
+}
+
+#[test]
+fn refresh_view_playlists_yields_loadplaylists() {
+    let mut app = test_app();
+    assert!(matches!(
+        reload_msg_for(&mut app, crate::View::Playlists),
+        Some(crate::app_message::Message::LoadPlaylists)
+    ));
+}
+
+#[test]
+fn refresh_view_radios_yields_loadradiostations() {
+    let mut app = test_app();
+    assert!(matches!(
+        reload_msg_for(&mut app, crate::View::Radios),
+        Some(crate::app_message::Message::LoadRadioStations)
+    ));
+}
+
+#[test]
+fn refresh_view_queue_yields_none() {
+    // Queue impls ViewPage but inherits the default reload_message = None
+    // (client-side filtering, no server fetch needed on F5/Escape).
+    let mut app = test_app();
+    assert!(reload_msg_for(&mut app, crate::View::Queue).is_none());
+}
+
+#[test]
+fn refresh_view_settings_yields_none() {
+    // Settings doesn't impl ViewPage at all — current_view_page() returns None.
+    let mut app = test_app();
+    assert!(reload_msg_for(&mut app, crate::View::Settings).is_none());
+}
+
+// ============================================================================
 // Starred Status Handlers (hotkeys.rs)
 // ============================================================================
 

@@ -14,58 +14,32 @@ use crate::{
 
 // === pending-expand helpers ===
 
-/// 2s delayed task that emits the `Message::PendingExpand*Timeout` matching
-/// the variant of `pending`. The corresponding handler verifies the id is
-/// still the active target before toasting, so superseded clicks stay silent.
-/// Songs only enter the find-and-expand chain via the CenterOnPlaying
-/// (Shift+C) fallback.
+/// 2s delayed task that emits a single `Message::PendingExpandTimeout` carrying
+/// the chain's `PendingExpand`. The collapsed `handle_pending_expand_timeout`
+/// verifies the variant + id still match the active target before toasting,
+/// so superseded clicks stay silent. Songs only enter the find-and-expand
+/// chain via the CenterOnPlaying (Shift+C) fallback.
 pub(crate) fn pending_expand_timeout_task(pending: crate::state::PendingExpand) -> Task<Message> {
     Task::perform(
         async {
             tokio::time::sleep(Duration::from_secs(2)).await;
         },
-        move |()| match &pending {
-            crate::state::PendingExpand::Album { album_id, .. } => {
-                Message::PendingExpandAlbumTimeout(album_id.clone())
-            }
-            crate::state::PendingExpand::Artist { artist_id, .. } => {
-                Message::PendingExpandArtistTimeout(artist_id.clone())
-            }
-            crate::state::PendingExpand::Genre { genre_id, .. } => {
-                Message::PendingExpandGenreTimeout(genre_id.clone())
-            }
-            crate::state::PendingExpand::Song { song_id, .. } => {
-                Message::PendingExpandSongTimeout(song_id.clone())
-            }
-        },
+        move |()| Message::PendingExpandTimeout(pending.clone()),
     )
 }
 
 /// Toast a "Finding {entity}…" notification iff `expected` still matches the
 /// active pending-expand target (same variant + same id; `for_browsing_pane`
-/// is ignored). Called by the four `handle_pending_expand_*_timeout`
-/// dispatchers — superseded clicks stay silent because the active target
-/// has already been replaced or cleared.
+/// is ignored). Called by the collapsed `handle_pending_expand_timeout`
+/// dispatcher — superseded clicks stay silent because the active target
+/// has already been replaced or cleared. Discriminant equality plus
+/// `entity_id()` covers the "same variant + same id" contract without an
+/// N×N pairing match.
 fn pending_expand_timeout_toast(app: &mut Nokkvi, expected: &crate::state::PendingExpand) {
-    let id_matches = match (&app.pending_expand, expected) {
-        (
-            Some(crate::state::PendingExpand::Album { album_id: a, .. }),
-            crate::state::PendingExpand::Album { album_id: b, .. },
-        ) => a == b,
-        (
-            Some(crate::state::PendingExpand::Artist { artist_id: a, .. }),
-            crate::state::PendingExpand::Artist { artist_id: b, .. },
-        ) => a == b,
-        (
-            Some(crate::state::PendingExpand::Genre { genre_id: a, .. }),
-            crate::state::PendingExpand::Genre { genre_id: b, .. },
-        ) => a == b,
-        (
-            Some(crate::state::PendingExpand::Song { song_id: a, .. }),
-            crate::state::PendingExpand::Song { song_id: b, .. },
-        ) => a == b,
-        _ => false,
-    };
+    let id_matches = app.pending_expand.as_ref().is_some_and(|active| {
+        std::mem::discriminant(active) == std::mem::discriminant(expected)
+            && active.entity_id() == expected.entity_id()
+    });
     if id_matches {
         let label = match expected {
             crate::state::PendingExpand::Album { .. } => "Finding album…",
@@ -584,17 +558,15 @@ impl Nokkvi {
     /// the unfiltered list until the album appears, then dispatching
     /// `FocusAndExpand` so its tracks render inline.
     pub(crate) fn handle_navigate_and_expand_album(&mut self, album_id: String) -> Task<Message> {
-        self.prime_expand_album_target(album_id.clone(), false);
+        let pending = crate::state::PendingExpand::Album {
+            album_id,
+            for_browsing_pane: false,
+        };
+        self.prime_expand(pending.clone());
         // Clearing `library.albums` above flips `is_empty()` to true, so
         // handle_switch_view's Albums arm dispatches LoadAlbums for us.
         let switch_task = self.handle_switch_view(View::Albums);
-        Task::batch([
-            switch_task,
-            pending_expand_timeout_task(crate::state::PendingExpand::Album {
-                album_id,
-                for_browsing_pane: false,
-            }),
-        ])
+        Task::batch([switch_task, pending_expand_timeout_task(pending)])
     }
 
     /// Browsing-pane variant of `handle_navigate_and_expand_album` — switches
@@ -604,32 +576,28 @@ impl Nokkvi {
         &mut self,
         album_id: String,
     ) -> Task<Message> {
-        self.prime_expand_album_target(album_id.clone(), true);
+        let pending = crate::state::PendingExpand::Album {
+            album_id,
+            for_browsing_pane: true,
+        };
+        self.prime_expand(pending.clone());
         let switch_task = self.handle_browsing_panel_message(
             crate::views::BrowsingPanelMessage::SwitchView(crate::views::BrowsingView::Albums),
         );
         Task::batch([
             switch_task,
             Task::done(Message::LoadAlbums),
-            pending_expand_timeout_task(crate::state::PendingExpand::Album {
-                album_id,
-                for_browsing_pane: true,
-            }),
+            pending_expand_timeout_task(pending),
         ])
     }
 
-    /// Shared setup for both navigate-and-expand variants: reset Albums page
-    /// state, defocus its search input (so the user isn't typing into it on
-    /// arrival), drop the current buffer, and install the pending target.
-    /// Caller dispatches the actual load + timeout tasks.
-    fn prime_expand_album_target(&mut self, album_id: String, for_browsing_pane: bool) {
-        prime_expand_target(
-            self,
-            crate::state::PendingExpand::Album {
-                album_id,
-                for_browsing_pane,
-            },
-        );
+    /// Single source of truth for the navigate-and-expand priming step.
+    /// Resets the matching page (search, expansion, viewport, selection),
+    /// drops the corresponding library buffer, clears the center-only flag,
+    /// and installs `pending` as the active target. Thin wrapper around the
+    /// free-function `prime_expand_target` so callers can stay method-chained.
+    fn prime_expand(&mut self, pending: crate::state::PendingExpand) {
+        prime_expand_target(self, pending);
     }
 
     /// Drop the in-flight find-and-expand chain (whichever kind) plus any
@@ -647,15 +615,13 @@ impl Nokkvi {
     /// Genre-side mirror of `handle_navigate_and_expand_album`. The find
     /// chain is single-shot since genres don't paginate.
     pub(crate) fn handle_navigate_and_expand_genre(&mut self, genre_id: String) -> Task<Message> {
-        self.prime_expand_genre_target(genre_id.clone(), false);
+        let pending = crate::state::PendingExpand::Genre {
+            genre_id,
+            for_browsing_pane: false,
+        };
+        self.prime_expand(pending.clone());
         let switch_task = self.handle_switch_view(View::Genres);
-        Task::batch([
-            switch_task,
-            pending_expand_timeout_task(crate::state::PendingExpand::Genre {
-                genre_id,
-                for_browsing_pane: false,
-            }),
-        ])
+        Task::batch([switch_task, pending_expand_timeout_task(pending)])
     }
 
     /// Browsing-pane variant of `handle_navigate_and_expand_genre`.
@@ -663,44 +629,19 @@ impl Nokkvi {
         &mut self,
         genre_id: String,
     ) -> Task<Message> {
-        self.prime_expand_genre_target(genre_id.clone(), true);
+        let pending = crate::state::PendingExpand::Genre {
+            genre_id,
+            for_browsing_pane: true,
+        };
+        self.prime_expand(pending.clone());
         let switch_task = self.handle_browsing_panel_message(
             crate::views::BrowsingPanelMessage::SwitchView(crate::views::BrowsingView::Genres),
         );
         Task::batch([
             switch_task,
             Task::done(Message::LoadGenres),
-            pending_expand_timeout_task(crate::state::PendingExpand::Genre {
-                genre_id,
-                for_browsing_pane: true,
-            }),
+            pending_expand_timeout_task(pending),
         ])
-    }
-
-    /// Shared setup for both genre navigate-and-expand variants.
-    fn prime_expand_genre_target(&mut self, genre_id: String, for_browsing_pane: bool) {
-        prime_expand_target(
-            self,
-            crate::state::PendingExpand::Genre {
-                genre_id,
-                for_browsing_pane,
-            },
-        );
-    }
-
-    /// Genre-side mirror of `handle_pending_expand_album_timeout`.
-    pub(crate) fn handle_pending_expand_genre_timeout(
-        &mut self,
-        genre_id: String,
-    ) -> Task<Message> {
-        pending_expand_timeout_toast(
-            self,
-            &crate::state::PendingExpand::Genre {
-                genre_id,
-                for_browsing_pane: false,
-            },
-        );
-        Task::none()
     }
 
     /// Genre-side mirror of `try_resolve_pending_expand_album`. Single-shot:
@@ -727,15 +668,13 @@ impl Nokkvi {
     /// find-and-expand target. The artists load handlers consume it after
     /// each page arrives.
     pub(crate) fn handle_navigate_and_expand_artist(&mut self, artist_id: String) -> Task<Message> {
-        self.prime_expand_artist_target(artist_id.clone(), false);
+        let pending = crate::state::PendingExpand::Artist {
+            artist_id,
+            for_browsing_pane: false,
+        };
+        self.prime_expand(pending.clone());
         let switch_task = self.handle_switch_view(View::Artists);
-        Task::batch([
-            switch_task,
-            pending_expand_timeout_task(crate::state::PendingExpand::Artist {
-                artist_id,
-                for_browsing_pane: false,
-            }),
-        ])
+        Task::batch([switch_task, pending_expand_timeout_task(pending)])
     }
 
     /// Browsing-pane variant of `handle_navigate_and_expand_artist`.
@@ -743,44 +682,19 @@ impl Nokkvi {
         &mut self,
         artist_id: String,
     ) -> Task<Message> {
-        self.prime_expand_artist_target(artist_id.clone(), true);
+        let pending = crate::state::PendingExpand::Artist {
+            artist_id,
+            for_browsing_pane: true,
+        };
+        self.prime_expand(pending.clone());
         let switch_task = self.handle_browsing_panel_message(
             crate::views::BrowsingPanelMessage::SwitchView(crate::views::BrowsingView::Artists),
         );
         Task::batch([
             switch_task,
             Task::done(Message::LoadArtists),
-            pending_expand_timeout_task(crate::state::PendingExpand::Artist {
-                artist_id,
-                for_browsing_pane: true,
-            }),
+            pending_expand_timeout_task(pending),
         ])
-    }
-
-    /// Shared setup for both artist navigate-and-expand variants.
-    fn prime_expand_artist_target(&mut self, artist_id: String, for_browsing_pane: bool) {
-        prime_expand_target(
-            self,
-            crate::state::PendingExpand::Artist {
-                artist_id,
-                for_browsing_pane,
-            },
-        );
-    }
-
-    /// Artist-side mirror of `handle_pending_expand_album_timeout`.
-    pub(crate) fn handle_pending_expand_artist_timeout(
-        &mut self,
-        artist_id: String,
-    ) -> Task<Message> {
-        pending_expand_timeout_toast(
-            self,
-            &crate::state::PendingExpand::Artist {
-                artist_id,
-                for_browsing_pane: false,
-            },
-        );
-        Task::none()
     }
 
     /// Artist-side mirror of `try_resolve_pending_expand_album`. After each
@@ -802,48 +716,17 @@ impl Nokkvi {
         self.try_resolve_pending_expand_with::<crate::update::AlbumSpec>()
     }
 
-    /// Fired ~2s after `handle_navigate_and_expand_album` to surface a
-    /// "Finding album…" toast when the chain is still hunting. Compares
-    /// `album_id` against the currently pending target so a stale timeout
-    /// from a superseded click does not toast.
-    pub(crate) fn handle_pending_expand_album_timeout(
+    /// Fired ~2s after a navigate-and-expand handler primes a chain. Compares
+    /// the carried `PendingExpand` against the currently pending target via
+    /// `pending_expand_timeout_toast` and surfaces a "Finding {entity}…" toast
+    /// when they still match — so stale timeouts from superseded clicks stay
+    /// silent. Always returns `Task::none()` (the toast is a side effect on
+    /// `app.toast`).
+    pub(crate) fn handle_pending_expand_timeout(
         &mut self,
-        album_id: String,
+        pending: crate::state::PendingExpand,
     ) -> Task<Message> {
-        pending_expand_timeout_toast(
-            self,
-            &crate::state::PendingExpand::Album {
-                album_id,
-                for_browsing_pane: false,
-            },
-        );
-        Task::none()
-    }
-
-    /// Songs-side mirror of `prime_expand_album_target`. Songs aren't
-    /// expandable, so this is only used by the CenterOnPlaying (Shift+C)
-    /// fallback — never by a click. The corresponding `try_resolve_*` is
-    /// implicitly center-only (skips FocusAndExpand). The shared
-    /// `prime_expand_target` skips `expansion.clear()` for the Song variant.
-    fn prime_expand_song_target(&mut self, song_id: String, for_browsing_pane: bool) {
-        prime_expand_target(
-            self,
-            crate::state::PendingExpand::Song {
-                song_id,
-                for_browsing_pane,
-            },
-        );
-    }
-
-    /// Song-side mirror of `handle_pending_expand_album_timeout`.
-    pub(crate) fn handle_pending_expand_song_timeout(&mut self, song_id: String) -> Task<Message> {
-        pending_expand_timeout_toast(
-            self,
-            &crate::state::PendingExpand::Song {
-                song_id,
-                for_browsing_pane: false,
-            },
-        );
+        pending_expand_timeout_toast(self, &pending);
         Task::none()
     }
 
@@ -856,71 +739,21 @@ impl Nokkvi {
         self.try_resolve_pending_expand_with::<crate::update::SongSpec>()
     }
 
-    /// CenterOnPlaying (Shift+C) fallback for the Albums view: clear search
-    /// and any filter, drop the loaded buffer, install a center-only
-    /// pending-expand target, and kick the find chain. The chain
-    /// force-loads pages until the playing album appears, then centers it
-    /// without dispatching FocusAndExpand.
-    pub(crate) fn start_center_on_playing_album_chain(
+    /// CenterOnPlaying (Shift+C) fallback: clear the matching view's search
+    /// and filter, drop its loaded buffer, install a center-only
+    /// `PendingExpand` target, and kick the find chain. The chain force-loads
+    /// pages until the playing item appears, then centers it without
+    /// dispatching FocusAndExpand. `PendingExpand::load_message` picks the
+    /// right `Message::Load*` for the carried variant — Albums/Artists/Songs
+    /// paginate, Genres is single-shot under the hood.
+    pub(crate) fn start_center_on_playing_chain(
         &mut self,
-        album_id: String,
+        pending: crate::state::PendingExpand,
     ) -> Task<Message> {
-        self.prime_expand_album_target(album_id.clone(), false);
+        let load = pending.load_message();
+        self.prime_expand(pending.clone());
         self.pending_expand_center_only = true;
-        Task::batch([
-            Task::done(Message::LoadAlbums),
-            pending_expand_timeout_task(crate::state::PendingExpand::Album {
-                album_id,
-                for_browsing_pane: false,
-            }),
-        ])
-    }
-
-    /// Artists-view mirror of `start_center_on_playing_album_chain`.
-    pub(crate) fn start_center_on_playing_artist_chain(
-        &mut self,
-        artist_id: String,
-    ) -> Task<Message> {
-        self.prime_expand_artist_target(artist_id.clone(), false);
-        self.pending_expand_center_only = true;
-        Task::batch([
-            Task::done(Message::LoadArtists),
-            pending_expand_timeout_task(crate::state::PendingExpand::Artist {
-                artist_id,
-                for_browsing_pane: false,
-            }),
-        ])
-    }
-
-    /// Genres-view mirror of `start_center_on_playing_album_chain`. Single-
-    /// shot under the hood (genres don't paginate).
-    pub(crate) fn start_center_on_playing_genre_chain(
-        &mut self,
-        genre_id: String,
-    ) -> Task<Message> {
-        self.prime_expand_genre_target(genre_id.clone(), false);
-        self.pending_expand_center_only = true;
-        Task::batch([
-            Task::done(Message::LoadGenres),
-            pending_expand_timeout_task(crate::state::PendingExpand::Genre {
-                genre_id,
-                for_browsing_pane: false,
-            }),
-        ])
-    }
-
-    /// Songs-view mirror of `start_center_on_playing_album_chain`. Songs
-    /// aren't expandable so the resolved row is always just centered.
-    pub(crate) fn start_center_on_playing_song_chain(&mut self, song_id: String) -> Task<Message> {
-        self.prime_expand_song_target(song_id.clone(), false);
-        self.pending_expand_center_only = true;
-        Task::batch([
-            Task::done(Message::LoadSongs),
-            pending_expand_timeout_task(crate::state::PendingExpand::Song {
-                song_id,
-                for_browsing_pane: false,
-            }),
-        ])
+        Task::batch([Task::done(load), pending_expand_timeout_task(pending)])
     }
 
     /// Handles cross-view navigation specifically intercepted from within the right-side browsing pane.

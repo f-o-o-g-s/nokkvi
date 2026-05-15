@@ -43,6 +43,7 @@ macro_rules! for_each_expandable_entity {
             library_field:           albums,
             pending_var:             crate::state::PendingExpand::Album,
             pending_field:           album_id,
+            pending_factory:         pending_album,
             pin_var:                 crate::state::PendingTopPin::Album,
             view_const:              crate::View::Albums,
             children_loaded_msg:     crate::views::AlbumsMessage::TracksLoaded,
@@ -52,7 +53,6 @@ macro_rules! for_each_expandable_entity {
             try_resolve_fn:          try_resolve_pending_expand_album,
             handle_navigate_fn:      handle_navigate_and_expand_album,
             handle_browser_fn:       handle_browser_pane_navigate_and_expand_album,
-            handle_timeout_fn:       handle_pending_expand_album_timeout,
             target_in_3:             "a1",
             target_idx_in_3:         1,
             expected_pin_in_3:       "a1",
@@ -70,6 +70,7 @@ macro_rules! for_each_expandable_entity {
             library_field:           artists,
             pending_var:             crate::state::PendingExpand::Artist,
             pending_field:           artist_id,
+            pending_factory:         pending_artist,
             pin_var:                 crate::state::PendingTopPin::Artist,
             view_const:              crate::View::Artists,
             children_loaded_msg:     crate::views::ArtistsMessage::AlbumsLoaded,
@@ -79,7 +80,6 @@ macro_rules! for_each_expandable_entity {
             try_resolve_fn:          try_resolve_pending_expand_artist,
             handle_navigate_fn:      handle_navigate_and_expand_artist,
             handle_browser_fn:       handle_browser_pane_navigate_and_expand_artist,
-            handle_timeout_fn:       handle_pending_expand_artist_timeout,
             target_in_3:             "ar1",
             target_idx_in_3:         1,
             expected_pin_in_3:       "ar1",
@@ -97,6 +97,7 @@ macro_rules! for_each_expandable_entity {
             library_field:           genres,
             pending_var:             crate::state::PendingExpand::Genre,
             pending_field:           genre_id,
+            pending_factory:         pending_genre,
             pin_var:                 crate::state::PendingTopPin::Genre,
             view_const:              crate::View::Genres,
             children_loaded_msg:     crate::views::GenresMessage::AlbumsLoaded,
@@ -106,7 +107,6 @@ macro_rules! for_each_expandable_entity {
             try_resolve_fn:          try_resolve_pending_expand_genre,
             handle_navigate_fn:      handle_navigate_and_expand_genre,
             handle_browser_fn:       handle_browser_pane_navigate_and_expand_genre,
-            handle_timeout_fn:       handle_pending_expand_genre_timeout,
             target_in_3:             "Genre 1",
             target_idx_in_3:         1,
             expected_pin_in_3:       "uuid-1",
@@ -144,6 +144,7 @@ macro_rules! find_chain_scenarios_full {
         library_field:           $lib:ident,
         pending_var:             $pending_var:path,
         pending_field:           $pfield:ident,
+        pending_factory:         $pending_factory:ident,
         pin_var:                 $pin_var:path,
         view_const:              $view:path,
         children_loaded_msg:     $children_msg:path,
@@ -153,7 +154,6 @@ macro_rules! find_chain_scenarios_full {
         try_resolve_fn:          $resolve:ident,
         handle_navigate_fn:      $navigate:ident,
         handle_browser_fn:       $browser:ident,
-        handle_timeout_fn:       $timeout:ident,
         target_in_3:             $target_in_3:expr,
         target_idx_in_3:         $idx_in_3:expr,
         expected_pin_in_3:       $expected_pin_in_3:expr,
@@ -385,7 +385,7 @@ macro_rules! find_chain_scenarios_full {
                 let mut app = test_app();
                 assert!(app.pending_expand.is_none());
 
-                let _ = app.$timeout("a1".to_string());
+                let _ = app.handle_pending_expand_timeout($pending_factory("a1"));
 
                 assert!(
                     app.toast.toasts.is_empty(),
@@ -398,7 +398,7 @@ macro_rules! find_chain_scenarios_full {
                 let mut app = test_app();
                 $arm_pending(&mut app, "newer");
 
-                let _ = app.$timeout("older".to_string());
+                let _ = app.handle_pending_expand_timeout($pending_factory("older"));
 
                 assert!(
                     app.toast.toasts.is_empty(),
@@ -411,7 +411,7 @@ macro_rules! find_chain_scenarios_full {
                 let mut app = test_app();
                 $arm_pending(&mut app, "a1");
 
-                let _ = app.$timeout("a1".to_string());
+                let _ = app.handle_pending_expand_timeout($pending_factory("a1"));
 
                 assert_eq!(app.toast.toasts.len(), 1);
             }
@@ -482,6 +482,7 @@ macro_rules! find_chain_scenarios_single_shot {
         library_field:           $lib:ident,
         pending_var:             $pending_var:path,
         pending_field:           $pfield:ident,
+        pending_factory:         $pending_factory:ident,
         pin_var:                 $pin_var:path,
         view_const:              $view:path,
         children_loaded_msg:     $children_msg:path,
@@ -491,7 +492,6 @@ macro_rules! find_chain_scenarios_single_shot {
         try_resolve_fn:          $resolve:ident,
         handle_navigate_fn:      $navigate:ident,
         handle_browser_fn:       $browser:ident,
-        handle_timeout_fn:       $timeout:ident,
         target_in_3:             $target_in_3:expr,
         target_idx_in_3:         $idx_in_3:expr,
         expected_pin_in_3:       $expected_pin_in_3:expr,
@@ -659,7 +659,7 @@ macro_rules! find_chain_scenarios_single_shot {
             fn pending_timeout_does_not_toast_when_target_already_resolved() {
                 let mut app = test_app();
 
-                let _ = app.$timeout("Rock".to_string());
+                let _ = app.handle_pending_expand_timeout($pending_factory("Rock"));
 
                 assert!(app.toast.toasts.is_empty());
             }
@@ -669,7 +669,7 @@ macro_rules! find_chain_scenarios_single_shot {
                 let mut app = test_app();
                 $arm_pending(&mut app, "Rock");
 
-                let _ = app.$timeout("Rock".to_string());
+                let _ = app.handle_pending_expand_timeout($pending_factory("Rock"));
 
                 assert_eq!(app.toast.toasts.len(), 1);
             }

@@ -127,17 +127,11 @@ impl Nokkvi {
             Message::BrowserPaneNavigateAndExpandAlbum { album_id } => {
                 self.handle_browser_pane_navigate_and_expand_album(album_id)
             }
-            Message::PendingExpandAlbumTimeout(album_id) => {
-                self.handle_pending_expand_album_timeout(album_id)
-            }
             Message::NavigateAndExpandArtist { artist_id } => {
                 self.handle_navigate_and_expand_artist(artist_id)
             }
             Message::BrowserPaneNavigateAndExpandArtist { artist_id } => {
                 self.handle_browser_pane_navigate_and_expand_artist(artist_id)
-            }
-            Message::PendingExpandArtistTimeout(artist_id) => {
-                self.handle_pending_expand_artist_timeout(artist_id)
             }
             Message::NavigateAndExpandGenre { genre_id } => {
                 self.handle_navigate_and_expand_genre(genre_id)
@@ -145,12 +139,7 @@ impl Nokkvi {
             Message::BrowserPaneNavigateAndExpandGenre { genre_id } => {
                 self.handle_browser_pane_navigate_and_expand_genre(genre_id)
             }
-            Message::PendingExpandGenreTimeout(genre_id) => {
-                self.handle_pending_expand_genre_timeout(genre_id)
-            }
-            Message::PendingExpandSongTimeout(song_id) => {
-                self.handle_pending_expand_song_timeout(song_id)
-            }
+            Message::PendingExpandTimeout(pending) => self.handle_pending_expand_timeout(pending),
             Message::StripClicked => {
                 use nokkvi_data::types::player_settings::StripClickAction;
                 match crate::theme::strip_click_action() {

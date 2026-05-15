@@ -62,6 +62,116 @@ impl PendingExpand {
             Self::Song { .. } => crate::View::Songs,
         }
     }
+
+    /// Target id carried by this variant. Each variant's id field has a
+    /// distinct name (`album_id`/`artist_id`/`genre_id`/`song_id`) — this
+    /// accessor lets entity-agnostic call sites read the id without a
+    /// per-variant match.
+    pub fn entity_id(&self) -> &str {
+        match self {
+            Self::Album { album_id, .. } => album_id,
+            Self::Artist { artist_id, .. } => artist_id,
+            Self::Genre { genre_id, .. } => genre_id,
+            Self::Song { song_id, .. } => song_id,
+        }
+    }
+
+    /// The `Message::Load*` that fetches this entity's library. Used by
+    /// the collapsed `start_center_on_playing_chain` to dispatch the right
+    /// load without a per-variant match at the call site. Note: this is
+    /// the *entity-load* message, distinct from `ViewPage::reload_message`
+    /// (which is per-view and includes Playlists/Radios — entities that
+    /// don't participate in the find-and-expand chain).
+    pub fn load_message(&self) -> crate::app_message::Message {
+        match self {
+            Self::Album { .. } => crate::app_message::Message::LoadAlbums,
+            Self::Artist { .. } => crate::app_message::Message::LoadArtists,
+            Self::Genre { .. } => crate::app_message::Message::LoadGenres,
+            Self::Song { .. } => crate::app_message::Message::LoadSongs,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app_message::Message;
+
+    fn id(s: &str) -> String {
+        s.to_string()
+    }
+
+    #[test]
+    fn load_message_picks_loadalbums_for_album_variant() {
+        let p = PendingExpand::Album {
+            album_id: id("a1"),
+            for_browsing_pane: false,
+        };
+        assert!(matches!(p.load_message(), Message::LoadAlbums));
+    }
+
+    #[test]
+    fn load_message_picks_loadartists_for_artist_variant() {
+        let p = PendingExpand::Artist {
+            artist_id: id("ar1"),
+            for_browsing_pane: true,
+        };
+        assert!(matches!(p.load_message(), Message::LoadArtists));
+    }
+
+    #[test]
+    fn load_message_picks_loadgenres_for_genre_variant() {
+        let p = PendingExpand::Genre {
+            genre_id: id("Rock"),
+            for_browsing_pane: false,
+        };
+        assert!(matches!(p.load_message(), Message::LoadGenres));
+    }
+
+    #[test]
+    fn load_message_picks_loadsongs_for_song_variant() {
+        let p = PendingExpand::Song {
+            song_id: id("s9"),
+            for_browsing_pane: false,
+        };
+        assert!(matches!(p.load_message(), Message::LoadSongs));
+    }
+
+    #[test]
+    fn entity_id_returns_inner_id_for_every_variant() {
+        assert_eq!(
+            PendingExpand::Album {
+                album_id: id("a1"),
+                for_browsing_pane: false,
+            }
+            .entity_id(),
+            "a1",
+        );
+        assert_eq!(
+            PendingExpand::Artist {
+                artist_id: id("ar2"),
+                for_browsing_pane: false,
+            }
+            .entity_id(),
+            "ar2",
+        );
+        assert_eq!(
+            PendingExpand::Genre {
+                genre_id: id("Jazz"),
+                for_browsing_pane: false,
+            }
+            .entity_id(),
+            "Jazz",
+        );
+        assert_eq!(
+            PendingExpand::Song {
+                song_id: id("s7"),
+                for_browsing_pane: false,
+            }
+            .entity_id(),
+            "s7",
+        );
+    }
 }
 
 /// Item to re-pin the highlight onto after `set_children` fires.

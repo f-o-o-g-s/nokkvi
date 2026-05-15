@@ -196,36 +196,56 @@ pub(crate) fn albums_indexed(n: usize) -> Vec<AlbumUIViewData> {
         .collect()
 }
 
-/// Arm `pending_expand` for an Album target (top-pane, not browsing).
-pub(crate) fn arm_pending_album(app: &mut Nokkvi, id: &str) {
-    app.pending_expand = Some(crate::state::PendingExpand::Album {
+/// Build a top-pane `PendingExpand::Album` with the given id.
+pub(crate) fn pending_album(id: &str) -> crate::state::PendingExpand {
+    crate::state::PendingExpand::Album {
         album_id: id.to_string(),
         for_browsing_pane: false,
-    });
+    }
+}
+
+/// Build a top-pane `PendingExpand::Artist` with the given id.
+pub(crate) fn pending_artist(id: &str) -> crate::state::PendingExpand {
+    crate::state::PendingExpand::Artist {
+        artist_id: id.to_string(),
+        for_browsing_pane: false,
+    }
+}
+
+/// Build a top-pane `PendingExpand::Genre` with the given id.
+pub(crate) fn pending_genre(id: &str) -> crate::state::PendingExpand {
+    crate::state::PendingExpand::Genre {
+        genre_id: id.to_string(),
+        for_browsing_pane: false,
+    }
+}
+
+/// Build a top-pane `PendingExpand::Song` with the given id.
+pub(crate) fn pending_song(id: &str) -> crate::state::PendingExpand {
+    crate::state::PendingExpand::Song {
+        song_id: id.to_string(),
+        for_browsing_pane: false,
+    }
+}
+
+/// Arm `pending_expand` for an Album target (top-pane, not browsing).
+pub(crate) fn arm_pending_album(app: &mut Nokkvi, id: &str) {
+    app.pending_expand = Some(pending_album(id));
 }
 
 /// Arm `pending_expand` for an Artist target (top-pane, not browsing).
 pub(crate) fn arm_pending_artist(app: &mut Nokkvi, id: &str) {
-    app.pending_expand = Some(crate::state::PendingExpand::Artist {
-        artist_id: id.to_string(),
-        for_browsing_pane: false,
-    });
+    app.pending_expand = Some(pending_artist(id));
 }
 
 /// Arm `pending_expand` for a Genre target (top-pane, not browsing).
 pub(crate) fn arm_pending_genre(app: &mut Nokkvi, id: &str) {
-    app.pending_expand = Some(crate::state::PendingExpand::Genre {
-        genre_id: id.to_string(),
-        for_browsing_pane: false,
-    });
+    app.pending_expand = Some(pending_genre(id));
 }
 
 /// Arm `pending_expand` for a Song target (top-pane, not browsing).
 pub(crate) fn arm_pending_song(app: &mut Nokkvi, id: &str) {
-    app.pending_expand = Some(crate::state::PendingExpand::Song {
-        song_id: id.to_string(),
-        for_browsing_pane: false,
-    });
+    app.pending_expand = Some(pending_song(id));
 }
 
 /// `n` indexed artists with ids `ar0..ar{n-1}` and names `Artist 0..Artist {n-1}`.
