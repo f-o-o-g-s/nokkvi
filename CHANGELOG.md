@@ -12,6 +12,10 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Volume changes made by releasing the slider, scrolling the wheel, or sending an external D-Bus command (MPRIS, playerctl, headset buttons, hardware media keys) now reliably persist past the 500ms throttle. All three were previously routed through the drag-intermediate path, so a release that landed inside the throttle window or a discrete wheel notch / external command inside it could be silently dropped on the next launch.
+- Two rapid mouse-wheel notches now produce two volume steps. The wheel handler previously based the second event off a render-time snapshot, so a second notch arriving before the next render computed from the stale pre-first base and overwrote the first.
+- Ctrl-clicking an expanded child row (e.g. a track inside an Artists album expansion) now adds it to the multi-selection in legacy click-to-play mode. The child-row handler previously dispatched the play action on modifier-click and defeated multi-select.
+- Playlist create, save, and delete writes now use a leading-slash path so reverse-proxied Navidrome deployments behind a URL prefix accept them. Read paths already had the leading slash.
 - Songs view and per-genre Songs view now load complete libraries instead of stopping at 50_000 rows. The underlying Navidrome request had a hardcoded `_end=50000` sentinel that silently truncated libraries above that size; the load now paginates internally in 5_000-row chunks until the server returns a short page or the cumulative count matches `X-Total-Count`.
 
 ### Removed
