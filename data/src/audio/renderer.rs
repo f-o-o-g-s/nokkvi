@@ -361,6 +361,7 @@ impl AudioRenderer {
             norm,
             self.eq_state.clone(),
             self.consumed_notify.clone(),
+            true,
         );
 
         debug!(
@@ -560,6 +561,7 @@ impl AudioRenderer {
                 norm,
                 self.eq_state.clone(),
                 self.consumed_notify.clone(),
+                true,
             );
             self.primary_stream = Some(stream);
             // Keep current_replay_gain consistent — don't blow it away.
@@ -759,6 +761,10 @@ impl AudioRenderer {
         };
 
         let cf_norm = self.resolve_norm_for(self.pending_crossfade_replay_gain.as_ref());
+        // `feeds_visualizer = false` — see `StreamHandle::feeds_visualizer`.
+        // Two concurrent streams sharing the visualizer callback would otherwise
+        // flip its rate atomic every batch, thrashing the spectrum engine into
+        // constant reinit. `finalize_crossfade` flips this `true` after promotion.
         let cf_stream = output.create_stream(
             incoming_format.sample_rate(),
             incoming_format.channel_count() as u16,
@@ -766,6 +772,7 @@ impl AudioRenderer {
             cf_norm,
             self.eq_state.clone(),
             self.consumed_notify.clone(),
+            false,
         );
 
         self.crossfade_state = CrossfadeState::Active {
@@ -913,9 +920,13 @@ impl AudioRenderer {
         }
         self.primary_stream = Some(stream);
 
-        // Set new primary to full user volume
+        // Set new primary to full user volume and promote it to visualizer
+        // feeder (it was created silent for the viz to avoid the two-stream
+        // rate thrash; now that it's the only stream alive, it should drive
+        // the spectrum).
         if let Some(ref stream) = self.primary_stream {
             stream.set_volume(self.stream_volume());
+            stream.set_feeds_visualizer(true);
         }
 
         // Update format to the incoming track's format

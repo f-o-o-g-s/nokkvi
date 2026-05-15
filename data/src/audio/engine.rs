@@ -2277,6 +2277,7 @@ mod tests {
             1.0,
             None,
             notify,
+            true,
         );
 
         if paused {

@@ -66,6 +66,16 @@ pub struct StreamHandle {
     /// so it wakes as soon as the renderer drains space — and stays asleep
     /// for the full timeout while paused (renderer not consuming → no fires).
     pub(super) consumed_notify: Arc<Notify>,
+    /// Whether this stream feeds the shared visualizer callback slot.
+    ///
+    /// Multiple streams share one callback slot via `SharedVisualizerCallback`.
+    /// During a crossfade between tracks with different sample rates, two
+    /// concurrent streams would otherwise both fire the callback with their
+    /// own rates, flipping the visualizer's stored rate atomic each batch and
+    /// thrashing the spectrum engine into constant reinitialization. The
+    /// renderer sets this `false` on the crossfade incoming stream and flips
+    /// it `true` after promotion in `finalize_crossfade`.
+    pub(super) feeds_visualizer: Arc<AtomicBool>,
 }
 
 impl StreamHandle {
@@ -132,6 +142,19 @@ impl StreamHandle {
     pub fn consumed_notify(&self) -> &Arc<Notify> {
         &self.consumed_notify
     }
+
+    /// Whether this stream is currently feeding the shared visualizer callback.
+    pub fn feeds_visualizer(&self) -> bool {
+        self.feeds_visualizer.load(Ordering::Acquire)
+    }
+
+    /// Toggle whether this stream feeds the shared visualizer callback.
+    ///
+    /// The renderer calls this with `true` on the new primary at
+    /// `finalize_crossfade` after promoting the crossfade incoming stream.
+    pub fn set_feeds_visualizer(&self, feeds: bool) {
+        self.feeds_visualizer.store(feeds, Ordering::Release);
+    }
 }
 
 /// Visualizer callback type — receives a batch of f32 samples and the sample rate.
@@ -195,6 +218,14 @@ impl StreamingSource {
     /// - `consumed_notify`: Notify primitive fired every `CONSUMED_NOTIFY_STRIDE` samples.
     ///   The decode loop awaits this (with a timeout) instead of busy-sleeping when the
     ///   ring buffer is full — it wakes as soon as there is space to write.
+    /// - `feeds_visualizer`: whether this stream should push samples to the shared
+    ///   visualizer callback. The renderer passes `false` for a crossfade incoming
+    ///   stream so two concurrent streams cannot thrash the visualizer's per-batch
+    ///   sample-rate atomic, then flips it `true` after promotion in `finalize_crossfade`.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "low-level stream constructor; each arg is independent decoder/output config — struct-bundling would just wrap them"
+    )]
     pub fn new(
         consumer: HeapCons<f32>,
         channels: NonZero<u16>,
@@ -203,6 +234,7 @@ impl StreamingSource {
         initial_volume: f32,
         eq_state: Option<super::eq::EqState>,
         consumed_notify: Arc<Notify>,
+        feeds_visualizer: bool,
     ) -> (Self, StreamHandle) {
         let volume = initial_volume.clamp(0.0, 1.0);
         let handle = StreamHandle {
@@ -214,6 +246,7 @@ impl StreamingSource {
             peak_underrun_samples: Arc::new(AtomicU64::new(0)),
             total_silence_samples: Arc::new(AtomicU64::new(0)),
             consumed_notify,
+            feeds_visualizer: Arc::new(AtomicBool::new(feeds_visualizer)),
         };
 
         // ~5ms time constant for volume smoothing (avoids crossfade crackle).
@@ -248,6 +281,10 @@ impl StreamingSource {
 
     /// Flush any remaining visualizer samples.
     fn flush_viz(&mut self) {
+        if !self.handle.feeds_visualizer.load(Ordering::Acquire) {
+            self.viz_buffer.clear();
+            return;
+        }
         let guard = self.visualizer.read();
         if let Some(ref cb) = *guard
             && !self.viz_buffer.is_empty()
@@ -327,8 +364,12 @@ impl Iterator for StreamingSource {
                 .fetch_add(1, Ordering::Relaxed);
         }
 
-        // Feed visualizer only with real samples (not silence fill)
-        if raw.is_some() {
+        // Feed visualizer only with real samples (not silence fill), and only
+        // from the stream currently designated the visualizer feeder. During a
+        // crossfade the incoming stream is gated off here so two streams at
+        // different sample rates cannot flip the visualizer's per-batch rate
+        // atomic and thrash the spectrum engine into constant reinit.
+        if raw.is_some() && self.handle.feeds_visualizer.load(Ordering::Acquire) {
             let guard = self.visualizer.read();
             if guard.is_some() {
                 // Feed the pre-volume sample scaled to S16 range for the visualizer FFT.
@@ -372,5 +413,123 @@ impl Source for StreamingSource {
     #[inline]
     fn total_duration(&self) -> Option<Duration> {
         None // Streaming — unknown duration
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ringbuf::{
+        HeapRb,
+        traits::{Producer, Split},
+    };
+
+    use super::*;
+
+    /// Build a `StreamingSource` with `samples` of f32 data already in the ring,
+    /// wired to the supplied shared callback slot.
+    fn make_source(
+        sample_rate: u32,
+        samples: usize,
+        callback: SharedVisualizerCallback,
+        feeds_visualizer: bool,
+    ) -> (StreamingSource, StreamHandle) {
+        let rb = HeapRb::<f32>::new(samples.max(1));
+        let (mut producer, consumer) = rb.split();
+        let data: Vec<f32> = (0..samples).map(|i| (i as f32 * 0.001).sin()).collect();
+        producer.push_slice(&data);
+
+        StreamingSource::new(
+            consumer,
+            NonZero::new(2).expect("2 is nonzero"),
+            NonZero::new(sample_rate).expect("test sample rate is nonzero"),
+            callback,
+            1.0,
+            None,
+            Arc::new(Notify::new()),
+            feeds_visualizer,
+        )
+    }
+
+    /// Build a callback that records every sample-rate it sees, and the shared
+    /// slot wrapping it.
+    fn counting_callback() -> (SharedVisualizerCallback, Arc<parking_lot::Mutex<Vec<u32>>>) {
+        let observed = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let observed_for_cb = observed.clone();
+        let cb: VisualizerCallback = Arc::new(move |_samples: &[f32], rate: u32| {
+            observed_for_cb.lock().push(rate);
+        });
+        let slot: SharedVisualizerCallback = Arc::new(parking_lot::RwLock::new(Some(cb)));
+        (slot, observed)
+    }
+
+    /// Crossfade thrash regression: two streams at different sample rates
+    /// sharing one viz callback slot must only let the active one fire it.
+    /// Otherwise the visualizer's stored-rate atomic flips per batch and the
+    /// spectrum engine reinitializes itself into a blank state for the entire
+    /// crossfade window.
+    #[test]
+    fn only_active_stream_feeds_visualizer_during_crossfade() {
+        let (slot, observed) = counting_callback();
+
+        // Plenty of samples per source so we definitely cross a viz batch
+        // boundary (viz_batch_size = 2048) several times.
+        let (mut primary, _h_primary) = make_source(44_100, 8_192, slot.clone(), true);
+        let (mut incoming, _h_incoming) = make_source(48_000, 8_192, slot.clone(), false);
+
+        // Interleave next() calls — models the cpal callback alternating
+        // between the two ActiveStreams during a crossfade.
+        for _ in 0..4_096 {
+            let _ = primary.next();
+            let _ = incoming.next();
+        }
+
+        let rates = observed.lock();
+        assert!(
+            !rates.is_empty(),
+            "primary stream should have produced ≥1 viz batch"
+        );
+        assert!(
+            rates.iter().all(|&r| r == 44_100),
+            "viz callback must only be fired by the active stream; saw rates {:?}",
+            *rates
+        );
+    }
+
+    /// `finalize_crossfade` promotes the formerly-silent incoming stream to
+    /// primary and flips its visualizer flag on. After that flip, the same
+    /// source must start feeding the callback.
+    #[test]
+    fn promoted_stream_feeds_visualizer_after_flag_flip() {
+        let (slot, observed) = counting_callback();
+
+        let (mut source, handle) = make_source(48_000, 8_192, slot, false);
+
+        // Drain enough to cross several viz batch boundaries — nothing fed
+        // because the source starts inactive.
+        for _ in 0..4_096 {
+            let _ = source.next();
+        }
+        assert!(
+            observed.lock().is_empty(),
+            "inactive stream must not feed visualizer; saw rates {:?}",
+            *observed.lock()
+        );
+
+        // Promote: models finalize_crossfade's set_feeds_visualizer(true).
+        handle.set_feeds_visualizer(true);
+
+        for _ in 0..4_096 {
+            let _ = source.next();
+        }
+        let rates = observed.lock();
+        assert!(
+            !rates.is_empty(),
+            "promoted stream should now drive the visualizer"
+        );
+        assert!(
+            rates.iter().all(|&r| r == 48_000),
+            "post-promotion callback fires must carry this stream's rate; saw {:?}",
+            *rates
+        );
     }
 }

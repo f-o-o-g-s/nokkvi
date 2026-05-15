@@ -62,4 +62,4 @@ Two concurrent `ActiveStream`s. Guards: both songs ≥ 10 s, duration clamped to
 
 ## Visualizer Sync
 
-`StreamingSource::next()` → pre-volume samples (S16-scaled, volume-independent) → viz_buffer → FFT thread (60 fps, `try_lock()` only) → display buffers (Mutex) → shader GPU. `is_dirty()` gates redraws — GPU idle when paused.
+`StreamingSource::next()` → pre-volume samples (S16-scaled, volume-independent) → viz_buffer → FFT thread (60 fps, `try_lock()` only) → display buffers (Mutex) → shader GPU. `is_dirty()` gates redraws — GPU idle when paused. Only the active primary feeds the shared callback: `StreamHandle.feeds_visualizer: Arc<AtomicBool>` is set `true` at construction for primary streams (init / seek-recreate) and `false` for the crossfade incoming stream — `finalize_crossfade` flips the newly-promoted primary `true`. Without this gate, two concurrent streams at different rates would each tag batches with their own rate, flipping the visualizer's stored-rate atomic every batch and thrashing the spectrum engine into constant reinit (blank bars during cross-rate crossfade windows).

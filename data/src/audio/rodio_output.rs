@@ -85,6 +85,11 @@ impl ActiveStream {
     pub fn resume(&self) {
         self.handle.resume();
     }
+
+    /// Toggle whether this stream feeds the shared visualizer callback.
+    pub fn set_feeds_visualizer(&self, feeds: bool) {
+        self.handle.set_feeds_visualizer(feeds);
+    }
 }
 
 /// The audio output manager for music playback.
@@ -126,6 +131,14 @@ impl RodioOutput {
     ///   (off, AGC at target level, or static linear gain).
     /// - `consumed_notify`: Notify primitive fired every ~512 consumed samples.
     ///   The decode loop awaits this to avoid busy-sleeping when the ring is full.
+    /// - `feeds_visualizer`: whether this stream should push samples into the
+    ///   shared visualizer callback. Pass `true` for primary streams; pass
+    ///   `false` for a crossfade incoming stream, then call
+    ///   `ActiveStream::set_feeds_visualizer(true)` after promotion to primary.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "thin pass-through to StreamingSource::new; same independent-config rationale applies"
+    )]
     pub fn create_stream(
         &self,
         sample_rate: u32,
@@ -134,6 +147,7 @@ impl RodioOutput {
         norm: super::NormalizationConfig,
         eq_state: Option<super::eq::EqState>,
         consumed_notify: Arc<Notify>,
+        feeds_visualizer: bool,
     ) -> ActiveStream {
         // Create lock-free ring buffer
         let rb = HeapRb::<f32>::new(RING_BUFFER_CAPACITY);
@@ -152,6 +166,7 @@ impl RodioOutput {
             initial_volume,
             eq_state,
             consumed_notify,
+            feeds_visualizer,
         );
 
         // Pre-mixer chain. The peak limiter sits at the end of every variant so
