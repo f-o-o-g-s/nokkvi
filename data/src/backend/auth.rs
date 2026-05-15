@@ -62,6 +62,20 @@ impl AuthGateway {
         auth_service.get_subsonic_credential().to_string()
     }
 
+    /// Get server URL and subsonic credential pair (single lock acquisition).
+    ///
+    /// Prefer this over calling `get_server_url()` followed by
+    /// `get_subsonic_credential()` — it halves auth mutex acquisitions and
+    /// removes the micro-window where the pair could be observed across two
+    /// different sessions.
+    pub async fn server_config(&self) -> (String, String) {
+        let auth_service = self.auth_service.lock().await;
+        (
+            auth_service.get_server_url().to_string(),
+            auth_service.get_subsonic_credential().to_string(),
+        )
+    }
+
     /// Get the initial JWT token (as received from login or resume)
     pub async fn get_token(&self) -> String {
         let auth_service = self.auth_service.lock().await;
@@ -87,5 +101,48 @@ impl AuthGateway {
     pub async fn fetch_server_version(&self) -> Result<String> {
         let auth_service = self.auth_service.lock().await;
         auth_service.fetch_server_version().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `server_config()` returns the same `(server_url, subsonic_credential)`
+    /// pair that solo `get_server_url()` / `get_subsonic_credential()` calls
+    /// would produce — but under a single mutex acquisition. This pins the
+    /// pair-getter invariant so the six backend pair-lock sites can safely
+    /// migrate to it.
+    #[tokio::test]
+    async fn server_config_returns_same_pair_as_solo_getters() {
+        let gateway = AuthGateway::new().expect("auth gateway");
+        gateway
+            .resume_session(
+                "http://localhost:4533".to_string(),
+                "alice".to_string(),
+                "jwt-token-abc".to_string(),
+                "u=alice&s=salt&t=token".to_string(),
+            )
+            .await
+            .expect("resume session");
+
+        let solo_url = gateway.get_server_url().await;
+        let solo_cred = gateway.get_subsonic_credential().await;
+        let (pair_url, pair_cred) = gateway.server_config().await;
+
+        assert_eq!(pair_url, solo_url);
+        assert_eq!(pair_cred, solo_cred);
+        assert_eq!(pair_url, "http://localhost:4533");
+        assert_eq!(pair_cred, "u=alice&s=salt&t=token");
+    }
+
+    /// Fresh gateway with no session resumed yields empty strings — matches
+    /// the empty-state arm in the `get_server_config()` callsites.
+    #[tokio::test]
+    async fn server_config_fresh_gateway_returns_empty_pair() {
+        let gateway = AuthGateway::new().expect("auth gateway");
+        let (url, cred) = gateway.server_config().await;
+        assert!(url.is_empty());
+        assert!(cred.is_empty());
     }
 }

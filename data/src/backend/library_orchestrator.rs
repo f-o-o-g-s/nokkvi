@@ -88,8 +88,7 @@ impl<'a> LibraryOrchestrator<'a> {
             .get_client()
             .await
             .ok_or_else(|| anyhow::anyhow!("Not authenticated"))?;
-        let server_url = self.auth.get_server_url().await;
-        let subsonic_credential = self.auth.get_subsonic_credential().await;
+        let (server_url, subsonic_credential) = self.auth.server_config().await;
         let playlists_api = PlaylistsApiService::new(client, server_url, subsonic_credential);
         playlists_api.load_playlist_songs(playlist_id).await
     }

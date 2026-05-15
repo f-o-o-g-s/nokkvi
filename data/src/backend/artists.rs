@@ -225,9 +225,7 @@ impl ArtistsService {
     /// Get server configuration for artwork URLs
     pub async fn get_server_config(&self) -> (String, String) {
         if let Some(auth) = self.auth_gateway.get() {
-            let server_url = auth.get_server_url().await;
-            let subsonic_credential = auth.get_subsonic_credential().await;
-            (server_url, subsonic_credential)
+            auth.server_config().await
         } else {
             (String::new(), String::new())
         }

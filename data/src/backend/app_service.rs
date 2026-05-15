@@ -676,8 +676,7 @@ macro_rules! subsonic_api_factory {
                     .get_client()
                     .await
                     .ok_or_else(|| anyhow::anyhow!("Not authenticated"))?;
-                let server_url = self.auth_gateway.get_server_url().await;
-                let subsonic_credential = self.auth_gateway.get_subsonic_credential().await;
+                let (server_url, subsonic_credential) = self.auth_gateway.server_config().await;
                 Ok(<$ty>::new(client, server_url, subsonic_credential))
             }
         )+

@@ -143,10 +143,7 @@ impl QueueService {
     pub async fn get_server_config(&self) -> (String, String) {
         let auth_guard = self.auth_gateway.lock().await;
         if let Some(auth) = auth_guard.as_ref() {
-            (
-                auth.get_server_url().await,
-                auth.get_subsonic_credential().await,
-            )
+            auth.server_config().await
         } else {
             (String::new(), String::new())
         }
