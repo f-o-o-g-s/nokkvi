@@ -17,8 +17,12 @@ use crate::{
 impl Nokkvi {
     /// Route SimilarMessage to the page and handle returned actions.
     pub(crate) fn handle_similar_message(&mut self, msg: SimilarMessage) -> Task<Message> {
-        if let SimilarMessage::SetOpenMenu(next) = msg {
-            return Task::done(Message::SetOpenMenu(next));
+        // Similar lives in the browsing panel and has no top-level `View`
+        // variant — the only chrome paths that matter here are SetOpenMenu
+        // and the artwork-drag interceptors. `View::Queue` is a placeholder
+        // for the Roulette arm, which Similar's `is_roulette` always vetoes.
+        if let Some(task) = crate::update::dispatch_view_chrome(self, &msg, crate::View::Queue) {
+            return task;
         }
         let songs = self
             .similar_songs

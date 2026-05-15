@@ -381,12 +381,6 @@ impl Nokkvi {
                 Task::none()
             }
             Message::ToggleLightMode => self.handle_toggle_light_mode(),
-            Message::Albums(crate::views::AlbumsMessage::ArtworkColumnDrag(ev)) => {
-                self.handle_artwork_column_drag(ev)
-            }
-            Message::Albums(crate::views::AlbumsMessage::ArtworkColumnVerticalDrag(ev)) => {
-                self.handle_artwork_vertical_drag(ev)
-            }
             Message::Albums(msg) => {
                 dispatch_view_with_seek!(
                     self,
@@ -398,19 +392,7 @@ impl Nokkvi {
                     View::Albums
                 )
             }
-            Message::Queue(crate::views::QueueMessage::ArtworkColumnDrag(ev)) => {
-                self.handle_artwork_column_drag(ev)
-            }
-            Message::Queue(crate::views::QueueMessage::ArtworkColumnVerticalDrag(ev)) => {
-                self.handle_artwork_vertical_drag(ev)
-            }
             Message::Queue(msg) => self.handle_queue(msg),
-            Message::Artists(crate::views::ArtistsMessage::ArtworkColumnDrag(ev)) => {
-                self.handle_artwork_column_drag(ev)
-            }
-            Message::Artists(crate::views::ArtistsMessage::ArtworkColumnVerticalDrag(ev)) => {
-                self.handle_artwork_vertical_drag(ev)
-            }
             Message::Artists(msg) => {
                 dispatch_view_with_seek!(
                     self,
@@ -421,12 +403,6 @@ impl Nokkvi {
                     ),
                     View::Artists
                 )
-            }
-            Message::Songs(crate::views::SongsMessage::ArtworkColumnDrag(ev)) => {
-                self.handle_artwork_column_drag(ev)
-            }
-            Message::Songs(crate::views::SongsMessage::ArtworkColumnVerticalDrag(ev)) => {
-                self.handle_artwork_vertical_drag(ev)
             }
             Message::Songs(msg) => {
                 dispatch_view_with_seek!(
@@ -439,12 +415,6 @@ impl Nokkvi {
                     View::Songs
                 )
             }
-            Message::Genres(crate::views::GenresMessage::ArtworkColumnDrag(ev)) => {
-                self.handle_artwork_column_drag(ev)
-            }
-            Message::Genres(crate::views::GenresMessage::ArtworkColumnVerticalDrag(ev)) => {
-                self.handle_artwork_vertical_drag(ev)
-            }
             Message::Genres(msg) => {
                 dispatch_view_with_seek!(
                     self,
@@ -455,12 +425,6 @@ impl Nokkvi {
                     ),
                     View::Genres
                 )
-            }
-            Message::Playlists(crate::views::PlaylistsMessage::ArtworkColumnDrag(ev)) => {
-                self.handle_artwork_column_drag(ev)
-            }
-            Message::Playlists(crate::views::PlaylistsMessage::ArtworkColumnVerticalDrag(ev)) => {
-                self.handle_artwork_vertical_drag(ev)
             }
             Message::Playlists(msg) => {
                 dispatch_view_with_seek!(
@@ -608,12 +572,6 @@ impl Nokkvi {
             // -----------------------------------------------------------------
             // Similar Songs
             // -----------------------------------------------------------------
-            Message::Similar(crate::views::SimilarMessage::ArtworkColumnDrag(ev)) => {
-                self.handle_artwork_column_drag(ev)
-            }
-            Message::Similar(crate::views::SimilarMessage::ArtworkColumnVerticalDrag(ev)) => {
-                self.handle_artwork_vertical_drag(ev)
-            }
             Message::Similar(msg) => self.handle_similar_message(msg),
             Message::FindSimilar { id, label } => self.handle_find_similar(id, label),
             Message::FindTopSongs { artist_name, label } => {
@@ -633,7 +591,7 @@ impl Nokkvi {
     /// Shared handler for artwork-column drag events emitted by every view's
     /// drag handle. `Change` only updates the live atomic; `Commit` also
     /// persists to TOML via the settings backend.
-    fn handle_artwork_column_drag(
+    pub(crate) fn handle_artwork_column_drag(
         &mut self,
         ev: crate::widgets::artwork_split_handle::DragEvent,
     ) -> Task<Message> {
@@ -659,7 +617,7 @@ impl Nokkvi {
     /// Shared handler for Always-Vertical artwork drag events. Mirrors
     /// `handle_artwork_column_drag` but stores into the vertical-height
     /// atomic / SettingsManager setter.
-    fn handle_artwork_vertical_drag(
+    pub(crate) fn handle_artwork_vertical_drag(
         &mut self,
         ev: crate::widgets::artwork_split_handle::DragEvent,
     ) -> Task<Message> {

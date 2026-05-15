@@ -235,6 +235,16 @@ pub enum ArtworkMessage {
 
     // --- Song Artwork ---
     SongMiniLoaded(String, Option<image::Handle>),
+
+    // --- Artwork Pane Drag ---
+    /// Resize the artwork column via the split handle. `Change` is per-frame
+    /// drag preview; `Commit` fires once on release and persists to TOML.
+    /// Dispatched centrally so every view's drag handle routes through one
+    /// arm instead of per-view `*Message::ArtworkColumnDrag` variants.
+    ColumnDrag(crate::widgets::artwork_split_handle::DragEvent),
+    /// Always-Vertical artwork drag — same semantics as `ColumnDrag` but for
+    /// the vertical-height split (artwork stacked above the slot list).
+    VerticalDrag(crate::widgets::artwork_split_handle::DragEvent),
 }
 
 /// All application messages

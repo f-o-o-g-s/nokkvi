@@ -185,6 +185,13 @@ impl Nokkvi {
             ArtworkMessage::SongMiniLoaded(album_id, handle) => {
                 self.handle_song_artwork_loaded(album_id, handle)
             }
+            // Artwork-pane drag. The per-view chrome dispatcher already routes
+            // the per-view `ArtworkColumnDrag` / `ArtworkColumnVerticalDrag`
+            // variants synchronously; these arms exist so that any caller can
+            // construct `Message::Artwork(ArtworkMessage::ColumnDrag(ev))`
+            // directly and land in the same handler.
+            ArtworkMessage::ColumnDrag(ev) => self.handle_artwork_column_drag(ev),
+            ArtworkMessage::VerticalDrag(ev) => self.handle_artwork_vertical_drag(ev),
         }
     }
 }
