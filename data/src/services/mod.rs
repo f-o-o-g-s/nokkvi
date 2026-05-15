@@ -13,6 +13,7 @@ pub mod queue;
 pub mod settings;
 pub mod settings_tables;
 pub mod state_storage;
+pub(crate) mod storage_keys;
 pub mod task_manager;
 pub mod theme_loader;
 pub mod toml_settings_io;

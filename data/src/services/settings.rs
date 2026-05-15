@@ -77,16 +77,17 @@ impl SettingsManager {
         );
 
         // Phase 2: Load from redb (always needed for volume, playlist IDs, etc.)
-        let redb_settings = match storage.load::<UserSettings>("user_settings") {
-            Ok(Some(s)) => s,
-            Ok(None) => UserSettings::default(),
-            Err(e) => {
-                tracing::warn!("Settings deserialization failed, resetting to defaults: {e}");
-                let defaults = UserSettings::default();
-                let _ = storage.save("user_settings", &defaults);
-                defaults
-            }
-        };
+        let redb_settings =
+            match storage.load::<UserSettings>(crate::services::storage_keys::USER_SETTINGS) {
+                Ok(Some(s)) => s,
+                Ok(None) => UserSettings::default(),
+                Err(e) => {
+                    tracing::warn!("Settings deserialization failed, resetting to defaults: {e}");
+                    let defaults = UserSettings::default();
+                    let _ = storage.save(crate::services::storage_keys::USER_SETTINGS, &defaults);
+                    defaults
+                }
+            };
 
         // Phase 3: Merge — TOML overrides redb for user-facing settings,
         // redb retains volume, playlist IDs, and other runtime state.
@@ -134,7 +135,8 @@ impl SettingsManager {
     /// Save to redb (always) + config.toml sections (for user-facing settings).
     fn save(&self) -> Result<()> {
         // 1. Always write to redb (volume, playlist IDs, backward compat)
-        self.storage.save("user_settings", &self.settings)?;
+        self.storage
+            .save(crate::services::storage_keys::USER_SETTINGS, &self.settings)?;
         // 2. Write user-facing settings to config.toml (skipped in unit tests)
         if !self.skip_toml_writes {
             self.write_settings_toml()?;
@@ -145,7 +147,8 @@ impl SettingsManager {
     /// Save only to redb — used for high-frequency operations (volume) and
     /// runtime state (active playlist) that don't belong in config.toml.
     fn save_redb_only(&self) -> Result<()> {
-        self.storage.save("user_settings", &self.settings)?;
+        self.storage
+            .save(crate::services::storage_keys::USER_SETTINGS, &self.settings)?;
         Ok(())
     }
 
@@ -835,7 +838,8 @@ impl SettingsManager {
 
     /// Save redb + [views] section in config.toml.
     fn save_with_views(&self) -> Result<()> {
-        self.storage.save("user_settings", &self.settings)?;
+        self.storage
+            .save(crate::services::storage_keys::USER_SETTINGS, &self.settings)?;
         self.write_views_toml()?;
         Ok(())
     }
@@ -874,7 +878,8 @@ impl SettingsManager {
 
     /// Save redb + [hotkeys] section in config.toml.
     fn save_with_hotkeys(&self) -> Result<()> {
-        self.storage.save("user_settings", &self.settings)?;
+        self.storage
+            .save(crate::services::storage_keys::USER_SETTINGS, &self.settings)?;
         self.write_hotkeys_toml()?;
         Ok(())
     }

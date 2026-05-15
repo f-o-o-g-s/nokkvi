@@ -22,11 +22,17 @@ use tracing::{debug, info};
 // API call. If the JWT expires (default 48h inactivity), the login screen is shown.
 // ================================================================================
 
-/// Redb key for the Navidrome JWT token
-const JWT_TOKEN_KEY: &str = "jwt_token";
+/// Redb key for the Navidrome JWT token.
+///
+/// Re-exported from `services::storage_keys::JWT_TOKEN`; see that module
+/// for the on-disk-compat invariant.
+const JWT_TOKEN_KEY: &str = crate::services::storage_keys::JWT_TOKEN;
 
-/// Redb key for the Subsonic credential string (u=X&s=Y&t=Z)
-const SUBSONIC_CREDENTIAL_KEY: &str = "subsonic_credential";
+/// Redb key for the Subsonic credential string (u=X&s=Y&t=Z).
+///
+/// Re-exported from `services::storage_keys::SUBSONIC_CREDENTIAL`; see that
+/// module for the on-disk-compat invariant.
+const SUBSONIC_CREDENTIAL_KEY: &str = crate::services::storage_keys::SUBSONIC_CREDENTIAL;
 
 /// Config.toml fields (user-editable: server_url, username)
 #[derive(Debug, Serialize, Deserialize)]

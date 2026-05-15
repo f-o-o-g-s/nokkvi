@@ -47,8 +47,10 @@ impl std::fmt::Debug for QueueManager {
 }
 
 // ── Persistence key constants ──
-const KEY_QUEUE_ORDER: &str = "queue_order";
-const KEY_QUEUE_SONGS: &str = "queue_songs";
+// Re-exported from `services::storage_keys`; see that module for the
+// on-disk-compat invariant.
+const KEY_QUEUE_ORDER: &str = crate::services::storage_keys::QUEUE_ORDER;
+const KEY_QUEUE_SONGS: &str = crate::services::storage_keys::QUEUE_SONGS;
 
 impl QueueManager {
     pub fn new(storage: StateStorage) -> Result<Self> {
