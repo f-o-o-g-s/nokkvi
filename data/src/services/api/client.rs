@@ -265,54 +265,16 @@ impl ApiClient {
         }
     }
 
-    /// Make a GET request to the Navidrome REST API
-    /// endpoint: API path (e.g., "/api/album")
-    /// params: Query parameters as key-value pairs
+    /// Make a GET request to the Navidrome REST API.
+    /// `endpoint`: API path (e.g., "/api/album").
+    /// `params`: query parameters as key-value pairs.
+    ///
+    /// Thin wrapper around [`Self::get_with_headers`] that discards the
+    /// `X-Total-Count` header — use `get_with_headers` directly when the
+    /// total is needed for pagination.
     pub async fn get(&self, endpoint: &str, params: &[(&str, &str)]) -> Result<String> {
-        let mut url = self
-            .base_url
-            .join(endpoint)
-            .with_context(|| format!("Failed to join endpoint: {endpoint}"))?;
-
-        // Build query string manually to avoid Send issues with query_pairs_mut
-        if !params.is_empty() {
-            let mut query_parts = Vec::new();
-            for (key, value) in params {
-                query_parts.push(format!(
-                    "{}={}",
-                    url::form_urlencoded::byte_serialize(key.as_bytes()).collect::<String>(),
-                    url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>()
-                ));
-            }
-            url.set_query(Some(&query_parts.join("&")));
-        }
-
-        let response = self
-            .client
-            .get(url.as_str())
-            .header("X-ND-Authorization", self.bearer_header())
-            .send()
-            .await
-            .context("Failed to send GET request")?;
-
-        // Intercept refreshed JWT from response header
-        self.intercept_token_refresh(&response);
-
-        let status = response.status();
-        let body = response
-            .text()
-            .await
-            .context("Failed to read response body")?;
-
-        if status.is_success() {
-            Ok(body)
-        } else if status == reqwest::StatusCode::UNAUTHORIZED {
-            Err(NokkviError::Unauthorized.into())
-        } else {
-            Err(anyhow::anyhow!(
-                "API request failed with status {status}: {body}"
-            ))
-        }
+        let (body, _total_count) = self.get_with_headers(endpoint, params).await?;
+        Ok(body)
     }
 
     /// Make a GET request and return both body and headers
