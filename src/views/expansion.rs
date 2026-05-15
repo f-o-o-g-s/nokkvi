@@ -406,13 +406,17 @@ pub(crate) fn build_batch_payload(
 
 use iced::{
     Alignment, Element, Length,
-    widget::{button, container, row, text},
+    widget::{container, row, text},
 };
 use nokkvi_data::utils::formatters;
 
-use crate::widgets::slot_list::{
-    SLOT_LIST_SLOT_PADDING, SlotListRowContext, SlotListSlotStyle, slot_list_favorite_icon,
-    slot_list_labeled_index_column, slot_list_metadata_column, slot_list_text,
+use crate::widgets::{
+    SlotListPageMessage,
+    slot_list::{
+        SLOT_LIST_SLOT_PADDING, SlotListRowContext, SlotListSlotStyle, child_slot_button,
+        slot_list_favorite_icon, slot_list_labeled_index_column, slot_list_metadata_column,
+        slot_list_text,
+    },
 };
 
 /// Slight leading indent placed before an expanded child's sub-index column,
@@ -428,48 +432,22 @@ fn child_leading_indent(depth: u8) -> f32 {
     }
 }
 
-/// Wrap child row content in a clickable styled container + button.
-///
-/// Shared by all child row renderers (track rows and album child rows).
-fn child_clickable_button<'a, M: Clone + 'a>(
-    content: iced::widget::Row<'a, M>,
-    ctx: &SlotListRowContext,
-    style: SlotListSlotStyle,
-    center_msg: M,
-    offset_msg: M,
-) -> Element<'a, M> {
-    let clickable = container(content)
-        .style(move |_theme| style.to_container_style())
-        .width(Length::Fill);
-
-    button(clickable)
-        .on_press(if ctx.modifiers.control() || ctx.modifiers.shift() {
-            offset_msg.clone()
-        } else if ctx.is_center {
-            center_msg
-        } else {
-            offset_msg
-        })
-        .style(|_theme, _status| button::Style {
-            background: None,
-            border: iced::Border::default(),
-            ..Default::default()
-        })
-        .padding(0)
-        .width(Length::Fill)
-        .into()
-}
-
 /// Render a child **track** row (used by Albums → Tracks and Playlists → Tracks).
 ///
 /// Layout: `[indent] [track#] [title 60%] [artist 20%] [duration 12%] [star 5%]`
+///
+/// `wrap` lifts a `SlotListPageMessage` into the caller's outer message type
+/// (typically `AlbumsMessage::SlotList` / `PlaylistsMessage::SlotList`).
+/// The 4-arm modifier-aware click ladder lives in
+/// [`crate::widgets::slot_list::primary_slot_click_message`] — this renderer
+/// composes through it via [`child_slot_button`].
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render_child_track_row<'a, M: Clone + 'a + 'static>(
     song: &nokkvi_data::backend::songs::SongUIViewData,
     ctx: &SlotListRowContext,
     sub_index_label: &str,
-    center_msg: M,
-    offset_msg: M,
+    stable_viewport: bool,
+    wrap: impl Fn(SlotListPageMessage) -> M,
     on_star_click: Option<M>,
     on_artist_click: Option<M>,
     depth: u8,
@@ -550,7 +528,7 @@ pub(crate) fn render_child_track_row<'a, M: Clone + 'a + 'static>(
     .align_y(Alignment::Center)
     .height(Length::Fill);
 
-    child_clickable_button(content, ctx, style, center_msg, offset_msg)
+    child_slot_button(content, ctx, style, stable_viewport, wrap)
 }
 
 /// Render a child **album** row (used by Artists → Albums and Genres → Albums).
@@ -559,6 +537,12 @@ pub(crate) fn render_child_track_row<'a, M: Clone + 'a + 'static>(
 /// When `show_artwork` is true, prepends a thumbnail column sourced from
 /// `artwork_handle` (typically `view_data.album_art.get(&album.id)`).
 /// Layout: `[indent] [artwork?] [album name] [artist?] [year 12%] [songs 15%] [duration 12%] [star 5%]`
+///
+/// `wrap` lifts a `SlotListPageMessage` into the caller's outer message type
+/// (typically `ArtistsMessage::SlotList` / `GenresMessage::SlotList`). The
+/// 4-arm modifier-aware click ladder lives in
+/// [`crate::widgets::slot_list::primary_slot_click_message`] — this renderer
+/// composes through it via [`child_slot_button`].
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
     album: &nokkvi_data::backend::albums::AlbumUIViewData,
@@ -566,8 +550,8 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
     sub_index_label: &str,
     artwork_handle: Option<&'a iced::widget::image::Handle>,
     show_artwork: bool,
-    center_msg: M,
-    offset_msg: M,
+    stable_viewport: bool,
+    wrap: impl Fn(SlotListPageMessage) -> M,
     show_artist: bool,
     on_star_click: Option<M>,
     on_song_count_click: Option<M>,
@@ -695,7 +679,7 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
         .align_y(Alignment::Center)
         .height(Length::Fill);
 
-    child_clickable_button(content, ctx, style, center_msg, offset_msg)
+    child_slot_button(content, ctx, style, stable_viewport, wrap)
 }
 
 #[cfg(test)]

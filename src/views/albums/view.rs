@@ -620,17 +620,8 @@ impl AlbumsPage {
             song,
             ctx,
             sub_index_label,
-            AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::ActivateCenter),
-            if stable_viewport {
-                AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
-                    ctx.item_index,
-                    ctx.modifiers,
-                ))
-            } else {
-                AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::ClickPlay(
-                    ctx.item_index,
-                ))
-            },
+            stable_viewport,
+            AlbumsMessage::SlotList,
             Some(AlbumsMessage::ClickToggleStar(ctx.item_index)),
             song.artist_id
                 .as_ref()

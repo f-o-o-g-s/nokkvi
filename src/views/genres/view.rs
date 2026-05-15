@@ -416,17 +416,8 @@ impl GenresPage {
             sub_index_label,
             album_art.get(&album.id),
             self.column_visibility.thumbnail,
-            GenresMessage::SlotList(crate::widgets::SlotListPageMessage::ActivateCenter),
-            if stable_viewport {
-                GenresMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
-                    ctx.item_index,
-                    ctx.modifiers,
-                ))
-            } else {
-                GenresMessage::SlotList(crate::widgets::SlotListPageMessage::ClickPlay(
-                    ctx.item_index,
-                ))
-            },
+            stable_viewport,
+            GenresMessage::SlotList,
             true, // show artist since genre groups albums from different artists
             Some(GenresMessage::ClickToggleStar(ctx.item_index)),
             Some(navigate_msg.clone()),

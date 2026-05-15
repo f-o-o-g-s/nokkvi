@@ -660,17 +660,8 @@ impl PlaylistsPage {
             song,
             ctx,
             sub_index_label,
-            PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::ActivateCenter),
-            if stable_viewport {
-                PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::SetOffset(
-                    ctx.item_index,
-                    ctx.modifiers,
-                ))
-            } else {
-                PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::ClickPlay(
-                    ctx.item_index,
-                ))
-            },
+            stable_viewport,
+            PlaylistsMessage::SlotList,
             Some(PlaylistsMessage::ClickToggleStar(ctx.item_index)),
             song.artist_id
                 .as_ref()
