@@ -10,7 +10,7 @@ use tracing::{debug, warn};
 use crate::{
     services::api::{
         client::ApiClient,
-        parse,
+        pagination, parse,
         sort::{self, SortDomain},
         subsonic,
     },
@@ -94,7 +94,7 @@ impl PlaylistsApiService {
             ("_sort", sort_param),
             ("_order", order_param),
             ("_start", "0"),
-            ("_end", "999999"),
+            ("_end", pagination::NO_LIMIT_END_STR),
         ];
 
         // Add search query if provided (playlists use "q" parameter)

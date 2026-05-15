@@ -6,7 +6,7 @@ use tracing::{debug, trace};
 use crate::{
     services::api::{
         client::ApiClient,
-        parse,
+        pagination, parse,
         sort::{self, SortDomain},
     },
     types::album::Album,
@@ -61,16 +61,10 @@ impl AlbumsApiService {
             ("filter", "{}"),
         ];
 
-        // Add pagination parameters (Navidrome uses _start and _end, not _offset and _limit)
-        // For unlimited: use a very large number (999999) as the end value
-        let offset_value = offset.unwrap_or(0);
-        let limit_value = limit.unwrap_or(999999); // Use very large number for "unlimited"
-        let start_value = offset_value;
-        let end_value = offset_value + limit_value;
-        let start_str = start_value.to_string();
-        let end_str = end_value.to_string();
-        params.push(("_start", &start_str));
-        params.push(("_end", &end_str));
+        // Add pagination parameters (Navidrome uses _start and _end, not _offset and _limit).
+        let range = pagination::paged_range(offset.unwrap_or(0) as u32, limit.map(|x| x as u32));
+        params.push(("_start", &range.start));
+        params.push(("_end", &range.end));
 
         // Apply ID filter if present
         if let Some(f) = filter {

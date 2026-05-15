@@ -7,6 +7,7 @@ pub mod albums;
 pub mod artists;
 pub mod client;
 pub mod genres;
+pub(crate) mod pagination;
 pub(crate) mod parse;
 pub mod playlists;
 pub mod radios;

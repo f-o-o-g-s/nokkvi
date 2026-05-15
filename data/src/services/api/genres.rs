@@ -6,7 +6,7 @@ use tracing::{debug, warn};
 use crate::{
     services::api::{
         client::ApiClient,
-        parse,
+        pagination, parse,
         sort::{self, SortDomain},
     },
     types::genre::Genre,
@@ -89,7 +89,7 @@ impl GenresApiService {
             ("_sort", sort_param),
             ("_order", order_param),
             ("_start", "0"),
-            ("_end", "999999"),
+            ("_end", pagination::NO_LIMIT_END_STR),
         ];
 
         // Add search query if provided
@@ -270,7 +270,7 @@ impl GenresApiService {
             ("_sort", "name"),
             ("_order", "ASC"),
             ("_start", "0"),
-            ("_end", "999999"),
+            ("_end", pagination::NO_LIMIT_END_STR),
             ("genre_id", genre_name),
         ];
 

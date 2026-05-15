@@ -6,7 +6,7 @@ use tracing::debug;
 use crate::{
     services::api::{
         client::ApiClient,
-        parse,
+        pagination, parse,
         sort::{self, SortDomain},
     },
     types::{album::Album, artist::Artist},
@@ -59,13 +59,10 @@ impl ArtistsApiService {
             params.push(("role", "albumartist"));
         }
 
-        // Add pagination parameters
-        let offset_val = offset.unwrap_or(0);
-        let limit_val = limit.unwrap_or(999999);
-        let start_str = offset_val.to_string();
-        let end_str = (offset_val + limit_val).to_string();
-        params.push(("_start", &start_str));
-        params.push(("_end", &end_str));
+        // Add pagination parameters.
+        let range = pagination::paged_range(offset.unwrap_or(0) as u32, limit.map(|x| x as u32));
+        params.push(("_start", &range.start));
+        params.push(("_end", &range.end));
 
         // Apply ID filter if present
         if let Some(f) = filter {
@@ -118,7 +115,7 @@ impl ArtistsApiService {
             ("_sort", "max_year"),
             ("_order", "DESC"),
             ("_start", "0"),
-            ("_end", "999999"),
+            ("_end", pagination::NO_LIMIT_END_STR),
             ("artist_id", artist_id),
         ];
 
