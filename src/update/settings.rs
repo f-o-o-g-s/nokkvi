@@ -214,7 +214,9 @@ impl Nokkvi {
                     let value =
                         crate::views::settings::items::SettingValue::HexColor(default_hex.clone());
                     // Color keys are theme-file-relative (e.g. dark.background.hard)
-                    if let Err(e) = crate::config_writer::update_theme_value(key, &value) {
+                    if let Err(e) = crate::config_writer::ConfigKey::theme_scalar(key.clone())
+                        .write(&value, None)
+                    {
                         tracing::warn!(" [SETTINGS] Failed to restore default for {key}: {e}");
                     }
                 }
@@ -339,8 +341,10 @@ impl Nokkvi {
             crate::visualizer_config::keys::MONSTERCAT => {
                 if matches!(value, crate::views::settings::items::SettingValue::Float { val, .. } if val >= crate::visualizer_config::MONSTERCAT_MIN_EFFECTIVE)
                 {
-                    let _ = crate::config_writer::update_config_value(
-                        crate::visualizer_config::keys::WAVES,
+                    let _ = crate::config_writer::ConfigKey::app_scalar(
+                        crate::visualizer_config::keys::WAVES.to_string(),
+                    )
+                    .write(
                         &crate::views::settings::items::SettingValue::Bool(false),
                         None,
                     );
@@ -358,8 +362,10 @@ impl Nokkvi {
                     value,
                     crate::views::settings::items::SettingValue::Bool(true)
                 ) {
-                    let _ = crate::config_writer::update_config_value(
-                        crate::visualizer_config::keys::MONSTERCAT,
+                    let _ = crate::config_writer::ConfigKey::app_scalar(
+                        crate::visualizer_config::keys::MONSTERCAT.to_string(),
+                    )
+                    .write(
                         &crate::views::settings::items::SettingValue::Float {
                             val: 0.0,
                             min: 0.0,
@@ -592,11 +598,10 @@ impl Nokkvi {
             SettingsSideEffect::None => Task::none(),
             SettingsSideEffect::SetLightModeAtomic(on) => {
                 crate::theme::set_light_mode(on);
-                if let Err(e) = crate::config_writer::update_config_value(
-                    "settings.light_mode",
-                    &crate::views::settings::items::SettingValue::Bool(on),
-                    None,
-                ) {
+                if let Err(e) =
+                    crate::config_writer::ConfigKey::app_scalar("settings.light_mode".to_string())
+                        .write(&crate::views::settings::items::SettingValue::Bool(on), None)
+                {
                     tracing::warn!(" [SETTINGS] Failed to write light_mode to config.toml: {e}");
                 }
                 Task::done(Message::Playback(crate::app_message::PlaybackMessage::Tick))

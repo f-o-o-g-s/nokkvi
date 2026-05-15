@@ -550,6 +550,69 @@ mod tests {
     //  ConfigKey routing
     // ══════════════════════════════════════════════════════════════════
 
+    /// Caller discipline guard — every config-write must funnel through the
+    /// typed `ConfigKey` API (`ConfigKey::app_scalar(...).write(...)`,
+    /// `ConfigKey::theme_scalar(...).write(...)`, or
+    /// `ConfigKey::theme_array(...).write_color(...)`). The raw free
+    /// functions `update_config_value`, `update_theme_value`, and
+    /// `update_theme_color_array_entry` are private writer impls and must
+    /// only be invoked from within `config_writer.rs`. A clippy
+    /// `disallowed-methods` lint in `clippy.toml` provides belt-and-suspenders
+    /// for `pub(crate)` lookups, but this filesystem-walking test is the
+    /// load-bearing enforcement.
+    #[test]
+    fn raw_config_write_fns_have_no_callers_outside_module() {
+        use std::{fs, path::Path};
+
+        let mut offenders: Vec<String> = Vec::new();
+
+        fn walk(dir: &Path, offenders: &mut Vec<String>) {
+            let Ok(entries) = fs::read_dir(dir) else {
+                return;
+            };
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    walk(&p, offenders);
+                    continue;
+                }
+                if p.extension().and_then(|s| s.to_str()) != Some("rs") {
+                    continue;
+                }
+                if p.file_name().and_then(|s| s.to_str()) == Some("config_writer.rs") {
+                    continue;
+                }
+                let body = fs::read_to_string(&p).unwrap_or_default();
+                for (lineno, raw_line) in body.lines().enumerate() {
+                    // Strip line comments so prose like
+                    // `// routed via update_theme_value()` doesn't trip the
+                    // detector. Block comments (`/* ... */`) are not used
+                    // for these references in this codebase, so the simple
+                    // `//` split is sufficient.
+                    let line = raw_line.split("//").next().unwrap_or("");
+                    for needle in [
+                        "update_config_value(",
+                        "update_theme_value(",
+                        "update_theme_color_array_entry(",
+                    ] {
+                        if line.contains(needle) {
+                            offenders.push(format!("{}:{}: {needle}", p.display(), lineno + 1));
+                        }
+                    }
+                }
+            }
+        }
+
+        let src_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        walk(&src_root, &mut offenders);
+
+        assert!(
+            offenders.is_empty(),
+            "raw free-fn callers found (use ConfigKey API instead):\n{}",
+            offenders.join("\n")
+        );
+    }
+
     #[test]
     fn config_key_named_constructors_produce_correct_variants() {
         assert!(matches!(

@@ -25,11 +25,12 @@ impl Nokkvi {
         debug!(" Light mode set to: {}", new_state);
         // Persist to config.toml — the config file watcher will pick this up
         // and ThemeConfigReloaded will read the correct value
-        if let Err(e) = crate::config_writer::update_config_value(
-            "settings.light_mode",
-            &crate::views::settings::items::SettingValue::Bool(new_state),
-            None,
-        ) {
+        if let Err(e) =
+            crate::config_writer::ConfigKey::app_scalar("settings.light_mode".to_string()).write(
+                &crate::views::settings::items::SettingValue::Bool(new_state),
+                None,
+            )
+        {
             tracing::warn!(" Failed to write light_mode to config.toml: {e}");
         }
         // Force UI refresh

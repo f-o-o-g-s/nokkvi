@@ -1,0 +1,5 @@
+disallowed-methods = [
+    { path = "crate::config_writer::update_config_value", reason = "Use ConfigKey::app_scalar(...).write(...) instead" },
+    { path = "crate::config_writer::update_theme_value", reason = "Use ConfigKey::theme_scalar(...).write(...) instead" },
+    { path = "crate::config_writer::update_theme_color_array_entry", reason = "Use ConfigKey::theme_array(...).write_color(...) instead" },
+]
