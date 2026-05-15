@@ -26,6 +26,7 @@ mod items_theme;
 mod items_visualizer;
 pub(crate) mod presets;
 mod rendering;
+pub(crate) mod sentinel;
 mod sub_lists;
 mod view;
 
@@ -655,28 +656,34 @@ impl SettingsPage {
                         }
                         Some(SettingsEntry::Item(item)) => {
                             let key_ref = item.key.clone();
-                            match key_ref.as_ref() {
+                            // Typed sentinel dispatch — see `sentinel::SentinelKind`.
+                            // All `__*` sentinel keys round-trip through the enum;
+                            // a `None` return means the key is a regular settings
+                            // key and falls through to the value-edit dispatch
+                            // below.
+                            match sentinel::SentinelKind::from_key(key_ref.as_ref()) {
+                                Some(sentinel::SentinelKind::Logout) => {
+                                    return SettingsAction::Logout;
+                                }
+                                Some(sentinel::SentinelKind::PresetTheme(idx)) => {
+                                    return SettingsAction::ApplyPreset(idx as usize);
+                                }
                                 // Restore-defaults sentinels (including
-                                // `__restore_all_hotkeys` — routed via
-                                // `handle_restore_defaults`, see that function
-                                // for the sentinel-specific dispatch).
-                                k if items::is_restore_key(k) => {
-                                    return self.handle_restore_defaults(k);
+                                // `__restore_all_hotkeys`) — funnel through
+                                // `handle_restore_defaults`, which owns the
+                                // per-sentinel routing.
+                                Some(
+                                    sentinel::SentinelKind::RestoreTheme
+                                    | sentinel::SentinelKind::RestoreBg
+                                    | sentinel::SentinelKind::RestoreFg
+                                    | sentinel::SentinelKind::RestoreAccent
+                                    | sentinel::SentinelKind::RestoreSemantic
+                                    | sentinel::SentinelKind::RestoreVisualizer
+                                    | sentinel::SentinelKind::RestoreAllHotkeys,
+                                ) => {
+                                    return self.handle_restore_defaults(key_ref.as_ref());
                                 }
-                                // Inline preset sentinels
-                                k if items::is_preset_key(k) => {
-                                    if let Some(idx) = items::preset_key_index(k) {
-                                        return SettingsAction::ApplyPreset(idx);
-                                    }
-                                }
-                                // Action button sentinels
-                                k if items::is_action_key(k) => {
-                                    return match k {
-                                        "__action_logout" => SettingsAction::Logout,
-                                        _ => SettingsAction::None,
-                                    };
-                                }
-                                _ => {
+                                None => {
                                     match &item.value {
                                         // ToggleSet with active cursor: Enter toggles the
                                         // cursored badge on/off
@@ -914,6 +921,9 @@ impl SettingsPage {
                     }
                     self.editing_index = None;
                     self.hex_input.clear();
+                    // Defense-in-depth: skip any `__*` key (sentinel or future
+                    // un-registered variant). Broader than `SentinelKind`
+                    // on purpose — config writes should never name a sentinel.
                     if !key.is_empty() && !key.starts_with("__") {
                         return SettingsAction::WriteConfig {
                             key: if is_theme {
@@ -958,29 +968,46 @@ impl SettingsPage {
     ///
     /// Sentinel-specific branches run before the generic HexColor scan so that
     /// keys without color entries (e.g. `__restore_all_hotkeys`) still route to
-    /// the right action — the prefix check in the EditActivate match
-    /// (`is_restore_key`) funnels every `__restore_*` key through here, so this
-    /// function is the single source of truth for restore-defaults routing.
+    /// the right action — every `__restore_*` sentinel in
+    /// `EditActivate` funnels through here, so this function is the single
+    /// source of truth for restore-defaults routing.
     pub(crate) fn handle_restore_defaults(&mut self, restore_key: &str) -> SettingsAction {
-        // Special: __restore_all_hotkeys opens the reset-hotkeys confirmation
-        // dialog. The Hotkeys tab has no HexColor entries, so the generic scan
-        // below would otherwise fall through to `SettingsAction::None`.
-        if restore_key == "__restore_all_hotkeys" {
-            return SettingsAction::OpenResetHotkeysDialog;
-        }
-
-        // Special: __restore_theme restores the active built-in theme to its original
-        if restore_key == "__restore_theme" {
-            let stem = presets::active_theme_stem();
-            if let Err(e) = presets::restore_theme(&stem) {
-                tracing::warn!(" [SETTINGS] Failed to restore theme '{stem}': {e}");
+        // Typed dispatch on the restore sentinels with dedicated side-effects.
+        // The color-group sentinels (Bg / Fg / Accent / Semantic) fall through
+        // to the HexColor scan below — they share the same category-scoped
+        // collection logic.
+        if let Some(kind) = sentinel::SentinelKind::from_key(restore_key) {
+            match kind {
+                // __restore_all_hotkeys opens the reset-hotkeys confirmation
+                // dialog. The Hotkeys tab has no HexColor entries, so the
+                // generic scan below would otherwise fall through to
+                // `SettingsAction::None`.
+                sentinel::SentinelKind::RestoreAllHotkeys => {
+                    return SettingsAction::OpenResetHotkeysDialog;
+                }
+                // __restore_theme restores the active built-in theme on disk.
+                sentinel::SentinelKind::RestoreTheme => {
+                    let stem = presets::active_theme_stem();
+                    if let Err(e) = presets::restore_theme(&stem) {
+                        tracing::warn!(" [SETTINGS] Failed to restore theme '{stem}': {e}");
+                    }
+                    return SettingsAction::RestoreColorGroup { entries: vec![] };
+                }
+                // __restore_visualizer opens a confirmation dialog.
+                sentinel::SentinelKind::RestoreVisualizer => {
+                    return SettingsAction::OpenResetVisualizerDialog;
+                }
+                // Color-group sentinels — fall through to the HexColor scan.
+                sentinel::SentinelKind::RestoreBg
+                | sentinel::SentinelKind::RestoreFg
+                | sentinel::SentinelKind::RestoreAccent
+                | sentinel::SentinelKind::RestoreSemantic => {}
+                // Non-restore sentinels reach this function only via the
+                // public API; ignore them defensively.
+                sentinel::SentinelKind::Logout | sentinel::SentinelKind::PresetTheme(_) => {
+                    return SettingsAction::None;
+                }
             }
-            return SettingsAction::RestoreColorGroup { entries: vec![] };
-        }
-
-        // Special: __restore_visualizer opens a confirmation dialog
-        if restore_key == "__restore_visualizer" {
-            return SettingsAction::OpenResetVisualizerDialog;
         }
 
         // Find the category that this __restore key belongs to
@@ -998,6 +1025,8 @@ impl SettingsPage {
                 .cached_entries
                 .iter()
                 .filter_map(|e| {
+                    // Defense-in-depth `starts_with("__")`: skip any sentinel
+                    // (registered or not) when collecting color entries.
                     if let SettingsEntry::Item(item) = e
                         && item.category == category
                         && !item.key.starts_with("__")

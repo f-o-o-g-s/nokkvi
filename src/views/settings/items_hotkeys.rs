@@ -2,7 +2,10 @@
 
 use nokkvi_data::types::hotkey_config::{HotkeyAction, HotkeyConfig};
 
-use super::items::{SettingItem, SettingValue, SettingsEntry};
+use super::{
+    items::{SettingItem, SettingValue, SettingsEntry},
+    sentinel::SentinelKind,
+};
 
 /// Reverse-lookup a settings key string (e.g. "hotkey.toggle_play") to its `HotkeyAction`.
 pub(crate) fn key_to_hotkey_action(key: &str) -> Option<HotkeyAction> {
@@ -12,26 +15,6 @@ pub(crate) fn key_to_hotkey_action(key: &str) -> Option<HotkeyAction> {
         }
     }
     None
-}
-
-/// Check whether a key starts with `__restore_` (restore-defaults sentinel).
-pub(crate) fn is_restore_key(key: &str) -> bool {
-    key.starts_with("__restore_")
-}
-
-/// Check whether a key starts with `__preset_` (inline preset sentinel).
-pub(crate) fn is_preset_key(key: &str) -> bool {
-    key.starts_with("__preset_")
-}
-
-/// Check whether a key starts with `__action_` (action button sentinel).
-pub(crate) fn is_action_key(key: &str) -> bool {
-    key.starts_with("__action_")
-}
-
-/// Extract the preset index from a `__preset_N` key.
-pub(crate) fn preset_key_index(key: &str) -> Option<usize> {
-    key.strip_prefix("__preset_").and_then(|s| s.parse().ok())
 }
 
 /// Build settings entries for the Hotkeys tab from live hotkey config.
@@ -82,7 +65,7 @@ pub(crate) fn build_hotkeys_items(config: &HotkeyConfig) -> Vec<SettingsEntry> {
             restore_pushed = true;
             entries.push(SettingItem::text(
                 meta!(
-                    "__restore_all_hotkeys",
+                    SentinelKind::RestoreAllHotkeys.to_key(),
                     "⟲ Restore Defaults",
                     cat,
                     "Restore all hotkey bindings to their defaults. Does not affect other settings."

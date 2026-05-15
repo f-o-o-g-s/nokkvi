@@ -260,8 +260,8 @@ fn player_settings_loaded_playlists_artwork_overlay_flips_atomic() {
 // ============================================================================
 //
 // The Hotkeys tab "Restore Defaults" row uses the key `__restore_all_hotkeys`,
-// which is intercepted by `is_restore_key` (matches any `__restore_*` prefix)
-// and routed into `handle_restore_defaults`. That function must early-return
+// which is parsed by `SentinelKind::from_key` and routed into
+// `handle_restore_defaults` via the typed dispatch. That function must early-return
 // `OpenResetHotkeysDialog` for the all-hotkeys sentinel rather than falling
 // through to the HexColor scan path (which is intended for color-group resets
 // like `__restore_bg` / `__restore_accent`).
@@ -326,4 +326,109 @@ fn handle_restore_defaults_color_group_with_no_cached_entries_returns_none() {
         matches!(action, SettingsAction::None),
         "__restore_bg with no cached HexColor entries must return None, got {action:?}"
     );
+}
+
+// ============================================================================
+// Sentinel-key dispatch characterization
+// ============================================================================
+//
+// These tests pin the `__*` sentinel-key dispatch surface so changes to
+// SentinelKind cannot silently change observable routing. They cover:
+//
+//   * `SentinelKind::from_key` parsing for each registered sentinel,
+//   * `__preset_N` numeric index extraction (drives `ApplyPreset`),
+//   * `handle_restore_defaults` with a populated `cached_entries` for
+//     `__restore_bg` — exercises the HexColor scan path that returns a
+//     non-empty `RestoreColorGroup`,
+//   * the explicit non-sentinel-ness of `__toggle_*` keys (regular
+//     ToggleSet keys that must NOT parse into `SentinelKind`).
+//
+// The `SentinelKind` enum itself owns from_key/to_key round-trip coverage
+// in `settings/sentinel.rs`; these tests are the dispatch-level anchors.
+
+#[test]
+fn sentinel_action_logout_parses_to_logout() {
+    use crate::views::settings::sentinel::SentinelKind;
+
+    assert_eq!(
+        SentinelKind::from_key("__action_logout"),
+        Some(SentinelKind::Logout)
+    );
+}
+
+#[test]
+fn sentinel_preset_zero_extracts_index() {
+    use crate::views::settings::sentinel::SentinelKind;
+
+    assert_eq!(
+        SentinelKind::from_key("__preset_0"),
+        Some(SentinelKind::PresetTheme(0))
+    );
+}
+
+#[test]
+fn sentinel_preset_seven_extracts_index() {
+    use crate::views::settings::sentinel::SentinelKind;
+
+    assert_eq!(
+        SentinelKind::from_key("__preset_7"),
+        Some(SentinelKind::PresetTheme(7))
+    );
+}
+
+#[test]
+fn sentinel_toggle_keys_are_not_sentinels() {
+    // Regular ToggleSet keys — must NOT parse into SentinelKind, since they
+    // route through `ToggleSetToggle`, not the EditActivate sentinel dispatch.
+    use crate::views::settings::sentinel::SentinelKind;
+
+    assert_eq!(SentinelKind::from_key("__toggle_artwork_overlays"), None);
+    assert_eq!(SentinelKind::from_key("__toggle_strip_fields"), None);
+}
+
+#[test]
+fn handle_restore_defaults_bg_with_cached_entries_returns_non_empty_group() {
+    // When `cached_entries` contains HexColor items in the "Background
+    // Colors" category, __restore_bg must collect them into
+    // `RestoreColorGroup { entries }` with a non-empty Vec.
+    use nokkvi_data::types::setting_item::{SettingItem, SettingMeta};
+
+    use crate::views::settings::SettingsAction;
+
+    let mut app = test_app();
+
+    // Seed cached_entries with the __restore_bg row + a HexColor row in the
+    // same "Background Colors" category. The category match drives the
+    // scan inside `handle_restore_defaults`.
+    let restore_meta = SettingMeta {
+        key: std::borrow::Cow::Borrowed("__restore_bg"),
+        label: "⟲ Restore Defaults",
+        category: "Background Colors",
+        subtitle: None,
+    };
+    let color_meta = SettingMeta {
+        key: std::borrow::Cow::Borrowed("dark.background.hard"),
+        label: "BG hard (dark)",
+        category: "Background Colors",
+        subtitle: None,
+    };
+    app.settings_page.cached_entries = vec![
+        SettingItem::text(restore_meta, "Press Enter", "Press Enter"),
+        SettingItem::hex_color(color_meta, "#000000", "#1d2021"),
+    ];
+
+    let action = app.settings_page.handle_restore_defaults("__restore_bg");
+
+    match action {
+        SettingsAction::RestoreColorGroup { entries } => {
+            assert_eq!(
+                entries.len(),
+                1,
+                "__restore_bg must collect the one HexColor entry in its category"
+            );
+            assert_eq!(entries[0].0, "dark.background.hard");
+            assert_eq!(entries[0].1, "#1d2021");
+        }
+        other => panic!("expected RestoreColorGroup, got {other:?}"),
+    }
 }

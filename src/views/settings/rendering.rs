@@ -12,7 +12,7 @@ use iced::{
 
 use super::{
     SettingsMessage,
-    items::{self, SettingItem, SettingValue, SettingsEntry},
+    items::{SettingItem, SettingValue, SettingsEntry},
 };
 use crate::{embedded_svg, theme, widgets::slot_list};
 
@@ -401,9 +401,7 @@ fn render_item_slot<'a>(
 
     // ── Special layout for preset, restore, and action items ──────────
     let key_ref = item.key.as_ref();
-    let is_action_item = items::is_preset_key(key_ref)
-        || items::is_restore_key(key_ref)
-        || items::is_action_key(key_ref);
+    let is_action_item = super::sentinel::SentinelKind::from_key(key_ref).is_some();
 
     let content: Element<'a, SettingsMessage> = if is_action_item {
         let description = item.value.display();

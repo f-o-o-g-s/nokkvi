@@ -44,10 +44,7 @@ macro_rules! meta {
 
 pub(crate) use super::{
     items_general::{GeneralSettingsData, build_general_items},
-    items_hotkeys::{
-        build_hotkeys_items, is_action_key, is_preset_key, is_restore_key, key_to_hotkey_action,
-        preset_key_index,
-    },
+    items_hotkeys::{build_hotkeys_items, key_to_hotkey_action},
     items_interface::{InterfaceSettingsData, build_interface_items},
     items_playback::{PlaybackSettingsData, build_playback_items},
     items_theme::build_theme_items,
@@ -116,7 +113,7 @@ mod tests {
         // Verify key paths start with "visualizer." (skip __ sentinel keys)
         let keys = extract_keys(&entries);
         for key in &keys {
-            if key.starts_with("__") {
+            if super::super::sentinel::SentinelKind::from_key(key).is_some() {
                 continue;
             }
             assert!(
@@ -179,7 +176,7 @@ mod tests {
         for entry in &entries {
             if let SettingsEntry::Item(item) = entry {
                 let k = item.key.as_ref();
-                if k.starts_with("__") {
+                if super::super::sentinel::SentinelKind::from_key(k).is_some() {
                     // Sentinel keys (restore buttons, etc.) — skip
                 } else if k == vkeys::NOISE_REDUCTION || k == vkeys::MONSTERCAT {
                     // Float settings
@@ -236,7 +233,7 @@ mod tests {
         // (skip __ sentinel keys — they're action buttons, not config values)
         for entry in &entries {
             if let SettingsEntry::Item(item) = entry {
-                if item.key.starts_with("__") {
+                if super::super::sentinel::SentinelKind::from_key(&item.key).is_some() {
                     continue;
                 }
                 let val_display = item.value.display();

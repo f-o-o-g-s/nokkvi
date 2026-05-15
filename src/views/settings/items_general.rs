@@ -14,7 +14,10 @@
 use nokkvi_data::services::settings_tables::general::build_general_tab_settings_items;
 pub(crate) use nokkvi_data::types::settings_data::GeneralSettingsData;
 
-use super::items::{SettingItem, SettingsEntry};
+use super::{
+    items::{SettingItem, SettingsEntry},
+    sentinel::SentinelKind,
+};
 
 /// Build settings entries for the General tab.
 pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEntry> {
@@ -91,7 +94,7 @@ pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEnt
         ),
         SettingItem::text_with_icon(
             meta!(
-                "__action_logout",
+                SentinelKind::Logout.to_key(),
                 "Logout",
                 "Account",
                 "Sign out and return to login screen"

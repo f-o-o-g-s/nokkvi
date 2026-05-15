@@ -6,7 +6,10 @@
 
 use nokkvi_data::types::theme_file::ThemeFile;
 
-use super::items::{SettingItem, SettingsEntry};
+use super::{
+    items::{SettingItem, SettingsEntry},
+    sentinel::SentinelKind,
+};
 
 /// Build settings entries for the Theme tab from the active theme file.
 /// Shows the active palette (dark or light) colors based on current mode.
@@ -49,7 +52,7 @@ pub(crate) fn build_theme_items(
     e.push(
         SettingItem::text(
             meta!(
-                "__restore_theme",
+                SentinelKind::RestoreTheme.to_key(),
                 "⟲ Restore Defaults",
                 "Select Theme",
                 "Restore this theme to its original built-in colors"
@@ -63,7 +66,7 @@ pub(crate) fn build_theme_items(
     // List all discovered themes
     let themes = presets::all_themes();
     for (i, info) in themes.iter().enumerate() {
-        let key = format!("__preset_{i}");
+        let key = SentinelKind::PresetTheme(i as u32).to_key();
         let suffix = if info.stem == active_stem {
             " ● active"
         } else {
@@ -133,7 +136,11 @@ pub(crate) fn build_theme_items(
     });
     e.push(
         SettingItem::text(
-            meta!("__restore_bg", "⟲ Restore Defaults", "Background Colors"),
+            meta!(
+                SentinelKind::RestoreBg.to_key(),
+                "⟲ Restore Defaults",
+                "Background Colors"
+            ),
             "Press Enter",
             "Press Enter",
         )
@@ -198,7 +205,11 @@ pub(crate) fn build_theme_items(
     });
     e.push(
         SettingItem::text(
-            meta!("__restore_fg", "⟲ Restore Defaults", "Foreground Colors"),
+            meta!(
+                SentinelKind::RestoreFg.to_key(),
+                "⟲ Restore Defaults",
+                "Foreground Colors"
+            ),
             "Press Enter",
             "Press Enter",
         )
@@ -258,7 +269,11 @@ pub(crate) fn build_theme_items(
     });
     e.push(
         SettingItem::text(
-            meta!("__restore_accent", "⟲ Restore Defaults", "Accent Colors"),
+            meta!(
+                SentinelKind::RestoreAccent.to_key(),
+                "⟲ Restore Defaults",
+                "Accent Colors"
+            ),
             "Press Enter",
             "Press Enter",
         )
@@ -319,7 +334,7 @@ pub(crate) fn build_theme_items(
     e.push(
         SettingItem::text(
             meta!(
-                "__restore_semantic",
+                SentinelKind::RestoreSemantic.to_key(),
                 "⟲ Restore Defaults",
                 "Semantic Colors"
             ),

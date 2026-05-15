@@ -2,7 +2,10 @@
 
 use nokkvi_data::types::theme_file::{ThemeFile, VisualizerColors};
 
-use super::items::{SettingItem, SettingsEntry};
+use super::{
+    items::{SettingItem, SettingsEntry},
+    sentinel::SentinelKind,
+};
 use crate::visualizer_config::{VisualizerConfig, keys};
 
 /// Push color entries for one mode (dark or light) into the settings list.
@@ -121,7 +124,7 @@ pub(crate) fn build_visualizer_items(
     });
     e.push(SettingItem::text(
         meta!(
-            "__restore_visualizer",
+            SentinelKind::RestoreVisualizer.to_key(),
             "⟲ Restore Defaults",
             "General",
             "Restore all visualizer settings to defaults. Preserves your color palette."
