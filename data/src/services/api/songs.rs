@@ -4,6 +4,7 @@ use serde::Deserialize;
 use crate::{
     services::api::{
         client::ApiClient,
+        pagination::{self, FULL_LOAD_PAGE_SIZE},
         parse,
         sort::{self, SortDomain},
     },
@@ -12,6 +13,19 @@ use crate::{
 
 pub struct SongsApiService {
     client: ApiClient,
+}
+
+/// Shared shape of every `/api/song` query: sort/order/filter/search/mode.
+/// Split out so the per-page and paginated helpers can take a single
+/// borrow instead of five identical scalars (which trips
+/// `clippy::too_many_arguments`). The lifetime is the caller's stack
+/// frame — every borrow is short-lived alongside the helper call.
+struct SongQueryShape<'a> {
+    sort_param: &'a str,
+    order: &'a str,
+    search_query: Option<&'a str>,
+    filter: Option<&'a crate::types::filter::LibraryFilter>,
+    sort_mode: &'a str,
 }
 
 impl SongsApiService {
@@ -27,14 +41,19 @@ impl SongsApiService {
         Self::new(client, server_url, subsonic_credential)
     }
 
-    /// Load all songs with sorting, filtering, and pagination
+    /// Load songs with sorting, filtering, and pagination.
     ///
     /// # Arguments
-    /// * `sort_mode` - Sort/filter type: "recentlyAdded", "random", "title", etc
-    /// * `sort_order` - "ASC" or "DESC"
-    /// * `search_query` - Optional search term
-    /// * `offset` - Starting position for pagination
-    /// * `limit` - Maximum number of songs to return (None = 500)
+    /// * `sort_mode` — Sort/filter type: `"recentlyAdded"`, `"random"`, `"title"`, etc.
+    /// * `sort_order` — `"ASC"` or `"DESC"`. Empty falls back to the per-mode default.
+    /// * `search_query` — Optional title-substring search.
+    /// * `filter` — Optional `LibraryFilter` (artist / album / genre scope).
+    /// * `offset` — Optional starting index (defaults to 0).
+    /// * `limit` — `Some(n)` issues a single page of `n` rows; `None` paginates
+    ///   internally in `FULL_LOAD_PAGE_SIZE` chunks until the server reports a
+    ///   short page or the cumulative count meets `X-Total-Count`. The latter
+    ///   replaced the legacy `_end=50000` ceiling that silently truncated
+    ///   libraries with more than 50_000 songs.
     pub async fn load_songs(
         &self,
         sort_mode: &str,
@@ -50,22 +69,39 @@ impl SongsApiService {
         } else {
             sort_order
         };
+        let offset_val = offset.unwrap_or(0) as u32;
+        let shape = SongQueryShape {
+            sort_param,
+            order,
+            search_query,
+            filter,
+            sort_mode,
+        };
 
-        let offset_val = offset.unwrap_or(0);
-        let limit_val = limit.unwrap_or(50000); // No practical limit
-        let start = offset_val.to_string();
-        let end = (offset_val + limit_val).to_string();
+        match limit {
+            Some(l) => {
+                self.load_songs_single_page(&shape, offset_val, l as u32)
+                    .await
+            }
+            None => self.load_songs_all_pages(&shape, offset_val).await,
+        }
+    }
 
+    /// Build the `_sort` / `_order` / `_start` / `_end` / filter / favorited
+    /// params for a single Songs request. Shared between the single-page and
+    /// paginated paths so the per-request shape stays in lockstep.
+    fn build_song_params<'a>(
+        shape: &SongQueryShape<'a>,
+        start_str: &'a str,
+        end_str: &'a str,
+    ) -> Vec<(&'a str, &'a str)> {
         let mut params: Vec<(&str, &str)> = vec![
-            ("_sort", sort_param),
-            ("_order", order),
-            ("_start", &start),
-            ("_end", &end),
+            ("_sort", shape.sort_param),
+            ("_order", shape.order),
+            ("_start", start_str),
+            ("_end", end_str),
         ];
-
-        // Apply ID filter if present
-        let title_search: String;
-        if let Some(f) = filter {
+        if let Some(f) = shape.filter {
             match f {
                 crate::types::filter::LibraryFilter::ArtistId { id, .. } => {
                     params.push(("artists_id", id));
@@ -77,28 +113,87 @@ impl SongsApiService {
                     params.push(("album_id", id));
                 }
             }
-        } else if let Some(query) = search_query
+        } else if let Some(query) = shape.search_query
             && !query.is_empty()
         {
-            title_search = query.to_string();
-            params.push(("title", &title_search));
+            params.push(("title", query));
         }
-
-        // Add starred filter for favorited view
-        if sort_mode == "favorited" {
+        if shape.sort_mode == "favorited" {
             params.push(("starred", "true"));
         }
+        params
+    }
 
-        let response_text = self
+    /// Single `/api/song` request, used when the caller specified an explicit
+    /// `limit`. Mirrors the previous (pre-pagination-loop) single-call shape.
+    async fn load_songs_single_page(
+        &self,
+        shape: &SongQueryShape<'_>,
+        offset: u32,
+        limit: u32,
+    ) -> Result<(Vec<Song>, usize)> {
+        let range = pagination::paged_range(offset, Some(limit));
+        let params = Self::build_song_params(shape, &range.start, &range.end);
+        let response = self
             .client
             .get_with_headers("/api/song", &params)
             .await
             .context("Failed to fetch songs from API")?;
+        Self::parse_response_with_total(&response.0, response.1)
+    }
 
-        let (body, total_count) =
-            Self::parse_response_with_total(&response_text.0, response_text.1)?;
+    /// Page through `/api/song` in `FULL_LOAD_PAGE_SIZE` chunks until the
+    /// server returns a short page or the cumulative count meets the reported
+    /// total. Used when the caller passes `limit = None` — i.e., "load every
+    /// matching row". `starting_offset` is preserved relative to each
+    /// per-page request so callers paginating from a non-zero base get
+    /// consistent absolute indices on the wire.
+    async fn load_songs_all_pages(
+        &self,
+        shape: &SongQueryShape<'_>,
+        starting_offset: u32,
+    ) -> Result<(Vec<Song>, usize)> {
+        // Outer-closure captures: the Fn signature on `fetch_all_pages` means
+        // anything referenced from inside must be re-clonable across calls.
+        // Clone-on-entry to owned types here keeps the inner `async move`
+        // body straightforward — borrowing through the shape into the closure
+        // would require the shape to outlive an opaque Future and forces
+        // lifetime gymnastics we don't need.
+        let client = self.client.clone();
+        let sort_param = shape.sort_param.to_string();
+        let order = shape.order.to_string();
+        let search_query = shape.search_query.map(str::to_string);
+        let filter = shape.filter.cloned();
+        let sort_mode = shape.sort_mode.to_string();
 
-        Ok((body, total_count))
+        pagination::fetch_all_pages(FULL_LOAD_PAGE_SIZE, |start, end| {
+            let client = client.clone();
+            let sort_param = sort_param.clone();
+            let order = order.clone();
+            let search_query = search_query.clone();
+            let filter = filter.clone();
+            let sort_mode = sort_mode.clone();
+            async move {
+                let absolute_start = starting_offset.saturating_add(start);
+                let absolute_end = starting_offset.saturating_add(end);
+                let start_str = absolute_start.to_string();
+                let end_str = absolute_end.to_string();
+                let shape = SongQueryShape {
+                    sort_param: &sort_param,
+                    order: &order,
+                    search_query: search_query.as_deref(),
+                    filter: filter.as_ref(),
+                    sort_mode: &sort_mode,
+                };
+                let params = Self::build_song_params(&shape, &start_str, &end_str);
+                let response = client
+                    .get_with_headers("/api/song", &params)
+                    .await
+                    .context("Failed to fetch songs page from API")?;
+                Self::parse_response_with_total(&response.0, response.1)
+            }
+        })
+        .await
     }
 
     /// Load a single song by its ID
@@ -156,30 +251,39 @@ impl SongsApiService {
         Ok(songs)
     }
 
-    /// Load all songs for a specific genre
+    /// Load every song for a specific genre.
     ///
     /// # Arguments
-    /// * `genre_name` - The genre name to filter by
+    /// * `genre_name` — The genre name to filter by.
+    ///
+    /// Pages through `/api/song` in `FULL_LOAD_PAGE_SIZE` chunks until
+    /// exhausted. Replaces the legacy `_end=50000` ceiling, which silently
+    /// truncated genres with more than 50_000 songs.
     pub async fn load_songs_by_genre(&self, genre_name: &str) -> Result<(Vec<Song>, usize)> {
+        let client = self.client.clone();
         let genre_filter = genre_name.to_string();
-        let params = vec![
-            ("genre", genre_filter.as_str()),
-            ("_sort", "album"),
-            ("_order", "ASC"),
-            ("_start", "0"),
-            ("_end", "50000"), // No practical limit
-        ];
 
-        let response_text = self
-            .client
-            .get_with_headers("/api/song", &params)
-            .await
-            .context("Failed to fetch genre songs from API")?;
-
-        let (songs, total_count) =
-            Self::parse_response_with_total(&response_text.0, response_text.1)?;
-
-        Ok((songs, total_count))
+        pagination::fetch_all_pages(FULL_LOAD_PAGE_SIZE, |start, end| {
+            let client = client.clone();
+            let genre_filter = genre_filter.clone();
+            async move {
+                let start_str = start.to_string();
+                let end_str = end.to_string();
+                let params = vec![
+                    ("genre", genre_filter.as_str()),
+                    ("_sort", "album"),
+                    ("_order", "ASC"),
+                    ("_start", start_str.as_str()),
+                    ("_end", end_str.as_str()),
+                ];
+                let response = client
+                    .get_with_headers("/api/song", &params)
+                    .await
+                    .context("Failed to fetch genre songs from API")?;
+                Self::parse_response_with_total(&response.0, response.1)
+            }
+        })
+        .await
     }
 
     /// Parse response that may be array or object with content
