@@ -198,6 +198,7 @@ impl SettingsPage {
                 SettingsEntry::Item(item) => {
                     let subtitle_matches = item
                         .subtitle
+                        .as_deref()
                         .is_some_and(|s| s.to_lowercase().contains(&query_lower));
                     let item_matches = header_matches
                         || item.label.to_lowercase().contains(&query_lower)

@@ -17,7 +17,7 @@ use nokkvi_data::{
     types::player_settings::ArtworkColumnMode,
 };
 
-use super::items::{SettingItem, SettingsEntry};
+use super::items::{MacroRows, SettingItem, SettingMeta, SettingsEntry};
 
 /// Build settings entries for the Interface tab.
 pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<SettingsEntry> {
@@ -33,14 +33,7 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
         data.font_family
     };
 
-    let mut macro_rows = build_interface_tab_settings_items(data);
-    let mut take = |key: &str| -> SettingsEntry {
-        let pos = macro_rows
-            .iter()
-            .position(|e| matches!(e, SettingsEntry::Item(it) if it.key.as_ref() == key))
-            .unwrap_or_else(|| panic!("missing macro row for {key}"));
-        macro_rows.remove(pos)
-    };
+    let mut macro_rows = MacroRows::new(build_interface_tab_settings_items(data));
 
     let mut items: Vec<SettingsEntry> = vec![
         // --- Layout ---
@@ -48,21 +41,21 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
             label: "Layout",
             icon: LAYOUT,
         },
-        take("general.nav_layout"),
-        take("general.nav_display_mode"),
-        take("general.track_info_display"),
-        take("general.slot_row_height"),
-        take("general.horizontal_volume"),
+        macro_rows.take("general.nav_layout"),
+        macro_rows.take("general.nav_display_mode"),
+        macro_rows.take("general.track_info_display"),
+        macro_rows.take("general.slot_row_height"),
+        macro_rows.take("general.horizontal_volume"),
         // --- Views ---
         SettingsEntry::Header {
             label: "Views",
             icon: VIEWS,
         },
         SettingItem::toggle_set(
-            meta!(
+            SettingMeta::new(
                 "__toggle_artwork_overlays",
                 "Text Overlay On Artwork",
-                "Show the metadata text overlay on the large artwork in each view"
+                "Show the metadata text overlay on the large artwork in each view",
             ),
             vec![
                 (
@@ -87,19 +80,15 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
                 ),
             ],
         ),
-        take("general.slot_text_links"),
+        macro_rows.take("general.slot_text_links"),
         // --- Font (theme-routed; hand-written) ---
         SettingsEntry::Header {
             label: "Font",
             icon: FONT,
         },
         SettingItem::text(
-            meta!(
-                "font_family",
-                "Font Family",
-                "Font",
-                "Enter to browse installed fonts"
-            ),
+            SettingMeta::new("font_family", "Font Family", "Font")
+                .with_subtitle("Enter to browse installed fonts"),
             font_display,
             "(system default)",
         )
@@ -110,10 +99,10 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
             icon: STRIP,
         },
         SettingItem::toggle_set(
-            meta!(
+            SettingMeta::new(
                 "__toggle_strip_fields",
                 "Visible Fields",
-                "Choose which metadata fields appear in the strip"
+                "Choose which metadata fields appear in the strip",
             ),
             vec![
                 (
@@ -138,28 +127,28 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
                 ),
             ],
         ),
-        take("general.strip_merged_mode"),
-        take("general.strip_show_labels"),
-        take("general.strip_separator"),
-        take("general.strip_click_action"),
+        macro_rows.take("general.strip_merged_mode"),
+        macro_rows.take("general.strip_show_labels"),
+        macro_rows.take("general.strip_separator"),
+        macro_rows.take("general.strip_click_action"),
         // --- Artwork Column ---
         SettingsEntry::Header {
             label: "Artwork Column",
             icon: ARTWORK_COL,
         },
-        take("general.artwork_column_mode"),
-        take("general.artwork_auto_max_pct"),
-        take("general.artwork_vertical_height_pct"),
+        macro_rows.take("general.artwork_column_mode"),
+        macro_rows.take("general.artwork_auto_max_pct"),
+        macro_rows.take("general.artwork_vertical_height_pct"),
     ];
 
     // Stretched-only knob: image fit applies only when the column is
     // stretched (horizontal or vertical).
     if ArtworkColumnMode::from_label(data.artwork_column_mode).is_stretched() {
         items.push(SettingItem::enum_val(
-            meta!(
+            SettingMeta::new(
                 "general.artwork_column_stretch_fit",
                 "Stretch Fit",
-                "Cover: crop to fill, preserve aspect · Fill: true stretch, distorts album art"
+                "Cover: crop to fill, preserve aspect · Fill: true stretch, distorts album art",
             ),
             data.artwork_column_stretch_fit,
             "Cover",

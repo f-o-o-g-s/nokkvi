@@ -12,7 +12,7 @@
 use nokkvi_data::services::settings_tables::playback::build_playback_tab_settings_items;
 pub(crate) use nokkvi_data::types::settings_data::PlaybackSettingsData;
 
-use super::items::{SettingItem, SettingsEntry};
+use super::items::{MacroRows, SettingItem, SettingMeta, SettingsEntry};
 
 /// Build settings entries for the Playback tab.
 pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsEntry> {
@@ -20,14 +20,7 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
     const SCR: &str = "assets/icons/radio-tower.svg";
     const LIST: &str = "assets/icons/list-music.svg";
 
-    let mut macro_rows = build_playback_tab_settings_items(data);
-    let mut take = |key: &str| -> SettingsEntry {
-        let pos = macro_rows
-            .iter()
-            .position(|e| matches!(e, SettingsEntry::Item(it) if it.key.as_ref() == key))
-            .unwrap_or_else(|| panic!("missing macro row for {key}"));
-        macro_rows.remove(pos)
-    };
+    let mut macro_rows = MacroRows::new(build_playback_tab_settings_items(data));
 
     let mut items: Vec<SettingsEntry> = vec![
         // --- Playback ---
@@ -35,18 +28,18 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             label: "Playback",
             icon: PLAY,
         },
-        take("general.crossfade_enabled"),
-        take("general.crossfade_duration"),
-        take("general.volume_normalization"),
+        macro_rows.take("general.crossfade_enabled"),
+        macro_rows.take("general.crossfade_duration"),
+        macro_rows.take("general.volume_normalization"),
     ];
 
     // AGC-only knob: target loudness applies only when AGC is selected.
     if data.volume_normalization == "AGC" {
         items.push(SettingItem::enum_val(
-            meta!(
+            SettingMeta::new(
                 "general.normalization_level",
                 "AGC Target Level",
-                "Quiet (headroom) · Normal · Loud (boost)"
+                "Quiet (headroom) · Normal · Loud (boost)",
             ),
             data.normalization_level,
             "Normal",
@@ -61,10 +54,10 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
     );
     if is_rg {
         items.push(SettingItem::int(
-            meta!(
+            SettingMeta::new(
                 "general.replay_gain_preamp_db",
                 "ReplayGain Pre-amp",
-                "Boost on top of the tag value · 0 dB matches reference, +6 is typical for modern listeners"
+                "Boost on top of the tag value · 0 dB matches reference, +6 is typical for modern listeners",
             ),
             data.replay_gain_preamp_db,
             0,
@@ -74,10 +67,10 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             "dB",
         ));
         items.push(SettingItem::int(
-            meta!(
+            SettingMeta::new(
                 "general.replay_gain_fallback_db",
                 "Untagged Track Fallback",
-                "dB applied when a track has no ReplayGain tags · ignored if Use AGC for Untagged is on"
+                "dB applied when a track has no ReplayGain tags · ignored if Use AGC for Untagged is on",
             ),
             data.replay_gain_fallback_db,
             0,
@@ -87,19 +80,19 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             "dB",
         ));
         items.push(SettingItem::bool_val(
-            meta!(
+            SettingMeta::new(
                 "general.replay_gain_fallback_to_agc",
                 "Use AGC for Untagged Tracks",
-                "Falls through to real-time AGC when a track has no ReplayGain tags"
+                "Falls through to real-time AGC when a track has no ReplayGain tags",
             ),
             data.replay_gain_fallback_to_agc,
             false,
         ));
         items.push(SettingItem::bool_val(
-            meta!(
+            SettingMeta::new(
                 "general.replay_gain_prevent_clipping",
                 "Prevent Clipping",
-                "Clamp gain so track_peak × gain ≤ 1.0"
+                "Clamp gain so track_peak × gain ≤ 1.0",
             ),
             data.replay_gain_prevent_clipping,
             true,
@@ -112,22 +105,22 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             label: "Scrobbling",
             icon: SCR,
         },
-        take("general.scrobbling_enabled"),
-        take("general.scrobble_threshold"),
+        macro_rows.take("general.scrobbling_enabled"),
+        macro_rows.take("general.scrobble_threshold"),
         // --- Playlists ---
         SettingsEntry::Header {
             label: "Playlists",
             icon: LIST,
         },
-        take("general.quick_add_to_playlist"),
+        macro_rows.take("general.quick_add_to_playlist"),
         // `general.default_playlist_name` opens a picker dialog (sentinel
         // path); kept hand-written so the empty/Not-set fallback lives at
         // the row construction site.
         SettingItem::text(
-            meta!(
+            SettingMeta::new(
                 "general.default_playlist_name",
                 "Default Playlist",
-                "Click to choose a playlist · also settable from the Playlists header chip or right-click menu"
+                "Click to choose a playlist · also settable from the Playlists header chip or right-click menu",
             ),
             if data.default_playlist_name.is_empty() {
                 "Not set"
@@ -137,7 +130,7 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             "Not set",
         )
         .with_enter_hint(),
-        take("general.queue_show_default_playlist"),
+        macro_rows.take("general.queue_show_default_playlist"),
     ]);
 
     items

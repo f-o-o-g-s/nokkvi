@@ -17,15 +17,48 @@ use crate::types::setting_value::SettingValue;
 /// Common metadata shared by all setting items (key, label, category, icon).
 /// Extracted to reduce argument count in builder methods.
 ///
-/// The `meta!()` macro in the UI crate constructs these inline for hand-written
-/// builders; `define_settings!` constructs them directly in its expansion.
+/// Prefer the [`SettingMeta::new`] + [`SettingMeta::with_subtitle`] builder over
+/// direct struct literals. `define_settings!` still constructs these inline in
+/// its macro expansion (see `define_settings_build_item_arm!`).
 #[derive(Debug, Clone)]
 pub struct SettingMeta<'a> {
     pub key: Cow<'static, str>,
     pub label: &'a str,
     pub category: &'static str,
     /// Optional subtitle override (displayed instead of `category` in the UI).
-    pub subtitle: Option<&'static str>,
+    ///
+    /// `Cow<'static, str>` accepts both `&'static str` literals (zero-cost
+    /// `Cow::Borrowed`) and owned `String` values (e.g. the per-hotkey-action
+    /// subtitle built via `format!`). This replaces the previous `Box::leak`
+    /// dance the hotkeys builder used to satisfy the old `&'static str` bound.
+    pub subtitle: Option<Cow<'static, str>>,
+}
+
+impl<'a> SettingMeta<'a> {
+    /// Build a `SettingMeta` without a subtitle.
+    ///
+    /// Accepts both `&'static str` and `String` keys via
+    /// `Into<Cow<'static, str>>` — `format!`-generated keys (e.g. theme color
+    /// rows in `items_theme.rs`) work without an extra conversion.
+    pub fn new<K: Into<Cow<'static, str>>>(key: K, label: &'a str, category: &'static str) -> Self {
+        Self {
+            key: key.into(),
+            label,
+            category,
+            subtitle: None,
+        }
+    }
+
+    /// Attach a subtitle (description text shown in the footer / search index).
+    ///
+    /// Accepts both `&'static str` and `String` via `Into<Cow<'static, str>>`.
+    /// Owned strings (e.g. the per-hotkey-action subtitle) avoid the previous
+    /// `Box::leak` allocation.
+    #[must_use]
+    pub fn with_subtitle<S: Into<Cow<'static, str>>>(mut self, subtitle: S) -> Self {
+        self.subtitle = Some(subtitle.into());
+        self
+    }
 }
 
 /// A single navigable setting in the slot list.
@@ -44,7 +77,7 @@ pub struct SettingItem {
     /// Optional inline SVG icon rendered next to the label.
     pub label_icon: Option<&'static str>,
     /// Optional subtitle override (displayed instead of `category` in the UI).
-    pub subtitle: Option<&'static str>,
+    pub subtitle: Option<Cow<'static, str>>,
     /// True when the key targets the active theme file (`dark.*` / `light.*`).
     /// False means the key targets config.toml.
     pub is_theme_key: bool,
@@ -256,5 +289,42 @@ impl SettingsEntry {
             item.needs_enter_hint = true;
         }
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn setting_meta_new_defaults_subtitle_to_none() {
+        let meta = SettingMeta::new("general.start_view", "Start View", "Application");
+        assert!(meta.subtitle.is_none());
+        assert_eq!(meta.key, Cow::Borrowed("general.start_view"));
+        assert_eq!(meta.label, "Start View");
+        assert_eq!(meta.category, "Application");
+    }
+
+    #[test]
+    fn setting_meta_with_subtitle_borrowed() {
+        let meta =
+            SettingMeta::new("general.start_view", "Start View", "Application").with_subtitle("s");
+        let subtitle = meta.subtitle.expect("subtitle should be Some");
+        assert!(
+            matches!(&subtitle, Cow::Borrowed(s) if *s == "s"),
+            "expected Cow::Borrowed(\"s\"), got {subtitle:?}"
+        );
+    }
+
+    #[test]
+    fn setting_meta_with_subtitle_owned() {
+        let meta = SettingMeta::new("hotkey.toggle_play", "Toggle Play", "Playback")
+            .with_subtitle(format!("dynamic {}", 42));
+        let subtitle = meta.subtitle.as_ref().expect("subtitle should be Some");
+        assert!(
+            matches!(subtitle, Cow::Owned(_)),
+            "expected Cow::Owned, got Cow::Borrowed"
+        );
+        assert_eq!(subtitle.as_ref(), "dynamic 42");
     }
 }

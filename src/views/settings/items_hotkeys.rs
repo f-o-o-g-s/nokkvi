@@ -3,7 +3,7 @@
 use nokkvi_data::types::hotkey_config::{HotkeyAction, HotkeyConfig};
 
 use super::{
-    items::{SettingItem, SettingValue, SettingsEntry},
+    items::{SettingItem, SettingMeta, SettingValue, SettingsEntry},
     sentinel::SentinelKind,
 };
 
@@ -64,12 +64,10 @@ pub(crate) fn build_hotkeys_items(config: &HotkeyConfig) -> Vec<SettingsEntry> {
         if !restore_pushed {
             restore_pushed = true;
             entries.push(SettingItem::text(
-                meta!(
-                    SentinelKind::RestoreAllHotkeys.to_key(),
-                    "⟲ Restore Defaults",
-                    cat,
-                    "Restore all hotkey bindings to their defaults. Does not affect other settings."
-                ),
+                SettingMeta::new(SentinelKind::RestoreAllHotkeys.to_key(), "⟲ Restore Defaults", cat)
+                    .with_subtitle(
+                        "Restore all hotkey bindings to their defaults. Does not affect other settings.",
+                    ),
                 "Press Enter",
                 "Press Enter",
             ));
@@ -88,14 +86,8 @@ pub(crate) fn build_hotkeys_items(config: &HotkeyConfig) -> Vec<SettingsEntry> {
                 action.description()
             );
             let mut entry = SettingItem::from_meta(
-                meta!(
-                    action.settings_key(),
-                    action.display_name(),
-                    cat,
-                    // Leak the dynamic subtitle string so the &'static str requirement is met.
-                    // Bounded by HotkeyAction::ALL count (~35 actions), each leaked once.
-                    &*Box::leak(subtitle.into_boxed_str())
-                ),
+                SettingMeta::new(action.settings_key(), action.display_name(), cat)
+                    .with_subtitle(subtitle),
                 SettingValue::Hotkey(combo_display),
                 SettingValue::Hotkey(default_display),
             );

@@ -421,9 +421,10 @@ macro_rules! define_settings_dispatch_arm {
 /// `value_type` ident so the right `SettingItem::*` constructor receives the
 /// right typed payload.
 ///
-/// Each arm constructs a `SettingMeta` literal (the data-crate-side analog of
-/// the UI-crate `meta!()` macro) and forwards `(val, default, [knobs])` to
-/// the matching constructor. `Enum` arms additionally clone the `options`
+/// Each arm constructs a `SettingMeta` literal (parallel to the UI-crate
+/// `SettingMeta::new(...).with_subtitle(...)` builder used by the
+/// hand-written `items_<tab>.rs` files) and forwards `(val, default, [knobs])`
+/// to the matching constructor. `Enum` arms additionally clone the `options`
 /// slice into a `Vec` since `enum_val` takes ownership of the option list.
 #[macro_export]
 #[doc(hidden)]
@@ -434,7 +435,7 @@ macro_rules! define_settings_build_item_arm {
                 key: ::std::borrow::Cow::Borrowed($key),
                 label: $label,
                 category: $cat,
-                subtitle: $sub,
+                subtitle: ($sub).map(::std::borrow::Cow::Borrowed),
             },
             $val,
             $default,
@@ -447,7 +448,7 @@ macro_rules! define_settings_build_item_arm {
                 key: ::std::borrow::Cow::Borrowed($key),
                 label: $label,
                 category: $cat,
-                subtitle: $sub,
+                subtitle: ($sub).map(::std::borrow::Cow::Borrowed),
             },
             $val,
             $default,
@@ -464,7 +465,7 @@ macro_rules! define_settings_build_item_arm {
                 key: ::std::borrow::Cow::Borrowed($key),
                 label: $label,
                 category: $cat,
-                subtitle: $sub,
+                subtitle: ($sub).map(::std::borrow::Cow::Borrowed),
             },
             $val,
             $default,
@@ -481,7 +482,7 @@ macro_rules! define_settings_build_item_arm {
                 key: ::std::borrow::Cow::Borrowed($key),
                 label: $label,
                 category: $cat,
-                subtitle: $sub,
+                subtitle: ($sub).map(::std::borrow::Cow::Borrowed),
             },
             $val,
             $default,
@@ -494,7 +495,7 @@ macro_rules! define_settings_build_item_arm {
                 key: ::std::borrow::Cow::Borrowed($key),
                 label: $label,
                 category: $cat,
-                subtitle: $sub,
+                subtitle: ($sub).map(::std::borrow::Cow::Borrowed),
             },
             $val,
             $default,

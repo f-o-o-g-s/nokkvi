@@ -400,18 +400,12 @@ fn handle_restore_defaults_bg_with_cached_entries_returns_non_empty_group() {
     // Seed cached_entries with the __restore_bg row + a HexColor row in the
     // same "Background Colors" category. The category match drives the
     // scan inside `handle_restore_defaults`.
-    let restore_meta = SettingMeta {
-        key: std::borrow::Cow::Borrowed("__restore_bg"),
-        label: "⟲ Restore Defaults",
-        category: "Background Colors",
-        subtitle: None,
-    };
-    let color_meta = SettingMeta {
-        key: std::borrow::Cow::Borrowed("dark.background.hard"),
-        label: "BG hard (dark)",
-        category: "Background Colors",
-        subtitle: None,
-    };
+    let restore_meta = SettingMeta::new("__restore_bg", "⟲ Restore Defaults", "Background Colors");
+    let color_meta = SettingMeta::new(
+        "dark.background.hard",
+        "BG hard (dark)",
+        "Background Colors",
+    );
     app.settings_page.cached_entries = vec![
         SettingItem::text(restore_meta, "Press Enter", "Press Enter"),
         SettingItem::hex_color(color_meta, "#000000", "#1d2021"),

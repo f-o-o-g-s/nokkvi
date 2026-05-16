@@ -15,9 +15,8 @@ use nokkvi_data::types::{
 
 use crate::{visualizer_config::VisualizerConfig, widgets::SlotListView};
 
-#[macro_use]
-pub(crate) mod items;
 mod entries;
+pub(crate) mod items;
 mod items_general;
 mod items_hotkeys;
 mod items_interface;
@@ -1395,7 +1394,7 @@ impl SettingsPage {
             }
             if !key.is_empty() {
                 let description = self.cached_entries.get(edit_idx).and_then(|e| match e {
-                    SettingsEntry::Item(item) => item.subtitle.map(String::from),
+                    SettingsEntry::Item(item) => item.subtitle.as_deref().map(String::from),
                     SettingsEntry::Header { .. } => None,
                 });
                 return route_write(key, is_theme, new_value, description);
@@ -1427,7 +1426,11 @@ impl SettingsPage {
             .get_center_item_index(total)
             .and_then(|idx| self.cached_entries.get(idx))
             .map(|entry| match entry {
-                SettingsEntry::Item(item) => item.subtitle.unwrap_or(item.category).to_string(),
+                SettingsEntry::Item(item) => item
+                    .subtitle
+                    .as_deref()
+                    .unwrap_or(item.category)
+                    .to_string(),
                 SettingsEntry::Header { label, .. } => {
                     // At Level 1 (without active search), look up the tab's
                     // description for a meaningful footer. During search, headers

@@ -11,7 +11,7 @@ globs: src/views/settings/**,src/update/settings.rs
 views/settings/
 ├── mod.rs              — State, Message, Action, update, view; SettingsTab enum (6 variants); NavLevel
 ├── entries.rs          — Entry building / filtering / cross-tab search
-├── items.rs            — Re-exports SettingValue / SettingMeta / SettingItem / SettingsEntry from the data crate, plus the inline `meta!` macro and shared item helpers
+├── items.rs            — Re-exports SettingValue / SettingMeta / SettingItem / SettingsEntry from the data crate, plus the `MacroRows::{new, take}` helper used by the per-tab builders. Construct `SettingMeta` via `SettingMeta::new(key, label, category).with_subtitle(...)`
 ├── items_general.rs    — Application, Mouse Behavior, System Tray, Account
 ├── items_interface.rs  — Layout, Views, Font, Metadata Strip, Artwork Column
 ├── items_playback.rs   — Playback, Scrobbling, Playlists

@@ -7,7 +7,7 @@
 use nokkvi_data::types::theme_file::ThemeFile;
 
 use super::{
-    items::{SettingItem, SettingsEntry},
+    items::{SettingItem, SettingMeta, SettingsEntry},
     sentinel::SentinelKind,
 };
 
@@ -51,12 +51,12 @@ pub(crate) fn build_theme_items(
     // Restore Defaults (only for built-in themes)
     e.push(
         SettingItem::text(
-            meta!(
+            SettingMeta::new(
                 SentinelKind::RestoreTheme.to_key(),
                 "⟲ Restore Defaults",
                 "Select Theme",
-                "Restore this theme to its original built-in colors"
-            ),
+            )
+            .with_subtitle("Restore this theme to its original built-in colors"),
             "Press Enter",
             "Press Enter",
         )
@@ -78,7 +78,10 @@ pub(crate) fn build_theme_items(
         } else {
             "Custom"
         };
-        e.push(SettingItem::text(meta!(key, &label, "Select Theme"), sub, "").with_theme_key());
+        e.push(
+            SettingItem::text(SettingMeta::new(key, &label, "Select Theme"), sub, "")
+                .with_theme_key(),
+        );
     }
 
     // ── Appearance ───────────────────────────────────────────────────
@@ -89,33 +92,21 @@ pub(crate) fn build_theme_items(
     });
     let theme_val = if is_light_mode { "Light" } else { "Dark" };
     e.push(SettingItem::enum_val(
-        meta!(
-            "general.light_mode",
-            "Theme Mode",
-            "Appearance",
-            "Switch between dark and light"
-        ),
+        SettingMeta::new("general.light_mode", "Theme Mode", "Appearance")
+            .with_subtitle("Switch between dark and light"),
         theme_val,
         "Dark",
         vec!["Dark", "Light"],
     ));
     e.push(SettingItem::bool_val(
-        meta!(
-            "general.rounded_mode",
-            "Rounded Corners",
-            "Appearance",
-            "Apply rounded borders to UI elements"
-        ),
+        SettingMeta::new("general.rounded_mode", "Rounded Corners", "Appearance")
+            .with_subtitle("Apply rounded borders to UI elements"),
         rounded_mode,
         false,
     ));
     e.push(SettingItem::bool_val(
-        meta!(
-            "general.opacity_gradient",
-            "Opacity Gradient",
-            "Appearance",
-            "Fade non-center slots in list views"
-        ),
+        SettingMeta::new("general.opacity_gradient", "Opacity Gradient", "Appearance")
+            .with_subtitle("Fade non-center slots in list views"),
         opacity_gradient,
         true,
     ));
@@ -127,10 +118,10 @@ pub(crate) fn build_theme_items(
     });
     e.push(
         SettingItem::text(
-            meta!(
+            SettingMeta::new(
                 SentinelKind::RestoreBg.to_key(),
                 "⟲ Restore Defaults",
-                "Background Colors"
+                "Background Colors",
             ),
             "Press Enter",
             "Press Enter",
@@ -177,10 +168,10 @@ pub(crate) fn build_theme_items(
         let key = format!("{palette_prefix}.background.{field}");
         e.push(
             SettingItem::hex_color(
-                meta!(
+                SettingMeta::new(
                     key,
                     &format!("BG {field} ({palette_label})"),
-                    "Background Colors"
+                    "Background Colors",
                 ),
                 value,
                 default,
@@ -196,10 +187,10 @@ pub(crate) fn build_theme_items(
     });
     e.push(
         SettingItem::text(
-            meta!(
+            SettingMeta::new(
                 SentinelKind::RestoreFg.to_key(),
                 "⟲ Restore Defaults",
-                "Foreground Colors"
+                "Foreground Colors",
             ),
             "Press Enter",
             "Press Enter",
@@ -241,10 +232,10 @@ pub(crate) fn build_theme_items(
         let key = format!("{palette_prefix}.foreground.{field}");
         e.push(
             SettingItem::hex_color(
-                meta!(
+                SettingMeta::new(
                     key,
                     &format!("FG {field} ({palette_label})"),
-                    "Foreground Colors"
+                    "Foreground Colors",
                 ),
                 value,
                 default,
@@ -260,10 +251,10 @@ pub(crate) fn build_theme_items(
     });
     e.push(
         SettingItem::text(
-            meta!(
+            SettingMeta::new(
                 SentinelKind::RestoreAccent.to_key(),
                 "⟲ Restore Defaults",
-                "Accent Colors"
+                "Accent Colors",
             ),
             "Press Enter",
             "Press Enter",
@@ -305,10 +296,10 @@ pub(crate) fn build_theme_items(
         let key = format!("{palette_prefix}.accent.{field}");
         e.push(
             SettingItem::hex_color(
-                meta!(
+                SettingMeta::new(
                     key,
                     &format!("Accent {field} ({palette_label})"),
-                    "Accent Colors"
+                    "Accent Colors",
                 ),
                 value,
                 default,
@@ -324,10 +315,10 @@ pub(crate) fn build_theme_items(
     });
     e.push(
         SettingItem::text(
-            meta!(
+            SettingMeta::new(
                 SentinelKind::RestoreSemantic.to_key(),
                 "⟲ Restore Defaults",
-                "Semantic Colors"
+                "Semantic Colors",
             ),
             "Press Enter",
             "Press Enter",
@@ -372,10 +363,10 @@ pub(crate) fn build_theme_items(
         let key_bright = format!("{palette_prefix}.{section}.bright");
         e.push(
             SettingItem::hex_color(
-                meta!(
+                SettingMeta::new(
                     key_base,
                     &format!("{color_name} Base ({palette_label})"),
-                    "Semantic Colors"
+                    "Semantic Colors",
                 ),
                 base,
                 def_base,
@@ -384,10 +375,10 @@ pub(crate) fn build_theme_items(
         );
         e.push(
             SettingItem::hex_color(
-                meta!(
+                SettingMeta::new(
                     key_bright,
                     &format!("{color_name} Bright ({palette_label})"),
-                    "Semantic Colors"
+                    "Semantic Colors",
                 ),
                 bright,
                 def_bright,

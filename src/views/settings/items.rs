@@ -14,33 +14,48 @@ pub(crate) use nokkvi_data::types::{
     setting_value::SettingValue,
 };
 
-/// Shorthand for constructing `SettingMeta` inline.
-/// Accepts both `&'static str` and `String` keys via `Into<Cow<'static, str>>`.
-macro_rules! meta {
-    ($key:expr, $label:expr, $cat:expr) => {
-        $crate::views::settings::items::SettingMeta {
-            key: std::borrow::Cow::from($key),
-            label: $label,
-            category: $cat,
-            subtitle: None,
-        }
-    };
-    ($key:expr, $label:expr, $cat:expr, $sub:expr) => {
-        $crate::views::settings::items::SettingMeta {
-            key: std::borrow::Cow::from($key),
-            label: $label,
-            category: $cat,
-            subtitle: Some($sub),
-        }
-    };
+/// Wrapper around the macro-emitted `Vec<SettingsEntry>` returned by
+/// `build_<tab>_tab_settings_items`, with a single-use `take(key)` accessor
+/// that drains rows in display order.
+///
+/// The hand-written `items_<tab>.rs` builders need to interleave the
+/// `define_settings!`-emitted rows with section headers, conditional rows, and
+/// ToggleSet rows. They previously reached for an inline closure to look up
+/// each row by key and remove it from the underlying `Vec`. This helper
+/// centralizes that pattern so the same panic-on-miss semantics
+/// (`"missing macro row for {key}"`) are guaranteed across all three sites
+/// (`items_general.rs`, `items_interface.rs`, `items_playback.rs`).
+pub(crate) struct MacroRows {
+    rows: Vec<SettingsEntry>,
+}
+
+impl MacroRows {
+    /// Wrap a freshly-built `Vec<SettingsEntry>` (the output of any
+    /// `build_<tab>_tab_settings_items` helper).
+    pub(crate) fn new(rows: Vec<SettingsEntry>) -> Self {
+        Self { rows }
+    }
+
+    /// Remove and return the row whose `SettingItem.key` matches `key`.
+    ///
+    /// Panics with `"missing macro row for {key}"` if no row matches —
+    /// matching the original inline closure's behavior. This is the correct
+    /// abort semantic for builder code: a missing macro row means the
+    /// `define_settings!` table and the items_<tab>.rs display order drifted,
+    /// which would otherwise show up as a silently missing row in the UI.
+    pub(crate) fn take(&mut self, key: &str) -> SettingsEntry {
+        let pos = self
+            .rows
+            .iter()
+            .position(|e| matches!(e, SettingsEntry::Item(it) if it.key.as_ref() == key))
+            .unwrap_or_else(|| panic!("missing macro row for {key}"));
+        self.rows.remove(pos)
+    }
 }
 
 // ============================================================================
 // Tab Builder Re-exports
 // ============================================================================
-
-// The `meta!` macro above is used by these sibling modules via `#[macro_use]`
-// on the `mod items;` declaration in `settings/mod.rs`.
 
 pub(crate) use super::{
     items_general::{GeneralSettingsData, build_general_items},
@@ -81,6 +96,49 @@ mod tests {
                 SettingsEntry::Header { .. } => None,
             })
             .collect()
+    }
+
+    /// Helper: build a 1-row `Vec<SettingsEntry>` containing only a Bool item
+    /// with the supplied key, for `MacroRows` test setup.
+    fn bool_item(key: &'static str) -> SettingsEntry {
+        SettingItem::bool_val(SettingMeta::new(key, "label", "Test"), true, true)
+    }
+
+    #[test]
+    fn macro_rows_take_returns_matching_entry() {
+        let rows = vec![
+            bool_item("a"),
+            SettingsEntry::Header {
+                label: "header",
+                icon: "assets/icons/monitor.svg",
+            },
+            bool_item("b"),
+        ];
+        let mut macro_rows = MacroRows::new(rows);
+        let taken = macro_rows.take("a");
+        match taken {
+            SettingsEntry::Item(item) => assert_eq!(item.key.as_ref(), "a"),
+            SettingsEntry::Header { .. } => panic!("expected Item, got Header"),
+        }
+        // Underlying rows shrink by 1; "b" is still reachable.
+        assert_eq!(macro_rows.rows.len(), 2);
+        let still_there = macro_rows.take("b");
+        assert!(matches!(still_there, SettingsEntry::Item(it) if it.key.as_ref() == "b"));
+    }
+
+    #[test]
+    #[should_panic(expected = "missing macro row for nope")]
+    fn macro_rows_take_missing_key_panics() {
+        let mut macro_rows = MacroRows::new(Vec::new());
+        let _ = macro_rows.take("nope");
+    }
+
+    #[test]
+    #[should_panic(expected = "missing macro row for a")]
+    fn macro_rows_take_then_take_same_key_panics() {
+        let mut macro_rows = MacroRows::new(vec![bool_item("a")]);
+        let _ = macro_rows.take("a");
+        let _ = macro_rows.take("a");
     }
 
     #[test]

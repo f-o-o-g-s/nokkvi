@@ -15,7 +15,7 @@ use nokkvi_data::services::settings_tables::general::build_general_tab_settings_
 pub(crate) use nokkvi_data::types::settings_data::GeneralSettingsData;
 
 use super::{
-    items::{SettingItem, SettingsEntry},
+    items::{MacroRows, SettingItem, SettingMeta, SettingsEntry},
     sentinel::SentinelKind,
 };
 
@@ -29,14 +29,7 @@ pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEnt
 
     // Drain the macro-emitted rows by key so the explicit UI display order
     // below is decoupled from the macro entry order in `define_settings!`.
-    let mut macro_rows = build_general_tab_settings_items(data);
-    let mut take = |key: &str| -> SettingsEntry {
-        let pos = macro_rows
-            .iter()
-            .position(|e| matches!(e, SettingsEntry::Item(it) if it.key.as_ref() == key))
-            .unwrap_or_else(|| panic!("missing macro row for {key}"));
-        macro_rows.remove(pos)
-    };
+    let mut macro_rows = MacroRows::new(build_general_tab_settings_items(data));
 
     vec![
         // --- Application ---
@@ -44,61 +37,59 @@ pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEnt
             label: "Application",
             icon: APP,
         },
-        take("general.start_view"),
-        take("general.enter_behavior"),
+        macro_rows.take("general.start_view"),
+        macro_rows.take("general.enter_behavior"),
         // Local music path opens a free-text input dialog (see
         // settings/mod.rs::SettingsAction::OpenTextInput) so the renderer
         // should show the "Enter ↵" affordance on this row.
-        take("general.local_music_path").with_enter_hint(),
-        take("general.library_page_size"),
-        take("general.artwork_resolution"),
-        take("general.show_album_artists_only"),
-        take("general.suppress_library_refresh_toasts"),
-        take("general.verbose_config"),
+        macro_rows
+            .take("general.local_music_path")
+            .with_enter_hint(),
+        macro_rows.take("general.library_page_size"),
+        macro_rows.take("general.artwork_resolution"),
+        macro_rows.take("general.show_album_artists_only"),
+        macro_rows.take("general.suppress_library_refresh_toasts"),
+        macro_rows.take("general.verbose_config"),
         // --- Mouse Behavior ---
         SettingsEntry::Header {
             label: "Mouse Behavior",
             icon: MOUSE,
         },
-        take("general.stable_viewport"),
-        take("general.auto_follow_playing"),
+        macro_rows.take("general.stable_viewport"),
+        macro_rows.take("general.auto_follow_playing"),
         // --- System Tray ---
         SettingsEntry::Header {
             label: "System Tray",
             icon: TRAY,
         },
-        take("general.show_tray_icon"),
-        take("general.close_to_tray"),
+        macro_rows.take("general.show_tray_icon"),
+        macro_rows.take("general.close_to_tray"),
         // --- Account (hand-written: read-only mirrors + logout dialog sentinel) ---
         SettingsEntry::Header {
             label: "Account",
             icon: ACC,
         },
         SettingItem::text(
-            meta!(
+            SettingMeta::new(
                 "general.server_url",
                 "Server URL",
-                "Read-only · configured at login"
+                "Read-only · configured at login",
             ),
             data.server_url,
             data.server_url,
         ),
         SettingItem::text(
-            meta!(
+            SettingMeta::new(
                 "general.username",
                 "Username",
-                "Read-only · configured at login"
+                "Read-only · configured at login",
             ),
             data.username,
             data.username,
         ),
         SettingItem::text_with_icon(
-            meta!(
-                SentinelKind::Logout.to_key(),
-                "Logout",
-                "Account",
-                "Sign out and return to login screen"
-            ),
+            SettingMeta::new(SentinelKind::Logout.to_key(), "Logout", "Account")
+                .with_subtitle("Sign out and return to login screen"),
             "Press Enter to logout",
             "",
             LOGOUT,
