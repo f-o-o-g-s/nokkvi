@@ -302,14 +302,14 @@ impl Nokkvi {
     ) {
         match target {
             CollageTarget::Genre => {
-                if let Some(g) = self.library.genres.iter_mut().find(|g| g.id == item_id) {
-                    g.artwork_album_ids = album_ids;
-                }
+                self.library
+                    .genres
+                    .update_by(|g| g.id == item_id, |g| g.artwork_album_ids = album_ids);
             }
             CollageTarget::Playlist => {
-                if let Some(p) = self.library.playlists.iter_mut().find(|p| p.id == item_id) {
-                    p.artwork_album_ids = album_ids;
-                }
+                self.library
+                    .playlists
+                    .update_by(|p| p.id == item_id, |p| p.artwork_album_ids = album_ids);
             }
         }
     }

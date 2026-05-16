@@ -164,19 +164,49 @@ impl<T> PagedBuffer<T> {
     }
 
     /// Get a mutable reference to an item by index. Bumps the generation
-    /// counter — the assumption is that any caller asking for `&mut T` is
-    /// going to mutate it. Callers that only need read access should use
-    /// `Deref` (`&self.items[i]`) instead.
+    /// counter unconditionally — even if the index is out of bounds and
+    /// `None` is returned. For find-then-mutate patterns where the
+    /// mutation is conditional, prefer [`update_by`] which bumps only
+    /// when the predicate matches.
     pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
         self.bump_generation();
         self.items.get_mut(index)
     }
 
-    /// Get a mutable iterator over all loaded items. Same generation-bump
-    /// rationale as `get_mut`.
+    /// Get a mutable iterator over all loaded items. Bumps the generation
+    /// counter unconditionally — even if the caller never actually
+    /// mutates anything. For find-then-mutate-one patterns, prefer
+    /// [`update_by`]; for unconditional batch mutation (e.g.
+    /// `iter_mut().enumerate()` that touches every item), `iter_mut`
+    /// is the right tool.
     pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, T> {
         self.bump_generation();
         self.items.iter_mut()
+    }
+
+    /// Find the first item matching `pred` and apply `f` to it. Returns
+    /// `true` iff an item was found and the closure ran. Bumps the
+    /// generation counter only when the predicate matches — unlike
+    /// `iter_mut` / `get_mut`, a no-op `find()` does not invalidate
+    /// downstream caches keyed on the generation.
+    ///
+    /// Prefer this over `iter_mut().find(|x| ...).map(...)` for the
+    /// common find-then-mutate pattern. The closure is the caller's
+    /// declared intent to mutate; whether the mutation is observably
+    /// a no-op (e.g. assigning a field to its current value) is invisible
+    /// to this method, so the generation bumps whenever the closure runs.
+    pub fn update_by<P, F>(&mut self, pred: P, f: F) -> bool
+    where
+        P: Fn(&T) -> bool,
+        F: FnOnce(&mut T),
+    {
+        if let Some(item) = self.items.iter_mut().find(|item| pred(item)) {
+            f(item);
+            self.bump_generation();
+            true
+        } else {
+            false
+        }
     }
 
     /// Direct access to the underlying Vec (for compatibility with
@@ -448,5 +478,92 @@ mod tests {
         buf.set_loading(true);
         buf.set_loading(false);
         assert_eq!(buf.generation(), before);
+    }
+
+    /// `update_by` bumps the generation counter when the predicate
+    /// matches and the closure runs.
+    #[test]
+    fn update_by_bumps_generation_on_match() {
+        let mut buf: PagedBuffer<u32> = PagedBuffer::new();
+        buf.set_first_page(vec![1, 2, 3], 100);
+        let before = buf.generation();
+        let matched = buf.update_by(|x| *x == 2, |x| *x = 42);
+        assert!(matched, "predicate matched 2, closure must have run");
+        assert!(buf.generation() > before, "match must bump generation");
+        assert_eq!(buf[1], 42);
+    }
+
+    /// `update_by` does NOT bump the generation when no item matches
+    /// the predicate — closing the spurious-cache-invalidation bug
+    /// that motivated this API.
+    #[test]
+    fn update_by_does_not_bump_generation_on_miss() {
+        let mut buf: PagedBuffer<u32> = PagedBuffer::new();
+        buf.set_first_page(vec![1, 2, 3], 100);
+        let before = buf.generation();
+        let matched = buf.update_by(|x| *x == 999, |x| *x = 42);
+        assert!(!matched, "no element matches 999");
+        assert_eq!(buf.generation(), before, "miss must NOT bump generation");
+    }
+
+    /// `update_by` bumps once per call, regardless of how many items
+    /// could match — only the first match is mutated.
+    #[test]
+    fn update_by_mutates_only_first_match() {
+        let mut buf: PagedBuffer<u32> = PagedBuffer::new();
+        buf.set_first_page(vec![5, 5, 5], 100);
+        let before = buf.generation();
+        let matched = buf.update_by(|x| *x == 5, |x| *x = 99);
+        assert!(matched);
+        assert_eq!(buf.generation(), before + 1, "exactly one bump per call");
+        assert_eq!(buf[0], 99);
+        assert_eq!(buf[1], 5);
+        assert_eq!(buf[2], 5);
+    }
+
+    /// Predicate matching is the bump trigger — even if the mutation
+    /// closure is observably a no-op (writing the same value back),
+    /// the generation still bumps. The closure is the caller's
+    /// declared intent; introspecting it is impossible.
+    #[test]
+    fn update_by_bumps_when_closure_is_observable_noop() {
+        let mut buf: PagedBuffer<u32> = PagedBuffer::new();
+        buf.set_first_page(vec![1, 2, 3], 100);
+        let before = buf.generation();
+        let matched = buf.update_by(|x| *x == 2, |_| {}); // empty closure
+        assert!(matched);
+        assert_eq!(buf.generation(), before + 1, "predicate-match-always-bumps");
+    }
+
+    /// Existing iter_mut callers continue to bump generation
+    /// unconditionally — `update_by` is additive and does not change
+    /// the legacy semantics.
+    #[test]
+    fn iter_mut_still_bumps_generation_unconditionally() {
+        let mut buf: PagedBuffer<u32> = PagedBuffer::new();
+        buf.set_first_page(vec![1, 2, 3], 100);
+        let before = buf.generation();
+        // Consume but do NOT mutate
+        for _ in buf.iter_mut() {
+            // empty body
+        }
+        assert!(
+            buf.generation() > before,
+            "iter_mut must keep its eager-invalidation contract for legacy callers"
+        );
+    }
+
+    /// Existing get_mut callers continue to bump generation even
+    /// when the index is out of bounds (returns None).
+    #[test]
+    fn get_mut_still_bumps_generation_on_out_of_bounds() {
+        let mut buf: PagedBuffer<u32> = PagedBuffer::new();
+        buf.set_first_page(vec![1, 2, 3], 100);
+        let before = buf.generation();
+        let _ = buf.get_mut(999); // out of bounds → None
+        assert!(
+            buf.generation() > before,
+            "get_mut must keep its eager-invalidation contract for legacy callers"
+        );
     }
 }
