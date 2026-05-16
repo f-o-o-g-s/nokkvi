@@ -397,22 +397,22 @@ pub(crate) fn build_visualizer_items(
     // --- Bar Colors (Dark / Light) ---
     // These keys are theme-file-relative — they write to the active theme file,
     // not config.toml. The handler routes them via update_theme_value().
-    push_visualizer_color_entries(
-        &mut e,
-        "dark",
-        "Bar Colors (Dark)",
-        P,
-        &theme.dark.visualizer,
-        &dt.dark.visualizer,
-    );
-    push_visualizer_color_entries(
-        &mut e,
-        "light",
-        "Bar Colors (Light)",
-        P,
-        &theme.light.visualizer,
-        &dt.light.visualizer,
-    );
+    for (prefix, label, colors, defaults) in [
+        (
+            "dark",
+            "Bar Colors (Dark)",
+            &theme.dark.visualizer,
+            &dt.dark.visualizer,
+        ),
+        (
+            "light",
+            "Bar Colors (Light)",
+            &theme.light.visualizer,
+            &dt.light.visualizer,
+        ),
+    ] {
+        push_visualizer_color_entries(&mut e, prefix, label, P, colors, defaults);
+    }
 
     // --- Lines section ---
     e.push(SettingsEntry::Header {
