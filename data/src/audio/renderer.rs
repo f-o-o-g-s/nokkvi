@@ -906,6 +906,26 @@ impl AudioRenderer {
             stream.set_volume((fade_in * user_vol as f64) as f32);
         }
 
+        // Hand off the visualizer feed at the equal-power midpoint. Before
+        // 50% the outgoing dominates audio and drives viz; after 50% the
+        // incoming dominates and takes over. Without this swap the outgoing
+        // primary's ring buffer drains during the crossfade tail (its decoder
+        // is already at EOF for tracks long enough to fill the ring) and the
+        // visualizer freezes — the incoming's viz feed is gated off until
+        // finalize to prevent the two-rate atomic thrash that the prior viz
+        // fix addressed. Switching flags in this order (off then on) means at
+        // most one batch is skipped during the handoff; the reverse order
+        // would briefly have both streams feeding the shared callback and
+        // re-introduce a single rate flip.
+        if progress >= 0.5 {
+            if let Some(ref primary) = self.primary_stream {
+                primary.set_feeds_visualizer(false);
+            }
+            if let CrossfadeState::Active { stream, .. } = &self.crossfade_state {
+                stream.set_feeds_visualizer(true);
+            }
+        }
+
         progress >= 1.0
     }
 
