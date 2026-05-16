@@ -512,3 +512,108 @@ impl Visualizer {
 pub(crate) fn visualizer(bar_count: usize, config: SharedVisualizerConfig) -> Visualizer {
     Visualizer::new(bar_count, config)
 }
+
+#[cfg(test)]
+mod wgsl_helper_tests {
+    //! Smoke tests pinning the WGSL-side helpers + constants extracted in Group N Lane 2
+    //! (audit findings #1, #5, #6, #11, #12, #13). These prevent silent regression — a
+    //! future agent stripping the helper/const and reinlining the magic literal would
+    //! fail these tests before shipping.
+    //!
+    //! Naga validation runs as part of pipeline construction (release build); these
+    //! tests are a separate string-level guard so the "did the helper get removed?"
+    //! question fails fast at `cargo test` time rather than depending on a release build.
+    const BARS: &str = include_str!("shaders/bars.wgsl");
+    const LINES: &str = include_str!("shaders/lines.wgsl");
+
+    #[test]
+    fn bars_wgsl_brightness_and_led_helpers_are_defined() {
+        assert!(
+            BARS.contains("fn apply_brightness_mod(color: vec4<f32>, bm: f32) -> vec4<f32>"),
+            "bars.wgsl is missing apply_brightness_mod helper",
+        );
+        assert!(
+            BARS.contains("fn snap_to_led_segments(bar_height: f32"),
+            "bars.wgsl is missing snap_to_led_segments helper",
+        );
+        // Confirm callsites use the helper rather than reinlining the body.
+        assert!(
+            BARS.contains("apply_brightness_mod(base_color, input.brightness_mod)"),
+            "bars.wgsl gradient-bar path is not calling apply_brightness_mod",
+        );
+        assert!(
+            BARS.contains("apply_brightness_mod(final_color, input.brightness_mod)"),
+            "bars.wgsl border/peak path is not calling apply_brightness_mod",
+        );
+    }
+
+    #[test]
+    fn bars_wgsl_constants_are_defined() {
+        assert!(
+            BARS.contains("const BARS_GRADIENT_CYCLE_SPEED: f32 = 0.25;"),
+            "bars.wgsl is missing BARS_GRADIENT_CYCLE_SPEED const",
+        );
+        assert!(
+            BARS.contains("const BRIGHTNESS_TOP_THRESHOLD: f32 = 1.1;"),
+            "bars.wgsl is missing BRIGHTNESS_TOP_THRESHOLD const",
+        );
+        assert!(
+            BARS.contains("const BRIGHTNESS_SIDE_THRESHOLD: f32 = 0.9;"),
+            "bars.wgsl is missing BRIGHTNESS_SIDE_THRESHOLD const",
+        );
+        assert!(
+            BARS.contains("const BRIGHTNESS_LIGHTEN_FACTOR: f32 = 0.5;"),
+            "bars.wgsl is missing BRIGHTNESS_LIGHTEN_FACTOR const",
+        );
+        // Palette segment-count constants — NAMING ONLY per audit Finding #1 warning.
+        assert!(
+            BARS.contains("const BARS_PALETTE_SEGMENTS_STATIC: f32 = 5.0;"),
+            "bars.wgsl is missing BARS_PALETTE_SEGMENTS_STATIC const",
+        );
+        assert!(
+            BARS.contains("const BARS_PALETTE_SEGMENTS_LOOPED: f32 = 6.0;"),
+            "bars.wgsl is missing BARS_PALETTE_SEGMENTS_LOOPED const",
+        );
+        assert!(
+            BARS.contains("const BARS_PALETTE_INDEX_TAIL: u32 = 5u;"),
+            "bars.wgsl is missing BARS_PALETTE_INDEX_TAIL const",
+        );
+        assert!(
+            BARS.contains("const BARS_PALETTE_INDEX_MOD: u32 = 6u;"),
+            "bars.wgsl is missing BARS_PALETTE_INDEX_MOD const",
+        );
+    }
+
+    #[test]
+    fn lines_wgsl_dead_output_helper_defined() {
+        assert!(
+            LINES.contains("fn dead_output() -> VertexOutput"),
+            "lines.wgsl is missing dead_output helper",
+        );
+        // Every dead-output callsite must use the helper rather than reinlining.
+        assert!(
+            LINES.contains("return dead_output();"),
+            "lines.wgsl is not calling dead_output() at early-return sites",
+        );
+    }
+
+    #[test]
+    fn lines_wgsl_palette_constants_are_defined() {
+        assert!(
+            LINES.contains("const LINES_PALETTE_SEGMENTS_STATIC: f32 = 7.0;"),
+            "lines.wgsl is missing LINES_PALETTE_SEGMENTS_STATIC const",
+        );
+        assert!(
+            LINES.contains("const LINES_PALETTE_SEGMENTS_LOOPED: f32 = 8.0;"),
+            "lines.wgsl is missing LINES_PALETTE_SEGMENTS_LOOPED const",
+        );
+        assert!(
+            LINES.contains("const LINES_PALETTE_INDEX_TAIL: u32 = 7u;"),
+            "lines.wgsl is missing LINES_PALETTE_INDEX_TAIL const",
+        );
+        assert!(
+            LINES.contains("const LINES_PALETTE_INDEX_MOD: u32 = 8u;"),
+            "lines.wgsl is missing LINES_PALETTE_INDEX_MOD const",
+        );
+    }
+}

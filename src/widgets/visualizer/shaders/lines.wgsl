@@ -34,7 +34,7 @@ struct Config {
     led_segment_height: f32,  // Height of each LED segment in pixels (not used in lines mode)
     led_border_opacity: f32,  // Border opacity in LED mode (not used in lines mode)
     border_opacity: f32,      // Border opacity in non-LED mode (not used in lines mode)
-    gradient_mode: u32,       // 0 = static gradient, 1 = breathing animation
+    gradient_mode: u32,       // 0 = static, 2 = wave, 3 = shimmer, 4 = energy, 5 = alternate (1 is intentionally unused)
     peak_gradient_mode: u32,  // 0=static, 1=cycle, 2=height, 3=match (not used in lines mode)
     peak_mode: u32,           // 0=none, 1=fade, 2=fall, 3=fall_accel, 4=fall_fade (not used in lines mode)
     peak_hold_time: f32,      // Time in seconds for peak to hold (not used in lines mode)
@@ -65,6 +65,15 @@ struct Config {
 @group(0) @binding(2) var<storage, read> peak_data: array<f32>;  // Not used in lines mode
 @group(0) @binding(3) var<storage, read> peak_alpha_data: array<f32>;  // Not used in lines mode
 
+// ---------- Palette segment-count constants ----------
+// lines.wgsl interpolates across the full 8-entry palette (matching the CPU pad).
+// Static/position/height/wave use 7 segments (indices 0..7); breathing wraps `% 8u`.
+// Audit Finding #1: naming only — values are NOT harmonized (HIGH RISK visual regression).
+const LINES_PALETTE_SEGMENTS_STATIC: f32 = 7.0;
+const LINES_PALETTE_SEGMENTS_LOOPED: f32 = 8.0;
+const LINES_PALETTE_INDEX_TAIL: u32 = 7u;
+const LINES_PALETTE_INDEX_MOD: u32 = 8u;
+
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec4<f32>,
@@ -73,6 +82,20 @@ struct VertexOutput {
     @location(3) normalized_x: f32,  // Horizontal position (0.0 = left, 1.0 = right)
     @location(4) amplitude: f32,  // Point amplitude (0.0 = silent, 1.0 = max)
     @location(5) is_fill: f32,  // 1.0 = fill pass, 0.0 = line/outline pass
+}
+
+// Helper: create a "dead" (offscreen) vertex output for early-return paths
+// (insufficient points, fill disabled, vertex-index out of bounds).
+fn dead_output() -> VertexOutput {
+    var output: VertexOutput;
+    output.position = vec4<f32>(-2.0, -2.0, 0.0, 1.0);
+    output.color = vec4<f32>(0.0);
+    output.distance_to_center = 0.0;
+    output.is_outline = 0.0;
+    output.normalized_x = 0.0;
+    output.amplitude = 0.0;
+    output.is_fill = 0.0;
+    return output;
 }
 
 // Convert pixel coordinates to NDC (-1 to 1)
@@ -88,17 +111,17 @@ fn get_gradient_color_animated(time: f32) -> vec4<f32> {
     // Cycle speed from config (higher = faster cycling through gradient colors)
     let cycle_speed = uniforms.config.lines_animation_speed;
     let t = fract(time * cycle_speed);
-    
+
     // Interpolate through 8 gradient colors (0-7)
-    let segments = 8.0;
+    let segments = LINES_PALETTE_SEGMENTS_LOOPED;
     let pos = t * segments;
-    let idx = u32(floor(pos)) % 8u;
-    let next_idx = (idx + 1u) % 8u;
+    let idx = u32(floor(pos)) % LINES_PALETTE_INDEX_MOD;
+    let next_idx = (idx + 1u) % LINES_PALETTE_INDEX_MOD;
     let frac = pos - floor(pos);
-    
+
     let c1 = uniforms.gradient_colors[idx];
     let c2 = uniforms.gradient_colors[next_idx];
-    
+
     return mix(c1, c2, frac);
 }
 
@@ -110,35 +133,35 @@ fn get_gradient_color_static() -> vec4<f32> {
 // Position-based gradient: color by horizontal position along the line
 // Left = first gradient color, right = last gradient color (bass → treble rainbow)
 fn get_gradient_color_by_position(normalized_x: f32) -> vec4<f32> {
-    let segments = 7.0;
+    let segments = LINES_PALETTE_SEGMENTS_STATIC;
     let pos = clamp(normalized_x, 0.0, 1.0) * segments;
     let idx = u32(floor(pos));
     let frac = pos - floor(pos);
-    
-    if (idx >= 7u) {
-        return uniforms.gradient_colors[7];
+
+    if (idx >= LINES_PALETTE_INDEX_TAIL) {
+        return uniforms.gradient_colors[LINES_PALETTE_INDEX_TAIL];
     }
-    
+
     let c1 = uniforms.gradient_colors[idx];
     let c2 = uniforms.gradient_colors[idx + 1u];
-    
+
     return mix(c1, c2, frac);
 }
 
 // Height-based gradient: color by amplitude (quiet = bottom colors, loud = top colors)
 fn get_gradient_color_by_height(amplitude: f32) -> vec4<f32> {
-    let segments = 7.0;
+    let segments = LINES_PALETTE_SEGMENTS_STATIC;
     let pos = clamp(amplitude, 0.0, 1.0) * segments;
     let idx = u32(floor(pos));
     let frac = pos - floor(pos);
-    
-    if (idx >= 7u) {
-        return uniforms.gradient_colors[7];
+
+    if (idx >= LINES_PALETTE_INDEX_TAIL) {
+        return uniforms.gradient_colors[LINES_PALETTE_INDEX_TAIL];
     }
-    
+
     let c1 = uniforms.gradient_colors[idx];
     let c2 = uniforms.gradient_colors[idx + 1u];
-    
+
     return mix(c1, c2, frac);
 }
 
@@ -148,18 +171,18 @@ fn get_gradient_color_wave(normalized_x: f32, amplitude: f32) -> vec4<f32> {
     // Base color from position (0.0-0.5 of palette range)
     // Amplitude pushes further along the palette (0.0-0.5 extra)
     let blended = clamp(normalized_x * 0.5 + amplitude * 0.5, 0.0, 1.0);
-    let segments = 7.0;
+    let segments = LINES_PALETTE_SEGMENTS_STATIC;
     let pos = blended * segments;
     let idx = u32(floor(pos));
     let frac = pos - floor(pos);
-    
-    if (idx >= 7u) {
-        return uniforms.gradient_colors[7];
+
+    if (idx >= LINES_PALETTE_INDEX_TAIL) {
+        return uniforms.gradient_colors[LINES_PALETTE_INDEX_TAIL];
     }
-    
+
     let c1 = uniforms.gradient_colors[idx];
     let c2 = uniforms.gradient_colors[idx + 1u];
-    
+
     return mix(c1, c2, frac);
 }
 
@@ -259,26 +282,12 @@ fn vs_main(
     // base_instance 2 = main line pass
     
     if (point_count < 2) {
-        output.position = vec4<f32>(-2.0, -2.0, 0.0, 1.0);
-        output.color = vec4<f32>(0.0);
-        output.distance_to_center = 0.0;
-        output.is_outline = 0.0;
-        output.normalized_x = 0.0;
-        output.amplitude = 0.0;
-        output.is_fill = 0.0;
-        return output;
+        return dead_output();
     }
-    
+
     // If fill is disabled, discard fill pass vertices
     if (is_fill_pass && uniforms.config.lines_fill_opacity < 0.001) {
-        output.position = vec4<f32>(-2.0, -2.0, 0.0, 1.0);
-        output.color = vec4<f32>(0.0);
-        output.distance_to_center = 0.0;
-        output.is_outline = 0.0;
-        output.normalized_x = 0.0;
-        output.amplitude = 0.0;
-        output.is_fill = 0.0;
-        return output;
+        return dead_output();
     }
     
     // Spline interpolation: 16 samples per segment for smoother curves
@@ -291,14 +300,7 @@ fn vs_main(
     let vertices_per_pass = u32(total_spline_points) * u32(vertices_per_spline);
     
     if (vertex_index >= vertices_per_pass) {
-        output.position = vec4<f32>(-2.0, -2.0, 0.0, 1.0);
-        output.color = vec4<f32>(0.0);
-        output.distance_to_center = 0.0;
-        output.is_outline = 0.0;
-        output.normalized_x = 0.0;
-        output.amplitude = 0.0;
-        output.is_fill = 0.0;
-        return output;
+        return dead_output();
     }
     
     // Which spline point is this vertex for?

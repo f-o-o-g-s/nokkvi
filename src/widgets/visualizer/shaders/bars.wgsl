@@ -64,6 +64,60 @@ struct Config {
 @group(0) @binding(2) var<storage, read> peak_data: array<f32>;
 @group(0) @binding(3) var<storage, read> peak_alpha_data: array<f32>;
 
+// ---------- Brightness modulation constants ----------
+// 3D face brightness: 1.0=front, ~1.4=top, ~0.45=side (set in geometry helpers).
+// Thresholds gate the brighten/darken branches; lighten factor scales brighten delta.
+const BRIGHTNESS_TOP_THRESHOLD: f32 = 1.1;
+const BRIGHTNESS_SIDE_THRESHOLD: f32 = 0.9;
+const BRIGHTNESS_LIGHTEN_FACTOR: f32 = 0.5;
+
+// ---------- Animation constants ----------
+// Complete cycle through gradient/peak colors in ~4 seconds (1.0 / 0.25).
+const BARS_GRADIENT_CYCLE_SPEED: f32 = 0.25;
+
+// ---------- Palette segment-count constants ----------
+// CPU side (ThemeBarColors::get_bar_gradient_colors) pads to 8 entries.
+// Static gradient uses 6 colors (indices 0..5); looped/animated/peak modes wrap `% 6u`.
+// Audit Finding #1: naming only — values are NOT harmonized (HIGH RISK visual regression).
+const BARS_PALETTE_SEGMENTS_STATIC: f32 = 5.0;
+const BARS_PALETTE_SEGMENTS_LOOPED: f32 = 6.0;
+const BARS_PALETTE_INDEX_TAIL: u32 = 5u;
+const BARS_PALETTE_INDEX_MOD: u32 = 6u;
+
+// ---------- Shared helpers ----------
+// Apply 3D-face brightness modulation: top faces (bm > top threshold) brighten toward white;
+// side faces (bm < side threshold) darken multiplicatively; front faces (bm ~= 1.0) pass through.
+fn apply_brightness_mod(color: vec4<f32>, bm: f32) -> vec4<f32> {
+    if (bm > BRIGHTNESS_TOP_THRESHOLD) {
+        let brighten = bm - 1.0;
+        return vec4<f32>(
+            min(color.r + brighten * BRIGHTNESS_LIGHTEN_FACTOR, 1.0),
+            min(color.g + brighten * BRIGHTNESS_LIGHTEN_FACTOR, 1.0),
+            min(color.b + brighten * BRIGHTNESS_LIGHTEN_FACTOR, 1.0),
+            color.a
+        );
+    } else if (bm < BRIGHTNESS_SIDE_THRESHOLD) {
+        return vec4<f32>(
+            color.r * bm,
+            color.g * bm,
+            color.b * bm,
+            color.a
+        );
+    }
+    return color;
+}
+
+// Snap bar height to the nearest complete LED segment count, leaving the trailing gap off.
+// Returns 0.0 if the height doesn't span a single complete segment.
+fn snap_to_led_segments(bar_height: f32, segment_height: f32, segment_gap: f32) -> f32 {
+    let segment_period = segment_height + segment_gap;
+    let num_complete_segments = floor((bar_height + segment_gap) / segment_period);
+    if (num_complete_segments > 0.0) {
+        return num_complete_segments * segment_period - segment_gap;
+    }
+    return 0.0;
+}
+
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec4<f32>,
@@ -90,18 +144,18 @@ fn pixel_to_ndc(pixel_x: f32, pixel_y: f32) -> vec2<f32> {
 // Get gradient color based on normalized height (0.0 = bottom, 1.0 = top)
 // Non-looping version - for static gradients where 0=bottom color, 1=top color
 fn get_gradient_color(normalized_y: f32) -> vec4<f32> {
-    let segments = 5.0;
+    let segments = BARS_PALETTE_SEGMENTS_STATIC;
     let pos = clamp(normalized_y, 0.0, 1.0) * segments;
     let idx = u32(floor(pos));
     let frac = pos - floor(pos);
-    
-    if (idx >= 5u) {
-        return uniforms.gradient_colors[5];
+
+    if (idx >= BARS_PALETTE_INDEX_TAIL) {
+        return uniforms.gradient_colors[BARS_PALETTE_INDEX_TAIL];
     }
-    
+
     let c1 = uniforms.gradient_colors[idx];
     let c2 = uniforms.gradient_colors[idx + 1u];
-    
+
     return mix(c1, c2, frac);
 }
 
@@ -109,34 +163,34 @@ fn get_gradient_color(normalized_y: f32) -> vec4<f32> {
 // Wraps from color[5] back to color[0] smoothly
 fn get_gradient_color_looped(normalized_y: f32) -> vec4<f32> {
     // Use 6 segments so we interpolate through all 6 colors AND back to first
-    let segments = 6.0;
+    let segments = BARS_PALETTE_SEGMENTS_LOOPED;
     let pos = fract(normalized_y) * segments;  // fract ensures 0-1 range
-    let idx = u32(floor(pos)) % 6u;
-    let next_idx = (idx + 1u) % 6u;  // Wrap around to 0 after 5
+    let idx = u32(floor(pos)) % BARS_PALETTE_INDEX_MOD;
+    let next_idx = (idx + 1u) % BARS_PALETTE_INDEX_MOD;  // Wrap around to 0 after 5
     let frac = pos - floor(pos);
-    
+
     let c1 = uniforms.gradient_colors[idx];
     let c2 = uniforms.gradient_colors[next_idx];
-    
+
     return mix(c1, c2, frac);
 }
 
 // Get gradient color based on time (breathing animation cycling through all colors)
 fn get_gradient_color_animated(time: f32) -> vec4<f32> {
     // Cycle speed: complete cycle through all colors in ~4 seconds
-    let cycle_speed = 0.25;  // Lower = slower
+    let cycle_speed = BARS_GRADIENT_CYCLE_SPEED;  // Lower = slower
     let t = fract(time * cycle_speed);
-    
+
     // Interpolate through 6 gradient colors (0-5)
-    let segments = 6.0;
+    let segments = BARS_PALETTE_SEGMENTS_LOOPED;
     let pos = t * segments;
-    let idx = u32(floor(pos)) % 6u;
-    let next_idx = (idx + 1u) % 6u;
+    let idx = u32(floor(pos)) % BARS_PALETTE_INDEX_MOD;
+    let next_idx = (idx + 1u) % BARS_PALETTE_INDEX_MOD;
     let frac = pos - floor(pos);
-    
+
     let c1 = uniforms.gradient_colors[idx];
     let c2 = uniforms.gradient_colors[next_idx];
-    
+
     return mix(c1, c2, frac);
 }
 
@@ -144,19 +198,19 @@ fn get_gradient_color_animated(time: f32) -> vec4<f32> {
 // phase_offset: 0.0-1.0 offset in the color cycle
 fn get_gradient_color_animated_offset(time: f32, phase_offset: f32) -> vec4<f32> {
     // Cycle speed: complete cycle through all colors in ~4 seconds
-    let cycle_speed = 0.25;  // Lower = slower
+    let cycle_speed = BARS_GRADIENT_CYCLE_SPEED;  // Lower = slower
     let t = fract(time * cycle_speed + phase_offset);
-    
+
     // Interpolate through 6 gradient colors (0-5)
-    let segments = 6.0;
+    let segments = BARS_PALETTE_SEGMENTS_LOOPED;
     let pos = t * segments;
-    let idx = u32(floor(pos)) % 6u;
-    let next_idx = (idx + 1u) % 6u;
+    let idx = u32(floor(pos)) % BARS_PALETTE_INDEX_MOD;
+    let next_idx = (idx + 1u) % BARS_PALETTE_INDEX_MOD;
     let frac = pos - floor(pos);
-    
+
     let c1 = uniforms.gradient_colors[idx];
     let c2 = uniforms.gradient_colors[next_idx];
-    
+
     return mix(c1, c2, frac);
 }
 
@@ -167,48 +221,48 @@ fn get_peak_color(mode: u32, time: f32, normalized_height: f32) -> vec4<f32> {
         return uniforms.peak_gradient_colors[0];
     } else if (mode == 1u) {
         // Cycle: time-based cycling through all peak colors
-        let cycle_speed = 0.25;  // Complete cycle in ~4 seconds
+        let cycle_speed = BARS_GRADIENT_CYCLE_SPEED;  // Complete cycle in ~4 seconds
         let t = fract(time * cycle_speed);
-        
-        let segments = 6.0;
+
+        let segments = BARS_PALETTE_SEGMENTS_LOOPED;
         let pos = t * segments;
-        let idx = u32(floor(pos)) % 6u;
-        let next_idx = (idx + 1u) % 6u;
+        let idx = u32(floor(pos)) % BARS_PALETTE_INDEX_MOD;
+        let next_idx = (idx + 1u) % BARS_PALETTE_INDEX_MOD;
         let frac = pos - floor(pos);
-        
+
         let c1 = uniforms.peak_gradient_colors[idx];
         let c2 = uniforms.peak_gradient_colors[next_idx];
-        
+
         return mix(c1, c2, frac);
     } else if (mode == 2u) {
         // Height: color based on peak height position (taller peaks = higher colors)
-        let segments = 5.0;
+        let segments = BARS_PALETTE_SEGMENTS_STATIC;
         let pos = clamp(normalized_height, 0.0, 1.0) * segments;
         let idx = u32(floor(pos));
         let frac = pos - floor(pos);
-        
-        if (idx >= 5u) {
-            return uniforms.peak_gradient_colors[5];
+
+        if (idx >= BARS_PALETTE_INDEX_TAIL) {
+            return uniforms.peak_gradient_colors[BARS_PALETTE_INDEX_TAIL];
         }
-        
+
         let c1 = uniforms.peak_gradient_colors[idx];
         let c2 = uniforms.peak_gradient_colors[idx + 1u];
-        
+
         return mix(c1, c2, frac);
     } else {
         // Match (mode == 3): use bar gradient at peak height position
-        let segments = 5.0;
+        let segments = BARS_PALETTE_SEGMENTS_STATIC;
         let pos = clamp(normalized_height, 0.0, 1.0) * segments;
         let idx = u32(floor(pos));
         let frac = pos - floor(pos);
-        
-        if (idx >= 5u) {
-            return uniforms.gradient_colors[5];
+
+        if (idx >= BARS_PALETTE_INDEX_TAIL) {
+            return uniforms.gradient_colors[BARS_PALETTE_INDEX_TAIL];
         }
-        
+
         let c1 = uniforms.gradient_colors[idx];
         let c2 = uniforms.gradient_colors[idx + 1u];
-        
+
         return mix(c1, c2, frac);
     }
 }
@@ -223,20 +277,20 @@ fn get_gradient_color_breathing(normalized_y: f32, time: f32, breath_enabled: bo
     }
     
     // Cycle speed: complete cycle through all colors in ~4 seconds (matching peak animation)
-    let cycle_speed = 0.25;  // Lower = slower
+    let cycle_speed = BARS_GRADIENT_CYCLE_SPEED;  // Lower = slower
     let time_offset = fract(time * cycle_speed);
-    
+
     // Combine height position with time offset for breathing effect
     // Using 6 segments for seamless looping through all colors
-    let segments = 6.0;
+    let segments = BARS_PALETTE_SEGMENTS_LOOPED;
     let pos = fract(normalized_y + time_offset) * segments;
-    let idx = u32(floor(pos)) % 6u;
-    let next_idx = (idx + 1u) % 6u;  // Wrap around to 0 after 5
+    let idx = u32(floor(pos)) % BARS_PALETTE_INDEX_MOD;
+    let next_idx = (idx + 1u) % BARS_PALETTE_INDEX_MOD;  // Wrap around to 0 after 5
     let frac = pos - floor(pos);
-    
+
     let c1 = uniforms.gradient_colors[idx];
     let c2 = uniforms.gradient_colors[next_idx];
-    
+
     return mix(c1, c2, frac);
 }
 
@@ -285,15 +339,15 @@ fn get_gradient_color_energy(normalized_y: f32, energy: f32) -> vec4<f32> {
     let combined_offset = fract(normalized_y + energy_offset);
     
     // Use 6 segments for seamless looping
-    let segments = 6.0;
+    let segments = BARS_PALETTE_SEGMENTS_LOOPED;
     let pos = combined_offset * segments;
-    let idx = u32(floor(pos)) % 6u;
-    let next_idx = (idx + 1u) % 6u;
+    let idx = u32(floor(pos)) % BARS_PALETTE_INDEX_MOD;
+    let next_idx = (idx + 1u) % BARS_PALETTE_INDEX_MOD;
     let frac = pos - floor(pos);
-    
+
     let c1 = uniforms.gradient_colors[idx];
     let c2 = uniforms.gradient_colors[next_idx];
-    
+
     return mix(c1, c2, frac);
 }
 
@@ -317,10 +371,10 @@ fn get_gradient_color_shimmer(bar_index: u32, time: f32, energy: f32) -> vec4<f3
 
     // Each bar is offset by 1/6 of the cycle, so adjacent bars show different colors
     // fract() keeps it in [0,1), then scale to 6 color segments for smooth interpolation
-    let bar_phase = f32(bar_index % 6u) / 6.0;
-    let pos = fract(bar_phase + time_offset) * 6.0;
-    let idx = u32(floor(pos)) % 6u;
-    let next_idx = (idx + 1u) % 6u;
+    let bar_phase = f32(bar_index % BARS_PALETTE_INDEX_MOD) / BARS_PALETTE_SEGMENTS_LOOPED;
+    let pos = fract(bar_phase + time_offset) * BARS_PALETTE_SEGMENTS_LOOPED;
+    let idx = u32(floor(pos)) % BARS_PALETTE_INDEX_MOD;
+    let next_idx = (idx + 1u) % BARS_PALETTE_INDEX_MOD;
     let frac = pos - floor(pos);
 
     let c1 = uniforms.gradient_colors[idx];
@@ -637,23 +691,15 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
         
         let clamped_value = clamp(value, 0.0, 1.0);
         var bar_height = clamped_value * usable_height;
-        
+
         // LED snap
         if (uniforms.config.led_bars != 0u) {
-            let segment_height = uniforms.config.led_segment_height;
-            let segment_gap = uniforms.config.border_width;
-            let segment_period = segment_height + segment_gap;
-            let num_complete_segments = floor((bar_height + segment_gap) / segment_period);
-            if (num_complete_segments > 0.0) {
-                bar_height = num_complete_segments * segment_period - segment_gap;
-            } else {
-                bar_height = 0.0;
-            }
+            bar_height = snap_to_led_segments(bar_height, uniforms.config.led_segment_height, uniforms.config.border_width);
         }
-        
+
         let snapped_bar_height = round(bar_height);
         let snapped_y = top_margin + (usable_height - snapped_bar_height);
-        
+
         let front_tl = vec2<f32>(snapped_x, snapped_y);
         let front_tr = vec2<f32>(snapped_x + bar_width, snapped_y);
         let front_bl = vec2<f32>(snapped_x, snapped_y + peak_thickness);
@@ -683,23 +729,15 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
         
         let clamped_value = clamp(value, 0.0, 1.0);
         var bar_height = clamped_value * usable_height;
-        
+
         // LED snap
         if (uniforms.config.led_bars != 0u) {
-            let segment_height = uniforms.config.led_segment_height;
-            let segment_gap = uniforms.config.border_width;
-            let segment_period = segment_height + segment_gap;
-            let num_complete_segments = floor((bar_height + segment_gap) / segment_period);
-            if (num_complete_segments > 0.0) {
-                bar_height = num_complete_segments * segment_period - segment_gap;
-            } else {
-                bar_height = 0.0;
-            }
+            bar_height = snap_to_led_segments(bar_height, uniforms.config.led_segment_height, uniforms.config.border_width);
         }
-        
+
         let snapped_bar_height = round(bar_height);
         let snapped_y = top_margin + (usable_height - snapped_bar_height);
-        
+
         let front_tl = vec2<f32>(snapped_x, snapped_y);
         let front_tr = vec2<f32>(snapped_x + bar_width, snapped_y);
         let front_bl = vec2<f32>(snapped_x, snapped_y + snapped_bar_height);
@@ -841,53 +879,19 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
         
         // Apply 3D brightness modulation
-        let bm = input.brightness_mod;
-        if (bm > 1.1) {
-            // Top face: brighten towards white
-            let brighten = bm - 1.0;  // ~0.4
-            base_color = vec4<f32>(
-                min(base_color.r + brighten * 0.5, 1.0),
-                min(base_color.g + brighten * 0.5, 1.0),
-                min(base_color.b + brighten * 0.5, 1.0),
-                base_color.a
-            );
-        } else if (bm < 0.9) {
-            // Side face: darken
-            base_color = vec4<f32>(
-                base_color.r * bm,
-                base_color.g * bm,
-                base_color.b * bm,
-                base_color.a
-            );
-        }
+        base_color = apply_brightness_mod(base_color, input.brightness_mod);
         // Front face (bm ~= 1.0): no modification
-        
+
         // Apply global opacity
         base_color.a *= uniforms.config.global_opacity;
         return base_color;
     }
-    
+
     // For borders and peaks, use the color passed from vertex shader
     // Apply brightness modulation for 3D peak faces
     var final_color = input.color;
-    let bm = input.brightness_mod;
-    if (bm > 1.1) {
-        let brighten = bm - 1.0;
-        final_color = vec4<f32>(
-            min(final_color.r + brighten * 0.5, 1.0),
-            min(final_color.g + brighten * 0.5, 1.0),
-            min(final_color.b + brighten * 0.5, 1.0),
-            final_color.a
-        );
-    } else if (bm < 0.9) {
-        final_color = vec4<f32>(
-            final_color.r * bm,
-            final_color.g * bm,
-            final_color.b * bm,
-            final_color.a
-        );
-    }
-    
+    final_color = apply_brightness_mod(final_color, input.brightness_mod);
+
     if (uniforms.config.peak_mode == 1u || uniforms.config.peak_mode == 4u) {
         final_color.a = final_color.a * input.peak_alpha;
     }
