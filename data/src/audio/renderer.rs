@@ -788,8 +788,23 @@ impl AudioRenderer {
         );
     }
 
-    /// Cancel an active crossfade.
+    /// Cancel an in-flight (Active) crossfade.
+    ///
+    /// Only handles `CrossfadeState::Active` — `Armed` is preserved (the
+    /// gapless prep is still valid; the position-based trigger should still
+    /// fire from `render_tick`). To clear `Armed` explicitly, use
+    /// [`Self::disarm_crossfade`]. The engine's `cancel_crossfade` pairs the
+    /// two for stop / skip flows.
+    ///
+    /// The seek path used to call this and silently drop the `Armed` state,
+    /// which left the engine's gapless slot prepared but the renderer with
+    /// nothing to fire — forcing the EOF-fallback crossfade against an
+    /// already-drained outgoing (audible as a multi-second pause / fade-in
+    /// from silence on tracks where seek landed during the armed window).
     pub fn cancel_crossfade(&mut self) {
+        if !matches!(self.crossfade_state, CrossfadeState::Active { .. }) {
+            return;
+        }
         let prior = std::mem::replace(&mut self.crossfade_state, CrossfadeState::Idle);
         if let CrossfadeState::Active {
             stream,
@@ -1120,5 +1135,63 @@ fn rg_track_gains_differ(current: Option<&ReplayGain>, pending: Option<&ReplayGa
         (None, Some(p)) => p.track_gain.is_some(),
         (Some(c), None) => c.track_gain.is_some(),
         (Some(c), Some(p)) => c.track_gain != p.track_gain,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `cancel_crossfade` historically blasted ANY prior state to `Idle`, which
+    /// silently disarmed a pending gapless crossfade when the user seeked during
+    /// the armed window. After the seek, the engine's gapless slot was still
+    /// "prepared", so the position-based trigger never fired and the crossfade
+    /// got kicked into the EOF-fallback path — producing a ~5 s silent fade-in
+    /// because the outgoing was already at EOF.
+    ///
+    /// The contract is now: `cancel_crossfade` handles `Active` only;
+    /// `disarm_crossfade` handles `Armed` only. Callers must pair them when
+    /// they want both (see `engine.cancel_crossfade`).
+    #[tokio::test]
+    async fn cancel_crossfade_preserves_armed_state() {
+        let mut renderer = AudioRenderer::new();
+        renderer.crossfade_state = CrossfadeState::Armed {
+            duration_ms: 10_000,
+            incoming_format: AudioFormat::invalid(),
+            track_duration_ms: 230_315,
+        };
+
+        renderer.cancel_crossfade();
+
+        assert!(
+            matches!(renderer.crossfade_state, CrossfadeState::Armed { .. }),
+            "cancel_crossfade must leave Armed alone — use disarm_crossfade to clear Armed"
+        );
+    }
+
+    /// Regression: `cancel_crossfade` on a fresh `Idle` renderer must remain a
+    /// no-op (no panic, state stays Idle).
+    #[tokio::test]
+    async fn cancel_crossfade_on_idle_is_noop() {
+        let mut renderer = AudioRenderer::new();
+        renderer.cancel_crossfade();
+        assert!(matches!(renderer.crossfade_state, CrossfadeState::Idle));
+    }
+
+    /// Sanity: `disarm_crossfade` still clears `Armed → Idle` (the complementary
+    /// half of the split). Without this the engine's stop / cancel paths would
+    /// leak a stale Armed state across track changes.
+    #[tokio::test]
+    async fn disarm_crossfade_clears_armed_to_idle() {
+        let mut renderer = AudioRenderer::new();
+        renderer.crossfade_state = CrossfadeState::Armed {
+            duration_ms: 10_000,
+            incoming_format: AudioFormat::invalid(),
+            track_duration_ms: 230_315,
+        };
+
+        renderer.disarm_crossfade();
+
+        assert!(matches!(renderer.crossfade_state, CrossfadeState::Idle));
     }
 }

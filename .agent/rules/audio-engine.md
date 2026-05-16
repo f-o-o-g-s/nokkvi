@@ -58,7 +58,7 @@ Dual-path: PipeWire native (preferred) or software fallback.
 
 ## Crossfade
 
-Two concurrent `ActiveStream`s. Guards: both songs ≥ 10 s, duration clamped to `min(xfade, shorter / 2)`. The position-based trigger must be **synchronous** (set `crossfade_active = true` in the same tick as the position check) before signaling the engine async — otherwise EOF fires first → hard cut. Cancellation calls `cancel_crossfade()`.
+Two concurrent `ActiveStream`s. Guards: both songs ≥ 10 s, duration clamped to `min(xfade, shorter / 2)`. The position-based trigger must be **synchronous** (set `crossfade_active = true` in the same tick as the position check) before signaling the engine async — otherwise EOF fires first → hard cut. Cancellation splits by state: `cancel_crossfade()` clears `Active` (the in-flight stream); `disarm_crossfade()` clears `Armed` (metadata only). Pair them when both must clear (engine-level `cancel_crossfade`, renderer `stop`). `renderer.seek` calls only `cancel_crossfade()` so a pending gapless `Armed` state survives the seek and the position-based trigger can still fire.
 
 ## Visualizer Sync
 
