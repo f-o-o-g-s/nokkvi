@@ -75,8 +75,8 @@ pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEnt
                 "Server URL",
                 "Read-only · configured at login",
             ),
-            data.server_url,
-            data.server_url,
+            data.server_url.as_ref(),
+            data.server_url.as_ref(),
         ),
         SettingItem::text(
             SettingMeta::new(
@@ -84,8 +84,8 @@ pub(crate) fn build_general_items(data: &GeneralSettingsData) -> Vec<SettingsEnt
                 "Username",
                 "Read-only · configured at login",
             ),
-            data.username,
-            data.username,
+            data.username.as_ref(),
+            data.username.as_ref(),
         ),
         SettingItem::text_with_icon(
             SettingMeta::new(SentinelKind::Logout.to_key(), "Logout", "Account")

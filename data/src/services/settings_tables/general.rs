@@ -26,7 +26,7 @@ use crate::{
 
 define_settings! {
     tab: Tab::General,
-    data_type: GeneralSettingsData<'_>,
+    data_type: GeneralSettingsData,
     items_fn: build_general_tab_settings_items,
     settings_const: TAB_GENERAL_SETTINGS,
     contains_fn: tab_general_contains,
@@ -60,7 +60,7 @@ define_settings! {
                 subtitle: Some("View shown after login"),
                 default: "Queue",
                 options: &["Queue", "Albums", "Artists", "Songs", "Genres", "Playlists"],
-                read_field: |d| d.start_view,
+                read_field: |d| d.start_view.as_ref(),
             },
         },
         EnterBehavior {
@@ -77,7 +77,7 @@ define_settings! {
                 ),
                 default: "Play All",
                 options: &["Play All", "Play Single", "Append & Play"],
-                read_field: |d| d.enter_behavior,
+                read_field: |d| d.enter_behavior.as_ref(),
             },
         },
         LibraryPageSize {
@@ -99,7 +99,7 @@ define_settings! {
                     "Large (1,000)",
                     "Massive (5,000)",
                 ],
-                read_field: |d| d.library_page_size,
+                read_field: |d| d.library_page_size.as_ref(),
             },
         },
         SuppressLibraryRefreshToasts {
@@ -201,7 +201,7 @@ define_settings! {
                      press Enter to edit",
                 ),
                 default: "",
-                read_field: |d| d.local_music_path,
+                read_field: |d| d.local_music_path.as_ref(),
             },
         },
         ShowAlbumArtistsOnly {
@@ -246,7 +246,7 @@ define_settings! {
                     "Ultra (2000px)",
                     "Original (Full Size)",
                 ],
-                read_field: |d| d.artwork_resolution,
+                read_field: |d| d.artwork_resolution.as_ref(),
             },
         },
         // The setter writes only redb (via `save_redb_only`); the UI handler
@@ -605,20 +605,20 @@ mod tests {
         );
     }
 
-    /// Sample borrow-shaped data with all defaults, used to exercise the
-    /// macro-emitted items helper.
-    fn default_general_data() -> GeneralSettingsData<'static> {
+    /// Sample data with all defaults, used to exercise the macro-emitted
+    /// items helper.
+    fn default_general_data() -> GeneralSettingsData {
         GeneralSettingsData {
-            server_url: "http://localhost:4533",
-            username: "admin",
-            start_view: "Queue",
+            server_url: "http://localhost:4533".into(),
+            username: "admin".into(),
+            start_view: "Queue".into(),
             stable_viewport: true,
             auto_follow_playing: true,
-            enter_behavior: "Play All",
-            local_music_path: "",
+            enter_behavior: "Play All".into(),
+            local_music_path: "".into(),
             verbose_config: false,
-            library_page_size: "Default (500)",
-            artwork_resolution: "Default (1000px)",
+            library_page_size: "Default (500)".into(),
+            artwork_resolution: "Default (1000px)".into(),
             show_album_artists_only: true,
             suppress_library_refresh_toasts: false,
             show_tray_icon: false,
@@ -647,7 +647,7 @@ mod tests {
     fn build_general_tab_settings_items_uses_data_for_values() {
         let mut data = default_general_data();
         data.stable_viewport = false;
-        data.start_view = "Albums";
+        data.start_view = "Albums".into();
         let entries = build_general_tab_settings_items(&data);
         let stable = entries
             .iter()

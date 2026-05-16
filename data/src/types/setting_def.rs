@@ -69,7 +69,7 @@ pub struct SettingDef {
 /// ```ignore
 /// nokkvi_data::define_settings! {
 ///     tab: nokkvi_data::types::setting_def::Tab::General,
-///     data_type: nokkvi_data::types::settings_data::GeneralSettingsData<'_>,
+///     data_type: nokkvi_data::types::settings_data::GeneralSettingsData,
 ///     items_fn: build_general_tab_settings_items,
 ///     settings_const: TAB_GENERAL_SETTINGS,
 ///     contains_fn: tab_general_contains,

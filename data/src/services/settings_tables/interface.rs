@@ -25,7 +25,7 @@ use crate::{
 
 define_settings! {
     tab: Tab::Interface,
-    data_type: InterfaceSettingsData<'_>,
+    data_type: InterfaceSettingsData,
     items_fn: build_interface_tab_settings_items,
     settings_const: TAB_INTERFACE_SETTINGS,
     contains_fn: tab_interface_contains,
@@ -46,7 +46,7 @@ define_settings! {
                 subtitle: Some("Top bar tabs, vertical sidebar, or no navigation chrome"),
                 default: "Top",
                 options: &["Top", "Side", "None"],
-                read_field: |d| d.nav_layout,
+                read_field: |d| d.nav_layout.as_ref(),
             },
         },
         NavDisplayModeSetting {
@@ -61,7 +61,7 @@ define_settings! {
                 subtitle: Some("Show text, icons, or both in navigation tabs"),
                 default: "Text Only",
                 options: &["Text Only", "Text + Icons", "Icons Only"],
-                read_field: |d| d.nav_display_mode,
+                read_field: |d| d.nav_display_mode.as_ref(),
             },
         },
         TrackInfoDisplaySetting {
@@ -76,7 +76,7 @@ define_settings! {
                 subtitle: Some("Where to show the now-playing metadata strip"),
                 default: "Off",
                 options: &["Off", "Player Bar", "Top Bar", "Progress Track"],
-                read_field: |d| d.track_info_display,
+                read_field: |d| d.track_info_display.as_ref(),
             },
         },
         SlotRowHeightSetting {
@@ -93,7 +93,7 @@ define_settings! {
                 ),
                 default: "Default",
                 options: &["Compact", "Default", "Comfortable", "Spacious"],
-                read_field: |d| d.slot_row_height,
+                read_field: |d| d.slot_row_height.as_ref(),
             },
         },
         HorizontalVolume {
@@ -236,7 +236,7 @@ define_settings! {
                     "Slash /",
                     "Bar │",
                 ],
-                read_field: |d| d.strip_separator,
+                read_field: |d| d.strip_separator.as_ref(),
             },
         },
         StripClickActionSetting {
@@ -260,7 +260,7 @@ define_settings! {
                     "Copy Track Info",
                     "Do Nothing",
                 ],
-                read_field: |d| d.strip_click_action,
+                read_field: |d| d.strip_click_action.as_ref(),
             },
         },
         // --- Artwork Column ---
@@ -287,7 +287,7 @@ define_settings! {
                     "Always (Vertical Stretched)",
                     "Never",
                 ],
-                read_field: |d| d.artwork_column_mode,
+                read_field: |d| d.artwork_column_mode.as_ref(),
             },
         },
         // The stretch-fit knob is conditional (only when artwork_column_mode
@@ -366,29 +366,29 @@ mod tests {
         (SettingsManager::for_test(storage), tmp)
     }
 
-    fn default_interface_data() -> InterfaceSettingsData<'static> {
+    fn default_interface_data() -> InterfaceSettingsData {
         InterfaceSettingsData {
-            nav_layout: "Top",
-            nav_display_mode: "Text Only",
-            track_info_display: "Off",
-            slot_row_height: "Default",
+            nav_layout: "Top".into(),
+            nav_display_mode: "Text Only".into(),
+            track_info_display: "Off".into(),
+            slot_row_height: "Default".into(),
             horizontal_volume: false,
             slot_text_links: true,
-            font_family: "",
+            font_family: "".into(),
             strip_show_title: true,
             strip_show_artist: true,
             strip_show_album: true,
             strip_show_format_info: true,
             strip_merged_mode: false,
             strip_show_labels: true,
-            strip_separator: "Dot ·",
-            strip_click_action: "Go to Queue",
+            strip_separator: "Dot ·".into(),
+            strip_click_action: "Go to Queue".into(),
             albums_artwork_overlay: true,
             artists_artwork_overlay: true,
             songs_artwork_overlay: true,
             playlists_artwork_overlay: true,
-            artwork_column_mode: "Auto",
-            artwork_column_stretch_fit: "Cover",
+            artwork_column_mode: "Auto".into(),
+            artwork_column_stretch_fit: "Cover".into(),
             artwork_auto_max_pct: 0.40,
             artwork_vertical_height_pct: 0.40,
         }

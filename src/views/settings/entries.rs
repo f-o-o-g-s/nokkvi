@@ -59,71 +59,9 @@ impl SettingsPage {
                 data.opacity_gradient,
                 data.is_light_mode,
             ),
-            SettingsTab::General => {
-                let gdata = items::GeneralSettingsData {
-                    server_url: &data.server_url,
-                    username: &data.username,
-                    start_view: &data.start_view,
-                    stable_viewport: data.stable_viewport,
-                    auto_follow_playing: data.auto_follow_playing,
-                    enter_behavior: data.enter_behavior,
-                    local_music_path: &data.local_music_path,
-                    verbose_config: data.verbose_config,
-                    library_page_size: data.library_page_size,
-                    artwork_resolution: data.artwork_resolution,
-                    show_album_artists_only: data.show_album_artists_only,
-                    suppress_library_refresh_toasts: data.suppress_library_refresh_toasts,
-                    show_tray_icon: data.show_tray_icon,
-                    close_to_tray: data.close_to_tray,
-                };
-                items::build_general_items(&gdata)
-            }
-            SettingsTab::Interface => {
-                let idata = items::InterfaceSettingsData {
-                    nav_layout: data.nav_layout,
-                    nav_display_mode: data.nav_display_mode,
-                    track_info_display: data.track_info_display,
-                    slot_row_height: data.slot_row_height,
-                    horizontal_volume: data.horizontal_volume,
-                    slot_text_links: data.slot_text_links,
-                    font_family: &data.font_family,
-                    strip_show_title: data.strip_show_title,
-                    strip_show_artist: data.strip_show_artist,
-                    strip_show_album: data.strip_show_album,
-                    strip_show_format_info: data.strip_show_format_info,
-                    strip_merged_mode: data.strip_merged_mode,
-                    strip_show_labels: data.strip_show_labels,
-                    strip_separator: data.strip_separator,
-                    strip_click_action: data.strip_click_action,
-                    albums_artwork_overlay: data.albums_artwork_overlay,
-                    artists_artwork_overlay: data.artists_artwork_overlay,
-                    songs_artwork_overlay: data.songs_artwork_overlay,
-                    playlists_artwork_overlay: data.playlists_artwork_overlay,
-                    artwork_column_mode: data.artwork_column_mode,
-                    artwork_column_stretch_fit: data.artwork_column_stretch_fit,
-                    artwork_auto_max_pct: data.artwork_auto_max_pct,
-                    artwork_vertical_height_pct: data.artwork_vertical_height_pct,
-                };
-                items::build_interface_items(&idata)
-            }
-            SettingsTab::Playback => {
-                let pdata = items::PlaybackSettingsData {
-                    crossfade_enabled: data.crossfade_enabled,
-                    crossfade_duration_secs: data.crossfade_duration_secs as i64,
-                    volume_normalization: data.volume_normalization,
-                    normalization_level: data.normalization_level,
-                    replay_gain_preamp_db: data.replay_gain_preamp_db as i64,
-                    replay_gain_fallback_db: data.replay_gain_fallback_db as i64,
-                    replay_gain_fallback_to_agc: data.replay_gain_fallback_to_agc,
-                    replay_gain_prevent_clipping: data.replay_gain_prevent_clipping,
-                    scrobbling_enabled: data.scrobbling_enabled,
-                    scrobble_threshold: f64::from(data.scrobble_threshold),
-                    quick_add_to_playlist: data.quick_add_to_playlist,
-                    default_playlist_name: &data.default_playlist_name,
-                    queue_show_default_playlist: data.queue_show_default_playlist,
-                };
-                items::build_playback_items(&pdata)
-            }
+            SettingsTab::General => items::build_general_items(&data.general),
+            SettingsTab::Interface => items::build_interface_items(&data.interface),
+            SettingsTab::Playback => items::build_playback_items(&data.playback),
             SettingsTab::Hotkeys => items::build_hotkeys_items(&data.hotkey_config),
         }
     }

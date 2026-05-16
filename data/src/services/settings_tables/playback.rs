@@ -28,7 +28,7 @@ use crate::{
 
 define_settings! {
     tab: crate::types::setting_def::Tab::Playback,
-    data_type: PlaybackSettingsData<'_>,
+    data_type: PlaybackSettingsData,
     items_fn: build_playback_tab_settings_items,
     settings_const: TAB_PLAYBACK_SETTINGS,
     contains_fn: tab_playback_contains,
@@ -83,7 +83,7 @@ define_settings! {
                 subtitle: Some("Off · ReplayGain (track or album) · AGC (real-time)"),
                 default: "Off",
                 options: &["Off", "ReplayGain (Track)", "ReplayGain (Album)", "AGC"],
-                read_field: |d| d.volume_normalization,
+                read_field: |d| d.volume_normalization.as_ref(),
             },
         },
         NormalizationLevelKey {
@@ -270,12 +270,12 @@ mod tests {
         (SettingsManager::for_test(storage), tmp)
     }
 
-    fn default_playback_data() -> PlaybackSettingsData<'static> {
+    fn default_playback_data() -> PlaybackSettingsData {
         PlaybackSettingsData {
             crossfade_enabled: false,
             crossfade_duration_secs: 5,
-            volume_normalization: "Off",
-            normalization_level: "Normal",
+            volume_normalization: "Off".into(),
+            normalization_level: "Normal".into(),
             replay_gain_preamp_db: 0,
             replay_gain_fallback_db: 0,
             replay_gain_fallback_to_agc: false,
@@ -283,7 +283,7 @@ mod tests {
             scrobbling_enabled: true,
             scrobble_threshold: 0.50,
             quick_add_to_playlist: false,
-            default_playlist_name: "",
+            default_playlist_name: "".into(),
             queue_show_default_playlist: false,
         }
     }

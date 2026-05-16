@@ -13,74 +13,95 @@ use crate::{Nokkvi, app_message::Message};
 
 impl Nokkvi {
     pub(crate) fn build_settings_view_data(&self) -> crate::views::SettingsViewData {
+        use nokkvi_data::types::settings_data::{
+            GeneralSettingsData, InterfaceSettingsData, PlaybackSettingsData,
+        };
+
         let viz_config = self.visualizer_config.read().clone();
         let theme_file = crate::theme_config::load_active_theme_file();
         let active_theme_stem = nokkvi_data::services::theme_loader::read_theme_name_from_config();
-        crate::views::SettingsViewData {
-            visualizer_config: viz_config,
-            theme_file,
-            active_theme_stem,
-            window_height: self.window.height,
-            hotkey_config: self.hotkey_config.clone(),
-            server_url: self.login_page.server_url.clone(),
-            username: self.login_page.username.clone(),
-            is_light_mode: crate::theme::is_light_mode(),
-            scrobbling_enabled: self.scrobbling_enabled,
-            scrobble_threshold: self.scrobble_threshold,
-            start_view: self.start_view.clone(),
+
+        let nav_layout_label = if crate::theme::is_side_nav() {
+            "Side"
+        } else if crate::theme::is_none_nav() {
+            "None"
+        } else {
+            "Top"
+        };
+
+        let general = GeneralSettingsData {
+            server_url: self.login_page.server_url.clone().into(),
+            username: self.login_page.username.clone().into(),
+            start_view: self.start_view.clone().into(),
             stable_viewport: self.stable_viewport,
             auto_follow_playing: self.auto_follow_playing,
-            enter_behavior: self.enter_behavior.as_label(),
-            local_music_path: self.local_music_path.clone(),
-            library_page_size: self.library_page_size.as_label(),
+            enter_behavior: self.enter_behavior.as_label().into(),
+            local_music_path: self.local_music_path.clone().into(),
+            verbose_config: self.verbose_config,
+            library_page_size: self.library_page_size.as_label().into(),
+            artwork_resolution: self.artwork_resolution.as_label().into(),
             show_album_artists_only: self.show_album_artists_only,
             suppress_library_refresh_toasts: self.suppress_library_refresh_toasts,
             show_tray_icon: self.show_tray_icon,
             close_to_tray: self.close_to_tray,
-            rounded_mode: crate::theme::is_rounded_mode(),
-            nav_layout: if crate::theme::is_side_nav() {
-                "Side"
-            } else if crate::theme::is_none_nav() {
-                "None"
-            } else {
-                "Top"
-            },
-            nav_display_mode: crate::theme::nav_display_mode().as_label(),
-            track_info_display: crate::theme::track_info_display().as_label(),
-            slot_row_height: crate::theme::slot_row_height_variant().as_label(),
-            opacity_gradient: crate::theme::is_opacity_gradient(),
-            slot_text_links: crate::theme::is_slot_text_links(),
-            crossfade_enabled: self.engine.crossfade_enabled,
-            crossfade_duration_secs: self.engine.crossfade_duration_secs,
-            volume_normalization: self.engine.volume_normalization.as_label(),
-            normalization_level: self.engine.normalization_level.as_label(),
-            replay_gain_preamp_db: self.engine.replay_gain_preamp_db.round() as i32,
-            replay_gain_fallback_db: self.engine.replay_gain_fallback_db.round() as i32,
-            replay_gain_fallback_to_agc: self.engine.replay_gain_fallback_to_agc,
-            replay_gain_prevent_clipping: self.engine.replay_gain_prevent_clipping,
-            default_playlist_name: self.default_playlist_name.clone(),
-            quick_add_to_playlist: self.quick_add_to_playlist,
-            queue_show_default_playlist: self.queue_show_default_playlist,
+        };
+
+        let interface = InterfaceSettingsData {
+            nav_layout: nav_layout_label.into(),
+            nav_display_mode: crate::theme::nav_display_mode().as_label().into(),
+            track_info_display: crate::theme::track_info_display().as_label().into(),
+            slot_row_height: crate::theme::slot_row_height_variant().as_label().into(),
             horizontal_volume: crate::theme::is_horizontal_volume(),
-            font_family: crate::theme::font_family(),
+            slot_text_links: crate::theme::is_slot_text_links(),
+            font_family: crate::theme::font_family().into(),
             strip_show_title: crate::theme::strip_show_title(),
             strip_show_artist: crate::theme::strip_show_artist(),
             strip_show_album: crate::theme::strip_show_album(),
             strip_show_format_info: crate::theme::strip_show_format_info(),
             strip_merged_mode: crate::theme::strip_merged_mode(),
             strip_show_labels: crate::theme::strip_show_labels(),
-            strip_separator: crate::theme::strip_separator().as_label(),
-            strip_click_action: crate::theme::strip_click_action().as_label(),
+            strip_separator: crate::theme::strip_separator().as_label().into(),
+            strip_click_action: crate::theme::strip_click_action().as_label().into(),
             albums_artwork_overlay: crate::theme::albums_artwork_overlay(),
             artists_artwork_overlay: crate::theme::artists_artwork_overlay(),
             songs_artwork_overlay: crate::theme::songs_artwork_overlay(),
             playlists_artwork_overlay: crate::theme::playlists_artwork_overlay(),
-            artwork_column_mode: crate::theme::artwork_column_mode().as_label(),
-            artwork_column_stretch_fit: crate::theme::artwork_column_stretch_fit().as_label(),
+            artwork_column_mode: crate::theme::artwork_column_mode().as_label().into(),
+            artwork_column_stretch_fit: crate::theme::artwork_column_stretch_fit()
+                .as_label()
+                .into(),
             artwork_auto_max_pct: f64::from(crate::theme::artwork_auto_max_pct()),
             artwork_vertical_height_pct: f64::from(crate::theme::artwork_vertical_height_pct()),
-            verbose_config: self.verbose_config,
-            artwork_resolution: self.artwork_resolution.as_label(),
+        };
+
+        let playback = PlaybackSettingsData {
+            crossfade_enabled: self.engine.crossfade_enabled,
+            crossfade_duration_secs: i64::from(self.engine.crossfade_duration_secs),
+            volume_normalization: self.engine.volume_normalization.as_label().into(),
+            normalization_level: self.engine.normalization_level.as_label().into(),
+            replay_gain_preamp_db: self.engine.replay_gain_preamp_db.round() as i64,
+            replay_gain_fallback_db: self.engine.replay_gain_fallback_db.round() as i64,
+            replay_gain_fallback_to_agc: self.engine.replay_gain_fallback_to_agc,
+            replay_gain_prevent_clipping: self.engine.replay_gain_prevent_clipping,
+            scrobbling_enabled: self.scrobbling_enabled,
+            scrobble_threshold: f64::from(self.scrobble_threshold),
+            quick_add_to_playlist: self.quick_add_to_playlist,
+            default_playlist_name: self.default_playlist_name.clone().into(),
+            queue_show_default_playlist: self.queue_show_default_playlist,
+        };
+
+        crate::views::SettingsViewData {
+            general,
+            interface,
+            playback,
+            visualizer_config: viz_config,
+            theme_file,
+            active_theme_stem,
+            window_height: self.window.height,
+            hotkey_config: self.hotkey_config.clone(),
+            is_light_mode: crate::theme::is_light_mode(),
+            rounded_mode: crate::theme::is_rounded_mode(),
+            opacity_gradient: crate::theme::is_opacity_gradient(),
         }
     }
 

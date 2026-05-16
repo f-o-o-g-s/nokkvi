@@ -30,7 +30,7 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
     let font_display = if data.font_family.is_empty() {
         "(system default)"
     } else {
-        data.font_family
+        data.font_family.as_ref()
     };
 
     let mut macro_rows = MacroRows::new(build_interface_tab_settings_items(data));
@@ -143,14 +143,14 @@ pub(crate) fn build_interface_items(data: &InterfaceSettingsData) -> Vec<Setting
 
     // Stretched-only knob: image fit applies only when the column is
     // stretched (horizontal or vertical).
-    if ArtworkColumnMode::from_label(data.artwork_column_mode).is_stretched() {
+    if ArtworkColumnMode::from_label(data.artwork_column_mode.as_ref()).is_stretched() {
         items.push(SettingItem::enum_val(
             SettingMeta::new(
                 "general.artwork_column_stretch_fit",
                 "Stretch Fit",
                 "Cover: crop to fill, preserve aspect · Fill: true stretch, distorts album art",
             ),
-            data.artwork_column_stretch_fit,
+            data.artwork_column_stretch_fit.as_ref(),
             "Cover",
             vec!["Cover", "Fill"],
         ));

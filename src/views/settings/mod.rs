@@ -400,6 +400,26 @@ pub enum SettingsMessage {
     ToggleSetToggle(String),
 }
 
+/// Build the scrollbar-seek closure shared by every settings slot list.
+///
+/// `slot_list::slot_list_view_with_scroll` calls the seek callback with a
+/// normalized fraction `f ∈ [0.0, 1.0]`; mapping it to the absolute slot
+/// offset requires the entry-list length at construction time. The three
+/// settings surfaces (main entries list, font picker sub-list, color
+/// gradient sub-list) all need the byte-identical closure; this helper
+/// collapses them to a one-liner so the [`SlotListSetOffset`] message shape
+/// can't drift across call sites.
+///
+/// [`SlotListSetOffset`]: SettingsMessage::SlotListSetOffset
+pub(super) fn settings_seek_to(total: usize) -> impl Fn(f32) -> SettingsMessage {
+    move |f| {
+        SettingsMessage::SlotListSetOffset(
+            (f * total as f32) as usize,
+            iced::keyboard::Modifiers::default(),
+        )
+    }
+}
+
 /// Actions that the settings view requests from the parent
 #[derive(Debug, Clone)]
 pub(crate) enum SettingsAction {
@@ -476,68 +496,27 @@ pub(crate) enum SettingsAction {
 // Settings View Data
 // ============================================================================
 
-/// Read-only data passed in from the parent for rendering
+/// Read-only data passed in from the parent for rendering.
+///
+/// Composition: the tab-specific payloads live in
+/// [`GeneralSettingsData`] / [`InterfaceSettingsData`] /
+/// [`PlaybackSettingsData`] (from `nokkvi_data::types::settings_data`),
+/// and the cross-cutting fields (theme/visualizer/window/hotkey) stay flat
+/// at this level. `build_settings_view_data` constructs each sub-struct
+/// directly; `entries.rs::build_tab_entries` hands the matching sub-struct
+/// straight to `items::build_*_items`.
 pub(crate) struct SettingsViewData {
+    pub general: nokkvi_data::types::settings_data::GeneralSettingsData,
+    pub interface: nokkvi_data::types::settings_data::InterfaceSettingsData,
+    pub playback: nokkvi_data::types::settings_data::PlaybackSettingsData,
     pub visualizer_config: VisualizerConfig,
     pub theme_file: ThemeFile,
     pub active_theme_stem: String,
     pub window_height: f32,
     pub hotkey_config: nokkvi_data::types::hotkey_config::HotkeyConfig,
-    // --- General tab data ---
-    pub server_url: String,
-    pub username: String,
     pub is_light_mode: bool,
-    pub scrobbling_enabled: bool,
-    pub scrobble_threshold: f32,
-    pub start_view: String,
-    pub stable_viewport: bool,
-    pub auto_follow_playing: bool,
-    pub enter_behavior: &'static str,
-    pub local_music_path: String,
-    pub library_page_size: &'static str,
-    pub show_album_artists_only: bool,
-    pub suppress_library_refresh_toasts: bool,
-    pub show_tray_icon: bool,
-    pub close_to_tray: bool,
     pub rounded_mode: bool,
-    pub slot_text_links: bool,
-    pub nav_layout: &'static str,
-    pub nav_display_mode: &'static str,
-    pub track_info_display: &'static str,
-    pub slot_row_height: &'static str,
     pub opacity_gradient: bool,
-    pub crossfade_enabled: bool,
-    pub crossfade_duration_secs: u32,
-    /// Volume-normalization mode label ("Off" / "AGC" / "ReplayGain (Track)" / "ReplayGain (Album)").
-    pub volume_normalization: &'static str,
-    pub normalization_level: &'static str,
-    pub replay_gain_preamp_db: i32,
-    pub replay_gain_fallback_db: i32,
-    pub replay_gain_fallback_to_agc: bool,
-    pub replay_gain_prevent_clipping: bool,
-    pub default_playlist_name: String,
-    pub quick_add_to_playlist: bool,
-    pub queue_show_default_playlist: bool,
-    pub horizontal_volume: bool,
-    pub font_family: String,
-    pub strip_show_title: bool,
-    pub strip_show_artist: bool,
-    pub strip_show_album: bool,
-    pub strip_show_format_info: bool,
-    pub strip_merged_mode: bool,
-    pub strip_show_labels: bool,
-    pub strip_separator: &'static str,
-    pub strip_click_action: &'static str,
-    pub albums_artwork_overlay: bool,
-    pub artists_artwork_overlay: bool,
-    pub songs_artwork_overlay: bool,
-    pub playlists_artwork_overlay: bool,
-    pub artwork_column_mode: &'static str,
-    pub artwork_column_stretch_fit: &'static str,
-    pub artwork_auto_max_pct: f64,
-    pub artwork_vertical_height_pct: f64,
-    pub verbose_config: bool,
-    pub artwork_resolution: &'static str,
 }
 
 // ============================================================================

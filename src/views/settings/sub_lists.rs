@@ -310,15 +310,7 @@ impl SettingsPage {
             &config,
             SettingsMessage::SlotListUp,
             SettingsMessage::SlotListDown,
-            {
-                let total = total_colors;
-                move |f| {
-                    SettingsMessage::SlotListSetOffset(
-                        (f * total as f32) as usize,
-                        iced::keyboard::Modifiers::default(),
-                    )
-                }
-            },
+            super::settings_seek_to(total_colors),
             move |hex_color, ctx| {
                 let is_editing = editing_color_index == Some(ctx.item_index);
                 let ctx = SlotRenderContext {

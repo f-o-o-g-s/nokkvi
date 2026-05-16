@@ -34,14 +34,14 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
     ];
 
     // AGC-only knob: target loudness applies only when AGC is selected.
-    if data.volume_normalization == "AGC" {
+    if data.volume_normalization.as_ref() == "AGC" {
         items.push(SettingItem::enum_val(
             SettingMeta::new(
                 "general.normalization_level",
                 "AGC Target Level",
                 "Quiet (headroom) · Normal · Loud (boost)",
             ),
-            data.normalization_level,
+            data.normalization_level.as_ref(),
             "Normal",
             vec!["Quiet", "Normal", "Loud"],
         ));
@@ -49,7 +49,7 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
 
     // ReplayGain-only knobs: appear when either RG mode is selected.
     let is_rg = matches!(
-        data.volume_normalization,
+        data.volume_normalization.as_ref(),
         "ReplayGain (Track)" | "ReplayGain (Album)"
     );
     if is_rg {
@@ -125,7 +125,7 @@ pub(crate) fn build_playback_items(data: &PlaybackSettingsData) -> Vec<SettingsE
             if data.default_playlist_name.is_empty() {
                 "Not set"
             } else {
-                data.default_playlist_name
+                data.default_playlist_name.as_ref()
             },
             "Not set",
         )

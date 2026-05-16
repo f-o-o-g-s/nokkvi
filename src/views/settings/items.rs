@@ -57,11 +57,19 @@ impl MacroRows {
 // Tab Builder Re-exports
 // ============================================================================
 
+// Re-export `GeneralSettingsData` so the inline `#[cfg(test)] mod tests`
+// below can refer to it by short name (the General tab's tests are written at
+// this module's level rather than inside a tab-specific scope). The
+// Interface/Playback equivalents are imported directly by the tests that
+// need them via `super::super::items_<tab>::...`. Production code reads each
+// struct from `nokkvi_data::types::settings_data` directly.
+#[cfg(test)]
+pub(crate) use super::items_general::GeneralSettingsData;
 pub(crate) use super::{
-    items_general::{GeneralSettingsData, build_general_items},
+    items_general::build_general_items,
     items_hotkeys::{build_hotkeys_items, key_to_hotkey_action},
-    items_interface::{InterfaceSettingsData, build_interface_items},
-    items_playback::{PlaybackSettingsData, build_playback_items},
+    items_interface::build_interface_items,
+    items_playback::build_playback_items,
     items_theme::build_theme_items,
     items_visualizer::build_visualizer_items,
 };
@@ -327,22 +335,11 @@ mod tests {
 
     #[test]
     fn general_items_structure() {
-        let data = GeneralSettingsData {
-            server_url: "http://localhost:4533",
-            username: "admin",
-            start_view: "Queue",
-            stable_viewport: true,
-            auto_follow_playing: true,
-            enter_behavior: "Play All",
-            local_music_path: "",
-            verbose_config: false,
-            library_page_size: "Default (500)",
-            artwork_resolution: "Default (1000px)",
-            show_album_artists_only: true,
-            suppress_library_refresh_toasts: false,
-            show_tray_icon: false,
-            close_to_tray: false,
-        };
+        // Structure-only test — header/item counts are independent of the
+        // string values, so the Default sentinels are fine here. Default
+        // boolean fields are all `false`; that's enough since the General tab
+        // has no conditional rows.
+        let data = GeneralSettingsData::default();
         let entries = build_general_items(&data);
 
         assert_eq!(
@@ -356,31 +353,10 @@ mod tests {
     #[test]
     fn interface_items_structure() {
         use super::super::items_interface::{InterfaceSettingsData, build_interface_items};
-        let data = InterfaceSettingsData {
-            nav_layout: "Top",
-            nav_display_mode: "Text Only",
-            track_info_display: "Off",
-            slot_row_height: "Default",
-            horizontal_volume: false,
-            slot_text_links: true,
-            font_family: "",
-            strip_show_title: true,
-            strip_show_artist: true,
-            strip_show_album: true,
-            strip_show_format_info: true,
-            strip_merged_mode: false,
-            strip_show_labels: true,
-            strip_separator: "Dot ·",
-            strip_click_action: "Go to Queue",
-            albums_artwork_overlay: true,
-            artists_artwork_overlay: true,
-            songs_artwork_overlay: true,
-            playlists_artwork_overlay: true,
-            artwork_column_mode: "Auto",
-            artwork_column_stretch_fit: "Cover",
-            artwork_auto_max_pct: 0.40,
-            artwork_vertical_height_pct: 0.40,
-        };
+        // `artwork_column_mode = "test-default"` falls through to
+        // `ArtworkColumnMode::Auto` (not stretched), so the conditional
+        // stretch-fit knob is omitted — matching the 16-item baseline.
+        let data = InterfaceSettingsData::default();
         let entries = build_interface_items(&data);
 
         assert_eq!(
@@ -399,29 +375,8 @@ mod tests {
     fn interface_items_artwork_column_stretched_adds_fit_knob() {
         use super::super::items_interface::{InterfaceSettingsData, build_interface_items};
         let data = InterfaceSettingsData {
-            nav_layout: "Top",
-            nav_display_mode: "Text Only",
-            track_info_display: "Off",
-            slot_row_height: "Default",
-            horizontal_volume: false,
-            slot_text_links: true,
-            font_family: "",
-            strip_show_title: true,
-            strip_show_artist: true,
-            strip_show_album: true,
-            strip_show_format_info: true,
-            strip_merged_mode: false,
-            strip_show_labels: true,
-            strip_separator: "Dot ·",
-            strip_click_action: "Go to Queue",
-            albums_artwork_overlay: true,
-            artists_artwork_overlay: true,
-            songs_artwork_overlay: true,
-            playlists_artwork_overlay: true,
-            artwork_column_mode: "Always (Stretched)",
-            artwork_column_stretch_fit: "Cover",
-            artwork_auto_max_pct: 0.40,
-            artwork_vertical_height_pct: 0.40,
+            artwork_column_mode: "Always (Stretched)".into(),
+            ..Default::default()
         };
         let entries = build_interface_items(&data);
         assert_eq!(count_items(&entries), 17);
@@ -430,21 +385,10 @@ mod tests {
     #[test]
     fn playback_items_structure_off_mode() {
         use super::super::items_playback::{PlaybackSettingsData, build_playback_items};
-        let data = PlaybackSettingsData {
-            crossfade_enabled: false,
-            crossfade_duration_secs: 5,
-            volume_normalization: "Off",
-            normalization_level: "Normal",
-            replay_gain_preamp_db: 0,
-            replay_gain_fallback_db: 0,
-            replay_gain_fallback_to_agc: false,
-            replay_gain_prevent_clipping: true,
-            scrobbling_enabled: true,
-            scrobble_threshold: 0.50,
-            quick_add_to_playlist: false,
-            default_playlist_name: "",
-            queue_show_default_playlist: false,
-        };
+        // `volume_normalization = "test-default"` matches neither "AGC" nor
+        // any ReplayGain label, so the conditional knobs are omitted —
+        // matching the 8-item Off baseline.
+        let data = PlaybackSettingsData::default();
         let entries = build_playback_items(&data);
 
         assert_eq!(
@@ -464,19 +408,8 @@ mod tests {
     fn playback_items_structure_agc_mode_shows_target_level() {
         use super::super::items_playback::{PlaybackSettingsData, build_playback_items};
         let data = PlaybackSettingsData {
-            crossfade_enabled: false,
-            crossfade_duration_secs: 5,
-            volume_normalization: "AGC",
-            normalization_level: "Normal",
-            replay_gain_preamp_db: 0,
-            replay_gain_fallback_db: 0,
-            replay_gain_fallback_to_agc: false,
-            replay_gain_prevent_clipping: true,
-            scrobbling_enabled: true,
-            scrobble_threshold: 0.50,
-            quick_add_to_playlist: false,
-            default_playlist_name: "",
-            queue_show_default_playlist: false,
+            volume_normalization: "AGC".into(),
+            ..Default::default()
         };
         let entries = build_playback_items(&data);
         // AGC mode adds the target-level dropdown.
@@ -487,19 +420,8 @@ mod tests {
     fn playback_items_structure_replay_gain_mode_shows_rg_knobs() {
         use super::super::items_playback::{PlaybackSettingsData, build_playback_items};
         let data = PlaybackSettingsData {
-            crossfade_enabled: false,
-            crossfade_duration_secs: 5,
-            volume_normalization: "ReplayGain (Track)",
-            normalization_level: "Normal",
-            replay_gain_preamp_db: 0,
-            replay_gain_fallback_db: 0,
-            replay_gain_fallback_to_agc: false,
-            replay_gain_prevent_clipping: true,
-            scrobbling_enabled: true,
-            scrobble_threshold: 0.50,
-            quick_add_to_playlist: false,
-            default_playlist_name: "",
-            queue_show_default_playlist: false,
+            volume_normalization: "ReplayGain (Track)".into(),
+            ..Default::default()
         };
         let entries = build_playback_items(&data);
         // RG modes add 4 knobs: preamp, fallback_db, fallback_to_agc, prevent_clipping.
@@ -532,31 +454,7 @@ mod tests {
     #[test]
     fn interface_items_font_family_has_enter_hint() {
         use super::super::items_interface::{InterfaceSettingsData, build_interface_items};
-        let data = InterfaceSettingsData {
-            nav_layout: "Top",
-            nav_display_mode: "Text Only",
-            track_info_display: "Off",
-            slot_row_height: "Default",
-            horizontal_volume: false,
-            slot_text_links: true,
-            font_family: "",
-            strip_show_title: true,
-            strip_show_artist: true,
-            strip_show_album: true,
-            strip_show_format_info: true,
-            strip_merged_mode: false,
-            strip_show_labels: true,
-            strip_separator: "Dot ·",
-            strip_click_action: "Go to Queue",
-            albums_artwork_overlay: true,
-            artists_artwork_overlay: true,
-            songs_artwork_overlay: true,
-            playlists_artwork_overlay: true,
-            artwork_column_mode: "Auto",
-            artwork_column_stretch_fit: "Cover",
-            artwork_auto_max_pct: 0.40,
-            artwork_vertical_height_pct: 0.40,
-        };
+        let data = InterfaceSettingsData::default();
         let entries = build_interface_items(&data);
         assert_entry_needs_enter_hint(&entries, "font_family");
     }
@@ -567,21 +465,7 @@ mod tests {
     #[test]
     fn playback_items_default_playlist_name_has_enter_hint() {
         use super::super::items_playback::{PlaybackSettingsData, build_playback_items};
-        let data = PlaybackSettingsData {
-            crossfade_enabled: false,
-            crossfade_duration_secs: 5,
-            volume_normalization: "Off",
-            normalization_level: "Normal",
-            replay_gain_preamp_db: 0,
-            replay_gain_fallback_db: 0,
-            replay_gain_fallback_to_agc: false,
-            replay_gain_prevent_clipping: true,
-            scrobbling_enabled: true,
-            scrobble_threshold: 0.50,
-            quick_add_to_playlist: false,
-            default_playlist_name: "",
-            queue_show_default_playlist: false,
-        };
+        let data = PlaybackSettingsData::default();
         let entries = build_playback_items(&data);
         assert_entry_needs_enter_hint(&entries, "general.default_playlist_name");
     }
@@ -593,22 +477,7 @@ mod tests {
     /// future regressions when the structural flag replaces the match.
     #[test]
     fn general_items_local_music_path_has_enter_hint() {
-        let data = GeneralSettingsData {
-            server_url: "http://localhost:4533",
-            username: "admin",
-            start_view: "Queue",
-            stable_viewport: true,
-            auto_follow_playing: true,
-            enter_behavior: "Play All",
-            local_music_path: "",
-            verbose_config: false,
-            library_page_size: "Default (500)",
-            artwork_resolution: "Default (1000px)",
-            show_album_artists_only: true,
-            suppress_library_refresh_toasts: false,
-            show_tray_icon: false,
-            close_to_tray: false,
-        };
+        let data = GeneralSettingsData::default();
         let entries = build_general_items(&data);
         assert_entry_needs_enter_hint(&entries, "general.local_music_path");
     }
@@ -712,62 +581,9 @@ mod tests {
 
     #[test]
     fn settings_descriptions_fit_in_footer() {
-        let general = crate::views::settings::items_general::GeneralSettingsData {
-            server_url: "http://localhost:4533",
-            username: "admin",
-            start_view: "Queue",
-            stable_viewport: true,
-            auto_follow_playing: true,
-            enter_behavior: "Play All",
-            local_music_path: "",
-            verbose_config: false,
-            library_page_size: "Default (500)",
-            artwork_resolution: "Default (1000px)",
-            show_album_artists_only: true,
-            suppress_library_refresh_toasts: false,
-            show_tray_icon: false,
-            close_to_tray: false,
-        };
-        let interface = crate::views::settings::items_interface::InterfaceSettingsData {
-            nav_layout: "Top",
-            nav_display_mode: "Text Only",
-            track_info_display: "Off",
-            slot_row_height: "Default",
-            horizontal_volume: false,
-            slot_text_links: true,
-            font_family: "",
-            strip_show_title: true,
-            strip_show_artist: true,
-            strip_show_album: true,
-            strip_show_format_info: true,
-            strip_merged_mode: false,
-            strip_show_labels: true,
-            strip_separator: "Dot ·",
-            strip_click_action: "Go to Queue",
-            albums_artwork_overlay: true,
-            artists_artwork_overlay: true,
-            songs_artwork_overlay: true,
-            playlists_artwork_overlay: true,
-            artwork_column_mode: "Auto",
-            artwork_column_stretch_fit: "Cover",
-            artwork_auto_max_pct: 0.40,
-            artwork_vertical_height_pct: 0.40,
-        };
-        let playback = crate::views::settings::items_playback::PlaybackSettingsData {
-            crossfade_enabled: false,
-            crossfade_duration_secs: 5,
-            volume_normalization: "Off",
-            normalization_level: "Normal",
-            replay_gain_preamp_db: 0,
-            replay_gain_fallback_db: 0,
-            replay_gain_fallback_to_agc: false,
-            replay_gain_prevent_clipping: true,
-            scrobbling_enabled: true,
-            scrobble_threshold: 0.50,
-            quick_add_to_playlist: false,
-            default_playlist_name: "",
-            queue_show_default_playlist: false,
-        };
+        let general = crate::views::settings::items_general::GeneralSettingsData::default();
+        let interface = crate::views::settings::items_interface::InterfaceSettingsData::default();
+        let playback = crate::views::settings::items_playback::PlaybackSettingsData::default();
         let hotkeys = nokkvi_data::types::hotkey_config::HotkeyConfig::default();
         let theme = nokkvi_data::types::theme_file::ThemeFile::default();
         let visualizer = crate::visualizer_config::VisualizerConfig::default();
