@@ -10,67 +10,22 @@
 //! Only one receiver is active at a time. Logging out replaces it via
 //! `register_receiver`, triggering a fresh subscription identity.
 
-use std::sync::OnceLock;
+use iced::task::{Never, Sipper};
+use tokio::sync::mpsc::UnboundedReceiver;
 
-use iced::task::{Never, Sipper, sipper};
-use tokio::sync::{Mutex, mpsc::UnboundedReceiver};
-use tracing::debug;
+use super::subscription_slot::SubscriptionSlot;
 
-/// Global slot for the queue-changed receiver, set at login time.
-///
-/// `OnceLock` is used so the slot can be set once per process life.
-/// Wrap in `Mutex` to allow async `recv()` calls from the sipper.
-static QUEUE_CHANGED_RX: OnceLock<Mutex<Option<UnboundedReceiver<()>>>> = OnceLock::new();
+static SLOT: SubscriptionSlot<()> = SubscriptionSlot::new("QUEUE_CHANGED_SUB");
 
-/// Register a queue-changed receiver at login time.
-///
-/// Replaces any previously registered receiver. Called once from
-/// `handle_login_result` after a successful login.
+/// Register a queue-changed receiver at login time. Replaces any previously
+/// registered receiver. Called once from `handle_login_result` after a
+/// successful login.
 pub(crate) fn register_receiver(rx: UnboundedReceiver<()>) {
-    let slot = QUEUE_CHANGED_RX.get_or_init(|| Mutex::new(None));
-    // Temporarily block to store the new receiver synchronously.
-    // Safe: no other tokio thread can hold this lock at login time.
-    if let Ok(mut guard) = slot.try_lock() {
-        *guard = Some(rx);
-        debug!(" [QUEUE_CHANGED_SUB] Queue-changed receiver registered");
-    }
+    SLOT.register(rx);
 }
 
-/// Run the queue-changed subscription as an iced subscription.
-///
-/// Yields one `()` per queue change event. Terminates only when the
-/// sender side is dropped (app exit).
+/// Run the queue-changed subscription as an iced subscription. Yields one `()`
+/// per queue change event. Stalls on channel close (app exit).
 pub(crate) fn run() -> impl Sipper<Never, ()> {
-    sipper(async |mut output| {
-        loop {
-            // Block until either a signal arrives or the channel is closed.
-            let event = {
-                let slot = QUEUE_CHANGED_RX.get_or_init(|| Mutex::new(None));
-                let mut guard = slot.lock().await;
-                match guard.as_mut() {
-                    Some(rx) => rx.recv().await,
-                    None => {
-                        // No receiver yet — wait a bit and retry.
-                        drop(guard);
-                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                        continue;
-                    }
-                }
-            };
-
-            match event {
-                Some(()) => {
-                    debug!(" [QUEUE_CHANGED_SUB] Queue changed event received");
-                    output.send(()).await;
-                }
-                None => {
-                    // Channel closed (app exit), stop subscription.
-                    debug!(" [QUEUE_CHANGED_SUB] Channel closed, subscription ending");
-                    break;
-                }
-            }
-        }
-
-        std::future::pending::<Never>().await
-    })
+    SLOT.run()
 }
