@@ -141,8 +141,8 @@ where
                     let create_mini = create_mini_message.clone();
                     tasks.push(Task::perform(
                         async move {
-                            let server_url = auth_vm_clone.get_server_url().await;
-                            let subsonic_credential = auth_vm_clone.get_subsonic_credential().await;
+                            let (server_url, subsonic_credential) =
+                                auth_vm_clone.server_config().await;
                             (id, server_url, subsonic_credential, album_ids, is_center)
                         },
                         move |(id, url, cred, album_ids, is_center)| {
@@ -216,8 +216,7 @@ where
 
     let task = Task::perform(
         async move {
-            let server_url = auth_vm.get_server_url().await;
-            let subsonic_credential = auth_vm.get_subsonic_credential().await;
+            let (server_url, subsonic_credential) = auth_vm.server_config().await;
             (ids_to_load, server_url, subsonic_credential)
         },
         move |(ids, url, cred)| create_batch_message(ids, url, cred),

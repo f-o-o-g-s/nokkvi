@@ -100,8 +100,7 @@ impl Nokkvi {
 
         Task::perform(
             async move {
-                let server_url = auth_vm.get_server_url().await;
-                let cred = auth_vm.get_subsonic_credential().await;
+                let (server_url, cred) = auth_vm.server_config().await;
                 (genre_id, server_url, cred, cached_album_ids)
             },
             |(id, url, cred, ids)| {

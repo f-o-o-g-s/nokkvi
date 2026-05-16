@@ -257,11 +257,7 @@ impl Nokkvi {
         self.shell_task(
             move |shell| async move {
                 let auth_vm = shell.auth().clone();
-                let (server_url, subsonic_credential) = {
-                    let url = auth_vm.get_server_url().await;
-                    let cred = auth_vm.get_subsonic_credential().await;
-                    (url, cred)
-                };
+                let (server_url, subsonic_credential) = auth_vm.server_config().await;
 
                 let client = match auth_vm.get_client().await {
                     Some(c) => c,

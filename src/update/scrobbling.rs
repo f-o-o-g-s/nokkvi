@@ -26,8 +26,7 @@ impl Nokkvi {
         self.shell_task(
             move |shell| async move {
                 let auth = shell.auth();
-                let server_url = auth.get_server_url().await;
-                let cred = auth.get_subsonic_credential().await;
+                let (server_url, cred) = auth.server_config().await;
 
                 if let Some(api_client) = auth.get_client().await {
                     let http_client = api_client.http_client();
@@ -62,8 +61,7 @@ impl Nokkvi {
         self.shell_task(
             move |shell| async move {
                 let auth = shell.auth();
-                let server_url = auth.get_server_url().await;
-                let cred = auth.get_subsonic_credential().await;
+                let (server_url, cred) = auth.server_config().await;
 
                 if let Some(api_client) = auth.get_client().await {
                     let http_client = api_client.http_client();

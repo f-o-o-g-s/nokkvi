@@ -757,8 +757,7 @@ impl Nokkvi {
                     .get_client()
                     .await
                     .ok_or_else(|| anyhow::anyhow!("No API client available"))?;
-                let server_url = auth_vm.get_server_url().await;
-                let subsonic_credential = auth_vm.get_subsonic_credential().await;
+                let (server_url, subsonic_credential) = auth_vm.server_config().await;
                 if star {
                     nokkvi_data::services::api::star::star_item(
                         &client.http_client(),
@@ -865,8 +864,7 @@ impl Nokkvi {
                     .get_client()
                     .await
                     .ok_or_else(|| anyhow::anyhow!("No API client available"))?;
-                let server_url = auth_vm.get_server_url().await;
-                let subsonic_credential = auth_vm.get_subsonic_credential().await;
+                let (server_url, subsonic_credential) = auth_vm.server_config().await;
 
                 nokkvi_data::services::api::rating::set_rating(
                     &client.http_client(),
