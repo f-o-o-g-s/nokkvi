@@ -32,6 +32,7 @@ One native PipeWire stream via a shared `rodio::Mixer`:
 
 ## Critical Rules
 
+- **Codec registry**: every Symphonia decoder/lookup MUST go through `audio::symphonia_registry::codecs()`, never `symphonia::default::get_codecs()`. The shared registry adds `symphonia-adapter-libopus` on top of the Symphonia defaults; the upstream default registry has no Opus decoder (pdeljanov/Symphonia#8 open since 2020), so any direct call to `get_codecs()` re-breaks `.opus` playback (see GH#3).
 - **Track changes**: create fresh decoders **before** locking the engine; release the engine lock during decoder operations. Use `engine.load_track_with_rg(url, rg)` — the atomic pair that stashes ReplayGain on the renderer and then calls `set_source(url)`, replacing the historical `set_pending_replay_gain` + `load_track` / `set_source` pairing in `PlaybackController`.
 - **`SourceGeneration`**: typed atomic counter; `bump_for_user_action()` on every user-driven source change. The renderer snapshots `current()` before releasing the engine lock and discards stale completion callbacks.
 - **Mode toggle reset**: `reset_next_track()` clears the prepared decoder and disarms crossfade on shuffle / repeat / consume toggle. Mode toggles return `ModeToggleEffect` (currently a no-op type) so the controller chains the reset uniformly.

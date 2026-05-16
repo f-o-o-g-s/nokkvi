@@ -17,7 +17,7 @@ use tokio_util::{
 use tracing::{debug, error, trace, warn};
 
 use super::range_http_reader::RangeHttpReader;
-use crate::audio::{AudioBuffer, AudioFormat, SampleFormat};
+use crate::audio::{AudioBuffer, AudioFormat, SampleFormat, symphonia_registry};
 
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
@@ -582,7 +582,7 @@ impl AudioDecoder {
         // Create decoder
         let decoder_opts = DecoderOptions::default();
         trace!(" [DECODER] Creating codec decoder...");
-        let decoder = symphonia::default::get_codecs()
+        let decoder = symphonia_registry::codecs()
             .make(&track.codec_params, &decoder_opts)
             .context("Failed to create decoder")?;
         trace!(" [DECODER] Codec decoder created successfully");
@@ -590,7 +590,7 @@ impl AudioDecoder {
         // Get format info
         let codec_params = &track.codec_params;
         let mut codec_name = None;
-        if let Some(desc) = symphonia::default::get_codecs().get_codec(codec_params.codec) {
+        if let Some(desc) = symphonia_registry::codecs().get_codec(codec_params.codec) {
             codec_name = Some(desc.short_name.to_string());
         }
 
@@ -766,7 +766,7 @@ impl AudioDecoder {
                                 let format_reader = probed.format;
                                 if let Some(track) = format_reader.default_track() {
                                     self.track_id = Some(track.id);
-                                    let decoder = symphonia::default::get_codecs().make(
+                                    let decoder = symphonia_registry::codecs().make(
                                         &track.codec_params,
                                         &symphonia::core::codecs::DecoderOptions::default(),
                                     );
@@ -788,7 +788,7 @@ impl AudioDecoder {
                                             sample_rate,
                                             channels as u32,
                                         );
-                                        if let Some(desc) = symphonia::default::get_codecs()
+                                        if let Some(desc) = symphonia_registry::codecs()
                                             .get_codec(track.codec_params.codec)
                                         {
                                             self.live_codec = Some(desc.short_name.to_string());
