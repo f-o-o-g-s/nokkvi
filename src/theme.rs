@@ -1047,14 +1047,14 @@ pub(crate) fn darken(color: Color, amount: f32) -> Color {
     blend_toward(color, Color::BLACK, amount)
 }
 
-/// Returns (highlight_color, shadow_color) for 3D raised accent-colored elements
+/// Returns (highlight_color, shadow_color) for 3D raised elements derived from
+/// an arbitrary accent-family base color.
 ///
-/// Derives highlight/shadow from the base accent color by blending toward white/black.
-/// This creates a cohesive color family instead of metallic pure black/white overlays.
+/// Lighten/darken ratios are mode-aware: light mode prefers a subtle highlight
+/// and moderate shadow; dark mode prefers a moderate highlight and subtle
+/// shadow. Shared between the bright-accent and darker-accent wrappers below.
 #[inline]
-pub(crate) fn border_3d_accent_raised() -> (Color, Color) {
-    let base = accent_bright();
-
+fn border_3d_accent_from_base(base: Color) -> (Color, Color) {
     if is_light_mode() {
         // Light mode: subtle lighten, moderate darken
         (lighten(base, 0.25), darken(base, 0.35))
@@ -1064,18 +1064,21 @@ pub(crate) fn border_3d_accent_raised() -> (Color, Color) {
     }
 }
 
+/// Returns (highlight_color, shadow_color) for 3D raised accent-colored elements
+///
+/// Derives highlight/shadow from the base accent color by blending toward white/black.
+/// This creates a cohesive color family instead of metallic pure black/white overlays.
+#[inline]
+pub(crate) fn border_3d_accent_raised() -> (Color, Color) {
+    border_3d_accent_from_base(accent_bright())
+}
+
 /// Returns (highlight_color, shadow_color) for 3D raised accent elements using darker accent
 ///
 /// Same approach but uses the darker accent as the base color.
 #[inline]
 pub(crate) fn border_3d_accent_darker_raised() -> (Color, Color) {
-    let base = accent(); // Darker accent
-
-    if is_light_mode() {
-        (lighten(base, 0.25), darken(base, 0.35))
-    } else {
-        (lighten(base, 0.35), darken(base, 0.30))
-    }
+    border_3d_accent_from_base(accent())
 }
 
 // ============================================================================
@@ -1282,5 +1285,79 @@ mod tests {
             elapsed.as_millis() < 1_000,
             "fg0() x{iters} unexpectedly slow: {elapsed:?}"
         );
+    }
+
+    // ------------------------------------------------------------------------
+    // border_3d_accent_from_base — helper extracted from the two public
+    // wrappers (`border_3d_accent_raised` / `border_3d_accent_darker_raised`).
+    // These tests pin both the lighten/darken ratios (so a future "tweak the
+    // 3D look" PR can't silently regress them) and the wrapper equivalence
+    // (so a wrapper edit can't accidentally diverge from the helper).
+    // ------------------------------------------------------------------------
+
+    /// Sequential guard for tests that flip `theme::set_light_mode` (a global
+    /// atomic). Mirrors the pattern in `widgets/boat_tests.rs` so the helper
+    /// tests below don't race with each other under multi-threaded
+    /// `cargo test`. `parking_lot::Mutex` avoids std-lock poisoning if one
+    /// test panics.
+    static THEME_MODE_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+    /// Approximate-equality helper for `Color` channel comparisons. Floating-
+    /// point blend math means `0.5 + (1.0 - 0.5) * 0.35` is unlikely to be
+    /// exactly representable, so we tolerate a tiny epsilon.
+    fn assert_color_eq(actual: Color, expected: Color, what: &str) {
+        let eps = 1e-6_f32;
+        assert!(
+            (actual.r - expected.r).abs() < eps
+                && (actual.g - expected.g).abs() < eps
+                && (actual.b - expected.b).abs() < eps
+                && (actual.a - expected.a).abs() < eps,
+            "{what}: expected {expected:?}, got {actual:?}"
+        );
+    }
+
+    /// Lighten/darken ratios MUST stay at (0.25, 0.35) under light mode and
+    /// (0.35, 0.30) under dark mode. A regression here would shift every 3D
+    /// accent button's highlight/shadow contrast simultaneously, which the
+    /// human owner would not catch without a side-by-side palette diff.
+    #[test]
+    fn border_3d_accent_from_base_pins_lighten_darken_ratios() {
+        let _guard = THEME_MODE_LOCK.lock();
+        let initial_mode = is_light_mode();
+
+        let base = Color::from_rgb(0.5, 0.3, 0.7);
+
+        set_light_mode(false);
+        let (hi_dark, lo_dark) = border_3d_accent_from_base(base);
+        assert_color_eq(hi_dark, lighten(base, 0.35), "dark-mode highlight");
+        assert_color_eq(lo_dark, darken(base, 0.30), "dark-mode shadow");
+
+        set_light_mode(true);
+        let (hi_light, lo_light) = border_3d_accent_from_base(base);
+        assert_color_eq(hi_light, lighten(base, 0.25), "light-mode highlight");
+        assert_color_eq(lo_light, darken(base, 0.35), "light-mode shadow");
+
+        // Restore the global atomic before exit so we don't bleed state into
+        // any other test in this binary that observes `is_light_mode()`.
+        set_light_mode(initial_mode);
+    }
+
+    /// The two public wrappers MUST be one-line delegations to the helper:
+    /// bright-accent base and darker-accent base, respectively. Pinning this
+    /// equivalence prevents a future edit from re-introducing copy-pasted
+    /// math in either wrapper.
+    #[test]
+    fn border_3d_accent_wrappers_delegate_to_helper() {
+        let _guard = THEME_MODE_LOCK.lock();
+
+        let (raised_hi, raised_lo) = border_3d_accent_raised();
+        let (expected_raised_hi, expected_raised_lo) = border_3d_accent_from_base(accent_bright());
+        assert_color_eq(raised_hi, expected_raised_hi, "raised highlight");
+        assert_color_eq(raised_lo, expected_raised_lo, "raised shadow");
+
+        let (darker_hi, darker_lo) = border_3d_accent_darker_raised();
+        let (expected_darker_hi, expected_darker_lo) = border_3d_accent_from_base(accent());
+        assert_color_eq(darker_hi, expected_darker_hi, "darker-raised highlight");
+        assert_color_eq(darker_lo, expected_darker_lo, "darker-raised shadow");
     }
 }
