@@ -97,6 +97,39 @@ fn build_spectrum_engine(
 pub(crate) type SharedVisualizerConfig = Arc<RwLock<VisualizerConfig>>;
 
 // ========================================
+// Visualizer tick rate (60 Hz family)
+// ========================================
+
+/// Visualizer timing constants derived from the 60 Hz tick rate.
+///
+/// All four constants are const-fn-arithmeticked from `TICK_RATE_HZ` so a
+/// future agent re-tunes the family by changing a single value. Replaces
+/// scattered 16667 / 16670 / 16.67 / 0.01667 literals that had each been
+/// transcribed by hand and drifted by ≤ 0.5 µs/frame coincidentally.
+///
+/// Integer division on `TICK_INTERVAL` yields 16_666_666 ns (1e9 / 60 with
+/// a 40 ns remainder dropped). The f64 / f32 variants use the exact
+/// `repeating` representation at their precision.
+pub(crate) struct VisualizerTiming;
+
+impl VisualizerTiming {
+    /// Tick rate in Hz. The FFT thread targets this, peak decay and flash
+    /// effects are scaled to it, and the GPU shader's animation clock is
+    /// driven from elapsed time at this cadence.
+    pub(crate) const TICK_RATE_HZ: u32 = 60;
+    /// One tick as a `Duration` — used by `thread::sleep` budgeting and
+    /// by `apply_peak_decay_step` as the per-frame decrement.
+    pub(crate) const TICK_INTERVAL: Duration =
+        Duration::from_nanos(1_000_000_000_u64 / Self::TICK_RATE_HZ as u64);
+    /// One tick in milliseconds as `f64` — used by the peak-fade math
+    /// (`tick_ms / peak_fade_time_ms` per frame).
+    pub(crate) const TICK_INTERVAL_MS_F64: f64 = 1000.0 / Self::TICK_RATE_HZ as f64;
+    /// One tick in seconds as `f32` — used by the flash-effect elapsed
+    /// clock that drives the LCG seed.
+    pub(crate) const TICK_INTERVAL_SECS_F32: f32 = 1.0 / Self::TICK_RATE_HZ as f32;
+}
+
+// ========================================
 // Consolidated Inner Structs
 // ========================================
 
@@ -523,7 +556,7 @@ impl VisualizerState {
             .spawn(move || {
                 debug!("📊 [FFT THREAD] Started background FFT processing at 60fps");
                 let mut frame_count: u64 = 0;
-                let target_interval = Duration::from_micros(16667); // ~60fps
+                let target_interval = VisualizerTiming::TICK_INTERVAL;
 
                 while running.load(Ordering::Relaxed) {
                     let frame_start = Instant::now();
@@ -770,12 +803,12 @@ impl VisualizerState {
 
                     let peak_hold_duration = Duration::from_millis(u64::from(peak_hold_time_ms));
                     let fade_rate_per_frame = if peak_fade_time_ms > 0 {
-                        16.67 / f64::from(peak_fade_time_ms)
+                        VisualizerTiming::TICK_INTERVAL_MS_F64 / f64::from(peak_fade_time_ms)
                     } else {
                         0.1
                     };
 
-                    let chunk_duration = Duration::from_micros(16670);
+                    let chunk_duration = VisualizerTiming::TICK_INTERVAL;
                     let safe_len = visual_count
                         .min(output.len())
                         .min(display.peak_bars.len())
@@ -897,7 +930,7 @@ impl VisualizerState {
         }
 
         // Update elapsed time
-        effects.elapsed_time += 0.01667;
+        effects.elapsed_time += VisualizerTiming::TICK_INTERVAL_SECS_F32;
     }
 
     pub(crate) fn get_bars(&self) -> Vec<f64> {
@@ -1308,7 +1341,20 @@ mod tests {
     use super::*;
 
     const HOLD: Duration = Duration::from_millis(500);
-    const TICK: Duration = Duration::from_micros(16670);
+    const TICK: Duration = VisualizerTiming::TICK_INTERVAL;
+
+    /// Pin the typed-struct 60 Hz tick-rate constants so a future agent
+    /// who edits `TICK_RATE_HZ` (or the const-fn arithmetic) sees the
+    /// downstream values move in lockstep. Integer division on the
+    /// nanosecond constant intentionally drops 40 ns of remainder (1e9 /
+    /// 60 = 16_666_666 ns with 40 ns leftover).
+    #[test]
+    fn visualizer_timing_consts_match_60_hz() {
+        assert_eq!(VisualizerTiming::TICK_RATE_HZ, 60);
+        assert_eq!(VisualizerTiming::TICK_INTERVAL.as_nanos(), 16_666_666_u128);
+        assert!((VisualizerTiming::TICK_INTERVAL_MS_F64 - (1000.0 / 60.0)).abs() < 1e-12);
+        assert!((VisualizerTiming::TICK_INTERVAL_SECS_F32 - (1.0 / 60.0)).abs() < 1e-7);
+    }
 
     fn fixtures(peak: f64, alpha: f64, velocity: f64) -> (DisplayBuffers, PeakState) {
         let mut display = DisplayBuffers::new(1);

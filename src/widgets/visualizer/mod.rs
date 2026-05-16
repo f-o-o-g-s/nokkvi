@@ -406,6 +406,61 @@ impl Visualizer {
         }
     }
 
+    /// Construct the 33-field `ShaderParams` from a config snapshot, theme
+    /// colors, and the widget's per-instance state.
+    ///
+    /// Sources, by axis:
+    /// - `cfg.bars.*` / `cfg.lines.*` / `cfg.opacity` — hot-reloaded TOML
+    ///   config (units converted: peak hold/fade ms → seconds, peak height
+    ///   percentage → ratio).
+    /// - `colors.*` — theme palette (border color/opacity, bar/peak gradient
+    ///   palettes).
+    /// - `self.peak_enabled` / `peak_alpha` / `peak_color` / `line_thickness` /
+    ///   `bar_width` / `bar_spacing` / `edge_spacing` — per-widget builder
+    ///   state set by `width()` / `mode()` / the `peak_*` setters.
+    /// - `lines_glow_intensity: 0.0` — feature toggle held at zero by design;
+    ///   the glow path lives in the shader but the UI never exposes it.
+    fn build_shader_params(
+        &self,
+        cfg: &crate::visualizer_config::VisualizerConfig,
+        colors: &crate::visualizer_config::ThemeBarColors,
+    ) -> ShaderParams {
+        ShaderParams {
+            gradient_colors: colors.get_bar_gradient_colors(),
+            peak_gradient_colors: colors.get_peak_gradient_colors(),
+            border_color: colors.get_border_color(),
+            border_width: cfg.bars.border_width,
+            peak_enabled: self.peak_enabled,
+            peak_thickness: cfg.bars.peak_height_ratio as f32 / 100.0,
+            peak_alpha: self.peak_alpha,
+            peak_color: self.peak_color,
+            line_thickness: self.line_thickness,
+            bar_width: self.bar_width,
+            bar_spacing: self.bar_spacing,
+            edge_spacing: self.edge_spacing,
+            led_bars: cfg.bars.led_bars,
+            led_segment_height: cfg.bars.led_segment_height,
+            led_border_opacity: colors.led_border_opacity,
+            border_opacity: colors.border_opacity,
+            gradient_mode: cfg.bars.get_gradient_mode_value(),
+            gradient_orientation: cfg.bars.get_gradient_orientation_value(),
+            peak_gradient_mode: cfg.bars.get_peak_gradient_mode_value(),
+            peak_mode: cfg.bars.get_peak_mode_value(),
+            peak_hold_time: cfg.bars.peak_hold_time as f32 / 1000.0,
+            peak_fade_time: cfg.bars.peak_fade_time as f32 / 1000.0,
+            bar_depth_3d: cfg.bars.bar_depth_3d,
+            global_opacity: cfg.opacity,
+            lines_outline_thickness: cfg.lines.outline_thickness,
+            lines_outline_opacity: cfg.lines.outline_opacity,
+            lines_animation_speed: cfg.lines.animation_speed,
+            lines_gradient_mode: cfg.lines.get_gradient_mode_value(),
+            lines_fill_opacity: cfg.lines.fill_opacity,
+            lines_mirror: cfg.lines.mirror,
+            lines_glow_intensity: 0.0,
+            lines_style: cfg.lines.get_style_value(),
+        }
+    }
+
     /// Convert to widget element based on mode
     /// Uses GPU shader widget for hardware-accelerated rendering
     pub fn view<'a, Message: 'a>(&self) -> Element<'a, Message> {
@@ -416,89 +471,10 @@ impl Visualizer {
         let cfg = self.config.read();
         let colors: crate::visualizer_config::ThemeBarColors =
             crate::theme::get_visualizer_colors().into();
-        let (
-            border_width,
-            led_bars,
-            led_segment_height,
-            led_border_opacity,
-            border_opacity,
-            gradient_colors,
-            peak_gradient_colors,
-            gradient_mode,
-            gradient_orientation,
-            peak_gradient_mode,
-            peak_mode,
-            peak_hold_time,
-            peak_fade_time,
-            border_color,
-            bar_depth_3d,
-            peak_height_ratio,
-        ) = (
-            cfg.bars.border_width,
-            cfg.bars.led_bars,
-            cfg.bars.led_segment_height,
-            colors.led_border_opacity,
-            colors.border_opacity,
-            colors.get_bar_gradient_colors(),
-            colors.get_peak_gradient_colors(),
-            cfg.bars.get_gradient_mode_value(), // 0=static, 2=wave, 3=shimmer, 4=energy
-            cfg.bars.get_gradient_orientation_value(), // 0=vertical, 1=horizontal
-            cfg.bars.get_peak_gradient_mode_value(), // 0=static, 1=cycle, 2=height, 3=match
-            cfg.bars.get_peak_mode_value(),     // 0=none, 1=fade, 2=fall, 3=fall_accel
-            cfg.bars.peak_hold_time as f32 / 1000.0, // Convert ms to seconds
-            cfg.bars.peak_fade_time as f32 / 1000.0, // Convert ms to seconds
-            colors.get_border_color(),
-            cfg.bars.bar_depth_3d,
-            cfg.bars.peak_height_ratio as f32 / 100.0, // Convert percentage to ratio
-        );
-        let global_opacity = cfg.opacity;
-        let (lines_outline_thickness, lines_outline_opacity, lines_animation_speed) = (
-            cfg.lines.outline_thickness,
-            cfg.lines.outline_opacity,
-            cfg.lines.animation_speed,
-        );
-        let lines_gradient_mode = cfg.lines.get_gradient_mode_value();
-        let lines_fill_opacity = cfg.lines.fill_opacity;
-        let lines_mirror = cfg.lines.mirror;
-        let lines_style = cfg.lines.get_style_value();
+        let params = self.build_shader_params(&cfg, &colors);
         drop(cfg);
 
         // Create shader-based visualizer (GPU accelerated)
-        let params = ShaderParams {
-            gradient_colors,
-            peak_gradient_colors,
-            border_color,
-            border_width,
-            peak_enabled: self.peak_enabled,
-            peak_thickness: peak_height_ratio,
-            peak_alpha: self.peak_alpha,
-            peak_color: self.peak_color,
-            line_thickness: self.line_thickness,
-            bar_width: self.bar_width,
-            bar_spacing: self.bar_spacing,
-            edge_spacing: self.edge_spacing,
-            led_bars,
-            led_segment_height,
-            led_border_opacity,
-            border_opacity,
-            gradient_mode,
-            gradient_orientation,
-            peak_gradient_mode,
-            peak_mode,
-            peak_hold_time,
-            peak_fade_time,
-            bar_depth_3d,
-            global_opacity,
-            lines_outline_thickness,
-            lines_outline_opacity,
-            lines_animation_speed,
-            lines_gradient_mode,
-            lines_fill_opacity,
-            lines_mirror,
-            lines_glow_intensity: 0.0,
-            lines_style,
-        };
-
         let shader_viz = ShaderVisualizer::new(self.state.clone(), self.mode, params);
 
         shader(shader_viz)
@@ -615,5 +591,112 @@ mod wgsl_helper_tests {
             LINES.contains("const LINES_PALETTE_INDEX_MOD: u32 = 8u;"),
             "lines.wgsl is missing LINES_PALETTE_INDEX_MOD const",
         );
+    }
+}
+
+#[cfg(test)]
+mod wgsl_config_identity_tests {
+    /// Extract the `struct Config { … }` block from a WGSL source, strip
+    /// line comments + whitespace, and return the remaining field lines
+    /// joined by newlines.
+    ///
+    /// Comments are removed so the assertion checks the field structure
+    /// only — Lane 2's visualizer-dedup work touches `gradient_mode` and
+    /// `lines_gradient_mode` doc comments asymmetrically between the
+    /// two shaders, and we don't want comment drift to fail the check.
+    /// The Rust-side `VisualizerConfig` (shader.rs) is the byte-layout
+    /// source of truth; this test catches a field drift between the
+    /// two WGSL mirrors.
+    fn extract_config_block(src: &str) -> String {
+        let start = src
+            .find("struct Config {")
+            .expect("WGSL must contain `struct Config {`");
+        let tail = &src[start..];
+        let end = tail
+            .find('}')
+            .expect("WGSL struct Config must close with `}`")
+            + 1;
+        let block = &tail[..end];
+        block
+            .lines()
+            .map(|line| line.split("//").next().unwrap_or("").trim())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn wgsl_config_blocks_declare_identical_fields() {
+        const BARS: &str = include_str!("shaders/bars.wgsl");
+        const LINES: &str = include_str!("shaders/lines.wgsl");
+        let bars_cfg = extract_config_block(BARS);
+        let lines_cfg = extract_config_block(LINES);
+        assert_eq!(
+            bars_cfg, lines_cfg,
+            "WGSL Config blocks in bars.wgsl + lines.wgsl must declare identical fields. \
+             The Rust-side VisualizerConfig (shader.rs) is the byte-layout source of truth; \
+             both shaders must mirror its field list verbatim or the bytemuck cast UB-fails."
+        );
+    }
+}
+
+#[cfg(test)]
+mod build_shader_params_tests {
+    //! Output pinning for `Visualizer::build_shader_params`.
+    //!
+    //! Constructs a Visualizer with a known config + default theme colors
+    //! and asserts a handful of specific field outputs on the returned
+    //! `ShaderParams`. Pins the unit conversions (ms → seconds, percent →
+    //! ratio) and the routing of cfg-vs-colors-vs-self fields so a future
+    //! agent who reorders the helper sees the assertions fail before the
+    //! UI flickers.
+    use std::sync::Arc;
+
+    use parking_lot::RwLock;
+
+    use super::*;
+    use crate::visualizer_config::{ThemeBarColors, VisualizerConfig};
+
+    #[test]
+    fn build_shader_params_routes_known_fields() {
+        // Known config — adjust a few fields away from default so the
+        // assertions cannot accidentally pass on a wrong source.
+        let mut cfg = VisualizerConfig::default();
+        cfg.bars.border_width = 3.5;
+        cfg.bars.peak_height_ratio = 80; // → 0.8 ratio
+        cfg.bars.peak_hold_time = 1234; // → 1.234 s
+        cfg.bars.peak_fade_time = 500; // → 0.5 s
+        cfg.bars.led_bars = true;
+        cfg.opacity = 0.42;
+        cfg.lines.mirror = true;
+
+        let shared = Arc::new(RwLock::new(cfg.clone()));
+        let viz = Visualizer::new(64, shared);
+        let colors = ThemeBarColors::default();
+        let params = viz.build_shader_params(&cfg, &colors);
+
+        // cfg-routed (cfg.bars.*)
+        assert!((params.border_width - 3.5).abs() < 1e-6);
+        assert!((params.peak_thickness - 0.80).abs() < 1e-6);
+        assert!((params.peak_hold_time - 1.234).abs() < 1e-6);
+        assert!((params.peak_fade_time - 0.5).abs() < 1e-6);
+        assert!(params.led_bars);
+
+        // cfg-routed (cfg.opacity / cfg.lines.*)
+        assert!((params.global_opacity - 0.42).abs() < 1e-6);
+        assert!(params.lines_mirror);
+
+        // colors-routed — peak/bar gradient palettes must be padded to 8.
+        assert_eq!(params.gradient_colors.len(), 8);
+        assert_eq!(params.peak_gradient_colors.len(), 8);
+
+        // self-routed: Visualizer::new defaults peak_enabled=true,
+        // peak_alpha=1.0, peak_color=TRANSPARENT.
+        assert!(params.peak_enabled);
+        assert!((params.peak_alpha - 1.0).abs() < 1e-6);
+        assert_eq!(params.peak_color, iced::Color::TRANSPARENT);
+
+        // Constant: lines_glow_intensity is pinned at 0.0 by design.
+        assert!((params.lines_glow_intensity - 0.0).abs() < 1e-9);
     }
 }

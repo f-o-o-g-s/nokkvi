@@ -7,6 +7,65 @@ use iced::wgpu;
 
 use super::shader::{Uniforms, VisualizerPipeline};
 
+/// Build one of the four bars/lines × default/MSAA render pipelines.
+///
+/// The four sites in `VisualizerPipeline::new` differ only along four axes:
+/// `topology` (TriangleList for bars, TriangleStrip for lines), `msaa`
+/// (default vs 4× MSAA), `shader` (bars.wgsl vs lines.wgsl module), and
+/// `label` (for debug introspection). Everything else — pipeline layout,
+/// vertex/fragment entry points, `ALPHA_BLENDING` blend state, color
+/// target format, write mask, depth stencil, multiview mask, cache —
+/// is identical, so the helper centralizes the wgpu boilerplate.
+///
+/// `vs_main` / `fs_main` are the entry points both shaders share.
+fn build_visualizer_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    topology: wgpu::PrimitiveTopology,
+    msaa: bool,
+    label: &'static str,
+    format: wgpu::TextureFormat,
+) -> wgpu::RenderPipeline {
+    let multisample = if msaa {
+        wgpu::MultisampleState {
+            count: 4,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        }
+    } else {
+        wgpu::MultisampleState::default()
+    };
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_main"),
+            buffers: &[],
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        },
+        primitive: wgpu::PrimitiveState {
+            topology,
+            ..Default::default()
+        },
+        depth_stencil: None,
+        multisample,
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        }),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
 impl VisualizerPipeline {
     pub(crate) const MAX_BARS: usize = 2048;
 
@@ -146,132 +205,48 @@ impl VisualizerPipeline {
         });
 
         // Create bars render pipeline (no MSAA — fast path for flat mode)
-        let bars_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("visualizer bars pipeline"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &bars_shader,
-                entry_point: Some("vs_main"),
-                buffers: &[],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &bars_shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let bars_pipeline = build_visualizer_pipeline(
+            device,
+            &layout,
+            &bars_shader,
+            wgpu::PrimitiveTopology::TriangleList,
+            false,
+            "visualizer bars pipeline",
+            format,
+        );
 
         // Create bars render pipeline with 4x MSAA (for perspective/3D mode)
-        let bars_pipeline_msaa = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("visualizer bars pipeline (MSAA 4x)"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &bars_shader,
-                entry_point: Some("vs_main"),
-                buffers: &[],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 4,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &bars_shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let bars_pipeline_msaa = build_visualizer_pipeline(
+            device,
+            &layout,
+            &bars_shader,
+            wgpu::PrimitiveTopology::TriangleList,
+            true,
+            "visualizer bars pipeline (MSAA 4x)",
+            format,
+        );
 
         // Create lines render pipeline (uses TriangleStrip for thick lines)
-        let lines_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("visualizer lines pipeline"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &lines_shader,
-                entry_point: Some("vs_main"),
-                buffers: &[],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &lines_shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let lines_pipeline = build_visualizer_pipeline(
+            device,
+            &layout,
+            &lines_shader,
+            wgpu::PrimitiveTopology::TriangleStrip,
+            false,
+            "visualizer lines pipeline",
+            format,
+        );
 
         // Create lines render pipeline with 4x MSAA (for perspective/3D mode)
-        let lines_pipeline_msaa = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("visualizer lines pipeline (MSAA 4x)"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &lines_shader,
-                entry_point: Some("vs_main"),
-                buffers: &[],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 4,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &lines_shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let lines_pipeline_msaa = build_visualizer_pipeline(
+            device,
+            &layout,
+            &lines_shader,
+            wgpu::PrimitiveTopology::TriangleStrip,
+            true,
+            "visualizer lines pipeline (MSAA 4x)",
+            format,
+        );
 
         // --- Blit pipeline for compositing MSAA result onto framebuffer ---
         let blit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
