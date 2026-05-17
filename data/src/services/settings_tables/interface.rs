@@ -32,6 +32,7 @@ define_settings! {
     dispatch_fn: dispatch_interface_tab_setting,
     apply_fn: apply_toml_interface_tab,
     dump_fn: dump_interface_tab_player_settings,
+    write_fn: write_interface_tab_toml,
     settings: [
         // --- Layout ---
         NavLayoutSetting {
@@ -40,6 +41,7 @@ define_settings! {
             setter: |mgr, v: String| mgr.set_nav_layout(NavLayout::from_label(&v)),
             toml_apply: |ts, p| p.nav_layout = ts.nav_layout,
             read: |src, out| out.nav_layout = src.nav_layout,
+            write: |ps, ts| ts.nav_layout = ps.nav_layout,
             ui_meta: {
                 label: "Navigation Layout",
                 category: "Layout",
@@ -55,6 +57,7 @@ define_settings! {
             setter: |mgr, v: String| mgr.set_nav_display_mode(NavDisplayMode::from_label(&v)),
             toml_apply: |ts, p| p.nav_display_mode = ts.nav_display_mode,
             read: |src, out| out.nav_display_mode = src.nav_display_mode,
+            write: |ps, ts| ts.nav_display_mode = ps.nav_display_mode,
             ui_meta: {
                 label: "Nav Display",
                 category: "Layout",
@@ -70,6 +73,7 @@ define_settings! {
             setter: |mgr, v: String| mgr.set_track_info_display(TrackInfoDisplay::from_label(&v)),
             toml_apply: |ts, p| p.track_info_display = ts.track_info_display,
             read: |src, out| out.track_info_display = src.track_info_display,
+            write: |ps, ts| ts.track_info_display = ps.track_info_display,
             ui_meta: {
                 label: "Metadata Strip",
                 category: "Layout",
@@ -85,6 +89,7 @@ define_settings! {
             setter: |mgr, v: String| mgr.set_slot_row_height(SlotRowHeight::from_label(&v)),
             toml_apply: |ts, p| p.slot_row_height = ts.slot_row_height,
             read: |src, out| out.slot_row_height = src.slot_row_height,
+            write: |ps, ts| ts.slot_row_height = ps.slot_row_height,
             ui_meta: {
                 label: "Row Density",
                 category: "Layout",
@@ -102,6 +107,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_horizontal_volume(v),
             toml_apply: |ts, p| p.horizontal_volume = ts.horizontal_volume,
             read: |src, out| out.horizontal_volume = src.horizontal_volume,
+            write: |ps, ts| ts.horizontal_volume = ps.horizontal_volume,
             ui_meta: {
                 label: "Horizontal Volume Controls",
                 category: "Layout",
@@ -117,6 +123,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_slot_text_links(v),
             toml_apply: |ts, p| p.slot_text_links = ts.slot_text_links,
             read: |src, out| out.slot_text_links = src.slot_text_links,
+            write: |ps, ts| ts.slot_text_links = ps.slot_text_links,
             ui_meta: {
                 label: "Slot Text Links",
                 category: "Views",
@@ -133,6 +140,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_albums_artwork_overlay(v),
             toml_apply: |ts, p| p.albums_artwork_overlay = ts.albums_artwork_overlay,
             read: |src, out| out.albums_artwork_overlay = src.albums_artwork_overlay,
+            write: |ps, ts| ts.albums_artwork_overlay = ps.albums_artwork_overlay,
         },
         ArtistsArtworkOverlay {
             key: "general.artists_artwork_overlay",
@@ -140,6 +148,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_artists_artwork_overlay(v),
             toml_apply: |ts, p| p.artists_artwork_overlay = ts.artists_artwork_overlay,
             read: |src, out| out.artists_artwork_overlay = src.artists_artwork_overlay,
+            write: |ps, ts| ts.artists_artwork_overlay = ps.artists_artwork_overlay,
         },
         SongsArtworkOverlay {
             key: "general.songs_artwork_overlay",
@@ -147,6 +156,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_songs_artwork_overlay(v),
             toml_apply: |ts, p| p.songs_artwork_overlay = ts.songs_artwork_overlay,
             read: |src, out| out.songs_artwork_overlay = src.songs_artwork_overlay,
+            write: |ps, ts| ts.songs_artwork_overlay = ps.songs_artwork_overlay,
         },
         PlaylistsArtworkOverlay {
             key: "general.playlists_artwork_overlay",
@@ -154,6 +164,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_playlists_artwork_overlay(v),
             toml_apply: |ts, p| p.playlists_artwork_overlay = ts.playlists_artwork_overlay,
             read: |src, out| out.playlists_artwork_overlay = src.playlists_artwork_overlay,
+            write: |ps, ts| ts.playlists_artwork_overlay = ps.playlists_artwork_overlay,
         },
         // --- Strip ---
         StripShowTitle {
@@ -162,6 +173,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_strip_show_title(v),
             toml_apply: |ts, p| p.strip_show_title = ts.strip_show_title,
             read: |src, out| out.strip_show_title = src.strip_show_title,
+            write: |ps, ts| ts.strip_show_title = ps.strip_show_title,
         },
         StripShowArtist {
             key: "general.strip_show_artist",
@@ -169,6 +181,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_strip_show_artist(v),
             toml_apply: |ts, p| p.strip_show_artist = ts.strip_show_artist,
             read: |src, out| out.strip_show_artist = src.strip_show_artist,
+            write: |ps, ts| ts.strip_show_artist = ps.strip_show_artist,
         },
         StripShowAlbum {
             key: "general.strip_show_album",
@@ -176,6 +189,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_strip_show_album(v),
             toml_apply: |ts, p| p.strip_show_album = ts.strip_show_album,
             read: |src, out| out.strip_show_album = src.strip_show_album,
+            write: |ps, ts| ts.strip_show_album = ps.strip_show_album,
         },
         StripShowFormatInfo {
             key: "general.strip_show_format_info",
@@ -183,6 +197,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_strip_show_format_info(v),
             toml_apply: |ts, p| p.strip_show_format_info = ts.strip_show_format_info,
             read: |src, out| out.strip_show_format_info = src.strip_show_format_info,
+            write: |ps, ts| ts.strip_show_format_info = ps.strip_show_format_info,
         },
         StripMergedMode {
             key: "general.strip_merged_mode",
@@ -190,6 +205,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_strip_merged_mode(v),
             toml_apply: |ts, p| p.strip_merged_mode = ts.strip_merged_mode,
             read: |src, out| out.strip_merged_mode = src.strip_merged_mode,
+            write: |ps, ts| ts.strip_merged_mode = ps.strip_merged_mode,
             ui_meta: {
                 label: "Merged Mode",
                 category: "Metadata Strip",
@@ -207,6 +223,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_strip_show_labels(v),
             toml_apply: |ts, p| p.strip_show_labels = ts.strip_show_labels,
             read: |src, out| out.strip_show_labels = src.strip_show_labels,
+            write: |ps, ts| ts.strip_show_labels = ps.strip_show_labels,
             ui_meta: {
                 label: "Show Labels",
                 category: "Metadata Strip",
@@ -223,6 +240,7 @@ define_settings! {
             setter: |mgr, v: String| mgr.set_strip_separator(StripSeparator::from_label(&v)),
             toml_apply: |ts, p| p.strip_separator = ts.strip_separator,
             read: |src, out| out.strip_separator = src.strip_separator,
+            write: |ps, ts| ts.strip_separator = ps.strip_separator,
             ui_meta: {
                 label: "Field Separator",
                 category: "Metadata Strip",
@@ -245,6 +263,7 @@ define_settings! {
             setter: |mgr, v: String| mgr.set_strip_click_action(StripClickAction::from_label(&v)),
             toml_apply: |ts, p| p.strip_click_action = ts.strip_click_action,
             read: |src, out| out.strip_click_action = src.strip_click_action,
+            write: |ps, ts| ts.strip_click_action = ps.strip_click_action,
             ui_meta: {
                 label: "Click Action",
                 category: "Metadata Strip",
@@ -270,6 +289,7 @@ define_settings! {
             setter: |mgr, v: String| mgr.set_artwork_column_mode(ArtworkColumnMode::from_label(&v)),
             toml_apply: |ts, p| p.artwork_column_mode = ts.artwork_column_mode,
             read: |src, out| out.artwork_column_mode = src.artwork_column_mode,
+            write: |ps, ts| ts.artwork_column_mode = ps.artwork_column_mode,
             ui_meta: {
                 label: "Display Mode",
                 category: "Artwork Column",
@@ -302,6 +322,7 @@ define_settings! {
             },
             toml_apply: |ts, p| p.artwork_column_stretch_fit = ts.artwork_column_stretch_fit,
             read: |src, out| out.artwork_column_stretch_fit = src.artwork_column_stretch_fit,
+            write: |ps, ts| ts.artwork_column_stretch_fit = ps.artwork_column_stretch_fit,
         },
         ArtworkAutoMaxPctSetting {
             key: "general.artwork_auto_max_pct",
@@ -309,6 +330,7 @@ define_settings! {
             setter: |mgr, v: f64| mgr.set_artwork_auto_max_pct(v as f32),
             toml_apply: |ts, p| p.artwork_auto_max_pct = ts.artwork_auto_max_pct,
             read: |src, out| out.artwork_auto_max_pct = src.artwork_auto_max_pct,
+            write: |ps, ts| ts.artwork_auto_max_pct = ps.artwork_auto_max_pct,
             ui_meta: {
                 label: "Auto-mode artwork size",
                 category: "Artwork Column",
@@ -328,6 +350,7 @@ define_settings! {
             setter: |mgr, v: f64| mgr.set_artwork_vertical_height_pct(v as f32),
             toml_apply: |ts, p| p.artwork_vertical_height_pct = ts.artwork_vertical_height_pct,
             read: |src, out| out.artwork_vertical_height_pct = src.artwork_vertical_height_pct,
+            write: |ps, ts| ts.artwork_vertical_height_pct = ps.artwork_vertical_height_pct,
             ui_meta: {
                 label: "Always-Vertical artwork height",
                 category: "Artwork Column",
@@ -585,5 +608,34 @@ mod tests {
             ui.artwork_column_mode,
             ArtworkColumnMode::from_label("Never")
         );
+    }
+
+    /// Write-side: `write_interface_tab_toml` copies the migrated fields
+    /// from the UI-facing struct onto `TomlSettings`. Inverse of
+    /// `apply_toml_interface_tab`. The two pct fields are routed through
+    /// `round_f32` on serialize; this test only asserts the byte-identical
+    /// f32 round-trip pre-serialize.
+    #[test]
+    fn write_interface_round_trip_copies_migrated_fields_to_toml() {
+        let mut ps = crate::types::player_settings::PlayerSettings::default();
+        ps.nav_layout = NavLayout::Side;
+        ps.strip_show_title = false;
+        ps.albums_artwork_overlay = false;
+        ps.artwork_column_mode = ArtworkColumnMode::from_label("Never");
+        ps.artwork_auto_max_pct = 0.55;
+        ps.artwork_vertical_height_pct = 0.65;
+
+        let mut ts = TomlSettings::default();
+        write_interface_tab_toml(&ps, &mut ts);
+
+        assert_eq!(ts.nav_layout, NavLayout::Side);
+        assert!(!ts.strip_show_title);
+        assert!(!ts.albums_artwork_overlay);
+        assert_eq!(
+            ts.artwork_column_mode,
+            ArtworkColumnMode::from_label("Never")
+        );
+        assert!((ts.artwork_auto_max_pct - 0.55).abs() < f32::EPSILON);
+        assert!((ts.artwork_vertical_height_pct - 0.65).abs() < f32::EPSILON);
     }
 }

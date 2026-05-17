@@ -33,6 +33,7 @@ define_settings! {
     dispatch_fn: dispatch_general_tab_setting,
     apply_fn: apply_toml_general_tab,
     dump_fn: dump_general_tab_player_settings,
+    write_fn: write_general_tab_toml,
     settings: [
         StableViewport {
             key: "general.stable_viewport",
@@ -40,6 +41,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_stable_viewport(v),
             toml_apply: |ts, p| p.stable_viewport = ts.stable_viewport,
             read: |src, out| out.stable_viewport = src.stable_viewport,
+            write: |ps, ts| ts.stable_viewport = ps.stable_viewport,
             ui_meta: {
                 label: "Stable Viewport",
                 category: "Mouse Behavior",
@@ -54,6 +56,7 @@ define_settings! {
             setter: |mgr, v: String| mgr.set_start_view(&v),
             toml_apply: |ts, p| p.start_view = ts.start_view.clone(),
             read: |src, out| out.start_view = src.start_view.clone(),
+            write: |ps, ts| ts.start_view = ps.start_view.clone(),
             ui_meta: {
                 label: "Start View",
                 category: "Application",
@@ -69,6 +72,7 @@ define_settings! {
             setter: |mgr, v: String| mgr.set_enter_behavior(EnterBehavior::from_label(&v)),
             toml_apply: |ts, p| p.enter_behavior = ts.enter_behavior,
             read: |src, out| out.enter_behavior = src.enter_behavior,
+            write: |ps, ts| ts.enter_behavior = ps.enter_behavior,
             ui_meta: {
                 label: "Enter Behavior",
                 category: "Application",
@@ -86,6 +90,7 @@ define_settings! {
             setter: |mgr, v: String| mgr.set_library_page_size(LibraryPageSize::from_label(&v)),
             toml_apply: |ts, p| p.library_page_size = ts.library_page_size,
             read: |src, out| out.library_page_size = src.library_page_size,
+            write: |ps, ts| ts.library_page_size = ps.library_page_size,
             ui_meta: {
                 label: "Library Page Size",
                 category: "Application",
@@ -108,6 +113,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_suppress_library_refresh_toasts(v),
             toml_apply: |ts, p| p.suppress_library_refresh_toasts = ts.suppress_library_refresh_toasts,
             read: |src, out| out.suppress_library_refresh_toasts = src.suppress_library_refresh_toasts,
+            write: |ps, ts| ts.suppress_library_refresh_toasts = ps.suppress_library_refresh_toasts,
             ui_meta: {
                 label: "Suppress Library Refresh Toasts",
                 category: "Application",
@@ -122,6 +128,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_auto_follow_playing(v),
             toml_apply: |ts, p| p.auto_follow_playing = ts.auto_follow_playing,
             read: |src, out| out.auto_follow_playing = src.auto_follow_playing,
+            write: |ps, ts| ts.auto_follow_playing = ps.auto_follow_playing,
             ui_meta: {
                 label: "Auto-Follow Playing Track",
                 category: "Mouse Behavior",
@@ -136,6 +143,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_show_tray_icon(v),
             toml_apply: |ts, p| p.show_tray_icon = ts.show_tray_icon,
             read: |src, out| out.show_tray_icon = src.show_tray_icon,
+            write: |ps, ts| ts.show_tray_icon = ps.show_tray_icon,
             ui_meta: {
                 label: "Show Tray Icon",
                 category: "System Tray",
@@ -153,6 +161,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_close_to_tray(v),
             toml_apply: |ts, p| p.close_to_tray = ts.close_to_tray,
             read: |src, out| out.close_to_tray = src.close_to_tray,
+            write: |ps, ts| ts.close_to_tray = ps.close_to_tray,
             ui_meta: {
                 label: "Close to Tray",
                 category: "System Tray",
@@ -179,8 +188,13 @@ define_settings! {
             toml_apply: |ts, p| p.light_mode = ts.light_mode,
             // `light_mode` lives in the theme atomic + config.toml, not on the
             // UI-facing `PlayerSettings` (see player_settings/mod.rs:25). The
-            // dump is intentionally a no-op; on_dispatch carries the truth.
+            // dump and write are intentionally no-ops; on_dispatch carries
+            // the truth, and the on-disk TOML write is owned by the
+            // `SetLightModeAtomic` side-effect handler in the UI crate via a
+            // targeted `update_config_value` call (not via
+            // `from_player_settings`).
             read: |_src, _out| {},
+            write: |_ps, _ts| {},
             on_dispatch: |v: String| SettingsSideEffect::SetLightModeAtomic(v == "Light"),
         },
         // The setter trims user-typed leading/trailing whitespace before
@@ -193,6 +207,7 @@ define_settings! {
             setter: |mgr, v: String| mgr.set_local_music_path(v.trim().to_string()),
             toml_apply: |ts, p| p.local_music_path = ts.local_music_path.clone(),
             read: |src, out| out.local_music_path = src.local_music_path.clone(),
+            write: |ps, ts| ts.local_music_path = ps.local_music_path.clone(),
             ui_meta: {
                 label: "Local Music Path",
                 category: "Application",
@@ -210,6 +225,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_show_album_artists_only(v),
             toml_apply: |ts, p| p.show_album_artists_only = ts.show_album_artists_only,
             read: |src, out| out.show_album_artists_only = src.show_album_artists_only,
+            write: |ps, ts| ts.show_album_artists_only = ps.show_album_artists_only,
             on_dispatch: |_v: bool| SettingsSideEffect::LoadArtists,
             ui_meta: {
                 label: "Album Artists Only",
@@ -228,6 +244,7 @@ define_settings! {
             setter: |mgr, v: String| mgr.set_artwork_resolution(ArtworkResolution::from_label(&v)),
             toml_apply: |ts, p| p.artwork_resolution = ts.artwork_resolution,
             read: |src, out| out.artwork_resolution = src.artwork_resolution,
+            write: |ps, ts| ts.artwork_resolution = ps.artwork_resolution,
             on_dispatch: |_v: String| SettingsSideEffect::Toast {
                 level: ToastLevel::Info,
                 message: "Artwork resolution changed — new artwork will fetch at this size"
@@ -259,6 +276,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_verbose_config(v),
             toml_apply: |ts, p| p.verbose_config = ts.verbose_config,
             read: |src, out| out.verbose_config = src.verbose_config,
+            write: |ps, ts| ts.verbose_config = ps.verbose_config,
             on_dispatch: |v: bool| SettingsSideEffect::WriteVerboseConfig { enabled: v },
             ui_meta: {
                 label: "Verbose Config",
@@ -461,6 +479,55 @@ mod tests {
         assert!(p.suppress_library_refresh_toasts);
         assert!(p.show_tray_icon);
         assert!(p.close_to_tray);
+    }
+
+    /// Write-side: `write_general_tab_toml` copies the migrated fields from
+    /// the UI-facing `PlayerSettings` onto `TomlSettings` for serialization
+    /// back to `config.toml`. Inverse of `apply_toml_general_tab`. The
+    /// `light_mode` entry deliberately declares a no-op `write:` closure
+    /// (UI-PS has no light_mode field); this test confirms `ts.light_mode`
+    /// keeps the value it had before `write_general_tab_toml` ran.
+    #[test]
+    fn write_general_round_trip_copies_migrated_fields_to_toml() {
+        let mut ps = crate::types::player_settings::PlayerSettings::default();
+        ps.stable_viewport = false;
+        ps.start_view = "Songs".to_string();
+        ps.enter_behavior = EnterBehavior::PlaySingle;
+        ps.library_page_size = LibraryPageSize::Large;
+        ps.auto_follow_playing = false;
+        ps.suppress_library_refresh_toasts = true;
+        ps.show_tray_icon = true;
+        ps.close_to_tray = true;
+        ps.local_music_path = "/tmp/test_lib".to_string();
+        ps.show_album_artists_only = false;
+        ps.artwork_resolution = ArtworkResolution::Ultra;
+        ps.verbose_config = true;
+
+        // Seed the destination with `light_mode = true` so we can confirm the
+        // no-op `write:` closure does NOT stomp it.
+        let mut ts = TomlSettings {
+            light_mode: true,
+            ..TomlSettings::default()
+        };
+
+        write_general_tab_toml(&ps, &mut ts);
+
+        assert!(!ts.stable_viewport);
+        assert_eq!(ts.start_view, "Songs");
+        assert_eq!(ts.enter_behavior, EnterBehavior::PlaySingle);
+        assert_eq!(ts.library_page_size, LibraryPageSize::Large);
+        assert!(!ts.auto_follow_playing);
+        assert!(ts.suppress_library_refresh_toasts);
+        assert!(ts.show_tray_icon);
+        assert!(ts.close_to_tray);
+        assert_eq!(ts.local_music_path, "/tmp/test_lib");
+        assert!(!ts.show_album_artists_only);
+        assert_eq!(ts.artwork_resolution, ArtworkResolution::Ultra);
+        assert!(ts.verbose_config);
+        assert!(
+            ts.light_mode,
+            "light_mode entry declares a no-op write — must NOT stomp ts.light_mode",
+        );
     }
 
     /// Read-side: `dump_general_tab_player_settings` copies the migrated

@@ -1,7 +1,7 @@
 //! Settings macro foundation — `define_settings!` plus its supporting types.
 //!
 //! Each settings tab declares its keys via [`define_settings!`] in
-//! `data/src/services/settings_tables/<tab>.rs`. The macro emits four
+//! `data/src/services/settings_tables/<tab>.rs`. The macro emits five
 //! artifacts per tab:
 //!
 //! - `pub const TAB_<TAB>_SETTINGS: &[SettingDef]` — table of declared keys
@@ -21,6 +21,10 @@
 //!   `read` closures, copying the redb-backed internal `PlayerSettings` into
 //!   the UI-facing `PlayerSettings` consumed by `Message::PlayerSettingsLoaded`.
 //!   Called from `SettingsManager::get_player_settings`.
+//! - `pub fn write_<tab>_tab_toml(ps, ts)` — runs the per-setting `write`
+//!   closures, copying the UI-facing `PlayerSettings` back onto `TomlSettings`
+//!   for serialization to `config.toml`. Inverse of `apply_toml_<tab>_tab`.
+//!   Called from `TomlSettings::from_player_settings`.
 //!
 //! The dispatcher takes `&mut SettingsManager` (sync). The UI handler in
 //! `update/settings.rs` locks the manager mutex inside an async task before
@@ -52,7 +56,7 @@ pub struct SettingDef {
 ///
 /// See the module-level docs for the artifacts emitted. Adding a setting is a
 /// single declarative entry; the compiler enforces that `setter`, `toml_apply`,
-/// and `read` are all declared (no silent omission). `on_dispatch:` is
+/// `read`, and `write` are all declared (no silent omission). `on_dispatch:` is
 /// optional — entries that omit it default to
 /// [`SettingsSideEffect::None`][crate::types::settings_side_effect::SettingsSideEffect::None].
 ///
@@ -76,6 +80,7 @@ pub struct SettingDef {
 ///     dispatch_fn: dispatch_general_tab_setting,
 ///     apply_fn: apply_toml_general_tab,
 ///     dump_fn: dump_general_tab_player_settings,
+///     write_fn: write_general_tab_toml,
 ///     settings: [
 ///         StableViewport {
 ///             key: "general.stable_viewport",
@@ -83,6 +88,7 @@ pub struct SettingDef {
 ///             setter: |mgr, v: bool| mgr.set_stable_viewport(v),
 ///             toml_apply: |ts, p| p.stable_viewport = ts.stable_viewport,
 ///             read: |src, out| out.stable_viewport = src.stable_viewport,
+///             write: |ps, ts| ts.stable_viewport = ps.stable_viewport,
 ///             ui_meta: {
 ///                 label: "Stable Viewport",
 ///                 category: "Mouse Behavior",
@@ -97,7 +103,13 @@ pub struct SettingDef {
 ///             value_type: Enum,
 ///             setter: |_mgr, _v: String| Ok(()),
 ///             toml_apply: |ts, p| p.light_mode = ts.light_mode,
+///             // UI-PS has no light_mode field — write is a no-op. The
+///             // on-disk truth is maintained separately by the
+///             // `SetLightModeAtomic` side-effect handler in the UI crate
+///             // via a targeted toml_edit write that does not go through
+///             // `from_player_settings`.
 ///             read: |_src, _out| {},
+///             write: |_ps, _ts| {},
 ///             on_dispatch: |v: String| SettingsSideEffect::SetLightModeAtomic(v == "Light"),
 ///         },
 ///     ]
@@ -114,6 +126,14 @@ pub struct SettingDef {
 /// redb-stored internal `PlayerSettings` value onto the UI-facing struct
 /// (e.g. `out.scrobble_threshold = src.scrobble_threshold as f32` or
 /// `out.start_view = src.start_view.clone()`).
+///
+/// `write` carries the per-field cast/clone semantics needed to land the
+/// UI-facing `PlayerSettings` value onto `TomlSettings` for serialization —
+/// the inverse of `read`. Field types are usually identical between UI-PS
+/// and TomlSettings (both f32 for `scrobble_threshold`, both `String` for
+/// `start_view`), so most `write` closures are a simple assignment of the
+/// matching field name. Entries whose UI-facing struct lacks the field
+/// (only `light_mode` today) declare a `|_ps, _ts| {}` no-op.
 ///
 /// `on_dispatch` (when supplied) receives the same unpacked payload — for
 /// `Text` and `Enum` keys the macro hands it a clone so the setter can still
@@ -146,6 +166,7 @@ macro_rules! define_settings {
         dispatch_fn: $dispatch_fn:ident,
         apply_fn: $apply_fn:ident,
         dump_fn: $dump_fn:ident,
+        write_fn: $write_fn:ident,
         settings: [
             $(
                 $variant:ident {
@@ -153,7 +174,8 @@ macro_rules! define_settings {
                     value_type: $vtype:ident,
                     setter: |$smgr:ident, $sval:ident : $sty:ty| $sbody:expr,
                     toml_apply: |$ats:ident, $ap:ident| $abody:expr,
-                    read: |$rsrc:ident, $rout:ident| $rbody:expr
+                    read: |$rsrc:ident, $rout:ident| $rbody:expr,
+                    write: |$wps:ident, $wts:ident| $wbody:expr
                     $(, on_dispatch: |$dval:ident : $dty:ty| $dbody:expr)?
                     $(, ui_meta: {
                         label: $label:literal,
@@ -237,6 +259,28 @@ macro_rules! define_settings {
                     let $rsrc: &$crate::types::settings::PlayerSettings = src;
                     let $rout: &mut $crate::types::player_settings::PlayerSettings = out;
                     $rbody;
+                }
+            )*
+        }
+
+        /// Macro-emitted writer — copies the per-tab declared fields from the
+        /// UI-facing `PlayerSettings` onto `TomlSettings` for serialization
+        /// back to `config.toml`. Inverse of `$apply_fn` (TOML→internal) and
+        /// `$dump_fn` (internal→UI). Entries whose UI-facing struct does not
+        /// carry the field (e.g. `light_mode`, which lives only on the
+        /// internal redb-backed `PlayerSettings`) declare a no-op `write:`
+        /// closure so the per-tab function still claims the key even though
+        /// the wire copy is a no-op.
+        #[allow(unused_variables)]
+        pub fn $write_fn(
+            ps: &$crate::types::player_settings::PlayerSettings,
+            ts: &mut $crate::types::toml_settings::TomlSettings,
+        ) {
+            $(
+                {
+                    let $wps: &$crate::types::player_settings::PlayerSettings = ps;
+                    let $wts: &mut $crate::types::toml_settings::TomlSettings = ts;
+                    $wbody;
                 }
             )*
         }

@@ -35,6 +35,7 @@ define_settings! {
     dispatch_fn: dispatch_playback_tab_setting,
     apply_fn: apply_toml_playback_tab,
     dump_fn: dump_playback_tab_player_settings,
+    write_fn: write_playback_tab_toml,
     settings: [
         // -- Playback ---------------------------------------------------------
         CrossfadeEnabled {
@@ -43,6 +44,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_crossfade_enabled(v),
             toml_apply: |ts, p| p.crossfade_enabled = ts.crossfade_enabled,
             read: |src, out| out.crossfade_enabled = src.crossfade_enabled,
+            write: |ps, ts| ts.crossfade_enabled = ps.crossfade_enabled,
             ui_meta: {
                 label: "Crossfade",
                 category: "Playback",
@@ -57,6 +59,7 @@ define_settings! {
             setter: |mgr, v: i64| mgr.set_crossfade_duration(v as u32),
             toml_apply: |ts, p| p.crossfade_duration_secs = ts.crossfade_duration_secs,
             read: |src, out| out.crossfade_duration_secs = src.crossfade_duration_secs,
+            write: |ps, ts| ts.crossfade_duration_secs = ps.crossfade_duration_secs,
             ui_meta: {
                 label: "Crossfade Duration",
                 category: "Playback",
@@ -77,6 +80,7 @@ define_settings! {
             },
             toml_apply: |ts, p| p.volume_normalization = ts.volume_normalization,
             read: |src, out| out.volume_normalization = src.volume_normalization,
+            write: |ps, ts| ts.volume_normalization = ps.volume_normalization,
             ui_meta: {
                 label: "Volume Normalization",
                 category: "Playback",
@@ -94,6 +98,7 @@ define_settings! {
             },
             toml_apply: |ts, p| p.normalization_level = ts.normalization_level,
             read: |src, out| out.normalization_level = src.normalization_level,
+            write: |ps, ts| ts.normalization_level = ps.normalization_level,
         },
         ReplayGainPreampDb {
             key: "general.replay_gain_preamp_db",
@@ -101,6 +106,7 @@ define_settings! {
             setter: |mgr, v: i64| mgr.set_replay_gain_preamp_db(v as f32),
             toml_apply: |ts, p| p.replay_gain_preamp_db = ts.replay_gain_preamp_db,
             read: |src, out| out.replay_gain_preamp_db = src.replay_gain_preamp_db,
+            write: |ps, ts| ts.replay_gain_preamp_db = ps.replay_gain_preamp_db,
         },
         ReplayGainFallbackDb {
             key: "general.replay_gain_fallback_db",
@@ -108,6 +114,7 @@ define_settings! {
             setter: |mgr, v: i64| mgr.set_replay_gain_fallback_db(v as f32),
             toml_apply: |ts, p| p.replay_gain_fallback_db = ts.replay_gain_fallback_db,
             read: |src, out| out.replay_gain_fallback_db = src.replay_gain_fallback_db,
+            write: |ps, ts| ts.replay_gain_fallback_db = ps.replay_gain_fallback_db,
         },
         ReplayGainFallbackToAgc {
             key: "general.replay_gain_fallback_to_agc",
@@ -115,6 +122,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_replay_gain_fallback_to_agc(v),
             toml_apply: |ts, p| p.replay_gain_fallback_to_agc = ts.replay_gain_fallback_to_agc,
             read: |src, out| out.replay_gain_fallback_to_agc = src.replay_gain_fallback_to_agc,
+            write: |ps, ts| ts.replay_gain_fallback_to_agc = ps.replay_gain_fallback_to_agc,
         },
         ReplayGainPreventClipping {
             key: "general.replay_gain_prevent_clipping",
@@ -122,6 +130,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_replay_gain_prevent_clipping(v),
             toml_apply: |ts, p| p.replay_gain_prevent_clipping = ts.replay_gain_prevent_clipping,
             read: |src, out| out.replay_gain_prevent_clipping = src.replay_gain_prevent_clipping,
+            write: |ps, ts| ts.replay_gain_prevent_clipping = ps.replay_gain_prevent_clipping,
         },
 
         // -- Scrobbling -------------------------------------------------------
@@ -131,6 +140,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_scrobbling_enabled(v),
             toml_apply: |ts, p| p.scrobbling_enabled = ts.scrobbling_enabled,
             read: |src, out| out.scrobbling_enabled = src.scrobbling_enabled,
+            write: |ps, ts| ts.scrobbling_enabled = ps.scrobbling_enabled,
             ui_meta: {
                 label: "Scrobbling Enabled",
                 category: "Scrobbling",
@@ -149,6 +159,8 @@ define_settings! {
             setter: |mgr, v: i64| mgr.set_scrobble_threshold(v as f64 / 100.0),
             toml_apply: |ts, p| p.scrobble_threshold = ts.scrobble_threshold as f64,
             read: |src, out| out.scrobble_threshold = src.scrobble_threshold as f32,
+            // UI-PS holds f32, TomlSettings holds f32 — direct copy.
+            write: |ps, ts| ts.scrobble_threshold = ps.scrobble_threshold,
             ui_meta: {
                 label: "Scrobble Threshold",
                 category: "Scrobbling",
@@ -169,6 +181,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_quick_add_to_playlist(v),
             toml_apply: |ts, p| p.quick_add_to_playlist = ts.quick_add_to_playlist,
             read: |src, out| out.quick_add_to_playlist = src.quick_add_to_playlist,
+            write: |ps, ts| ts.quick_add_to_playlist = ps.quick_add_to_playlist,
             ui_meta: {
                 label: "Quick Add to Playlist",
                 category: "Playlists",
@@ -183,6 +196,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_queue_show_default_playlist(v),
             toml_apply: |ts, p| p.queue_show_default_playlist = ts.queue_show_default_playlist,
             read: |src, out| out.queue_show_default_playlist = src.queue_show_default_playlist,
+            write: |ps, ts| ts.queue_show_default_playlist = ps.queue_show_default_playlist,
             ui_meta: {
                 label: "Default Playlist Chip in Queue",
                 category: "Playlists",
@@ -205,6 +219,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_queue_show_stars(v),
             toml_apply: |ts, p| p.queue_show_stars = ts.queue_show_stars,
             read: |src, out| out.queue_show_stars = src.queue_show_stars,
+            write: |ps, ts| ts.queue_show_stars = ps.queue_show_stars,
         },
         QueueShowAlbum {
             key: "general.queue_show_album",
@@ -212,6 +227,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_queue_show_album(v),
             toml_apply: |ts, p| p.queue_show_album = ts.queue_show_album,
             read: |src, out| out.queue_show_album = src.queue_show_album,
+            write: |ps, ts| ts.queue_show_album = ps.queue_show_album,
         },
         QueueShowDuration {
             key: "general.queue_show_duration",
@@ -219,6 +235,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_queue_show_duration(v),
             toml_apply: |ts, p| p.queue_show_duration = ts.queue_show_duration,
             read: |src, out| out.queue_show_duration = src.queue_show_duration,
+            write: |ps, ts| ts.queue_show_duration = ps.queue_show_duration,
         },
         QueueShowLove {
             key: "general.queue_show_love",
@@ -226,6 +243,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_queue_show_love(v),
             toml_apply: |ts, p| p.queue_show_love = ts.queue_show_love,
             read: |src, out| out.queue_show_love = src.queue_show_love,
+            write: |ps, ts| ts.queue_show_love = ps.queue_show_love,
         },
 
         // -- Theme tab top scalars (Bool) ------------------------------------
@@ -235,6 +253,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_opacity_gradient(v),
             toml_apply: |ts, p| p.opacity_gradient = ts.opacity_gradient,
             read: |src, out| out.opacity_gradient = src.opacity_gradient,
+            write: |ps, ts| ts.opacity_gradient = ps.opacity_gradient,
         },
         RoundedMode {
             key: "general.rounded_mode",
@@ -242,6 +261,7 @@ define_settings! {
             setter: |mgr, v: bool| mgr.set_rounded_mode(v),
             toml_apply: |ts, p| p.rounded_mode = ts.rounded_mode,
             read: |src, out| out.rounded_mode = src.rounded_mode,
+            write: |ps, ts| ts.rounded_mode = ps.rounded_mode,
         },
     ]
 }
@@ -535,5 +555,59 @@ mod tests {
         assert!(ui.rounded_mode);
         assert!(!ui.queue_show_stars);
         assert!((ui.scrobble_threshold - 0.75_f32).abs() < f32::EPSILON);
+    }
+
+    /// Write-side: `write_playback_tab_toml` copies the migrated fields
+    /// from the UI-facing struct onto `TomlSettings` for config.toml
+    /// serialization. The `scrobble_threshold` field is f32 on both UI-PS
+    /// and TomlSettings (the f64 only exists on the redb-backed internal
+    /// `PlayerSettings`) — the write closure is therefore a plain copy
+    /// without cast.
+    #[test]
+    fn write_playback_round_trip_copies_migrated_fields_to_toml() {
+        let mut ps = crate::types::player_settings::PlayerSettings::default();
+        ps.crossfade_enabled = true;
+        ps.crossfade_duration_secs = 9;
+        ps.replay_gain_preamp_db = 4.0;
+        ps.replay_gain_fallback_db = 1.5;
+        ps.replay_gain_fallback_to_agc = true;
+        ps.replay_gain_prevent_clipping = false;
+        ps.volume_normalization = VolumeNormalizationMode::ReplayGainAlbum;
+        ps.normalization_level = NormalizationLevel::Loud;
+        ps.opacity_gradient = false;
+        ps.rounded_mode = true;
+        ps.queue_show_stars = false;
+        ps.queue_show_album = false;
+        ps.queue_show_duration = false;
+        ps.queue_show_love = false;
+        ps.scrobble_threshold = 0.75;
+        ps.quick_add_to_playlist = true;
+        ps.queue_show_default_playlist = true;
+        ps.scrobbling_enabled = false;
+
+        let mut ts = TomlSettings::default();
+        write_playback_tab_toml(&ps, &mut ts);
+
+        assert!(ts.crossfade_enabled);
+        assert_eq!(ts.crossfade_duration_secs, 9);
+        assert!((ts.replay_gain_preamp_db - 4.0).abs() < f32::EPSILON);
+        assert!((ts.replay_gain_fallback_db - 1.5).abs() < f32::EPSILON);
+        assert!(ts.replay_gain_fallback_to_agc);
+        assert!(!ts.replay_gain_prevent_clipping);
+        assert_eq!(
+            ts.volume_normalization,
+            VolumeNormalizationMode::ReplayGainAlbum
+        );
+        assert_eq!(ts.normalization_level, NormalizationLevel::Loud);
+        assert!(!ts.opacity_gradient);
+        assert!(ts.rounded_mode);
+        assert!(!ts.queue_show_stars);
+        assert!(!ts.queue_show_album);
+        assert!(!ts.queue_show_duration);
+        assert!(!ts.queue_show_love);
+        assert!((ts.scrobble_threshold - 0.75).abs() < f32::EPSILON);
+        assert!(ts.quick_add_to_playlist);
+        assert!(ts.queue_show_default_playlist);
+        assert!(!ts.scrobbling_enabled);
     }
 }
