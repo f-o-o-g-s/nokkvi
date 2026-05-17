@@ -2,40 +2,40 @@ use std::time::Instant;
 
 /// Identifies the slot under the cursor in a slot list.
 ///
-/// Published by `mouse_area::on_enter` / `on_exit` for each slot in
-/// `build_slot_list_slots` so the cross-pane drag handlers can resolve
+/// Published by `mouse_area::on_enter` / `on_move` / `on_exit` for each slot
+/// in `build_slot_list_slots` so the cross-pane drag handlers can resolve
 /// "what is the cursor over" by asking the rendered widget tree instead of
-/// reconstructing slot positions from chrome constants. Carries both the
-/// visual slot index (for positioning the drop indicator) and the resolved
-/// item index baked in at render time using the same `effective_center`
-/// math as the slots themselves, so forward (cursor→slot→item) and any
-/// reverse (item→slot→y) projection cannot disagree.
+/// reconstructing slot positions from chrome constants. Carries the visual
+/// slot index (for positioning the drop indicator), the resolved item index
+/// baked in at render time using the same `effective_center` math as the
+/// slots themselves, and the buffer length at bake time so consumers can
+/// detect stale payloads after a queue / library mutation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HoveredSlot {
     /// Cursor is over a slot whose row maps to `item_index` in the
-    /// underlying buffer.
+    /// underlying buffer. `items_len` is the buffer length when this
+    /// payload was baked — cross-pane drag consumers compare it to the
+    /// current length to reject stale payloads (the only scenario where a
+    /// fresh `mouse_area::on_enter` / `on_move` event does NOT refresh
+    /// state is items mutating beneath a stationary cursor).
     Item {
         slot_index: usize,
         item_index: usize,
+        items_len: usize,
     },
     /// Cursor is over a slot whose row is empty (top-packing, end of list,
     /// or zero items). Drop targets treat this as "insert at end".
-    Empty { slot_index: usize },
+    /// `items_len` carries the same staleness-detection role as on `Item`.
+    Empty { slot_index: usize, items_len: usize },
 }
 
 impl HoveredSlot {
     /// The visual slot index inside the slot list (0..slot_count).
     pub fn slot_index(self) -> usize {
         match self {
-            HoveredSlot::Item { slot_index, .. } | HoveredSlot::Empty { slot_index } => slot_index,
-        }
-    }
-
-    /// The resolved item index, or `None` if the hovered slot is empty.
-    pub fn item_index(self) -> Option<usize> {
-        match self {
-            HoveredSlot::Item { item_index, .. } => Some(item_index),
-            HoveredSlot::Empty { .. } => None,
+            HoveredSlot::Item { slot_index, .. } | HoveredSlot::Empty { slot_index, .. } => {
+                slot_index
+            }
         }
     }
 }

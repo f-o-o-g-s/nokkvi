@@ -953,17 +953,8 @@ impl QueuePage {
                     }
                 },
                 QueueMessage::DragReorder,
-                Some(crate::widgets::slot_list::SlotHoverCallback::new(
-                    |h| {
-                        QueueMessage::SlotList(crate::widgets::SlotListPageMessage::HoverEnterSlot(
-                            h,
-                        ))
-                    },
-                    |h| {
-                        QueueMessage::SlotList(crate::widgets::SlotListPageMessage::HoverExitSlot(
-                            h,
-                        ))
-                    },
+                Some(crate::widgets::slot_list::SlotHoverCallback::for_slot_list(
+                    QueueMessage::SlotList,
                 )),
                 data.drop_indicator_slot,
                 render_item,

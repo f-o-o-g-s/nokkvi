@@ -73,7 +73,7 @@ Custom `iced::advanced` seekable widget. `Vec<OverlaySegment>` for scrolling col
 
 ## Layout Constants (`slot_list.rs`)
 
-Single source of truth: `chrome_height_with_header()`, `queue_slot_list_start_y()`, `NAV_BAR_HEIGHT = 32`, `VIEW_HEADER_HEIGHT = 48`, `TAB_BAR_HEIGHT = 32`, `SLOT_SPACING = 3`. Slot count is computed dynamically: always odd, capped at `MAX_SLOT_COUNT = 29`.
+Single source of truth: `chrome_height_with_header()`, `NAV_BAR_HEIGHT = 32`, `VIEW_HEADER_HEIGHT = 48`, `TAB_BAR_HEIGHT = 32`, `SLOT_SPACING = 3`. Slot count is computed dynamically: always odd, capped at `MAX_SLOT_COUNT = 29`. Cross-pane drag uses structural cursor → slot resolution via per-slot `mouse_area` (see `slot_list.rs::SlotHoverCallback`) rather than chrome math, so there is no `queue_slot_list_start_y` helper.
 
 ## Slot Rendering
 

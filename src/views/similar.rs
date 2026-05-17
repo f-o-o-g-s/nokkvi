@@ -406,9 +406,8 @@ impl SimilarPage {
                     ))
                 }
             },
-            Some(crate::widgets::slot_list::SlotHoverCallback::new(
-                |h| SimilarMessage::SlotList(SlotListPageMessage::HoverEnterSlot(h)),
-                |h| SimilarMessage::SlotList(SlotListPageMessage::HoverExitSlot(h)),
+            Some(crate::widgets::slot_list::SlotHoverCallback::for_slot_list(
+                SimilarMessage::SlotList,
             )),
             |song, ctx| {
                 let song_title = song.title.clone();

@@ -178,9 +178,8 @@ impl SongsPage {
                     ))
                 }
             },
-            Some(crate::widgets::slot_list::SlotHoverCallback::new(
-                |h| SongsMessage::SlotList(crate::widgets::SlotListPageMessage::HoverEnterSlot(h)),
-                |h| SongsMessage::SlotList(crate::widgets::SlotListPageMessage::HoverExitSlot(h)),
+            Some(crate::widgets::slot_list::SlotHoverCallback::for_slot_list(
+                SongsMessage::SlotList,
             )),
             |song, ctx| {
                 // Clone all data from song at the start to avoid lifetime issues

@@ -484,23 +484,34 @@ impl Nokkvi {
     /// Resolve the queue insertion index for the current cross-pane drag.
     ///
     /// Reads `queue_page.common.slot_list.hovered_slot`, which the per-slot
-    /// `mouse_area::on_enter` writes whenever the cursor crosses into a
-    /// queue slot's rendered bounds. `HoveredSlot::Item { item_index }`
+    /// `mouse_area::on_enter` / `on_move` writes whenever the cursor is
+    /// over a queue slot's rendered bounds. `HoveredSlot::Item { item_index }`
     /// maps to insert-before-that-item; `HoveredSlot::Empty` (cursor on a
     /// trailing empty slot — top-packing tail or queue end) maps to
     /// insert-at-end. `None` means the cursor is not over any queue slot
     /// at all — either it is on chrome, a different pane, or completely
     /// outside the slot list.
     ///
-    /// No chrome reconstruction, no `cursor_y → slot` math, no stored
-    /// `slot_count` divergence — the slot index baked into the message
-    /// came from the same `effective_center` computation
-    /// `build_slot_list_slots` used to render the slots, so forward and
-    /// reverse projections cannot disagree.
+    /// Staleness gate: if `queue_songs.len()` has changed since the hover
+    /// was baked (consume auto-advance, SSE library refresh, optimistic
+    /// reorder), reject the payload and return `None`. The released drag
+    /// then cancels rather than mis-dropping at a position that no longer
+    /// matches what the user sees. The iced `mouse_area` diff condition
+    /// (`reference-iced/widget/src/mouse_area.rs:320`) only re-fires
+    /// `on_enter` on cursor or bounds change, so a queue mutation beneath
+    /// a stationary cursor never refreshes the payload organically.
     pub(crate) fn compute_queue_drop_slot(&self) -> Option<usize> {
-        match self.queue_page.common.slot_list.hovered_slot? {
+        let hovered = self.queue_page.common.slot_list.hovered_slot?;
+        let current_len = self.library.queue_songs.len();
+        let baked_len = match hovered {
+            HoveredSlot::Item { items_len, .. } | HoveredSlot::Empty { items_len, .. } => items_len,
+        };
+        if baked_len != current_len {
+            return None;
+        }
+        match hovered {
             HoveredSlot::Item { item_index, .. } => Some(item_index),
-            HoveredSlot::Empty { .. } => Some(self.library.queue_songs.len()),
+            HoveredSlot::Empty { .. } => Some(current_len),
         }
     }
 }

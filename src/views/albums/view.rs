@@ -189,9 +189,8 @@ impl AlbumsPage {
                     ))
                 }
             },
-            Some(crate::widgets::slot_list::SlotHoverCallback::new(
-                |h| AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::HoverEnterSlot(h)),
-                |h| AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::HoverExitSlot(h)),
+            Some(crate::widgets::slot_list::SlotHoverCallback::for_slot_list(
+                AlbumsMessage::SlotList,
             )),
             |entry, ctx| match entry {
                 SlotListEntry::Parent(album) => {

@@ -26,6 +26,7 @@ impl AlbumsPage {
             toggle_sort: AlbumsMessage::ToggleSortOrder => AlbumsAction::SortOrderChanged,
             search_changed: AlbumsMessage::SearchQueryChanged => AlbumsAction::SearchChanged,
             search_focused: AlbumsMessage::SearchFocused,
+            slot_list_wrap: AlbumsMessage::SlotList,
             action_none: AlbumsAction::None,
         ) {
             Ok(result) => result,
@@ -192,21 +193,18 @@ impl AlbumsPage {
                         SlotListPageMessage::CenterOnPlaying => {
                             (Task::none(), AlbumsAction::CenterOnPlaying)
                         }
-                        SlotListPageMessage::HoverEnterSlot(h) => {
-                            self.common.slot_list.hovered_slot = Some(h);
-                            (Task::none(), AlbumsAction::None)
-                        }
-                        SlotListPageMessage::HoverExitSlot(h) => {
-                            if self.common.slot_list.hovered_slot == Some(h) {
-                                self.common.slot_list.hovered_slot = None;
-                            }
-                            (Task::none(), AlbumsAction::None)
-                        }
-                        // Sort/search exhaustiveness arms (expansion views don't emit these via SlotList):
+                        // Sort/search/hover exhaustiveness arms — `SearchQueryChanged`,
+                        // `SearchFocused`, `SortModeSelected`, `ToggleSortOrder`,
+                        // `HoverEnterSlot`, and `HoverExitSlot` are all handled by
+                        // `impl_expansion_update!` above; these arms exist only for
+                        // pattern-exhaustiveness so the compiler can verify nothing leaked
+                        // through.
                         SlotListPageMessage::SearchQueryChanged(_)
                         | SlotListPageMessage::SearchFocused(_)
                         | SlotListPageMessage::SortModeSelected(_)
-                        | SlotListPageMessage::ToggleSortOrder => {
+                        | SlotListPageMessage::ToggleSortOrder
+                        | SlotListPageMessage::HoverEnterSlot(_)
+                        | SlotListPageMessage::HoverExitSlot(_) => {
                             (Task::none(), AlbumsAction::None)
                         }
                     }

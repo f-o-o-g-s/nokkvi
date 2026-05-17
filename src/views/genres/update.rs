@@ -67,6 +67,7 @@ impl GenresPage {
             toggle_sort: GenresMessage::ToggleSortOrder => GenresAction::SortOrderChanged,
             search_changed: GenresMessage::SearchQueryChanged => GenresAction::SearchChanged,
             search_focused: GenresMessage::SearchFocused,
+            slot_list_wrap: GenresMessage::SlotList,
             action_none: GenresAction::None,
         ) {
             Ok(result) => result,
@@ -188,16 +189,6 @@ impl GenresPage {
                     }
                     SlotListPageMessage::CenterOnPlaying => {
                         (Task::none(), GenresAction::CenterOnPlaying)
-                    }
-                    SlotListPageMessage::HoverEnterSlot(h) => {
-                        self.common.slot_list.hovered_slot = Some(h);
-                        (Task::none(), GenresAction::None)
-                    }
-                    SlotListPageMessage::HoverExitSlot(h) => {
-                        if self.common.slot_list.hovered_slot == Some(h) {
-                            self.common.slot_list.hovered_slot = None;
-                        }
-                        (Task::none(), GenresAction::None)
                     }
                     // Exhaustiveness: variants handled by macro above come through
                     // the Ok arm; these are forwarded by view-level emit sites that

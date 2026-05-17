@@ -30,7 +30,7 @@ pub(crate) struct SlotHoverCallback<'a, Message> {
     pub(crate) on_exit: Box<dyn Fn(HoveredSlot) -> Message + 'a>,
 }
 
-impl<'a, Message> SlotHoverCallback<'a, Message> {
+impl<'a, Message: 'a> SlotHoverCallback<'a, Message> {
     pub(crate) fn new(
         on_enter: impl Fn(HoveredSlot) -> Message + 'a,
         on_exit: impl Fn(HoveredSlot) -> Message + 'a,
@@ -39,6 +39,21 @@ impl<'a, Message> SlotHoverCallback<'a, Message> {
             on_enter: Box::new(on_enter),
             on_exit: Box::new(on_exit),
         }
+    }
+
+    /// Build a callback from a single message wrapper — the per-view
+    /// `SlotList(SlotListPageMessage)` variant constructor — making the
+    /// "always route hover events through `SlotListPageMessage::Hover*Slot`"
+    /// contract structural at the call site.
+    ///
+    /// Replaces the lambda-pair boilerplate
+    /// `SlotHoverCallback::new(|h| M::SlotList(SLM::HoverEnterSlot(h)), |h| ...)`
+    /// with `SlotHoverCallback::for_slot_list(M::SlotList)`.
+    pub(crate) fn for_slot_list(wrap: fn(SlotListPageMessage) -> Message) -> Self {
+        Self::new(
+            move |h| wrap(SlotListPageMessage::HoverEnterSlot(h)),
+            move |h| wrap(SlotListPageMessage::HoverExitSlot(h)),
+        )
     }
 }
 
@@ -647,12 +662,28 @@ fn build_slot_list_slots<'a, T, Message: Clone + 'a>(
                 Some(item_index) => HoveredSlot::Item {
                     slot_index,
                     item_index,
+                    items_len: total_items,
                 },
-                None => HoveredSlot::Empty { slot_index },
+                None => HoveredSlot::Empty {
+                    slot_index,
+                    items_len: total_items,
+                },
             };
+            let enter_msg = (cb.on_enter)(hovered);
+            let exit_msg = (cb.on_exit)(hovered);
+            // `on_move` republishes the enter payload on every CursorMoved
+            // while the cursor is inside the slot. The iced mouse_area diff
+            // only fires `on_enter`/`on_exit` on a bounds- OR position-change
+            // crossing, so a cursor-stationary scroll (viewport_offset shift)
+            // would otherwise leave `hovered_slot` referencing the
+            // pre-scroll `item_index`. With `on_move`, any cursor twitch
+            // after the scroll re-bakes the message with the current
+            // render's `item_index` and refreshes state.
+            let move_msg = enter_msg.clone();
             mouse_area(hover_target)
-                .on_enter((cb.on_enter)(hovered))
-                .on_exit((cb.on_exit)(hovered))
+                .on_enter(enter_msg)
+                .on_exit(exit_msg)
+                .on_move(move |_pt| move_msg.clone())
                 .into()
         } else {
             hover_target

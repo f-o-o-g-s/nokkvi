@@ -172,9 +172,8 @@ impl GenresPage {
                     ))
                 }
             },
-            Some(crate::widgets::slot_list::SlotHoverCallback::new(
-                |h| GenresMessage::SlotList(crate::widgets::SlotListPageMessage::HoverEnterSlot(h)),
-                |h| GenresMessage::SlotList(crate::widgets::SlotListPageMessage::HoverExitSlot(h)),
+            Some(crate::widgets::slot_list::SlotHoverCallback::for_slot_list(
+                GenresMessage::SlotList,
             )),
             |entry, ctx| match entry {
                 SlotListEntry::Parent(genre) => {

@@ -29,6 +29,7 @@ impl PlaylistsPage {
             toggle_sort: PlaylistsMessage::ToggleSortOrder => PlaylistsAction::SortOrderChanged,
             search_changed: PlaylistsMessage::SearchQueryChanged => PlaylistsAction::SearchChanged,
             search_focused: PlaylistsMessage::SearchFocused,
+            slot_list_wrap: PlaylistsMessage::SlotList,
             action_none: PlaylistsAction::None,
         ) {
             Ok(result) => result,
@@ -165,21 +166,14 @@ impl PlaylistsPage {
                         SlotListPageMessage::CenterOnPlaying => {
                             (Task::none(), PlaylistsAction::None)
                         }
-                        SlotListPageMessage::HoverEnterSlot(h) => {
-                            self.common.slot_list.hovered_slot = Some(h);
-                            (Task::none(), PlaylistsAction::None)
-                        }
-                        SlotListPageMessage::HoverExitSlot(h) => {
-                            if self.common.slot_list.hovered_slot == Some(h) {
-                                self.common.slot_list.hovered_slot = None;
-                            }
-                            (Task::none(), PlaylistsAction::None)
-                        }
-                        // Sort/search exhaustiveness arms (expansion views don't emit these via SlotList):
+                        // Sort/search/hover exhaustiveness arms — all handled by
+                        // impl_expansion_update! above.
                         SlotListPageMessage::SearchQueryChanged(_)
                         | SlotListPageMessage::SearchFocused(_)
                         | SlotListPageMessage::SortModeSelected(_)
-                        | SlotListPageMessage::ToggleSortOrder => {
+                        | SlotListPageMessage::ToggleSortOrder
+                        | SlotListPageMessage::HoverEnterSlot(_)
+                        | SlotListPageMessage::HoverExitSlot(_) => {
                             (Task::none(), PlaylistsAction::None)
                         }
                     }

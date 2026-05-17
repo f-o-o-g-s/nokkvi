@@ -282,9 +282,8 @@ impl RadiosPage {
                     ))
                 }
             },
-            Some(crate::widgets::slot_list::SlotHoverCallback::new(
-                |h| RadiosMessage::SlotList(SlotListPageMessage::HoverEnterSlot(h)),
-                |h| RadiosMessage::SlotList(SlotListPageMessage::HoverExitSlot(h)),
+            Some(crate::widgets::slot_list::SlotHoverCallback::for_slot_list(
+                RadiosMessage::SlotList,
             )),
             |station, ctx| {
                 let style = SlotListSlotStyle::for_slot(

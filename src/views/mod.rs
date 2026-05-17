@@ -186,6 +186,8 @@ pub(crate) trait HasCommonAction {
 /// - ToggleSortOrder → delegates to `expansion.handle_toggle_sort_order()`
 /// - SearchQueryChanged(query) → delegates to `expansion.handle_search_query_changed()`
 /// - SearchFocused(focused) → delegates to `common.handle_search_focused()`
+/// - `SlotList(SlotListPageMessage::HoverEnterSlot)` / `HoverExitSlot` →
+///   writes / idempotently clears `common.slot_list.hovered_slot`
 ///
 /// # Usage
 /// ```ignore
@@ -199,6 +201,7 @@ pub(crate) trait HasCommonAction {
 ///     toggle_sort: AlbumsMessage::ToggleSortOrder => AlbumsAction::SortOrderChanged,
 ///     search_changed: AlbumsMessage::SearchQueryChanged => AlbumsAction::SearchChanged,
 ///     search_focused: AlbumsMessage::SearchFocused,
+///     slot_list_wrap: AlbumsMessage::SlotList,
 ///     action_none: AlbumsAction::None,
 /// ) {
 ///     Ok(result) => result,
@@ -219,6 +222,7 @@ macro_rules! impl_expansion_update {
         toggle_sort: $toggle_msg:path => $sort_order_action:expr,
         search_changed: $search_msg:path => $search_action:expr,
         search_focused: $focus_msg:path,
+        slot_list_wrap: $slot_list_wrap:path,
         action_none: $action_none:expr $(,)?
     ) => {{
         // Try to match common expansion arms.
@@ -259,6 +263,16 @@ macro_rules! impl_expansion_update {
             }
             $focus_msg(focused) => {
                 $self.common.handle_search_focused(focused);
+                Ok((Task::none(), $action_none))
+            }
+            $slot_list_wrap(crate::widgets::SlotListPageMessage::HoverEnterSlot(h)) => {
+                $self.common.slot_list.hovered_slot = Some(h);
+                Ok((Task::none(), $action_none))
+            }
+            $slot_list_wrap(crate::widgets::SlotListPageMessage::HoverExitSlot(h)) => {
+                if $self.common.slot_list.hovered_slot == Some(h) {
+                    $self.common.slot_list.hovered_slot = None;
+                }
                 Ok((Task::none(), $action_none))
             }
             other => Err(other)

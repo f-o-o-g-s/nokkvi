@@ -9,6 +9,10 @@
 //!   pair can trigger.
 //! - `compute_queue_drop_slot` reads the queue's hovered slot directly —
 //!   no `cursor_y` argument, no chrome math, no slot-count divergence.
+//!   It additionally rejects payloads whose `items_len` no longer matches
+//!   the live queue length, so a mid-drag mutation (consume auto-advance,
+//!   SSE library refresh) cancels the drop instead of dropping at a stale
+//!   index.
 //! - `handle_cross_pane_drag_pressed` reads the active browser view's
 //!   hovered slot — the press at the "wrong-track-dragged" scenario from
 //!   the math-fix branch is now structurally unreachable because the
@@ -26,9 +30,8 @@
 //!    resolution runs at consume time.
 //! 3. Nav-mode-insensitive press chrome math → wrong-track-dragged —
 //!    structurally unreachable: `handle_cross_pane_drag_pressed` reads
-//!    `hovered_slot.item_index()` published by the slot's own
-//!    `mouse_area`, so the press resolves to whichever item the user is
-//!    actually pointing at.
+//!    `hovered_slot` published by the slot's own `mouse_area`, so the
+//!    press resolves to whichever item the user is actually pointing at.
 //! 4. Hand-coded `EDIT_BAR_HEIGHT = 32` vs the queue view's actual 45/33
 //!    — structurally unreachable: indicator y is derived from the hovered
 //!    slot's index inside the slot list's own coordinate space (see
@@ -55,6 +58,33 @@ fn open_browsing_panel(app: &mut crate::Nokkvi, view: views::BrowsingView) {
     app.browsing_panel = Some(panel);
 }
 
+/// Build an `Item` hover payload with `items_len` matching the live queue.
+fn queue_hover(app: &crate::Nokkvi, slot_index: usize, item_index: usize) -> HoveredSlot {
+    HoveredSlot::Item {
+        slot_index,
+        item_index,
+        items_len: app.library.queue_songs.len(),
+    }
+}
+
+/// Build an `Empty` hover payload with `items_len` matching the live queue.
+fn queue_empty_hover(app: &crate::Nokkvi, slot_index: usize) -> HoveredSlot {
+    HoveredSlot::Empty {
+        slot_index,
+        items_len: app.library.queue_songs.len(),
+    }
+}
+
+/// Build an `Item` hover for the browser-pane songs view, with `items_len`
+/// matching the live `songs` buffer.
+fn songs_hover(app: &crate::Nokkvi, slot_index: usize, item_index: usize) -> HoveredSlot {
+    HoveredSlot::Item {
+        slot_index,
+        item_index,
+        items_len: app.library.songs.len(),
+    }
+}
+
 #[test]
 fn hover_enter_records_slot_on_queue_page() {
     // Per-slot `mouse_area::on_enter` publishes HoverEnterSlot; the queue
@@ -63,10 +93,7 @@ fn hover_enter_records_slot_on_queue_page() {
     let mut app = test_app();
     populate_queue(&mut app, 20);
 
-    let payload = HoveredSlot::Item {
-        slot_index: 4,
-        item_index: 4,
-    };
+    let payload = queue_hover(&app, 4, 4);
     let total = app.library.queue_songs.len();
     app.queue_page
         .common
@@ -90,14 +117,8 @@ fn hover_exit_clears_only_if_payload_matches() {
     let mut app = test_app();
     populate_queue(&mut app, 20);
 
-    let slot_a = HoveredSlot::Item {
-        slot_index: 3,
-        item_index: 3,
-    };
-    let slot_b = HoveredSlot::Item {
-        slot_index: 4,
-        item_index: 4,
-    };
+    let slot_a = queue_hover(&app, 3, 3);
+    let slot_b = queue_hover(&app, 4, 4);
     let total = app.library.queue_songs.len();
 
     // Simulate: enter A, then enter B (cursor moved from A → B already
@@ -136,10 +157,8 @@ fn compute_queue_drop_slot_returns_hovered_item_index() {
     // hover payload at render time IS the insertion index.
     let mut app = test_app();
     populate_queue(&mut app, 50);
-    app.queue_page.common.slot_list.hovered_slot = Some(HoveredSlot::Item {
-        slot_index: 6,
-        item_index: 27,
-    });
+    let hover = queue_hover(&app, 6, 27);
+    app.queue_page.common.slot_list.hovered_slot = Some(hover);
 
     assert_eq!(
         app.compute_queue_drop_slot(),
@@ -155,7 +174,8 @@ fn compute_queue_drop_slot_empty_slot_appends() {
     // to insert-at-total — the "append" position.
     let mut app = test_app();
     populate_queue(&mut app, 8);
-    app.queue_page.common.slot_list.hovered_slot = Some(HoveredSlot::Empty { slot_index: 9 });
+    let hover = queue_empty_hover(&app, 9);
+    app.queue_page.common.slot_list.hovered_slot = Some(hover);
 
     assert_eq!(
         app.compute_queue_drop_slot(),
@@ -194,10 +214,8 @@ fn compute_queue_drop_slot_is_unaffected_by_window_resize() {
     // not change the result for a fixed hover payload.
     let mut app = test_app();
     populate_queue(&mut app, 100);
-    app.queue_page.common.slot_list.hovered_slot = Some(HoveredSlot::Item {
-        slot_index: 2,
-        item_index: 42,
-    });
+    let hover = queue_hover(&app, 2, 42);
+    app.queue_page.common.slot_list.hovered_slot = Some(hover);
 
     app.window.width = 1920.0;
     app.window.height = 1080.0;
@@ -230,10 +248,8 @@ fn compute_queue_drop_slot_is_unaffected_by_viewport_offset() {
     let mut app = test_app();
     populate_queue(&mut app, 13_500);
     app.queue_page.common.slot_list.viewport_offset = 5_000;
-    app.queue_page.common.slot_list.hovered_slot = Some(HoveredSlot::Item {
-        slot_index: 4,
-        item_index: 5_001,
-    });
+    let hover = queue_hover(&app, 4, 5_001);
+    app.queue_page.common.slot_list.hovered_slot = Some(hover);
 
     assert_eq!(
         app.compute_queue_drop_slot(),
@@ -254,18 +270,15 @@ fn compute_queue_drop_slot_ignores_stale_stored_slot_count() {
     // calling `slot_to_item_index`.
     //
     // Structurally, `compute_queue_drop_slot` never calls
-    // `slot_to_item_index` — it reads `hovered_slot.item_index()`
-    // straight from a payload that was baked with the inline (correct)
-    // value. Stash a deliberately stale `slot_count = 5` and verify the
-    // drop slot is unchanged.
+    // `slot_to_item_index` — it reads the item index straight from a
+    // payload baked with the inline (correct) value. Stash a deliberately
+    // stale `slot_count = 5` and verify the drop slot is unchanged.
     let mut app = test_app();
     populate_queue(&mut app, 20);
     app.queue_page.common.slot_list.viewport_offset = 18;
     app.queue_page.common.slot_list.slot_count = 5; // stale on purpose
-    app.queue_page.common.slot_list.hovered_slot = Some(HoveredSlot::Item {
-        slot_index: 12,
-        item_index: 17,
-    });
+    let hover = queue_hover(&app, 12, 17);
+    app.queue_page.common.slot_list.hovered_slot = Some(hover);
 
     assert_eq!(
         app.compute_queue_drop_slot(),
@@ -273,6 +286,73 @@ fn compute_queue_drop_slot_ignores_stale_stored_slot_count() {
         "stored slot_count value MUST NOT enter the calculation — the \
          hover payload's item_index is authoritative"
     );
+}
+
+#[test]
+fn compute_queue_drop_slot_rejects_payload_when_queue_grows() {
+    // The scalability audit's C2 scenario: the cursor is stationary over
+    // a queue slot, and `library.queue_songs` mutates beneath it (SSE
+    // refresh adds items, optimistic reorder, etc.). iced's
+    // `mouse_area::update` only re-fires `on_enter` on cursor- or
+    // bounds-change (`reference-iced/widget/src/mouse_area.rs:320`), so
+    // a new render's freshly-baked item_index never reaches
+    // `hovered_slot`. The drop would mis-route by the size of the
+    // mutation.
+    //
+    // Staleness gate: the baked `items_len` is compared to the live
+    // length. Mismatch → return None → released drag cancels rather than
+    // dropping at the now-incorrect index.
+    let mut app = test_app();
+    populate_queue(&mut app, 10);
+    let hover = queue_hover(&app, 4, 4); // baked with items_len = 10
+    app.queue_page.common.slot_list.hovered_slot = Some(hover);
+
+    // Mutation between hover-bake and drop-consume: queue grows by 5.
+    populate_queue(&mut app, 5);
+    assert_eq!(app.library.queue_songs.len(), 15);
+
+    assert_eq!(
+        app.compute_queue_drop_slot(),
+        None,
+        "items_len mismatch must cancel the drop — without this, the \
+         cursor-stationary mutation scenario silently inserts at a stale \
+         index"
+    );
+}
+
+#[test]
+fn compute_queue_drop_slot_rejects_payload_when_queue_shrinks() {
+    // Mirror of the grow case: consume-mode auto-advance removes the
+    // playing song from the queue, shifting every subsequent index down
+    // by 1.
+    let mut app = test_app();
+    populate_queue(&mut app, 20);
+    let hover = queue_hover(&app, 4, 12); // baked with items_len = 20
+    app.queue_page.common.slot_list.hovered_slot = Some(hover);
+
+    app.library.queue_songs.remove(0);
+    assert_eq!(app.library.queue_songs.len(), 19);
+
+    assert_eq!(
+        app.compute_queue_drop_slot(),
+        None,
+        "consume-mode advance (or any queue-shrink event) during a drag \
+         must invalidate the hover payload — otherwise the drop lands at \
+         what is now a different song"
+    );
+}
+
+#[test]
+fn compute_queue_drop_slot_accepts_payload_when_queue_unchanged() {
+    // Pair to the rejection tests: the gate must NOT fire spuriously.
+    // No mutation between bake and consume → drop position passes
+    // through.
+    let mut app = test_app();
+    populate_queue(&mut app, 20);
+    let hover = queue_hover(&app, 4, 12);
+    app.queue_page.common.slot_list.hovered_slot = Some(hover);
+
+    assert_eq!(app.compute_queue_drop_slot(), Some(12));
 }
 
 #[test]
@@ -295,10 +375,7 @@ fn press_resolves_from_browser_hovered_item_index() {
     open_browsing_panel(&mut app, views::BrowsingView::Songs);
 
     // Cursor is over visual slot 0 of the songs view — item 0.
-    app.songs_page.common.slot_list.hovered_slot = Some(HoveredSlot::Item {
-        slot_index: 0,
-        item_index: 0,
-    });
+    app.songs_page.common.slot_list.hovered_slot = Some(songs_hover(&app, 0, 0));
 
     let _ = app.handle_cross_pane_drag_pressed();
 
@@ -327,10 +404,7 @@ fn press_resolves_from_browser_hovered_item_at_high_offset() {
     app.library.songs.set_from_vec(songs);
     app.songs_page.common.slot_list.viewport_offset = 1_337;
     open_browsing_panel(&mut app, views::BrowsingView::Songs);
-    app.songs_page.common.slot_list.hovered_slot = Some(HoveredSlot::Item {
-        slot_index: 7,
-        item_index: 1_340,
-    });
+    app.songs_page.common.slot_list.hovered_slot = Some(songs_hover(&app, 7, 1_340));
 
     let _ = app.handle_cross_pane_drag_pressed();
     assert_eq!(app.cross_pane_drag_pressed_item, Some(1_340));
@@ -366,7 +440,10 @@ fn press_no_op_on_empty_trailing_slot() {
         .collect();
     app.library.songs.set_from_vec(songs);
     open_browsing_panel(&mut app, views::BrowsingView::Songs);
-    app.songs_page.common.slot_list.hovered_slot = Some(HoveredSlot::Empty { slot_index: 7 });
+    app.songs_page.common.slot_list.hovered_slot = Some(HoveredSlot::Empty {
+        slot_index: 7,
+        items_len: app.library.songs.len(),
+    });
 
     let _ = app.handle_cross_pane_drag_pressed();
     assert_eq!(app.cross_pane_drag_pressed_item, None);
@@ -379,10 +456,7 @@ fn press_no_op_when_browsing_panel_closed() {
     let mut app = test_app();
     app.browsing_panel = None;
     // Hover state on songs is irrelevant when no panel is open.
-    app.songs_page.common.slot_list.hovered_slot = Some(HoveredSlot::Item {
-        slot_index: 2,
-        item_index: 2,
-    });
+    app.songs_page.common.slot_list.hovered_slot = Some(songs_hover(&app, 2, 2));
 
     let _ = app.handle_cross_pane_drag_pressed();
     assert_eq!(app.cross_pane_drag_pressed_item, None);
@@ -404,10 +478,7 @@ fn press_reads_from_active_browser_view_not_a_different_one() {
     // Albums (active) has NO hover.
     app.albums_page.common.slot_list.hovered_slot = None;
     // Songs (inactive) has a stale hover — must be ignored.
-    app.songs_page.common.slot_list.hovered_slot = Some(HoveredSlot::Item {
-        slot_index: 2,
-        item_index: 2,
-    });
+    app.songs_page.common.slot_list.hovered_slot = Some(songs_hover(&app, 2, 2));
 
     let _ = app.handle_cross_pane_drag_pressed();
     assert_eq!(
@@ -428,10 +499,7 @@ fn press_no_op_with_ctrl_or_shift_modifier() {
         .collect();
     app.library.songs.set_from_vec(songs);
     open_browsing_panel(&mut app, views::BrowsingView::Songs);
-    app.songs_page.common.slot_list.hovered_slot = Some(HoveredSlot::Item {
-        slot_index: 2,
-        item_index: 2,
-    });
+    app.songs_page.common.slot_list.hovered_slot = Some(songs_hover(&app, 2, 2));
 
     app.window.keyboard_modifiers = iced::keyboard::Modifiers::CTRL;
     let _ = app.handle_cross_pane_drag_pressed();

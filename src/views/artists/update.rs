@@ -48,6 +48,7 @@ impl ArtistsPage {
             toggle_sort: ArtistsMessage::ToggleSortOrder => ArtistsAction::SortOrderChanged,
             search_changed: ArtistsMessage::SearchQueryChanged => ArtistsAction::SearchChanged,
             search_focused: ArtistsMessage::SearchFocused,
+            slot_list_wrap: ArtistsMessage::SlotList,
             action_none: ArtistsAction::None,
         ) {
             Ok(result) => result,
@@ -164,22 +165,14 @@ impl ArtistsPage {
                     SlotListPageMessage::CenterOnPlaying => {
                         (Task::none(), ArtistsAction::CenterOnPlaying)
                     }
-                    SlotListPageMessage::HoverEnterSlot(h) => {
-                        self.common.slot_list.hovered_slot = Some(h);
-                        (Task::none(), ArtistsAction::None)
-                    }
-                    SlotListPageMessage::HoverExitSlot(h) => {
-                        if self.common.slot_list.hovered_slot == Some(h) {
-                            self.common.slot_list.hovered_slot = None;
-                        }
-                        (Task::none(), ArtistsAction::None)
-                    }
-                    // Sort/search are handled by impl_expansion_update! above;
-                    // these arms exist only for exhaustiveness.
+                    // Sort/search/hover are handled by impl_expansion_update! above;
+                    // these arms exist only for pattern-exhaustiveness.
                     SlotListPageMessage::SearchQueryChanged(_)
                     | SlotListPageMessage::SearchFocused(_)
                     | SlotListPageMessage::SortModeSelected(_)
-                    | SlotListPageMessage::ToggleSortOrder => (Task::none(), ArtistsAction::None),
+                    | SlotListPageMessage::ToggleSortOrder
+                    | SlotListPageMessage::HoverEnterSlot(_)
+                    | SlotListPageMessage::HoverExitSlot(_) => (Task::none(), ArtistsAction::None),
                 },
 
                 // Routed up to root in `handle_artists` before this match runs;

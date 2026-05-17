@@ -183,11 +183,8 @@ impl ArtistsPage {
                     ))
                 }
             },
-            Some(crate::widgets::slot_list::SlotHoverCallback::new(
-                |h| {
-                    ArtistsMessage::SlotList(crate::widgets::SlotListPageMessage::HoverEnterSlot(h))
-                },
-                |h| ArtistsMessage::SlotList(crate::widgets::SlotListPageMessage::HoverExitSlot(h)),
+            Some(crate::widgets::slot_list::SlotHoverCallback::for_slot_list(
+                ArtistsMessage::SlotList,
             )),
             |entry, ctx| match entry {
                 SlotListEntry::Parent(artist) => {
