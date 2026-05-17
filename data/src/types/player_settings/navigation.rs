@@ -2,93 +2,39 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Navigation layout mode — controls where the view tabs are displayed.
-///
-/// Serializes to lowercase strings for redb storage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum NavLayout {
-    /// Navigation tabs in the horizontal top bar (default)
-    #[default]
-    Top,
-    /// Navigation tabs in a vertical sidebar on the left
-    Side,
-    /// No navigation chrome — only the active page and player bar are rendered
-    None,
-}
+use crate::define_labeled_enum;
 
-impl NavLayout {
-    /// Convert from settings GUI label to enum variant
-    pub fn from_label(label: &str) -> Self {
-        match label {
-            "Side" => Self::Side,
-            "None" => Self::None,
-            _ => Self::Top,
-        }
-    }
-
-    /// Convert to settings GUI label
-    pub fn as_label(self) -> &'static str {
-        match self {
-            Self::Top => "Top",
-            Self::Side => "Side",
-            Self::None => "None",
-        }
+define_labeled_enum! {
+    /// Navigation layout mode — controls where the view tabs are displayed.
+    ///
+    /// Serializes to lowercase strings for redb storage.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+    #[serde(rename_all = "lowercase")]
+    pub enum NavLayout {
+        /// Navigation tabs in the horizontal top bar (default)
+        #[default]
+        Top { label: "Top", wire: "top" },
+        /// Navigation tabs in a vertical sidebar on the left
+        Side { label: "Side", wire: "side" },
+        /// No navigation chrome — only the active page and player bar are rendered
+        None { label: "None", wire: "none" },
     }
 }
 
-impl std::fmt::Display for NavLayout {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Top => write!(f, "top"),
-            Self::Side => write!(f, "side"),
-            Self::None => write!(f, "none"),
-        }
-    }
-}
-
-/// Navigation display mode — controls what content is shown in navigation tabs.
-///
-/// Serializes to snake_case strings for redb storage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum NavDisplayMode {
-    /// Show only text labels (default)
-    #[default]
-    TextOnly,
-    /// Show icons alongside text labels
-    TextAndIcons,
-    /// Show only icons (no text)
-    IconsOnly,
-}
-
-impl NavDisplayMode {
-    /// Convert from settings GUI label to enum variant
-    pub fn from_label(label: &str) -> Self {
-        match label {
-            "Text + Icons" => Self::TextAndIcons,
-            "Icons Only" => Self::IconsOnly,
-            _ => Self::TextOnly,
-        }
-    }
-
-    /// Convert to settings GUI label
-    pub fn as_label(self) -> &'static str {
-        match self {
-            Self::TextOnly => "Text Only",
-            Self::TextAndIcons => "Text + Icons",
-            Self::IconsOnly => "Icons Only",
-        }
-    }
-}
-
-impl std::fmt::Display for NavDisplayMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::TextOnly => write!(f, "text_only"),
-            Self::TextAndIcons => write!(f, "text_and_icons"),
-            Self::IconsOnly => write!(f, "icons_only"),
-        }
+define_labeled_enum! {
+    /// Navigation display mode — controls what content is shown in navigation tabs.
+    ///
+    /// Serializes to snake_case strings for redb storage.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum NavDisplayMode {
+        /// Show only text labels (default)
+        #[default]
+        TextOnly { label: "Text Only", wire: "text_only" },
+        /// Show icons alongside text labels
+        TextAndIcons { label: "Text + Icons", wire: "text_and_icons" },
+        /// Show only icons (no text)
+        IconsOnly { label: "Icons Only", wire: "icons_only" },
     }
 }
 

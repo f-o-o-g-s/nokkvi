@@ -13,6 +13,7 @@ pub mod genre;
 pub mod hotkey_config;
 pub mod info_modal;
 pub mod item_kind;
+pub mod labeled_enum;
 pub mod next_track_reset;
 pub mod paged_buffer;
 pub mod player_settings;

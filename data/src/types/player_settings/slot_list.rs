@@ -2,60 +2,46 @@
 
 use serde::{Deserialize, Serialize};
 
-/// What happens when pressing Enter on a song in the Songs view.
-///
-/// Serializes to snake_case strings for redb storage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EnterBehavior {
-    /// Replace queue with all songs in the current view, play from selected index
-    #[default]
-    PlayAll,
-    /// Replace queue with just the selected song
-    PlaySingle,
-    /// Append the selected song to the existing queue and start playing it
-    AppendAndPlay,
-}
+use crate::define_labeled_enum;
 
-impl EnterBehavior {
-    /// Convert from settings GUI label to enum variant
-    pub fn from_label(label: &str) -> Self {
-        match label {
-            "Play Single" => Self::PlaySingle,
-            "Append & Play" => Self::AppendAndPlay,
-            _ => Self::PlayAll,
-        }
-    }
-
-    /// Convert to settings GUI label
-    pub fn as_label(self) -> &'static str {
-        match self {
-            Self::PlayAll => "Play All",
-            Self::PlaySingle => "Play Single",
-            Self::AppendAndPlay => "Append & Play",
-        }
+define_labeled_enum! {
+    /// What happens when pressing Enter on a song in the Songs view.
+    ///
+    /// Serializes to snake_case strings for redb storage.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum EnterBehavior {
+        /// Replace queue with all songs in the current view, play from selected index
+        #[default]
+        PlayAll { label: "Play All", wire: "play_all" },
+        /// Replace queue with just the selected song
+        PlaySingle { label: "Play Single", wire: "play_single" },
+        /// Append the selected song to the existing queue and start playing it
+        AppendAndPlay { label: "Append & Play", wire: "append_and_play" },
     }
 }
 
-/// Slot list row density — controls the target row height for all slot lists.
-///
-/// Each variant is spaced far enough apart (~20px) to guarantee a different
-/// slot count at any reasonable window height, eliminating the dead-zone
-/// problem of the old continuous slider.
-///
-/// Serializes to lowercase strings for redb storage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SlotRowHeight {
-    /// Maximum density — smallest comfortable rows (50px target)
-    Compact,
-    /// Balanced (70px target)
-    #[default]
-    Default,
-    /// Fewer, taller rows (90px target)
-    Comfortable,
-    /// Maximum row height (110px target)
-    Spacious,
+define_labeled_enum! {
+    /// Slot list row density — controls the target row height for all slot lists.
+    ///
+    /// Each variant is spaced far enough apart (~20px) to guarantee a different
+    /// slot count at any reasonable window height, eliminating the dead-zone
+    /// problem of the old continuous slider.
+    ///
+    /// Serializes to lowercase strings for redb storage.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+    #[serde(rename_all = "lowercase")]
+    pub enum SlotRowHeight {
+        /// Maximum density — smallest comfortable rows (50px target)
+        Compact { label: "Compact", wire: "compact" },
+        /// Balanced (70px target)
+        #[default]
+        Default { label: "Default", wire: "default" },
+        /// Fewer, taller rows (90px target)
+        Comfortable { label: "Comfortable", wire: "comfortable" },
+        /// Maximum row height (110px target)
+        Spacious { label: "Spacious", wire: "spacious" },
+    }
 }
 
 impl SlotRowHeight {
@@ -66,37 +52,6 @@ impl SlotRowHeight {
             Self::Default => 70,
             Self::Comfortable => 90,
             Self::Spacious => 110,
-        }
-    }
-
-    /// Convert from settings GUI label to enum variant.
-    pub fn from_label(label: &str) -> Self {
-        match label {
-            "Compact" => Self::Compact,
-            "Comfortable" => Self::Comfortable,
-            "Spacious" => Self::Spacious,
-            _ => Self::Default,
-        }
-    }
-
-    /// Convert to settings GUI label.
-    pub fn as_label(self) -> &'static str {
-        match self {
-            Self::Compact => "Compact",
-            Self::Default => "Default",
-            Self::Comfortable => "Comfortable",
-            Self::Spacious => "Spacious",
-        }
-    }
-}
-
-impl std::fmt::Display for SlotRowHeight {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Compact => write!(f, "compact"),
-            Self::Default => write!(f, "default"),
-            Self::Comfortable => write!(f, "comfortable"),
-            Self::Spacious => write!(f, "spacious"),
         }
     }
 }
@@ -133,5 +88,24 @@ mod tests {
         ] {
             assert_eq!(EnterBehavior::from_label(behavior.as_label()), behavior);
         }
+    }
+
+    // Pins the new Display impl that the macro added to EnterBehavior — the
+    // hand-written version was previously missing this trait, leaving the
+    // enum asymmetric with the other settings enums. The wire strings mirror
+    // the outer `#[serde(rename_all = "snake_case")]`.
+    #[test]
+    fn enter_behavior_display_play_all() {
+        assert_eq!(EnterBehavior::PlayAll.to_string(), "play_all");
+    }
+
+    #[test]
+    fn enter_behavior_display_play_single() {
+        assert_eq!(EnterBehavior::PlaySingle.to_string(), "play_single");
+    }
+
+    #[test]
+    fn enter_behavior_display_append_and_play() {
+        assert_eq!(EnterBehavior::AppendAndPlay.to_string(), "append_and_play");
     }
 }
