@@ -15,6 +15,24 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
+/// Field-level deserializer that falls back to `T::default()` on any error
+/// (empty string, unknown variant, malformed value). Preserves the
+/// pre-Group-G "silent fallback on unknown" behavior for the visualizer's
+/// stringly-typed-then-now-typed-enum fields, so existing user `config.toml`
+/// files with empty strings or typos keep parsing instead of rejecting the
+/// whole `[visualizer]` section.
+fn deserialize_or_default<'de, T, D>(deserializer: D) -> Result<T, D::Error>
+where
+    T: Deserialize<'de> + Default,
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{IntoDeserializer, value::Error as ValueError};
+
+    let raw = String::deserialize(deserializer).unwrap_or_default();
+    let inner: serde::de::value::StringDeserializer<ValueError> = raw.into_deserializer();
+    Ok(T::deserialize(inner).unwrap_or_default())
+}
+
 /// Bar gradient color mode.
 ///
 /// Discriminants match the integer dispatch in `widgets/visualizer/shaders/bars.wgsl`.
@@ -334,13 +352,14 @@ pub struct BarsConfig {
     /// Bar gradient color mode. See [`BarsGradientMode`] for variants.
     ///
     /// Default: [`BarsGradientMode::Wave`]
+    #[serde(deserialize_with = "deserialize_or_default")]
     pub gradient_mode: BarsGradientMode,
 
     /// Gradient orientation — controls which axis the gradient colors are mapped along.
     /// Works with all gradient modes except `Alternate`.
     ///
     /// Default: [`BarsGradientOrientation::Vertical`]
-    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_or_default")]
     pub gradient_orientation: BarsGradientOrientation,
 
     /// Peak gradient color mode. See [`BarsPeakGradientMode`] for variants.
@@ -348,12 +367,14 @@ pub struct BarsConfig {
     /// Default: [`BarsPeakGradientMode::Cycle`] (the fallback used when no value
     /// is set; the [`Default`] impl for [`BarsConfig`] overrides this to
     /// [`BarsPeakGradientMode::Static`])
+    #[serde(deserialize_with = "deserialize_or_default")]
     pub peak_gradient_mode: BarsPeakGradientMode,
 
     /// Peak behavior mode (inspired by audioMotion-analyzer). See [`BarsPeakMode`].
     ///
     /// Default: [`BarsPeakMode::FallFade`] (overridden via the [`Default`] impl
     /// for [`BarsConfig`])
+    #[serde(deserialize_with = "deserialize_or_default")]
     pub peak_mode: BarsPeakMode,
 
     /// Time in milliseconds for peaks to hold before falling/fading
@@ -461,6 +482,7 @@ pub struct LinesConfig {
     /// Default: [`LinesGradientMode::Breathing`] (the fallback used when no value
     /// is set; the [`Default`] impl for [`LinesConfig`] overrides this to
     /// [`LinesGradientMode::Static`])
+    #[serde(deserialize_with = "deserialize_or_default")]
     pub gradient_mode: LinesGradientMode,
     /// Fill opacity under the curve (0.0 = disabled, 1.0 = fully opaque).
     /// Default: 0.5
@@ -471,6 +493,7 @@ pub struct LinesConfig {
     /// Interpolation style. See [`LinesStyle`] for variants.
     ///
     /// Default: [`LinesStyle::Smooth`]
+    #[serde(deserialize_with = "deserialize_or_default")]
     pub style: LinesStyle,
     /// Surfing boat: render a small boat that rides the waveform.
     /// Default: false
@@ -1100,6 +1123,43 @@ mod tests {
             let parsed: LinesConfig = toml::from_str(&toml_str).expect("deserialize LinesConfig");
             assert_eq!(parsed.style, *variant);
         }
+    }
+
+    /// Existing `config.toml` files on disk (pre-Group-G) may have empty
+    /// strings or typo'd values for the enum-typed visualizer fields. The
+    /// pre-Group-G `String`-typed implementation silently fell back to the
+    /// default for unknown values; the post-Group-G typed enums would
+    /// otherwise reject the whole `[visualizer]` section with a serde error.
+    /// `deserialize_or_default` restores the field-level silent fallback so
+    /// existing user configs keep parsing.
+    #[test]
+    fn bars_config_tolerates_empty_and_typo_strings() {
+        let toml_input = r#"
+gradient_mode = "shimer"
+gradient_orientation = ""
+peak_gradient_mode = ""
+peak_mode = "unknown_mode"
+"#;
+        let cfg: BarsConfig = toml::from_str(toml_input).expect(
+            "BarsConfig must tolerate empty + typo strings instead of rejecting the whole struct",
+        );
+        assert_eq!(cfg.gradient_mode, BarsGradientMode::default());
+        assert_eq!(cfg.gradient_orientation, BarsGradientOrientation::default());
+        assert_eq!(cfg.peak_gradient_mode, BarsPeakGradientMode::default());
+        assert_eq!(cfg.peak_mode, BarsPeakMode::default());
+    }
+
+    #[test]
+    fn lines_config_tolerates_empty_and_typo_strings() {
+        let toml_input = r#"
+gradient_mode = ""
+style = "wibbly"
+"#;
+        let cfg: LinesConfig = toml::from_str(toml_input).expect(
+            "LinesConfig must tolerate empty + typo strings instead of rejecting the whole struct",
+        );
+        assert_eq!(cfg.gradient_mode, LinesGradientMode::default());
+        assert_eq!(cfg.style, LinesStyle::default());
     }
 
     /// Lock the WGSL dispatch contract — the `#[repr(u32)]` discriminants on
