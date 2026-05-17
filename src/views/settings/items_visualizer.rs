@@ -301,8 +301,8 @@ pub(crate) fn build_visualizer_items(
             .with_subtitle(
                 "static: height-based gradient (bottom to top)\nwave: gradient stretching (taller bars show more bottom colors)\nshimmer: bars cycle through all gradient colors as flat per-bar colors\nenergy: gradient shifts based on overall loudness\nalternate: bars alternate between first two gradient colors",
             ),
-        &config.bars.gradient_mode,
-        &d.bars.gradient_mode,
+        config.bars.gradient_mode.as_wire_str(),
+        d.bars.gradient_mode.as_wire_str(),
         vec!["static", "wave", "shimmer", "energy", "alternate"],
     ));
     e.push(SettingItem::enum_val(
@@ -314,8 +314,8 @@ pub(crate) fn build_visualizer_items(
         .with_subtitle(
             "Axis the gradient colors are mapped along (ignored by alternate mode)\nvertical: colors map bottom-to-top within each bar\nhorizontal: colors map left-to-right across bars (bass to treble)",
         ),
-        &config.bars.gradient_orientation,
-        &d.bars.gradient_orientation,
+        config.bars.gradient_orientation.as_wire_str(),
+        d.bars.gradient_orientation.as_wire_str(),
         vec!["vertical", "horizontal"],
     ));
     e.push(SettingItem::enum_val(
@@ -327,8 +327,8 @@ pub(crate) fn build_visualizer_items(
         .with_subtitle(
             "Color mode for peak indicators\nstatic: uses first color in peak gradient only\ncycle: time-based animation cycling through all peak colors\nheight: color based on peak height position\nmatch: uses same color as bar gradient at that height",
         ),
-        &config.bars.peak_gradient_mode,
-        &d.bars.peak_gradient_mode,
+        config.bars.peak_gradient_mode.as_wire_str(),
+        d.bars.peak_gradient_mode.as_wire_str(),
         vec!["static", "cycle", "height", "match"],
     ));
     e.push(SettingItem::enum_val(
@@ -336,8 +336,8 @@ pub(crate) fn build_visualizer_items(
             .with_subtitle(
                 "none: peak bars disabled\nfade: hold, then fade out in place (opacity decreases)\nfall: hold, then fall at constant speed\nfall_accel: hold, then fall with gravity acceleration\nfall_fade: hold, then fall at constant speed while fading out",
             ),
-        &config.bars.peak_mode,
-        &d.bars.peak_mode,
+        config.bars.peak_mode.as_wire_str(),
+        d.bars.peak_mode.as_wire_str(),
         vec!["none", "fade", "fall", "fall_accel", "fall_fade"],
     ));
     e.push(SettingItem::int(
@@ -474,8 +474,8 @@ pub(crate) fn build_visualizer_items(
             .with_subtitle(
                 "breathing: time-based cycling through gradient palette\nstatic: uses first gradient color only\nposition: color by horizontal position (bass → treble rainbow)\nheight: color by amplitude (quiet → loud)\ngradient: position + amplitude blend (peaks shift palette)",
             ),
-        &config.lines.gradient_mode,
-        &d.lines.gradient_mode,
+        config.lines.gradient_mode.as_wire_str(),
+        d.lines.gradient_mode.as_wire_str(),
         vec!["breathing", "static", "position", "height", "gradient"],
     ));
     e.push(SettingItem::float(
@@ -499,8 +499,8 @@ pub(crate) fn build_visualizer_items(
             .with_subtitle(
                 "Interpolation between data points\nsmooth: Catmull-Rom spline (curvy)\nangular: straight line segments",
             ),
-        &config.lines.style,
-        &d.lines.style,
+        config.lines.style.as_wire_str(),
+        d.lines.style.as_wire_str(),
         vec!["smooth", "angular"],
     ));
     e.push(SettingItem::bool_val(

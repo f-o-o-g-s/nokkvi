@@ -14,6 +14,7 @@ use nokkvi_data::types::player_settings::VisualizationMode;
 use crate::{
     Nokkvi,
     app_message::Message,
+    visualizer_config::LinesStyle,
     widgets::{
         boat::{self, MusicSignals},
         visualizer::visualizer_area_height,
@@ -32,7 +33,7 @@ pub(crate) fn handle_boat_tick(app: &mut Nokkvi, now: Instant) -> Task<Message> 
     let in_lines_mode = app.engine.visualization_mode == VisualizationMode::Lines;
     let cfg = app.visualizer_config.read();
     let cfg_boat_on = cfg.lines.boat;
-    let angular = cfg.lines.style.eq_ignore_ascii_case("angular");
+    let angular = cfg.lines.style == LinesStyle::Angular;
     let height_percent = cfg.height_percent;
     let lines_mirror = cfg.lines.mirror;
     drop(cfg);

@@ -15,6 +15,178 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
+/// Bar gradient color mode.
+///
+/// Discriminants match the integer dispatch in `widgets/visualizer/shaders/bars.wgsl`.
+/// `1` is intentionally skipped — `bars.wgsl` has no branch for it and would silently
+/// fall through to the static gradient. See the
+/// `bars_gradient_mode_never_emits_dead_1u` test below.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[repr(u32)]
+pub enum BarsGradientMode {
+    /// Height-based gradient (bottom to top).
+    Static = 0,
+    // value 1 intentionally skipped — dead in bars.wgsl.
+    /// Gradient stretching (taller bars show more bottom colors).
+    #[default]
+    Wave = 2,
+    /// Bars cycle through gradient colors with music-driven animation.
+    Shimmer = 3,
+    /// Gradient shifts based on overall loudness.
+    Energy = 4,
+    /// Bars alternate between first two gradient colors.
+    Alternate = 5,
+}
+
+impl BarsGradientMode {
+    /// Wire-format string used in `config.toml`. Must match the
+    /// `#[serde(rename_all = "snake_case")]` output exactly.
+    pub fn as_wire_str(&self) -> &'static str {
+        match self {
+            Self::Static => "static",
+            Self::Wave => "wave",
+            Self::Shimmer => "shimmer",
+            Self::Energy => "energy",
+            Self::Alternate => "alternate",
+        }
+    }
+}
+
+/// Gradient orientation — which axis the gradient colors map along.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[repr(u32)]
+pub enum BarsGradientOrientation {
+    /// Colors map bottom-to-top within each bar.
+    #[default]
+    Vertical = 0,
+    /// Colors map left-to-right across bars (bass → treble rainbow).
+    Horizontal = 1,
+}
+
+impl BarsGradientOrientation {
+    /// Wire-format string used in `config.toml`.
+    pub fn as_wire_str(&self) -> &'static str {
+        match self {
+            Self::Vertical => "vertical",
+            Self::Horizontal => "horizontal",
+        }
+    }
+}
+
+/// Peak gradient color mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[repr(u32)]
+pub enum BarsPeakGradientMode {
+    /// First color in `peak_gradient_colors` only.
+    Static = 0,
+    /// Time-based animation cycling through all peak colors.
+    #[default]
+    Cycle = 1,
+    /// Color based on peak height.
+    Height = 2,
+    /// Uses same color as bar gradient at that height position.
+    Match = 3,
+}
+
+impl BarsPeakGradientMode {
+    /// Wire-format string used in `config.toml`.
+    pub fn as_wire_str(&self) -> &'static str {
+        match self {
+            Self::Static => "static",
+            Self::Cycle => "cycle",
+            Self::Height => "height",
+            Self::Match => "match",
+        }
+    }
+}
+
+/// Peak behavior mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[repr(u32)]
+pub enum BarsPeakMode {
+    /// Peak bars disabled.
+    None = 0,
+    /// Hold, then fade out in place.
+    Fade = 1,
+    /// Hold, then fall at constant speed.
+    #[default]
+    Fall = 2,
+    /// Hold, then fall with gravity acceleration.
+    FallAccel = 3,
+    /// Hold, then fall at constant speed while fading out.
+    FallFade = 4,
+}
+
+impl BarsPeakMode {
+    /// Wire-format string used in `config.toml`.
+    pub fn as_wire_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Fade => "fade",
+            Self::Fall => "fall",
+            Self::FallAccel => "fall_accel",
+            Self::FallFade => "fall_fade",
+        }
+    }
+}
+
+/// Lines mode gradient color mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[repr(u32)]
+pub enum LinesGradientMode {
+    /// Time-based cycling through all gradient colors.
+    #[default]
+    Breathing = 0,
+    /// Uses first gradient color only (no animation).
+    Static = 1,
+    /// Color based on horizontal position (bass → treble).
+    Position = 2,
+    /// Color based on amplitude (quiet → loud).
+    Height = 3,
+    /// Position + amplitude blend (peaks shift palette).
+    Gradient = 4,
+}
+
+impl LinesGradientMode {
+    /// Wire-format string used in `config.toml`.
+    pub fn as_wire_str(&self) -> &'static str {
+        match self {
+            Self::Breathing => "breathing",
+            Self::Static => "static",
+            Self::Position => "position",
+            Self::Height => "height",
+            Self::Gradient => "gradient",
+        }
+    }
+}
+
+/// Lines mode interpolation style.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[repr(u32)]
+pub enum LinesStyle {
+    /// Catmull-Rom spline (curvy).
+    #[default]
+    Smooth = 0,
+    /// Straight line segments between points.
+    Angular = 1,
+}
+
+impl LinesStyle {
+    /// Wire-format string used in `config.toml`.
+    pub fn as_wire_str(&self) -> &'static str {
+        match self {
+            Self::Smooth => "smooth",
+            Self::Angular => "angular",
+        }
+    }
+}
+
 /// Theme-specific bar color configuration (colors only)
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
@@ -159,39 +331,30 @@ pub struct BarsConfig {
     /// Default: 5.0
     pub led_segment_height: f32,
 
-    /// Bar gradient color mode:
-    /// - "static": Static height-based gradient (bottom to top)
-    /// - "wave": Gradient stretching (taller bars show more bottom colors, works great with monstercat)
-    /// - "shimmer": Bars cycle through all gradient colors as flat per-bar colors with music-driven animation
-    /// - "energy": Energy-scaled gradient offset (gradient shifts dramatically based on overall loudness)
-    /// - "alternate": Bars alternate between first two gradient colors with music-driven 2-color oscillation
-    ///   Default: "wave"
-    pub gradient_mode: String,
+    /// Bar gradient color mode. See [`BarsGradientMode`] for variants.
+    ///
+    /// Default: [`BarsGradientMode::Wave`]
+    pub gradient_mode: BarsGradientMode,
 
-    /// Gradient orientation — controls which axis the gradient colors are mapped along:
-    /// - "vertical": Colors map bottom-to-top within each bar (default)
-    /// - "horizontal": Colors map left-to-right across bars (bass → treble rainbow)
-    ///   Works with all gradient modes except alternate (static, wave, shimmer, energy).
-    ///   Default: "vertical"
+    /// Gradient orientation — controls which axis the gradient colors are mapped along.
+    /// Works with all gradient modes except `Alternate`.
+    ///
+    /// Default: [`BarsGradientOrientation::Vertical`]
     #[serde(default)]
-    pub gradient_orientation: String,
+    pub gradient_orientation: BarsGradientOrientation,
 
-    /// Peak gradient color mode:
-    /// - "static": Uses first color in peak_gradient_colors only
-    /// - "cycle": Time-based animation cycling through all peak colors
-    /// - "height": Color based on peak height (taller peaks show higher gradient colors)
-    /// - "match": Uses same color as bar gradient at that height position
-    ///   Default: "static"
-    pub peak_gradient_mode: String,
+    /// Peak gradient color mode. See [`BarsPeakGradientMode`] for variants.
+    ///
+    /// Default: [`BarsPeakGradientMode::Cycle`] (the fallback used when no value
+    /// is set; the [`Default`] impl for [`BarsConfig`] overrides this to
+    /// [`BarsPeakGradientMode::Static`])
+    pub peak_gradient_mode: BarsPeakGradientMode,
 
-    /// Peak behavior mode (inspired by audioMotion-analyzer):
-    /// - "none": Peak bars disabled
-    /// - "fade": Hold, then fade out in place (opacity decreases)
-    /// - "fall": Hold, then fall at constant speed
-    /// - "fall_accel": Hold, then fall with gravity acceleration
-    /// - "fall_fade": Hold, then fall at constant speed while simultaneously fading out
-    ///   Default: "fall_fade"
-    pub peak_mode: String,
+    /// Peak behavior mode (inspired by audioMotion-analyzer). See [`BarsPeakMode`].
+    ///
+    /// Default: [`BarsPeakMode::FallFade`] (overridden via the [`Default`] impl
+    /// for [`BarsConfig`])
+    pub peak_mode: BarsPeakMode,
 
     /// Time in milliseconds for peaks to hold before falling/fading
     /// Default: 1950
@@ -232,10 +395,10 @@ impl Default for BarsConfig {
             border_width: 2.0,
             led_bars: false,
             led_segment_height: 5.0,
-            gradient_mode: "wave".to_string(),
-            gradient_orientation: "vertical".to_string(),
-            peak_gradient_mode: "static".to_string(),
-            peak_mode: "fall_fade".to_string(),
+            gradient_mode: BarsGradientMode::Wave,
+            gradient_orientation: BarsGradientOrientation::Vertical,
+            peak_gradient_mode: BarsPeakGradientMode::Static,
+            peak_mode: BarsPeakMode::FallFade,
             peak_hold_time: 1950,
             peak_fade_time: 750,
             peak_height_ratio: 35,
@@ -250,49 +413,27 @@ impl BarsConfig {
     /// Get the gradient mode as u32 for shader (0=static, 2=wave, 3=shimmer, 4=energy, 5=alternate).
     ///
     /// `1u` is intentionally absent from the emitted set — `bars.wgsl` does not branch on it
-    /// and would silently fall through to the static gradient. See Tier 0 #0.10 in the
-    /// 2026-05-11 audit roadmap; the `bars_gradient_mode_never_emits_dead_1u` test below
-    /// pins this so a future agent who adds a `1`-valued arm fails immediately.
+    /// and would silently fall through to the static gradient. The explicit discriminants on
+    /// [`BarsGradientMode`] preserve this non-contiguous {0, 2, 3, 4, 5} encoding; the
+    /// `bars_gradient_mode_never_emits_dead_1u` test below pins this so a future agent who
+    /// adds a `1`-valued variant fails immediately.
     pub fn get_gradient_mode_value(&self) -> u32 {
-        match self.gradient_mode.to_lowercase().as_str() {
-            "static" => 0,
-            "wave" => 2,
-            "shimmer" => 3,
-            "energy" => 4,
-            "alternate" => 5,
-            _ => 3, // Default to shimmer mode
-        }
+        self.gradient_mode as u32
     }
 
     /// Get the gradient orientation as u32 for shader (0=vertical, 1=horizontal)
     pub fn get_gradient_orientation_value(&self) -> u32 {
-        match self.gradient_orientation.to_lowercase().as_str() {
-            "horizontal" => 1,
-            _ => 0, // Default to vertical
-        }
+        self.gradient_orientation as u32
     }
 
     /// Get the peak gradient mode as u32 for shader (0=static, 1=cycle, 2=height, 3=match)
     pub fn get_peak_gradient_mode_value(&self) -> u32 {
-        match self.peak_gradient_mode.to_lowercase().as_str() {
-            "static" => 0,
-            "cycle" => 1,
-            "height" => 2,
-            "match" => 3,
-            _ => 1, // Default to cycle mode
-        }
+        self.peak_gradient_mode as u32
     }
 
     /// Get the peak behavior mode as u32 for shader (0=none, 1=fade, 2=fall, 3=fall_accel, 4=fall_fade)
     pub fn get_peak_mode_value(&self) -> u32 {
-        match self.peak_mode.to_lowercase().as_str() {
-            "none" => 0,
-            "fade" => 1,
-            "fall" => 2,
-            "fall_accel" => 3,
-            "fall_fade" => 4,
-            _ => 2, // Default to fall mode
-        }
+        self.peak_mode as u32
     }
 }
 
@@ -315,24 +456,22 @@ pub struct LinesConfig {
     /// Controls how quickly the line color cycles through the gradient palette.
     /// Default: 0.1
     pub animation_speed: f32,
-    /// Gradient color mode:
-    /// - "breathing": Time-based cycling through all gradient colors
-    /// - "static": Uses first gradient color only (no animation)
-    /// - "position": Color based on horizontal position (bass=left → treble=right)
-    /// - "height": Color based on amplitude (quiet=bottom colors, loud=top colors)
-    ///   Default: "static"
-    pub gradient_mode: String,
+    /// Gradient color mode. See [`LinesGradientMode`] for variants.
+    ///
+    /// Default: [`LinesGradientMode::Breathing`] (the fallback used when no value
+    /// is set; the [`Default`] impl for [`LinesConfig`] overrides this to
+    /// [`LinesGradientMode::Static`])
+    pub gradient_mode: LinesGradientMode,
     /// Fill opacity under the curve (0.0 = disabled, 1.0 = fully opaque).
     /// Default: 0.5
     pub fill_opacity: f32,
     /// Mirror mode: render waveform symmetrically from center.
     /// Default: false
     pub mirror: bool,
-    /// Interpolation style:
-    /// - "smooth": Catmull-Rom spline (default)
-    /// - "angular": Straight line segments between points
-    ///   Default: "smooth"
-    pub style: String,
+    /// Interpolation style. See [`LinesStyle`] for variants.
+    ///
+    /// Default: [`LinesStyle::Smooth`]
+    pub style: LinesStyle,
     /// Surfing boat: render a small boat that rides the waveform.
     /// Default: false
     pub boat: bool,
@@ -346,10 +485,10 @@ impl Default for LinesConfig {
             outline_thickness: 1.0,
             outline_opacity: 1.0,
             animation_speed: 0.1,
-            gradient_mode: "static".to_string(),
+            gradient_mode: LinesGradientMode::Static,
             fill_opacity: 0.5,
             mirror: false,
-            style: "smooth".to_string(),
+            style: LinesStyle::Smooth,
             boat: false,
         }
     }
@@ -358,23 +497,12 @@ impl Default for LinesConfig {
 impl LinesConfig {
     /// Get the gradient mode as u32 for shader (0=breathing, 1=static, 2=position, 3=height, 4=gradient)
     pub fn get_gradient_mode_value(&self) -> u32 {
-        match self.gradient_mode.to_lowercase().as_str() {
-            "breathing" => 0,
-            "static" => 1,
-            "position" => 2,
-            "height" => 3,
-            "gradient" => 4,
-            _ => 0, // Default to breathing
-        }
+        self.gradient_mode as u32
     }
 
     /// Get the style as u32 for shader (0=smooth, 1=angular)
     pub fn get_style_value(&self) -> u32 {
-        match self.style.to_lowercase().as_str() {
-            "smooth" => 0,
-            "angular" => 1,
-            _ => 0,
-        }
+        self.style as u32
     }
 }
 
@@ -613,7 +741,7 @@ pub(crate) fn load_visualizer_config() -> Result<VisualizerConfig> {
         viz_config.lines.line_thickness,
         viz_config.lines.outline_thickness,
         viz_config.lines.animation_speed,
-        viz_config.lines.gradient_mode
+        viz_config.lines.gradient_mode.as_wire_str()
     );
 
     Ok(viz_config)
@@ -774,59 +902,266 @@ mod tests {
     use super::*;
 
     /// Pins the `BarsConfig::get_gradient_mode_value` emitted u32 set so a future agent
-    /// who adds an arm returning `1` fails immediately — `bars.wgsl` has no branch for
+    /// who adds a `1`-valued variant fails immediately — `bars.wgsl` has no branch for
     /// `1u` and would silently fall through to the static gradient. See Tier 0 #0.10 in
     /// the 2026-05-11 audit roadmap.
     #[test]
     fn bars_gradient_mode_never_emits_dead_1u() {
-        // Every defined label (the only inputs reachable from the TOML config + UI dropdown).
-        let labels = ["static", "wave", "shimmer", "energy", "alternate"];
-        for label in labels {
+        // Every defined variant (the only inputs reachable from the TOML config + UI dropdown).
+        let variants = [
+            BarsGradientMode::Static,
+            BarsGradientMode::Wave,
+            BarsGradientMode::Shimmer,
+            BarsGradientMode::Energy,
+            BarsGradientMode::Alternate,
+        ];
+        for variant in variants {
             let cfg = BarsConfig {
-                gradient_mode: label.to_string(),
+                gradient_mode: variant,
                 ..Default::default()
             };
             let value = cfg.get_gradient_mode_value();
             assert_ne!(
                 value, 1,
-                "gradient_mode label {label:?} emits 1u, which is dead in bars.wgsl",
+                "gradient_mode variant {variant:?} emits 1u, which is dead in bars.wgsl",
             );
         }
 
-        // The unknown-label fallback must also avoid 1u.
-        let cfg = BarsConfig {
-            gradient_mode: "this-is-not-a-real-mode".to_string(),
-            ..Default::default()
-        };
+        // The default fallback (used when TOML is missing the field) must also avoid 1u.
+        let cfg = BarsConfig::default();
         assert_ne!(
             cfg.get_gradient_mode_value(),
             1,
-            "default fallback for unknown gradient_mode label emits dead 1u",
+            "default fallback for gradient_mode emits dead 1u",
         );
     }
 
     /// Pins the exact emitted set so a renumbering that shifts a mode onto 1u is caught.
     /// This is intentionally redundant with the test above — together they cover both
-    /// "no arm maps to 1" and "the full set is what bars.wgsl branches on".
+    /// "no variant maps to 1" and "the full set is what bars.wgsl branches on".
     #[test]
     fn bars_gradient_mode_emits_expected_discriminants() {
-        let expected: &[(&str, u32)] = &[
-            ("static", 0),
-            ("wave", 2),
-            ("shimmer", 3),
-            ("energy", 4),
-            ("alternate", 5),
+        let expected: &[(BarsGradientMode, u32)] = &[
+            (BarsGradientMode::Static, 0),
+            (BarsGradientMode::Wave, 2),
+            (BarsGradientMode::Shimmer, 3),
+            (BarsGradientMode::Energy, 4),
+            (BarsGradientMode::Alternate, 5),
         ];
-        for (label, want) in expected {
+        for (variant, want) in expected {
             let cfg = BarsConfig {
-                gradient_mode: (*label).to_string(),
+                gradient_mode: *variant,
                 ..Default::default()
             };
             assert_eq!(
                 cfg.get_gradient_mode_value(),
                 *want,
-                "gradient_mode {label:?} should emit {want}u",
+                "gradient_mode {variant:?} should emit {want}u",
             );
         }
+    }
+
+    /// Round-trip every `BarsConfig` enum variant through TOML to verify the
+    /// `#[serde(rename_all = "snake_case")]` wire format is preserved end-to-end
+    /// and matches the literal strings stored in `config.toml`.
+    #[test]
+    fn bars_config_serde_roundtrip_byte_identity() {
+        let cases: &[(BarsGradientMode, &str)] = &[
+            (BarsGradientMode::Static, "static"),
+            (BarsGradientMode::Wave, "wave"),
+            (BarsGradientMode::Shimmer, "shimmer"),
+            (BarsGradientMode::Energy, "energy"),
+            (BarsGradientMode::Alternate, "alternate"),
+        ];
+        for (variant, expected_wire) in cases {
+            assert_eq!(variant.as_wire_str(), *expected_wire);
+            let cfg = BarsConfig {
+                gradient_mode: *variant,
+                ..Default::default()
+            };
+            let toml_str = toml::to_string(&cfg).expect("serialize BarsConfig");
+            assert!(
+                toml_str.contains(&format!("gradient_mode = \"{expected_wire}\"")),
+                "BarsConfig with gradient_mode={variant:?} should emit \
+                 `gradient_mode = \"{expected_wire}\"`, got:\n{toml_str}",
+            );
+            let parsed: BarsConfig = toml::from_str(&toml_str).expect("deserialize BarsConfig");
+            assert_eq!(parsed.gradient_mode, *variant);
+        }
+
+        let orient_cases: &[(BarsGradientOrientation, &str)] = &[
+            (BarsGradientOrientation::Vertical, "vertical"),
+            (BarsGradientOrientation::Horizontal, "horizontal"),
+        ];
+        for (variant, expected_wire) in orient_cases {
+            assert_eq!(variant.as_wire_str(), *expected_wire);
+            let cfg = BarsConfig {
+                gradient_orientation: *variant,
+                ..Default::default()
+            };
+            let toml_str = toml::to_string(&cfg).expect("serialize BarsConfig");
+            assert!(
+                toml_str.contains(&format!("gradient_orientation = \"{expected_wire}\"")),
+                "BarsConfig with gradient_orientation={variant:?} should emit \
+                 `gradient_orientation = \"{expected_wire}\"`, got:\n{toml_str}",
+            );
+            let parsed: BarsConfig = toml::from_str(&toml_str).expect("deserialize BarsConfig");
+            assert_eq!(parsed.gradient_orientation, *variant);
+        }
+
+        let peak_grad_cases: &[(BarsPeakGradientMode, &str)] = &[
+            (BarsPeakGradientMode::Static, "static"),
+            (BarsPeakGradientMode::Cycle, "cycle"),
+            (BarsPeakGradientMode::Height, "height"),
+            (BarsPeakGradientMode::Match, "match"),
+        ];
+        for (variant, expected_wire) in peak_grad_cases {
+            assert_eq!(variant.as_wire_str(), *expected_wire);
+            let cfg = BarsConfig {
+                peak_gradient_mode: *variant,
+                ..Default::default()
+            };
+            let toml_str = toml::to_string(&cfg).expect("serialize BarsConfig");
+            assert!(
+                toml_str.contains(&format!("peak_gradient_mode = \"{expected_wire}\"")),
+                "BarsConfig with peak_gradient_mode={variant:?} should emit \
+                 `peak_gradient_mode = \"{expected_wire}\"`, got:\n{toml_str}",
+            );
+            let parsed: BarsConfig = toml::from_str(&toml_str).expect("deserialize BarsConfig");
+            assert_eq!(parsed.peak_gradient_mode, *variant);
+        }
+
+        let peak_cases: &[(BarsPeakMode, &str)] = &[
+            (BarsPeakMode::None, "none"),
+            (BarsPeakMode::Fade, "fade"),
+            (BarsPeakMode::Fall, "fall"),
+            (BarsPeakMode::FallAccel, "fall_accel"),
+            (BarsPeakMode::FallFade, "fall_fade"),
+        ];
+        for (variant, expected_wire) in peak_cases {
+            assert_eq!(variant.as_wire_str(), *expected_wire);
+            let cfg = BarsConfig {
+                peak_mode: *variant,
+                ..Default::default()
+            };
+            let toml_str = toml::to_string(&cfg).expect("serialize BarsConfig");
+            assert!(
+                toml_str.contains(&format!("peak_mode = \"{expected_wire}\"")),
+                "BarsConfig with peak_mode={variant:?} should emit \
+                 `peak_mode = \"{expected_wire}\"`, got:\n{toml_str}",
+            );
+            let parsed: BarsConfig = toml::from_str(&toml_str).expect("deserialize BarsConfig");
+            assert_eq!(parsed.peak_mode, *variant);
+        }
+    }
+
+    /// Round-trip every `LinesConfig` enum variant through TOML.
+    #[test]
+    fn lines_config_serde_roundtrip_byte_identity() {
+        let grad_cases: &[(LinesGradientMode, &str)] = &[
+            (LinesGradientMode::Breathing, "breathing"),
+            (LinesGradientMode::Static, "static"),
+            (LinesGradientMode::Position, "position"),
+            (LinesGradientMode::Height, "height"),
+            (LinesGradientMode::Gradient, "gradient"),
+        ];
+        for (variant, expected_wire) in grad_cases {
+            assert_eq!(variant.as_wire_str(), *expected_wire);
+            let cfg = LinesConfig {
+                gradient_mode: *variant,
+                ..Default::default()
+            };
+            let toml_str = toml::to_string(&cfg).expect("serialize LinesConfig");
+            assert!(
+                toml_str.contains(&format!("gradient_mode = \"{expected_wire}\"")),
+                "LinesConfig with gradient_mode={variant:?} should emit \
+                 `gradient_mode = \"{expected_wire}\"`, got:\n{toml_str}",
+            );
+            let parsed: LinesConfig = toml::from_str(&toml_str).expect("deserialize LinesConfig");
+            assert_eq!(parsed.gradient_mode, *variant);
+        }
+
+        let style_cases: &[(LinesStyle, &str)] = &[
+            (LinesStyle::Smooth, "smooth"),
+            (LinesStyle::Angular, "angular"),
+        ];
+        for (variant, expected_wire) in style_cases {
+            assert_eq!(variant.as_wire_str(), *expected_wire);
+            let cfg = LinesConfig {
+                style: *variant,
+                ..Default::default()
+            };
+            let toml_str = toml::to_string(&cfg).expect("serialize LinesConfig");
+            assert!(
+                toml_str.contains(&format!("style = \"{expected_wire}\"")),
+                "LinesConfig with style={variant:?} should emit \
+                 `style = \"{expected_wire}\"`, got:\n{toml_str}",
+            );
+            let parsed: LinesConfig = toml::from_str(&toml_str).expect("deserialize LinesConfig");
+            assert_eq!(parsed.style, *variant);
+        }
+    }
+
+    /// Lock the WGSL dispatch contract — the `#[repr(u32)]` discriminants on
+    /// [`BarsGradientMode`] must match the constants `bars.wgsl` branches on
+    /// (`gradient_mode == 0u`, `== 2u`, etc.). Value `1` is intentionally
+    /// absent (the dead branch).
+    #[test]
+    fn bars_gradient_mode_discriminants_match_wgsl_dispatch() {
+        assert_eq!(BarsGradientMode::Static as u32, 0);
+        assert_eq!(BarsGradientMode::Wave as u32, 2);
+        assert_eq!(BarsGradientMode::Shimmer as u32, 3);
+        assert_eq!(BarsGradientMode::Energy as u32, 4);
+        assert_eq!(BarsGradientMode::Alternate as u32, 5);
+
+        // Lock the full {0, 2, 3, 4, 5} set — assert no variant emits 1.
+        let all = [
+            BarsGradientMode::Static,
+            BarsGradientMode::Wave,
+            BarsGradientMode::Shimmer,
+            BarsGradientMode::Energy,
+            BarsGradientMode::Alternate,
+        ];
+        for v in all {
+            assert_ne!(v as u32, 1, "{v:?} emits 1u — dead in bars.wgsl");
+        }
+    }
+
+    /// Pin the PascalCase→snake_case transform for the most drift-prone variant.
+    /// `FallFade` must serialize to `"fall_fade"` (not `"fallfade"` or `"fall-fade"`).
+    #[test]
+    fn bars_peak_mode_fall_fade_serializes_to_snake_case() {
+        // Direct enum serialization via TOML's value wrapper (TOML can't
+        // serialize a bare enum at the document root, so wrap it).
+        #[derive(Serialize, Deserialize)]
+        struct Wrap {
+            v: BarsPeakMode,
+        }
+        let w = Wrap {
+            v: BarsPeakMode::FallFade,
+        };
+        let s = toml::to_string(&w).expect("serialize Wrap");
+        assert!(
+            s.contains("v = \"fall_fade\""),
+            "FallFade should serialize as `\"fall_fade\"`, got:\n{s}",
+        );
+
+        // Also pin the round trip.
+        let parsed: Wrap = toml::from_str("v = \"fall_fade\"").expect("deserialize Wrap");
+        assert_eq!(parsed.v, BarsPeakMode::FallFade);
+
+        // FallAccel — the other PascalCase variant.
+        let w2 = Wrap {
+            v: BarsPeakMode::FallAccel,
+        };
+        let s2 = toml::to_string(&w2).expect("serialize Wrap");
+        assert!(
+            s2.contains("v = \"fall_accel\""),
+            "FallAccel should serialize as `\"fall_accel\"`, got:\n{s2}",
+        );
+
+        // And the as_wire_str helper.
+        assert_eq!(BarsPeakMode::FallFade.as_wire_str(), "fall_fade");
+        assert_eq!(BarsPeakMode::FallAccel.as_wire_str(), "fall_accel");
     }
 }
