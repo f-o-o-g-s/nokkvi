@@ -123,10 +123,13 @@ where
 }
 
 impl Song {
-    pub fn format_duration(&self) -> String {
-        let minutes = self.duration / 60;
-        let seconds = self.duration % 60;
-        format!("{minutes}:{seconds:02}")
+    /// Whether this song is starred. Song's `starred` field is a plain
+    /// `bool` (the JSON parser maps both `false` and the empty-string
+    /// timestamp to `false` via `deserialize_starred`), so there's no
+    /// `Option` to unwrap here. Provided so callers can use the uniform
+    /// `entity.is_starred()` accessor pattern Album / Artist already have.
+    pub fn is_starred(&self) -> bool {
+        self.starred
     }
 
     /// Construct a minimal Song for unit tests. All optional fields default to `None`.

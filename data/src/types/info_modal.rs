@@ -4,6 +4,10 @@
 //! each item type and provides a uniform `properties()` method that returns
 //! label/value pairs for the two-column table.
 
+use crate::utils::formatters::{
+    bool_icon, format_duration_hms, format_file_size, format_rating, format_relative_time,
+};
+
 /// Items that can be shown in the info modal.
 /// Stores owned, cloned data so the modal state is self-contained.
 #[derive(Debug, Clone)]
@@ -176,7 +180,7 @@ impl InfoModalItem {
                 push_opt_u32(&mut rows, "Track", track);
                 push_opt_u32(&mut rows, "Year", year);
                 push_opt_str(&mut rows, "Genre", genre);
-                rows.push(("Duration".into(), format_duration_secs(*duration)));
+                rows.push(("Duration".into(), format_duration_hms(*duration)));
                 push_opt(&mut rows, "Compilation", compilation.map(bool_icon));
                 push_opt_str(&mut rows, "Codec", suffix);
                 push_opt(&mut rows, "Bitrate", bitrate.map(|b| format!("{b} kbps")));
@@ -288,7 +292,7 @@ impl InfoModalItem {
                 push_opt(
                     &mut rows,
                     "Duration",
-                    duration.map(|d| format_duration_secs(d as u32)),
+                    duration.map(|d| format_duration_hms(d as u32)),
                 );
                 push_opt_u32(&mut rows, "Year", year);
                 push_opt_u32(&mut rows, "Songs", song_count);
@@ -401,7 +405,7 @@ impl InfoModalItem {
                 if !comment.is_empty() {
                     rows.push(("Description".into(), comment.clone()));
                 }
-                rows.push(("Duration".into(), format_duration_secs(*duration as u32)));
+                rows.push(("Duration".into(), format_duration_hms(*duration as u32)));
                 rows.push(("Songs".into(), song_count.to_string()));
                 if *size as u64 > 0 {
                     rows.push(("Size".into(), format_file_size(*size as u64)));
@@ -454,116 +458,6 @@ fn push_opt(rows: &mut Vec<(String, String)>, label: &str, value: Option<String>
     {
         rows.push((label.to_string(), v));
     }
-}
-
-fn format_duration_secs(total_secs: u32) -> String {
-    let hours = total_secs / 3600;
-    let minutes = (total_secs % 3600) / 60;
-    let seconds = total_secs % 60;
-    if hours > 0 {
-        format!("{hours}:{minutes:02}:{seconds:02}")
-    } else {
-        format!("{minutes}:{seconds:02}")
-    }
-}
-
-fn format_file_size(bytes: u64) -> String {
-    const KB: u64 = 1024;
-    const MB: u64 = 1024 * KB;
-    const GB: u64 = 1024 * MB;
-
-    if bytes >= GB {
-        format!("{:.2} GiB", bytes as f64 / GB as f64)
-    } else if bytes >= MB {
-        format!("{:.2} MiB", bytes as f64 / MB as f64)
-    } else if bytes >= KB {
-        format!("{} KiB", bytes / KB)
-    } else {
-        format!("{bytes} B")
-    }
-}
-
-/// Format an ISO 8601 timestamp as a relative time string ("3 months ago", "9 days ago").
-/// Falls back to the raw string if parsing fails.
-fn format_relative_time(timestamp: &str) -> String {
-    use chrono::{DateTime, Datelike, FixedOffset, Utc};
-
-    let parsed = timestamp
-        .parse::<DateTime<FixedOffset>>()
-        .map(|dt| dt.with_timezone(&Utc))
-        .or_else(|_| timestamp.parse::<DateTime<Utc>>());
-
-    let Ok(dt) = parsed else {
-        return timestamp.to_string();
-    };
-
-    let now = Utc::now();
-    let duration = now.signed_duration_since(dt);
-
-    if duration.num_seconds() < 0 {
-        return "just now".to_string();
-    }
-
-    let seconds = duration.num_seconds();
-    let minutes = duration.num_minutes();
-    let hours = duration.num_hours();
-    let days = duration.num_days();
-
-    // Calendar-aware month/year calculation
-    let months = {
-        let y = (now.year() - dt.year()) * 12;
-        let m = now.month() as i32 - dt.month() as i32;
-        let total = y + m;
-        // Adjust: if we haven't reached the same day-of-month yet, subtract 1
-        if now.day() < dt.day() {
-            (total - 1).max(0)
-        } else {
-            total.max(0)
-        }
-    };
-    let years = months / 12;
-
-    if seconds < 60 {
-        "just now".to_string()
-    } else if minutes < 60 {
-        if minutes == 1 {
-            "1 minute ago".to_string()
-        } else {
-            format!("{minutes} minutes ago")
-        }
-    } else if hours < 24 {
-        if hours == 1 {
-            "1 hour ago".to_string()
-        } else {
-            format!("{hours} hours ago")
-        }
-    } else if days < 30 {
-        if days == 1 {
-            "1 day ago".to_string()
-        } else {
-            format!("{days} days ago")
-        }
-    } else if months < 12 {
-        if months == 1 {
-            "1 month ago".to_string()
-        } else {
-            format!("{months} months ago")
-        }
-    } else if years == 1 {
-        "1 year ago".to_string()
-    } else {
-        format!("{years} years ago")
-    }
-}
-
-fn format_rating(rating: u32) -> String {
-    let filled = rating.min(5) as usize;
-    let empty = 5 - filled;
-    format!("{}{}", "★".repeat(filled), "☆".repeat(empty))
-}
-
-fn bool_icon(value: bool) -> String {
-    if value { "✓" } else { "✗" }.to_string()
 }
 
 /// Strip HTML tags from text, converting `<a href="URL">text</a>` to `text (URL)`.

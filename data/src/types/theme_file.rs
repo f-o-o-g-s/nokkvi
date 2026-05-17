@@ -13,9 +13,15 @@ use serde::{Deserialize, Serialize};
 // Theme File (top-level)
 // ============================================================================
 
+/// Bundled Everforest theme TOML, used as the first-run default and as the
+/// schema-evolution baseline. Pulled into a module-level constant so the
+/// parse test (`everforest_toml_parses_cleanly`) and the `Default` impl
+/// share the same string.
+const EVERFOREST_TOML: &str = include_str!("../../../themes/everforest.toml");
+
 /// Complete theme file — the root struct for `{name}.toml`.
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(default = "theme_file_partial_fallback")]
+#[serde(default = "theme_file_everforest_fallback")]
 pub struct ThemeFile {
     /// Human-readable theme name (shown in the UI picker)
     pub name: String,
@@ -25,12 +31,13 @@ pub struct ThemeFile {
     pub light: ThemePalette,
 }
 
-/// Fallback used by serde when a theme file is missing fields.
+/// Serde fallback for a theme file missing its top-level `name` / `dark` /
+/// `light` keys. Returns an Everforest-named scaffold with palette defaults.
 ///
 /// Cannot route through `ThemeFile::default()` — that parses the bundled
 /// Everforest TOML, and `#[serde(default = ...)]` re-enters during the
 /// parse, which would recurse forever.
-fn theme_file_partial_fallback() -> ThemeFile {
+fn theme_file_everforest_fallback() -> ThemeFile {
     ThemeFile {
         name: "Everforest".to_string(),
         dark: ThemePalette::default(),
@@ -40,8 +47,7 @@ fn theme_file_partial_fallback() -> ThemeFile {
 
 impl Default for ThemeFile {
     fn default() -> Self {
-        const EVERFOREST_TOML: &str = include_str!("../../../themes/everforest.toml");
-        toml::from_str(EVERFOREST_TOML).unwrap_or_else(|_| theme_file_partial_fallback())
+        toml::from_str(EVERFOREST_TOML).unwrap_or_else(|_| theme_file_everforest_fallback())
     }
 }
 
@@ -408,5 +414,16 @@ mod tests {
         assert_eq!(palette.warning.base, "#f6d32d");
         assert_eq!(palette.star.base, "#f6d32d");
         assert_eq!(palette.star.bright, "#f9f06b");
+    }
+
+    /// The bundled `everforest.toml` (the first-run default theme) must always
+    /// parse cleanly against the current `ThemeFile` schema. If a future
+    /// refactor renames a field or changes a serde shape, this test fails at
+    /// the source instead of at user-startup time.
+    #[test]
+    fn everforest_toml_parses_cleanly() {
+        let parsed: ThemeFile =
+            toml::from_str(EVERFOREST_TOML).expect("bundled EVERFOREST_TOML must parse");
+        assert_eq!(parsed.name, "Everforest");
     }
 }

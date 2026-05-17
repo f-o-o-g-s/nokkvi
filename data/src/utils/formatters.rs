@@ -61,6 +61,132 @@ pub fn format_time(seconds: u32) -> String {
     format_duration(seconds)
 }
 
+/// Format a duration in seconds as `h:mm:ss` when hours > 0, otherwise `m:ss`.
+///
+/// Used by the Get Info modal for tracks and albums. Distinct from
+/// [`format_duration`], which never wraps to hours (caps at `mmm:ss`).
+pub fn format_duration_hms(total_secs: u32) -> String {
+    let hours = total_secs / 3600;
+    let minutes = (total_secs % 3600) / 60;
+    let seconds = total_secs % 60;
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes}:{seconds:02}")
+    }
+}
+
+/// Format a byte count as a binary-prefixed file size (`KiB` / `MiB` / `GiB`).
+///
+/// - `≥ 1 GiB`: `"X.XX GiB"` (2 decimals)
+/// - `≥ 1 MiB`: `"X.XX MiB"` (2 decimals)
+/// - `≥ 1 KiB`: `"N KiB"` (truncated to whole KiB)
+/// - otherwise: `"N B"` (raw bytes)
+pub fn format_file_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * KB;
+    const GB: u64 = 1024 * MB;
+
+    if bytes >= GB {
+        format!("{:.2} GiB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.2} MiB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{} KiB", bytes / KB)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+/// Format an ISO 8601 timestamp as a relative time string ("3 months ago", "9 days ago").
+///
+/// Falls back to the raw string if parsing fails. Negative durations (future timestamps)
+/// collapse to `"just now"`.
+pub fn format_relative_time(timestamp: &str) -> String {
+    use chrono::{DateTime, Datelike, FixedOffset, Utc};
+
+    let parsed = timestamp
+        .parse::<DateTime<FixedOffset>>()
+        .map(|dt| dt.with_timezone(&Utc))
+        .or_else(|_| timestamp.parse::<DateTime<Utc>>());
+
+    let Ok(dt) = parsed else {
+        return timestamp.to_string();
+    };
+
+    let now = Utc::now();
+    let duration = now.signed_duration_since(dt);
+
+    if duration.num_seconds() < 0 {
+        return "just now".to_string();
+    }
+
+    let seconds = duration.num_seconds();
+    let minutes = duration.num_minutes();
+    let hours = duration.num_hours();
+    let days = duration.num_days();
+
+    // Calendar-aware month/year calculation
+    let months = {
+        let y = (now.year() - dt.year()) * 12;
+        let m = now.month() as i32 - dt.month() as i32;
+        let total = y + m;
+        // Adjust: if we haven't reached the same day-of-month yet, subtract 1
+        if now.day() < dt.day() {
+            (total - 1).max(0)
+        } else {
+            total.max(0)
+        }
+    };
+    let years = months / 12;
+
+    if seconds < 60 {
+        "just now".to_string()
+    } else if minutes < 60 {
+        if minutes == 1 {
+            "1 minute ago".to_string()
+        } else {
+            format!("{minutes} minutes ago")
+        }
+    } else if hours < 24 {
+        if hours == 1 {
+            "1 hour ago".to_string()
+        } else {
+            format!("{hours} hours ago")
+        }
+    } else if days < 30 {
+        if days == 1 {
+            "1 day ago".to_string()
+        } else {
+            format!("{days} days ago")
+        }
+    } else if months < 12 {
+        if months == 1 {
+            "1 month ago".to_string()
+        } else {
+            format!("{months} months ago")
+        }
+    } else if years == 1 {
+        "1 year ago".to_string()
+    } else {
+        format!("{years} years ago")
+    }
+}
+
+/// Format a 0-5 star rating as filled and empty Unicode star glyphs.
+///
+/// Ratings > 5 saturate at 5.
+pub fn format_rating(rating: u32) -> String {
+    let filled = rating.min(5) as usize;
+    let empty = 5 - filled;
+    format!("{}{}", "★".repeat(filled), "☆".repeat(empty))
+}
+
+/// Return the Unicode check/cross glyph for a boolean — used by the info modal.
+pub fn bool_icon(value: bool) -> String {
+    if value { "✓" } else { "✗" }.to_string()
+}
+
 /// Format an ISO 8601 timestamp as a concise US date string.
 ///
 /// Output format: `M/D/YY` (e.g., `1/15/24`)
@@ -204,5 +330,85 @@ mod tests {
     #[test]
     fn release_date_empty() {
         assert_eq!(format_release_date(""), "");
+    }
+
+    // =========================================================================
+    // format_duration_hms — moved here from info_modal.rs, pins exact output
+    // =========================================================================
+
+    #[test]
+    fn duration_hms_under_hour_uses_m_ss() {
+        assert_eq!(format_duration_hms(0), "0:00");
+        assert_eq!(format_duration_hms(45), "0:45");
+        assert_eq!(format_duration_hms(3599), "59:59");
+    }
+
+    #[test]
+    fn duration_hms_at_hour_or_above_uses_h_mm_ss() {
+        assert_eq!(format_duration_hms(3600), "1:00:00");
+        assert_eq!(format_duration_hms(3661), "1:01:01");
+        assert_eq!(format_duration_hms(7322), "2:02:02");
+    }
+
+    // =========================================================================
+    // format_file_size — moved here from info_modal.rs, pins exact output
+    // =========================================================================
+
+    #[test]
+    fn file_size_bytes_below_kib() {
+        assert_eq!(format_file_size(0), "0 B");
+        assert_eq!(format_file_size(1023), "1023 B");
+    }
+
+    #[test]
+    fn file_size_kib_truncated() {
+        // KiB tier uses integer division — no decimal places
+        assert_eq!(format_file_size(1024), "1 KiB");
+        assert_eq!(format_file_size(2048), "2 KiB");
+        assert_eq!(format_file_size(2047), "1 KiB"); // truncates
+    }
+
+    #[test]
+    fn file_size_mib_two_decimals() {
+        assert_eq!(format_file_size(1024 * 1024), "1.00 MiB");
+        assert_eq!(format_file_size(1024 * 1024 * 5 / 2), "2.50 MiB");
+    }
+
+    #[test]
+    fn file_size_gib_two_decimals() {
+        assert_eq!(format_file_size(1024 * 1024 * 1024), "1.00 GiB");
+    }
+
+    // =========================================================================
+    // format_rating + bool_icon — moved here from info_modal.rs
+    // =========================================================================
+
+    #[test]
+    fn rating_renders_filled_and_empty_stars() {
+        assert_eq!(format_rating(0), "☆☆☆☆☆");
+        assert_eq!(format_rating(3), "★★★☆☆");
+        assert_eq!(format_rating(5), "★★★★★");
+    }
+
+    #[test]
+    fn rating_saturates_above_five() {
+        // Out-of-range ratings clamp at five (no overflow on the empty side)
+        assert_eq!(format_rating(7), "★★★★★");
+        assert_eq!(format_rating(100), "★★★★★");
+    }
+
+    #[test]
+    fn bool_icon_renders_check_or_cross() {
+        assert_eq!(bool_icon(true), "✓");
+        assert_eq!(bool_icon(false), "✗");
+    }
+
+    // =========================================================================
+    // format_relative_time — sanity checks on graceful fallback
+    // =========================================================================
+
+    #[test]
+    fn relative_time_invalid_returns_raw() {
+        assert_eq!(format_relative_time("not a date"), "not a date");
     }
 }

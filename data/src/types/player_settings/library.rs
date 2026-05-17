@@ -35,8 +35,55 @@ impl LibraryPageSize {
         }
     }
 
-    /// Calculate dynamic fetch threshold based on page size
+    /// Calculate dynamic fetch threshold based on this page size variant.
+    ///
+    /// Delegates to [`pagination_fetch_threshold`] — both the page-size enum
+    /// and the `PagedBuffer<T>::needs_fetch` path call the same formula so
+    /// they cannot drift.
     pub fn fetch_threshold(self) -> usize {
-        (self.to_usize() / 5).clamp(20, 500)
+        pagination_fetch_threshold(self.to_usize())
+    }
+}
+
+/// Dynamic page-fetch trigger threshold for a paginated buffer.
+///
+/// `PagedBuffer<T>::needs_fetch` fires a new request when the viewport is
+/// within this many items of the loaded edge. Sized as a fifth of the page
+/// (so a 500-item page fetches at 100 items from the end), clamped to
+/// `[20, 500]` so very small page sizes still fire reasonably early and
+/// very large ones don't pre-fetch megabytes off-screen.
+///
+/// Free fn so `PagedBuffer<T>` (a generic data type) doesn't have to depend
+/// on the `LibraryPageSize` enum — they share the formula via this one site.
+pub fn pagination_fetch_threshold(page_size: usize) -> usize {
+    (page_size / 5).clamp(20, 500)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pins the exact `(page_size / 5).clamp(20, 500)` formula. Both
+    /// `LibraryPageSize::fetch_threshold` and
+    /// `PagedBuffer::<T>::needs_fetch` route through `pagination_fetch_threshold`,
+    /// so changing this formula moves both sites in lockstep.
+    #[test]
+    fn fetch_threshold_formula() {
+        // Below the 20-item floor: page_size/5 = 20 → 20 (boundary)
+        assert_eq!(pagination_fetch_threshold(100), 20);
+        // Below the floor: page_size/5 = 10 → clamps up to 20
+        assert_eq!(pagination_fetch_threshold(50), 20);
+        // Mid-range: 500/5 = 100
+        assert_eq!(pagination_fetch_threshold(500), 100);
+        // Above the floor, below the ceiling: 1000/5 = 200
+        assert_eq!(pagination_fetch_threshold(1000), 200);
+        // Above the 500-item ceiling: 5000/5 = 1000 → clamps down to 500
+        assert_eq!(pagination_fetch_threshold(5000), 500);
+
+        // LibraryPageSize variants map to the same answers via to_usize().
+        assert_eq!(LibraryPageSize::Small.fetch_threshold(), 20);
+        assert_eq!(LibraryPageSize::Default.fetch_threshold(), 100);
+        assert_eq!(LibraryPageSize::Large.fetch_threshold(), 200);
+        assert_eq!(LibraryPageSize::Massive.fetch_threshold(), 500);
     }
 }

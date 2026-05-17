@@ -120,7 +120,7 @@ impl<T> PagedBuffer<T> {
         }
 
         let loaded = self.items.len();
-        let fetch_threshold = (page_size / 5).clamp(20, 500);
+        let fetch_threshold = crate::types::player_settings::pagination_fetch_threshold(page_size);
 
         // Trigger fetch when viewport is within fetch_threshold of the edge
         if loaded == 0 || viewport_offset + fetch_threshold >= loaded {

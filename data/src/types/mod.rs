@@ -3,6 +3,7 @@
 //! Entity types (Album, Artist, Song, Genre, Playlist), queue/sort modes,
 //! hotkey configuration, user settings, and thread-safe reactive containers.
 
+pub mod accessors;
 pub mod album;
 pub mod artist;
 pub mod batch;
@@ -41,6 +42,7 @@ pub mod toml_views;
 pub mod view_column_toml;
 pub mod view_preferences;
 
+pub use accessors::{HasId, Named};
 pub use item_kind::ItemKind;
 pub use next_track_reset::NextTrackResetEffect;
 pub use song_source::SongSource;
