@@ -22,6 +22,7 @@ pub mod sfx_engine;
 pub mod spectrum;
 
 pub mod streaming_source;
+pub mod symphonia_registry;
 
 pub use buffer::AudioBuffer;
 pub use decoder::AudioDecoder;

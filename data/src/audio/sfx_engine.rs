@@ -23,6 +23,8 @@ use symphonia::core::{
     meta::MetadataOptions, probe::Hint,
 };
 
+use crate::audio::symphonia_registry;
+
 /// Sound effect types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SfxType {
@@ -213,8 +215,7 @@ impl SfxEngine {
         let sample_rate = track.codec_params.sample_rate.unwrap_or(48000);
         let channels = track.codec_params.channels.map_or(2, |c| c.count());
 
-        let mut decoder =
-            symphonia::default::get_codecs().make(&track.codec_params, &decoder_opts)?;
+        let mut decoder = symphonia_registry::codecs().make(&track.codec_params, &decoder_opts)?;
 
         let mut samples = Vec::new();
 

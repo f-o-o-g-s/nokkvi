@@ -23,6 +23,15 @@ serde_json = "1.0.149"
 toml = { version = "1.0", features = ["parse", "display"] }
 toml_edit = "0.25"
 symphonia = { version = "0.5.5", features = ["mp3", "flac", "ogg", "wav", "aac", "isomp4", "alac", "aiff"] }
+# Opus decoder adapter for Symphonia. Workaround for pdeljanov/Symphonia#8 —
+# Symphonia ships no native Opus codec (open since 2020, no ETA). Drop this
+# dep and add `"opus"` to the symphonia features list above the day upstream
+# lands native Opus support, then delete `audio::symphonia_registry` and route
+# decoder lookups back through `symphonia::default::get_codecs()`.
+# Pin matrix: 0.2.x is symphonia 0.5; 0.3.x is symphonia 0.6 — bump in lockstep
+# whenever we move the symphonia pin. Default `bundled` feature vendors libopus
+# via opusic-sys so users need no runtime system package.
+symphonia-adapter-libopus = "0.2.9"
 tokio = { version = "1.50.0", features = ["full"] }
 tokio-util = "0.7"
 tracing = "0.1.44"

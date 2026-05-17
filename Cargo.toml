@@ -4,7 +4,7 @@ members = [".", "data"]
 [workspace.package]
 repository = "https://github.com/f-o-o-g-s/nokkvi"
 license = "GPL-3.0-only"
-rust-version = "1.87"
+rust-version = "1.89"
 
 [workspace.lints.clippy]
 # Code clarity

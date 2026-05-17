@@ -70,7 +70,7 @@ Runtime requirements: `pipewire` and `fontconfig` installed system-wide (Arch: `
 ## Quickstart (build from source)
 
 ```bash
-sudo pacman -S pipewire fontconfig pkgconf       # Arch system deps
+sudo pacman -S pipewire fontconfig pkgconf cmake # Arch system deps (cmake builds bundled libopus)
 cargo build --release                           # build
 ./install.sh                                    # install binary, .desktop, icon
 ```
