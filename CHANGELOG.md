@@ -10,6 +10,9 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Right-clicking one of two duplicate songs in the queue (or removing one via multi-select Delete / Ctrl+D) now removes only the clicked row instead of dropping both copies. Each queue row now carries a runtime per-entry id so duplicates of the same song are individually addressable; existing on-disk queue snapshots remain compatible.
+- Dragging songs from the library pane into the queue pane (split-view) now drops at the slot under the cursor across all artwork-column modes (Always-Vertical Native/Stretched, Auto with portrait fallback), nav layouts (Top/Side/None), playlist edit mode, and at scrolled queue positions — previously the drag could wrong-track the source row or land on the wrong queue slot in those combinations. The drag also fails-safe (cancels rather than dropping at a stale index) if the queue mutates mid-drag.
+
 ### Removed
 
 ## v0.4.0 — 2026-05-16
