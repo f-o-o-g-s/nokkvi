@@ -60,11 +60,11 @@ AppService (orchestrator)
 
 `SongPool` (HashMap) + `Queue` ordering (`song_ids` + `order` array + `current_order`). Modules: `services/queue/{mod, navigation, order, write_guard}.rs`.
 
-- **Mutation guard** (`write_guard.rs`): every queue write goes through `QueueWriteGuard`, which forces the caller to pick a commit mode at the end of the borrow — `commit_save_all` (full save), `commit_save_order` (order-only), or `commit_no_save` (in-memory only). Drop without committing panics in debug, warns in release.
+- **Mutation guard** (`write_guard.rs`): every queue write goes through `QueueWriteGuard`, which forces the caller to pick a commit mode at the end of the borrow — `commit_save_all` (full save), `commit_save_order` (order-only), or `commit_no_save` (in-memory only). Each `commit_*` method returns a `NextTrackResetEffect` so a future reorder path can't silently skip the engine's gapless-prep reset. Drop without committing panics in debug, warns in release.
 - **Navigation typestate** (`navigation.rs`): `peek_next_song()` returns a `PeekedQueue<'_>` guard whose only public consumer is `transition()`. The crate-internal `transition_to_queued_internal` is the actual mutator — no other call site can advance the queue without first peeking.
 - Shuffle off: identity order. Shuffle on: Fisher-Yates with the current song anchored at index 0.
 - Every queue mutation calls `clear_queued()` to invalidate the buffered next song.
-- Mode toggles (`toggle_shuffle`, `set_repeat`, `toggle_consume`) return `ModeToggleEffect` so the playback controller can chain `reset_next_track()` on the engine uniformly.
+- All queue mutators — mode toggles (`toggle_shuffle`, `set_repeat`, `toggle_consume`), reorders (`move_item`, `insert_*`, `remove_*`, `sort_queue`, `shuffle_queue`), and full replacements (`set_queue`, `add_songs`, `reposition_to_index`) — return `NextTrackResetEffect`. The `#[must_use]` discharge contract makes engine gapless-prep invalidation a compile-time obligation across every reorder path, closing the queue/engine desync window that a shuffle + crossfade reorder used to open.
 - Progressive build: first 500 plays immediately; recursive `ProgressiveQueueAppendPage` chain for the rest.
 - Serialization: bincode `Encode` / `Decode` (~3× faster than JSON). `load_binary_or_json()` migrates legacy.
 - **Reshuffle on repeat wrap**: shuffle + repeat-playlist re-shuffles the order array when the queue wraps back to the start.
@@ -110,7 +110,7 @@ Iced-free. Key types:
 - `HotkeyConfig` — HashMap with O(1) lookup
 - `PlayerSettings`, `TomlSettings`, `TomlViewPreferences`
 - `Queue`, `QueueSortMode` (physical sort: Album/Artist/Title/Duration/Genre/Rating/MostPlayed/Random — Random re-rolls on re-select)
-- `ModeToggleEffect` (`mode_toggle.rs`) returned from queue mode toggles to chain engine resets
+- `NextTrackResetEffect` (`next_track_reset.rs`) returned from every queue mutator (mode toggles + reorders + replacements) to chain engine `reset_next_track()` calls. `apply_to(&Mutex)` locks the engine internally; `apply_locked(&mut Engine)` is for callers already holding the engine lock (completion callback consume path, `play_next` / `play_previous`).
 - `SongPool`, `BatchPayload` / `BatchItem`
 - `LibraryFilter` — ID-based cross-view navigation filter
 - `PlaylistEditState` — dirty detection
