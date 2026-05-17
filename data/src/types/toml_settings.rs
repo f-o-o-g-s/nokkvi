@@ -386,116 +386,63 @@ impl Default for TomlSettings {
 
 impl TomlSettings {
     /// Build a `TomlSettings` from a `PlayerSettings` (for migration from redb).
+    ///
+    /// Composition: start from default TOML, apply each tab's macro-emitted
+    /// `write_<tab>_toml` (covers ~53 migrated setting keys), apply each
+    /// view's macro-emitted `write_<view>_columns_to_toml` (covers ~54
+    /// column-visibility booleans, including `queue_show_genre` and
+    /// `songs_show_genre` that the legacy hand-written body silently
+    /// omitted), then hand-write the residual scalars that aren't (yet)
+    /// owned by any per-tab or per-view-column macro invocation.
+    ///
+    /// `light_mode` is intentionally not touched — the on-disk truth is
+    /// owned by the `SetLightModeAtomic` side-effect handler in the UI crate
+    /// via a targeted `update_config_value` write that does not go through
+    /// this function. The default `TomlSettings { light_mode: false, .. }`
+    /// matches the pre-refactor behavior of hard-coding `false`.
     pub fn from_player_settings(ps: &crate::types::player_settings::PlayerSettings) -> Self {
-        Self {
-            start_view: ps.start_view.clone(),
-            enter_behavior: ps.enter_behavior,
-            local_music_path: ps.local_music_path.clone(),
-            verbose_config: ps.verbose_config,
-            library_page_size: ps.library_page_size,
-            artwork_resolution: ps.artwork_resolution,
-            show_album_artists_only: ps.show_album_artists_only,
-            suppress_library_refresh_toasts: ps.suppress_library_refresh_toasts,
-            queue_show_stars: ps.queue_show_stars,
-            queue_show_album: ps.queue_show_album,
-            queue_show_duration: ps.queue_show_duration,
-            queue_show_love: ps.queue_show_love,
-            queue_show_plays: ps.queue_show_plays,
-            queue_show_index: ps.queue_show_index,
-            queue_show_thumbnail: ps.queue_show_thumbnail,
-            queue_show_genre: ps.queue_show_genre,
-            queue_show_select: ps.queue_show_select,
-            albums_show_stars: ps.albums_show_stars,
-            albums_show_songcount: ps.albums_show_songcount,
-            albums_show_plays: ps.albums_show_plays,
-            albums_show_love: ps.albums_show_love,
-            albums_show_index: ps.albums_show_index,
-            albums_show_thumbnail: ps.albums_show_thumbnail,
-            albums_show_select: ps.albums_show_select,
-            songs_show_stars: ps.songs_show_stars,
-            songs_show_album: ps.songs_show_album,
-            songs_show_duration: ps.songs_show_duration,
-            songs_show_plays: ps.songs_show_plays,
-            songs_show_love: ps.songs_show_love,
-            songs_show_index: ps.songs_show_index,
-            songs_show_thumbnail: ps.songs_show_thumbnail,
-            songs_show_genre: ps.songs_show_genre,
-            songs_show_select: ps.songs_show_select,
-            artists_show_stars: ps.artists_show_stars,
-            artists_show_albumcount: ps.artists_show_albumcount,
-            artists_show_songcount: ps.artists_show_songcount,
-            artists_show_plays: ps.artists_show_plays,
-            artists_show_love: ps.artists_show_love,
-            artists_show_index: ps.artists_show_index,
-            artists_show_thumbnail: ps.artists_show_thumbnail,
-            artists_show_select: ps.artists_show_select,
-            genres_show_index: ps.genres_show_index,
-            genres_show_thumbnail: ps.genres_show_thumbnail,
-            genres_show_albumcount: ps.genres_show_albumcount,
-            genres_show_songcount: ps.genres_show_songcount,
-            genres_show_select: ps.genres_show_select,
-            playlists_show_index: ps.playlists_show_index,
-            playlists_show_thumbnail: ps.playlists_show_thumbnail,
-            playlists_show_songcount: ps.playlists_show_songcount,
-            playlists_show_duration: ps.playlists_show_duration,
-            playlists_show_updatedat: ps.playlists_show_updatedat,
-            playlists_show_select: ps.playlists_show_select,
-            similar_show_index: ps.similar_show_index,
-            similar_show_thumbnail: ps.similar_show_thumbnail,
-            similar_show_album: ps.similar_show_album,
-            similar_show_duration: ps.similar_show_duration,
-            similar_show_love: ps.similar_show_love,
-            similar_show_select: ps.similar_show_select,
-            albums_artwork_overlay: ps.albums_artwork_overlay,
-            artists_artwork_overlay: ps.artists_artwork_overlay,
-            songs_artwork_overlay: ps.songs_artwork_overlay,
-            playlists_artwork_overlay: ps.playlists_artwork_overlay,
-            artwork_column_mode: ps.artwork_column_mode,
-            artwork_column_stretch_fit: ps.artwork_column_stretch_fit,
-            artwork_column_width_pct: ps.artwork_column_width_pct,
-            artwork_auto_max_pct: ps.artwork_auto_max_pct,
-            artwork_vertical_height_pct: ps.artwork_vertical_height_pct,
-            stable_viewport: ps.stable_viewport,
-            auto_follow_playing: ps.auto_follow_playing,
-            light_mode: false, // Will be read from theme.light_mode or fresh default
-            rounded_mode: ps.rounded_mode,
-            nav_layout: ps.nav_layout,
-            nav_display_mode: ps.nav_display_mode,
-            track_info_display: ps.track_info_display,
-            slot_row_height: ps.slot_row_height,
-            opacity_gradient: ps.opacity_gradient,
-            slot_text_links: ps.slot_text_links,
-            horizontal_volume: ps.horizontal_volume,
-            font_family: ps.font_family.clone(),
-            strip_show_title: ps.strip_show_title,
-            strip_show_artist: ps.strip_show_artist,
-            strip_show_album: ps.strip_show_album,
-            strip_show_format_info: ps.strip_show_format_info,
-            strip_merged_mode: ps.strip_merged_mode,
-            strip_click_action: ps.strip_click_action,
-            strip_show_labels: ps.strip_show_labels,
-            strip_separator: ps.strip_separator,
-            crossfade_enabled: ps.crossfade_enabled,
-            crossfade_duration_secs: ps.crossfade_duration_secs,
-            volume_normalization: ps.volume_normalization,
-            normalization_level: ps.normalization_level,
-            replay_gain_preamp_db: ps.replay_gain_preamp_db,
-            replay_gain_fallback_db: ps.replay_gain_fallback_db,
-            replay_gain_fallback_to_agc: ps.replay_gain_fallback_to_agc,
-            replay_gain_prevent_clipping: ps.replay_gain_prevent_clipping,
-            visualization_mode: ps.visualization_mode,
-            sound_effects_enabled: ps.sound_effects_enabled,
-            sfx_volume: ps.sfx_volume,
-            scrobbling_enabled: ps.scrobbling_enabled,
-            scrobble_threshold: ps.scrobble_threshold,
-            quick_add_to_playlist: ps.quick_add_to_playlist,
-            queue_show_default_playlist: ps.queue_show_default_playlist,
-            eq_enabled: ps.eq_enabled,
-            eq_gains: ps.eq_gains,
-            custom_eq_presets: ps.custom_eq_presets.clone(),
-            show_tray_icon: ps.show_tray_icon,
-            close_to_tray: ps.close_to_tray,
-        }
+        let mut ts = Self::default();
+
+        // Per-tab macro-emitted writers (define_settings! `write:` closures).
+        crate::services::settings_tables::write_general_tab_toml(ps, &mut ts);
+        crate::services::settings_tables::write_interface_tab_toml(ps, &mut ts);
+        crate::services::settings_tables::write_playback_tab_toml(ps, &mut ts);
+
+        // Per-view-column macro-emitted writers (define_view_column_toml_helpers!).
+        crate::types::view_column_toml::write_albums_columns_to_toml(ps, &mut ts);
+        crate::types::view_column_toml::write_artists_columns_to_toml(ps, &mut ts);
+        crate::types::view_column_toml::write_genres_columns_to_toml(ps, &mut ts);
+        crate::types::view_column_toml::write_playlists_columns_to_toml(ps, &mut ts);
+        crate::types::view_column_toml::write_similar_columns_to_toml(ps, &mut ts);
+        crate::types::view_column_toml::write_songs_columns_to_toml(ps, &mut ts);
+        crate::types::view_column_toml::write_queue_columns_to_toml(ps, &mut ts);
+
+        // Hand-written residuals — fields not (yet) owned by any per-tab or
+        // per-view-column macro invocation:
+        //
+        // - `artwork_column_width_pct` is the pixel-drag-driven slider that
+        //   the Artwork Column section intentionally leaves off the items
+        //   dispatcher (see `interface.rs` — "absent: it has a setter but no
+        //   UI dispatch arm").
+        // - `font_family` routes through `Message::ApplyFont`, not a tab
+        //   dispatcher, so no `define_settings!` entry owns it.
+        // - The 3 audio/visualizer scalars (`visualization_mode`,
+        //   `sound_effects_enabled`, `sfx_volume`) and 3 EQ fields
+        //   (`eq_enabled`, `eq_gains`, `custom_eq_presets`) live on
+        //   different code paths and aren't claimed by any tab today.
+        // - `light_mode` deliberately stays at the default value (false) so
+        //   the on-disk truth maintained by the UI crate's targeted writer
+        //   isn't stomped by this whole-section serialize. See the doc above.
+        ts.artwork_column_width_pct = ps.artwork_column_width_pct;
+        ts.font_family = ps.font_family.clone();
+        ts.visualization_mode = ps.visualization_mode;
+        ts.sound_effects_enabled = ps.sound_effects_enabled;
+        ts.sfx_volume = ps.sfx_volume;
+        ts.eq_enabled = ps.eq_enabled;
+        ts.eq_gains = ps.eq_gains;
+        ts.custom_eq_presets = ps.custom_eq_presets.clone();
+
+        ts
     }
 }
 
