@@ -146,6 +146,8 @@ The same-version guard matters because `pkgrel` is reset to `1` on every fresh `
 
 **`nokkvi-git`** — no `pkgver` bump needed (it's auto-derived from `git describe` at install time). Refresh `.SRCINFO` so the AUR's "Last Updated" timestamp reflects the new release:
 
+**Before running this block:** if this release introduced a new `-sys` / build-script crate that pulls in a system build tool (`cmake`, `autoconf`, `pkg-config`, etc.), add it to `nokkvi-git/PKGBUILD`'s `makedepends` list manually first. `makepkg -od` skips the build stage, so this step won't catch a stale `makedepends` list on its own.
+
 ```bash
 if [ -d ~/aur/nokkvi-git/.git ]; then
     cd ~/aur/nokkvi-git

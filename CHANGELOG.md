@@ -8,7 +8,11 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- Settings config-write routing consolidated under typed dispatch.
+### Fixed
+
+### Removed
+
+## v0.4.0 — 2026-05-16
 
 ### Fixed
 
@@ -19,8 +23,7 @@ All notable changes to this project will be documented in this file.
 - Songs view and per-genre Songs view now load complete libraries instead of stopping at 50_000 rows. The underlying Navidrome request had a hardcoded `_end=50000` sentinel that silently truncated libraries above that size; the load now paginates internally in 5_000-row chunks until the server returns a short page or the cumulative count matches `X-Total-Count`.
 - Visualizer no longer flickers blank or freezes its peak bars during a crossfade between tracks of different sample rates (e.g. a 44.1 kHz FLAC into a 48 kHz one). Two concurrent streams were sharing the visualizer's stored sample rate and flipping it ~86 times per second, forcing the spectrum engine to reinitialize on every flip and clearing the FFT input buffer faster than it could refill. The visualizer now follows whichever stream is currently dominant in the fade, handing off at the equal-power midpoint, so the spectrum keeps animating continuously through the whole crossfade window.
 - Seeking near the end of a track no longer causes a multi-second silent fade-in on the next track. The seek silently disarmed the pending gapless crossfade so the engine's position-based trigger never fired, and the crossfade fell through to its EOF-fallback path — firing the configured crossfade against an already-drained outgoing stream so the new track faded in from silence rather than overlapping with the previous one. Within-track seeks now preserve the armed crossfade state and the position trigger fires normally one crossfade-duration before track end.
-
-### Removed
+- Opus-encoded tracks served from your Navidrome library now play, as do Opus Icecast radio streams. Symphonia ships no native Opus decoder, so any Opus file previously surfaced as "Failed to start playback: Failed to create decoder"; the decoder is now provided by a bundled libopus build, so there's no new runtime system dependency — though building nokkvi from source now needs `cmake` to compile the bundled decoder.
 
 ## v0.3.17 — 2026-05-14
 
