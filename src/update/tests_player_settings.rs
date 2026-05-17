@@ -206,3 +206,50 @@ fn ui_runtime_flags_stay_loose_on_nokkvi() {
     assert!(app.pending_top_pin.is_none());
     assert!(app.server_version.is_none());
 }
+
+// ══════════════════════════════════════════════════════════════════════
+//  EqModalState sibling extraction — pin shape and defaults
+// ══════════════════════════════════════════════════════════════════════
+
+#[test]
+fn eq_modal_state_defaults_match_expected() {
+    let state = crate::widgets::eq_modal::EqModalState::default();
+    assert!(!state.open, "EqModalState.open must default to false");
+    assert!(
+        !state.save_mode,
+        "EqModalState.save_mode must default to false"
+    );
+    assert!(
+        state.save_name.is_empty(),
+        "EqModalState.save_name must default to empty"
+    );
+    assert!(
+        state.custom_presets.is_empty(),
+        "EqModalState.custom_presets must default to empty Vec"
+    );
+}
+
+#[test]
+fn nokkvi_has_eq_modal_sibling_field() {
+    // Compile-time pin: removing `eq_modal: EqModalState` from Nokkvi (or
+    // accidentally moving it back into WindowState) will fail to compile
+    // here, NOT silently leak EQ-modal state into the window-dimensions
+    // catch-all.
+    let app = test_app();
+    let _: &crate::widgets::eq_modal::EqModalState = &app.eq_modal;
+    let _: &crate::widgets::info_modal::InfoModalState = &app.info_modal;
+    let _: &crate::widgets::about_modal::AboutModalState = &app.about_modal;
+
+    // EQ-modal state lives on its own struct now, not under window.
+    assert!(!app.eq_modal.open);
+    assert!(!app.eq_modal.save_mode);
+    assert!(app.eq_modal.save_name.is_empty());
+    assert!(app.eq_modal.custom_presets.is_empty());
+
+    // WindowState shape is now just dimensions + modifiers — pin the
+    // remaining four fields so the field set doesn't quietly regrow.
+    let _: f32 = app.window.width;
+    let _: f32 = app.window.height;
+    let _: f32 = app.window.scale_factor;
+    let _: iced::keyboard::Modifiers = app.window.keyboard_modifiers;
+}

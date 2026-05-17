@@ -158,6 +158,7 @@ pub struct Nokkvi {
     pub text_input_dialog: crate::widgets::text_input_dialog::TextInputDialogState,
     pub info_modal: crate::widgets::info_modal::InfoModalState,
     pub about_modal: crate::widgets::about_modal::AboutModalState,
+    pub eq_modal: crate::widgets::eq_modal::EqModalState,
     /// Default-playlist picker overlay state. `Some` = picker is open.
     pub default_playlist_picker:
         Option<crate::widgets::default_playlist_picker::DefaultPlaylistPickerState>,
@@ -389,6 +390,7 @@ impl Default for Nokkvi {
             text_input_dialog: crate::widgets::text_input_dialog::TextInputDialogState::default(),
             info_modal: crate::widgets::info_modal::InfoModalState::default(),
             about_modal: crate::widgets::about_modal::AboutModalState::default(),
+            eq_modal: crate::widgets::eq_modal::EqModalState::default(),
             default_playlist_picker: None,
             open_menu: None,
             active_progress: Vec::new(),

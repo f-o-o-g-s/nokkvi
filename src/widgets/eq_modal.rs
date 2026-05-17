@@ -19,6 +19,24 @@ use crate::{
 // State & Messages
 // =============================================================================
 
+/// State for the equalizer modal overlay.
+///
+/// Mirrors the sibling pattern established by `InfoModalState` and
+/// `AboutModalState` — modal state lives next to its widget rendering
+/// code, not in the catch-all `WindowState` struct. Lift target for
+/// the four EQ-modal fields that previously lived on `WindowState`.
+#[derive(Debug, Default)]
+pub struct EqModalState {
+    /// Whether the EQ modal overlay is currently visible.
+    pub open: bool,
+    /// Whether the modal is in "save preset" mode (showing name input).
+    pub save_mode: bool,
+    /// Text input content for the preset name being saved.
+    pub save_name: String,
+    /// Cached custom EQ presets (loaded from redb, kept in sync on save/delete).
+    pub custom_presets: Vec<nokkvi_data::audio::eq::CustomEqPreset>,
+}
+
 #[derive(Debug, Clone)]
 pub enum EqModalMessage {
     Open,

@@ -1103,7 +1103,7 @@ impl Nokkvi {
         }
 
         // Load custom EQ presets into UI cache
-        self.window.custom_eq_presets = settings.custom_eq_presets.clone();
+        self.eq_modal.custom_presets = settings.custom_eq_presets.clone();
 
         debug!(
             "⚙️ [SETTINGS LOADED] crossfade_enabled={}, crossfade_duration_secs={}, volume_normalization={}, normalization_level={:?}",

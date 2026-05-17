@@ -456,12 +456,12 @@ impl Nokkvi {
             [0.0; 10]
         };
         if let Some(eq_overlay) = crate::widgets::eq_modal_overlay(
-            self.window.eq_modal_open,
+            self.eq_modal.open,
             eq_enabled,
             eq_gains,
-            &self.window.custom_eq_presets,
-            self.window.eq_save_mode,
-            &self.window.eq_save_name,
+            &self.eq_modal.custom_presets,
+            self.eq_modal.save_mode,
+            &self.eq_modal.save_name,
         ) {
             stack = stack.push(eq_overlay.map(Message::EqModal));
         }

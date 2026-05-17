@@ -223,7 +223,7 @@ fn escape_not_suppressed_when_captured() {
     let mut app = test_app();
     app.current_view = View::Settings;
     app.screen = crate::Screen::Home;
-    app.window.eq_modal_open = true;
+    app.eq_modal.open = true;
 
     let _ = send_raw_key(
         &mut app,
@@ -233,7 +233,7 @@ fn escape_not_suppressed_when_captured() {
     );
 
     assert!(
-        !app.window.eq_modal_open,
+        !app.eq_modal.open,
         "Escape should close EQ modal even when Status::Captured"
     );
 }

@@ -348,8 +348,8 @@ impl Nokkvi {
         match msg {
             HotkeyMessage::ClearSearch => {
                 // If EQ modal is visible, Escape closes it first
-                if self.window.eq_modal_open {
-                    self.window.eq_modal_open = false;
+                if self.eq_modal.open {
+                    self.eq_modal.open = false;
                     return Task::none();
                 }
                 // If about modal is visible, Escape closes it first

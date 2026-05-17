@@ -6,18 +6,18 @@ impl Nokkvi {
     pub(crate) fn handle_eq_modal(&mut self, msg: EqModalMessage) -> Task<Message> {
         match msg {
             EqModalMessage::Open => {
-                self.window.eq_modal_open = true;
+                self.eq_modal.open = true;
                 Task::none()
             }
             EqModalMessage::Close => {
-                self.window.eq_modal_open = false;
-                self.window.eq_save_mode = false;
+                self.eq_modal.open = false;
+                self.eq_modal.save_mode = false;
                 Task::none()
             }
             EqModalMessage::Toggle => {
-                self.window.eq_modal_open = !self.window.eq_modal_open;
-                if !self.window.eq_modal_open {
-                    self.window.eq_save_mode = false;
+                self.eq_modal.open = !self.eq_modal.open;
+                if !self.eq_modal.open {
+                    self.eq_modal.save_mode = false;
                 }
                 Task::none()
             }
@@ -63,7 +63,7 @@ impl Nokkvi {
                         )
                     }
                     crate::widgets::PresetChoice::Custom(idx) => {
-                        let preset = self.window.custom_eq_presets.get(*idx);
+                        let preset = self.eq_modal.custom_presets.get(*idx);
                         (
                             preset.map(|p| p.gains),
                             preset.map(|p| p.name.clone()).unwrap_or_default(),
@@ -97,16 +97,16 @@ impl Nokkvi {
                 )
             }
             EqModalMessage::SavePreset => {
-                self.window.eq_save_mode = true;
-                self.window.eq_save_name.clear();
+                self.eq_modal.save_mode = true;
+                self.eq_modal.save_name.clear();
                 Task::none()
             }
             EqModalMessage::SavePresetNameChanged(name) => {
-                self.window.eq_save_name = name;
+                self.eq_modal.save_name = name;
                 Task::none()
             }
             EqModalMessage::SavePresetConfirm => {
-                let name = self.window.eq_save_name.trim().to_string();
+                let name = self.eq_modal.save_name.trim().to_string();
                 if name.is_empty() {
                     self.toast_warn("Preset name cannot be empty".to_string());
                     return Task::none();
@@ -115,8 +115,8 @@ impl Nokkvi {
                 // Reject duplicate names (custom presets + builtins)
                 let name_lower = name.to_lowercase();
                 let duplicate_custom = self
-                    .window
-                    .custom_eq_presets
+                    .eq_modal
+                    .custom_presets
                     .iter()
                     .any(|p| p.name.to_lowercase() == name_lower);
                 let duplicate_builtin = nokkvi_data::audio::eq::BUILTIN_PRESETS
@@ -134,16 +134,16 @@ impl Nokkvi {
                 }
 
                 // Add to local cache
-                self.window
-                    .custom_eq_presets
+                self.eq_modal
+                    .custom_presets
                     .push(nokkvi_data::audio::eq::CustomEqPreset {
                         name: name.clone(),
                         gains,
                     });
 
                 // Exit save mode
-                self.window.eq_save_mode = false;
-                self.window.eq_save_name.clear();
+                self.eq_modal.save_mode = false;
+                self.eq_modal.save_name.clear();
 
                 self.shell_fire_and_forget_task(
                     move |shell| async move {
@@ -154,21 +154,21 @@ impl Nokkvi {
                 )
             }
             EqModalMessage::CancelSave => {
-                self.window.eq_save_mode = false;
-                self.window.eq_save_name.clear();
+                self.eq_modal.save_mode = false;
+                self.eq_modal.save_name.clear();
                 Task::none()
             }
             EqModalMessage::DeletePreset(idx) => {
                 let name = self
-                    .window
-                    .custom_eq_presets
+                    .eq_modal
+                    .custom_presets
                     .get(idx)
                     .map(|p| p.name.clone())
                     .unwrap_or_default();
 
                 // Remove from local cache
-                if idx < self.window.custom_eq_presets.len() {
-                    self.window.custom_eq_presets.remove(idx);
+                if idx < self.eq_modal.custom_presets.len() {
+                    self.eq_modal.custom_presets.remove(idx);
                 }
 
                 // Reset gains to flat after deleting the active preset
