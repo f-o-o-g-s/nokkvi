@@ -282,10 +282,14 @@ impl Nokkvi {
                     // (the backend handles its own current_index in QueueManager)
                 }
 
-                // Persist to backend and reload queue state
+                // Persist to backend and reload queue state. The
+                // AppService bundle method handles the queue mutation,
+                // the reactive projection, and — critically — the
+                // engine's gapless-prep invalidation so the shuffle +
+                // crossfade reorder path doesn't desync the UI from the
+                // audible stream.
                 self.shell_spawn("queue_move_item", move |shell| async move {
-                    shell.queue().move_item(from, to).await?;
-                    shell.queue().refresh_from_queue().await
+                    shell.move_queue_item(from, to).await
                 });
             }
             QueueAction::MoveBatch { indices, target } => {
@@ -334,29 +338,7 @@ impl Nokkvi {
                 }
 
                 self.shell_spawn("queue_move_batch", move |shell| async move {
-                    let qm_arc = shell.queue().queue_manager();
-                    let mut qm = qm_arc.lock().await;
-                    let mut extracted = Vec::new();
-                    for &qi in &raw_indices_desc {
-                        if let Some(id) = qm.get_queue().song_ids.get(qi).cloned()
-                            && let Some(song) = qm.get_song(&id)
-                        {
-                            extracted.push(song.clone());
-                        }
-                    }
-                    for &qi in &raw_indices_desc {
-                        qm.remove_song(qi).ok();
-                    }
-                    extracted.reverse();
-                    let removed_before = raw_indices_desc
-                        .iter()
-                        .filter(|&&qi| qi < raw_target)
-                        .count();
-                    let adj = raw_target.saturating_sub(removed_before);
-                    let pos = adj.min(qm.get_queue().song_ids.len());
-                    qm.insert_songs_at(pos, extracted).ok();
-                    drop(qm);
-                    shell.queue().refresh_from_queue().await
+                    shell.move_queue_batch(raw_indices_desc, raw_target).await
                 });
             }
             QueueAction::RemoveFromQueue(entry_ids) => {
@@ -417,24 +399,7 @@ impl Nokkvi {
                 // Skip optimistic UI for PlayNext — target slot depends on the
                 // current playing index, which lives in the backend.
                 self.shell_spawn("queue_play_next_batch", move |shell| async move {
-                    let qm_arc = shell.queue().queue_manager();
-                    let mut qm = qm_arc.lock().await;
-                    // Resolve each entry_id → its current song_id → pool
-                    // Song clone. Doing this *before* the removal means
-                    // pool entries that would otherwise be dropped along
-                    // with the last queue row are still reachable.
-                    let extracted: Vec<_> = entry_ids
-                        .iter()
-                        .filter_map(|&eid| {
-                            let idx = qm.index_of_entry(eid)?;
-                            let song_id = qm.get_queue().song_ids.get(idx).cloned()?;
-                            qm.get_song(&song_id).cloned()
-                        })
-                        .collect();
-                    qm.remove_entries_by_ids(&entry_ids).ok();
-                    qm.insert_after_current(extracted).ok();
-                    drop(qm);
-                    shell.queue().refresh_from_queue().await
+                    shell.play_next_in_queue(entry_ids).await
                 });
             }
             QueueAction::ShowToast(msg) => {
@@ -766,14 +731,11 @@ impl Nokkvi {
                 .slot_list
                 .set_offset(0, filtered.len());
         }
-        // Physically reorder backend queue so next/prev follows sorted order
+        // Physically reorder backend queue so next/prev follows sorted order.
+        // `AppService::sort_queue` bundles the mutation, the reactive refresh,
+        // the engine gapless-prep reset, and the settings persist.
         self.shell_spawn("sort_backend_queue", move |shell| async move {
-            let qm_arc = shell.queue().queue_manager();
-            let mut qm = qm_arc.lock().await;
-            qm.sort_queue(sort_mode, ascending)?;
-            drop(qm);
-            shell.queue().refresh_from_queue().await?;
-            shell.settings().set_queue_prefs(sort_mode, ascending).await
+            shell.sort_queue(sort_mode, ascending).await
         });
         std::borrow::Cow::Owned(filtered)
     }
@@ -799,11 +761,7 @@ impl Nokkvi {
 
         self.shell_task(
             |shell| async move {
-                let qm_arc = shell.queue().queue_manager();
-                let mut qm = qm_arc.lock().await;
-                qm.sort_queue(QueueSortMode::Random, true)?;
-                drop(qm);
-                shell.queue().refresh_from_queue().await?;
+                shell.shuffle_queue_randomly().await?;
                 Ok::<_, anyhow::Error>(shell.queue().get_songs())
             },
             |result| {

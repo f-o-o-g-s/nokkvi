@@ -48,7 +48,12 @@ impl Nokkvi {
                     )
                     .await?;
                 let count = songs.len();
-                shell.queue().add_songs(songs).await?;
+                // Appending in shuffle mode invalidates the engine's
+                // pre-buffered next-track decoder — discharge against
+                // the engine immediately so the next gapless prep
+                // picks the right song from the freshly-extended order.
+                let effect = shell.queue().add_songs(songs).await?;
+                effect.apply_to(&shell.audio_engine()).await;
                 Ok(count)
             },
             move |result: Result<usize, anyhow::Error>| match result {

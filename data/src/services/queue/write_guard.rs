@@ -19,6 +19,7 @@
 use anyhow::Result;
 
 use super::QueueManager;
+use crate::types::NextTrackResetEffect;
 
 pub struct QueueWriteGuard<'a> {
     mgr: Option<&'a mut QueueManager>,
@@ -38,27 +39,35 @@ fn assert_entry_ids_parallel(mgr: &QueueManager) {
 }
 
 impl QueueWriteGuard<'_> {
-    /// Commit with full save (queue ordering + song pool).
-    pub fn commit_save_all(mut self) -> Result<()> {
+    /// Commit with full save (queue ordering + song pool). Returns a
+    /// [`NextTrackResetEffect`] the caller must dispatch to the audio
+    /// engine — every queue mutation may have invalidated the prepared
+    /// next-track decoder.
+    pub fn commit_save_all(mut self) -> Result<NextTrackResetEffect> {
         let mgr = self.mgr.take().expect("guard already consumed");
         assert_entry_ids_parallel(mgr);
         mgr.clear_queued();
-        mgr.save_all()
+        mgr.save_all()?;
+        Ok(NextTrackResetEffect::new())
     }
 
-    /// Commit with order-only save (song pool unchanged).
-    pub fn commit_save_order(mut self) -> Result<()> {
+    /// Commit with order-only save (song pool unchanged). Returns a
+    /// [`NextTrackResetEffect`] obligation — see [`Self::commit_save_all`].
+    pub fn commit_save_order(mut self) -> Result<NextTrackResetEffect> {
         let mgr = self.mgr.take().expect("guard already consumed");
         assert_entry_ids_parallel(mgr);
         mgr.clear_queued();
-        mgr.save_order()
+        mgr.save_order()?;
+        Ok(NextTrackResetEffect::new())
     }
 
-    /// Commit without persisting (in-memory mutation only).
-    pub fn commit_no_save(mut self) {
+    /// Commit without persisting (in-memory mutation only). Returns a
+    /// [`NextTrackResetEffect`] obligation — see [`Self::commit_save_all`].
+    pub fn commit_no_save(mut self) -> NextTrackResetEffect {
         let mgr = self.mgr.take().expect("guard already consumed");
         assert_entry_ids_parallel(mgr);
         mgr.clear_queued();
+        NextTrackResetEffect::new()
     }
 }
 

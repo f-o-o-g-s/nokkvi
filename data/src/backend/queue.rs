@@ -12,6 +12,7 @@ use crate::{
     backend::auth::AuthGateway,
     services::queue::QueueManager,
     types::{
+        NextTrackResetEffect,
         reactive::{ReactiveInt, ReactiveVecProperty},
         song::Song,
     },
@@ -131,18 +132,27 @@ impl QueueService {
         self.songs.get()
     }
 
-    /// Add songs to the queue
-    pub async fn add_songs(&self, songs: Vec<Song>) -> Result<()> {
+    /// Add songs to the queue. Returns a [`NextTrackResetEffect`] obligation
+    /// — the audio engine's prepared gapless decoder is stale once the queue
+    /// changes, and the caller must dispatch the effect against the engine.
+    pub async fn add_songs(&self, songs: Vec<Song>) -> Result<NextTrackResetEffect> {
         let mut queue_manager = self.queue_manager.lock().await;
-        queue_manager.add_songs(songs)?;
-        self.refresh_from_locked_manager(&queue_manager).await
+        let effect = queue_manager.add_songs(songs)?;
+        self.refresh_from_locked_manager(&queue_manager).await?;
+        Ok(effect)
     }
 
-    /// Set the queue (replace all songs)
-    pub async fn set_queue(&self, songs: Vec<Song>, current_index: Option<usize>) -> Result<()> {
+    /// Set the queue (replace all songs). Returns a [`NextTrackResetEffect`]
+    /// obligation — see [`Self::add_songs`].
+    pub async fn set_queue(
+        &self,
+        songs: Vec<Song>,
+        current_index: Option<usize>,
+    ) -> Result<NextTrackResetEffect> {
         let mut queue_manager = self.queue_manager.lock().await;
-        queue_manager.set_queue(songs, current_index)?;
-        self.refresh_from_locked_manager(&queue_manager).await
+        let effect = queue_manager.set_queue(songs, current_index)?;
+        self.refresh_from_locked_manager(&queue_manager).await?;
+        Ok(effect)
     }
 
     /// Helper to get server URL and credential
@@ -215,18 +225,22 @@ impl QueueService {
         self.queue_manager.clone()
     }
 
-    /// Move a queue item from one position to another (drag-and-drop reorder)
-    pub async fn move_item(&self, from: usize, to: usize) -> Result<()> {
+    /// Move a queue item from one position to another (drag-and-drop reorder).
+    /// Returns a [`NextTrackResetEffect`] obligation — see [`Self::add_songs`].
+    pub async fn move_item(&self, from: usize, to: usize) -> Result<NextTrackResetEffect> {
         let mut qm = self.queue_manager.lock().await;
-        qm.move_item(from, to)?;
-        self.refresh_from_locked_manager(&qm).await
+        let effect = qm.move_item(from, to)?;
+        self.refresh_from_locked_manager(&qm).await?;
+        Ok(effect)
     }
 
-    /// Remove a song from the queue by index
-    pub async fn remove_song(&self, index: usize) -> Result<()> {
+    /// Remove a song from the queue by index. Returns a [`NextTrackResetEffect`]
+    /// obligation — see [`Self::add_songs`].
+    pub async fn remove_song(&self, index: usize) -> Result<NextTrackResetEffect> {
         let mut qm = self.queue_manager.lock().await;
-        qm.remove_song(index)?;
-        self.refresh_from_locked_manager(&qm).await
+        let effect = qm.remove_song(index)?;
+        self.refresh_from_locked_manager(&qm).await?;
+        Ok(effect)
     }
 
     /// Remove a batch of queue rows by per-row `entry_id`. Drift-immune *and*
@@ -237,17 +251,26 @@ impl QueueService {
     /// The "drop every row matching this song_id" variant lives on the
     /// inner [`QueueManager::remove_songs_by_ids`] primitive; no async
     /// wrapper is exposed because the UI layer never wants that contract.
-    pub async fn remove_entries_by_ids(&self, entry_ids: &[u64]) -> Result<()> {
+    ///
+    /// Returns a [`NextTrackResetEffect`] obligation — see [`Self::add_songs`].
+    pub async fn remove_entries_by_ids(&self, entry_ids: &[u64]) -> Result<NextTrackResetEffect> {
         let mut qm = self.queue_manager.lock().await;
-        qm.remove_entries_by_ids(entry_ids)?;
-        self.refresh_from_locked_manager(&qm).await
+        let effect = qm.remove_entries_by_ids(entry_ids)?;
+        self.refresh_from_locked_manager(&qm).await?;
+        Ok(effect)
     }
 
-    /// Insert songs at a specific position in the queue (cross-pane drag drop)
-    pub async fn insert_songs_at(&self, index: usize, songs: Vec<Song>) -> Result<()> {
+    /// Insert songs at a specific position in the queue (cross-pane drag drop).
+    /// Returns a [`NextTrackResetEffect`] obligation — see [`Self::add_songs`].
+    pub async fn insert_songs_at(
+        &self,
+        index: usize,
+        songs: Vec<Song>,
+    ) -> Result<NextTrackResetEffect> {
         let mut queue_manager = self.queue_manager.lock().await;
-        queue_manager.insert_songs_at(index, songs)?;
-        self.refresh_from_locked_manager(&queue_manager).await
+        let effect = queue_manager.insert_songs_at(index, songs)?;
+        self.refresh_from_locked_manager(&queue_manager).await?;
+        Ok(effect)
     }
 
     /// Get the current playing index
@@ -332,13 +355,13 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn add_songs_updates_total_count() {
         let (service, _temp) = make_service();
-        service
+        let _ = service
             .set_queue(make_songs(&["a", "b"]), Some(0))
             .await
             .expect("set_queue");
         assert_eq!(service.total_count.get(), 2);
 
-        service
+        let _ = service
             .add_songs(make_songs(&["c", "d", "e"]))
             .await
             .expect("add_songs");
@@ -356,13 +379,13 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn add_songs_preserves_current_index() {
         let (service, _temp) = make_service();
-        service
+        let _ = service
             .set_queue(make_songs(&["a", "b", "c", "d"]), Some(2))
             .await
             .expect("set_queue");
         assert_eq!(service.current_index.get(), 2);
 
-        service
+        let _ = service
             .add_songs(make_songs(&["x", "y"]))
             .await
             .expect("add_songs");
@@ -378,13 +401,13 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn insert_songs_at_updates_total_count() {
         let (service, _temp) = make_service();
-        service
+        let _ = service
             .set_queue(make_songs(&["a", "b", "c"]), Some(0))
             .await
             .expect("set_queue");
         assert_eq!(service.total_count.get(), 3);
 
-        service
+        let _ = service
             .insert_songs_at(1, make_songs(&["x", "y"]))
             .await
             .expect("insert_songs_at");
@@ -403,13 +426,13 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn insert_songs_at_before_current_shifts_index() {
         let (service, _temp) = make_service();
-        service
+        let _ = service
             .set_queue(make_songs(&["a", "b", "c", "d"]), Some(3))
             .await
             .expect("set_queue");
         assert_eq!(service.current_index.get(), 3);
 
-        service
+        let _ = service
             .insert_songs_at(1, make_songs(&["x", "y"]))
             .await
             .expect("insert_songs_at");
@@ -425,13 +448,13 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn insert_songs_at_after_current_preserves_index() {
         let (service, _temp) = make_service();
-        service
+        let _ = service
             .set_queue(make_songs(&["a", "b", "c"]), Some(1))
             .await
             .expect("set_queue");
         assert_eq!(service.current_index.get(), 1);
 
-        service
+        let _ = service
             .insert_songs_at(3, make_songs(&["x"]))
             .await
             .expect("insert_songs_at");
@@ -448,7 +471,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn set_queue_sets_all_three_reactives() {
         let (service, _temp) = make_service();
-        service
+        let _ = service
             .set_queue(make_songs(&["a", "b", "c"]), Some(1))
             .await
             .expect("set_queue");
@@ -464,7 +487,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn refresh_from_queue_sets_all_three_reactives() {
         let (service, _temp) = make_service();
-        service
+        let _ = service
             .set_queue(make_songs(&["a", "b"]), Some(0))
             .await
             .expect("set_queue");
@@ -485,14 +508,14 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn remove_song_projects_reactives_after_mutation() {
         let (service, _temp) = make_service();
-        service
+        let _ = service
             .set_queue(make_songs(&["a", "b", "c", "d"]), Some(2))
             .await
             .expect("set_queue");
         assert_eq!(service.total_count.get(), 4);
         assert_eq!(service.current_index.get(), 2);
 
-        service.remove_song(0).await.expect("remove_song");
+        let _ = service.remove_song(0).await.expect("remove_song");
 
         assert_eq!(
             service.total_count.get(),
@@ -513,7 +536,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn remove_entries_by_ids_projects_reactives_after_mutation() {
         let (service, _temp) = make_service();
-        service
+        let _ = service
             .set_queue(make_songs(&["a", "b", "c", "d", "e"]), Some(3))
             .await
             .expect("set_queue");
@@ -528,7 +551,7 @@ mod tests {
             qm.entry_ids()[..2].to_vec()
         };
 
-        service
+        let _ = service
             .remove_entries_by_ids(&first_two_entry_ids)
             .await
             .expect("remove_entries_by_ids");
@@ -552,7 +575,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn move_item_projects_reactives_after_mutation() {
         let (service, _temp) = make_service();
-        service
+        let _ = service
             .set_queue(make_songs(&["a", "b", "c", "d"]), Some(0))
             .await
             .expect("set_queue");
@@ -562,7 +585,7 @@ mod tests {
         // Move the playing song (at index 0) to the back. `move_item`
         // computes `insert_at = to - 1` when moving forward, so the playing
         // song lands at index 2 (in a 4-song queue, `to = 3` → `insert_at = 2`).
-        service.move_item(0, 3).await.expect("move_item");
+        let _ = service.move_item(0, 3).await.expect("move_item");
 
         assert_eq!(
             service.total_count.get(),

@@ -18,6 +18,7 @@ use crate::{
         songs::SongsService,
     },
     services::task_manager::TaskManager,
+    types::queue_sort_mode::QueueSortMode,
 };
 
 /// AppService — Application-level orchestration and state management.
@@ -377,7 +378,8 @@ impl AppService {
             .resolve_playlist(playlist_id)
             .await?;
         let cursor = if songs.is_empty() { None } else { Some(0) };
-        self.queue_service.set_queue(songs, cursor).await?;
+        let effect = self.queue_service.set_queue(songs, cursor).await?;
+        effect.apply_to(&self.audio_engine()).await;
         debug!(
             "📋 Loaded playlist {} into queue (no playback)",
             playlist_id
@@ -451,7 +453,8 @@ impl AppService {
     pub async fn add_song_to_queue_by_id(&self, song_id: &str, album_id: &str) -> Result<()> {
         let songs = self.albums_service.load_album_songs(album_id).await?;
         if let Some(song) = songs.into_iter().find(|s| s.id == song_id) {
-            self.queue_service.add_songs(vec![song]).await?;
+            let effect = self.queue_service.add_songs(vec![song]).await?;
+            effect.apply_to(&self.audio_engine()).await;
             debug!("➕ Added song {} to queue", song_id);
             Ok(())
         } else {
@@ -617,9 +620,11 @@ impl AppService {
     ) -> Result<()> {
         let songs = self.albums_service.load_album_songs(album_id).await?;
         if let Some(song) = songs.into_iter().find(|s| s.id == song_id) {
-            self.queue_service
+            let effect = self
+                .queue_service
                 .insert_songs_at(position, vec![song])
                 .await?;
+            effect.apply_to(&self.audio_engine()).await;
             debug!(
                 "📌 Inserted song {} at queue position {}",
                 song_id, position
@@ -867,7 +872,7 @@ impl AppService {
                 .collect()
         };
 
-        self.queue_service.remove_entries_by_ids(entry_ids).await?;
+        let effect = self.queue_service.remove_entries_by_ids(entry_ids).await?;
 
         let plan = {
             let qm_arc = self.queue_service.queue_manager();
@@ -880,7 +885,139 @@ impl AppService {
         };
 
         self.playback.apply_removal_aftermath(plan).await?;
+        // `apply_removal_aftermath` invalidates engine prep on the
+        // `LoadNewCurrent` path (via `load_track_with_rg`), but the
+        // `NoCurrentChange` branch doesn't touch the engine — the
+        // removed row could still be the song the engine had buffered
+        // as the next gapless track. Always discharge the
+        // `NextTrackResetEffect` so that case can't leave a stale
+        // prepared decoder pointing at a vanished queue row.
+        effect.apply_to(&self.audio_engine()).await;
 
+        Ok(())
+    }
+
+    /// Move a queue item from one position to another (drag-and-drop reorder
+    /// or Shift+↑ / Shift+↓ hotkey). Mutates the queue, refreshes the
+    /// reactive projection, and invalidates the audio engine's prepared
+    /// next-track decoder — without that final step, a shuffle+crossfade
+    /// reorder leaves the engine streaming the originally-prepared song
+    /// while the UI highlights whichever row the queue's re-shuffled
+    /// `order[]` now picks as next.
+    pub async fn move_queue_item(&self, from: usize, to: usize) -> Result<()> {
+        let effect = self.queue_service.move_item(from, to).await?;
+        effect.apply_to(&self.audio_engine()).await;
+        Ok(())
+    }
+
+    /// Multi-selection drag reorder: remove the rows named by
+    /// `raw_indices_desc` (which must already be in descending order) and
+    /// re-insert their songs at `raw_target`, with the insertion point
+    /// adjusted by however many of the removed rows fell before it.
+    /// Discharges the resulting `NextTrackResetEffect` against the engine.
+    pub async fn move_queue_batch(
+        &self,
+        raw_indices_desc: Vec<usize>,
+        raw_target: usize,
+    ) -> Result<()> {
+        let effect = {
+            let qm_arc = self.queue_service.queue_manager();
+            let mut qm = qm_arc.lock().await;
+            let mut extracted = Vec::new();
+            for &qi in &raw_indices_desc {
+                if let Some(id) = qm.get_queue().song_ids.get(qi).cloned()
+                    && let Some(song) = qm.get_song(&id)
+                {
+                    extracted.push(song.clone());
+                }
+            }
+            for &qi in &raw_indices_desc {
+                let _ = qm.remove_song(qi);
+            }
+            extracted.reverse();
+            let removed_before = raw_indices_desc
+                .iter()
+                .filter(|&&qi| qi < raw_target)
+                .count();
+            let adj = raw_target.saturating_sub(removed_before);
+            let pos = adj.min(qm.get_queue().song_ids.len());
+            qm.insert_songs_at(pos, extracted)?
+        };
+        self.queue_service.refresh_from_queue().await?;
+        effect.apply_to(&self.audio_engine()).await;
+        Ok(())
+    }
+
+    /// "Play Next" batch from the queue context menu: remove the targeted
+    /// rows by `entry_id`, then re-insert their songs right after the
+    /// currently-playing position. Discharges the resulting effect against
+    /// the engine.
+    pub async fn play_next_in_queue(&self, entry_ids: Vec<u64>) -> Result<()> {
+        let effect = {
+            let qm_arc = self.queue_service.queue_manager();
+            let mut qm = qm_arc.lock().await;
+            // Resolve each entry_id → its current song_id → pool clone
+            // *before* the removal so pool entries that would otherwise
+            // be dropped along with the last queue row are still
+            // reachable.
+            let extracted: Vec<_> = entry_ids
+                .iter()
+                .filter_map(|&eid| {
+                    let idx = qm.index_of_entry(eid)?;
+                    let song_id = qm.get_queue().song_ids.get(idx).cloned()?;
+                    qm.get_song(&song_id).cloned()
+                })
+                .collect();
+            let _ = qm.remove_entries_by_ids(&entry_ids);
+            qm.insert_after_current(extracted)?
+        };
+        self.queue_service.refresh_from_queue().await?;
+        effect.apply_to(&self.audio_engine()).await;
+        Ok(())
+    }
+
+    /// Sort the queue physically by `mode` + `ascending`, persist the new
+    /// sort prefs, refresh the reactive projection, and discharge the
+    /// resulting `NextTrackResetEffect`. `Random` falls through to
+    /// `shuffle_queue` (which doesn't persist).
+    pub async fn sort_queue(&self, mode: QueueSortMode, ascending: bool) -> Result<()> {
+        let effect = {
+            let qm_arc = self.queue_service.queue_manager();
+            let mut qm = qm_arc.lock().await;
+            qm.sort_queue(mode, ascending)?
+        };
+        self.queue_service.refresh_from_queue().await?;
+        effect.apply_to(&self.audio_engine()).await;
+        self.settings_service.set_queue_prefs(mode, ascending).await
+    }
+
+    /// Re-shuffle the queue (the `Random` sort-mode dispatch). Same as
+    /// [`Self::sort_queue`] but skips the prefs persistence — picking
+    /// `Random` is not a deterministic preference worth saving.
+    pub async fn shuffle_queue_randomly(&self) -> Result<()> {
+        let effect = {
+            let qm_arc = self.queue_service.queue_manager();
+            let mut qm = qm_arc.lock().await;
+            qm.sort_queue(QueueSortMode::Random, true)?
+        };
+        self.queue_service.refresh_from_queue().await?;
+        effect.apply_to(&self.audio_engine()).await;
+        Ok(())
+    }
+
+    /// Clear the queue: stop the engine, drop its source, clear the queue
+    /// model, and refresh the projection. Discharges the
+    /// `NextTrackResetEffect` produced by `set_queue` so a previously
+    /// prepared gapless decoder doesn't outlive the cleared queue.
+    pub async fn clear_queue(&self) -> Result<()> {
+        let engine_arc = self.audio_engine();
+        {
+            let mut engine = engine_arc.lock().await;
+            let _ = engine.stop().await;
+            engine.set_source(String::new()).await;
+        }
+        let effect = self.queue_service.set_queue(Vec::new(), None).await?;
+        effect.apply_to(&engine_arc).await;
         Ok(())
     }
 }

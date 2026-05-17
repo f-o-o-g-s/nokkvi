@@ -257,12 +257,15 @@ impl PlaybackController {
                 .cloned();
 
             // Persist the resolved current_index so the queue navigator and UI
-            // stay in sync (mirrors what play_song_from_queue does).
+            // stay in sync (mirrors what play_song_from_queue does). Engine is
+            // already locked above, so the next-track-reset effect is
+            // discharged in-line against the held lock.
             if let Some(idx) = current_index
                 && queue_manager.get_queue().current_index.is_none()
             {
-                queue_manager.reposition_to_index(Some(idx));
+                let effect = queue_manager.reposition_to_index(Some(idx));
                 let _ = queue_manager.save_order();
+                effect.apply_locked(&mut audio).await;
             }
             drop(queue_manager);
 
@@ -610,8 +613,11 @@ impl PlaybackController {
 
         let play_index = start_index.min(songs.len() - 1);
 
-        // 1. Set queue with songs, starting at play_index
-        self.queue_service
+        // 1. Set queue with songs, starting at play_index. The returned
+        //    `NextTrackResetEffect` is dispatched against the engine
+        //    further down where the lock is held.
+        let effect = self
+            .queue_service
             .set_queue(songs.clone(), Some(play_index))
             .await?;
 
@@ -628,12 +634,15 @@ impl PlaybackController {
             return Err(anyhow::anyhow!("Failed to build stream URL"));
         }
 
-        // 3. Load and play
+        // 3. Load and play. `load_track_with_rg` already invalidates gapless
+        //    prep, but discharge the `set_queue` effect explicitly so the
+        //    obligation isn't dropped — the work itself coalesces.
         let mut engine = self.audio_engine.lock().await;
         engine
             .load_track_with_rg(&stream_url, song.replay_gain.clone())
             .await;
         engine.play().await?;
+        effect.apply_locked(&mut engine).await;
         drop(engine);
 
         // 4. Update navigator's current_song_id so consume mode knows what's playing
@@ -665,9 +674,11 @@ impl PlaybackController {
             }
         }
 
-        // 1. Set queue current index directly (no index_of scan needed)
+        // 1. Set queue current index directly (no index_of scan needed).
+        //    The reposition produces a `NextTrackResetEffect` that is
+        //    discharged below where the engine lock is held.
         let mut qm = queue_manager.lock().await;
-        qm.reposition_to_index(Some(queue_index));
+        let reposition_effect = qm.reposition_to_index(Some(queue_index));
         qm.save_order()?;
         drop(qm);
 
@@ -691,6 +702,7 @@ impl PlaybackController {
         let mut engine = self.audio_engine.lock().await;
         engine.load_track_with_rg(&stream_url, rg).await;
         engine.play().await?;
+        reposition_effect.apply_locked(&mut engine).await;
         drop(engine);
 
         // Update navigator's current_song_id so consume mode knows what's playing

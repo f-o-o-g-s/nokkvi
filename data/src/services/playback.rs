@@ -4,7 +4,11 @@ use anyhow::Result;
 use tokio::sync::Mutex;
 use tracing::debug;
 
-use crate::{audio::engine::CustomAudioEngine, services::queue::QueueManager, types::song::Song};
+use crate::{
+    audio::engine::CustomAudioEngine,
+    services::queue::QueueManager,
+    types::{NextTrackResetEffect, song::Song},
+};
 
 /// Plan describing what the audio engine still needs to do after the queue
 /// has been advanced to the next track.
@@ -144,7 +148,10 @@ impl QueueNavigator {
     // ══════════════════════════════════════════════════════════════════════
 
     /// Record the previous song in history, then consume it if consume mode
-    /// is active.
+    /// is active. Returns the [`NextTrackResetEffect`] produced by the
+    /// underlying `remove_song` call, if consume ran — the caller (which
+    /// already holds the engine lock) must dispatch it via
+    /// [`NextTrackResetEffect::apply_locked`].
     ///
     /// This is the single entry point for all consume-mode cleanup.
     /// Call this after transitioning to the next song.
@@ -153,7 +160,7 @@ impl QueueNavigator {
         queue_manager: &mut QueueManager,
         prev_song_id: &str,
         prev_index: usize,
-    ) {
+    ) -> Option<NextTrackResetEffect> {
         // Record in history
         if let Some(prev_song) = queue_manager.get_song(prev_song_id).cloned() {
             queue_manager.add_to_history(prev_song);
@@ -161,16 +168,26 @@ impl QueueNavigator {
 
         // Consume: remove the finished song from queue + pool
         if queue_manager.get_queue().consume {
-            self.consume_song_at_index(queue_manager, prev_index);
+            self.consume_song_at_index(queue_manager, prev_index)
+        } else {
+            None
         }
     }
 
     /// Remove a song from the queue by its index.
     /// Uses QueueManager.remove_song() which properly maintains the order array,
     /// adjusts current_index, and persists.
-    fn consume_song_at_index(&self, queue_manager: &mut QueueManager, index: usize) {
+    ///
+    /// Returns the [`NextTrackResetEffect`] produced by the underlying
+    /// removal so the caller can discharge it against the engine. `None`
+    /// when the index is out of bounds.
+    fn consume_song_at_index(
+        &self,
+        queue_manager: &mut QueueManager,
+        index: usize,
+    ) -> Option<NextTrackResetEffect> {
         if index >= queue_manager.get_queue().song_ids.len() {
-            return;
+            return None;
         }
 
         if let Some(id) = queue_manager.get_queue().song_ids.get(index)
@@ -182,12 +199,14 @@ impl QueueNavigator {
             );
         }
 
-        queue_manager.remove_song(index).ok();
+        let effect = queue_manager.remove_song(index).ok();
 
         debug!(
             " [CONSUME] Queue length now: {}",
             queue_manager.get_queue().song_ids.len()
         );
+
+        effect
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -300,17 +319,27 @@ impl QueueNavigator {
 
         // For path 3, ensure queued is set
         if needs_load && queue_manager.peek_next_song().is_none() {
-            // Consume the just-finished song before stopping
+            // Consume the just-finished song before stopping. Both
+            // `record_and_consume` (when consume mode actually ran) and
+            // the reposition produce next-track-reset effects; the
+            // engine lock is already held, so discharge in-line via
+            // `apply_locked` before releasing the queue lock.
             let prev_id = self.current_song_id.lock().await.clone();
-            if let Some(ref pid) = prev_id
+            let consume_effect = if let Some(ref pid) = prev_id
                 && let Some(idx) = queue_manager.get_queue().current_index
             {
-                self.record_and_consume(&mut queue_manager, pid, idx);
-            }
+                self.record_and_consume(&mut queue_manager, pid, idx)
+            } else {
+                None
+            };
             *self.current_song_id.lock().await = None;
-            queue_manager.reposition_to_index(None);
+            let reposition_effect = queue_manager.reposition_to_index(None);
             queue_manager.save_all().ok();
             drop(queue_manager);
+            if let Some(effect) = consume_effect {
+                effect.apply_locked(engine).await;
+            }
+            reposition_effect.apply_locked(engine).await;
             debug!(" No next song available (queue empty or at end)");
             return TrackTransitionPlan::Stop;
         }
@@ -337,16 +366,23 @@ impl QueueNavigator {
         .to_string();
 
         // Record history + consume previous song (via remove_song which
-        // properly maintains the order array)
+        // properly maintains the order array). The consume removal may
+        // have invalidated engine gapless prep — discharge the resulting
+        // effect against the engine lock we already hold.
         let prev_id = self.current_song_id.lock().await.clone();
-        if let Some(ref pid) = prev_id
+        let consume_effect = if let Some(ref pid) = prev_id
             && let Some(old_idx) = transition.old_index
         {
-            self.record_and_consume(&mut queue_manager, pid, old_idx);
-        }
+            self.record_and_consume(&mut queue_manager, pid, old_idx)
+        } else {
+            None
+        };
 
         *self.current_song_id.lock().await = Some(song.id.clone());
         drop(queue_manager);
+        if let Some(effect) = consume_effect {
+            effect.apply_locked(engine).await;
+        }
 
         debug!(
             "▶️ Now Playing: {} - {} ({})",
@@ -471,7 +507,11 @@ impl QueueNavigator {
         // Use the explicit old index (not song ID) to correctly handle duplicates.
         if is_consume && let Some(old_idx) = current_index {
             let mut qm = self.queue_manager.lock().await;
-            self.consume_song_at_index(&mut qm, old_idx);
+            let effect = self.consume_song_at_index(&mut qm, old_idx);
+            drop(qm);
+            if let Some(effect) = effect {
+                effect.apply_locked(engine).await;
+            }
         }
 
         Ok(Some((result.song, result.reason)))
@@ -506,7 +546,11 @@ impl QueueNavigator {
                 // Use the explicit old index to correctly handle duplicates.
                 if is_consume && let Some(old_idx) = old_current_index {
                     let mut qm = self.queue_manager.lock().await;
-                    self.consume_song_at_index(&mut qm, old_idx);
+                    let effect = self.consume_song_at_index(&mut qm, old_idx);
+                    drop(qm);
+                    if let Some(effect) = effect {
+                        effect.apply_locked(engine).await;
+                    }
                 }
 
                 debug!("▶️ Now Playing: {} - {}", song.title, song.artist);
@@ -519,10 +563,12 @@ impl QueueNavigator {
                 );
 
                 let insert_idx = current_index.unwrap_or(0);
-                queue_manager.insert_song_and_make_current(insert_idx, song.clone())?;
+                let insert_effect =
+                    queue_manager.insert_song_and_make_current(insert_idx, song.clone())?;
 
                 *self.current_song_id.lock().await = Some(song.id.clone());
                 drop(queue_manager);
+                insert_effect.apply_locked(engine).await;
 
                 self.play_song_direct(engine, &song, server_url, subsonic_credential)
                     .await?;
@@ -778,7 +824,7 @@ mod tests {
             vec![make_song("a"), make_song("b"), make_song("c")],
             Some(0),
         );
-        qm.remove_song_by_id("b").expect("remove b");
+        let _ = qm.remove_song_by_id("b").expect("remove b");
 
         let plan = decide_removal_aftermath(&qm, Some("a"), &["b".to_string()]);
 
@@ -800,7 +846,7 @@ mod tests {
             vec![make_song("a"), make_song("b"), make_song("c")],
             Some(1),
         );
-        qm.remove_song_by_id("b").expect("remove b");
+        let _ = qm.remove_song_by_id("b").expect("remove b");
 
         let plan = decide_removal_aftermath(&qm, Some("b"), &["b".to_string()]);
 
@@ -829,7 +875,8 @@ mod tests {
             ],
             Some(1),
         );
-        qm.remove_songs_by_ids(&["b".to_string(), "d".to_string()])
+        let _ = qm
+            .remove_songs_by_ids(&["b".to_string(), "d".to_string()])
             .expect("remove batch");
 
         let plan = decide_removal_aftermath(&qm, Some("b"), &["b".to_string(), "d".to_string()]);
@@ -849,7 +896,7 @@ mod tests {
     fn removal_aftermath_last_song_removed_returns_stop_empty() {
         // Queue: [only], current = 0. Remove only. After: [], current_index = None.
         let mut qm = manager_with_songs(vec![make_song("only")], Some(0));
-        qm.remove_song_by_id("only").expect("remove only");
+        let _ = qm.remove_song_by_id("only").expect("remove only");
 
         let plan = decide_removal_aftermath(&qm, Some("only"), &["only".to_string()]);
 
@@ -893,7 +940,8 @@ mod tests {
         );
 
         // Now mutate.
-        qm.remove_entry_by_id(target_entry_id)
+        let _ = qm
+            .remove_entry_by_id(target_entry_id)
             .expect("remove by entry_id");
         assert_eq!(qm.get_queue().song_ids, vec!["a", "c"]);
         // After removal the entry_id is gone, so a resolution attempt would
@@ -937,7 +985,7 @@ mod tests {
             Some(0),
         );
         // Remove only the row at index 0 (one of the duplicates).
-        qm.remove_song(0).expect("remove duplicate row");
+        let _ = qm.remove_song(0).expect("remove duplicate row");
         assert_eq!(qm.get_queue().song_ids, vec!["dup", "b"]);
         assert_eq!(qm.get_queue().current_index, Some(0));
 
@@ -956,7 +1004,8 @@ mod tests {
     fn removal_aftermath_clear_queue_returns_stop_empty() {
         // Queue: [a, b], current = a (idx 0). Remove [a, b]. After: [].
         let mut qm = manager_with_songs(vec![make_song("a"), make_song("b")], Some(0));
-        qm.remove_songs_by_ids(&["a".to_string(), "b".to_string()])
+        let _ = qm
+            .remove_songs_by_ids(&["a".to_string(), "b".to_string()])
             .expect("remove all");
 
         let plan = decide_removal_aftermath(&qm, Some("a"), &["a".to_string(), "b".to_string()]);

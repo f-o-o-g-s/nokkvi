@@ -75,17 +75,10 @@ impl Nokkvi {
         self.toast_success("Queue cleared");
         self.shell_task(
             move |shell| async move {
-                let queue_vm = shell.queue().clone();
-                let audio_engine = shell.audio_engine().clone();
-                // 1. Stop playback and clear source
-                let mut engine = audio_engine.lock().await;
-                let _ = engine.stop().await;
-                engine.set_source(String::new()).await; // Clear source to prevent resuming
-                drop(engine);
-
-                // 2. Clear the queue
-                queue_vm.set_queue(Vec::new(), None).await?;
-
+                // `AppService::clear_queue` bundles the engine stop +
+                // source clear + queue set_queue empty + engine gapless
+                // prep reset.
+                shell.clear_queue().await?;
                 Ok::<_, anyhow::Error>(())
             },
             |result| match result {
@@ -235,10 +228,10 @@ impl Nokkvi {
         // Play tab SFX for feedback
         self.sfx_engine.play(nokkvi_data::audio::SfxType::Tab);
 
-        // Persist to backend
+        // Persist to backend. `AppService::move_queue_item` bundles the
+        // mutation + reactive refresh + engine gapless-prep reset.
         self.shell_spawn("queue_move_item", move |shell| async move {
-            shell.queue().move_item(from, to).await?;
-            shell.queue().refresh_from_queue().await
+            shell.move_queue_item(from, to).await
         });
 
         Task::none()
