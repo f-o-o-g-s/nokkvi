@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 
 - EQ modal's preset dropdown now shows the correct saved custom preset as active after restarting nokkvi — previously the dropdown fell back to "Custom" even though your saved preset was still loaded and applied.
 - Settings → Hotkeys row now updates to the new key right after you rebind it — previously the row kept showing the old key even though the new binding was already saved and working.
+- Reordering the queue while a song is playing (drag-and-drop, Shift+↑/↓, right-click "Remove from queue" or "Play Next", sort, or clear) no longer leaves the player bar's title and the queue view's highlight out of sync with what's actually playing. The desync was most visible with shuffle and crossfade both on — every reorder now resets nokkvi's pre-buffered "next song" choice so the displayed track follows the actual audio.
 
 ### Removed
 
