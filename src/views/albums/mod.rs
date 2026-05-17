@@ -10,9 +10,9 @@
 //! - `update.rs`: `impl AlbumsPage { fn update }` + the
 //!   center-on-playing/toggle-column tests
 //! - `view.rs`: `impl AlbumsPage { fn view, fn render_album_row,
-//!   fn render_track_row }`, the per-mode column helpers
-//!   (`albums_stars_visible`, `albums_plays_visible`), the dynamic-slot
-//!   value resolver (`get_extra_column_value`), and the helper-tests
+//!   fn render_track_row }` and the dynamic-slot value resolver
+//!   (`get_extra_column_value`). The Stars / Plays auto-show-on-sort
+//!   decision is centralized in `crate::views::auto_show_on_sort`.
 
 use std::collections::HashMap;
 
@@ -46,11 +46,11 @@ pub struct AlbumsPage {
 // sorted by those modes — Stars and Plays are now dedicated columns.
 //
 // Stars and Plays default off — today they only appear when their sort
-// mode is active (see view::albums_stars_visible / albums_plays_visible).
-// SongCount and Love default on (always-shown today). Index/Thumbnail
-// default on to match historical always-on rendering of those leading
-// columns. Select defaults off — opt-in discovery affordance for
-// multi-selection.
+// mode is active (see view::view::auto_show_on_sort with
+// [SortMode::Rating] / [SortMode::MostPlayed] respectively). SongCount
+// and Love default on (always-shown today). Index/Thumbnail default on
+// to match historical always-on rendering of those leading columns.
+// Select defaults off — opt-in discovery affordance for multi-selection.
 super::define_view_columns! {
     AlbumsColumn => AlbumsColumnVisibility {
         Select: select = false => set_albums_show_select,

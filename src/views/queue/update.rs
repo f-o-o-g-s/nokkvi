@@ -73,8 +73,7 @@ impl QueuePage {
                 (Task::none(), QueueAction::SortModeChanged(sort_mode))
             }
             QueueMessage::ToggleColumnVisible(col) => {
-                let new_value = !self.column_visibility.get(col);
-                self.column_visibility.set(col, new_value);
+                let new_value = self.column_visibility.toggle(col);
                 (
                     Task::none(),
                     QueueAction::ColumnVisibilityChanged(col, new_value),
@@ -94,12 +93,9 @@ impl QueuePage {
             }
             QueueMessage::ClickSetRating(item_index, rating) => {
                 if let Some(song) = queue_songs.get(item_index) {
+                    use nokkvi_data::utils::formatters::compute_rating_toggle;
                     let current = song.rating.unwrap_or(0) as usize;
-                    let new_rating = if rating == current {
-                        rating.saturating_sub(1)
-                    } else {
-                        rating
-                    };
+                    let new_rating = compute_rating_toggle(current, rating);
                     (
                         Task::none(),
                         QueueAction::SetRating(song.id.clone(), new_rating),
@@ -331,5 +327,74 @@ mod tests {
             action,
             QueueAction::ColumnVisibilityChanged(QueueColumn::Love, false)
         ));
+    }
+
+    /// Build a queue row with a known rating so we can exercise the
+    /// rating-toggle handler without dragging in the full UI fixture.
+    fn make_song(id: &str, rating: Option<u32>) -> QueueSongUIViewData {
+        QueueSongUIViewData {
+            id: id.to_string(),
+            entry_id: 0,
+            track_number: 1,
+            title: "t".into(),
+            artist: "a".into(),
+            artist_id: "ai".into(),
+            album: "al".into(),
+            album_id: "alid".into(),
+            artwork_url: String::new(),
+            duration: "0:00".into(),
+            duration_seconds: 0,
+            genre: String::new(),
+            starred: false,
+            rating,
+            play_count: None,
+            searchable_lower: "t".into(),
+        }
+    }
+
+    /// Queue's `ClickSetRating` was the lone outlier that inlined the
+    /// `if rating == current { rating - 1 } else { rating }` table — now
+    /// routed through `compute_rating_toggle` to match Albums / Artists /
+    /// Songs. This test pins parity by computing each row's expected new
+    /// rating with `compute_rating_toggle` and asserting the handler
+    /// produces the same `QueueAction::SetRating(id, new)`.
+    #[test]
+    fn queue_click_set_rating_matches_compute_rating_toggle() {
+        use nokkvi_data::utils::formatters::compute_rating_toggle;
+
+        let songs = vec![
+            make_song("s0", Some(3)), // current 3
+            make_song("s1", Some(1)), // current 1 — same-click goes to 0
+            make_song("s2", None),    // current 0 — new rating
+            make_song("s3", Some(5)), // current 5 — same-click decrements
+        ];
+        let mut page = QueuePage::default();
+
+        // (item_index, clicked) tuples that probe each compute_rating_toggle branch.
+        let cases = [(0, 5), (0, 3), (1, 1), (2, 4), (3, 5)];
+        for (idx, clicked) in cases {
+            let current = songs[idx].rating.unwrap_or(0) as usize;
+            let expected = compute_rating_toggle(current, clicked);
+
+            let (_t, action) = page.update(QueueMessage::ClickSetRating(idx, clicked), &songs);
+            match action {
+                QueueAction::SetRating(id, new) => {
+                    assert_eq!(id, songs[idx].id);
+                    assert_eq!(
+                        new, expected,
+                        "compute_rating_toggle parity broke for idx={idx} clicked={clicked}"
+                    );
+                }
+                other => panic!("expected QueueAction::SetRating, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn queue_click_set_rating_out_of_bounds_returns_none_action() {
+        let songs = vec![make_song("s0", Some(2))];
+        let mut page = QueuePage::default();
+        let (_t, action) = page.update(QueueMessage::ClickSetRating(42, 4), &songs);
+        assert!(matches!(action, QueueAction::None));
     }
 }

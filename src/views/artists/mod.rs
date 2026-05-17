@@ -9,8 +9,8 @@
 //!   for column declarations
 //! - `update.rs`: `impl ArtistsPage { fn update }` + the toggle-column test
 //! - `view.rs`: `impl ArtistsPage { fn view, fn render_artist_row,
-//!   fn render_album_child_row }`, the per-mode column helpers
-//!   (`artists_stars_visible`, `artists_plays_visible`), and helper tests
+//!   fn render_album_child_row }`. The Stars / Plays auto-show-on-sort
+//!   decision is centralized in `crate::views::auto_show_on_sort`.
 
 use std::collections::HashMap;
 

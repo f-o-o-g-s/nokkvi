@@ -252,14 +252,7 @@ impl PlaylistsPage {
             &config,
             PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateUp),
             PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateDown),
-            {
-                let total = flattened.len();
-                move |f| {
-                    PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::ScrollSeek(
-                        (f * total as f32) as usize,
-                    ))
-                }
-            },
+            crate::views::scroll_seek_msg(flattened.len(), PlaylistsMessage::SlotList),
             Some(crate::widgets::slot_list::SlotHoverCallback::for_slot_list(
                 PlaylistsMessage::SlotList,
             )),

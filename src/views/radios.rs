@@ -274,14 +274,7 @@ impl RadiosPage {
             &config,
             RadiosMessage::SlotList(SlotListPageMessage::NavigateUp),
             RadiosMessage::SlotList(SlotListPageMessage::NavigateDown),
-            {
-                let total = stations.len();
-                move |f| {
-                    RadiosMessage::SlotList(SlotListPageMessage::ScrollSeek(
-                        (f * total as f32) as usize,
-                    ))
-                }
-            },
+            crate::views::scroll_seek_msg(stations.len(), RadiosMessage::SlotList),
             Some(crate::widgets::slot_list::SlotHoverCallback::for_slot_list(
                 RadiosMessage::SlotList,
             )),

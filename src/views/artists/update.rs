@@ -183,8 +183,7 @@ impl ArtistsPage {
                     (Task::none(), ArtistsAction::NavigateAndFilter(view, filter))
                 }
                 ArtistsMessage::ToggleColumnVisible(col) => {
-                    let new_value = !self.column_visibility.get(col);
-                    self.column_visibility.set(col, new_value);
+                    let new_value = self.column_visibility.toggle(col);
                     (
                         Task::none(),
                         ArtistsAction::ColumnVisibilityChanged(col, new_value),

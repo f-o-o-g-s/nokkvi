@@ -220,8 +220,7 @@ impl SongsPage {
                 (Task::none(), SongsAction::NavigateAndExpandGenre(genre_id))
             }
             SongsMessage::ToggleColumnVisible(col) => {
-                let new_value = !self.column_visibility.get(col);
-                self.column_visibility.set(col, new_value);
+                let new_value = self.column_visibility.toggle(col);
                 (
                     Task::none(),
                     SongsAction::ColumnVisibilityChanged(col, new_value),

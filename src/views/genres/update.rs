@@ -225,8 +225,7 @@ impl GenresPage {
                     GenresAction::NavigateAndExpandArtist(artist_id),
                 ),
                 GenresMessage::ToggleColumnVisible(col) => {
-                    let new_value = !self.column_visibility.get(col);
-                    self.column_visibility.set(col, new_value);
+                    let new_value = self.column_visibility.toggle(col);
                     (
                         Task::none(),
                         GenresAction::ColumnVisibilityChanged(col, new_value),

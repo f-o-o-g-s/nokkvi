@@ -1,7 +1,7 @@
 //! Songs view — `impl SongsPage { fn view }`.
 //!
-//! Rendering for the songs page, plus the per-mode column-visibility helpers
-//! (`songs_stars_visible`, `songs_plays_visible`, `songs_genre_visible`).
+//! Rendering for the songs page. The Stars / Plays / Genre auto-show-on-sort
+//! decisions are centralized in `crate::views::auto_show_on_sort`.
 //!
 //! Update/state logic lives in `update.rs`; types live in `mod.rs`.
 
@@ -16,20 +16,6 @@ use crate::widgets::{
     self,
     view_header::{HeaderButton, SortMode, ViewHeaderConfig},
 };
-
-pub(crate) fn songs_stars_visible(sort: SortMode, user_visible: bool) -> bool {
-    user_visible || matches!(sort, SortMode::Rating)
-}
-
-pub(crate) fn songs_plays_visible(sort: SortMode, user_visible: bool) -> bool {
-    user_visible || matches!(sort, SortMode::MostPlayed)
-}
-
-/// Pure decision: should the genre be rendered (stacked under album, or in
-/// place of album when album is hidden)? Toggle on, OR sort = Genre.
-pub(crate) fn songs_genre_visible(sort: SortMode, user_visible: bool) -> bool {
-    user_visible || matches!(sort, SortMode::Genre)
-}
 
 impl SongsPage {
     /// Build the view
@@ -170,14 +156,7 @@ impl SongsPage {
             &config,
             SongsMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateUp),
             SongsMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateDown),
-            {
-                let total = songs.len();
-                move |f| {
-                    SongsMessage::SlotList(crate::widgets::SlotListPageMessage::ScrollSeek(
-                        (f * total as f32) as usize,
-                    ))
-                }
-            },
+            crate::views::scroll_seek_msg(songs.len(), SongsMessage::SlotList),
             Some(crate::widgets::slot_list::SlotHoverCallback::for_slot_list(
                 SongsMessage::SlotList,
             )),
@@ -223,10 +202,22 @@ impl SongsPage {
 
                 // Per-column visibility (Stars/Plays/Genre auto-shown by sort mode).
                 let vis = self.column_visibility;
-                let show_stars = songs_stars_visible(current_sort_mode, vis.stars);
+                let show_stars = crate::views::auto_show_on_sort(
+                    current_sort_mode,
+                    vis.stars,
+                    &[SortMode::Rating],
+                );
                 let show_album = vis.album;
-                let show_genre = songs_genre_visible(current_sort_mode, vis.genre);
-                let show_plays = songs_plays_visible(current_sort_mode, vis.plays);
+                let show_genre = crate::views::auto_show_on_sort(
+                    current_sort_mode,
+                    vis.genre,
+                    &[SortMode::Genre],
+                );
+                let show_plays = crate::views::auto_show_on_sort(
+                    current_sort_mode,
+                    vis.plays,
+                    &[SortMode::MostPlayed],
+                );
                 let show_duration = vis.duration;
                 let show_love = vis.love;
                 // Dynamic slot carries year / BPM / channels / comment /
@@ -599,34 +590,5 @@ impl SongsPage {
             Some(SongsMessage::ArtworkColumnDrag),
             Some(SongsMessage::ArtworkColumnVerticalDrag),
         )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn songs_stars_visible_auto_shows_on_rating_sort() {
-        assert!(songs_stars_visible(SortMode::Rating, false));
-        assert!(songs_stars_visible(SortMode::Rating, true));
-        assert!(!songs_stars_visible(SortMode::Title, false));
-        assert!(songs_stars_visible(SortMode::Title, true));
-    }
-
-    #[test]
-    fn songs_plays_visible_auto_shows_on_most_played() {
-        assert!(songs_plays_visible(SortMode::MostPlayed, false));
-        assert!(songs_plays_visible(SortMode::MostPlayed, true));
-        assert!(!songs_plays_visible(SortMode::Title, false));
-        assert!(songs_plays_visible(SortMode::Title, true));
-    }
-
-    #[test]
-    fn songs_genre_visible_auto_shows_on_genre_sort() {
-        assert!(songs_genre_visible(SortMode::Genre, false));
-        assert!(songs_genre_visible(SortMode::Genre, true));
-        assert!(!songs_genre_visible(SortMode::Title, false));
-        assert!(songs_genre_visible(SortMode::Title, true));
     }
 }

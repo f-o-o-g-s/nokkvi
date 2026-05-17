@@ -183,8 +183,7 @@ impl SimilarPage {
                 }
             }
             SimilarMessage::ToggleColumnVisible(col) => {
-                let new_value = !self.column_visibility.get(col);
-                self.column_visibility.set(col, new_value);
+                let new_value = self.column_visibility.toggle(col);
                 (
                     Task::none(),
                     SimilarAction::ColumnVisibilityChanged(col, new_value),
@@ -398,14 +397,7 @@ impl SimilarPage {
             &config,
             SimilarMessage::SlotList(SlotListPageMessage::NavigateUp),
             SimilarMessage::SlotList(SlotListPageMessage::NavigateDown),
-            {
-                let total = songs.len();
-                move |f| {
-                    SimilarMessage::SlotList(SlotListPageMessage::ScrollSeek(
-                        (f * total as f32) as usize,
-                    ))
-                }
-            },
+            crate::views::scroll_seek_msg(songs.len(), SimilarMessage::SlotList),
             Some(crate::widgets::slot_list::SlotHoverCallback::for_slot_list(
                 SimilarMessage::SlotList,
             )),

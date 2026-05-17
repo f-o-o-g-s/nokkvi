@@ -944,14 +944,7 @@ impl QueuePage {
                 &config,
                 QueueMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateUp),
                 QueueMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateDown),
-                {
-                    let total = queue_songs.len();
-                    move |f| {
-                        QueueMessage::SlotList(crate::widgets::SlotListPageMessage::ScrollSeek(
-                            (f * total as f32) as usize,
-                        ))
-                    }
-                },
+                crate::views::scroll_seek_msg(queue_songs.len(), QueueMessage::SlotList),
                 QueueMessage::DragReorder,
                 Some(crate::widgets::slot_list::SlotHoverCallback::for_slot_list(
                     QueueMessage::SlotList,

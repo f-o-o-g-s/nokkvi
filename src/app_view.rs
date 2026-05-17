@@ -9,6 +9,45 @@ use iced::{
 
 use crate::{Nokkvi, Screen, View, app_message::Message, views, widgets};
 
+// ============================================================================
+// View ⇄ NavView conversions
+// ============================================================================
+//
+// `View` (8 variants) is the app's screen enum; `NavView` (7 variants) is the
+// nav-bar widget's column enum. Settings has no nav-bar column, so the
+// conversion is naturally lossy in one direction — `Option<NavView>` handles
+// that without per-call-site `match` boilerplate. The 7 overlapping variants
+// pair 1:1 by name, so each impl is just a small renaming table.
+
+impl From<View> for Option<widgets::NavView> {
+    fn from(v: View) -> Self {
+        match v {
+            View::Queue => Some(widgets::NavView::Queue),
+            View::Albums => Some(widgets::NavView::Albums),
+            View::Artists => Some(widgets::NavView::Artists),
+            View::Genres => Some(widgets::NavView::Genres),
+            View::Songs => Some(widgets::NavView::Songs),
+            View::Playlists => Some(widgets::NavView::Playlists),
+            View::Radios => Some(widgets::NavView::Radios),
+            View::Settings => None,
+        }
+    }
+}
+
+impl From<widgets::NavView> for View {
+    fn from(nav: widgets::NavView) -> Self {
+        match nav {
+            widgets::NavView::Queue => View::Queue,
+            widgets::NavView::Albums => View::Albums,
+            widgets::NavView::Artists => View::Artists,
+            widgets::NavView::Genres => View::Genres,
+            widgets::NavView::Songs => View::Songs,
+            widgets::NavView::Playlists => View::Playlists,
+            widgets::NavView::Radios => View::Radios,
+        }
+    }
+}
+
 /// Extract `(is_open, trigger_bounds)` for a view's column-visibility
 /// `checkbox_dropdown` from the root-level open-menu state. Returns the open
 /// flag plus the captured trigger bounds, or `(false, None)` if a different
@@ -60,18 +99,7 @@ fn strip_context_state(
 /// side nav bar — avoids duplicating the `NavView → View` mapping.
 fn map_nav_bar_message(msg: widgets::NavBarMessage) -> Message {
     match msg {
-        widgets::NavBarMessage::SwitchView(nav_view) => {
-            let view = match nav_view {
-                widgets::NavView::Queue => View::Queue,
-                widgets::NavView::Albums => View::Albums,
-                widgets::NavView::Artists => View::Artists,
-                widgets::NavView::Genres => View::Genres,
-                widgets::NavView::Songs => View::Songs,
-                widgets::NavView::Playlists => View::Playlists,
-                widgets::NavView::Radios => View::Radios,
-            };
-            Message::SwitchView(view)
-        }
+        widgets::NavBarMessage::SwitchView(nav_view) => Message::SwitchView(nav_view.into()),
         widgets::NavBarMessage::ToggleLightMode => Message::ToggleLightMode,
         widgets::NavBarMessage::OpenSettings => Message::SwitchView(View::Settings),
         widgets::NavBarMessage::StripClicked => Message::StripClicked,
@@ -303,15 +331,11 @@ impl Nokkvi {
             }
 
             if crate::theme::is_side_nav() {
-                let side_nav_view = match self.current_view {
-                    View::Queue | View::Settings => widgets::NavView::Queue,
-                    View::Albums => widgets::NavView::Albums,
-                    View::Artists => widgets::NavView::Artists,
-                    View::Genres => widgets::NavView::Genres,
-                    View::Songs => widgets::NavView::Songs,
-                    View::Playlists => widgets::NavView::Playlists,
-                    View::Radios => widgets::NavView::Radios,
-                };
+                // Settings has no NavView counterpart; the sidebar treats it
+                // as Queue (`settings_open` flag below highlights it instead).
+                let side_nav_view: widgets::NavView =
+                    Option::<widgets::NavView>::from(self.current_view)
+                        .unwrap_or(widgets::NavView::Queue);
                 let side_data = widgets::SideNavBarData {
                     current_view: side_nav_view,
                     settings_open: self.current_view == View::Settings,
@@ -587,17 +611,12 @@ impl Nokkvi {
 
     /// Navigation bar - delegates to nav_bar component with playback data
     fn navigation_bar(&self) -> Element<'_, Message> {
-        // Convert app::View to widgets::NavView for the component
+        // Convert app::View to widgets::NavView for the component. Settings
+        // is not a nav-bar column — fall back to Queue (ignored when
+        // `settings_open` is set, which highlights the settings icon instead).
         let settings_open = matches!(self.current_view, View::Settings);
-        let current_nav_view = match self.current_view {
-            View::Queue | View::Settings => widgets::NavView::Queue, // fallback; ignored when settings_open
-            View::Albums => widgets::NavView::Albums,
-            View::Artists => widgets::NavView::Artists,
-            View::Genres => widgets::NavView::Genres,
-            View::Songs => widgets::NavView::Songs,
-            View::Playlists => widgets::NavView::Playlists,
-            View::Radios => widgets::NavView::Radios,
-        };
+        let current_nav_view: widgets::NavView =
+            Option::<widgets::NavView>::from(self.current_view).unwrap_or(widgets::NavView::Queue);
 
         // Create NavBarViewData with current playback state or radio overrides
         let (track_title, track_artist, track_album) =
@@ -1080,5 +1099,83 @@ impl Nokkvi {
                 self.radios_page.view(view_data).map(Message::Radios)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every `View` variant must convert to either `Some(NavView)` or `None`
+    /// (Settings) — the table doubles as a length-anchor: adding a `View`
+    /// variant without updating the conversion fails this test, not just at
+    /// compile time.
+    #[test]
+    fn view_to_nav_view_covers_every_variant() {
+        for &v in View::ALL {
+            let nav: Option<widgets::NavView> = v.into();
+            match v {
+                View::Settings => assert!(nav.is_none(), "Settings has no NavView"),
+                _ => assert!(nav.is_some(), "{v:?} must map to a NavView"),
+            }
+        }
+    }
+
+    /// Round-trip: every `NavView` variant → `View` → `Option<NavView>`
+    /// returns the original. Pins that the two maps are inverses for the
+    /// 7 overlapping variants.
+    #[test]
+    fn nav_view_to_view_round_trips() {
+        for &nav in widgets::NavView::ALL {
+            let v: View = nav.into();
+            let back: Option<widgets::NavView> = v.into();
+            assert_eq!(back, Some(nav), "round-trip failed for {nav:?}");
+        }
+    }
+
+    /// Spot-check each name-paired conversion direction to keep the renaming
+    /// table honest (catch e.g. a stray Albums → Artists transposition).
+    #[test]
+    fn nav_view_to_view_pairs_by_name() {
+        assert_eq!(View::from(widgets::NavView::Queue), View::Queue);
+        assert_eq!(View::from(widgets::NavView::Albums), View::Albums);
+        assert_eq!(View::from(widgets::NavView::Artists), View::Artists);
+        assert_eq!(View::from(widgets::NavView::Genres), View::Genres);
+        assert_eq!(View::from(widgets::NavView::Songs), View::Songs);
+        assert_eq!(View::from(widgets::NavView::Playlists), View::Playlists);
+        assert_eq!(View::from(widgets::NavView::Radios), View::Radios);
+    }
+
+    #[test]
+    fn view_to_nav_view_pairs_by_name() {
+        assert_eq!(
+            Option::<widgets::NavView>::from(View::Queue),
+            Some(widgets::NavView::Queue)
+        );
+        assert_eq!(
+            Option::<widgets::NavView>::from(View::Albums),
+            Some(widgets::NavView::Albums)
+        );
+        assert_eq!(
+            Option::<widgets::NavView>::from(View::Artists),
+            Some(widgets::NavView::Artists)
+        );
+        assert_eq!(
+            Option::<widgets::NavView>::from(View::Genres),
+            Some(widgets::NavView::Genres)
+        );
+        assert_eq!(
+            Option::<widgets::NavView>::from(View::Songs),
+            Some(widgets::NavView::Songs)
+        );
+        assert_eq!(
+            Option::<widgets::NavView>::from(View::Playlists),
+            Some(widgets::NavView::Playlists)
+        );
+        assert_eq!(
+            Option::<widgets::NavView>::from(View::Radios),
+            Some(widgets::NavView::Radios)
+        );
+        assert_eq!(Option::<widgets::NavView>::from(View::Settings), None);
     }
 }

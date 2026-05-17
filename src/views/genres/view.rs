@@ -164,14 +164,7 @@ impl GenresPage {
             &config,
             GenresMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateUp),
             GenresMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateDown),
-            {
-                let total = flattened.len();
-                move |f| {
-                    GenresMessage::SlotList(crate::widgets::SlotListPageMessage::ScrollSeek(
-                        (f * total as f32) as usize,
-                    ))
-                }
-            },
+            crate::views::scroll_seek_msg(flattened.len(), GenresMessage::SlotList),
             Some(crate::widgets::slot_list::SlotHoverCallback::for_slot_list(
                 GenresMessage::SlotList,
             )),

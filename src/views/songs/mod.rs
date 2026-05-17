@@ -12,9 +12,9 @@
 //!   for column declarations
 //! - `update.rs`: `impl SongsPage { fn update, fn sort_mode_to_api_string }`
 //!   + the toggle-column test
-//! - `view.rs`: `impl SongsPage { fn view }`, the per-mode column helpers
-//!   (`songs_stars_visible`, `songs_plays_visible`, `songs_genre_visible`),
-//!   and helper tests
+//! - `view.rs`: `impl SongsPage { fn view }`. The Stars / Plays / Genre
+//!   auto-show-on-sort decisions are centralized in
+//!   `crate::views::auto_show_on_sort`.
 
 use std::collections::HashMap;
 

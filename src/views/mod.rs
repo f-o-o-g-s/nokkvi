@@ -404,6 +404,19 @@ macro_rules! define_view_columns {
                     $( $col_enum::$variant => self.$field = value ),*
                 }
             }
+
+            /// Flip a column's visibility and return the new value.
+            ///
+            /// Collapses the read-modify-write pattern that the seven
+            /// `{View}Message::ToggleColumnVisible(col)` handlers
+            /// (Albums/Artists/Genres/Playlists/Queue/Songs/Similar) used
+            /// to spell out by hand, so they each become a single call
+            /// that yields the bool needed for `ColumnVisibilityChanged`.
+            pub fn toggle(&mut self, col: $col_enum) -> bool {
+                let new_value = !self.get(col);
+                self.set(col, new_value);
+                new_value
+            }
         }
     };
 }
@@ -496,6 +509,41 @@ macro_rules! impl_has_common_action {
 
 #[allow(unused_imports)]
 pub(crate) use impl_has_common_action;
+
+// ============================================================================
+// Shared closure factories — keep per-view view.rs/update.rs free of the
+// `(f * total as f32) as usize` boilerplate by composing the routing layer
+// (`{View}Message::SlotList(...)`) with the scroll-seek payload in one place.
+// ============================================================================
+
+/// Build the `on_seek` closure that `slot_list_view_with_scroll` /
+/// `slot_list_view_with_drag` expect.
+///
+/// The scrollbar callback receives a normalized `f32` (`0.0..=1.0`) and the
+/// per-view code historically translated that into a
+/// `{View}Message::SlotList(SlotListPageMessage::ScrollSeek(offset))` —
+/// 8 byte-identical sites across the slot-list views. The factory composes
+/// the two layers (`SlotListPageMessage::ScrollSeek` → outer routing
+/// constructor) so the call site collapses to `scroll_seek_msg(total,
+/// {View}Message::SlotList)`.
+pub(crate) fn scroll_seek_msg<F, M>(total: usize, ctor: F) -> impl Fn(f32) -> M
+where
+    F: Fn(SlotListPageMessage) -> M,
+{
+    move |f| ctor(SlotListPageMessage::ScrollSeek((f * total as f32) as usize))
+}
+
+/// `true` when the user toggle is on, OR the active sort matches one of the
+/// `triggers` (so the column auto-shows). Used by the per-view
+/// `*_stars_visible` / `*_plays_visible` / `songs_genre_visible` helpers,
+/// each of which now collapses to a one-line `auto_show_on_sort(...)` call.
+pub(crate) fn auto_show_on_sort<M: PartialEq>(
+    sort_mode: M,
+    user_visible: bool,
+    triggers: &[M],
+) -> bool {
+    user_visible || triggers.contains(&sort_mode)
+}
 
 #[cfg(test)]
 #[allow(unreachable_pub, dead_code)]
@@ -618,5 +666,116 @@ mod tests {
     fn has_common_action_no_center_falls_through_for_view_specific() {
         let a = TestActionNoCenter::ViewSpecificDoNotMatch;
         assert!(matches!(a.as_common(), CommonViewAction::ViewSpecific));
+    }
+
+    // ========================================================================
+    // scroll_seek_msg — closure factory composes both routing layers
+    // ========================================================================
+
+    // SlotListPageMessage doesn't derive PartialEq (its variants carry types
+    // like iced::keyboard::Modifiers and HoveredSlot that don't either), so
+    // these stand-ins use plain Debug + manual pattern matching.
+
+    /// Minimal stand-in for a per-view message enum carrying a SlotList variant.
+    #[derive(Debug)]
+    enum DummyAMessage {
+        SlotList(SlotListPageMessage),
+    }
+
+    #[derive(Debug)]
+    enum DummyBMessage {
+        SlotList(SlotListPageMessage),
+    }
+
+    #[test]
+    fn scroll_seek_msg_composes_for_view_a() {
+        let f = scroll_seek_msg(100, DummyAMessage::SlotList);
+        // f(0.5) should produce offset 50 — verifies the f32 → usize math.
+        let msg = f(0.5);
+        let DummyAMessage::SlotList(inner) = msg;
+        match inner {
+            SlotListPageMessage::ScrollSeek(offset) => assert_eq!(offset, 50),
+            other => panic!("expected ScrollSeek(50), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scroll_seek_msg_composes_for_view_b() {
+        // Same helper, different outer constructor — verifies the closure
+        // factory is generic over the routing layer (not hard-coded to one view).
+        let f = scroll_seek_msg(200, DummyBMessage::SlotList);
+        let msg = f(0.25);
+        let DummyBMessage::SlotList(inner) = msg;
+        match inner {
+            SlotListPageMessage::ScrollSeek(offset) => assert_eq!(offset, 50),
+            other => panic!("expected ScrollSeek(50), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scroll_seek_msg_zero_fraction_yields_zero_offset() {
+        let f = scroll_seek_msg(500, DummyAMessage::SlotList);
+        let msg = f(0.0);
+        let DummyAMessage::SlotList(inner) = msg;
+        match inner {
+            SlotListPageMessage::ScrollSeek(offset) => assert_eq!(offset, 0),
+            other => panic!("expected ScrollSeek(0), got {other:?}"),
+        }
+    }
+
+    // ========================================================================
+    // auto_show_on_sort — auto-show helper for stars/plays/genre columns
+    // ========================================================================
+
+    #[test]
+    fn auto_show_on_sort_returns_true_when_user_toggle_is_on() {
+        // Even outside the trigger set, the user toggle wins.
+        assert!(auto_show_on_sort(SortMode::Name, true, &[SortMode::Rating]));
+    }
+
+    #[test]
+    fn auto_show_on_sort_returns_true_when_sort_matches_trigger() {
+        // User toggle off, but sort = Rating → auto-shown.
+        assert!(auto_show_on_sort(
+            SortMode::Rating,
+            false,
+            &[SortMode::Rating]
+        ));
+    }
+
+    #[test]
+    fn auto_show_on_sort_returns_false_when_neither_toggle_nor_trigger() {
+        assert!(!auto_show_on_sort(
+            SortMode::Name,
+            false,
+            &[SortMode::Rating]
+        ));
+    }
+
+    #[test]
+    fn auto_show_on_sort_supports_multi_variant_triggers() {
+        // Sanity check that a multi-element trigger list works (no view uses
+        // this today, but the API allows it).
+        let triggers = &[SortMode::Rating, SortMode::MostPlayed][..];
+        assert!(auto_show_on_sort(SortMode::Rating, false, triggers));
+        assert!(auto_show_on_sort(SortMode::MostPlayed, false, triggers));
+        assert!(!auto_show_on_sort(SortMode::Name, false, triggers));
+    }
+
+    // ========================================================================
+    // define_view_columns! — toggle() method (Task 3.B)
+    // ========================================================================
+
+    #[test]
+    fn columns_toggle_flips_value_and_returns_new() {
+        let mut v = TestColumnVisibility::default();
+        // foo defaults to false → toggle returns true and flips the field.
+        let new = v.toggle(TestColumn::Foo);
+        assert!(new);
+        assert!(v.foo);
+        // bar defaults to true → toggle returns false.
+        let new2 = v.toggle(TestColumn::Bar);
+        assert!(!new2);
+        assert!(!v.bar);
     }
 }

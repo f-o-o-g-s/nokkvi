@@ -1,8 +1,8 @@
 //! Albums view — `impl AlbumsPage { fn view, fn render_album_row, fn render_track_row }`.
 //!
-//! Rendering for the albums page, plus the per-mode column-visibility
-//! helpers (`albums_stars_visible`, `albums_plays_visible`) and the
-//! dynamic-slot value resolver (`get_extra_column_value`).
+//! Rendering for the albums page, plus the dynamic-slot value resolver
+//! (`get_extra_column_value`). The Stars / Plays auto-show-on-sort
+//! decision is centralized in `crate::views::auto_show_on_sort`.
 //!
 //! Update/state logic lives in `update.rs`; types live in `mod.rs`.
 
@@ -24,16 +24,6 @@ use crate::widgets::{
     self,
     view_header::{HeaderButton, SortMode, ViewHeaderConfig},
 };
-
-/// Stars auto-show when sort = Rating regardless of toggle.
-pub(crate) fn albums_stars_visible(sort: SortMode, user_visible: bool) -> bool {
-    user_visible || matches!(sort, SortMode::Rating)
-}
-
-/// Plays auto-show when sort = MostPlayed regardless of toggle.
-pub(crate) fn albums_plays_visible(sort: SortMode, user_visible: bool) -> bool {
-    user_visible || matches!(sort, SortMode::MostPlayed)
-}
 
 impl AlbumsPage {
     /// Build the view
@@ -181,14 +171,7 @@ impl AlbumsPage {
             &config,
             AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateUp),
             AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateDown),
-            {
-                let total = flattened.len();
-                move |f| {
-                    AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::ScrollSeek(
-                        (f * total as f32) as usize,
-                    ))
-                }
-            },
+            crate::views::scroll_seek_msg(flattened.len(), AlbumsMessage::SlotList),
             Some(crate::widgets::slot_list::SlotHoverCallback::for_slot_list(
                 AlbumsMessage::SlotList,
             )),
@@ -430,9 +413,11 @@ impl AlbumsPage {
 
         // Per-column visibility (Stars/Plays auto-shown by their sort modes).
         let vis = self.column_visibility;
-        let show_stars = albums_stars_visible(current_sort_mode, vis.stars);
+        let show_stars =
+            crate::views::auto_show_on_sort(current_sort_mode, vis.stars, &[SortMode::Rating]);
         let show_songcount = vis.songcount;
-        let show_plays = albums_plays_visible(current_sort_mode, vis.plays);
+        let show_plays =
+            crate::views::auto_show_on_sort(current_sort_mode, vis.plays, &[SortMode::MostPlayed]);
         let show_love = vis.love;
         // Dynamic slot now only carries Date/Year/Duration/Genre — Rating
         // and MostPlayed have been promoted to dedicated columns.
@@ -682,26 +667,5 @@ fn get_extra_column_value(album: &AlbumUIViewData, sort_mode: SortMode) -> Strin
         | SortMode::Channels
         | SortMode::Comment
         | SortMode::UpdatedAt => String::new(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn albums_stars_visible_auto_shows_on_rating_sort() {
-        assert!(albums_stars_visible(SortMode::Rating, false));
-        assert!(albums_stars_visible(SortMode::Rating, true));
-        assert!(!albums_stars_visible(SortMode::Name, false));
-        assert!(albums_stars_visible(SortMode::Name, true));
-    }
-
-    #[test]
-    fn albums_plays_visible_auto_shows_on_most_played() {
-        assert!(albums_plays_visible(SortMode::MostPlayed, false));
-        assert!(albums_plays_visible(SortMode::MostPlayed, true));
-        assert!(!albums_plays_visible(SortMode::Name, false));
-        assert!(albums_plays_visible(SortMode::Name, true));
     }
 }

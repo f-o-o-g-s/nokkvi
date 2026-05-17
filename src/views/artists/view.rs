@@ -1,7 +1,7 @@
 //! Artists view — `impl ArtistsPage { fn view, fn render_artist_row, fn render_album_child_row }`.
 //!
-//! Rendering for the artists page, plus the per-mode column-visibility
-//! helpers (`artists_stars_visible`, `artists_plays_visible`).
+//! Rendering for the artists page. The Stars / Plays auto-show-on-sort
+//! decision is centralized in `crate::views::auto_show_on_sort`.
 //!
 //! Update/state logic lives in `update.rs`; types live in `mod.rs`.
 
@@ -20,16 +20,6 @@ use crate::widgets::{
     self,
     view_header::{HeaderButton, SortMode, ViewHeaderConfig},
 };
-
-/// Stars auto-show when sort = Rating regardless of toggle.
-pub(crate) fn artists_stars_visible(sort: SortMode, user_visible: bool) -> bool {
-    user_visible || matches!(sort, SortMode::Rating)
-}
-
-/// Plays auto-show when sort = MostPlayed regardless of toggle.
-pub(crate) fn artists_plays_visible(sort: SortMode, user_visible: bool) -> bool {
-    user_visible || matches!(sort, SortMode::MostPlayed)
-}
 
 impl ArtistsPage {
     /// Build the view
@@ -175,14 +165,7 @@ impl ArtistsPage {
             &config,
             ArtistsMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateUp),
             ArtistsMessage::SlotList(crate::widgets::SlotListPageMessage::NavigateDown),
-            {
-                let total = flattened.len();
-                move |f| {
-                    ArtistsMessage::SlotList(crate::widgets::SlotListPageMessage::ScrollSeek(
-                        (f * total as f32) as usize,
-                    ))
-                }
-            },
+            crate::views::scroll_seek_msg(flattened.len(), ArtistsMessage::SlotList),
             Some(crate::widgets::slot_list::SlotHoverCallback::for_slot_list(
                 ArtistsMessage::SlotList,
             )),
@@ -442,10 +425,10 @@ impl ArtistsPage {
         // Per-column visibility (sort overrides Stars/Plays toggles).
         let sort = self.common.current_sort_mode;
         let vis = self.column_visibility;
-        let show_stars = artists_stars_visible(sort, vis.stars);
+        let show_stars = crate::views::auto_show_on_sort(sort, vis.stars, &[SortMode::Rating]);
         let show_albumcount = vis.albumcount;
         let show_songcount = vis.songcount;
-        let show_plays = artists_plays_visible(sort, vis.plays);
+        let show_plays = crate::views::auto_show_on_sort(sort, vis.plays, &[SortMode::MostPlayed]);
         let show_love = vis.love;
 
         // Fixed portions for each toggleable column. Name column expands to
@@ -675,34 +658,5 @@ impl ArtistsPage {
             ArtistsMessage::ContextMenuAction,
             ArtistsMessage::SetOpenMenu,
         )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn artists_stars_visible_auto_shows_on_rating_sort() {
-        assert!(artists_stars_visible(SortMode::Rating, false));
-        assert!(artists_stars_visible(SortMode::Rating, true));
-    }
-
-    #[test]
-    fn artists_stars_visible_follows_toggle_for_other_sorts() {
-        assert!(!artists_stars_visible(SortMode::Name, false));
-        assert!(artists_stars_visible(SortMode::Name, true));
-    }
-
-    #[test]
-    fn artists_plays_visible_auto_shows_on_most_played() {
-        assert!(artists_plays_visible(SortMode::MostPlayed, false));
-        assert!(artists_plays_visible(SortMode::MostPlayed, true));
-    }
-
-    #[test]
-    fn artists_plays_visible_follows_toggle_for_other_sorts() {
-        assert!(!artists_plays_visible(SortMode::Name, false));
-        assert!(artists_plays_visible(SortMode::Name, true));
     }
 }
