@@ -14,10 +14,8 @@ use tokio_util::{
 };
 use tracing::{debug, error, trace, warn};
 
-use super::range_http_reader::RangeHttpReader;
+use super::{USER_AGENT, range_http_reader::RangeHttpReader};
 use crate::audio::{AudioBuffer, AudioFormat, SampleFormat, symphonia_registry};
-
-const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 /// Detect if an HTTP response originates from an Icecast/SHOUTcast radio server.
 fn is_radio_response(headers: &reqwest::header::HeaderMap) -> bool {

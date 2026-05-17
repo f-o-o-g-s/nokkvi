@@ -628,7 +628,7 @@ impl AudioRenderer {
     /// Returns approximate samples in the ring buffer.
     pub fn buffer_count(&self) -> usize {
         self.primary_stream.as_ref().map_or(0, |s| {
-            crate::audio::rodio_output::RING_BUFFER_CAPACITY.saturating_sub(s.available_space())
+            crate::audio::RING_BUFFER_CAPACITY.saturating_sub(s.available_space())
         })
     }
 
@@ -857,8 +857,7 @@ impl AudioRenderer {
     /// Get crossfade buffer count (approximate samples in crossfade ring buffer).
     pub fn crossfade_buffer_count(&self) -> usize {
         if let CrossfadeState::Active { stream, .. } = &self.crossfade_state {
-            crate::audio::rodio_output::RING_BUFFER_CAPACITY
-                .saturating_sub(stream.available_space())
+            crate::audio::RING_BUFFER_CAPACITY.saturating_sub(stream.available_space())
         } else {
             0
         }

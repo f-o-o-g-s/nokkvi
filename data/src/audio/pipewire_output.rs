@@ -1,3 +1,26 @@
+//! PipeWire native output sink.
+//!
+//! # Safety
+//!
+//! Every `unsafe { pw::sys::* }` block in this file is justified by the
+//! following invariants, which are stable across the file:
+//!
+//! 1. The cloned `Rc<Stream>` (e.g. `stream_clone`, `stream_vol_clone`)
+//!    outlives the closure it is captured into, because the closure is
+//!    attached to the mainloop and the mainloop owns the stream.
+//! 2. The mainloop is single-threaded — there is no concurrent mutation
+//!    of the stream from another thread.
+//! 3. The FFI calls (`pw_stream_set_control`, buffer reads, etc.) read
+//!    their arguments synchronously and return before the caller's borrow
+//!    ends; no `unsafe` pointer outlives its borrow.
+//! 4. Audio buffer reads/writes stay within bounds derived from the
+//!    negotiated `F32LE` format's `maxsize` and `stride` — see the process
+//!    callback for the specific bound calculation.
+//!
+//! Per-block `SAFETY` comments below restate only the call-site-specific
+//! constraints (which control / which buffer / which lifecycle) without
+//! re-deriving the file-wide invariants above.
+
 use std::thread::{self, JoinHandle};
 
 use anyhow::{Result, anyhow};
@@ -98,11 +121,9 @@ impl NativePipeWireSink {
                     let props = properties! {
                         *pw::keys::MEDIA_NAME => title.as_str()
                     };
-                    // SAFETY: `stream_clone` is an Rc clone of the stream created above,
-                    // kept alive by this closure. The closure is attached to the same
-                    // mainloop that owns the stream, so the raw pointer is valid for
-                    // the entire lifetime of the mainloop. `props.dict()` is a
-                    // stack-local `SpaPod` that outlives this FFI call.
+                    // SAFETY: title_receiver path — see module-level safety doc.
+                    // Updates `MEDIA_NAME` via `props.dict()`, a stack-local
+                    // `SpaPod` that outlives the FFI call.
                     unsafe {
                         pw::sys::pw_stream_update_properties(
                             stream_clone.as_raw_ptr(),
@@ -121,10 +142,9 @@ impl NativePipeWireSink {
                             vol
                         );
                         let volumes = [vol, vol];
-                        // SAFETY: `stream_vol_clone` is an Rc clone of the stream,
-                        // kept alive by this closure attached to the same mainloop.
-                        // The raw pointer is valid for the mainloop's lifetime.
-                        // `pw_stream_set_control` reads `values` synchronously.
+                        // SAFETY: volume_receiver path — see module-level safety
+                        // doc. Calls `pw_stream_set_control` synchronously on the
+                        // mainloop thread; `volumes` is a stack array.
                         let result = unsafe {
                             pw::sys::pw_stream_set_control(
                                 stream_vol_clone.as_raw_ptr(),
@@ -178,10 +198,10 @@ impl NativePipeWireSink {
                                 *chunk.size_mut() = (frames * stride) as u32;
 
                                 if let Some(out_slice) = data.data() {
-                                    // SAFETY: The stream format was negotiated as F32LE
-                                    // (set_format above), so the buffer is properly aligned
-                                    // for f32. `n_samples` is bounded by maxsize/stride,
-                                    // guaranteeing we stay within the allocated buffer.
+                                    // SAFETY: process callback — see module-level
+                                    // safety doc. Buffer is the negotiated F32LE
+                                    // format; `n_samples` is bounded by `frames *
+                                    // n_channels` derived from maxsize/stride above.
                                     let out = unsafe {
                                         std::slice::from_raw_parts_mut(
                                             out_slice.as_mut_ptr() as *mut f32,

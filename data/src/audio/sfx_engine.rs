@@ -20,6 +20,7 @@ use anyhow::{Result, anyhow};
 use rodio::{DeviceSinkBuilder, MixerDeviceSink, buffer::SamplesBuffer};
 use symphonia::core::{audio::SampleBuffer, io::MediaSourceStream, probe::Hint};
 
+use super::{load_f32, store_f32};
 use crate::audio::symphonia_registry;
 
 /// Sound effect types
@@ -52,15 +53,6 @@ const SFX_FILES: &[(&str, &[u8])] = &[
     ("expand_collapse.wav", BUNDLED_EXPAND_COLLAPSE),
     ("escape.wav", BUNDLED_ESCAPE),
 ];
-
-/// Atomic f32 helpers
-fn store_f32(atomic: &AtomicU32, value: f32) {
-    atomic.store(value.to_bits(), Ordering::Relaxed);
-}
-
-fn load_f32(atomic: &AtomicU32) -> f32 {
-    f32::from_bits(atomic.load(Ordering::Relaxed))
-}
 
 /// Sound effects engine using rodio's mixer for polyphonic playback.
 ///

@@ -17,14 +17,7 @@ use ringbuf::{HeapCons, traits::Consumer};
 use rodio::Source;
 use tokio::sync::Notify;
 
-/// Atomic f32 helpers using bit-level transmutation.
-fn store_f32(atomic: &AtomicU32, value: f32) {
-    atomic.store(value.to_bits(), Ordering::Relaxed);
-}
-
-fn load_f32(atomic: &AtomicU32) -> f32 {
-    f32::from_bits(atomic.load(Ordering::Relaxed))
-}
+use super::{load_f32, store_f32};
 
 /// Convert a linear 0.0–1.0 volume to a perceptually-correct amplitude.
 /// Based on <https://www.dr-lex.be/info-stuff/volumecontrols.html>,

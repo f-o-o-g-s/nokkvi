@@ -51,6 +51,10 @@ impl RangeHttpReader {
     /// Create a new HTTP client with optimal settings for streaming
     fn create_client() -> reqwest::blocking::Client {
         reqwest::blocking::Client::builder()
+            // Same desktop-browser UA the decoder advertises. Keeps Navidrome's
+            // optional UA filter behaviour consistent across all three audio
+            // HTTP clients (decoder HEAD probe, decoder infinite stream, this).
+            .user_agent(super::USER_AGENT)
             // Fast fail on connect - 5s is plenty for local server
             .connect_timeout(std::time::Duration::from_secs(5))
             // Reduced from 30s - 10s is enough for chunk reads, prevents long stalls
@@ -145,9 +149,11 @@ impl RangeHttpReader {
                         continue; // Retry
                     }
 
-                    // Log success (always log if slow or after retry)
+                    // Log success (always log if slow or after retry).
+                    // Severity contract (.agent/rules/code-standards.md):
+                    // success-after-retry is a milestone → info!.
                     if attempt > 0 || read_elapsed.as_millis() > 1000 {
-                        tracing::debug!(
+                        tracing::info!(
                             "📥 [HTTP] Chunk {} fetch completed (attempt {}/{}, read took {:?}, {} bytes)",
                             chunk_idx,
                             attempt + 1,
@@ -197,8 +203,11 @@ impl RangeHttpReader {
                         // Recreate client to force fresh connection
                         // Use longer backoff: 500ms, 1s, 1.5s, 2s
                         let backoff_ms = 500 * (attempt as u64 + 1);
-                        tracing::warn!(
-                            "⚠️ [HTTP] Chunk {} fetch failed (attempt {}/{}), retrying in {}ms: {:?}",
+                        // Severity contract (.agent/rules/code-standards.md):
+                        // per-attempt failure inside a retry loop is flow detail → debug!.
+                        // The user-facing event is the give-up below (error!).
+                        tracing::debug!(
+                            "📥 [HTTP] Chunk {} fetch failed (attempt {}/{}), retrying in {}ms: {:?}",
                             chunk_idx,
                             attempt + 1,
                             MAX_RETRIES,
