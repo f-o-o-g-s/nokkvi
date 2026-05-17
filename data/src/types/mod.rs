@@ -38,6 +38,7 @@ pub mod theme_file;
 pub mod toast;
 pub mod toml_settings;
 pub mod toml_views;
+pub mod view_column_toml;
 pub mod view_preferences;
 
 pub use item_kind::ItemKind;

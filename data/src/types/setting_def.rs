@@ -502,3 +502,99 @@ macro_rules! define_settings_build_item_arm {
         )
     };
 }
+
+/// Declarative table of view-column-visibility booleans for one slot-list view
+/// (Albums / Artists / Songs / Genres / Playlists / Similar / Queue). Emits
+/// three free functions per invocation:
+///
+/// - `$apply_fn(ts, p)` — copy `ts.field → p.field` for each declared field,
+///   moving the column toggle from TOML onto the redb-backed internal
+///   `PlayerSettings`.
+/// - `$dump_fn(src, out)` — copy `src.field → out.field` for each declared
+///   field, moving the column toggle from the redb-backed internal
+///   `PlayerSettings` onto the UI-facing `PlayerSettings` consumed by
+///   `Message::PlayerSettingsLoaded`.
+/// - `$write_fn(ps, ts)` — copy `ps.field → ts.field` for each declared field,
+///   moving the column toggle from the UI-facing `PlayerSettings` onto the
+///   TOML representation written to `config.toml`.
+///
+/// Companion to `define_view_columns!` (UI crate, `src/views/mod.rs`): the
+/// UI macro owns the column enum + visibility struct + `ColumnPersist` impl
+/// (UI types), this macro owns the TOML wire copies (data types). The two
+/// invocations share the same column-set per view; a parity test in this
+/// crate's test module asserts the column counts match so a column added on
+/// one side without the other surfaces as a test failure.
+///
+/// All declared fields must be `bool` on `TomlSettings`, the redb-backed
+/// internal `PlayerSettings`, and the UI-facing `PlayerSettings` — i.e. the
+/// per-view-column toggles. The macro relies on identical field names across
+/// all three types, which is the case today for every `<view>_show_<column>`
+/// field.
+///
+/// # Example
+///
+/// ```ignore
+/// nokkvi_data::define_view_column_toml_helpers! {
+///     view: Albums,
+///     apply_fn: apply_toml_albums_columns,
+///     dump_fn: dump_albums_columns_to_player,
+///     write_fn: write_albums_columns_to_toml,
+///     fields: [
+///         albums_show_select,
+///         albums_show_index,
+///         albums_show_thumbnail,
+///         albums_show_stars,
+///         albums_show_songcount,
+///         albums_show_plays,
+///         albums_show_love,
+///     ],
+/// }
+/// ```
+#[macro_export]
+macro_rules! define_view_column_toml_helpers {
+    (
+        view: $view:ident,
+        apply_fn: $apply_fn:ident,
+        dump_fn: $dump_fn:ident,
+        write_fn: $write_fn:ident,
+        fields: [ $( $field:ident ),* $(,)? ] $(,)?
+    ) => {
+        /// Macro-emitted: copy declared view-column-visibility fields from
+        /// `TomlSettings` onto the redb-backed internal `PlayerSettings`.
+        #[allow(dead_code)]
+        pub fn $apply_fn(
+            ts: &$crate::types::toml_settings::TomlSettings,
+            p: &mut $crate::types::settings::PlayerSettings,
+        ) {
+            $(
+                p.$field = ts.$field;
+            )*
+        }
+
+        /// Macro-emitted: copy declared view-column-visibility fields from
+        /// the redb-backed internal `PlayerSettings` onto the UI-facing
+        /// `PlayerSettings`.
+        #[allow(dead_code)]
+        pub fn $dump_fn(
+            src: &$crate::types::settings::PlayerSettings,
+            out: &mut $crate::types::player_settings::PlayerSettings,
+        ) {
+            $(
+                out.$field = src.$field;
+            )*
+        }
+
+        /// Macro-emitted: copy declared view-column-visibility fields from
+        /// the UI-facing `PlayerSettings` onto `TomlSettings` (for writing
+        /// back to `config.toml`).
+        #[allow(dead_code)]
+        pub fn $write_fn(
+            ps: &$crate::types::player_settings::PlayerSettings,
+            ts: &mut $crate::types::toml_settings::TomlSettings,
+        ) {
+            $(
+                ts.$field = ps.$field;
+            )*
+        }
+    };
+}
