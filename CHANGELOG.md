@@ -10,8 +10,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
-- EQ modal's preset dropdown now correctly highlights a saved custom preset as the active one after closing and reopening nokkvi. TOML serialization rounds the top-level `eq_gains` array more aggressively than the nested per-preset `gains` arrays, so the exact float-equality check between the two failed on every band and the indicator fell through to "Custom" even though the preset was still selectable and applied normally on click; the match now uses a 1e-3 dB epsilon, well above the rounding noise and well below any perceivable step.
-- Settings → Hotkeys row now reflects the new key combo immediately after rebinding through the in-app capture flow — previously the row kept showing the previous combo even though the binding had already been written to `config.toml` and was active at runtime, because the per-frame nav fast path never rebuilt the cached row.
+- EQ modal's preset dropdown now shows the correct saved custom preset as active after restarting nokkvi — previously the dropdown fell back to "Custom" even though your saved preset was still loaded and applied.
+- Settings → Hotkeys row now updates to the new key right after you rebind it — previously the row kept showing the old key even though the new binding was already saved and working.
 
 ### Removed
 
