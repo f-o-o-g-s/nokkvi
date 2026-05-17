@@ -8,6 +8,16 @@
 //! [`codecs()`] rather than `symphonia::default::get_codecs()` — otherwise Opus
 //! tracks fall back to the default registry and fail with
 //! `unsupported feature: core (codec):unsupported codec`.
+//!
+//! # Removal plan
+//!
+//! When upstream Symphonia lands native Opus (track pdeljanov/Symphonia#8):
+//! 1. Drop the `symphonia-adapter-libopus` dep in `data/Cargo.toml`.
+//! 2. Add `"opus"` to the symphonia features list there.
+//! 3. Delete this module and switch every `symphonia_registry::codecs()` call
+//!    back to `symphonia::default::get_codecs()`.
+//! 4. Drop the `cmake` mention from CI apt-install + Arch pacman lines in
+//!    `README.md` / `CLAUDE.md`.
 
 use std::sync::LazyLock;
 
