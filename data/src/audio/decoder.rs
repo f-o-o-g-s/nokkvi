@@ -35,11 +35,6 @@ const STREAM_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 /// cleanly during shutdown without waiting for TCP data.
 const READ_RECV_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
 
-/// Bounded wait for the producer task to acknowledge cancellation during Drop.
-/// Short by design — abort() is called immediately after, so the task is
-/// guaranteed to be unscheduled even if the join times out.
-const DROP_JOIN_BUDGET: std::time::Duration = std::time::Duration::from_millis(250);
-
 /// A background async task that eagerly consumes an infinite HTTP stream and
 /// forwards chunks over a bounded channel to the sync `Read` consumer.
 ///
@@ -168,20 +163,21 @@ impl std::io::Read for AsyncNetworkBuffer {
 
 impl Drop for AsyncNetworkBuffer {
     fn drop(&mut self) {
-        // Signal the producer task cooperatively first.
+        // Cooperative shutdown via the select! arm in the producer loop.
         self.cancel.cancel();
         if let Some(handle) = self.task.take() {
-            // Hard-abort: guarantees the task is unscheduled from the runtime even
-            // if the cooperative cancel didn't propagate yet.
+            // Hard-abort schedules cancellation at the producer's next yield point;
+            // dropping the JoinHandle detaches it so the runtime owns the cleanup.
+            //
+            // Deliberately NOT awaiting the handle here: Drop can fire from a tokio
+            // worker thread (e.g., the radio→library decoder swap on track change),
+            // and `Handle::block_on` from inside a runtime panics with "Cannot start
+            // a runtime from within a runtime". The original F4 shutdown-hang was
+            // caused by the producer being a blocking-pool task (`block_in_place`
+            // path); since that fix the producer is a normal `tokio::spawn`'d task,
+            // so `BlockingPool::shutdown` no longer waits on it and the synchronous
+            // join here is not load-bearing for clean shutdown.
             handle.abort();
-            // Give the task a short window to acknowledge (best-effort). A timeout
-            // here is important — anything blocking Drop for too long can re-introduce
-            // the shutdown-hang symptom we're fixing.
-            if let Ok(rt) = tokio::runtime::Handle::try_current() {
-                rt.block_on(async {
-                    let _ = tokio::time::timeout(DROP_JOIN_BUDGET, handle).await;
-                });
-            }
         }
     }
 }
@@ -1305,7 +1301,7 @@ mod tests {
     /// Post-fix behaviour: `Drop for AsyncNetworkBuffer` fires `cancel.cancel()`
     /// and `handle.abort()`. The producer's `select!` arm on `cancelled()` breaks
     /// the loop, or `abort()` forces task completion. Either way the JoinHandle
-    /// resolves within DROP_JOIN_BUDGET.
+    /// resolves promptly.
     #[tokio::test]
     async fn producer_task_exits_when_receiver_dropped() {
         use tokio_util::bytes::Bytes;
@@ -1381,6 +1377,55 @@ mod tests {
         assert!(
             result.is_ok(),
             "producer task did not exit within {deadline:?} after token cancellation"
+        );
+    }
+
+    /// Regression: `Drop for AsyncNetworkBuffer` must not panic when invoked
+    /// from inside a tokio runtime. The earlier implementation called
+    /// `Handle::current().block_on(...)` to await the producer's exit, which
+    /// panics with "Cannot start a runtime from within a runtime" the moment
+    /// Drop fires from a worker thread — production hit this on the
+    /// radio→library track transition (the new decoder replaces the old
+    /// `AsyncNetworkBuffer` from inside a tokio worker).
+    ///
+    /// Hand-constructed fields stand in for `AsyncNetworkBuffer::new_async`,
+    /// which needs a live HTTP response.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn drop_inside_runtime_worker_does_not_panic() {
+        let (tx, rx) = mpsc::channel::<Bytes>(1);
+        let cancel = CancellationToken::new();
+        let child_cancel = cancel.clone();
+        let task = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = child_cancel.cancelled() => return,
+                    result = tx.send(Bytes::from_static(b"x")) => {
+                        if result.is_err() { return; }
+                    }
+                }
+                tokio::task::yield_now().await;
+            }
+        });
+
+        let buf = AsyncNetworkBuffer {
+            rx,
+            leftover: Bytes::new(),
+            cancel,
+            task: Some(task),
+        };
+
+        // Run the Drop from a spawned task so it executes on a worker thread —
+        // mirrors the production trigger (async decoder swap on track change).
+        let drop_result = tokio::spawn(async move {
+            drop(buf);
+        })
+        .await;
+
+        assert!(
+            drop_result.is_ok(),
+            "AsyncNetworkBuffer::drop must not panic on a tokio worker thread, got: \
+             {drop_result:?}"
         );
     }
 
