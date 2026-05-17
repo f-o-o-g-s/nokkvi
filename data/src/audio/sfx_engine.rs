@@ -18,10 +18,7 @@ use std::{
 
 use anyhow::{Result, anyhow};
 use rodio::{DeviceSinkBuilder, MixerDeviceSink, buffer::SamplesBuffer};
-use symphonia::core::{
-    audio::SampleBuffer, codecs::DecoderOptions, formats::FormatOptions, io::MediaSourceStream,
-    meta::MetadataOptions, probe::Hint,
-};
+use symphonia::core::{audio::SampleBuffer, io::MediaSourceStream, probe::Hint};
 
 use crate::audio::symphonia_registry;
 
@@ -200,22 +197,23 @@ impl SfxEngine {
         let mut hint = Hint::new();
         hint.with_extension("wav");
 
-        let format_opts = FormatOptions::default();
-        let metadata_opts = MetadataOptions::default();
-        let decoder_opts = DecoderOptions::default();
+        // `enable_gapless: false` matches the prior `FormatOptions::default()` —
+        // SFX files are short, single-track WAVs that don't benefit from gapless
+        // trimming. See `symphonia_registry::probe_and_make_decoder`.
+        let (mut format, mut decoder, track_id) =
+            symphonia_registry::probe_and_make_decoder(mss, &hint, false)?;
 
-        let probed =
-            symphonia::default::get_probe().format(&hint, mss, &format_opts, &metadata_opts)?;
-
-        let mut format = probed.format;
-        let track = format
-            .default_track()
+        let (sample_rate, channels) = format
+            .tracks()
+            .iter()
+            .find(|t| t.id == track_id)
+            .map(|t| {
+                (
+                    t.codec_params.sample_rate.unwrap_or(48000),
+                    t.codec_params.channels.map_or(2, |c| c.count()),
+                )
+            })
             .ok_or_else(|| anyhow!("No audio track found"))?;
-
-        let sample_rate = track.codec_params.sample_rate.unwrap_or(48000);
-        let channels = track.codec_params.channels.map_or(2, |c| c.count());
-
-        let mut decoder = symphonia_registry::codecs().make(&track.codec_params, &decoder_opts)?;
 
         let mut samples = Vec::new();
 

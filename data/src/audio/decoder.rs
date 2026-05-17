@@ -1,11 +1,9 @@
 use anyhow::{Context, Result};
 use symphonia::core::{
     audio::RawSampleBuffer,
-    codecs::{CODEC_TYPE_NULL, DecoderOptions},
     errors::Error as SymphoniaError,
-    formats::{FormatOptions, FormatReader},
+    formats::FormatReader,
     io::{MediaSource, MediaSourceStream},
-    meta::MetadataOptions,
     probe::Hint,
     units::{Time, TimeBase},
 };
@@ -540,55 +538,38 @@ impl AudioDecoder {
             hint.with_extension(&ext);
         }
 
-        let format_opts = FormatOptions {
-            enable_gapless: true,
-            ..Default::default()
-        };
-        let metadata_opts = MetadataOptions::default();
-
         let probe_start = std::time::Instant::now();
         trace!(" [DECODER] Starting format probe...");
         // CRITICAL: Format probing reads from the MediaSource stream, which does blocking I/O.
         // Must wrap in block_in_place to avoid freezing the Tokio executor.
-        let probed = tokio::task::block_in_place(|| {
-            match symphonia::default::get_probe().format(&hint, mss, &format_opts, &metadata_opts) {
-                Ok(p) => {
-                    trace!(
-                        " [DECODER] Format probe successful (took {:?})",
-                        probe_start.elapsed()
-                    );
-                    Ok(p)
-                }
-                Err(e) => {
-                    error!(" [DECODER] Format probe FAILED: {:?}", e);
-                    Err(anyhow::Error::new(e).context("Failed to probe media format"))
-                }
-            }
+        // `enable_gapless: true` is load-bearing for the primary init path — the
+        // ResetRequired reprobe in `read_buffer` uses `false` instead (see
+        // `symphonia_registry::probe_and_make_decoder`).
+        let (format_reader, decoder, track_id) = tokio::task::block_in_place(|| {
+            symphonia_registry::probe_and_make_decoder(mss, &hint, true).inspect_err(|e| {
+                error!(
+                    " [DECODER] Format probe / decoder construction FAILED: {:?}",
+                    e
+                );
+            })
         })?;
-
-        let format_reader = probed.format;
-
-        // Find first audio track
-        trace!(" [DECODER] Finding audio track...");
-        let track = format_reader
-            .tracks()
-            .iter()
-            .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-            .context("No supported audio tracks found")?;
-
-        let track_id = track.id;
+        trace!(
+            " [DECODER] Format probe + decoder construction successful (took {:?})",
+            probe_start.elapsed()
+        );
         trace!(" [DECODER] Found audio track with ID: {}", track_id);
-
-        // Create decoder
-        let decoder_opts = DecoderOptions::default();
-        trace!(" [DECODER] Creating codec decoder...");
-        let decoder = symphonia_registry::codecs()
-            .make(&track.codec_params, &decoder_opts)
-            .context("Failed to create decoder")?;
         trace!(" [DECODER] Codec decoder created successfully");
 
-        // Get format info
-        let codec_params = &track.codec_params;
+        // Snapshot the selected track's codec parameters into owned locals so the
+        // immutable borrow of `format_reader` is released before we move it into
+        // `self.format_reader` below.
+        let codec_params = format_reader
+            .tracks()
+            .iter()
+            .find(|t| t.id == track_id)
+            .context("Selected track id missing from probed format")?
+            .codec_params
+            .clone();
         let mut codec_name = None;
         if let Some(desc) = symphonia_registry::codecs().get_codec(codec_params.codec) {
             codec_name = Some(desc.short_name.to_string());
@@ -734,13 +715,15 @@ impl AudioDecoder {
                     p
                 }
                 Err(SymphoniaError::ResetRequired) => {
-                    // Track list changed (e.g., OGG ICECast metadata changed)
+                    // Track list changed (e.g., OGG ICECast metadata changed).
+                    // `enable_gapless: false` is load-bearing here — OGG chained
+                    // metadata depends on Symphonia exposing every container
+                    // segment rather than gluing them together.
                     warn!(" [DECODER] ResetRequired error - Stream format changed, reprobing...");
                     if let Some(reader) = self.format_reader.take() {
                         let mss = reader.into_inner();
-                        let probe = symphonia::default::get_probe();
 
-                        let mut hint = symphonia::core::probe::Hint::new();
+                        let mut hint = Hint::new();
                         // Assume OGG for internet radio if it's infinite, as that's the main codec that chains
                         if self.infinite_stream
                             || self.url.to_lowercase().contains("ogg")
@@ -753,59 +736,45 @@ impl AudioDecoder {
                             hint.with_extension(ext);
                         }
 
-                        match probe.format(
-                            &hint,
-                            mss,
-                            &symphonia::core::formats::FormatOptions {
-                                enable_gapless: false,
-                                ..Default::default()
-                            },
-                            &symphonia::core::meta::MetadataOptions::default(),
-                        ) {
-                            Ok(probed) => {
-                                let format_reader = probed.format;
-                                if let Some(track) = format_reader.default_track() {
-                                    self.track_id = Some(track.id);
-                                    let decoder = symphonia_registry::codecs().make(
-                                        &track.codec_params,
-                                        &symphonia::core::codecs::DecoderOptions::default(),
+                        match symphonia_registry::probe_and_make_decoder(mss, &hint, false) {
+                            Ok((format_reader, dec, track_id)) => {
+                                // Snapshot codec parameters before moving the
+                                // format reader into `self.format_reader`.
+                                let codec_params = format_reader
+                                    .tracks()
+                                    .iter()
+                                    .find(|t| t.id == track_id)
+                                    .map(|t| t.codec_params.clone());
+                                self.track_id = Some(track_id);
+                                self.decoder = Some(dec);
+                                if let Some(codec_params) = codec_params {
+                                    let channels = codec_params
+                                        .channels
+                                        .unwrap_or(
+                                            symphonia::core::audio::Channels::FRONT_LEFT
+                                                | symphonia::core::audio::Channels::FRONT_RIGHT,
+                                        )
+                                        .count();
+                                    let sample_rate = codec_params.sample_rate.unwrap_or(44100);
+                                    self.format = AudioFormat::new(
+                                        SampleFormat::F32,
+                                        sample_rate,
+                                        channels as u32,
                                     );
-                                    if let Ok(dec) = decoder {
-                                        self.decoder = Some(dec);
-                                        // Update format in case it changed
-                                        let channels = track
-                                            .codec_params
-                                            .channels
-                                            .unwrap_or(
-                                                symphonia::core::audio::Channels::FRONT_LEFT
-                                                    | symphonia::core::audio::Channels::FRONT_RIGHT,
-                                            )
-                                            .count();
-                                        let sample_rate =
-                                            track.codec_params.sample_rate.unwrap_or(44100);
-                                        self.format = AudioFormat::new(
-                                            SampleFormat::F32,
-                                            sample_rate,
-                                            channels as u32,
-                                        );
-                                        if let Some(desc) = symphonia_registry::codecs()
-                                            .get_codec(track.codec_params.codec)
-                                        {
-                                            self.live_codec = Some(desc.short_name.to_string());
-                                        }
-                                        // Retry reading the packet with the new decoder
-                                        self.format_reader = Some(format_reader);
-                                        continue;
+                                    if let Some(desc) =
+                                        symphonia_registry::codecs().get_codec(codec_params.codec)
+                                    {
+                                        self.live_codec = Some(desc.short_name.to_string());
                                     }
-                                    error!(" [DECODER] Failed to make decoder after reprobing");
-                                } else {
-                                    error!(" [DECODER] No default track found after reprobing");
                                 }
                                 self.format_reader = Some(format_reader);
+                                // Retry reading the packet with the new decoder.
+                                continue;
                             }
                             Err(e) => {
                                 error!(
-                                    " [DECODER] Failed to reprobe format after ResetRequired: {}",
+                                    " [DECODER] Failed to reprobe format / build decoder after \
+                                     ResetRequired: {:#}",
                                     e
                                 );
                             }
