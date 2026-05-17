@@ -146,6 +146,18 @@ impl Nokkvi {
     ) -> Task<Message> {
         tracing::info!(" [SETTINGS] Hotkey config hot-reloaded");
         self.hotkey_config = config;
+        // Mark settings entries stale so the Hotkeys tab reflects the new
+        // binding instead of the previously cached combo string. Without
+        // this, a successful rebind keeps showing the old key on screen
+        // even though `config.toml` and `self.hotkey_config` both have the
+        // new value, because the per-frame nav fast path never rebuilds
+        // `cached_entries`.
+        self.settings_page.config_dirty = true;
+        if self.current_view == View::Settings {
+            let new_data = self.build_settings_view_data();
+            self.settings_page.refresh_entries(&new_data);
+            self.settings_page.config_dirty = false;
+        }
         Task::none()
     }
 }
