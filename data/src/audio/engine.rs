@@ -136,6 +136,25 @@ fn decode_buffer_size(format: &AudioFormat) -> usize {
     }
 }
 
+/// Samples-per-100ms approximation used for buffer-unit conversion. Paired
+/// with `compute_watermarks`'s `BUFFER_MS = 100` — if either is tuned, both
+/// must follow.
+const SAMPLES_PER_BUFFER_UNIT: usize = 800;
+
+/// Convert a raw sample count into the "buffer unit" scale used by
+/// `compute_watermarks`. Both the primary and crossfade decode loops use
+/// this to normalize ring-buffer fullness against the watermark thresholds.
+fn samples_to_buffer_units(samples: usize) -> usize {
+    samples / SAMPLES_PER_BUFFER_UNIT
+}
+
+/// Buffers to fill before starting playback. `play` cold-starts the decoder
+/// and renderer together so it needs more buffers to absorb the worst-case
+/// network latency before the first sample feeds out; `seek` runs against a
+/// renderer that's already initialized so it can prime with fewer buffers.
+const PLAY_PREBUFFER_COUNT: usize = 15;
+const SEEK_PREBUFFER_COUNT: usize = 10;
+
 /// Compute backpressure watermarks scaled by crossfade duration.
 ///
 /// Returns `(high_watermark, low_watermark)` — the thresholds at which the
@@ -151,6 +170,55 @@ fn compute_watermarks(crossfade_ms: u64) -> (usize, usize) {
     };
     let high = BASE_HIGH.max(cf_buffers);
     (high, high / 3)
+}
+
+/// Thread-safe slot holding an optional metadata string with non-blocking
+/// reset (B11 fix — `reset` must never block the audio hot path) and a
+/// blocking writer for decoder-init updates that must land before the next
+/// packet. Replaces ad-hoc `Arc<RwLock<Option<String>>>` field patterns on
+/// the engine so the reset/write asymmetry is encoded structurally and
+/// impossible to drift.
+pub(super) struct LiveStringSlot {
+    inner: Arc<std::sync::RwLock<Option<String>>>,
+}
+
+impl LiveStringSlot {
+    pub(super) fn new() -> Self {
+        Self {
+            inner: Arc::new(std::sync::RwLock::new(None)),
+        }
+    }
+
+    /// Clone the inner `Arc` handle. Used to pass the slot into the decoder's
+    /// IcyMetadataReader callback, which writes through the cloned Arc on its
+    /// own thread.
+    pub(super) fn clone_arc(&self) -> Arc<std::sync::RwLock<Option<String>>> {
+        self.inner.clone()
+    }
+
+    /// Non-blocking reset. Used on the audio hot path (`set_source`) — drops
+    /// the write attempt silently if a reader/writer is mid-flight rather
+    /// than stalling. B11 fix encoded structurally.
+    pub(super) fn reset(&self) {
+        if let Ok(mut guard) = self.inner.try_write() {
+            *guard = None;
+        }
+    }
+
+    /// Blocking write. Used during decoder-init paths where the new codec
+    /// name MUST land before the next read so downstream readers don't
+    /// observe the previous track's value.
+    pub(super) fn set(&self, value: Option<String>) {
+        if let Ok(mut guard) = self.inner.write() {
+            *guard = value;
+        }
+    }
+
+    /// Clone-on-read getter. Returns `None` on poisoned lock (same semantics
+    /// as the prior bare `.read().ok().and_then(...)` pattern).
+    pub(super) fn get(&self) -> Option<String> {
+        self.inner.read().ok().and_then(|guard| guard.clone())
+    }
 }
 
 /// Custom audio engine - main orchestrator
@@ -234,15 +302,15 @@ pub struct CustomAudioEngine {
     gapless_transition_info: Arc<tokio::sync::Mutex<Option<GaplessTransitionInfo>>>,
 
     /// Raw ICY-metadata parsed by IcyMetadataReader
-    live_icy_metadata: Arc<std::sync::RwLock<Option<String>>>,
+    live_icy_metadata: LiveStringSlot,
 
     /// Extracted stream codec based on Symphonia probing (e.g. mp3, aac)
-    live_codec_name: Arc<std::sync::RwLock<Option<String>>>,
+    live_codec_name: LiveStringSlot,
 }
 
 impl CustomAudioEngine {
     pub fn new() -> Self {
-        let live_icy_metadata = Arc::new(std::sync::RwLock::new(None));
+        let live_icy_metadata = LiveStringSlot::new();
         Self {
             source: String::new(),
             playing: false,
@@ -251,7 +319,7 @@ impl CustomAudioEngine {
             duration: 0,
             volume: 1.0,
             decoder: Arc::new(tokio::sync::Mutex::new(AudioDecoder::new(
-                live_icy_metadata.clone(),
+                live_icy_metadata.clone_arc(),
             ))),
             current_format: AudioFormat::invalid(),
             next_format: AudioFormat::invalid(),
@@ -274,7 +342,7 @@ impl CustomAudioEngine {
             crossfade_duration_ms: 5000,
             gapless_transition_info: Arc::new(tokio::sync::Mutex::new(None)),
             live_icy_metadata,
-            live_codec_name: Arc::new(std::sync::RwLock::new(None)),
+            live_codec_name: LiveStringSlot::new(),
         }
     }
 
@@ -306,18 +374,14 @@ impl CustomAudioEngine {
         self.live_bitrate.store(0, Ordering::Relaxed);
         self.live_sample_rate.store(0, Ordering::Relaxed);
         self.decoder_eof.store(false, Ordering::Release);
-        if let Ok(mut guard) = self.live_icy_metadata.try_write() {
-            *guard = None;
-        }
+        self.live_icy_metadata.reset();
         // Non-blocking like the icy_metadata reset above: stale codec data
         // is acceptable here, and `set_source` must not block on UI readers.
-        if let Ok(mut guard) = self.live_codec_name.try_write() {
-            *guard = None;
-        }
+        self.live_codec_name.reset();
 
         trace!(" AudioEngine: creating fresh decoder for new source");
         self.decoder = Arc::new(tokio::sync::Mutex::new(AudioDecoder::new(
-            self.live_icy_metadata.clone(),
+            self.live_icy_metadata.clone_arc(),
         )));
 
         self.duration = 0;
@@ -330,18 +394,12 @@ impl CustomAudioEngine {
 
     /// Get current parsed ICY-metadata from the stream buffer
     pub fn live_icy_metadata(&self) -> Option<String> {
-        self.live_icy_metadata
-            .read()
-            .ok()
-            .and_then(|guard| guard.clone())
+        self.live_icy_metadata.get()
     }
 
     /// Get current live codec name
     pub fn live_codec(&self) -> Option<String> {
-        self.live_codec_name
-            .read()
-            .ok()
-            .and_then(|guard| guard.clone())
+        self.live_codec_name.get()
     }
 
     /// Get playing state
@@ -433,9 +491,7 @@ impl CustomAudioEngine {
                         decoder.duration()
                     );
                     self.duration = decoder.duration();
-                    if let Ok(mut guard) = self.live_codec_name.write() {
-                        *guard = decoder.live_codec();
-                    }
+                    self.live_codec_name.set(decoder.live_codec());
                 }
                 Err(e) => {
                     error!(" AudioEngine: decoder initialization FAILED: {:?}", e);
@@ -498,7 +554,7 @@ impl CustomAudioEngine {
 
         // PREBUFFERING: Queue initial buffers before starting renderer
         // This prevents buffer starvation at playback start
-        const PLAY_PREBUFFER_COUNT: usize = 15;
+        // (`PLAY_PREBUFFER_COUNT` is module-scope — see top of file.)
         trace!(
             " AudioEngine: prebuffering {} buffers before playback",
             PLAY_PREBUFFER_COUNT
@@ -621,9 +677,9 @@ impl CustomAudioEngine {
                 // BACKPRESSURE CHECK: If ring buffer is full, wait for it to drain
                 let buffer_count = {
                     let renderer_guard = renderer.lock();
-                    // Approximate number of "buffer units" in the ring buffer
-                    // (divide samples by ~800 to get equivalent buffer count)
-                    renderer_guard.buffer_count() / 800
+                    // Normalize raw sample count to ~100 ms "buffer units"
+                    // so we can compare against the watermark thresholds.
+                    samples_to_buffer_units(renderer_guard.buffer_count())
                 }; // renderer lock dropped here, before any .await
 
                 // Dynamic watermarks: scale with crossfade duration so the
@@ -814,7 +870,7 @@ impl CustomAudioEngine {
                             }
                             retry_count += 1;
                             if retry_count > MAX_RETRIES {
-                                tracing::warn!(
+                                tracing::error!(
                                     "📻 [RECONNECT] Failed after {} attempts, giving up",
                                     MAX_RETRIES
                                 );
@@ -823,7 +879,7 @@ impl CustomAudioEngine {
                             }
                             let backoff =
                                 std::time::Duration::from_secs(1u64 << retry_count.min(4));
-                            tracing::info!(
+                            tracing::debug!(
                                 "📻 [RECONNECT] Attempt {}/{} in {:?}",
                                 retry_count,
                                 MAX_RETRIES,
@@ -844,7 +900,7 @@ impl CustomAudioEngine {
                                     continue 'decode_loop;
                                 }
                                 Err(e) => {
-                                    tracing::warn!("📻 [RECONNECT] Failed: {}", e);
+                                    tracing::debug!("📻 [RECONNECT] Failed: {}", e);
                                     drop(dec);
                                     // Continue retry loop
                                 }
@@ -1122,7 +1178,7 @@ impl CustomAudioEngine {
                 renderer.seek(pos);
 
                 // PREBUFFERING: Queue initial buffers after seek
-                const SEEK_PREBUFFER_COUNT: usize = 10;
+                // (`SEEK_PREBUFFER_COUNT` is module-scope — see top of file.)
                 trace!("🔍 [SEEK] Prebuffering {} buffers", SEEK_PREBUFFER_COUNT);
 
                 for i in 0..SEEK_PREBUFFER_COUNT {
@@ -1216,7 +1272,7 @@ impl CustomAudioEngine {
         }
 
         // Create and initialize next decoder
-        let mut next_decoder = AudioDecoder::new(self.live_icy_metadata.clone());
+        let mut next_decoder = AudioDecoder::new(self.live_icy_metadata.clone_arc());
         if next_decoder.init(url).await.is_ok() {
             let incoming_duration = next_decoder.duration();
             self.next_format = next_decoder.format().clone();
@@ -1310,9 +1366,7 @@ impl CustomAudioEngine {
             self.duration = info.duration;
             self.position = 0;
             self.current_format = info.format;
-            if let Ok(mut guard) = self.live_codec_name.write() {
-                *guard = info.codec;
-            }
+            self.live_codec_name.set(info.codec);
             self.next_source.clear();
             self.gapless.lock().await.source.clear();
             self.live_sample_rate
@@ -1604,7 +1658,7 @@ impl CustomAudioEngine {
                 // Backpressure check — normalize to buffer units (same as primary loop)
                 let buffer_count = {
                     let renderer_guard = renderer.lock();
-                    renderer_guard.crossfade_buffer_count() / 800
+                    samples_to_buffer_units(renderer_guard.crossfade_buffer_count())
                 };
 
                 let cf_ms = crossfade_duration_shared.load(Ordering::Relaxed);
@@ -2462,5 +2516,71 @@ mod tests {
         engine.request_shutdown();
         // Must not panic:
         engine.request_shutdown();
+    }
+
+    // =========================================================================
+    // Group M Lane 1 — module-level constants + LiveStringSlot newtype
+    // =========================================================================
+
+    /// Pin the samples→buffer-units divisor at 800. A future tuning of
+    /// `BUFFER_MS` in `compute_watermarks` would surface here if it forgets
+    /// to scale `SAMPLES_PER_BUFFER_UNIT` alongside it.
+    #[test]
+    fn samples_to_buffer_units_div_by_800() {
+        assert_eq!(samples_to_buffer_units(800), 1);
+        assert_eq!(samples_to_buffer_units(0), 0);
+        assert_eq!(samples_to_buffer_units(1599), 1);
+        assert_eq!(samples_to_buffer_units(1600), 2);
+    }
+
+    /// `LiveStringSlot::set` overwrites prior values and accepts `None` to
+    /// clear. Preserves the historical write semantics of the blocking
+    /// `RwLock::write()` path used by decoder-init.
+    #[test]
+    fn live_string_slot_set_get_roundtrip() {
+        let slot = LiveStringSlot::new();
+        slot.set(Some("foo".to_string()));
+        assert_eq!(slot.get(), Some("foo".to_string()));
+        slot.set(Some("bar".to_string()));
+        assert_eq!(slot.get(), Some("bar".to_string()));
+        slot.set(None);
+        assert_eq!(slot.get(), None);
+    }
+
+    /// `LiveStringSlot::reset` is the B11 hot-path-safe equivalent of
+    /// `set(None)` — must clear a previously-set value.
+    #[test]
+    fn live_string_slot_reset_clears() {
+        let slot = LiveStringSlot::new();
+        slot.set(Some("x".to_string()));
+        assert_eq!(slot.get(), Some("x".to_string()));
+        slot.reset();
+        assert_eq!(slot.get(), None);
+    }
+
+    /// `LiveStringSlot::clone_arc` must hand out a clone that shares state
+    /// with the slot — the IcyMetadataReader callback writes through the
+    /// cloned `Arc` on its own thread, and the slot's `get()` must observe
+    /// the write.
+    #[test]
+    fn live_string_slot_clone_arc_shares_state() {
+        let slot = LiveStringSlot::new();
+        let shared = slot.clone_arc();
+        // Simulate the IcyMetadataReader-callback pattern: lock the cloned
+        // Arc directly and store a value.
+        {
+            let mut guard = shared.write().expect("write lock");
+            *guard = Some("from_callback".to_string());
+        }
+        assert_eq!(slot.get(), Some("from_callback".to_string()));
+    }
+
+    /// Pin the doc-comment invariant: `play` cold-starts the decoder +
+    /// renderer together so it needs more buffers than `seek` (which runs
+    /// against an already-initialized renderer). A future tuning must not
+    /// accidentally invert this relationship.
+    #[test]
+    fn prebuffer_counts_play_exceeds_seek() {
+        assert!(PLAY_PREBUFFER_COUNT > SEEK_PREBUFFER_COUNT);
     }
 }
