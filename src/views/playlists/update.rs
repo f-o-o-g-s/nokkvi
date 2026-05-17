@@ -165,6 +165,16 @@ impl PlaylistsPage {
                         SlotListPageMessage::CenterOnPlaying => {
                             (Task::none(), PlaylistsAction::None)
                         }
+                        SlotListPageMessage::HoverEnterSlot(h) => {
+                            self.common.slot_list.hovered_slot = Some(h);
+                            (Task::none(), PlaylistsAction::None)
+                        }
+                        SlotListPageMessage::HoverExitSlot(h) => {
+                            if self.common.slot_list.hovered_slot == Some(h) {
+                                self.common.slot_list.hovered_slot = None;
+                            }
+                            (Task::none(), PlaylistsAction::None)
+                        }
                         // Sort/search exhaustiveness arms (expansion views don't emit these via SlotList):
                         SlotListPageMessage::SearchQueryChanged(_)
                         | SlotListPageMessage::SearchFocused(_)

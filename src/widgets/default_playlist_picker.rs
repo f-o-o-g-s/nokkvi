@@ -219,6 +219,7 @@ pub(crate) fn default_playlist_picker_overlay<'a>(
                     )
                 }
             },
+            None,
             move |entry, ctx| {
                 render_picker_slot(
                     entry,

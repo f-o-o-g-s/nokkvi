@@ -9,26 +9,42 @@
 //! Multi-selection aware: if the pressed item is within an active multi-selection,
 //! the entire selection set is dragged. Otherwise, the selection is cleared and
 //! only the pressed item is dragged (matching context menu semantics).
+//!
+//! Slot resolution is structural: every slot rendered by
+//! `build_slot_list_slots` is wrapped in a `mouse_area` whose `on_enter`
+//! publishes a `HoverEnterSlot { slot_index, item_index }` for the slot's
+//! row, stored on `SlotListView::hovered_slot`. These handlers read that
+//! state directly — no chrome reconstruction, no `cursor_y → slot` math,
+//! no stored-vs-inline `slot_count` divergence.
 
 use iced::Task;
 use tracing::debug;
 
-use crate::{Nokkvi, app_message::Message, state::CrossPaneDragState, views};
+use crate::{Nokkvi, app_message::Message, state::CrossPaneDragState, views, widgets::HoveredSlot};
 
 /// Minimum pixel distance before a press becomes a drag
 const DRAG_THRESHOLD: f32 = 5.0;
 
 impl Nokkvi {
-    /// Mouse pressed — record origin for threshold detection.
-    /// Only starts tracking if the browsing panel is open and the press
-    /// is in the browser zone (right side of split view).
-    pub(crate) fn handle_cross_pane_drag_pressed(&mut self) -> Task<Message> {
-        // Only relevant when browsing panel is visible
-        let panel = match self.browsing_panel.as_ref() {
-            Some(p) => p,
-            None => return Task::none(),
-        };
+    /// Look up the currently-hovered slot for the browsing panel's active
+    /// view. Returns `None` when no browsing panel is open or the cursor
+    /// is not over any slot in the active view (chrome, gaps, queue pane).
+    fn browsing_pane_hovered_slot(&self) -> Option<HoveredSlot> {
+        let panel = self.browsing_panel.as_ref()?;
+        match panel.active_view {
+            views::BrowsingView::Albums => self.albums_page.common.slot_list.hovered_slot,
+            views::BrowsingView::Songs => self.songs_page.common.slot_list.hovered_slot,
+            views::BrowsingView::Artists => self.artists_page.common.slot_list.hovered_slot,
+            views::BrowsingView::Genres => self.genres_page.common.slot_list.hovered_slot,
+            views::BrowsingView::Similar => self.similar_page.common.slot_list.hovered_slot,
+        }
+    }
 
+    /// Mouse pressed — record origin for threshold detection.
+    /// Only arms the drag state machine when the cursor is over a populated
+    /// slot in the browsing panel's active view; chrome, queue pane, and
+    /// empty-trailing-slot presses are no-ops.
+    pub(crate) fn handle_cross_pane_drag_pressed(&mut self) -> Task<Message> {
         // When Ctrl or Shift is held the user is multi-selecting, not starting
         // a drag.  Bail out to avoid clearing the selection state — the button's
         // on_press (which fires on mouse-up) will handle the click via
@@ -38,89 +54,20 @@ impl Nokkvi {
             return Task::none();
         }
 
-        let position = self.last_cursor_position;
-
-        // Check if cursor is in the browser pane (right portion of split).
-        // Split is 55% queue / 45% browser, so browser starts at 55% of window width.
-        let browser_start_x = self.window.width * 0.55;
-        if position.x < browser_start_x {
-            return Task::none();
-        }
-
-        // Store press origin — we don't activate drag yet until threshold is exceeded.
-        self.cross_pane_drag_press_origin = Some(position);
-
-        // --- Compute which item was pressed from cursor Y position ---
-        //
-        // We CANNOT rely on button's SlotListSetOffset being processed yet because
-        // Iced buttons fire on mouse RELEASE, not mouse DOWN. In a click-and-drag
-        // flow the button never fires. So we compute the slot from cursor position.
-        //
-        // Browser pane layout from window top:
-        //   nav_bar (32px) + tab_bar (36px) + view_header (48px) = 116px
-        //   then slot list slots start (with SLOT_LIST_CONTAINER_PADDING of 10px)
-        use crate::widgets::slot_list::{NAV_BAR_HEIGHT, SLOT_SPACING, TAB_BAR_HEIGHT};
-        const CHROME_TOP: f32 = NAV_BAR_HEIGHT + TAB_BAR_HEIGHT;
-
-        // Use the same SlotListConfig the view uses:
-        // browser_height = window_height - TAB_BAR_HEIGHT, chrome = chrome_height_with_header()
-        use crate::widgets::slot_list::{SlotListConfig, chrome_height_with_header};
-        let browser_height = self.window.height - TAB_BAR_HEIGHT;
-        let config =
-            SlotListConfig::with_dynamic_slots(browser_height, chrome_height_with_header());
-        let row_height = config.row_height();
-
-        // View header contributes to chrome: chrome_height_with_header() = nav(30)+player(56)+header(48)
-        // From the view's perspective, the chrome above the slot list is header(48) only
-        // (nav and player are outside the view's coordinate space).
-        // But from window coordinates: chrome_above_slot_list = nav(30) + tab(36) + header(48) = 114
-        // Plus half the container padding to account for top spacing.
-        let slot_list_start_y: f32 = CHROME_TOP + 48.0 + 5.0; // 5.0 ≈ half of SLOT_LIST_CONTAINER_PADDING
-
-        let slot_list_y = position.y - slot_list_start_y;
-        if slot_list_y < 0.0 {
-            return Task::none();
-        }
-
-        let slot_step = row_height + SLOT_SPACING;
-        let clicked_slot = (slot_list_y / slot_step).floor() as usize;
-        if clicked_slot >= config.slot_count {
-            return Task::none();
-        }
-
-        // Get the active view's SlotListView and total items.
-        // Sync slot_count so slot_to_item_index uses the same layout as rendering.
-        let (slot_list, total_items) = match panel.active_view {
-            views::BrowsingView::Albums => (
-                &mut self.albums_page.common.slot_list,
-                self.library.albums.len(),
-            ),
-            views::BrowsingView::Songs => (
-                &mut self.songs_page.common.slot_list,
-                self.library.songs.len(),
-            ),
-            views::BrowsingView::Artists => (
-                &mut self.artists_page.common.slot_list,
-                self.library.artists.len(),
-            ),
-            views::BrowsingView::Genres => (
-                &mut self.genres_page.common.slot_list,
-                self.library.genres.len(),
-            ),
-            views::BrowsingView::Similar => (
-                &mut self.similar_page.common.slot_list,
-                self.similar_songs.as_ref().map_or(0, |s| s.songs.len()),
-            ),
+        // Press only counts as drag-start when the cursor is over a real
+        // browser-pane slot. The per-slot `mouse_area::on_enter` already
+        // wrote that into the active view's `hovered_slot`, so:
+        //   - cursor over chrome / queue pane / different view → None,
+        //     no drag armed.
+        //   - cursor over a trailing empty browser slot → no item to drag,
+        //     no drag armed.
+        //   - cursor over a populated slot → arm with that item index.
+        let pressed_index = match self.browsing_pane_hovered_slot() {
+            Some(HoveredSlot::Item { item_index, .. }) => item_index,
+            Some(HoveredSlot::Empty { .. }) | None => return Task::none(),
         };
-        slot_list.slot_count = config.slot_count;
-        let viewport_offset = slot_list.viewport_offset;
 
-        // Delegate to slot_to_item_index — single source of truth for the
-        // effective_center calculation, matching build_slot_list_slots exactly.
-        let pressed_index = match slot_list.slot_to_item_index(clicked_slot, total_items) {
-            Some(idx) => idx,
-            None => return Task::none(),
-        };
+        self.cross_pane_drag_press_origin = Some(self.last_cursor_position);
         self.cross_pane_drag_pressed_item = Some(pressed_index);
 
         // Selection mutation is deferred to `handle_cross_pane_drag_moved`
@@ -135,10 +82,7 @@ impl Nokkvi {
         // `SlotListSelectionToggle` retain full ownership of the
         // click-to-select behaviour.
 
-        debug!(
-            " [DRAG] Press on browser pane: slot={}, item_index={} (viewport={})",
-            clicked_slot, pressed_index, viewport_offset
-        );
+        debug!(" [DRAG] Press on browser pane: item_index={pressed_index}");
 
         Task::none()
     }
@@ -198,23 +142,15 @@ impl Nokkvi {
                         origin,
                         cursor: position,
                         center_index: self.cross_pane_drag_pressed_item,
-                        drop_target_slot: None,
                         selection_count,
                     });
                 }
-            } else if self.cross_pane_drag.is_some() {
-                // Active drag — compute drop target slot before mutating drag state
-                let queue_end_x = self.window.width * 0.55;
-                let target_slot = if position.x < queue_end_x {
-                    self.compute_queue_drop_slot(position.y)
-                } else {
-                    None
-                };
-
-                if let Some(drag) = &mut self.cross_pane_drag {
-                    drag.cursor = position;
-                    drag.drop_target_slot = target_slot;
-                }
+            } else if let Some(drag) = self.cross_pane_drag.as_mut() {
+                // Active drag — drop target is read structurally from the
+                // queue's hover state at render / release time, so the only
+                // mutation here is to track the cursor for the floating
+                // preview overlay.
+                drag.cursor = position;
             }
         }
 
@@ -233,26 +169,21 @@ impl Nokkvi {
             None => return Task::none(), // No active drag
         };
 
-        let position = self.last_cursor_position;
-
-        // Check if cursor is in the queue pane (left portion: x < 55% of window width)
-        let queue_end_x = self.window.width * 0.55;
-        if position.x >= queue_end_x {
-            debug!(" [DRAG] Cross-pane drag cancelled: dropped outside queue zone");
-            return Task::none();
-        }
-
-        debug!(
-            " [DRAG] Cross-pane drop on queue at ({:.0}, {:.0})",
-            position.x, position.y
-        );
-
-        let queue_insert_index = self.compute_queue_drop_slot(position.y);
+        // Drop is over the queue pane iff a queue slot is currently hovered.
+        // No cursor-X check needed — the per-slot `mouse_area` only fires
+        // `on_enter` when the cursor is inside a slot's rendered bounds.
+        let queue_insert_index = match self.compute_queue_drop_slot() {
+            Some(idx) => idx,
+            None => {
+                debug!(" [DRAG] Cross-pane drag cancelled: released outside queue slots");
+                return Task::none();
+            }
+        };
 
         // Store the target position for the update handler to consume
-        self.pending_queue_insert_position = queue_insert_index;
+        self.pending_queue_insert_position = Some(queue_insert_index);
 
-        debug!(" [DRAG] Drop target queue index: {:?}", queue_insert_index);
+        debug!(" [DRAG] Drop target queue index: {queue_insert_index}");
 
         // For single-item drags: set selected_offset so AddCenterToQueue picks up
         // the correct item. This is necessary because the button's SlotListSetOffset
@@ -550,57 +481,26 @@ impl Nokkvi {
         .into()
     }
 
-    /// Compute the queue item index for a given cursor Y coordinate.
+    /// Resolve the queue insertion index for the current cross-pane drag.
     ///
-    /// Translates window Y → slot list slot → absolute queue item index.
-    /// Returns `Some(index)` when pointing at a valid slot, `None` to append.
-    fn compute_queue_drop_slot(&self, cursor_y: f32) -> Option<usize> {
-        use crate::widgets::slot_list::{
-            EDIT_BAR_HEIGHT, SELECT_HEADER_HEIGHT, SLOT_SPACING, SlotListConfig,
-            chrome_height_with_header,
-        };
-
-        let edit_bar_height: f32 =
-            if self.playlist_edit.is_some() || self.active_playlist_info.is_some() {
-                EDIT_BAR_HEIGHT
-            } else {
-                0.0
-            };
-        let select_header_visible = self.queue_page.column_visibility.select;
-
-        // Match the queue view's chrome height: base header + edit bar +
-        // tri-state select header (24px) when the queue's Select column is on.
-        let chrome_height = chrome_height_with_header()
-            + edit_bar_height
-            + if select_header_visible {
-                SELECT_HEADER_HEIGHT
-            } else {
-                0.0
-            };
-        let config = SlotListConfig::with_dynamic_slots(self.window.height, chrome_height);
-        let row_height = config.row_height();
-
-        let slot_list_start_y = crate::widgets::slot_list::queue_slot_list_start_y(
-            edit_bar_height,
-            select_header_visible,
-        );
-        let slot_list_y = cursor_y - slot_list_start_y;
-
-        if slot_list_y < 0.0 {
-            return Some(0);
-        }
-
-        let slot_step = row_height + SLOT_SPACING;
-        let hovered_slot = (slot_list_y / slot_step).floor() as usize;
-
-        if hovered_slot >= config.slot_count {
-            None
-        } else {
-            let total_queue = self.library.queue_songs.len();
-            self.queue_page
-                .common
-                .slot_list
-                .slot_to_item_index(hovered_slot, total_queue)
+    /// Reads `queue_page.common.slot_list.hovered_slot`, which the per-slot
+    /// `mouse_area::on_enter` writes whenever the cursor crosses into a
+    /// queue slot's rendered bounds. `HoveredSlot::Item { item_index }`
+    /// maps to insert-before-that-item; `HoveredSlot::Empty` (cursor on a
+    /// trailing empty slot — top-packing tail or queue end) maps to
+    /// insert-at-end. `None` means the cursor is not over any queue slot
+    /// at all — either it is on chrome, a different pane, or completely
+    /// outside the slot list.
+    ///
+    /// No chrome reconstruction, no `cursor_y → slot` math, no stored
+    /// `slot_count` divergence — the slot index baked into the message
+    /// came from the same `effective_center` computation
+    /// `build_slot_list_slots` used to render the slots, so forward and
+    /// reverse projections cannot disagree.
+    pub(crate) fn compute_queue_drop_slot(&self) -> Option<usize> {
+        match self.queue_page.common.slot_list.hovered_slot? {
+            HoveredSlot::Item { item_index, .. } => Some(item_index),
+            HoveredSlot::Empty { .. } => Some(self.library.queue_songs.len()),
         }
     }
 }

@@ -189,6 +189,10 @@ impl AlbumsPage {
                     ))
                 }
             },
+            Some(crate::widgets::slot_list::SlotHoverCallback::new(
+                |h| AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::HoverEnterSlot(h)),
+                |h| AlbumsMessage::SlotList(crate::widgets::SlotListPageMessage::HoverExitSlot(h)),
+            )),
             |entry, ctx| match entry {
                 SlotListEntry::Parent(album) => {
                     let row = self.render_album_row(

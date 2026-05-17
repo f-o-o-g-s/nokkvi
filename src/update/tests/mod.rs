@@ -9,6 +9,7 @@
 mod artwork_drag;
 mod boat;
 mod components;
+mod cross_pane_drag;
 mod default_playlist_picker;
 mod general;
 mod hotkeys;

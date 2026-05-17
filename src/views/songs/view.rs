@@ -178,6 +178,10 @@ impl SongsPage {
                     ))
                 }
             },
+            Some(crate::widgets::slot_list::SlotHoverCallback::new(
+                |h| SongsMessage::SlotList(crate::widgets::SlotListPageMessage::HoverEnterSlot(h)),
+                |h| SongsMessage::SlotList(crate::widgets::SlotListPageMessage::HoverExitSlot(h)),
+            )),
             |song, ctx| {
                 // Clone all data from song at the start to avoid lifetime issues
                 let song_title = song.title.clone();

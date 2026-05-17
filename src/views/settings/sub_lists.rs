@@ -311,6 +311,7 @@ impl SettingsPage {
             SettingsMessage::SlotListUp,
             SettingsMessage::SlotListDown,
             super::settings_seek_to(total_colors),
+            None,
             move |hex_color, ctx| {
                 let is_editing = editing_color_index == Some(ctx.item_index);
                 let ctx = SlotRenderContext {

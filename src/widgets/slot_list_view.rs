@@ -1,5 +1,45 @@
 use std::time::Instant;
 
+/// Identifies the slot under the cursor in a slot list.
+///
+/// Published by `mouse_area::on_enter` / `on_exit` for each slot in
+/// `build_slot_list_slots` so the cross-pane drag handlers can resolve
+/// "what is the cursor over" by asking the rendered widget tree instead of
+/// reconstructing slot positions from chrome constants. Carries both the
+/// visual slot index (for positioning the drop indicator) and the resolved
+/// item index baked in at render time using the same `effective_center`
+/// math as the slots themselves, so forward (cursor→slot→item) and any
+/// reverse (item→slot→y) projection cannot disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HoveredSlot {
+    /// Cursor is over a slot whose row maps to `item_index` in the
+    /// underlying buffer.
+    Item {
+        slot_index: usize,
+        item_index: usize,
+    },
+    /// Cursor is over a slot whose row is empty (top-packing, end of list,
+    /// or zero items). Drop targets treat this as "insert at end".
+    Empty { slot_index: usize },
+}
+
+impl HoveredSlot {
+    /// The visual slot index inside the slot list (0..slot_count).
+    pub fn slot_index(self) -> usize {
+        match self {
+            HoveredSlot::Item { slot_index, .. } | HoveredSlot::Empty { slot_index } => slot_index,
+        }
+    }
+
+    /// The resolved item index, or `None` if the hovered slot is empty.
+    pub fn item_index(self) -> Option<usize> {
+        match self {
+            HoveredSlot::Item { item_index, .. } => Some(item_index),
+            HoveredSlot::Empty { .. } => None,
+        }
+    }
+}
+
 /// Slot list view component for displaying items in a 9-slot circular navigation interface.
 /// This is the signature UI pattern from the original QML/Slint implementations.
 ///
@@ -39,6 +79,11 @@ pub struct SlotListView {
     pub selected_indices: std::collections::BTreeSet<usize>,
     /// The index where a shift-click range selection starts from
     pub anchor_index: Option<usize>,
+    /// Slot under the cursor right now, published by per-slot `mouse_area`
+    /// in `build_slot_list_slots`. `None` when the cursor is outside every
+    /// slot's bounds (chrome, gap, different pane). Read by the cross-pane
+    /// drag handlers in lieu of cursor-Y → slot chrome math.
+    pub hovered_slot: Option<HoveredSlot>,
 }
 
 impl SlotListView {
@@ -53,6 +98,7 @@ impl SlotListView {
             flash_center_at: None,
             selected_indices: std::collections::BTreeSet::new(),
             anchor_index: None,
+            hovered_slot: None,
         }
     }
 

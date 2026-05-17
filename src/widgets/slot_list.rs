@@ -12,8 +12,35 @@ use iced::{
 
 use crate::{
     theme,
-    widgets::{SlotListPageMessage, SlotListView},
+    widgets::{HoveredSlot, SlotListPageMessage, SlotListView},
 };
+
+/// Per-slot hover callbacks for `build_slot_list_slots`. Each slot is
+/// wrapped in a `mouse_area` that fires `on_enter` when the cursor crosses
+/// into the slot's rendered bounds, and `on_exit` when it leaves. The
+/// callbacks receive a `HoveredSlot` describing the slot index AND the
+/// resolved item index baked in at render time — so cross-pane drag
+/// handlers consume cursor → slot → item mapping straight from the widget
+/// tree, no chrome math needed.
+///
+/// `None` at a call site (settings, default-playlist picker) skips the
+/// wrapping entirely so non-drag callers pay zero overhead.
+pub(crate) struct SlotHoverCallback<'a, Message> {
+    pub(crate) on_enter: Box<dyn Fn(HoveredSlot) -> Message + 'a>,
+    pub(crate) on_exit: Box<dyn Fn(HoveredSlot) -> Message + 'a>,
+}
+
+impl<'a, Message> SlotHoverCallback<'a, Message> {
+    pub(crate) fn new(
+        on_enter: impl Fn(HoveredSlot) -> Message + 'a,
+        on_exit: impl Fn(HoveredSlot) -> Message + 'a,
+    ) -> Self {
+        Self {
+            on_enter: Box::new(on_enter),
+            on_exit: Box::new(on_exit),
+        }
+    }
+}
 
 /// Pre-computed font and sizing metrics for slot list rows.
 ///
@@ -231,9 +258,6 @@ pub(crate) const NAV_BAR_HEIGHT: f32 = 32.0;
 /// Height of the view header row (sort controls, search, etc.).
 pub(crate) const VIEW_HEADER_HEIGHT: f32 = 48.0;
 
-/// Height of the playlist edit / playlist context bar.
-pub(crate) const EDIT_BAR_HEIGHT: f32 = 32.0;
-
 /// Height of the browsing panel tab bar.
 pub(crate) const TAB_BAR_HEIGHT: f32 = 32.0;
 
@@ -259,33 +283,6 @@ pub(crate) fn chrome_height_with_header() -> f32 {
             0.0
         };
         player_bar_height() + VIEW_HEADER_HEIGHT + top_bar_strip
-    }
-}
-
-/// Y-coordinate where the queue slot list begins in window space.
-///
-/// Encapsulates the nav-layout / `show_top_bar_strip` branching that was
-/// previously inlined in `app_view.rs` and `cross_pane_drag.rs`.
-///
-/// `edit_bar_height`: extra height from playlist edit/context bars (typically 0 or 32).
-/// `select_header_visible`: when the queue has its multi-select column on,
-/// the tri-state header bar adds another `SELECT_HEADER_HEIGHT` between the
-/// view header and the first slot row.
-pub(crate) fn queue_slot_list_start_y(edit_bar_height: f32, select_header_visible: bool) -> f32 {
-    let base = if crate::theme::is_top_nav() {
-        NAV_BAR_HEIGHT + VIEW_HEADER_HEIGHT + edit_bar_height
-    } else {
-        let top_strip = if crate::theme::show_top_bar_strip() {
-            super::track_info_strip::STRIP_HEIGHT_WITH_SEPARATOR
-        } else {
-            0.0
-        };
-        top_strip + VIEW_HEADER_HEIGHT + edit_bar_height
-    };
-    base + if select_header_visible {
-        SELECT_HEADER_HEIGHT
-    } else {
-        0.0
     }
 }
 
@@ -395,35 +392,6 @@ impl SlotListConfig {
 
 /// Render a slot list view with custom item rendering
 ///
-/// # Arguments
-/// * `sl` - The SlotListView managing viewport offset
-/// * `items` - Slice of items to render
-/// * `config` - Slot list configuration
-/// * `render_item` - Closure to render each item, receives (item_index, item, slot_index, is_center, opacity, row_height, scale_factor)
-///   Note: The closure should clone/copy any data it needs from the item, as the returned Element's lifetime
-///   is independent of the item's lifetime.
-///
-/// # Returns
-/// Element containing the slot list view
-pub(crate) fn slot_list_view<'a, T, Message: 'a>(
-    sl: &SlotListView,
-    items: &[T],
-    config: &SlotListConfig,
-    mut render_item: impl FnMut(&T, SlotListRowContext) -> Element<'a, Message>,
-) -> Element<'a, Message> {
-    let slots = build_slot_list_slots(sl, items, config, &mut render_item);
-
-    container(
-        column(slots)
-            .spacing(3)
-            .width(Length::Fill)
-            .height(Length::Fill),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .into()
-}
-
 /// Render a slot list view with scroll support
 ///
 /// Wraps the slot list in a mouse_area that captures scroll events and emits
@@ -440,6 +408,7 @@ pub(crate) fn slot_list_view<'a, T, Message: 'a>(
 ///
 /// # Returns
 /// Element containing the scrollable slot list view
+#[expect(clippy::too_many_arguments)] // 7 args; an options-struct would force boxing on_seek
 pub(crate) fn slot_list_view_with_scroll<'a, T, Message: Clone + 'a>(
     sl: &SlotListView,
     items: &[T],
@@ -447,11 +416,21 @@ pub(crate) fn slot_list_view_with_scroll<'a, T, Message: Clone + 'a>(
     on_scroll_up: Message,
     on_scroll_down: Message,
     on_seek: impl Fn(f32) -> Message + 'a,
-    render_item: impl FnMut(&T, SlotListRowContext) -> Element<'a, Message>,
+    on_hover: Option<SlotHoverCallback<'a, Message>>,
+    mut render_item: impl FnMut(&T, SlotListRowContext) -> Element<'a, Message>,
 ) -> Element<'a, Message> {
     let total_items = items.len();
     let row_height = config.row_height();
-    let inner = slot_list_view(sl, items, config, render_item);
+    let slots = build_slot_list_slots(sl, items, config, &mut render_item, on_hover);
+    let inner: Element<'a, Message> = container(
+        column(slots)
+            .spacing(3)
+            .width(Length::Fill)
+            .height(Length::Fill),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into();
     let inner = wrap_with_scroll(inner, on_scroll_up, on_scroll_down);
     crate::widgets::scroll_indicator::wrap_with_scroll_indicator(
         inner,
@@ -467,7 +446,7 @@ pub(crate) fn slot_list_view_with_scroll<'a, T, Message: Clone + 'a>(
 /// Same as `slot_list_view_with_scroll` but the inner column of slots is a `DragColumn`
 /// that emits drag events via `on_drag_event`. Slot indices in the `DragEvent` are
 /// raw **slot** indices — caller translates to item indices via `viewport_offset`.
-#[expect(clippy::too_many_arguments)] // Mirrors slot_list_view_with_scroll (7 args) +1 on_drag_event; struct would require boxing on_seek
+#[expect(clippy::too_many_arguments)] // Mirrors slot_list_view_with_scroll (8 args) +on_drag_event +drop_indicator_slot; struct would require boxing on_seek
 pub(crate) fn slot_list_view_with_drag<'a, T, Message: Clone + 'a>(
     sl: &SlotListView,
     items: &[T],
@@ -476,8 +455,12 @@ pub(crate) fn slot_list_view_with_drag<'a, T, Message: Clone + 'a>(
     on_scroll_down: Message,
     on_seek: impl Fn(f32) -> Message + 'a,
     on_drag_event: impl Fn(crate::widgets::drag_column::DragEvent) -> Message + 'a,
+    on_hover: Option<SlotHoverCallback<'a, Message>>,
+    drop_indicator_slot: Option<usize>,
     mut render_item: impl FnMut(&T, SlotListRowContext) -> Element<'a, Message>,
 ) -> Element<'a, Message> {
+    use iced::widget::{Space, Stack, stack};
+
     use crate::widgets::drag_column::DragColumn;
 
     let total_items = items.len();
@@ -487,19 +470,50 @@ pub(crate) fn slot_list_view_with_drag<'a, T, Message: Clone + 'a>(
     } else {
         1
     };
-    let slots = build_slot_list_slots(sl, items, config, &mut render_item);
+    let slots = build_slot_list_slots(sl, items, config, &mut render_item, on_hover);
 
-    let inner: Element<'a, Message> = container(
-        DragColumn::from_vec(slots)
-            .spacing(3)
+    let drag_column: Element<'a, Message> = DragColumn::from_vec(slots)
+        .spacing(3)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .on_drag(on_drag_event)
+        .drag_badge_count(badge_count)
+        .into();
+
+    // Drop indicator rendered inside the slot list's own coordinate space,
+    // so its y-position is `slot_index * (row_height + SLOT_SPACING)` with
+    // no chrome math involved. Empty stack when no drag is active.
+    let content: Element<'a, Message> = if let Some(slot_idx) = drop_indicator_slot {
+        let slot_step = row_height + SLOT_SPACING;
+        let indicator_y = ((slot_idx as f32 * slot_step) - SLOT_SPACING / 2.0).max(0.0);
+        let line = container(Space::new())
             .width(Length::Fill)
-            .height(Length::Fill)
-            .on_drag(on_drag_event)
-            .drag_badge_count(badge_count),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .into();
+            .height(Length::Fixed(2.0))
+            .style(|_theme: &iced::Theme| container::Style {
+                background: Some(theme::accent_bright().into()),
+                border: iced::Border {
+                    radius: 2.0.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+        let indicator = container(line).width(Length::Fill).padding(iced::Padding {
+            top: indicator_y,
+            left: 0.0,
+            right: 0.0,
+            bottom: 0.0,
+        });
+        let mut s: Stack<'a, Message> = stack![drag_column];
+        s = s.push(indicator);
+        s.into()
+    } else {
+        drag_column
+    };
+
+    let inner: Element<'a, Message> = container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into();
 
     let inner = wrap_with_scroll(inner, on_scroll_up, on_scroll_down);
     crate::widgets::scroll_indicator::wrap_with_scroll_indicator(
@@ -515,11 +529,19 @@ pub(crate) fn slot_list_view_with_drag<'a, T, Message: Clone + 'a>(
 ///
 /// Shared by `slot_list_view`, `slot_list_view_with_drag`, etc. to avoid duplicating
 /// the effective-center calculation and slot rendering logic.
-fn build_slot_list_slots<'a, T, Message: 'a>(
+///
+/// When `on_hover` is `Some`, each slot is wrapped in a `mouse_area` that
+/// fires `on_enter` / `on_exit` carrying the slot's `HoveredSlot`
+/// (containing both its visual slot index and the resolved item index for
+/// the current viewport offset). Consumers store this on
+/// `SlotListView::hovered_slot` and read it from cross-pane drag handlers
+/// instead of reconstructing slot positions from chrome constants.
+fn build_slot_list_slots<'a, T, Message: Clone + 'a>(
     sl: &SlotListView,
     items: &[T],
     config: &SlotListConfig,
     render_item: &mut impl FnMut(&T, SlotListRowContext) -> Element<'a, Message>,
+    on_hover: Option<SlotHoverCallback<'a, Message>>,
 ) -> Vec<Element<'a, Message>> {
     let row_height = config.row_height();
     let total_items = items.len();
@@ -614,12 +636,29 @@ fn build_slot_list_slots<'a, T, Message: 'a>(
             None
         };
 
-        slots.push(
+        let hover_target: Element<'a, Message> =
             crate::widgets::hover_overlay::HoverOverlay::new(slot_element)
                 .border_radius(slot_list_border_radius())
                 .flash_at(flash)
-                .into(),
-        );
+                .into();
+
+        let wrapped = if let Some(cb) = on_hover.as_ref() {
+            let hovered = match item_index_opt {
+                Some(item_index) => HoveredSlot::Item {
+                    slot_index,
+                    item_index,
+                },
+                None => HoveredSlot::Empty { slot_index },
+            };
+            mouse_area(hover_target)
+                .on_enter((cb.on_enter)(hovered))
+                .on_exit((cb.on_exit)(hovered))
+                .into()
+        } else {
+            hover_target
+        };
+
+        slots.push(wrapped);
     }
 
     slots
@@ -1657,38 +1696,6 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn queue_slot_list_start_y_includes_edit_bar() {
-        // With edit_bar_height=0 and edit_bar_height=32, the difference
-        // should be exactly the edit bar.
-        let base = queue_slot_list_start_y(0.0, false);
-        let with_edit = queue_slot_list_start_y(EDIT_BAR_HEIGHT, false);
-        assert_eq!(
-            with_edit - base,
-            EDIT_BAR_HEIGHT,
-            "edit bar height must be additive"
-        );
-    }
-
-    #[test]
-    fn queue_slot_list_start_y_includes_select_header() {
-        // The tri-state select-all header sits between the view header and
-        // the first slot row when the queue's Select column is on; the
-        // start-y must shift down by exactly its height, otherwise the
-        // cross-pane drop indicator and slot-mapping math land 24 px high.
-        let base = queue_slot_list_start_y(0.0, false);
-        let with_select = queue_slot_list_start_y(0.0, true);
-        assert_eq!(
-            with_select - base,
-            SELECT_HEADER_HEIGHT,
-            "select header height must be additive"
-        );
-
-        // And it stacks with the edit bar, not replaces it.
-        let with_both = queue_slot_list_start_y(EDIT_BAR_HEIGHT, true);
-        assert_eq!(with_both - base, EDIT_BAR_HEIGHT + SELECT_HEADER_HEIGHT);
     }
 
     #[test]

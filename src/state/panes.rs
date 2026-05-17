@@ -24,9 +24,6 @@ pub struct CrossPaneDragState {
     /// threshold is exceeded, so the preview is decoupled from subsequent
     /// state changes (e.g., `selected_offset` being cleared by scrolling).
     pub center_index: Option<usize>,
-    /// Queue slot the cursor is currently hovering over (for drop indicator).
-    /// Updated on every cursor move; `None` when outside the queue pane.
-    pub drop_target_slot: Option<usize>,
     /// Number of items in this drag. 1 = single item, >1 = batch from multi-selection.
     /// When >1, `handle_cross_pane_drag_released` skips `set_selected()` and lets
     /// `AddCenterToQueue` read the existing `selected_indices` on the slot list.

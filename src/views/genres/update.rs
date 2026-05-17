@@ -189,6 +189,16 @@ impl GenresPage {
                     SlotListPageMessage::CenterOnPlaying => {
                         (Task::none(), GenresAction::CenterOnPlaying)
                     }
+                    SlotListPageMessage::HoverEnterSlot(h) => {
+                        self.common.slot_list.hovered_slot = Some(h);
+                        (Task::none(), GenresAction::None)
+                    }
+                    SlotListPageMessage::HoverExitSlot(h) => {
+                        if self.common.slot_list.hovered_slot == Some(h) {
+                            self.common.slot_list.hovered_slot = None;
+                        }
+                        (Task::none(), GenresAction::None)
+                    }
                     // Exhaustiveness: variants handled by macro above come through
                     // the Ok arm; these are forwarded by view-level emit sites that
                     // wrap common messages — treat as no-op here.

@@ -559,100 +559,26 @@ impl Nokkvi {
             });
 
             stack = stack.push(drag_overlay);
-
-            // Drop indicator: thin accent line between queue slots showing insertion point
-            if let Some(slot) = drag.drop_target_slot {
-                use crate::widgets::slot_list::{
-                    EDIT_BAR_HEIGHT, SELECT_HEADER_HEIGHT, SLOT_SPACING, SlotListConfig,
-                    chrome_height_with_header,
-                };
-
-                // Match the queue view's chrome height calculation (edit bar adds 32px,
-                // tri-state select header adds 24px when the queue's Select column is on)
-                let edit_bar_height: f32 =
-                    if self.playlist_edit.is_some() || self.active_playlist_info.is_some() {
-                        EDIT_BAR_HEIGHT
-                    } else {
-                        0.0
-                    };
-                let select_header_visible = self.queue_page.column_visibility.select;
-                let chrome_height = chrome_height_with_header()
-                    + edit_bar_height
-                    + if select_header_visible {
-                        SELECT_HEADER_HEIGHT
-                    } else {
-                        0.0
-                    };
-                let config = SlotListConfig::with_dynamic_slots(self.window.height, chrome_height);
-                let row_height = config.row_height();
-                let slot_spacing = SLOT_SPACING;
-                let slot_step = row_height + slot_spacing;
-
-                // Account for side nav bar when computing X offsets for the drop indicator.
-                let sidebar_width = self.window.width - self.content_pane_width();
-
-                let slot_list_start_y = crate::widgets::slot_list::queue_slot_list_start_y(
-                    edit_bar_height,
-                    select_header_visible,
-                );
-
-                // Convert the item index back to a slot position for rendering.
-                // We need the slot that corresponds to this item in the current viewport.
-                let total_queue = self.library.queue_songs.len();
-                let viewport_offset = self.queue_page.common.slot_list.viewport_offset;
-
-                // Find which visual slot this item index maps to
-                let visual_slot = if total_queue == 0 {
-                    0
-                } else {
-                    // slot = item_index - viewport_offset + effective_center
-                    let effective_center = if total_queue < config.slot_count {
-                        0
-                    } else {
-                        let items_at_and_after = total_queue.saturating_sub(viewport_offset);
-                        let end_push = config.slot_count.saturating_sub(items_at_and_after);
-                        config.center_slot.min(viewport_offset).max(end_push)
-                    };
-                    (slot as i32 - viewport_offset as i32 + effective_center as i32).max(0) as usize
-                };
-
-                // Position the line at the TOP edge of the hovered slot (between it and slot above)
-                let line_y =
-                    slot_list_start_y + (visual_slot as f32 * slot_step) - (slot_spacing / 2.0);
-
-                // Queue pane width: FillPortion(55) of the content area.
-                // Content area = window_width - sidebar_width.
-                let content_width = self.window.width - sidebar_width;
-                let queue_width = content_width * 55.0 / 100.0;
-                let indicator_left = sidebar_width + 8.0;
-
-                let indicator_line = container(
-                    container(iced::widget::Space::new())
-                        .width(Length::Fixed(queue_width - 16.0))
-                        .height(Length::Fixed(2.0))
-                        .style(|_theme: &iced::Theme| container::Style {
-                            background: Some(crate::theme::accent_bright().into()),
-                            border: iced::Border {
-                                radius: 2.0.into(),
-                                ..Default::default()
-                            },
-                            ..Default::default()
-                        }),
-                )
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .padding(iced::Padding {
-                    top: line_y.max(0.0),
-                    left: indicator_left,
-                    right: 0.0,
-                    bottom: 0.0,
-                });
-
-                stack = stack.push(indicator_line);
-            }
+            // The drop indicator is rendered inside the queue's own slot
+            // list area (see `slot_list_view_with_drag`) using the slot
+            // index recorded by per-slot `mouse_area::on_enter`, so its
+            // y-position is in the slot list's coordinate space — no
+            // chrome reconstruction needed at the window level.
         }
 
         stack.into()
+    }
+
+    /// Visual slot index for the cross-pane drag's drop indicator, or
+    /// `None` if no drag is active or the cursor is not over any queue
+    /// slot. Read by [`crate::views::QueueViewData::drop_indicator_slot`].
+    fn cross_pane_drop_indicator_slot(&self) -> Option<usize> {
+        self.cross_pane_drag.as_ref()?;
+        self.queue_page
+            .common
+            .slot_list
+            .hovered_slot
+            .map(|h| h.slot_index())
     }
 
     // -------------------------------------------------------------------------
@@ -786,6 +712,7 @@ impl Nokkvi {
                 open_menu: self.open_menu.as_ref(),
                 show_default_playlist_chip: self.queue_show_default_playlist,
                 default_playlist_name: &self.default_playlist_name,
+                drop_indicator_slot: self.cross_pane_drop_indicator_slot(),
             };
 
             let queue_pane = self.queue_page.view(queue_view_data).map(Message::Queue);
@@ -1038,6 +965,7 @@ impl Nokkvi {
                     open_menu: self.open_menu.as_ref(),
                     show_default_playlist_chip: self.queue_show_default_playlist,
                     default_playlist_name: &self.default_playlist_name,
+                    drop_indicator_slot: self.cross_pane_drop_indicator_slot(),
                 };
                 self.queue_page.view(view_data).map(Message::Queue)
             }

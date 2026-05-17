@@ -165,6 +165,7 @@ impl SettingsPage {
             SettingsMessage::SlotListUp,
             SettingsMessage::SlotListDown,
             super::settings_seek_to(entries_owned.len()),
+            None,
             move |entry, ctx| {
                 let is_editing = editing_index == Some(ctx.item_index);
                 // All headers are always expanded (no drill-down at Level 2)
@@ -524,6 +525,7 @@ impl SettingsPage {
                 SettingsMessage::SlotListUp,
                 SettingsMessage::SlotListDown,
                 super::settings_seek_to(fonts_owned.len()),
+                None,
                 move |font_name, ctx| {
                     let ctx = SlotRenderContext {
                         item_index: ctx.item_index,

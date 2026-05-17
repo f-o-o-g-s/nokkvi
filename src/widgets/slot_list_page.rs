@@ -3,7 +3,7 @@
 //! Provides common functionality for slot-list-based views (Albums, Artists, Songs, Genres, Playlists).
 //! Eliminates ~800 lines of duplicated code by abstracting common patterns.
 
-use crate::widgets::{SlotListView, view_header::SortMode};
+use crate::widgets::{SlotListView, slot_list_view::HoveredSlot, view_header::SortMode};
 
 /// Common state shared by all slot-list-based views
 #[derive(Debug)]
@@ -70,6 +70,19 @@ pub enum SlotListPageMessage {
     SearchFocused(bool),
     SortModeSelected(crate::widgets::view_header::SortMode),
     ToggleSortOrder,
+    /// Cursor entered a slot's bounds in this view. Published by
+    /// per-slot `mouse_area::on_enter` in `build_slot_list_slots`. Stored
+    /// on `SlotListView.hovered_slot` so cross-pane drag handlers can
+    /// resolve "which slot is the cursor over" structurally without any
+    /// chrome math. Carries both the visual slot index (for the drop
+    /// indicator) and the resolved item index (baked in at render time
+    /// with the same `effective_center` math the slots use).
+    HoverEnterSlot(HoveredSlot),
+    /// Cursor left a slot's bounds. Idempotent: the handler clears
+    /// `hovered_slot` only if it still matches this payload, so the
+    /// move-between-adjacent-slots sequence (slot N exit + slot M enter,
+    /// either order) lands on `Some(M)` regardless of dispatch order.
+    HoverExitSlot(HoveredSlot),
 }
 
 ///
@@ -355,6 +368,16 @@ impl SlotListPageState {
             SlotListPageMessage::ToggleSortOrder => self.handle_toggle_sort_order(),
             SlotListPageMessage::RefreshViewData => SlotListPageAction::RefreshViewData,
             SlotListPageMessage::CenterOnPlaying => SlotListPageAction::CenterOnPlaying,
+            SlotListPageMessage::HoverEnterSlot(h) => {
+                self.slot_list.hovered_slot = Some(h);
+                SlotListPageAction::None
+            }
+            SlotListPageMessage::HoverExitSlot(h) => {
+                if self.slot_list.hovered_slot == Some(h) {
+                    self.slot_list.hovered_slot = None;
+                }
+                SlotListPageAction::None
+            }
         }
     }
 

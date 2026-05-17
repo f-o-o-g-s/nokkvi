@@ -172,6 +172,10 @@ impl GenresPage {
                     ))
                 }
             },
+            Some(crate::widgets::slot_list::SlotHoverCallback::new(
+                |h| GenresMessage::SlotList(crate::widgets::SlotListPageMessage::HoverEnterSlot(h)),
+                |h| GenresMessage::SlotList(crate::widgets::SlotListPageMessage::HoverExitSlot(h)),
+            )),
             |entry, ctx| match entry {
                 SlotListEntry::Parent(genre) => {
                     let row = self.render_genre_row(

@@ -98,6 +98,11 @@ pub struct QueueViewData<'a> {
     pub show_default_playlist_chip: bool,
     /// Current default-playlist display name (empty when no default set).
     pub default_playlist_name: &'a str,
+    /// Visual slot index where the cross-pane-drag drop indicator should
+    /// draw — `Some` only when a drag is active and the cursor is over a
+    /// queue slot. The queue view renders a 2 px accent line at the top
+    /// of this slot inside its slot-list area (no chrome math).
+    pub drop_indicator_slot: Option<usize>,
 }
 
 /// Context menu entries for queue items

@@ -406,6 +406,10 @@ impl SimilarPage {
                     ))
                 }
             },
+            Some(crate::widgets::slot_list::SlotHoverCallback::new(
+                |h| SimilarMessage::SlotList(SlotListPageMessage::HoverEnterSlot(h)),
+                |h| SimilarMessage::SlotList(SlotListPageMessage::HoverExitSlot(h)),
+            )),
             |song, ctx| {
                 let song_title = song.title.clone();
                 let song_artist = song.artist.clone();

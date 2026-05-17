@@ -51,7 +51,7 @@ pub(crate) use nav_bar::{NavBarMessage, NavBarViewData, NavView, nav_bar};
 pub(crate) use player_bar::{PlayerBarMessage, PlayerBarViewData, player_bar};
 pub(crate) use side_nav_bar::{SideNavBarData, side_nav_bar};
 pub(crate) use slot_list_page::{SlotListPageAction, SlotListPageMessage, SlotListPageState};
-pub(crate) use slot_list_view::SlotListView;
+pub(crate) use slot_list_view::{HoveredSlot, SlotListView};
 pub(crate) use volume_slider::{SliderVariant, volume_slider};
 
 /// 1px light line for 3D inset effect (top of player bar/sections)

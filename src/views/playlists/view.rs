@@ -260,6 +260,18 @@ impl PlaylistsPage {
                     ))
                 }
             },
+            Some(crate::widgets::slot_list::SlotHoverCallback::new(
+                |h| {
+                    PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::HoverEnterSlot(
+                        h,
+                    ))
+                },
+                |h| {
+                    PlaylistsMessage::SlotList(crate::widgets::SlotListPageMessage::HoverExitSlot(
+                        h,
+                    ))
+                },
+            )),
             |entry, ctx| match entry {
                 SlotListEntry::Parent(playlist) => {
                     let row = self.render_playlist_row(

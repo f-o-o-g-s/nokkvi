@@ -164,6 +164,16 @@ impl ArtistsPage {
                     SlotListPageMessage::CenterOnPlaying => {
                         (Task::none(), ArtistsAction::CenterOnPlaying)
                     }
+                    SlotListPageMessage::HoverEnterSlot(h) => {
+                        self.common.slot_list.hovered_slot = Some(h);
+                        (Task::none(), ArtistsAction::None)
+                    }
+                    SlotListPageMessage::HoverExitSlot(h) => {
+                        if self.common.slot_list.hovered_slot == Some(h) {
+                            self.common.slot_list.hovered_slot = None;
+                        }
+                        (Task::none(), ArtistsAction::None)
+                    }
                     // Sort/search are handled by impl_expansion_update! above;
                     // these arms exist only for exhaustiveness.
                     SlotListPageMessage::SearchQueryChanged(_)
