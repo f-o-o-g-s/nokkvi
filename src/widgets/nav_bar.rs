@@ -171,33 +171,13 @@ pub(crate) fn colored_icon<'a>(path: &str, size: f32, color: iced::Color) -> ice
 /// In rounded mode separators are hidden by default; pass `force_visible = true`
 /// to keep one visible (used for the trailing separator after the last nav tab).
 fn tab_separator<'a, M: 'a>(force_visible: bool) -> Element<'a, M> {
-    container(Space::new())
-        .width(Length::Fixed(2.0))
-        .height(Length::Fill)
-        .style(move |_| container::Style {
-            background: if theme::is_rounded_mode() && !force_visible {
-                None
-            } else {
-                Some(theme::bg1().into())
-            },
-            ..Default::default()
-        })
-        .into()
+    theme::nav_separator(theme::NavSeparatorAxis::Vertical, force_visible)
 }
 
-/// 2px vertical separator for the metadata info row.
-///
-/// Extracted as a module-level function to avoid duplicating the same closure
-/// in the center section and format info section.
+/// 2px vertical separator for the metadata info row — always visible
+/// (callers want a hard visual divide between fields even in rounded mode).
 fn info_separator<'a, M: 'a>() -> Element<'a, M> {
-    container(Space::new())
-        .width(Length::Fixed(2.0))
-        .height(Length::Fill)
-        .style(move |_| container::Style {
-            background: Some(theme::bg1().into()),
-            ..Default::default()
-        })
-        .into()
+    theme::nav_separator(theme::NavSeparatorAxis::Vertical, true)
 }
 
 /// Height of the rounded underline indicator beneath active/hovered tabs
@@ -525,45 +505,17 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                     }
                     info_row = info_row.push(info_sep());
                 } else {
-                    info_row = info_row.push(info_sep());
-                    info_row = info_row.push(radio_icon());
-
-                    info_row = info_row.push(
-                        text(radio_name.clone())
-                            .size(12.0)
-                            .font(Font {
-                                weight: Weight::Bold,
-                                ..theme::ui_font()
-                            })
-                            .color(theme::now_playing_color()),
+                    // Columnar radio: shared builder so the nav-bar path and
+                    // the track_info_strip path stay in lockstep on field
+                    // labels, ordering, and URL fallback (audit Tier 2 #2.11).
+                    info_row = super::track_info_strip::columnar_radio_strip(
+                        info_row,
+                        radio_name,
+                        icy_title,
+                        icy_artist,
+                        data.radio_url.as_deref(),
+                        info_sep,
                     );
-
-                    if !icy_title.is_empty() {
-                        info_row = info_row.push(info_sep());
-                        info_row = info_row.push(info_field(
-                            "playing:",
-                            icy_title.to_string(),
-                            theme::accent_bright(),
-                        ));
-                    }
-
-                    if !icy_artist.is_empty() {
-                        info_row = info_row.push(info_sep());
-                        info_row = info_row.push(info_field(
-                            "artist:",
-                            icy_artist.to_string(),
-                            theme::selected_color(),
-                        ));
-                    }
-
-                    if icy_title.is_empty()
-                        && icy_artist.is_empty()
-                        && let Some(url) = &data.radio_url
-                    {
-                        info_row = info_row.push(info_sep());
-                        info_row = info_row.push(info_field("url:", url.clone(), theme::fg2()));
-                    }
-                    info_row = info_row.push(info_sep());
                 }
             } else if merged_mode_active {
                 let merged = super::track_info_strip::merged_strip_string(

@@ -273,20 +273,11 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
         .into()
     };
 
-    // Separator line between tabs (horizontal line in vertical layout)
+    // Separator line between tabs (horizontal line in vertical layout).
+    // `force_visible = !is_rounded` mirrors the original lambda: rounded mode
+    // hides the inter-tab rules, flat mode keeps them.
     let separator = || -> Element<'_, NavBarMessage> {
-        container(Space::new())
-            .width(Length::Fill)
-            .height(Length::Fixed(2.0))
-            .style(move |_| container::Style {
-                background: if is_rounded {
-                    None
-                } else {
-                    Some(theme::bg1().into())
-                },
-                ..Default::default()
-            })
-            .into()
+        theme::nav_separator(theme::NavSeparatorAxis::Horizontal, !is_rounded)
     };
 
     // Settings indicator when settings are open (non-interactive)

@@ -11,10 +11,16 @@
 
 use iced::{
     Alignment, Element, Length,
-    widget::{column, container, mouse_area, opaque, row, space, svg, text},
+    widget::{column, container, mouse_area, row, space, svg, text},
 };
 
-use crate::{theme, widgets::hover_overlay::HoverOverlay};
+use crate::{
+    theme,
+    widgets::{
+        hover_overlay::HoverOverlay,
+        sizes::{MODAL_ICON_BUTTON_SIZE, MODAL_ICON_SIZE_LARGE, MODAL_ICON_SIZE_SMALL},
+    },
+};
 
 // =============================================================================
 // State & Messages
@@ -96,55 +102,17 @@ pub(crate) fn about_modal_overlay<'a>(
         })
         .color(theme::accent_bright());
 
-    let close_button: Element<'_, AboutModalMessage> = mouse_area(
-        HoverOverlay::new(
-            container(
-                crate::embedded_svg::svg_widget("assets/icons/x.svg")
-                    .width(Length::Fixed(16.0))
-                    .height(Length::Fixed(16.0))
-                    .style(|_theme, _status| svg::Style {
-                        color: Some(theme::fg3()),
-                    }),
-            )
-            .width(Length::Fixed(28.0))
-            .height(Length::Fixed(28.0))
-            .style(|_theme| container::Style {
-                background: None,
-                border: iced::Border::default(),
-                ..Default::default()
-            })
-            .center(Length::Fixed(28.0)),
-        )
-        .border_radius(theme::ui_border_radius()),
-    )
-    .on_press(AboutModalMessage::Close)
-    .interaction(iced::mouse::Interaction::Pointer)
-    .into();
+    let close_button: Element<'_, AboutModalMessage> = modal_icon_button(
+        "assets/icons/x.svg",
+        MODAL_ICON_SIZE_LARGE,
+        AboutModalMessage::Close,
+    );
 
-    let copy_button: Element<'_, AboutModalMessage> = mouse_area(
-        HoverOverlay::new(
-            container(
-                crate::embedded_svg::svg_widget("assets/icons/copy.svg")
-                    .width(Length::Fixed(14.0))
-                    .height(Length::Fixed(14.0))
-                    .style(|_theme, _status| svg::Style {
-                        color: Some(theme::fg3()),
-                    }),
-            )
-            .width(Length::Fixed(28.0))
-            .height(Length::Fixed(28.0))
-            .style(|_theme| container::Style {
-                background: None,
-                border: iced::Border::default(),
-                ..Default::default()
-            })
-            .center(Length::Fixed(28.0)),
-        )
-        .border_radius(theme::ui_border_radius()),
-    )
-    .on_press(AboutModalMessage::CopyAll)
-    .interaction(iced::mouse::Interaction::Pointer)
-    .into();
+    let copy_button: Element<'_, AboutModalMessage> = modal_icon_button(
+        "assets/icons/copy.svg",
+        MODAL_ICON_SIZE_SMALL,
+        AboutModalMessage::CopyAll,
+    );
 
     let etymology = text("Old Norse nökkvi: a small, humble boat")
         .size(12.0)
@@ -160,7 +128,7 @@ pub(crate) fn about_modal_overlay<'a>(
         .spacing(8)
         .align_y(Alignment::Center);
 
-    let header_sep = separator_line();
+    let header_sep = theme::modal_header_separator();
 
     // ── Boat icon (theme-adaptive multi-color SVG) ──────────────
     let logo_svg = crate::embedded_svg::themed_logo_svg();
@@ -189,31 +157,31 @@ pub(crate) fn about_modal_overlay<'a>(
     // ── Info rows ────────────────────────────────────────────────
     let mut rows: Vec<Element<'_, AboutModalMessage>> = vec![
         info_row("Captain", "foogs"),
-        row_separator(),
+        theme::modal_row_separator(),
         info_row("Shipwrights", "Claude Opus 4.7"),
-        row_separator(),
+        theme::modal_row_separator(),
         info_row("Version", version),
-        row_separator(),
+        theme::modal_row_separator(),
     ];
 
     if !git_hash.is_empty() {
         rows.push(info_row("Commit", git_hash));
-        rows.push(row_separator());
+        rows.push(theme::modal_row_separator());
     }
 
     if !data.server_url.is_empty() {
         rows.push(info_row("Server", data.server_url));
-        rows.push(row_separator());
+        rows.push(theme::modal_row_separator());
     }
 
     if !data.username.is_empty() {
         rows.push(info_row("User", data.username));
-        rows.push(row_separator());
+        rows.push(theme::modal_row_separator());
     }
 
     if let Some(sv) = data.server_version {
         rows.push(info_row("Navidrome", sv));
-        rows.push(row_separator());
+        rows.push(theme::modal_row_separator());
     }
 
     // GPU backend info (via iced's renderer)
@@ -290,24 +258,11 @@ pub(crate) fn about_modal_overlay<'a>(
         .width(Length::Shrink);
 
     // ── Backdrop + opaque wrapper (prevents click-through) ───────
-    let backdrop = mouse_area(
-        container(opaque(dialog_box))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(Alignment::Center)
-            .align_y(Alignment::Center)
-            .style(|_theme| {
-                let mut bg = theme::bg0_hard();
-                bg.a = 0.6;
-                container::Style {
-                    background: Some(bg.into()),
-                    ..Default::default()
-                }
-            }),
-    )
-    .on_press(AboutModalMessage::Close);
-
-    Some(opaque(backdrop))
+    Some(theme::modal_scaffold(
+        dialog_box.into(),
+        AboutModalMessage::Close,
+        theme::MODAL_BACKDROP_ALPHA,
+    ))
 }
 
 // =============================================================================
@@ -347,34 +302,40 @@ fn info_row<'a>(label: &'a str, value: &'a str) -> Element<'a, AboutModalMessage
     .into()
 }
 
-/// A subtle horizontal separator line between rows.
-fn row_separator<'a>() -> Element<'a, AboutModalMessage> {
-    container(space::horizontal())
-        .width(Length::Fill)
-        .height(Length::Fixed(1.0))
-        .style(|_theme| {
-            let mut c = theme::fg4();
-            c.a = 0.12;
-            container::Style {
-                background: Some(c.into()),
+/// Borderless icon-only button that uses the canonical
+/// `mouse_area(HoverOverlay(container(svg(...))))` chrome.
+///
+/// Wraps the `MODAL_ICON_BUTTON_SIZE` × `MODAL_ICON_BUTTON_SIZE` chassis
+/// previously open-coded for the close/copy buttons. `icon_size` lets
+/// callers distinguish the visually-dominant close (X) glyph from the
+/// secondary copy glyph by inner SVG size.
+fn modal_icon_button<'a>(
+    icon_path: &'static str,
+    icon_size: f32,
+    on_press: AboutModalMessage,
+) -> Element<'a, AboutModalMessage> {
+    mouse_area(
+        HoverOverlay::new(
+            container(
+                crate::embedded_svg::svg_widget(icon_path)
+                    .width(Length::Fixed(icon_size))
+                    .height(Length::Fixed(icon_size))
+                    .style(|_theme, _status| svg::Style {
+                        color: Some(theme::fg3()),
+                    }),
+            )
+            .width(Length::Fixed(MODAL_ICON_BUTTON_SIZE))
+            .height(Length::Fixed(MODAL_ICON_BUTTON_SIZE))
+            .style(|_theme| container::Style {
+                background: None,
+                border: iced::Border::default(),
                 ..Default::default()
-            }
-        })
-        .into()
-}
-
-/// A more prominent separator (used under the header).
-fn separator_line<'a>() -> Element<'a, AboutModalMessage> {
-    container(space::horizontal())
-        .width(Length::Fill)
-        .height(Length::Fixed(1.0))
-        .style(|_theme| {
-            let mut c = theme::fg4();
-            c.a = 0.2;
-            container::Style {
-                background: Some(c.into()),
-                ..Default::default()
-            }
-        })
-        .into()
+            })
+            .center(Length::Fixed(MODAL_ICON_BUTTON_SIZE)),
+        )
+        .border_radius(theme::ui_border_radius()),
+    )
+    .on_press(on_press)
+    .interaction(iced::mouse::Interaction::Pointer)
+    .into()
 }

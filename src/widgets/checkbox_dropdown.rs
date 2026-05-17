@@ -32,7 +32,17 @@ use iced::{
     widget::{column, container, mouse_area, row, svg, text, tooltip},
 };
 
-use crate::theme;
+use crate::{
+    theme,
+    widgets::{
+        menu_constants::{MENU_ICON_SIZE, MENU_MIN_WIDTH, MENU_TEXT_SIZE},
+        sizes::ICON_BUTTON_SIZE,
+    },
+};
+
+/// 40×40 trigger button chassis — matches the shared `ICON_BUTTON_SIZE`.
+const TRIGGER_SIZE: f32 = ICON_BUTTON_SIZE;
+const TRIGGER_ICON_SIZE: f32 = 20.0;
 
 /// Build a checkbox dropdown anchored to a trigger icon button.
 ///
@@ -128,14 +138,8 @@ where
     )
 }
 
-const TRIGGER_SIZE: f32 = 40.0;
-const TRIGGER_ICON_SIZE: f32 = 20.0;
-const MENU_MIN_WIDTH: f32 = 180.0;
-const MENU_ICON_SIZE: f32 = 14.0;
-const MENU_TEXT_SIZE: f32 = 13.0;
-
 /// Build the trigger element — a 40×40 styled container holding the icon,
-/// wrapped in a tooltip that mirrors `view_header::header_icon_button` chrome
+/// wrapped in a tooltip that mirrors `view_header::flat_icon_button` chrome
 /// (without on_press, since the `CheckboxDropdown` Widget intercepts the
 /// left-click itself).
 fn trigger_button<'a, Message: 'a>(

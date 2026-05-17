@@ -29,13 +29,21 @@ use iced::{
     keyboard, mouse, touch,
 };
 
-use crate::theme;
+use crate::{
+    theme,
+    widgets::{
+        menu_constants::{
+            MENU_ICON_SIZE as MENU_CHECK_ICON_SIZE, MENU_ITEM_HEIGHT, MENU_PADDING,
+            MENU_PLAYER_MODES_WIDTH as MENU_WIDTH, MENU_TEXT_SIZE,
+        },
+        sizes::TOOLBAR_BUTTON_SIZE as TRIGGER_BUTTON_SIZE,
+    },
+};
 
 // ============================================================================
 // Constants
 // ============================================================================
 
-const TRIGGER_BUTTON_SIZE: f32 = 44.0;
 const TRIGGER_ICON_SIZE: f32 = 20.0;
 const TRIGGER_BORDER_WIDTH: f32 = 2.0;
 
@@ -45,11 +53,6 @@ const BADGE_DIAMETER: f32 = 8.0;
 /// Inset from the trigger's right and top edges to the badge dot's outer edge.
 const BADGE_INSET: f32 = 5.0;
 
-const MENU_WIDTH: f32 = 220.0;
-const MENU_ITEM_HEIGHT: f32 = 28.0;
-const MENU_PADDING: f32 = 4.0;
-const MENU_TEXT_SIZE: f32 = 13.0;
-const MENU_CHECK_ICON_SIZE: f32 = 14.0;
 const MENU_ROW_INSET: f32 = 6.0;
 const MENU_CHECK_GAP: f32 = 8.0;
 

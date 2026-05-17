@@ -24,7 +24,10 @@ use iced::{
     widget::{button, column, container, row, text},
 };
 
-use crate::theme;
+use crate::{
+    theme,
+    widgets::menu_constants::{MENU_ICON_SIZE, MENU_MIN_WIDTH, MENU_TEXT_SIZE},
+};
 
 // ============================================================================
 // Shared Library Context Menu Entry
@@ -858,11 +861,6 @@ impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'
 // ============================================================================
 // Menu Item Helpers
 // ============================================================================
-
-/// Minimum width for context menu items.
-const MENU_MIN_WIDTH: f32 = 180.0;
-const MENU_ICON_SIZE: f32 = 14.0;
-const MENU_TEXT_SIZE: f32 = 13.0;
 
 /// Render a standard menu button with an optional icon.
 ///

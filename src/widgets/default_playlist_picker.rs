@@ -156,7 +156,7 @@ pub(crate) fn default_playlist_picker_overlay<'a>(
             }),
     )
     .on_press(DefaultPlaylistPickerMessage::Close)
-    .style(transparent_button_style)
+    .style(theme::transparent_button_style)
     .padding(Padding::new(2.0));
 
     let title_row = row![
@@ -446,21 +446,6 @@ fn render_picker_slot<'a>(
         .on_press(DefaultPlaylistPickerMessage::ClickItem(item_index))
         .interaction(iced::mouse::Interaction::Pointer)
         .into()
-}
-
-fn transparent_button_style(_theme: &iced::Theme, status: button::Status) -> button::Style {
-    button::Style {
-        background: match status {
-            button::Status::Hovered => Some(theme::bg1().into()),
-            _ => None,
-        },
-        text_color: theme::fg0(),
-        border: Border {
-            radius: theme::ui_border_radius(),
-            ..Default::default()
-        },
-        ..Default::default()
-    }
 }
 
 #[cfg(test)]

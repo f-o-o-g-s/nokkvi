@@ -39,6 +39,79 @@ pub(crate) struct TrackInfoStripData<'a> {
     pub icy_title: Option<&'a str>,
 }
 
+/// Build the columnar radio-strip widgets — radio-tower icon, bold station
+/// name, ICY title (`playing:`) / ICY artist (`artist:`), URL fallback
+/// (`url:`) — pushed onto a caller-provided row alongside a caller-provided
+/// separator builder.
+///
+/// Both `track_info_strip` (player bar / top bar strip) and `nav_bar`
+/// (top-nav radio path) previously open-coded this fan-out. The two
+/// originals diverged on field labels — pre-`a5e6822` `nav_bar` labeled the
+/// ICY title `title:` while track_info_strip used `playing:` — a drift class
+/// the audit flagged for consolidation. The shared builder eliminates the
+/// drift by routing both sites through one canonical label set.
+///
+/// `info_sep` returns a fresh separator element each time it's called.
+/// Returns the input `row` with the radio fields appended, ready for the
+/// caller to add any further trailing content.
+pub(crate) fn columnar_radio_strip<'a, M: 'static, F>(
+    mut row_in: iced::widget::Row<'a, M>,
+    radio_name: &str,
+    icy_title: &str,
+    icy_artist: &str,
+    radio_url: Option<&str>,
+    info_sep: F,
+) -> iced::widget::Row<'a, M>
+where
+    F: Fn() -> Element<'a, M>,
+{
+    row_in = row_in.push(info_sep());
+    row_in = row_in.push(super::nav_bar::colored_icon(
+        RADIO_TOWER_ICON_PATH,
+        12.0,
+        theme::fg4(),
+    ));
+
+    row_in = row_in.push(
+        text(radio_name.to_string())
+            .size(12.0)
+            .font(Font {
+                weight: Weight::Bold,
+                ..theme::ui_font()
+            })
+            .color(theme::now_playing_color()),
+    );
+
+    if !icy_title.is_empty() {
+        row_in = row_in.push(info_sep());
+        row_in = row_in.push(info_field_widget(
+            "playing:",
+            icy_title.to_string(),
+            theme::accent_bright(),
+        ));
+    }
+
+    if !icy_artist.is_empty() {
+        row_in = row_in.push(info_sep());
+        row_in = row_in.push(info_field_widget(
+            "artist:",
+            icy_artist.to_string(),
+            theme::selected_color(),
+        ));
+    }
+
+    if icy_title.is_empty()
+        && icy_artist.is_empty()
+        && let Some(url) = radio_url
+    {
+        row_in = row_in.push(info_sep());
+        row_in = row_in.push(info_field_widget("url:", url.to_string(), theme::fg2()));
+    }
+    row_in = row_in.push(info_sep());
+
+    row_in
+}
+
 /// Labeled metadata field: dimmed label + scrolling marquee value.
 ///
 /// Shared by `track_info_strip` (player bar / top bar strip) and `nav_bar`
@@ -261,56 +334,17 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
     if !merged_mode && let Some(radio_name) = data.radio_name {
         // OVERRIDE: If radio mode is active (and we're NOT in merged mode —
         // the merged path is handled by an early-return above), display radio
-        // station info in the columnar layout.
-        center_row = iced::widget::Row::new()
-            .spacing(6)
-            .align_y(Alignment::Center);
-        center_row = center_row.push(info_sep());
-        center_row = center_row.push(super::nav_bar::colored_icon(
-            RADIO_TOWER_ICON_PATH,
-            12.0,
-            theme::fg4(),
-        ));
-
-        center_row = center_row.push(
-            text(radio_name.to_string())
-                .size(12.0)
-                .font(Font {
-                    weight: Weight::Bold,
-                    ..theme::ui_font()
-                })
-                .color(theme::now_playing_color()),
+        // station info in the columnar layout via the shared builder.
+        center_row = columnar_radio_strip(
+            iced::widget::Row::new()
+                .spacing(6)
+                .align_y(Alignment::Center),
+            radio_name,
+            data.icy_title.unwrap_or(""),
+            data.icy_artist.unwrap_or(""),
+            data.radio_url,
+            info_sep,
         );
-
-        let icy_title = data.icy_title.unwrap_or("");
-        let icy_artist = data.icy_artist.unwrap_or("");
-
-        if !icy_title.is_empty() {
-            center_row = center_row.push(info_sep());
-            center_row = center_row.push(info_field(
-                "playing:",
-                icy_title.to_string(),
-                theme::accent_bright(),
-            ));
-        }
-
-        if !icy_artist.is_empty() {
-            center_row = center_row.push(info_sep());
-            center_row = center_row.push(info_field(
-                "artist:",
-                icy_artist.to_string(),
-                theme::selected_color(),
-            ));
-        }
-
-        if icy_title.is_empty()
-            && icy_artist.is_empty()
-            && let Some(url) = data.radio_url
-        {
-            center_row = center_row.push(info_sep());
-            center_row = center_row.push(info_field("url:", url.to_string(), theme::fg2()));
-        }
-        center_row = center_row.push(info_sep());
     }
 
     let center_element: Element<'a, M> = if let Some(msg) = on_press {

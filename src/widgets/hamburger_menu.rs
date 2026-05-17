@@ -19,7 +19,12 @@ use iced::{
     keyboard, mouse, touch,
 };
 
-use crate::theme;
+use crate::{
+    theme,
+    widgets::menu_constants::{
+        MENU_HAMBURGER_WIDTH as MENU_WIDTH, MENU_ITEM_HEIGHT, MENU_PADDING, MENU_TEXT_SIZE,
+    },
+};
 
 // ============================================================================
 // Menu Item Definitions
@@ -285,11 +290,9 @@ struct MenuOverlay<'a, Message> {
     is_light_mode: bool,
 }
 
-/// Constants for menu item rendering
-const MENU_WIDTH: f32 = 180.0;
-const MENU_ITEM_HEIGHT: f32 = 28.0;
-const MENU_PADDING: f32 = 4.0;
-const MENU_TEXT_SIZE: f32 = 13.0;
+// Hamburger menu rendering constants — geometry comes from the shared
+// `menu_constants` module (see imports at top); only the inner text padding
+// is hamburger-specific.
 const MENU_TEXT_PADDING_LEFT: f32 = 10.0;
 
 /// Click-dispatch order for hamburger menu items. Index is the visual

@@ -17,13 +17,18 @@ use std::collections::HashSet;
 use iced::{
     Alignment, Element, Length,
     widget::{
-        button, column, container, mouse_area, opaque, row, scrollable, space, svg, text,
-        text_editor,
+        button, column, container, mouse_area, row, scrollable, space, svg, text, text_editor,
     },
 };
 use nokkvi_data::types::info_modal::InfoModalItem;
 
-use crate::theme;
+use crate::{
+    theme,
+    widgets::{
+        hover_overlay::HoverOverlay,
+        sizes::{MODAL_ICON_BUTTON_SIZE, MODAL_ICON_SIZE_LARGE, MODAL_ICON_SIZE_SMALL},
+    },
+};
 
 // =============================================================================
 // State & Messages
@@ -207,47 +212,17 @@ pub(crate) fn info_modal_overlay<'a>(
         .font(theme::ui_font())
         .color(theme::fg4());
 
-    let close_button = button(
-        crate::embedded_svg::svg_widget("assets/icons/x.svg")
-            .width(16)
-            .height(16)
-            .style(|_theme, _status| svg::Style {
-                color: Some(theme::fg3()),
-            }),
-    )
-    .on_press(InfoModalMessage::Close)
-    .padding(iced::Padding {
-        top: 2.0,
-        bottom: 2.0,
-        left: 6.0,
-        right: 6.0,
-    })
-    .style(|_theme, _status| button::Style {
-        background: None,
-        border: iced::Border::default(),
-        ..Default::default()
-    });
+    let close_button: Element<'_, InfoModalMessage> = modal_icon_button(
+        "assets/icons/x.svg",
+        MODAL_ICON_SIZE_LARGE,
+        InfoModalMessage::Close,
+    );
 
-    let copy_button = button(
-        crate::embedded_svg::svg_widget("assets/icons/copy.svg")
-            .width(14)
-            .height(14)
-            .style(|_theme, _status| svg::Style {
-                color: Some(theme::fg3()),
-            }),
-    )
-    .on_press(InfoModalMessage::CopyAll)
-    .padding(iced::Padding {
-        top: 2.0,
-        bottom: 2.0,
-        left: 6.0,
-        right: 6.0,
-    })
-    .style(|_theme, _status| button::Style {
-        background: None,
-        border: iced::Border::default(),
-        ..Default::default()
-    });
+    let copy_button: Element<'_, InfoModalMessage> = modal_icon_button(
+        "assets/icons/copy.svg",
+        MODAL_ICON_SIZE_SMALL,
+        InfoModalMessage::CopyAll,
+    );
 
     // Show folder button for Songs (direct path) and Albums (async fetch via ID)
     let folder_path = item.folder_path();
@@ -261,26 +236,8 @@ pub(crate) fn info_modal_overlay<'a>(
         album_id.map(InfoModalMessage::FetchAndOpenAlbumFolder)
     };
     let header = if let Some(msg) = folder_msg {
-        let folder_button = button(
-            crate::embedded_svg::svg_widget("assets/icons/folder-open.svg")
-                .width(14)
-                .height(14)
-                .style(|_theme, _status| svg::Style {
-                    color: Some(theme::fg3()),
-                }),
-        )
-        .on_press(msg)
-        .padding(iced::Padding {
-            top: 2.0,
-            bottom: 2.0,
-            left: 6.0,
-            right: 6.0,
-        })
-        .style(|_theme, _status| button::Style {
-            background: None,
-            border: iced::Border::default(),
-            ..Default::default()
-        });
+        let folder_button: Element<'_, InfoModalMessage> =
+            modal_icon_button("assets/icons/folder-open.svg", MODAL_ICON_SIZE_SMALL, msg);
         row![
             title_text,
             type_badge,
@@ -303,7 +260,7 @@ pub(crate) fn info_modal_overlay<'a>(
         .align_y(Alignment::Center)
     };
 
-    let header_sep = separator_line();
+    let header_sep = theme::modal_header_separator();
 
     // ── Property table rows ──────────────────────────────────────
     let mut rows: Vec<Element<'_, InfoModalMessage>> = Vec::new();
@@ -540,7 +497,7 @@ pub(crate) fn info_modal_overlay<'a>(
 
         // Row separator (skip after last row)
         if idx + 1 < n {
-            rows.push(row_separator());
+            rows.push(theme::modal_row_separator());
         }
     }
 
@@ -661,58 +618,76 @@ pub(crate) fn info_modal_overlay<'a>(
         .width(Length::Shrink);
 
     // ── Backdrop + opaque wrapper (prevents click-through) ───────
-    let backdrop = mouse_area(
-        container(opaque(dialog_box))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(Alignment::Center)
-            .align_y(Alignment::Center)
-            .style(|_theme| {
-                let mut bg = theme::bg0_hard();
-                bg.a = 0.6;
-                container::Style {
-                    background: Some(bg.into()),
-                    ..Default::default()
-                }
-            }),
-    )
-    .on_press(InfoModalMessage::Close);
-
-    Some(opaque(backdrop))
+    Some(theme::modal_scaffold(
+        dialog_box.into(),
+        InfoModalMessage::Close,
+        theme::MODAL_BACKDROP_ALPHA,
+    ))
 }
 
 // =============================================================================
 // Helpers
 // =============================================================================
 
-/// A subtle horizontal separator line between table rows.
-fn row_separator<'a>() -> Element<'a, InfoModalMessage> {
-    container(space::horizontal())
-        .width(Length::Fill)
-        .height(Length::Fixed(1.0))
-        .style(|_theme| {
-            let mut c = theme::fg4();
-            c.a = 0.12;
-            container::Style {
-                background: Some(c.into()),
+/// Borderless icon-only modal-header button using the canonical
+/// `mouse_area(HoverOverlay(container(svg(...))))` chrome.
+///
+/// Replaces the bare `button(svg(...))` chassis that the close, copy, and
+/// folder buttons previously used — they captured `ButtonPressed` early and
+/// bypassed the per-slot hover affordance the rest of the modal headers use.
+fn modal_icon_button<'a>(
+    icon_path: &'static str,
+    icon_size: f32,
+    on_press: InfoModalMessage,
+) -> Element<'a, InfoModalMessage> {
+    mouse_area(
+        HoverOverlay::new(
+            container(
+                crate::embedded_svg::svg_widget(icon_path)
+                    .width(Length::Fixed(icon_size))
+                    .height(Length::Fixed(icon_size))
+                    .style(|_theme, _status| svg::Style {
+                        color: Some(theme::fg3()),
+                    }),
+            )
+            .width(Length::Fixed(MODAL_ICON_BUTTON_SIZE))
+            .height(Length::Fixed(MODAL_ICON_BUTTON_SIZE))
+            .style(|_theme| container::Style {
+                background: None,
+                border: iced::Border::default(),
                 ..Default::default()
-            }
-        })
-        .into()
+            })
+            .center(Length::Fixed(MODAL_ICON_BUTTON_SIZE)),
+        )
+        .border_radius(theme::ui_border_radius()),
+    )
+    .on_press(on_press)
+    .interaction(iced::mouse::Interaction::Pointer)
+    .into()
 }
 
-/// A more prominent separator (used under the header).
-fn separator_line<'a>() -> Element<'a, InfoModalMessage> {
-    container(space::horizontal())
-        .width(Length::Fill)
-        .height(Length::Fixed(1.0))
-        .style(|_theme| {
-            let mut c = theme::fg4();
-            c.a = 0.2;
-            container::Style {
-                background: Some(c.into()),
-                ..Default::default()
-            }
-        })
-        .into()
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The canonical pattern for modal-header dismiss buttons is
+    /// `mouse_area(HoverOverlay(container(svg)))`. Verify that
+    /// `modal_icon_button` produces an Element accepting a `Message::Close`
+    /// (or other variant) — this is a characterization that the helper
+    /// compiles and threads the on_press through cleanly. A future regression
+    /// that switches back to bare `button(svg)` would silently lose the
+    /// hover-overlay affordance, so we pin the helper's existence here.
+    #[test]
+    fn modal_icon_button_accepts_close_message() {
+        let _el: Element<'_, InfoModalMessage> = modal_icon_button(
+            "assets/icons/x.svg",
+            MODAL_ICON_SIZE_LARGE,
+            InfoModalMessage::Close,
+        );
+        let _el2: Element<'_, InfoModalMessage> = modal_icon_button(
+            "assets/icons/copy.svg",
+            MODAL_ICON_SIZE_SMALL,
+            InfoModalMessage::CopyAll,
+        );
+    }
 }

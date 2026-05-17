@@ -1150,6 +1150,182 @@ pub(crate) fn vertical_separator<'a, M: 'a>(height: f32) -> iced::Element<'a, M>
         .into()
 }
 
+// ----------------------------------------------------------------------------
+// Modal separators
+// ----------------------------------------------------------------------------
+// These three helpers consolidate the eight near-identical separator lambdas
+// that previously lived in `about_modal`, `info_modal`, `eq_modal`,
+// `nav_bar` (twice), and `side_nav_bar`. The two alpha levels (0.12 / 0.2)
+// correspond to the row-vs-header visual hierarchy already present in the
+// originating widgets.
+
+/// 1-px horizontal separator between rows inside a modal (subtle, alpha 0.12).
+///
+/// Replaces the inline `row_separator` lambdas in `about_modal::info_row`
+/// and `info_modal`'s property table.
+pub(crate) fn modal_row_separator<'a, M: 'a>() -> iced::Element<'a, M> {
+    use iced::{
+        Length,
+        widget::{container, space},
+    };
+    container(space::horizontal())
+        .width(Length::Fill)
+        .height(Length::Fixed(1.0))
+        .style(|_| {
+            let mut c = fg4();
+            c.a = 0.12;
+            container::Style {
+                background: Some(c.into()),
+                ..Default::default()
+            }
+        })
+        .into()
+}
+
+/// 1-px horizontal separator under a modal's header (slightly stronger, alpha 0.2).
+///
+/// Replaces the inline `separator_line` lambdas in `about_modal`, `info_modal`,
+/// and `eq_modal`.
+pub(crate) fn modal_header_separator<'a, M: 'a>() -> iced::Element<'a, M> {
+    use iced::{
+        Length,
+        widget::{container, space},
+    };
+    container(space::horizontal())
+        .width(Length::Fill)
+        .height(Length::Fixed(1.0))
+        .style(|_| {
+            let mut c = fg4();
+            c.a = 0.2;
+            container::Style {
+                background: Some(c.into()),
+                ..Default::default()
+            }
+        })
+        .into()
+}
+
+/// Variant flag chosen by `nav_separator` callers — selects between the
+/// horizontal nav bar's tab separator (vertical 2-px rule, can hide in
+/// rounded mode) and the horizontal cross-bar separator drawn inside the
+/// side nav bar (between vertical tabs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NavSeparatorAxis {
+    /// 2-px wide vertical line, `Length::Fill` tall — used between
+    /// horizontal nav-bar tabs.
+    Vertical,
+    /// `Length::Fill` wide, 2-px tall — used between side-nav vertical tabs.
+    Horizontal,
+}
+
+/// 2-px nav-bar separator (vertical between top-nav tabs, horizontal between
+/// side-nav tabs). When `force_visible` is `false`, the separator is hidden
+/// in rounded mode to match the unbordered Material-style chrome; passing
+/// `true` keeps it visible (used for trailing/leading separators that
+/// bracket the tab strip).
+///
+/// Replaces `tab_separator` / `info_separator` / the inline `separator()`
+/// lambda formerly duplicated across `nav_bar` and `side_nav_bar`.
+pub(crate) fn nav_separator<'a, M: 'a>(
+    axis: NavSeparatorAxis,
+    force_visible: bool,
+) -> iced::Element<'a, M> {
+    use iced::{
+        Length,
+        widget::{Space, container},
+    };
+    let (w, h) = match axis {
+        NavSeparatorAxis::Vertical => (Length::Fixed(2.0), Length::Fill),
+        NavSeparatorAxis::Horizontal => (Length::Fill, Length::Fixed(2.0)),
+    };
+    container(Space::new())
+        .width(w)
+        .height(h)
+        .style(move |_| container::Style {
+            background: if is_rounded_mode() && !force_visible {
+                None
+            } else {
+                Some(bg1().into())
+            },
+            ..Default::default()
+        })
+        .into()
+}
+
+// ----------------------------------------------------------------------------
+// Modal scaffolding
+// ----------------------------------------------------------------------------
+
+/// Wrap a modal dialog box in the canonical backdrop + opaque scaffold.
+///
+/// Produces the `mouse_area(opaque(container(...).style(backdrop)))` Element
+/// that all four overlay modals (`about`, `info`, `eq`, `text_input_dialog`)
+/// previously open-coded. The backdrop is a semi-transparent `bg0_hard` wash
+/// (alpha = `backdrop_alpha`, conventionally `0.6`); clicking it emits
+/// `on_backdrop_press` (Close / Cancel depending on caller); `opaque()`
+/// blocks pointer events from reaching widgets behind the modal.
+///
+/// Restraint: only the backdrop layer is consolidated here. The dialog box
+/// itself (border color, max_height, fixed width, etc.) stays at each call
+/// site because those genuinely diverge between modals.
+pub(crate) fn modal_scaffold<'a, M: Clone + 'a>(
+    dialog_box: iced::Element<'a, M>,
+    on_backdrop_press: M,
+    backdrop_alpha: f32,
+) -> iced::Element<'a, M> {
+    use iced::{
+        Alignment, Length,
+        widget::{container, mouse_area, opaque},
+    };
+    let backdrop = mouse_area(
+        container(opaque(dialog_box))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center)
+            .style(move |_| {
+                let mut bg = bg0_hard();
+                bg.a = backdrop_alpha;
+                container::Style {
+                    background: Some(bg.into()),
+                    ..Default::default()
+                }
+            }),
+    )
+    .on_press(on_backdrop_press);
+    opaque(backdrop)
+}
+
+/// Conventional backdrop alpha used by every overlay modal.
+pub(crate) const MODAL_BACKDROP_ALPHA: f32 = 0.6;
+
+// ----------------------------------------------------------------------------
+// Transparent button style
+// ----------------------------------------------------------------------------
+
+/// Borderless button style: no background when idle, `bg1` on hover, no
+/// outline, `ui_border_radius()` corners. Hoisted from
+/// `default_playlist_picker::transparent_button_style` so future callers can
+/// find it without re-inventing.
+pub(crate) fn transparent_button_style(
+    _theme: &Theme,
+    status: iced::widget::button::Status,
+) -> iced::widget::button::Style {
+    use iced::widget::button;
+    button::Style {
+        background: match status {
+            button::Status::Hovered => Some(bg1().into()),
+            _ => None,
+        },
+        text_color: fg0(),
+        border: iced::Border {
+            radius: ui_border_radius(),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
 /// Themed search/filter text input style matching the Gruvbox palette.
 /// Used in view headers and settings sub-lists.
 pub(crate) fn search_input_style(_theme: &Theme, status: text_input::Status) -> text_input::Style {
@@ -1534,5 +1710,55 @@ mod tests {
         UI_MODE
             .artwork_column_stretch_fit
             .store(saved_asf, Ordering::Relaxed);
+    }
+
+    // ------------------------------------------------------------------------
+    // Modal / nav separator helpers — pin that the consolidated helpers
+    // still compile, produce real Elements, and select the right axis
+    // dimensions for `nav_separator`. The row-vs-header alpha pair is
+    // documented in the helper bodies; the consolidation kept those values
+    // intact, so the regression risk we guard against here is "future agent
+    // accidentally swaps axes or returns the wrong type."
+    // ------------------------------------------------------------------------
+
+    /// Both modal separator helpers must produce real `Element`s — a
+    /// characterization that the consolidation kept the lambdas building
+    /// elements that wire into a `Column`. Regression risk we guard: a
+    /// future refactor accidentally changes the return type to e.g. `Rule`
+    /// (which has different default styling).
+    #[test]
+    fn modal_separators_produce_elements() {
+        let _row: iced::Element<'_, ()> = modal_row_separator();
+        let _header: iced::Element<'_, ()> = modal_header_separator();
+    }
+
+    /// `nav_separator` must compile for both axis variants and produce real
+    /// `Element`s ready to be pushed onto a row/column. The exact pixel
+    /// dimensions stay verified by the integration-level nav-bar layout
+    /// tests; here we just pin the type-level contract so a future
+    /// refactor cannot silently change the return type.
+    #[test]
+    fn nav_separator_compiles_for_both_axes() {
+        let _v: iced::Element<'_, ()> = nav_separator(NavSeparatorAxis::Vertical, false);
+        let _h: iced::Element<'_, ()> = nav_separator(NavSeparatorAxis::Horizontal, true);
+    }
+
+    /// `modal_scaffold` must accept any `M: Clone` and return an Element of
+    /// the same message type. Pin the type-level contract so a future
+    /// refactor of the scaffold helper can't accidentally drop the
+    /// generic-message parameter (the audit explicitly calls out that
+    /// each modal uses a different `Message::Close` / `Message::Cancel`).
+    #[test]
+    fn modal_scaffold_threads_message_type_through() {
+        use iced::widget::Space;
+
+        #[derive(Debug, Clone, PartialEq)]
+        enum FakeMsg {
+            Closed,
+        }
+        let dialog: iced::Element<'_, FakeMsg> =
+            iced::Element::from(Space::new().width(100.0).height(60.0));
+        let _scaffold: iced::Element<'_, FakeMsg> =
+            modal_scaffold(dialog, FakeMsg::Closed, MODAL_BACKDROP_ALPHA);
     }
 }

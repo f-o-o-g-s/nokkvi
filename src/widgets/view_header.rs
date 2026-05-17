@@ -220,28 +220,24 @@ pub(crate) fn view_header<
                 } else {
                     "Sort: Descending"
                 };
-                button_elements.push(header_icon_button(sort_icon_path, tooltip_text, sort_msg));
+                button_elements.push(flat_icon_button(sort_icon_path, tooltip_text, sort_msg));
             }
             HeaderButton::Refresh(refresh_msg) => {
-                button_elements.push(header_icon_button(
+                button_elements.push(flat_icon_button(
                     "assets/icons/refresh-cw.svg",
                     "Refresh Data",
                     refresh_msg,
                 ));
             }
             HeaderButton::CenterOnPlaying(center_msg) => {
-                button_elements.push(header_icon_button(
+                button_elements.push(flat_icon_button(
                     "assets/icons/locate.svg",
                     "Center on Playing",
                     center_msg,
                 ));
             }
             HeaderButton::Add(tooltip, add_msg) => {
-                button_elements.push(header_icon_button(
-                    "assets/icons/plus.svg",
-                    tooltip,
-                    add_msg,
-                ));
+                button_elements.push(flat_icon_button("assets/icons/plus.svg", tooltip, add_msg));
             }
             HeaderButton::Trailing(element) => {
                 button_elements.push(element);
@@ -304,16 +300,23 @@ pub(crate) fn view_header<
     .into()
 }
 
-/// Reusable header icon button with tooltip, hover overlay, and consistent styling.
+/// Reusable flat-styled icon button with tooltip, hover overlay, and
+/// consistent chrome.
 ///
-/// Wraps an SVG icon in a 40×40 container with bg0_soft background, adds hover
-/// overlay for interactive feedback, and positions a tooltip above the button.
-fn header_icon_button<'a, Message: Clone + 'a>(
+/// Wraps an SVG icon in a square `ICON_BUTTON_SIZE` container with a
+/// `bg0_soft` background, applies the `ui_border_radius()` shape, layers
+/// a `HoverOverlay` for interactive feedback, and positions a tooltip
+/// above the button. Used by `view_header` for sort / center-on-playing /
+/// columns-dropdown / shuffle affordances. Kept here (rather than in
+/// theme.rs) because only widgets need it.
+fn flat_icon_button<'a, Message: Clone + 'a>(
     icon_path: &str,
     tooltip_text: &str,
     on_press: Message,
 ) -> Element<'a, Message> {
     use iced::widget::{svg, tooltip};
+
+    use crate::widgets::sizes::ICON_BUTTON_SIZE;
 
     let icon_svg = crate::embedded_svg::svg_widget(icon_path)
         .width(Length::Fixed(20.0))
@@ -326,8 +329,8 @@ fn header_icon_button<'a, Message: Clone + 'a>(
         mouse_area(
             HoverOverlay::new(
                 container(icon_svg)
-                    .width(Length::Fixed(40.0))
-                    .height(Length::Fixed(40.0))
+                    .width(Length::Fixed(ICON_BUTTON_SIZE))
+                    .height(Length::Fixed(ICON_BUTTON_SIZE))
                     .style(|_theme| container::Style {
                         background: Some(theme::bg0_soft().into()),
                         border: iced::Border {
@@ -336,7 +339,7 @@ fn header_icon_button<'a, Message: Clone + 'a>(
                         },
                         ..Default::default()
                     })
-                    .center(Length::Fixed(40.0)),
+                    .center(Length::Fixed(ICON_BUTTON_SIZE)),
             )
             .border_radius(theme::ui_border_radius()),
         )
@@ -360,9 +363,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn header_icon_button_produces_element() {
+    fn flat_icon_button_produces_element() {
         // Characterization test: the extracted helper compiles and produces a valid Element.
-        let _el: Element<'_, String> = header_icon_button(
+        let _el: Element<'_, String> = flat_icon_button(
             "assets/icons/locate.svg",
             "Center on Playing",
             "test_press".to_string(),

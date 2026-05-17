@@ -5,9 +5,7 @@
 
 use iced::{
     Alignment, Element, Length,
-    widget::{
-        button, column, container, mouse_area, opaque, pick_list, row, space, svg, text, tooltip,
-    },
+    widget::{button, column, container, mouse_area, pick_list, row, space, svg, text, tooltip},
 };
 
 use crate::{
@@ -376,7 +374,7 @@ pub(crate) fn eq_modal_overlay<'a>(
             .into()
     };
 
-    let header_sep = separator_line();
+    let header_sep = theme::modal_header_separator();
 
     // ── Equalizer Bands ──────────────────────────────────────────
     let mut sliders = Vec::new();
@@ -446,39 +444,11 @@ pub(crate) fn eq_modal_overlay<'a>(
         .width(Length::Shrink);
 
     // ── Backdrop ─────────────────────────────────────────────────
-    let backdrop = mouse_area(
-        container(opaque(dialog_box))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(Alignment::Center)
-            .align_y(Alignment::Center)
-            .style(|_theme| {
-                let mut bg = theme::bg0_hard();
-                bg.a = 0.6;
-                container::Style {
-                    background: Some(bg.into()),
-                    ..Default::default()
-                }
-            }),
-    )
-    .on_press(EqModalMessage::Close);
-
-    Some(opaque(backdrop))
-}
-
-fn separator_line<'a>() -> Element<'a, EqModalMessage> {
-    container(space::horizontal())
-        .width(Length::Fill)
-        .height(Length::Fixed(1.0))
-        .style(|_theme| {
-            let mut c = theme::fg4();
-            c.a = 0.2;
-            container::Style {
-                background: Some(c.into()),
-                ..Default::default()
-            }
-        })
-        .into()
+    Some(theme::modal_scaffold(
+        dialog_box.into(),
+        EqModalMessage::Close,
+        theme::MODAL_BACKDROP_ALPHA,
+    ))
 }
 
 /// Compare two 10-band EQ gain arrays with a 1e-3 dB epsilon.
