@@ -24,10 +24,24 @@ pub struct QueueWriteGuard<'a> {
     mgr: Option<&'a mut QueueManager>,
 }
 
+/// Debug-only invariant check: `entry_ids` must stay strictly parallel to
+/// `queue.song_ids`. Every mutator pairs the two; this assert lights up the
+/// path in tests if a future mutator forgets one half. Release builds skip
+/// the check, so production cost is zero.
+#[inline]
+fn assert_entry_ids_parallel(mgr: &QueueManager) {
+    debug_assert_eq!(
+        mgr.entry_ids.len(),
+        mgr.queue.song_ids.len(),
+        "entry_ids drifted from song_ids: a mutator updated one without the other",
+    );
+}
+
 impl QueueWriteGuard<'_> {
     /// Commit with full save (queue ordering + song pool).
     pub fn commit_save_all(mut self) -> Result<()> {
         let mgr = self.mgr.take().expect("guard already consumed");
+        assert_entry_ids_parallel(mgr);
         mgr.clear_queued();
         mgr.save_all()
     }
@@ -35,6 +49,7 @@ impl QueueWriteGuard<'_> {
     /// Commit with order-only save (song pool unchanged).
     pub fn commit_save_order(mut self) -> Result<()> {
         let mgr = self.mgr.take().expect("guard already consumed");
+        assert_entry_ids_parallel(mgr);
         mgr.clear_queued();
         mgr.save_order()
     }
@@ -42,6 +57,7 @@ impl QueueWriteGuard<'_> {
     /// Commit without persisting (in-memory mutation only).
     pub fn commit_no_save(mut self) {
         let mgr = self.mgr.take().expect("guard already consumed");
+        assert_entry_ids_parallel(mgr);
         mgr.clear_queued();
     }
 }

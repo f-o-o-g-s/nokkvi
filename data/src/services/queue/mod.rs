@@ -33,6 +33,18 @@ pub struct QueueManager {
     pub(crate) storage: StateStorage,
     pub(crate) playback_history: Vec<Song>,
     pub(crate) max_history_size: usize,
+    /// Per-row unique identifiers, parallel to `queue.song_ids`. Two queue
+    /// entries that share a `song_id` (duplicate adds, "Play Next" of an
+    /// already-queued song) still get distinct `entry_id`s, so right-click
+    /// "Remove from queue" can target a single row.
+    ///
+    /// Runtime-only — rebuilt from scratch on every `QueueManager::new()`,
+    /// so a persisted queue snapshot loads fine on an older client and the
+    /// IDs start fresh on relaunch.
+    pub(crate) entry_ids: Vec<u64>,
+    /// Monotonic counter that hands out the next `entry_id`. Never reused
+    /// within a process lifetime.
+    pub(crate) next_entry_id: u64,
 }
 
 impl std::fmt::Debug for QueueManager {
@@ -70,12 +82,21 @@ impl QueueManager {
             (Queue::default(), SongPool::default())
         };
 
+        // Seed runtime entry_ids parallel to the just-loaded song_ids. The
+        // counter starts past the seeded range so subsequent inserts cannot
+        // collide.
+        let initial_len = queue.song_ids.len();
+        let entry_ids: Vec<u64> = (0..initial_len as u64).collect();
+        let next_entry_id = initial_len as u64;
+
         let mgr = Self {
             queue,
             pool,
             storage,
             playback_history: Vec::new(),
             max_history_size: 100,
+            entry_ids,
+            next_entry_id,
         };
 
         Ok(mgr)
@@ -109,6 +130,57 @@ impl QueueManager {
         self.queue.song_ids.iter().position(|id| id == song_id)
     }
 
+    /// Read-only access to the per-row `entry_id` array (parallel to
+    /// `queue.song_ids`). Used by `transform_songs_from_pool` so each
+    /// `QueueSongUIViewData` carries the row identifier the view layer
+    /// echoes back on right-click removal.
+    pub fn entry_ids(&self) -> &[u64] {
+        &self.entry_ids
+    }
+
+    /// Look up the `entry_id` for a queue position. `None` if `index` is
+    /// out of bounds.
+    pub fn entry_id_at(&self, index: usize) -> Option<u64> {
+        self.entry_ids.get(index).copied()
+    }
+
+    /// O(n) scan to find the queue position holding a given `entry_id`.
+    pub fn index_of_entry(&self, entry_id: u64) -> Option<usize> {
+        self.entry_ids.iter().position(|&id| id == entry_id)
+    }
+
+    /// Hand out `count` fresh, never-reused `entry_id`s.
+    fn allocate_entry_ids(&mut self, count: usize) -> Vec<u64> {
+        let start = self.next_entry_id;
+        self.next_entry_id = self
+            .next_entry_id
+            .checked_add(count as u64)
+            .expect("queue entry_id counter overflow");
+        (start..start + count as u64).collect()
+    }
+
+    /// Test-only fast-path that replaces `song_ids` and reseeds the parallel
+    /// `entry_ids` in lockstep. Pool insertion is the caller's responsibility.
+    ///
+    /// Production code MUST NOT touch `queue.song_ids` directly — every
+    /// mutator pairs the song_ids change with the matching entry_ids work.
+    /// This helper exists so test fixtures don't have to copy-paste the
+    /// invariant-restoration ritual (and so a future contributor reading
+    /// the test code can't mistake the field-bypass idiom for production
+    /// usage).
+    #[cfg(test)]
+    pub(crate) fn replace_song_ids_for_test(
+        &mut self,
+        song_ids: Vec<String>,
+        current_index: Option<usize>,
+    ) {
+        let count = song_ids.len();
+        self.queue.song_ids = song_ids;
+        self.entry_ids = self.allocate_entry_ids(count);
+        self.queue.current_index = current_index;
+        self.rebuild_order_and_sync();
+    }
+
     /// Assign `original_position` to a batch of songs, continuing from the
     /// current maximum in the pool. Used by every "append" path so numbering
     /// is consistent regardless of insertion method.
@@ -132,14 +204,16 @@ impl QueueManager {
 
     pub fn add_songs(&mut self, mut songs: Vec<Song>) -> Result<()> {
         self.assign_original_positions(&mut songs);
+        let count = songs.len();
+        let fresh_entry_ids = self.allocate_entry_ids(count);
         let mut tx = self.write();
         let start_idx = tx.queue.song_ids.len();
-        let count = songs.len();
 
         // Add IDs to ordering, songs to pool
         for song in &songs {
             tx.queue.song_ids.push(song.id.clone());
         }
+        tx.entry_ids.extend(fresh_entry_ids);
         tx.pool.insert_many(songs);
 
         // Extend order array with new indices
@@ -152,8 +226,10 @@ impl QueueManager {
         for (i, song) in songs.iter_mut().enumerate() {
             song.original_position = Some(i as u32);
         }
+        let fresh_entry_ids = self.allocate_entry_ids(songs.len());
         let mut tx = self.write();
         tx.queue.song_ids = songs.iter().map(|s| s.id.clone()).collect();
+        tx.entry_ids = fresh_entry_ids;
         tx.queue.current_index = current_index;
         // Clear and rebuild pool
         tx.pool.clear();
@@ -175,7 +251,14 @@ impl QueueManager {
         }
         let mut tx = self.write();
         let removed_id = tx.queue.song_ids.remove(index);
-        tx.pool.remove(&removed_id);
+        if index < tx.entry_ids.len() {
+            tx.entry_ids.remove(index);
+        }
+        // Only drop the pool entry when no other queue row still references
+        // this song_id — a duplicate add keeps the pool alive for survivors.
+        if !tx.queue.song_ids.iter().any(|id| id == &removed_id) {
+            tx.pool.remove(&removed_id);
+        }
 
         // Remove from order array and adjust indices
         tx.remove_from_order(index);
@@ -205,26 +288,54 @@ impl QueueManager {
         self.pool.remove(id);
     }
 
-    /// Remove a single song from the queue by its ID.
+    /// Remove every queue row matching a song_id.
     ///
-    /// Resolves the index freshly via [`Self::index_of`] so callers don't have
-    /// to track positions across optimistic UI mutations, client-side sorts,
-    /// or concurrent queue changes. No-op if the ID isn't present.
+    /// Useful for "drop this song everywhere it appears" semantics. For
+    /// per-row removal (right-click on a single duplicate) use
+    /// [`Self::remove_entry_by_id`] instead — that path is duplicate-aware.
     pub fn remove_song_by_id(&mut self, id: &str) -> Result<()> {
-        if let Some(idx) = self.index_of(id) {
+        while let Some(idx) = self.index_of(id) {
             self.remove_song(idx)?;
         }
         Ok(())
     }
 
-    /// Remove multiple songs from the queue by ID.
+    /// Remove every queue row matching any of the given song_ids.
     ///
     /// Each ID is resolved freshly between removals so cascading shifts can't
-    /// desync the targets. Unknown IDs are skipped silently. Order of `ids`
-    /// is irrelevant — each lookup is against the current queue state.
+    /// desync the targets. Unknown IDs are skipped silently. As with
+    /// [`Self::remove_song_by_id`], duplicate rows of a song all disappear —
+    /// callers that need single-row removal should use
+    /// [`Self::remove_entries_by_ids`].
     pub fn remove_songs_by_ids(&mut self, ids: &[String]) -> Result<()> {
         for id in ids {
-            if let Some(idx) = self.index_of(id) {
+            while let Some(idx) = self.index_of(id) {
+                self.remove_song(idx)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Remove a single queue row by its per-row `entry_id`.
+    ///
+    /// Drift-immune *and* duplicate-aware: two queue rows that share a
+    /// `song_id` get distinct `entry_id`s, so right-click "Remove from
+    /// queue" can target one row without taking the other with it.
+    /// No-op if `entry_id` doesn't match any current row.
+    pub fn remove_entry_by_id(&mut self, entry_id: u64) -> Result<()> {
+        if let Some(idx) = self.index_of_entry(entry_id) {
+            self.remove_song(idx)?;
+        }
+        Ok(())
+    }
+
+    /// Remove a batch of queue rows by their `entry_id`s.
+    ///
+    /// Each ID is resolved freshly between removals — order of `entry_ids`
+    /// is irrelevant. Unknown IDs are skipped silently.
+    pub fn remove_entries_by_ids(&mut self, entry_ids: &[u64]) -> Result<()> {
+        for &eid in entry_ids {
+            if let Some(idx) = self.index_of_entry(eid) {
                 self.remove_song(idx)?;
             }
         }
@@ -261,9 +372,20 @@ impl QueueManager {
             .and_then(|idx| tx.queue.song_ids.get(idx))
             .cloned();
 
-        // Shuffle the IDs using Fisher-Yates algorithm
+        // Shuffle song_ids together with entry_ids so per-row identity
+        // follows the row through the shuffle. (Field-disjoint borrows
+        // don't see through the guard's Deref/DerefMut, so reborrow once
+        // and operate via `qm`.)
+        let qm: &mut QueueManager = &mut tx;
         let mut rng = rand::rng();
-        tx.queue.song_ids.shuffle(&mut rng);
+        let song_ids = std::mem::take(&mut qm.queue.song_ids);
+        let entry_ids = std::mem::take(&mut qm.entry_ids);
+        let mut pairs: Vec<(String, u64)> = song_ids.into_iter().zip(entry_ids).collect();
+        pairs.shuffle(&mut rng);
+        for (sid, eid) in pairs {
+            qm.queue.song_ids.push(sid);
+            qm.entry_ids.push(eid);
+        }
 
         // Update current_index to point to the same song after shuffle
         if let Some(song_id) = current_song_id {
@@ -304,9 +426,16 @@ impl QueueManager {
             .and_then(|idx| qm.queue.song_ids.get(idx))
             .cloned();
 
-        // Sort IDs by looking up song data from pool
+        // Sort song_ids + entry_ids as a pair so per-row identity follows
+        // the row through the sort. (`sort_by` on song_ids alone would
+        // leave the parallel entry_ids in stale positions.) Take the
+        // backing storage out via `mem::take` so the closure can borrow
+        // `pool` immutably without overlapping these mutable accesses.
+        let song_ids_buf = std::mem::take(&mut qm.queue.song_ids);
+        let entry_ids_buf = std::mem::take(&mut qm.entry_ids);
         let pool = &qm.pool;
-        qm.queue.song_ids.sort_by(|a_id, b_id| {
+        let mut pairs: Vec<(String, u64)> = song_ids_buf.into_iter().zip(entry_ids_buf).collect();
+        pairs.sort_by(|(a_id, _), (b_id, _)| {
             let a = pool.get(a_id);
             let b = pool.get(b_id);
             let cmp = match (a, b) {
@@ -338,6 +467,10 @@ impl QueueManager {
             };
             if ascending { cmp } else { cmp.reverse() }
         });
+        for (sid, eid) in pairs {
+            qm.queue.song_ids.push(sid);
+            qm.entry_ids.push(eid);
+        }
 
         // Update current_index to point to the same song after sort
         if let Some(song_id) = current_song_id {
@@ -438,6 +571,10 @@ impl QueueManager {
         let item = tx.queue.song_ids.remove(from);
         let insert_at = if from < to { to - 1 } else { to };
         tx.queue.song_ids.insert(insert_at, item);
+        // Keep entry_ids parallel with song_ids so per-row identity follows
+        // the row through reorders.
+        let entry = tx.entry_ids.remove(from);
+        tx.entry_ids.insert(insert_at, entry);
 
         // Adjust current_index to keep tracking the same song
         if let Some(cur) = tx.queue.current_index {
@@ -472,6 +609,8 @@ impl QueueManager {
     /// Does NOT change `current_index` — the currently playing song stays the same.
     pub fn insert_after_current(&mut self, mut songs: Vec<Song>) -> Result<()> {
         self.assign_original_positions(&mut songs);
+        let count = songs.len();
+        let fresh_entry_ids = self.allocate_entry_ids(count);
 
         let mut tx = self.write();
         let insert_pos = tx
@@ -480,11 +619,12 @@ impl QueueManager {
             .map_or(tx.queue.song_ids.len(), |idx| idx + 1);
 
         let clamped = insert_pos.min(tx.queue.song_ids.len());
-        let count = songs.len();
 
-        // Insert IDs in reverse so they end up in order, and add to pool
-        for song in songs.into_iter().rev() {
+        // Insert IDs + entry_ids in reverse so they end up in original
+        // forward order at `clamped`.
+        for (song, eid) in songs.into_iter().zip(fresh_entry_ids).rev() {
             tx.queue.song_ids.insert(clamped, song.id.clone());
+            tx.entry_ids.insert(clamped, eid);
             tx.pool.insert(song);
         }
 
@@ -521,14 +661,17 @@ impl QueueManager {
             return Ok(());
         }
         self.assign_original_positions(&mut songs);
+        let count = songs.len();
+        let fresh_entry_ids = self.allocate_entry_ids(count);
 
         let mut tx = self.write();
         let clamped = index.min(tx.queue.song_ids.len());
-        let count = songs.len();
 
-        // Insert in reverse so they end up in order at `clamped`
-        for song in songs.into_iter().rev() {
+        // Insert in reverse so they end up in order at `clamped`. entry_ids
+        // ride along to keep the parallel arrays aligned.
+        for (song, eid) in songs.into_iter().zip(fresh_entry_ids).rev() {
             tx.queue.song_ids.insert(clamped, song.id.clone());
+            tx.entry_ids.insert(clamped, eid);
             tx.pool.insert(song);
         }
 
@@ -598,9 +741,7 @@ pub(crate) mod tests {
         let mut qm = QueueManager::new(storage).expect("queue manager");
         let ids: Vec<String> = songs.iter().map(|s| s.id.clone()).collect();
         qm.pool.insert_many(songs);
-        qm.queue.song_ids = ids;
-        qm.queue.current_index = current_index;
-        qm.rebuild_order_and_sync();
+        qm.replace_song_ids_for_test(ids, current_index);
         (qm, temp)
     }
 
@@ -1342,5 +1483,198 @@ pub(crate) mod tests {
 
         assert_eq!(qm.queue.song_ids, vec!["a", "b"]);
         assert_eq!(qm.queue.current_index, Some(0));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Per-Row entry_id Removal (duplicate-aware)
+    // ══════════════════════════════════════════════════════════════════════
+
+    /// Regression: two queue rows of the same song_id must each be removable
+    /// without taking the other with them. The legacy `remove_songs_by_ids`
+    /// path tore both rows out because the queue identifier was the
+    /// `song_id`, which collided across duplicate adds.
+    #[test]
+    fn remove_entry_by_id_removes_only_targeted_duplicate() {
+        let song = make_test_song("dup");
+        let (mut qm, _temp) = make_test_manager(vec![song.clone(), song.clone()], Some(0));
+
+        assert_eq!(qm.queue.song_ids, vec!["dup", "dup"]);
+        let entry_ids = qm.entry_ids().to_vec();
+        assert_eq!(entry_ids.len(), 2, "two rows should have two entry_ids");
+        assert_ne!(
+            entry_ids[0], entry_ids[1],
+            "duplicate rows must get distinct entry_ids",
+        );
+
+        let target = entry_ids[1];
+        qm.remove_entry_by_id(target).unwrap();
+
+        assert_eq!(qm.queue.song_ids, vec!["dup"], "second row should remain");
+        assert_eq!(qm.entry_ids(), &[entry_ids[0]]);
+        // The pool entry survives because another row still references it.
+        assert!(
+            qm.get_song("dup").is_some(),
+            "pool entry must survive while at least one duplicate row remains",
+        );
+    }
+
+    #[test]
+    fn remove_entry_by_id_unknown_is_noop() {
+        let songs = vec![make_test_song("a"), make_test_song("b")];
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+
+        qm.remove_entry_by_id(99_999).unwrap();
+
+        assert_eq!(qm.queue.song_ids, vec!["a", "b"]);
+        assert_eq!(qm.entry_ids().len(), 2);
+    }
+
+    #[test]
+    fn remove_entries_by_ids_removes_each_targeted_row() {
+        let song = make_test_song("dup");
+        let unique = make_test_song("uniq");
+        let (mut qm, _temp) = make_test_manager(vec![song.clone(), unique, song.clone()], Some(0));
+        let entry_ids = qm.entry_ids().to_vec();
+
+        // Remove the two duplicate rows, leave the unique row.
+        qm.remove_entries_by_ids(&[entry_ids[0], entry_ids[2]])
+            .unwrap();
+
+        assert_eq!(qm.queue.song_ids, vec!["uniq"]);
+        // Pool drops "dup" only because no row references it anymore.
+        assert!(qm.get_song("dup").is_none());
+        assert!(qm.get_song("uniq").is_some());
+    }
+
+    /// `remove_song_by_id` on a duplicate must clear *every* row of that
+    /// song_id (the "drop everywhere" semantics that batch flows still want).
+    /// Distinct from the per-row `remove_entry_by_id` path above.
+    #[test]
+    fn remove_song_by_id_drops_all_duplicates() {
+        let song = make_test_song("dup");
+        let unique = make_test_song("uniq");
+        let (mut qm, _temp) = make_test_manager(vec![song.clone(), unique, song.clone()], Some(0));
+
+        qm.remove_song_by_id("dup").unwrap();
+
+        assert_eq!(qm.queue.song_ids, vec!["uniq"]);
+        assert!(qm.get_song("dup").is_none());
+    }
+
+    /// End-to-end mimic of `QueueNavigator::record_and_consume` on a
+    /// duplicate-row queue: peek → transition (advances current_index) →
+    /// remove the just-finished row (consume). The surviving duplicate must
+    /// stay in the queue AND in the pool, with its `entry_id` preserved.
+    ///
+    /// This is the path the user reports as buggy ("seeking through one
+    /// duplicate drops both"). If this test passes, the QueueManager layer
+    /// is innocent and the bug lives in the UI projection.
+    #[test]
+    fn consume_on_duplicate_keeps_survivor() {
+        let song = make_test_song("A");
+        let other = make_test_song("B");
+        let (mut qm, _temp) = make_test_manager(vec![song.clone(), song.clone(), other], Some(0));
+        qm.queue.consume = true;
+        let original_entry_ids = qm.entry_ids().to_vec();
+        assert_eq!(original_entry_ids.len(), 3);
+
+        // Mimic `on_track_finished`'s decide_transition: peek + transition
+        // bumps current_index from 0 → 1.
+        let peeked = qm.peek_next_song().expect("peek next song");
+        let transition = peeked.transition();
+        assert_eq!(transition.old_index, Some(0));
+        assert_eq!(transition.new_index, 1);
+        assert_eq!(qm.queue.current_index, Some(1));
+
+        // Then `record_and_consume` runs `remove_song(prev_index)` where
+        // prev_index is the captured `transition.old_index`.
+        qm.remove_song(0).expect("consume previous index");
+
+        assert_eq!(
+            qm.queue.song_ids,
+            vec!["A", "B"],
+            "first duplicate consumed; the survivor and B remain",
+        );
+        assert_eq!(
+            qm.entry_ids(),
+            &[original_entry_ids[1], original_entry_ids[2]],
+            "entry_ids ride with their rows through consume",
+        );
+        assert!(
+            qm.get_song("A").is_some(),
+            "pool must keep A while the duplicate survives — losing it here would drop both rows from the UI projection",
+        );
+        assert!(qm.get_song("B").is_some());
+        assert_eq!(
+            qm.queue.current_index,
+            Some(0),
+            "current_index shifts back from 1 → 0 after the index-0 removal",
+        );
+    }
+
+    /// Two consecutive consume cycles on adjacent duplicates: simulates the
+    /// user playing through both copies of "A" with consume on. Each cycle
+    /// must independently consume one row. The pool entry for "A" sticks
+    /// around until the *second* cycle drops the last copy.
+    #[test]
+    fn consume_through_both_duplicates_drops_pool_only_on_last() {
+        let song = make_test_song("A");
+        let other = make_test_song("B");
+        let (mut qm, _temp) = make_test_manager(vec![song.clone(), song.clone(), other], Some(0));
+        qm.queue.consume = true;
+
+        // ── First cycle: A1 finishes, consume removes idx 0 ──
+        let peeked = qm.peek_next_song().expect("peek 1");
+        let transition = peeked.transition();
+        assert_eq!(transition.old_index, Some(0));
+        assert_eq!(transition.new_index, 1);
+        qm.remove_song(0).expect("consume cycle 1");
+        assert_eq!(qm.queue.song_ids, vec!["A", "B"]);
+        assert_eq!(qm.queue.current_index, Some(0));
+        assert!(
+            qm.get_song("A").is_some(),
+            "pool keeps A after first cycle — survivor row still references it",
+        );
+
+        // ── Second cycle: A2 (the survivor) finishes, consume removes idx 0 ──
+        let peeked = qm.peek_next_song().expect("peek 2");
+        let transition = peeked.transition();
+        assert_eq!(transition.old_index, Some(0));
+        assert_eq!(transition.new_index, 1);
+        qm.remove_song(0).expect("consume cycle 2");
+        assert_eq!(qm.queue.song_ids, vec!["B"]);
+        assert_eq!(qm.queue.current_index, Some(0));
+        assert!(
+            qm.get_song("A").is_none(),
+            "pool finally drops A — no row references it anymore",
+        );
+        assert!(qm.get_song("B").is_some());
+    }
+
+    #[test]
+    fn entry_ids_survive_move_and_sort() {
+        use crate::types::queue_sort_mode::QueueSortMode;
+
+        let mut songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("c"),
+        ];
+        songs[0].title = "Charlie".into();
+        songs[1].title = "Alpha".into();
+        songs[2].title = "Bravo".into();
+        let (mut qm, _temp) = make_test_manager(songs, Some(0));
+
+        let original = qm.entry_ids().to_vec();
+        qm.sort_queue(QueueSortMode::Title, true).unwrap();
+
+        // After ascending title sort: Alpha (b), Bravo (c), Charlie (a).
+        assert_eq!(qm.queue.song_ids, vec!["b", "c", "a"]);
+        // entry_ids ride with their songs through the sort.
+        assert_eq!(
+            qm.entry_ids(),
+            &[original[1], original[2], original[0]],
+            "entry_ids must follow their song through sort",
+        );
     }
 }

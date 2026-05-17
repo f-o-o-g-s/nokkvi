@@ -81,10 +81,20 @@ pub fn decide_removal_aftermath(
         .current_index
         .and_then(|idx| queue.song_ids.get(idx).map(|id| (id.clone(), idx)))
     {
-        Some((new_id, idx)) => RemovalAftermath::LoadNewCurrent {
-            new_song_id: new_id,
-            new_index: idx,
-        },
+        Some((new_id, idx)) => {
+            // Duplicate-row case: the playing song was removed from one row,
+            // but another row with the same song_id still occupies the
+            // current slot. The engine is already producing that song —
+            // leave it alone instead of reloading the same URL.
+            if new_id == was_playing {
+                RemovalAftermath::NoCurrentChange
+            } else {
+                RemovalAftermath::LoadNewCurrent {
+                    new_song_id: new_id,
+                    new_index: idx,
+                }
+            }
+        }
         None => RemovalAftermath::StopEmpty,
     }
 }
@@ -582,9 +592,7 @@ mod tests {
         let mut qm = QueueManager::new(storage).expect("queue manager");
         let ids: Vec<String> = songs.iter().map(|s| s.id.clone()).collect();
         qm.pool.insert_many(songs);
-        qm.queue.song_ids = ids;
-        qm.queue.current_index = current_index;
-        qm.rebuild_order_and_sync();
+        qm.replace_song_ids_for_test(ids, current_index);
         qm
     }
 
@@ -849,6 +857,96 @@ mod tests {
             plan,
             RemovalAftermath::StopEmpty,
             "empty queue after removing the playing song must stop the engine",
+        );
+    }
+
+    /// Mirrors what `AppService::remove_queue_entries` does at the queue
+    /// layer: resolve entry_ids → song_ids *before* the mutation, then
+    /// `remove_entries_by_ids`, then `decide_removal_aftermath` with the
+    /// pre-mutation song_ids. The ordering matters — after the removal,
+    /// the entry_ids are gone and the resolution would yield an empty Vec,
+    /// making the aftermath plan return `NoCurrentChange` when it should
+    /// return `LoadNewCurrent`.
+    #[test]
+    fn orchestrator_resolves_entry_ids_to_song_ids_before_mutation() {
+        // Queue: [a, b, c], playing = "b". Remove the row whose entry_id
+        // currently sits at index 1 ("b").
+        let mut qm = manager_with_songs(
+            vec![make_song("a"), make_song("b"), make_song("c")],
+            Some(1),
+        );
+        let target_entry_id = qm.entry_id_at(1).expect("entry_id for b");
+
+        // Resolve first — this is the bit the orchestrator must do *before*
+        // mutating so it knows what song_ids were removed.
+        let removed_song_ids: Vec<String> = [target_entry_id]
+            .iter()
+            .filter_map(|&eid| {
+                qm.index_of_entry(eid)
+                    .and_then(|idx| qm.get_queue().song_ids.get(idx).cloned())
+            })
+            .collect();
+        assert_eq!(
+            removed_song_ids,
+            vec!["b".to_string()],
+            "resolution must read the pre-mutation queue",
+        );
+
+        // Now mutate.
+        qm.remove_entry_by_id(target_entry_id)
+            .expect("remove by entry_id");
+        assert_eq!(qm.get_queue().song_ids, vec!["a", "c"]);
+        // After removal the entry_id is gone, so a resolution attempt would
+        // return an empty Vec — proves the ordering is load-bearing.
+        let post_mutation_resolved: Vec<String> = [target_entry_id]
+            .iter()
+            .filter_map(|&eid| {
+                qm.index_of_entry(eid)
+                    .and_then(|idx| qm.get_queue().song_ids.get(idx).cloned())
+            })
+            .collect();
+        assert!(
+            post_mutation_resolved.is_empty(),
+            "post-mutation resolution must be empty — confirms ordering matters",
+        );
+
+        // And the aftermath plan, fed the pre-mutation resolution, correctly
+        // routes the engine to "c" (queue's clamp landed there).
+        let plan = decide_removal_aftermath(&qm, Some("b"), &removed_song_ids);
+        assert_eq!(
+            plan,
+            RemovalAftermath::LoadNewCurrent {
+                new_song_id: "c".to_string(),
+                new_index: 1,
+            },
+        );
+    }
+
+    /// Duplicate row removed: queue had two rows of the same song_id, the
+    /// playing row was removed by entry_id. The post-removal `current_index`
+    /// lands on the surviving duplicate — same song_id as `was_playing`, so
+    /// the engine must NOT reload (a no-op reload would re-buffer audio
+    /// that's already playing).
+    #[test]
+    fn removal_aftermath_duplicate_survives_keeps_engine_running() {
+        // Queue: [dup, dup, b], current = first dup (idx 0).
+        // Remove the first dup row. After: [dup, b], current_index clamps
+        // to 0, pointing at the surviving "dup" row.
+        let mut qm = manager_with_songs(
+            vec![make_song("dup"), make_song("dup"), make_song("b")],
+            Some(0),
+        );
+        // Remove only the row at index 0 (one of the duplicates).
+        qm.remove_song(0).expect("remove duplicate row");
+        assert_eq!(qm.get_queue().song_ids, vec!["dup", "b"]);
+        assert_eq!(qm.get_queue().current_index, Some(0));
+
+        let plan = decide_removal_aftermath(&qm, Some("dup"), &["dup".to_string()]);
+
+        assert_eq!(
+            plan,
+            RemovalAftermath::NoCurrentChange,
+            "removing one of two duplicate rows must not retarget the engine",
         );
     }
 

@@ -717,7 +717,7 @@ impl PlaybackController {
 
     /// Apply a [`RemovalAftermath`] plan to the engine + navigator.
     ///
-    /// Called from [`super::app_service::AppService::remove_queue_songs`]
+    /// Called from [`super::app_service::AppService::remove_queue_entries`]
     /// after the queue has already been mutated and the plan has been decided.
     /// Mirrors the engine-load body of [`Self::play_song_from_queue`] but skips
     /// the play-history append (the previous song is being deleted, not skipped).

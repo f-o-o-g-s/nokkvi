@@ -3,6 +3,8 @@
 //! Factory functions for constructing test data without boilerplate.
 //! Only compiled under `#[cfg(test)]`.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use nokkvi_data::{
     backend::{
         albums::AlbumUIViewData, artists::ArtistUIViewData, genres::GenreUIViewData,
@@ -12,6 +14,16 @@ use nokkvi_data::{
 };
 
 use crate::Nokkvi;
+
+/// Monotonic process-wide counter handing out unique per-row queue entry
+/// IDs to test factories. Distinct factory calls — even with the same
+/// song id — get distinct `entry_id`s, which mirrors the runtime queue's
+/// duplicate-row contract.
+static TEST_QUEUE_ENTRY_ID: AtomicU64 = AtomicU64::new(1);
+
+pub(crate) fn next_test_queue_entry_id() -> u64 {
+    TEST_QUEUE_ENTRY_ID.fetch_add(1, Ordering::Relaxed)
+}
 
 /// Create a default `Nokkvi` for testing.
 /// No network calls are made; `app_service` is `None`.
@@ -28,6 +40,7 @@ pub(crate) fn make_queue_song(
 ) -> QueueSongUIViewData {
     QueueSongUIViewData {
         id: id.to_string(),
+        entry_id: next_test_queue_entry_id(),
         track_number: 1,
         title: title.to_string(),
         artist: artist.to_string(),
@@ -57,6 +70,7 @@ pub(crate) fn make_queue_song_full(
 ) -> QueueSongUIViewData {
     QueueSongUIViewData {
         id: id.to_string(),
+        entry_id: next_test_queue_entry_id(),
         track_number,
         title: title.to_string(),
         artist: artist.to_string(),

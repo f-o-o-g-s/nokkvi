@@ -203,21 +203,22 @@ impl QueuePage {
                     let target_indices = self.common.evaluate_context_menu(clicked_idx);
                     self.common.clear_multi_selection();
 
-                    // Resolve filtered indices → song IDs at the boundary so
-                    // downstream code is index-free. Stale `track_number`,
-                    // client-side sorts, and optimistic mutations can't desync
-                    // an ID-based target.
-                    let target_ids: Vec<String> = target_indices
+                    // Resolve filtered indices → per-row `entry_id`s at the
+                    // boundary so downstream code is both index-free *and*
+                    // duplicate-aware. Two rows of the same song_id carry
+                    // distinct entry_ids, so a right-click targets a single
+                    // row without taking sibling duplicates with it.
+                    let target_entry_ids: Vec<u64> = target_indices
                         .iter()
-                        .filter_map(|&idx| queue_songs.get(idx).map(|s| s.id.clone()))
+                        .filter_map(|&idx| queue_songs.get(idx).map(|s| s.entry_id))
                         .collect();
 
                     match entry {
                         QueueContextEntry::RemoveFromQueue => {
-                            (Task::none(), QueueAction::RemoveFromQueue(target_ids))
+                            (Task::none(), QueueAction::RemoveFromQueue(target_entry_ids))
                         }
                         QueueContextEntry::PlayNext => {
-                            (Task::none(), QueueAction::PlayNext(target_ids))
+                            (Task::none(), QueueAction::PlayNext(target_entry_ids))
                         }
                         _ => unreachable!(),
                     }

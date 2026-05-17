@@ -23,6 +23,12 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct QueueSongUIViewData {
     pub id: String,
+    /// Per-row identifier handed out by `QueueManager` at insertion time.
+    /// Two rows sharing the same `id` (a song queued twice) carry distinct
+    /// `entry_id`s, so the view can echo a single row back on right-click
+    /// "Remove from queue" without taking the other duplicate with it.
+    /// Runtime-only — not persisted, regenerated on every load.
+    pub entry_id: u64,
     pub track_number: i32,
     pub title: String,
     pub artist: String,
@@ -158,12 +164,17 @@ impl QueueService {
         server_url: &str,
         subsonic_credential: &str,
     ) -> Vec<QueueSongUIViewData> {
+        let entry_ids = qm.entry_ids();
         qm.get_queue()
             .song_ids
             .iter()
             .enumerate()
             .filter_map(|(index, id)| {
                 let song = qm.get_song(id)?;
+                // entry_ids is maintained parallel to song_ids; the get()
+                // is defense-in-depth for an out-of-sync caller, not an
+                // expected path.
+                let entry_id = entry_ids.get(index).copied()?;
                 let track_number = (index + 1) as i32;
                 let album_id = song.album_id.clone().unwrap_or_default();
                 let url =
@@ -179,6 +190,7 @@ impl QueueService {
 
                 Some(QueueSongUIViewData {
                     id: song.id.clone(),
+                    entry_id,
                     track_number,
                     title: song.title.clone(),
                     artist: song.artist.clone(),
@@ -217,12 +229,17 @@ impl QueueService {
         self.refresh_from_locked_manager(&qm).await
     }
 
-    /// Remove a batch of songs from the queue by ID. Index-immune — pass the
-    /// song identifiers rather than positions so optimistic UI mutations,
-    /// client-side sorts, or concurrent backend changes can't desync targets.
-    pub async fn remove_songs_by_ids(&self, ids: &[String]) -> Result<()> {
+    /// Remove a batch of queue rows by per-row `entry_id`. Drift-immune *and*
+    /// duplicate-aware: two rows sharing the same song_id carry distinct
+    /// `entry_id`s, so right-click "Remove from queue" can target a single
+    /// duplicate without taking the other with it.
+    ///
+    /// The "drop every row matching this song_id" variant lives on the
+    /// inner [`QueueManager::remove_songs_by_ids`] primitive; no async
+    /// wrapper is exposed because the UI layer never wants that contract.
+    pub async fn remove_entries_by_ids(&self, entry_ids: &[u64]) -> Result<()> {
         let mut qm = self.queue_manager.lock().await;
-        qm.remove_songs_by_ids(ids)?;
+        qm.remove_entries_by_ids(entry_ids)?;
         self.refresh_from_locked_manager(&qm).await
     }
 
@@ -255,7 +272,7 @@ impl QueueService {
     /// an already-held queue lock.
     ///
     /// All six mutators (`set_queue`, `add_songs`, `insert_songs_at`,
-    /// `move_item`, `remove_song`, `remove_songs_by_ids`) — plus
+    /// `move_item`, `remove_song`, `remove_entries_by_ids`) — plus
     /// `refresh_from_queue` for direct projection — acquire the queue lock
     /// once, mutate (or skip mutation), then call this method to project,
     /// so a concurrent task cannot mutate the queue between the mutation
@@ -490,11 +507,11 @@ mod tests {
         assert_eq!(service.songs.get().len(), 3);
     }
 
-    /// `remove_songs_by_ids` must project all three reactives atomically.
-    /// Removing two ids before the playhead shifts `current_index` back by
+    /// `remove_entries_by_ids` must project all three reactives atomically.
+    /// Removing two rows before the playhead shifts `current_index` back by
     /// the count actually removed.
     #[tokio::test(flavor = "current_thread")]
-    async fn remove_songs_by_ids_projects_reactives_after_mutation() {
+    async fn remove_entries_by_ids_projects_reactives_after_mutation() {
         let (service, _temp) = make_service();
         service
             .set_queue(make_songs(&["a", "b", "c", "d", "e"]), Some(3))
@@ -503,20 +520,28 @@ mod tests {
         assert_eq!(service.total_count.get(), 5);
         assert_eq!(service.current_index.get(), 3);
 
+        // Snapshot the entry_ids of the first two rows so we can target
+        // them through the entry-id API.
+        let qm_arc = service.queue_manager();
+        let first_two_entry_ids: Vec<u64> = {
+            let qm = qm_arc.lock().await;
+            qm.entry_ids()[..2].to_vec()
+        };
+
         service
-            .remove_songs_by_ids(&["a".to_string(), "b".to_string()])
+            .remove_entries_by_ids(&first_two_entry_ids)
             .await
-            .expect("remove_songs_by_ids");
+            .expect("remove_entries_by_ids");
 
         assert_eq!(
             service.total_count.get(),
             3,
-            "remove_songs_by_ids must update total_count to reflect the batch removal"
+            "remove_entries_by_ids must update total_count to reflect the batch removal"
         );
         assert_eq!(
             service.current_index.get(),
             1,
-            "removing two ids before the playhead must shift current_index back by two"
+            "removing two rows before the playhead must shift current_index back by two"
         );
         assert_eq!(service.songs.get().len(), 3);
     }

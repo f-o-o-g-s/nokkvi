@@ -359,53 +359,54 @@ impl Nokkvi {
                     shell.queue().refresh_from_queue().await
                 });
             }
-            QueueAction::RemoveFromQueue(song_ids) => {
-                if song_ids.is_empty() {
+            QueueAction::RemoveFromQueue(entry_ids) => {
+                if entry_ids.is_empty() {
                     return Task::none();
                 }
 
-                let title_text = if song_ids.len() == 1 {
+                let id_set: std::collections::HashSet<u64> = entry_ids.iter().copied().collect();
+                let title_text = if entry_ids.len() == 1 {
                     self.library
                         .queue_songs
                         .iter()
-                        .find(|s| s.id == song_ids[0])
+                        .find(|s| id_set.contains(&s.entry_id))
                         .map(|s| format!("\"{}\"", s.title))
                         .unwrap_or_default()
                 } else {
-                    format!("{} songs", song_ids.len())
+                    format!("{} songs", entry_ids.len())
                 };
 
-                // Optimistic local removal — ID lookup is immune to stale
-                // `track_number` left behind by previous in-place mutations.
-                let id_set: std::collections::HashSet<&str> =
-                    song_ids.iter().map(|s| s.as_str()).collect();
+                // Optimistic local removal by per-row entry_id — duplicate
+                // rows of the same song_id only lose the targeted row(s).
                 self.library
                     .queue_songs
-                    .retain(|s| !id_set.contains(s.id.as_str()));
+                    .retain(|s| !id_set.contains(&s.entry_id));
                 self.toast_info(format!("Removed {title_text} from queue"));
 
-                // Goes through `AppService::remove_queue_songs` so the audio
-                // engine follows the queue when the playing song is removed —
-                // a bare `QueueService` call would leave the engine streaming
-                // the deleted track while the UI advertises a different one.
+                // Goes through `AppService::remove_queue_entries` so the
+                // audio engine follows the queue when the playing row is
+                // removed — a bare `QueueService` call would leave the
+                // engine streaming the deleted track while the UI advertises
+                // a different one.
                 self.shell_spawn("queue_remove_batch", move |shell| async move {
-                    shell.remove_queue_songs(&song_ids).await
+                    shell.remove_queue_entries(&entry_ids).await
                 });
             }
-            QueueAction::PlayNext(song_ids) => {
-                if song_ids.is_empty() {
+            QueueAction::PlayNext(entry_ids) => {
+                if entry_ids.is_empty() {
                     return Task::none();
                 }
 
-                let title_text = if song_ids.len() == 1 {
+                let id_set: std::collections::HashSet<u64> = entry_ids.iter().copied().collect();
+                let title_text = if entry_ids.len() == 1 {
                     self.library
                         .queue_songs
                         .iter()
-                        .find(|s| s.id == song_ids[0])
+                        .find(|s| id_set.contains(&s.entry_id))
                         .map(|s| format!("\"{}\"", s.title))
                         .unwrap_or_default()
                 } else {
-                    format!("{} songs", song_ids.len())
+                    format!("{} songs", entry_ids.len())
                 };
 
                 self.toast_info(format!("{title_text} will play next"));
@@ -418,11 +419,19 @@ impl Nokkvi {
                 self.shell_spawn("queue_play_next_batch", move |shell| async move {
                     let qm_arc = shell.queue().queue_manager();
                     let mut qm = qm_arc.lock().await;
-                    let extracted: Vec<_> = song_ids
+                    // Resolve each entry_id → its current song_id → pool
+                    // Song clone. Doing this *before* the removal means
+                    // pool entries that would otherwise be dropped along
+                    // with the last queue row are still reachable.
+                    let extracted: Vec<_> = entry_ids
                         .iter()
-                        .filter_map(|id| qm.get_song(id).cloned())
+                        .filter_map(|&eid| {
+                            let idx = qm.index_of_entry(eid)?;
+                            let song_id = qm.get_queue().song_ids.get(idx).cloned()?;
+                            qm.get_song(&song_id).cloned()
+                        })
                         .collect();
-                    qm.remove_songs_by_ids(&song_ids).ok();
+                    qm.remove_entries_by_ids(&entry_ids).ok();
                     qm.insert_after_current(extracted).ok();
                     drop(qm);
                     shell.queue().refresh_from_queue().await

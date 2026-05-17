@@ -195,23 +195,29 @@ pub enum QueueAction {
         indices: Vec<usize>,
         target: usize,
     }, // multi-selection drag reorder
-    RemoveFromQueue(Vec<String>),   // remove songs by ID (immune to index drift)
-    PlayNext(Vec<String>),          // insert songs after currently playing (by ID)
-    ShowToast(String),              // informational toast (e.g. drag disabled reason)
-    SaveAsPlaylist,                 // open dialog to save queue as new playlist
-    OpenBrowsingPanel,              // toggle the library browser panel
-    AddToPlaylist(Vec<String>),     // song_ids - add to playlist dialog
-    SavePlaylist,                   // save playlist edits (edit mode)
-    DiscardEdits,                   // discard edits and exit edit mode
-    PlaylistNameChanged(String),    // playlist name edited inline
+    /// Remove one or more queue rows by their per-row `entry_id`s.
+    /// Duplicate-aware: targets specific rows rather than every row that
+    /// shares a song_id.
+    RemoveFromQueue(Vec<u64>),
+    /// Insert one or more queue rows after the currently-playing position,
+    /// referenced by per-row `entry_id` so a single duplicate row can be
+    /// promoted without dragging the other duplicate with it.
+    PlayNext(Vec<u64>),
+    ShowToast(String),           // informational toast (e.g. drag disabled reason)
+    SaveAsPlaylist,              // open dialog to save queue as new playlist
+    OpenBrowsingPanel,           // toggle the library browser panel
+    AddToPlaylist(Vec<String>),  // song_ids - add to playlist dialog
+    SavePlaylist,                // save playlist edits (edit mode)
+    DiscardEdits,                // discard edits and exit edit mode
+    PlaylistNameChanged(String), // playlist name edited inline
     PlaylistCommentChanged(String), // playlist comment edited inline
     PlaylistEditPublicToggled(bool), // public/private toggled in the edit bar
-    EditPlaylist,                   // enter edit mode from playlist context bar
-    ShowInfo(usize),                // Open info modal (queue index for full Song lookup)
-    ShowInFolder(usize),            // Open containing folder (queue index, path fetched via API)
-    RefreshArtwork(String),         // album_id - refresh artwork from server
-    FindSimilar(usize),             // Open Find Similar panel for queue index
-    TopSongs(usize),                // Open Top Songs panel for queue index
+    EditPlaylist,                // enter edit mode from playlist context bar
+    ShowInfo(usize),             // Open info modal (queue index for full Song lookup)
+    ShowInFolder(usize),         // Open containing folder (queue index, path fetched via API)
+    RefreshArtwork(String),      // album_id - refresh artwork from server
+    FindSimilar(usize),          // Open Find Similar panel for queue index
+    TopSongs(usize),             // Open Top Songs panel for queue index
     NavigateAndFilter(crate::View, nokkvi_data::types::filter::LibraryFilter), // Navigate to target view and filter
     NavigateAndExpandAlbum(String), // album_id - navigate to Albums and auto-expand
     NavigateAndExpandArtist(String), // artist_id - navigate to Artists and auto-expand

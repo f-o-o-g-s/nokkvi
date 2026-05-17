@@ -822,57 +822,61 @@ impl AppService {
         Ok(())
     }
 
-    /// Remove a batch of indices from the queue. Indices must be provided as a Vec.
-    /// They will be sorted in descending order to prevent index shifting during removal.
-    pub async fn remove_batch_from_queue(&self, mut indices: Vec<usize>) -> Result<()> {
-        // Sort in descending order
-        indices.sort_unstable_by(|a, b| b.cmp(a));
-
-        let mut count = 0;
-        for idx in indices {
-            // Log individually but we're removing sequentially
-            if self.queue_service.remove_song(idx).await.is_ok() {
-                count += 1;
-            }
-        }
-
-        if count > 0 {
-            debug!("➖ Removed {} songs from queue via batch", count);
-        }
-        Ok(())
-    }
-
-    /// Remove songs from the queue by ID and keep the audio engine in sync.
+    /// Remove queue rows by per-row `entry_id` and keep the audio engine in
+    /// sync. Targets specific rows rather than every row matching a song_id,
+    /// so right-click "Remove from queue" on one of several duplicate rows
+    /// leaves the other duplicates playing.
     ///
-    /// The bare [`QueueService::remove_songs_by_ids`] only mutates queue state.
-    /// If the currently-playing song is among the removed IDs, the queue's
-    /// `current_index` is clamped to the next valid slot — but the engine
-    /// keeps decoding the removed song's URL, so the UI would advertise a
-    /// different "now playing" track than the engine is producing.
+    /// The bare [`QueueService::remove_entries_by_ids`] only mutates queue
+    /// state. If the currently-playing row is among those removed, the
+    /// queue's `current_index` is clamped to the next valid slot — but the
+    /// engine keeps decoding the removed song's URL, so the UI would
+    /// advertise a different "now playing" track than the engine is
+    /// producing.
     ///
     /// This method closes that gap: snapshot what the navigator was playing,
+    /// resolve the removed entry_ids back to song_ids before mutating (so
+    /// the aftermath plan can ask "was the playing song among the removed?"),
     /// mutate the queue, then ask
     /// [`crate::services::playback::decide_removal_aftermath`] whether the
     /// engine needs to swap sources or stop, and execute that plan via
     /// [`PlaybackController::apply_removal_aftermath`]. The reactive UI
-    /// projection happens atomically inside `remove_songs_by_ids`; the
-    /// aftermath step does engine/navigator work only and never mutates
-    /// the queue, so no trailing refresh is needed.
-    pub async fn remove_queue_songs(&self, ids: &[String]) -> Result<()> {
-        if ids.is_empty() {
+    /// projection happens atomically inside `remove_entries_by_ids`; the
+    /// aftermath step does engine/navigator work only and never mutates the
+    /// queue, so no trailing refresh is needed.
+    pub async fn remove_queue_entries(&self, entry_ids: &[u64]) -> Result<()> {
+        if entry_ids.is_empty() {
             return Ok(());
         }
 
-        // Snapshot before mutating — the navigator's current_song_id is the
-        // only place that records "what the engine actually has loaded."
         let was_playing_id = self.playback.current_song_id().await;
 
-        self.queue_service.remove_songs_by_ids(ids).await?;
+        // Resolve each entry_id → its song_id *before* the removal. The
+        // post-removal queue no longer holds those entries, and
+        // `decide_removal_aftermath` needs the song_ids to ask "was the
+        // currently-playing song among the removed?".
+        let removed_song_ids: Vec<String> = {
+            let qm_arc = self.queue_service.queue_manager();
+            let qm = qm_arc.lock().await;
+            entry_ids
+                .iter()
+                .filter_map(|&eid| {
+                    qm.index_of_entry(eid)
+                        .and_then(|idx| qm.get_queue().song_ids.get(idx).cloned())
+                })
+                .collect()
+        };
+
+        self.queue_service.remove_entries_by_ids(entry_ids).await?;
 
         let plan = {
             let qm_arc = self.queue_service.queue_manager();
             let qm = qm_arc.lock().await;
-            crate::services::playback::decide_removal_aftermath(&qm, was_playing_id.as_deref(), ids)
+            crate::services::playback::decide_removal_aftermath(
+                &qm,
+                was_playing_id.as_deref(),
+                &removed_song_ids,
+            )
         };
 
         self.playback.apply_removal_aftermath(plan).await?;

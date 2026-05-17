@@ -253,9 +253,11 @@ fn sort_queue_ascending_then_descending_inverts() {
 //    (e.g. consume-mode auto-advance fires `LoadQueue`), so the indices kept
 //    pointing at the rows now occupying those positions — different songs.
 //
-// Fix shape: `QueueAction::RemoveFromQueue` carries `Vec<String>` (song IDs)
-// instead of `Vec<usize>`; the optimistic local removal uses ID lookup; and
-// `handle_queue_loaded` / `apply_queue_sort` clear `selected_indices`.
+// Fix shape: `QueueAction::RemoveFromQueue` carries `Vec<u64>` of per-row
+// `entry_id`s — distinct even when two rows share a song_id, so right-click
+// removal targets one row instead of every duplicate. The optimistic local
+// removal echoes the same `entry_id` set; `handle_queue_loaded` /
+// `apply_queue_sort` clear `selected_indices`.
 
 #[test]
 fn handle_queue_loaded_clears_selected_indices() {
@@ -328,6 +330,41 @@ fn remove_from_queue_uses_id_lookup_immune_to_stale_track_number() {
     assert_eq!(
         app.library.queue_songs[0].id, "a",
         "A should remain — the user clicked C"
+    );
+}
+
+/// Regression: two queue rows with the same `song_id` (e.g. "Speak to Me" by
+/// Pink Floyd queued twice). Right-clicking one row → Remove must take only
+/// that row, never the duplicate sibling. The legacy `Vec<String>` payload
+/// keyed by song_id removed both at the optimistic-UI step.
+#[test]
+fn remove_from_queue_with_duplicate_song_id_removes_only_clicked_row() {
+    use crate::views::{QueueMessage, queue::QueueContextEntry};
+
+    let mut app = test_app();
+    // Two rows of the same song. `make_queue_song` hands out distinct
+    // entry_ids per call, so the duplicate rows are individually addressable.
+    let row_first = make_queue_song("dup", "Speak to Me", "Pink Floyd", "Dark Side");
+    let row_second = make_queue_song("dup", "Speak to Me", "Pink Floyd", "Dark Side");
+    let first_entry_id = row_first.entry_id;
+    let second_entry_id = row_second.entry_id;
+    assert_ne!(first_entry_id, second_entry_id);
+    app.library.queue_songs = vec![row_first, row_second];
+
+    // Right-click filtered row 0 → Remove. Only that row must disappear.
+    let _ = app.handle_queue(QueueMessage::ContextMenuAction(
+        0,
+        QueueContextEntry::RemoveFromQueue,
+    ));
+
+    assert_eq!(
+        app.library.queue_songs.len(),
+        1,
+        "removing one of two duplicate rows must leave the other intact"
+    );
+    assert_eq!(
+        app.library.queue_songs[0].entry_id, second_entry_id,
+        "the surviving row should be the one the user did not click"
     );
 }
 
