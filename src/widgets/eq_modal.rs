@@ -234,13 +234,13 @@ pub(crate) fn eq_modal_overlay<'a>(
         nokkvi_data::audio::eq::BUILTIN_PRESETS
             .iter()
             .enumerate()
-            .find(|(_, p)| p.gains == eq_gains)
+            .find(|(_, p)| gains_match(&p.gains, &eq_gains))
             .map(|(i, _)| PresetChoice::Builtin(i))
             .or_else(|| {
                 custom_presets
                     .iter()
                     .enumerate()
-                    .find(|(_, p)| p.gains == eq_gains)
+                    .find(|(_, p)| gains_match(&p.gains, &eq_gains))
                     .map(|(i, _)| PresetChoice::Custom(i))
             })
     } else {
@@ -479,4 +479,83 @@ fn separator_line<'a>() -> Element<'a, EqModalMessage> {
             }
         })
         .into()
+}
+
+/// Compare two 10-band EQ gain arrays with a 1e-3 dB epsilon.
+///
+/// `toml::to_string_pretty` serializes top-level `eq_gains` with ~4-decimal
+/// precision but writes nested `[[custom_eq_presets]].gains` at full f32
+/// precision. After a reload the rounded bits no longer match the
+/// full-precision bits, so the dropdown's exact-equality lookup would fall
+/// through to the "Custom" placeholder. 1e-3 sits well above the ~5e-5
+/// rounding noise and well below any user-perceivable gain step in the
+/// -12.0..=12.0 dB range.
+fn gains_match(a: &[f32; 10], b: &[f32; 10]) -> bool {
+    a.iter().zip(b.iter()).all(|(x, y)| (x - y).abs() < 1e-3)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::gains_match;
+
+    /// Pair lifted from a real config.toml: rounded top-level `eq_gains`
+    /// vs full-precision nested `[[custom_eq_presets]].gains`.
+    #[test]
+    fn gains_match_within_epsilon() {
+        let rounded: [f32; 10] = [
+            0.0, -3.1139, 8.5257, -8.3076, 5.8904, 0.0, 1.5, 3.0, 4.0, 5.0,
+        ];
+        // Clippy truncates these to their actual f32 bit representations
+        // (`-3.113_941`, `8.525_743_5`, `-8.307_606`, `5.890_437`); the
+        // longer TOML strings (`-3.113941192626953`, etc.) parse to the
+        // same bits.
+        let full_precision: [f32; 10] = [
+            0.0,
+            -3.113_941,
+            8.525_743_5,
+            -8.307_606,
+            5.890_437,
+            0.0,
+            1.5,
+            3.0,
+            4.0,
+            5.0,
+        ];
+        assert!(gains_match(&rounded, &full_precision));
+        assert!(gains_match(&full_precision, &rounded));
+    }
+
+    /// A real 0.01 dB delta (10x the epsilon) in any single band must
+    /// reject the match, so genuinely distinct presets stay distinguishable.
+    #[test]
+    fn gains_match_rejects_actual_difference() {
+        let base: [f32; 10] = [
+            0.0, -3.1139, 8.5257, -8.3076, 5.8904, 0.0, 1.5, 3.0, 4.0, 5.0,
+        ];
+        for band in 0..10 {
+            let mut perturbed = base;
+            perturbed[band] += 0.01;
+            assert!(
+                !gains_match(&base, &perturbed),
+                "expected mismatch when band {band} differs by 0.01 dB",
+            );
+        }
+    }
+
+    /// NaN / ±Inf should never appear in real config but must not panic
+    /// the comparison if they ever do.
+    #[test]
+    fn gains_match_handles_nan_and_inf_without_panic() {
+        let zeros = [0.0f32; 10];
+        let nans = [f32::NAN; 10];
+        let infs = [f32::INFINITY; 10];
+        let neg_infs = [f32::NEG_INFINITY; 10];
+
+        assert!(!gains_match(&nans, &nans));
+        assert!(!gains_match(&infs, &infs));
+        assert!(!gains_match(&neg_infs, &neg_infs));
+        assert!(!gains_match(&nans, &zeros));
+        assert!(!gains_match(&infs, &zeros));
+        assert!(!gains_match(&neg_infs, &zeros));
+    }
 }
