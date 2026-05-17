@@ -15,7 +15,7 @@ impl Nokkvi {
         song_id: String,
     ) -> Task<Message> {
         // Skip if scrobbling is disabled
-        if !self.scrobbling_enabled {
+        if !self.settings.scrobbling_enabled {
             return Task::none();
         }
         // Only send if timer_id matches (not stale from rapid song changes)
@@ -53,7 +53,7 @@ impl Nokkvi {
 
     pub(crate) fn handle_scrobble_submit(&mut self, song_id: String) -> Task<Message> {
         // Skip if scrobbling is disabled
-        if !self.scrobbling_enabled {
+        if !self.settings.scrobbling_enabled {
             return Task::none();
         }
         debug!(" [SCROBBLE] Submitting scrobble for: {}", song_id);
@@ -138,7 +138,10 @@ impl Nokkvi {
         let dur = self.playback.duration;
 
         // Submit if threshold was met and not already submitted
-        let submit_task = if self.scrobble.should_scrobble(dur, self.scrobble_threshold) {
+        let submit_task = if self
+            .scrobble
+            .should_scrobble(dur, self.settings.scrobble_threshold)
+        {
             debug!(
                 "📊 [SCROBBLE] Submitting on loop: {} (listened {:.0}s / {}s total)",
                 song_id, self.scrobble.listening_time, dur

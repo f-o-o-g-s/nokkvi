@@ -33,7 +33,7 @@ impl Nokkvi {
         let search_q = search_query.clone();
         let sort_m = sort_mode.clone();
         let sort_o = sort_order.clone();
-        let page_size = self.library_page_size.to_usize();
+        let page_size = self.settings.library_page_size.to_usize();
         let fetch_task = self.shell_task(
             move |shell| async move {
                 let songs = shell

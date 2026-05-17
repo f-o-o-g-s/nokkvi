@@ -17,7 +17,7 @@ fn wildcard_change() -> LibraryChange {
 #[test]
 fn library_refreshed_emits_toast_by_default() {
     let mut app = test_app();
-    assert!(!app.suppress_library_refresh_toasts);
+    assert!(!app.settings.suppress_library_refresh_toasts);
     assert!(app.toast.toasts.is_empty());
 
     let _ = app.handle_library_changed(wildcard_change());
@@ -39,7 +39,7 @@ fn library_refreshed_emits_toast_by_default() {
 #[test]
 fn library_refreshed_suppresses_toast_when_flag_set() {
     let mut app = test_app();
-    app.suppress_library_refresh_toasts = true;
+    app.settings.suppress_library_refresh_toasts = true;
     assert!(app.toast.toasts.is_empty());
 
     let _ = app.handle_library_changed(wildcard_change());
@@ -737,8 +737,8 @@ fn artists_rating_sort_empty_is_noop() {
 #[test]
 fn tray_settings_default_off() {
     let app = test_app();
-    assert!(!app.show_tray_icon);
-    assert!(!app.close_to_tray);
+    assert!(!app.settings.show_tray_icon);
+    assert!(!app.settings.close_to_tray);
     assert!(!app.tray_window_hidden);
     assert!(app.tray_connection.is_none());
     assert!(app.main_window_id.is_none());
@@ -766,8 +766,8 @@ fn window_opened_replaces_main_window_id() {
 #[test]
 fn window_close_requested_with_close_to_tray_off_does_not_hide() {
     let mut app = test_app();
-    app.show_tray_icon = true;
-    app.close_to_tray = false;
+    app.settings.show_tray_icon = true;
+    app.settings.close_to_tray = false;
     let id = iced::window::Id::unique();
 
     let _ = app.handle_window_close_requested(id);
@@ -781,8 +781,8 @@ fn window_close_requested_with_close_to_tray_off_does_not_hide() {
 #[test]
 fn window_close_requested_with_close_to_tray_on_destroys_window() {
     let mut app = test_app();
-    app.show_tray_icon = true;
-    app.close_to_tray = true;
+    app.settings.show_tray_icon = true;
+    app.settings.close_to_tray = true;
     app.main_window_id = Some(iced::window::Id::unique());
     let id = iced::window::Id::unique();
 

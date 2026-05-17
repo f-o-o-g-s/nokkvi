@@ -89,7 +89,7 @@ impl Nokkvi {
 
         // Notify the user gently (skipped when the user has opted to suppress
         // these notifications via Settings → General → Application).
-        if !self.suppress_library_refresh_toasts {
+        if !self.settings.suppress_library_refresh_toasts {
             self.toast_info("Library refreshed automatically");
         }
 
@@ -120,7 +120,7 @@ impl Nokkvi {
                 }
             }
 
-            if refreshed_in_ui > 0 && !self.suppress_library_refresh_toasts {
+            if refreshed_in_ui > 0 && !self.settings.suppress_library_refresh_toasts {
                 let suffix = if refreshed_in_ui == 1 { "" } else { "s" };
                 self.toast_info(format!(
                     "Updated artwork for {refreshed_in_ui} album{suffix}"

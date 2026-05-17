@@ -63,7 +63,7 @@ impl Nokkvi {
     /// `Message::ShutdownComplete` regardless of whether the timeout fired —
     /// the OS reaps anything left after process exit anyway.
     pub fn handle_window_close_requested(&mut self, id: window::Id) -> Task<Message> {
-        if self.show_tray_icon && self.close_to_tray {
+        if self.settings.show_tray_icon && self.settings.close_to_tray {
             debug!(" Close requested → destroying window (will reopen via tray)");
             self.tray_window_hidden = true;
             self.main_window_id = None;

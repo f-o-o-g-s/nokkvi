@@ -375,7 +375,7 @@ impl Nokkvi {
         if let Some(prev_song_id) = &self.scrobble.current_song_id
             && self
                 .scrobble
-                .should_scrobble(self.playback.duration, self.scrobble_threshold)
+                .should_scrobble(self.playback.duration, self.settings.scrobble_threshold)
         {
             debug!(
                 "📊 [SCROBBLE] Submitting previous song on change: {} (listened {:.0}s)",
@@ -447,7 +447,9 @@ impl Nokkvi {
         self.scrobble.last_position = current_pos;
 
         // Check scrobble conditions (once per song)
-        if self.scrobble.should_scrobble(dur, self.scrobble_threshold)
+        if self
+            .scrobble
+            .should_scrobble(dur, self.settings.scrobble_threshold)
             && let Some(sid) = song_id
         {
             debug!(
@@ -491,7 +493,7 @@ impl Nokkvi {
         // Use queue index for focus (not song_id) to correctly handle duplicate tracks
         if let Some(idx) = current_index
             && self.current_view == View::Queue
-            && self.auto_follow_playing
+            && self.settings.auto_follow_playing
         {
             trace!(
                 "🎯 [FOCUS] Triggering FocusCurrentPlaying({}) with queue reload",
@@ -792,7 +794,7 @@ impl Nokkvi {
             let mut tasks = vec![];
 
             // Auto follow for Radios page
-            if self.current_view == crate::View::Radios && self.auto_follow_playing {
+            if self.current_view == crate::View::Radios && self.settings.auto_follow_playing {
                 tasks.push(Task::done(Message::Radios(
                     crate::views::RadiosMessage::FocusCurrentPlaying(station_id),
                 )));
@@ -1101,7 +1103,7 @@ impl Nokkvi {
         }
 
         // Load custom EQ presets into UI cache
-        self.window.custom_eq_presets = settings.custom_eq_presets;
+        self.window.custom_eq_presets = settings.custom_eq_presets.clone();
 
         debug!(
             "⚙️ [SETTINGS LOADED] crossfade_enabled={}, crossfade_duration_secs={}, volume_normalization={}, normalization_level={:?}",
@@ -1145,25 +1147,12 @@ impl Nokkvi {
             Task::none()
         };
 
-        // General settings
-        self.scrobbling_enabled = settings.scrobbling_enabled;
-        self.scrobble_threshold = settings.scrobble_threshold;
-        self.start_view = settings.start_view.clone();
-        self.stable_viewport = settings.stable_viewport;
-        self.auto_follow_playing = settings.auto_follow_playing;
-        self.enter_behavior = settings.enter_behavior;
-        self.local_music_path = settings.local_music_path.clone();
-        self.library_page_size = settings.library_page_size;
-        self.default_playlist_id = settings.default_playlist_id.clone();
-        self.default_playlist_name = settings.default_playlist_name.clone();
-        self.quick_add_to_playlist = settings.quick_add_to_playlist;
-        self.queue_show_default_playlist = settings.queue_show_default_playlist;
-        self.verbose_config = settings.verbose_config;
-        self.artwork_resolution = settings.artwork_resolution;
-        self.show_album_artists_only = settings.show_album_artists_only;
-        self.suppress_library_refresh_toasts = settings.suppress_library_refresh_toasts;
-        self.show_tray_icon = settings.show_tray_icon;
-        self.close_to_tray = settings.close_to_tray;
+        // Persisted player settings — single substruct replacement collapses
+        // the per-field mirror writes that previously fanned out 1:1 with
+        // `PlayerSettings`. Local `settings` binding remains available for the
+        // subsequent column-visibility / theme-atomic / engine-push steps that
+        // read individual fields.
+        self.settings = settings.clone();
 
         // Restore queue column visibility from persisted settings.
         self.queue_page.column_visibility.stars = settings.queue_show_stars;

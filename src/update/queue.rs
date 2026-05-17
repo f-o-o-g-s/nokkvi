@@ -86,7 +86,7 @@ impl Nokkvi {
 
                 // Focus slot list on current playing track if on Queue view
                 // (only when auto_follow_playing is ON)
-                if self.auto_follow_playing
+                if self.settings.auto_follow_playing
                     && self.current_view == View::Queue
                     && let Some(queue_index) = self.last_queue_current_index
                 {

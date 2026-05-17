@@ -45,14 +45,14 @@ impl Nokkvi {
             }
             InfoModalMessage::OpenFolder(path) => {
                 // Resolve the full local path by prepending the user's configured prefix
-                let full_path = if self.local_music_path.is_empty() {
+                let full_path = if self.settings.local_music_path.is_empty() {
                     self.toast_warn(
                         "Set a Local Music Path in Settings → Application to open files in your file manager.",
                     );
                     return Task::none();
                 } else {
                     // Trim any trailing slash from prefix before joining
-                    let prefix = self.local_music_path.trim_end_matches('/');
+                    let prefix = self.settings.local_music_path.trim_end_matches('/');
                     format!("{prefix}/{path}")
                 };
 

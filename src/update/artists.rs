@@ -38,7 +38,7 @@ impl Nokkvi {
     where
         M: FnOnce((Result<Vec<ArtistUIViewData>, String>, usize)) -> Message + Send + 'static,
     {
-        let page_size = self.library_page_size.to_usize();
+        let page_size = self.settings.library_page_size.to_usize();
         // Phase 5A defensive gate — see load_albums_internal for rationale.
         if !force
             && offset > 0
@@ -61,7 +61,7 @@ impl Nokkvi {
         );
         let is_rating_sort =
             self.artists_page.common.current_sort_mode == widgets::view_header::SortMode::Rating;
-        let album_artists_only = self.show_album_artists_only;
+        let album_artists_only = self.settings.show_album_artists_only;
 
         debug!(
             " LoadArtists: offset={}, page_size={}, view={}, sort={}, search={:?}, album_artists_only={}",
@@ -323,7 +323,7 @@ impl Nokkvi {
                 }
                 // AppendAndPlay: append artist songs to queue and start playing
                 use nokkvi_data::types::player_settings::EnterBehavior;
-                if self.enter_behavior == EnterBehavior::AppendAndPlay
+                if self.settings.enter_behavior == EnterBehavior::AppendAndPlay
                     && let Ok(index) = artist_id_str.parse::<usize>()
                     && let Some(artist) = self.library.artists.get(index)
                 {
@@ -519,7 +519,7 @@ impl Nokkvi {
                     batch.push(self.handle_load_artist_large_artwork(id));
                 }
 
-                let page_size = self.library_page_size.to_usize();
+                let page_size = self.settings.library_page_size.to_usize();
                 if !self.library.artists.is_empty()
                     && let Some((offset, _)) = self.library.artists.needs_fetch(
                         self.artists_page.common.slot_list.viewport_offset,

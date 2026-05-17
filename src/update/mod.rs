@@ -73,6 +73,8 @@ mod songs;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tests_player_settings;
+#[cfg(test)]
 mod tests_queue_filter;
 #[cfg(test)]
 mod tests_star_rating;
@@ -292,11 +294,11 @@ impl Nokkvi {
             }
             Message::PlaylistsFetchedForAddToPlaylist(playlists, song_ids) => {
                 // Quick-add bypass: skip dialog when default playlist is configured
-                if self.quick_add_to_playlist
-                    && let Some(ref default_id) = self.default_playlist_id
+                if self.settings.quick_add_to_playlist
+                    && let Some(ref default_id) = self.settings.default_playlist_id
                 {
                     let playlist_id = default_id.clone();
-                    let playlist_name = self.default_playlist_name.clone();
+                    let playlist_name = self.settings.default_playlist_name.clone();
                     let count = song_ids.len();
                     return self.shell_action_task(
                         move |shell| async move {

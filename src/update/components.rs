@@ -1005,17 +1005,17 @@ impl Nokkvi {
     /// Open the containing folder of a song file in the user's file manager.
     ///
     /// `relative_path` is the song's path as stored by Navidrome (relative to the
-    /// music library root). The method prepends `self.local_music_path`, resolves
+    /// music library root). The method prepends `self.settings.local_music_path`, resolves
     /// the parent directory, and opens it with `xdg-open`.
     pub(crate) fn handle_show_in_folder(&mut self, relative_path: String) -> Task<Message> {
-        if self.local_music_path.is_empty() {
+        if self.settings.local_music_path.is_empty() {
             self.toast_warn(
                 "Set a Local Music Path in Settings → Application to open files in your file manager.",
             );
             return Task::none();
         }
 
-        let prefix = self.local_music_path.trim_end_matches('/');
+        let prefix = self.settings.local_music_path.trim_end_matches('/');
         let full_path = format!("{prefix}/{relative_path}");
         let file_path = std::path::Path::new(&full_path);
 

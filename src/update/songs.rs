@@ -22,7 +22,7 @@ impl Nokkvi {
     where
         M: FnOnce((Result<Vec<SongUIViewData>, String>, usize)) -> Message + Send + 'static,
     {
-        let page_size = self.library_page_size.to_usize();
+        let page_size = self.settings.library_page_size.to_usize();
         // Phase 5A defensive gate — see load_albums_internal for rationale.
         if !force
             && offset > 0
@@ -195,7 +195,7 @@ impl Nokkvi {
                     debug!(" Playing song from index: {} - {}", song.title, song.artist);
 
                     use nokkvi_data::types::player_settings::EnterBehavior;
-                    match self.enter_behavior {
+                    match self.settings.enter_behavior {
                         EnterBehavior::PlaySingle => {
                             // Replace queue with just this song
                             let song: nokkvi_data::types::song::Song = song.clone().into();
@@ -347,7 +347,7 @@ impl Nokkvi {
                 }
 
                 // Check if we need to fetch more pages while scrolling
-                let page_size = self.library_page_size.to_usize();
+                let page_size = self.settings.library_page_size.to_usize();
                 if let Some((offset, _)) = self
                     .library
                     .songs

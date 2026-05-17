@@ -234,35 +234,18 @@ pub struct Nokkvi {
     pub hotkey_config: HotkeyConfig,
 
     // -------------------------------------------------------------------------
-    // General Settings (loaded from redb via PlayerSettingsLoaded)
+    // Persisted player settings (mirrors PlayerSettings 1:1 — see
+    // data/src/types/player_settings/mod.rs). Loaded from redb on login via
+    // `PlayerSettingsLoaded`. Adding a new persisted setting is a one-side
+    // edit in `PlayerSettings`; this substruct picks it up automatically.
     // -------------------------------------------------------------------------
-    /// Whether scrobbling is enabled (default: true)
-    pub scrobbling_enabled: bool,
-    /// Scrobble threshold as fraction of track duration (default: 0.50)
-    pub scrobble_threshold: f32,
-    /// Start view name for initial view on login (default: "Queue")
-    pub start_view: String,
+    pub settings: nokkvi_data::types::player_settings::PlayerSettings,
+
+    // -------------------------------------------------------------------------
+    // UI runtime flags (NOT persisted to PlayerSettings)
+    // -------------------------------------------------------------------------
     /// One-shot flag: has start_view been applied yet?
     pub start_view_applied: bool,
-    /// Whether stable viewport mode is enabled (default: true)
-    pub stable_viewport: bool,
-    /// Whether auto-follow playing track is enabled (default: true)
-    pub auto_follow_playing: bool,
-    /// Whether the Artists view shows only album artists
-    pub show_album_artists_only: bool,
-    /// Whether to suppress the toast shown on Navidrome library-refresh events
-    /// (default: false = toasts shown).
-    pub suppress_library_refresh_toasts: bool,
-    /// Whether the system tray icon (StatusNotifierItem) is registered.
-    pub show_tray_icon: bool,
-    /// Whether the window's close button hides into the tray instead of quitting.
-    pub close_to_tray: bool,
-    /// What Enter does in the Songs view (default: PlayAll)
-    pub enter_behavior: nokkvi_data::types::player_settings::EnterBehavior,
-    /// Local filesystem prefix for opening files in the file manager (default: empty = not set)
-    pub local_music_path: String,
-    /// Page size for library pagination chunks
-    pub library_page_size: nokkvi_data::types::player_settings::LibraryPageSize,
     /// Transient flag: suppress the next auto-center triggered by a track change.
     /// Set when a click-initiated play fires, cleared after consumption.
     pub suppress_next_auto_center: bool,
@@ -285,18 +268,6 @@ pub struct Nokkvi {
     /// found; consumed by the matching children-loaded handler
     /// (`TracksLoaded` for albums, `AlbumsLoaded` for artists).
     pub pending_top_pin: Option<crate::state::PendingTopPin>,
-    /// Default playlist ID for quick-add (None = no default set)
-    pub default_playlist_id: Option<String>,
-    /// Default playlist display name (for settings UI readout)
-    pub default_playlist_name: String,
-    /// Whether to skip the Add to Playlist dialog and use the default playlist directly
-    pub quick_add_to_playlist: bool,
-    /// Whether the queue view's header shows the default playlist chip
-    pub queue_show_default_playlist: bool,
-    /// Whether all settings (including defaults) are written to config.toml
-    pub verbose_config: bool,
-    /// Artwork resolution for the large artwork panel (configurable in Settings)
-    pub artwork_resolution: nokkvi_data::types::player_settings::ArtworkResolution,
     /// Extracted backend server version (e.g. from Navidrome)
     pub server_version: Option<String>,
 
@@ -363,30 +334,25 @@ impl Default for Nokkvi {
             library: crate::state::LibraryData::default(),
             similar_songs: None,
             similar_songs_generation: 0,
-            // General settings defaults (overridden by PlayerSettingsLoaded)
-            scrobbling_enabled: true,
-            scrobble_threshold: 0.50,
-            start_view: "Queue".to_string(),
+            // Persisted player settings (overridden by PlayerSettingsLoaded).
+            // PlayerSettings derives Default, which zeros every field — the
+            // 18 fields previously hand-defaulted on Nokkvi are restored
+            // here so first-launch behavior (before PlayerSettingsLoaded
+            // fires) matches the pre-substruct shape.
+            settings: nokkvi_data::types::player_settings::PlayerSettings {
+                scrobbling_enabled: true,
+                scrobble_threshold: 0.50,
+                start_view: "Queue".to_string(),
+                stable_viewport: true,
+                auto_follow_playing: true,
+                ..nokkvi_data::types::player_settings::PlayerSettings::default()
+            },
+            // UI runtime flags (not persisted)
             start_view_applied: false,
-            stable_viewport: true,
-            auto_follow_playing: true,
-            show_album_artists_only: false,
-            suppress_library_refresh_toasts: false,
-            show_tray_icon: false,
-            close_to_tray: false,
-            enter_behavior: nokkvi_data::types::player_settings::EnterBehavior::default(),
-            local_music_path: String::new(),
-            library_page_size: nokkvi_data::types::player_settings::LibraryPageSize::Default,
             suppress_next_auto_center: false,
             pending_expand: None,
             pending_expand_center_only: false,
             pending_top_pin: None,
-            default_playlist_id: None,
-            default_playlist_name: String::new(),
-            quick_add_to_playlist: false,
-            queue_show_default_playlist: false,
-            verbose_config: false,
-            artwork_resolution: nokkvi_data::types::player_settings::ArtworkResolution::Default,
             server_version: None,
             // Consolidated state structs with defaults
             active_playback: crate::state::ActivePlayback::default(),
@@ -542,7 +508,7 @@ impl Nokkvi {
         // user toggles `show_tray_icon` off, the subscription disappears
         // from the batch and iced cancels it, which closes the command
         // channel and tears down the ksni service on its dedicated thread.
-        let tray = if self.show_tray_icon {
+        let tray = if self.settings.show_tray_icon {
             iced::Subscription::run(services::tray::run).map(Message::Tray)
         } else {
             iced::Subscription::none()

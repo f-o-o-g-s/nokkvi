@@ -113,7 +113,7 @@ impl Nokkvi {
                 }
                 // AppendAndPlay: append playlist songs to queue and start playing
                 use nokkvi_data::types::player_settings::EnterBehavior;
-                if self.enter_behavior == EnterBehavior::AppendAndPlay {
+                if self.settings.enter_behavior == EnterBehavior::AppendAndPlay {
                     let name = self
                         .library
                         .playlists
@@ -378,8 +378,8 @@ impl Nokkvi {
                     " Setting default playlist: '{}' ({})",
                     playlist_name, playlist_id
                 );
-                self.default_playlist_id = Some(playlist_id.clone());
-                self.default_playlist_name = playlist_name.clone();
+                self.settings.default_playlist_id = Some(playlist_id.clone());
+                self.settings.default_playlist_name = playlist_name.clone();
                 self.settings_page.config_dirty = true;
                 self.toast_success(format!("Default playlist set to '{playlist_name}'"));
                 self.shell_spawn("persist_default_playlist", move |shell| async move {

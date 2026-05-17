@@ -274,7 +274,7 @@ impl Nokkvi {
                 self.text_input_dialog.close();
                 // Update local state and persist for known general settings
                 if key == "general.local_music_path" {
-                    self.local_music_path = new_value.clone();
+                    self.settings.local_music_path = new_value.clone();
                     tracing::info!(" [SETTINGS] Local music path set to: {new_value:?}");
                     self.shell_fire_and_forget_task(
                         move |shell| async move {

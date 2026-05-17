@@ -214,7 +214,7 @@ impl Nokkvi {
                 }
                 // AppendAndPlay: append genre songs to queue and start playing
                 use nokkvi_data::types::player_settings::EnterBehavior;
-                if self.enter_behavior == EnterBehavior::AppendAndPlay {
+                if self.settings.enter_behavior == EnterBehavior::AppendAndPlay {
                     self.clear_active_playlist();
                     let name = genre_name.clone();
                     return self.shell_fire_and_forget_task(

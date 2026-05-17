@@ -219,7 +219,7 @@ impl Nokkvi {
                 if radio_name.is_some() {
                     strip
                 } else {
-                    let has_local_path = !self.local_music_path.is_empty();
+                    let has_local_path = !self.settings.local_music_path.is_empty();
                     let is_starred = self.is_current_track_starred();
                     let (strip_open, strip_position) = strip_context_state(&self.open_menu);
                     widgets::context_menu::context_menu(
@@ -269,7 +269,7 @@ impl Nokkvi {
                 let wrapped: Element<'_, Message> = if radio_name.is_some() {
                     strip
                 } else {
-                    let has_local_path = !self.local_music_path.is_empty();
+                    let has_local_path = !self.settings.local_music_path.is_empty();
                     let is_starred = self.is_current_track_starred();
                     let (strip_open, strip_position) = strip_context_state(&self.open_menu);
                     widgets::context_menu::context_menu(
@@ -625,7 +625,7 @@ impl Nokkvi {
             window_width: self.window.width,
             is_light_mode: crate::theme::is_light_mode(),
             settings_open,
-            local_music_path: self.local_music_path.clone(),
+            local_music_path: self.settings.local_music_path.clone(),
             is_current_starred: self.is_current_track_starred(),
             radio_name,
             radio_url,
@@ -702,7 +702,7 @@ impl Nokkvi {
                     .library
                     .queue_loading_target
                     .unwrap_or(self.library.queue_songs.len()),
-                stable_viewport: self.stable_viewport,
+                stable_viewport: self.settings.stable_viewport,
                 edit_mode_info,
                 edit_mode_comment,
                 edit_mode_public,
@@ -710,8 +710,8 @@ impl Nokkvi {
                 column_dropdown_open,
                 column_dropdown_trigger_bounds,
                 open_menu: self.open_menu.as_ref(),
-                show_default_playlist_chip: self.queue_show_default_playlist,
-                default_playlist_name: &self.default_playlist_name,
+                show_default_playlist_chip: self.settings.queue_show_default_playlist,
+                default_playlist_name: &self.settings.default_playlist_name,
                 drop_indicator_slot: self.cross_pane_drop_indicator_slot(),
             };
 
@@ -927,7 +927,7 @@ impl Nokkvi {
                     modifiers: self.window.keyboard_modifiers,
                     total_album_count: self.library.counts.albums,
                     loading: self.library.albums.is_loading(),
-                    stable_viewport: self.stable_viewport,
+                    stable_viewport: self.settings.stable_viewport,
                     in_browsing_panel: false,
                     column_dropdown_open,
                     column_dropdown_trigger_bounds,
@@ -955,7 +955,7 @@ impl Nokkvi {
                         .library
                         .queue_loading_target
                         .unwrap_or(self.library.queue_songs.len()),
-                    stable_viewport: self.stable_viewport,
+                    stable_viewport: self.settings.stable_viewport,
                     edit_mode_info: None,
                     edit_mode_comment: None,
                     edit_mode_public: None,
@@ -963,8 +963,8 @@ impl Nokkvi {
                     column_dropdown_open,
                     column_dropdown_trigger_bounds,
                     open_menu: self.open_menu.as_ref(),
-                    show_default_playlist_chip: self.queue_show_default_playlist,
-                    default_playlist_name: &self.default_playlist_name,
+                    show_default_playlist_chip: self.settings.queue_show_default_playlist,
+                    default_playlist_name: &self.settings.default_playlist_name,
                     drop_indicator_slot: self.cross_pane_drop_indicator_slot(),
                 };
                 self.queue_page.view(view_data).map(Message::Queue)
@@ -984,7 +984,7 @@ impl Nokkvi {
                     modifiers: self.window.keyboard_modifiers,
                     total_artist_count: self.library.counts.artists,
                     loading: self.library.artists.is_loading(),
-                    stable_viewport: self.stable_viewport,
+                    stable_viewport: self.settings.stable_viewport,
                     in_browsing_panel: false,
                     column_dropdown_open,
                     column_dropdown_trigger_bounds,
@@ -1006,7 +1006,7 @@ impl Nokkvi {
                     modifiers: self.window.keyboard_modifiers,
                     total_song_count: self.library.counts.songs,
                     loading: self.library.songs.is_loading(),
-                    stable_viewport: self.stable_viewport,
+                    stable_viewport: self.settings.stable_viewport,
                     in_browsing_panel: false,
                     column_dropdown_open,
                     column_dropdown_trigger_bounds,
@@ -1028,7 +1028,7 @@ impl Nokkvi {
                     modifiers: self.window.keyboard_modifiers,
                     total_genre_count: self.library.counts.genres,
                     loading: self.library.genres.is_loading(),
-                    stable_viewport: self.stable_viewport,
+                    stable_viewport: self.settings.stable_viewport,
                     in_browsing_panel: false,
                     column_dropdown_open,
                     column_dropdown_trigger_bounds,
@@ -1049,8 +1049,8 @@ impl Nokkvi {
                     modifiers: self.window.keyboard_modifiers,
                     total_playlist_count: self.library.counts.playlists,
                     loading: self.library.playlists.is_loading(),
-                    stable_viewport: self.stable_viewport,
-                    default_playlist_name: &self.default_playlist_name,
+                    stable_viewport: self.settings.stable_viewport,
+                    default_playlist_name: &self.settings.default_playlist_name,
                     column_dropdown_open,
                     column_dropdown_trigger_bounds,
                     open_menu: self.open_menu.as_ref(),
@@ -1073,7 +1073,7 @@ impl Nokkvi {
                     scale_factor: self.window.scale_factor,
                     loading: false, // TODO: add loading state for radio stations
                     total_station_count: self.library.radio_stations.len(),
-                    stable_viewport: self.stable_viewport,
+                    stable_viewport: self.settings.stable_viewport,
                     modifiers: self.window.keyboard_modifiers,
                     open_menu: self.open_menu.as_ref(),
                 };

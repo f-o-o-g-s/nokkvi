@@ -32,18 +32,18 @@ impl Nokkvi {
         let general = GeneralSettingsData {
             server_url: self.login_page.server_url.clone().into(),
             username: self.login_page.username.clone().into(),
-            start_view: self.start_view.clone().into(),
-            stable_viewport: self.stable_viewport,
-            auto_follow_playing: self.auto_follow_playing,
-            enter_behavior: self.enter_behavior.as_label().into(),
-            local_music_path: self.local_music_path.clone().into(),
-            verbose_config: self.verbose_config,
-            library_page_size: self.library_page_size.as_label().into(),
-            artwork_resolution: self.artwork_resolution.as_label().into(),
-            show_album_artists_only: self.show_album_artists_only,
-            suppress_library_refresh_toasts: self.suppress_library_refresh_toasts,
-            show_tray_icon: self.show_tray_icon,
-            close_to_tray: self.close_to_tray,
+            start_view: self.settings.start_view.clone().into(),
+            stable_viewport: self.settings.stable_viewport,
+            auto_follow_playing: self.settings.auto_follow_playing,
+            enter_behavior: self.settings.enter_behavior.as_label().into(),
+            local_music_path: self.settings.local_music_path.clone().into(),
+            verbose_config: self.settings.verbose_config,
+            library_page_size: self.settings.library_page_size.as_label().into(),
+            artwork_resolution: self.settings.artwork_resolution.as_label().into(),
+            show_album_artists_only: self.settings.show_album_artists_only,
+            suppress_library_refresh_toasts: self.settings.suppress_library_refresh_toasts,
+            show_tray_icon: self.settings.show_tray_icon,
+            close_to_tray: self.settings.close_to_tray,
         };
 
         let interface = InterfaceSettingsData {
@@ -83,11 +83,11 @@ impl Nokkvi {
             replay_gain_fallback_db: self.engine.replay_gain_fallback_db.round() as i64,
             replay_gain_fallback_to_agc: self.engine.replay_gain_fallback_to_agc,
             replay_gain_prevent_clipping: self.engine.replay_gain_prevent_clipping,
-            scrobbling_enabled: self.scrobbling_enabled,
-            scrobble_threshold: f64::from(self.scrobble_threshold),
-            quick_add_to_playlist: self.quick_add_to_playlist,
-            default_playlist_name: self.default_playlist_name.clone().into(),
-            queue_show_default_playlist: self.queue_show_default_playlist,
+            scrobbling_enabled: self.settings.scrobbling_enabled,
+            scrobble_threshold: f64::from(self.settings.scrobble_threshold),
+            quick_add_to_playlist: self.settings.quick_add_to_playlist,
+            default_playlist_name: self.settings.default_playlist_name.clone().into(),
+            queue_show_default_playlist: self.settings.queue_show_default_playlist,
         };
 
         crate::views::SettingsViewData {

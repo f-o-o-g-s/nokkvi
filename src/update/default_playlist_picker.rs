@@ -124,8 +124,8 @@ impl Nokkvi {
         match entry {
             PickerEntry::Clear => {
                 info!(" Clearing default playlist");
-                self.default_playlist_id = None;
-                self.default_playlist_name.clear();
+                self.settings.default_playlist_id = None;
+                self.settings.default_playlist_name.clear();
                 self.settings_page.config_dirty = true;
                 self.toast_info("Default playlist cleared");
                 self.shell_spawn("persist_default_playlist", |shell| async move {
@@ -137,8 +137,8 @@ impl Nokkvi {
             }
             PickerEntry::Playlist { id, name, .. } => {
                 info!(" Setting default playlist: '{}' ({})", name, id);
-                self.default_playlist_id = Some(id.clone());
-                self.default_playlist_name = name.clone();
+                self.settings.default_playlist_id = Some(id.clone());
+                self.settings.default_playlist_name = name.clone();
                 self.settings_page.config_dirty = true;
                 self.toast_success(format!("Default playlist set to '{name}'"));
                 self.shell_spawn("persist_default_playlist", move |shell| async move {

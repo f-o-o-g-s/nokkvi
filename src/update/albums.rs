@@ -28,7 +28,7 @@ impl Nokkvi {
     where
         M: FnOnce((Result<Vec<AlbumUIViewData>, String>, usize)) -> Message + Send + 'static,
     {
-        let page_size = self.library_page_size.to_usize();
+        let page_size = self.settings.library_page_size.to_usize();
         // Phase 5A defensive gate: page-load follow-ups (offset > 0) must
         // pass needs_fetch. Catches duplicate dispatches that race past
         // the upstream needs_fetch check at the action site. Initial
@@ -178,7 +178,7 @@ impl Nokkvi {
 
         if let Some(shell) = &self.app_service {
             let albums_vm = shell.albums().clone();
-            let artwork_size = self.artwork_resolution.to_size();
+            let artwork_size = self.settings.artwork_resolution.to_size();
             // Resolve the art_id (and updated_at, when known) from the albums list
             // first — falls back to the bare album_id which `fetch_album_artwork`
             // will normalize with the `al-` prefix.
@@ -236,7 +236,7 @@ impl Nokkvi {
         };
         let albums_vm = shell.albums().clone();
         let id = album_id.clone();
-        let artwork_size = self.artwork_resolution.to_size();
+        let artwork_size = self.settings.artwork_resolution.to_size();
         let updated_at = self
             .library
             .albums
@@ -330,7 +330,7 @@ impl Nokkvi {
             if let Some(shell) = &self.app_service {
                 let albums_vm = shell.albums().clone();
                 let art_id = id.clone();
-                let artwork_size = self.artwork_resolution.to_size();
+                let artwork_size = self.settings.artwork_resolution.to_size();
 
                 fetch_color_task = Task::perform(
                     async move {
@@ -462,7 +462,7 @@ impl Nokkvi {
                 }
                 // AppendAndPlay: append album songs to queue and start playing
                 use nokkvi_data::types::player_settings::EnterBehavior;
-                if self.enter_behavior == EnterBehavior::AppendAndPlay
+                if self.settings.enter_behavior == EnterBehavior::AppendAndPlay
                     && let Ok(index) = album_id_str.parse::<usize>()
                     && let Some(album) = self.library.albums.get(index)
                 {
@@ -551,7 +551,7 @@ impl Nokkvi {
 
                     if !tasks.is_empty() {
                         // Check if we need to fetch more pages while scrolling
-                        let page_size = self.library_page_size.to_usize();
+                        let page_size = self.settings.library_page_size.to_usize();
                         if let Some((offset, _)) = self.library.albums.needs_fetch(
                             self.albums_page.common.slot_list.viewport_offset,
                             page_size,

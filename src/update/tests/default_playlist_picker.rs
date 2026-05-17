@@ -97,14 +97,14 @@ fn picker_click_playlist_sets_default_and_closes() {
     let mut app = test_app();
     seed_playlists(&mut app, vec![("p1", "Workout"), ("p2", "Chill")]);
     let _ = app.handle_default_playlist_picker(DefaultPlaylistPickerMessage::Open);
-    assert!(app.default_playlist_id.is_none());
-    assert!(app.default_playlist_name.is_empty());
+    assert!(app.settings.default_playlist_id.is_none());
+    assert!(app.settings.default_playlist_name.is_empty());
 
     // Index 1 is the first real playlist (index 0 is the Clear virtual entry).
     let _ = app.handle_default_playlist_picker(DefaultPlaylistPickerMessage::ClickItem(1));
 
-    assert_eq!(app.default_playlist_id, Some("p1".to_string()));
-    assert_eq!(app.default_playlist_name, "Workout");
+    assert_eq!(app.settings.default_playlist_id, Some("p1".to_string()));
+    assert_eq!(app.settings.default_playlist_name, "Workout");
     assert!(
         app.default_playlist_picker.is_none(),
         "selecting an entry should close the picker"
@@ -116,16 +116,16 @@ fn picker_click_clear_unsets_default_and_closes() {
     use crate::widgets::default_playlist_picker::DefaultPlaylistPickerMessage;
 
     let mut app = test_app();
-    app.default_playlist_id = Some("p1".to_string());
-    app.default_playlist_name = "Workout".to_string();
+    app.settings.default_playlist_id = Some("p1".to_string());
+    app.settings.default_playlist_name = "Workout".to_string();
     seed_playlists(&mut app, vec![("p1", "Workout")]);
     let _ = app.handle_default_playlist_picker(DefaultPlaylistPickerMessage::Open);
 
     // Index 0 is the Clear virtual entry.
     let _ = app.handle_default_playlist_picker(DefaultPlaylistPickerMessage::ClickItem(0));
 
-    assert!(app.default_playlist_id.is_none());
-    assert!(app.default_playlist_name.is_empty());
+    assert!(app.settings.default_playlist_id.is_none());
+    assert!(app.settings.default_playlist_name.is_empty());
     assert!(app.default_playlist_picker.is_none());
 }
 
@@ -204,7 +204,7 @@ fn picker_repopulates_when_playlists_load_after_open() {
 fn queue_show_default_playlist_setting_default_is_off() {
     let app = test_app();
     assert!(
-        !app.queue_show_default_playlist,
+        !app.settings.queue_show_default_playlist,
         "the queue chip is opt-in — default should be hidden"
     );
 }

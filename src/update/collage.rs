@@ -49,7 +49,7 @@ impl Nokkvi {
         Fut: Future<Output = Vec<String>> + Send,
     {
         let entity_id_clone = entity_id.clone();
-        let artwork_size = self.artwork_resolution.to_size();
+        let artwork_size = self.settings.artwork_resolution.to_size();
 
         self.shell_task(
             move |shell| async move {
