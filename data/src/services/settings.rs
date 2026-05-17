@@ -908,82 +908,52 @@ impl SettingsManager {
 
     /// Get player settings for Message::PlayerSettingsLoaded.
     ///
-    /// Strangler-fig: per-tab `dump_<tab>_tab_player_settings` calls
-    /// (macro-emitted from `services/settings_tables/`) own the keys that
-    /// have been migrated to `define_settings!`. The struct expression below
-    /// hand-writes only the residual fields; everything else falls through
-    /// `..Default::default()` and is then overwritten by the dumpers. Adding
-    /// a `read:` closure to a per-tab entry shifts a field from "residual"
-    /// to "macro-owned" — drop the matching line here when you do.
+    /// Composition: start from default UI-facing `PlayerSettings`, populate
+    /// the runtime-only fields (volume, playlist IDs that don't round-trip
+    /// through `config.toml`) and the scalar residuals not yet owned by any
+    /// per-tab or per-view-column macro, then run the 3 per-tab dumpers and
+    /// 7 per-view-column dumpers to cover the migrated entries.
     pub fn get_player_settings(&self) -> crate::types::player_settings::PlayerSettings {
         let p = &self.settings.player;
         let mut out = crate::types::player_settings::PlayerSettings {
+            // Runtime-only fields — these live in redb only and never
+            // round-trip through config.toml. The dumpers below intentionally
+            // do NOT touch these.
             volume: p.volume as f32,
-            sfx_volume: p.sfx_volume as f32,
-            sound_effects_enabled: p.sound_effects_enabled,
-            visualization_mode: p.visualization_mode,
             default_playlist_id: p.default_playlist_id.clone(),
             default_playlist_name: p.default_playlist_name.clone(),
-            font_family: p.font_family.clone(),
             active_playlist_id: p.active_playlist_id.clone(),
             active_playlist_name: p.active_playlist_name.clone(),
             active_playlist_comment: p.active_playlist_comment.clone(),
+
+            // Scalar residuals — fields not (yet) owned by any per-tab or
+            // per-view-column macro (paralleling the same residuals in
+            // `apply_toml_settings_to_internal` and
+            // `TomlSettings::from_player_settings`).
+            sfx_volume: p.sfx_volume as f32,
+            sound_effects_enabled: p.sound_effects_enabled,
+            visualization_mode: p.visualization_mode,
+            font_family: p.font_family.clone(),
             eq_enabled: p.eq_enabled,
             eq_gains: p.eq_gains,
             custom_eq_presets: p.custom_eq_presets.clone(),
-            queue_show_plays: p.queue_show_plays,
-            queue_show_index: p.queue_show_index,
-            queue_show_thumbnail: p.queue_show_thumbnail,
-            queue_show_genre: p.queue_show_genre,
-            queue_show_select: p.queue_show_select,
-            albums_show_stars: p.albums_show_stars,
-            albums_show_songcount: p.albums_show_songcount,
-            albums_show_plays: p.albums_show_plays,
-            albums_show_love: p.albums_show_love,
-            albums_show_index: p.albums_show_index,
-            albums_show_thumbnail: p.albums_show_thumbnail,
-            albums_show_select: p.albums_show_select,
-            songs_show_stars: p.songs_show_stars,
-            songs_show_album: p.songs_show_album,
-            songs_show_duration: p.songs_show_duration,
-            songs_show_plays: p.songs_show_plays,
-            songs_show_love: p.songs_show_love,
-            songs_show_index: p.songs_show_index,
-            songs_show_thumbnail: p.songs_show_thumbnail,
-            songs_show_genre: p.songs_show_genre,
-            songs_show_select: p.songs_show_select,
-            artists_show_stars: p.artists_show_stars,
-            artists_show_albumcount: p.artists_show_albumcount,
-            artists_show_songcount: p.artists_show_songcount,
-            artists_show_plays: p.artists_show_plays,
-            artists_show_love: p.artists_show_love,
-            artists_show_index: p.artists_show_index,
-            artists_show_thumbnail: p.artists_show_thumbnail,
-            artists_show_select: p.artists_show_select,
-            genres_show_index: p.genres_show_index,
-            genres_show_thumbnail: p.genres_show_thumbnail,
-            genres_show_albumcount: p.genres_show_albumcount,
-            genres_show_songcount: p.genres_show_songcount,
-            genres_show_select: p.genres_show_select,
-            playlists_show_index: p.playlists_show_index,
-            playlists_show_thumbnail: p.playlists_show_thumbnail,
-            playlists_show_songcount: p.playlists_show_songcount,
-            playlists_show_duration: p.playlists_show_duration,
-            playlists_show_updatedat: p.playlists_show_updatedat,
-            playlists_show_select: p.playlists_show_select,
-            similar_show_index: p.similar_show_index,
-            similar_show_thumbnail: p.similar_show_thumbnail,
-            similar_show_album: p.similar_show_album,
-            similar_show_duration: p.similar_show_duration,
-            similar_show_love: p.similar_show_love,
-            similar_show_select: p.similar_show_select,
             artwork_column_width_pct: p.artwork_column_width_pct,
             ..Default::default()
         };
 
+        // Per-tab macro-emitted dumpers (define_settings! `read:` closures).
         crate::services::settings_tables::dump_general_tab_player_settings(p, &mut out);
         crate::services::settings_tables::dump_interface_tab_player_settings(p, &mut out);
         crate::services::settings_tables::dump_playback_tab_player_settings(p, &mut out);
+
+        // Per-view-column macro-emitted dumpers (define_view_column_toml_helpers!).
+        crate::types::view_column_toml::dump_albums_columns_to_player(p, &mut out);
+        crate::types::view_column_toml::dump_artists_columns_to_player(p, &mut out);
+        crate::types::view_column_toml::dump_genres_columns_to_player(p, &mut out);
+        crate::types::view_column_toml::dump_playlists_columns_to_player(p, &mut out);
+        crate::types::view_column_toml::dump_similar_columns_to_player(p, &mut out);
+        crate::types::view_column_toml::dump_songs_columns_to_player(p, &mut out);
+        crate::types::view_column_toml::dump_queue_columns_to_player(p, &mut out);
 
         out
     }
@@ -1011,20 +981,46 @@ impl SettingsManager {
 /// Only overwrites user-facing preference fields — volume, playlist IDs, and
 /// other runtime state are left untouched.
 ///
-/// Strangler-fig: per-tab `apply_toml_*_tab` calls (macro-generated from
-/// `services/settings_tables/`) own keys that have been migrated to
-/// `define_settings!` declarations. Keys still in the hand-written body
-/// below are pending migration via per-tab follow-up commits.
+/// Composition: 3 per-tab `apply_toml_<tab>` macro-emitted helpers cover the
+/// migrated `define_settings!` entries; 7 per-view `apply_toml_<view>_columns`
+/// macro-emitted helpers cover every column-toggle bool — including
+/// `queue_show_genre` and `songs_show_genre` that the previous hand-written
+/// body silently dropped. The remaining hand-written assignments cover the
+/// scalar residuals (`font_family`, visualizer/SFX/EQ fields) that are not
+/// yet owned by any per-tab or per-view-column macro invocation.
+///
+/// `light_mode` and a handful of other fields are still applied here because
+/// they round-trip through `TomlSettings` but are not yet routed through a
+/// macro entry — see the inline comments.
 fn apply_toml_settings_to_internal(
     ts: &TomlSettings,
     p: &mut crate::types::settings::PlayerSettings,
 ) {
+    // Per-tab macro-emitted appliers (define_settings! `toml_apply:` closures).
     crate::services::settings_tables::apply_toml_general_tab(ts, p);
     crate::services::settings_tables::apply_toml_interface_tab(ts, p);
     crate::services::settings_tables::apply_toml_playback_tab(ts, p);
 
-    p.local_music_path = ts.local_music_path.clone();
-    p.light_mode = ts.light_mode;
+    // Per-view-column macro-emitted appliers (define_view_column_toml_helpers!).
+    // These close the silent-drop bug for queue_show_genre / songs_show_genre
+    // that the pre-refactor hand-written body did not cover.
+    crate::types::view_column_toml::apply_toml_albums_columns(ts, p);
+    crate::types::view_column_toml::apply_toml_artists_columns(ts, p);
+    crate::types::view_column_toml::apply_toml_genres_columns(ts, p);
+    crate::types::view_column_toml::apply_toml_playlists_columns(ts, p);
+    crate::types::view_column_toml::apply_toml_similar_columns(ts, p);
+    crate::types::view_column_toml::apply_toml_songs_columns(ts, p);
+    crate::types::view_column_toml::apply_toml_queue_columns(ts, p);
+
+    // Hand-written residuals — scalar fields not (yet) owned by any per-tab
+    // or per-view-column macro invocation:
+    //
+    // - `font_family` routes through Message::ApplyFont, not a tab dispatcher.
+    // - The 3 audio/visualizer scalars (`visualization_mode`,
+    //   `sound_effects_enabled`, `sfx_volume`) and 3 EQ fields (`eq_enabled`,
+    //   `eq_gains`, `custom_eq_presets`) live on different code paths.
+    // - `artwork_column_width_pct` is the pixel-drag-driven slider that
+    //   intentionally has no UI dispatch arm.
     p.font_family = ts.font_family.clone();
     p.visualization_mode = ts.visualization_mode;
     p.sound_effects_enabled = ts.sound_effects_enabled;
@@ -1032,53 +1028,6 @@ fn apply_toml_settings_to_internal(
     p.eq_enabled = ts.eq_enabled;
     p.eq_gains = ts.eq_gains;
     p.custom_eq_presets = ts.custom_eq_presets.clone();
-    p.verbose_config = ts.verbose_config;
-    p.artwork_resolution = ts.artwork_resolution;
-    p.show_album_artists_only = ts.show_album_artists_only;
-    p.queue_show_plays = ts.queue_show_plays;
-    p.queue_show_index = ts.queue_show_index;
-    p.queue_show_thumbnail = ts.queue_show_thumbnail;
-    p.queue_show_select = ts.queue_show_select;
-    p.albums_show_stars = ts.albums_show_stars;
-    p.albums_show_songcount = ts.albums_show_songcount;
-    p.albums_show_plays = ts.albums_show_plays;
-    p.albums_show_love = ts.albums_show_love;
-    p.albums_show_index = ts.albums_show_index;
-    p.albums_show_thumbnail = ts.albums_show_thumbnail;
-    p.albums_show_select = ts.albums_show_select;
-    p.songs_show_stars = ts.songs_show_stars;
-    p.songs_show_album = ts.songs_show_album;
-    p.songs_show_duration = ts.songs_show_duration;
-    p.songs_show_plays = ts.songs_show_plays;
-    p.songs_show_love = ts.songs_show_love;
-    p.songs_show_index = ts.songs_show_index;
-    p.songs_show_thumbnail = ts.songs_show_thumbnail;
-    p.songs_show_select = ts.songs_show_select;
-    p.artists_show_stars = ts.artists_show_stars;
-    p.artists_show_albumcount = ts.artists_show_albumcount;
-    p.artists_show_songcount = ts.artists_show_songcount;
-    p.artists_show_plays = ts.artists_show_plays;
-    p.artists_show_love = ts.artists_show_love;
-    p.artists_show_index = ts.artists_show_index;
-    p.artists_show_thumbnail = ts.artists_show_thumbnail;
-    p.artists_show_select = ts.artists_show_select;
-    p.genres_show_index = ts.genres_show_index;
-    p.genres_show_thumbnail = ts.genres_show_thumbnail;
-    p.genres_show_albumcount = ts.genres_show_albumcount;
-    p.genres_show_songcount = ts.genres_show_songcount;
-    p.genres_show_select = ts.genres_show_select;
-    p.playlists_show_index = ts.playlists_show_index;
-    p.playlists_show_thumbnail = ts.playlists_show_thumbnail;
-    p.playlists_show_songcount = ts.playlists_show_songcount;
-    p.playlists_show_duration = ts.playlists_show_duration;
-    p.playlists_show_updatedat = ts.playlists_show_updatedat;
-    p.playlists_show_select = ts.playlists_show_select;
-    p.similar_show_index = ts.similar_show_index;
-    p.similar_show_thumbnail = ts.similar_show_thumbnail;
-    p.similar_show_album = ts.similar_show_album;
-    p.similar_show_duration = ts.similar_show_duration;
-    p.similar_show_love = ts.similar_show_love;
-    p.similar_show_select = ts.similar_show_select;
     p.artwork_column_width_pct = ts.artwork_column_width_pct;
 }
 
@@ -1474,22 +1423,20 @@ mod sentinel_roundtrip_tests {
         assert_eq!(ui_ps1.queue_show_plays, ui_ps2.queue_show_plays);
         assert_eq!(ui_ps1.queue_show_index, ui_ps2.queue_show_index);
         assert_eq!(ui_ps1.queue_show_thumbnail, ui_ps2.queue_show_thumbnail);
-        // BUG (pinned): `queue_show_genre` is silently dropped on apply —
-        // it ships in TomlSettings (with serde wiring) but is missing from
-        // both the hand-written `apply_toml_settings_to_internal` block AND
-        // every per-tab `define_settings!` invocation. ui_ps1 (built from
-        // sentinel internal) carries `true`; ui_ps2 (round-tripped through
-        // TOML and apply) snaps back to the type default (`false`). This
-        // assertion pins the bug for the strangler-fig refactor; the fold-in
-        // commit (after the macro extension adds the field) will flip it to
-        // a real round-trip assertion.
+        // queue_show_genre was silently dropped on apply prior to commit 5
+        // (the field ships in TomlSettings with serde wiring but was missing
+        // from both the hand-written apply body and every per-tab macro
+        // entry). Commit 5's macro-helper collapse picks it up through the
+        // queue-columns helpers, closing the silent-drop bug. This assertion
+        // is the fold-in: it now requires a real round-trip rather than
+        // pinning the buggy default-snap-back behavior.
         assert!(
             ui_ps1.queue_show_genre,
             "sentinel sets queue_show_genre=true"
         );
-        assert!(
-            !ui_ps2.queue_show_genre,
-            "current bug: queue_show_genre drops to false on TOML→internal apply",
+        assert_eq!(
+            ui_ps1.queue_show_genre, ui_ps2.queue_show_genre,
+            "queue_show_genre must round-trip through TOML→internal apply",
         );
         assert_eq!(ui_ps1.queue_show_select, ui_ps2.queue_show_select);
 
@@ -1510,17 +1457,19 @@ mod sentinel_roundtrip_tests {
         assert_eq!(ui_ps1.songs_show_love, ui_ps2.songs_show_love);
         assert_eq!(ui_ps1.songs_show_index, ui_ps2.songs_show_index);
         assert_eq!(ui_ps1.songs_show_thumbnail, ui_ps2.songs_show_thumbnail);
-        // BUG (pinned): `songs_show_genre` is silently dropped on apply for
-        // the same reason as `queue_show_genre` — present in TomlSettings,
-        // missing from the apply paths. See the queue_show_genre comment
-        // above. Fold-in commit will flip this to a real round-trip assert.
+        // songs_show_genre was silently dropped on apply prior to commit 5
+        // (same shape as queue_show_genre — the field ships in TomlSettings
+        // with serde wiring but was missing from both the hand-written apply
+        // body and every per-tab macro entry). The macro-helper collapse
+        // picks it up through the songs-columns helpers. Fold-in: real
+        // round-trip assertion instead of the buggy-default pin.
         assert!(
             ui_ps1.songs_show_genre,
             "sentinel sets songs_show_genre=true"
         );
-        assert!(
-            !ui_ps2.songs_show_genre,
-            "current bug: songs_show_genre drops to false on TOML→internal apply",
+        assert_eq!(
+            ui_ps1.songs_show_genre, ui_ps2.songs_show_genre,
+            "songs_show_genre must round-trip through TOML→internal apply",
         );
         assert_eq!(ui_ps1.songs_show_select, ui_ps2.songs_show_select);
 
