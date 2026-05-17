@@ -330,27 +330,29 @@ pub(crate) fn active_accent() -> Color {
 
 use nokkvi_data::types::player_settings::TrackInfoDisplay;
 
+use crate::atomic_u8_enum::{AtomicU8Enum, atomic_u8_enum};
+
+atomic_u8_enum! {
+    TrackInfoDisplay {
+        0 => Off,
+        1 => PlayerBar,
+        2 => TopBar,
+        3 => ProgressTrack,
+    } default Off
+}
+
 /// Returns the current track info display mode
 #[inline]
 pub(crate) fn track_info_display() -> TrackInfoDisplay {
-    match UI_MODE.track_info_display.load(Ordering::Relaxed) {
-        1 => TrackInfoDisplay::PlayerBar,
-        2 => TrackInfoDisplay::TopBar,
-        3 => TrackInfoDisplay::ProgressTrack,
-        _ => TrackInfoDisplay::Off,
-    }
+    TrackInfoDisplay::from_u8(UI_MODE.track_info_display.load(Ordering::Relaxed))
 }
 
 /// Set track info display mode (call when user changes the setting)
 #[inline]
 pub(crate) fn set_track_info_display(mode: TrackInfoDisplay) {
-    let val = match mode {
-        TrackInfoDisplay::Off => 0,
-        TrackInfoDisplay::PlayerBar => 1,
-        TrackInfoDisplay::TopBar => 2,
-        TrackInfoDisplay::ProgressTrack => 3,
-    };
-    UI_MODE.track_info_display.store(val, Ordering::Relaxed);
+    UI_MODE
+        .track_info_display
+        .store(mode.to_u8(), Ordering::Relaxed);
     debug!(" Track info display changed: {}", mode);
 }
 
@@ -380,6 +382,14 @@ pub(crate) fn show_top_bar_strip() -> bool {
 
 use nokkvi_data::types::player_settings::{NavDisplayMode, NavLayout};
 
+atomic_u8_enum! {
+    NavLayout {
+        0 => Top,
+        1 => Side,
+        2 => None,
+    } default Top
+}
+
 /// Returns true if side navigation layout is active
 #[inline]
 pub(crate) fn is_side_nav() -> bool {
@@ -401,12 +411,7 @@ pub(crate) fn is_top_nav() -> bool {
 /// Set the navigation layout from a NavLayout enum value
 #[inline]
 pub(crate) fn set_nav_layout(layout: NavLayout) {
-    let val = match layout {
-        NavLayout::Top => 0,
-        NavLayout::Side => 1,
-        NavLayout::None => 2,
-    };
-    UI_MODE.nav_layout.store(val, Ordering::Relaxed);
+    UI_MODE.nav_layout.store(layout.to_u8(), Ordering::Relaxed);
     debug!(" Nav layout changed: nav_layout={}", layout);
 }
 
@@ -414,25 +419,26 @@ pub(crate) fn set_nav_layout(layout: NavLayout) {
 // Nav Display Mode Control
 // ============================================================================
 
+atomic_u8_enum! {
+    NavDisplayMode {
+        0 => TextOnly,
+        1 => TextAndIcons,
+        2 => IconsOnly,
+    } default TextOnly
+}
+
 /// Get the current navigation display mode
 #[inline]
 pub(crate) fn nav_display_mode() -> NavDisplayMode {
-    match UI_MODE.nav_display_mode.load(Ordering::Relaxed) {
-        1 => NavDisplayMode::TextAndIcons,
-        2 => NavDisplayMode::IconsOnly,
-        _ => NavDisplayMode::TextOnly,
-    }
+    NavDisplayMode::from_u8(UI_MODE.nav_display_mode.load(Ordering::Relaxed))
 }
 
 /// Set the navigation display mode from a NavDisplayMode enum value
 #[inline]
 pub(crate) fn set_nav_display_mode(mode: NavDisplayMode) {
-    let val = match mode {
-        NavDisplayMode::TextOnly => 0,
-        NavDisplayMode::TextAndIcons => 1,
-        NavDisplayMode::IconsOnly => 2,
-    };
-    UI_MODE.nav_display_mode.store(val, Ordering::Relaxed);
+    UI_MODE
+        .nav_display_mode
+        .store(mode.to_u8(), Ordering::Relaxed);
     debug!(" Nav display mode changed: nav_display_mode={}", mode);
 }
 
@@ -447,31 +453,29 @@ pub(crate) fn slot_row_height() -> f32 {
     variant.to_pixels() as f32
 }
 
+use nokkvi_data::types::player_settings::SlotRowHeight;
+
+atomic_u8_enum! {
+    SlotRowHeight {
+        0 => Compact,
+        1 => Default,
+        2 => Comfortable,
+        3 => Spacious,
+    } default Default
+}
+
 /// Get the current slot row height enum variant
 #[inline]
-pub(crate) fn slot_row_height_variant() -> nokkvi_data::types::player_settings::SlotRowHeight {
-    use nokkvi_data::types::player_settings::SlotRowHeight;
-    match UI_MODE.slot_row_height.load(Ordering::Relaxed) {
-        0 => SlotRowHeight::Compact,
-        2 => SlotRowHeight::Comfortable,
-        3 => SlotRowHeight::Spacious,
-        _ => SlotRowHeight::Default,
-    }
+pub(crate) fn slot_row_height_variant() -> SlotRowHeight {
+    SlotRowHeight::from_u8(UI_MODE.slot_row_height.load(Ordering::Relaxed))
 }
 
 /// Set the target row height for slot lists
 #[inline]
-pub(crate) fn set_slot_row_height(height: nokkvi_data::types::player_settings::SlotRowHeight) {
-    use nokkvi_data::types::player_settings::SlotRowHeight;
-    let discriminant = match height {
-        SlotRowHeight::Compact => 0,
-        SlotRowHeight::Default => 1,
-        SlotRowHeight::Comfortable => 2,
-        SlotRowHeight::Spacious => 3,
-    };
+pub(crate) fn set_slot_row_height(height: SlotRowHeight) {
     UI_MODE
         .slot_row_height
-        .store(discriminant, Ordering::Relaxed);
+        .store(height.to_u8(), Ordering::Relaxed);
     debug!(
         " Slot row height changed: {} ({}px)",
         height.as_label(),
@@ -535,6 +539,27 @@ pub(crate) fn set_horizontal_volume(enabled: bool) {
 // ============================================================================
 
 use nokkvi_data::types::player_settings::{StripClickAction, StripSeparator};
+
+atomic_u8_enum! {
+    StripClickAction {
+        0 => GoToQueue,
+        1 => GoToAlbum,
+        2 => GoToArtist,
+        3 => CopyTrackInfo,
+        4 => DoNothing,
+    } default GoToQueue
+}
+
+atomic_u8_enum! {
+    StripSeparator {
+        0 => Dot,
+        1 => Bullet,
+        2 => Pipe,
+        3 => EmDash,
+        4 => Slash,
+        5 => Bar,
+    } default Dot
+}
 
 /// Returns true if the title field is visible in the track info strip
 #[inline]
@@ -602,26 +627,15 @@ pub(crate) fn set_strip_merged_mode(enabled: bool) {
 /// Returns the current strip click action
 #[inline]
 pub(crate) fn strip_click_action() -> StripClickAction {
-    match UI_MODE.strip_click_action.load(Ordering::Relaxed) {
-        1 => StripClickAction::GoToAlbum,
-        2 => StripClickAction::GoToArtist,
-        3 => StripClickAction::CopyTrackInfo,
-        4 => StripClickAction::DoNothing,
-        _ => StripClickAction::GoToQueue,
-    }
+    StripClickAction::from_u8(UI_MODE.strip_click_action.load(Ordering::Relaxed))
 }
 
 /// Set strip click action (call when user changes the setting)
 #[inline]
 pub(crate) fn set_strip_click_action(action: StripClickAction) {
-    let val = match action {
-        StripClickAction::GoToQueue => 0,
-        StripClickAction::GoToAlbum => 1,
-        StripClickAction::GoToArtist => 2,
-        StripClickAction::CopyTrackInfo => 3,
-        StripClickAction::DoNothing => 4,
-    };
-    UI_MODE.strip_click_action.store(val, Ordering::Relaxed);
+    UI_MODE
+        .strip_click_action
+        .store(action.to_u8(), Ordering::Relaxed);
 }
 
 /// Returns true if `title:` / `artist:` / `album:` labels are shown in the strip
@@ -639,28 +653,15 @@ pub(crate) fn set_strip_show_labels(enabled: bool) {
 /// Returns the active strip merged-mode field separator
 #[inline]
 pub(crate) fn strip_separator() -> StripSeparator {
-    match UI_MODE.strip_separator.load(Ordering::Relaxed) {
-        1 => StripSeparator::Bullet,
-        2 => StripSeparator::Pipe,
-        3 => StripSeparator::EmDash,
-        4 => StripSeparator::Slash,
-        5 => StripSeparator::Bar,
-        _ => StripSeparator::Dot,
-    }
+    StripSeparator::from_u8(UI_MODE.strip_separator.load(Ordering::Relaxed))
 }
 
 /// Set strip merged-mode field separator
 #[inline]
 pub(crate) fn set_strip_separator(sep: StripSeparator) {
-    let val = match sep {
-        StripSeparator::Dot => 0,
-        StripSeparator::Bullet => 1,
-        StripSeparator::Pipe => 2,
-        StripSeparator::EmDash => 3,
-        StripSeparator::Slash => 4,
-        StripSeparator::Bar => 5,
-    };
-    UI_MODE.strip_separator.store(val, Ordering::Relaxed);
+    UI_MODE
+        .strip_separator
+        .store(sep.to_u8(), Ordering::Relaxed);
 }
 
 // ============================================================================
@@ -737,56 +738,53 @@ use nokkvi_data::types::player_settings::{
 // 3=Never (kept where it is for redb back-compat — do not renumber even
 // though `Never` sits awkwardly between the two Always-mode clusters),
 // 4=AlwaysVerticalNative, 5=AlwaysVerticalStretched. New variants must be
-// appended at 6+; the load `match` falls back to `Auto` for unknown values
-// and the store `match` is enum-exhaustive (so adding a variant forces a
-// compile error here).
+// appended at 6+; the `atomic_u8_enum!` loader falls back to `Auto` for
+// unknown values and the store half is enum-exhaustive (so adding a variant
+// forces a compile error here).
+atomic_u8_enum! {
+    ArtworkColumnMode {
+        0 => Auto,
+        1 => AlwaysNative,
+        2 => AlwaysStretched,
+        3 => Never,
+        4 => AlwaysVerticalNative,
+        5 => AlwaysVerticalStretched,
+    } default Auto
+}
+
+atomic_u8_enum! {
+    ArtworkStretchFit {
+        0 => Cover,
+        1 => Fill,
+    } default Cover
+}
 
 /// Returns the active artwork column display mode.
 #[inline]
 pub(crate) fn artwork_column_mode() -> ArtworkColumnMode {
-    match UI_MODE.artwork_column_mode.load(Ordering::Relaxed) {
-        1 => ArtworkColumnMode::AlwaysNative,
-        2 => ArtworkColumnMode::AlwaysStretched,
-        3 => ArtworkColumnMode::Never,
-        4 => ArtworkColumnMode::AlwaysVerticalNative,
-        5 => ArtworkColumnMode::AlwaysVerticalStretched,
-        _ => ArtworkColumnMode::Auto,
-    }
+    ArtworkColumnMode::from_u8(UI_MODE.artwork_column_mode.load(Ordering::Relaxed))
 }
 
 /// Set the artwork column display mode (call when user changes the setting).
 #[inline]
 pub(crate) fn set_artwork_column_mode(mode: ArtworkColumnMode) {
-    let val = match mode {
-        ArtworkColumnMode::Auto => 0,
-        ArtworkColumnMode::AlwaysNative => 1,
-        ArtworkColumnMode::AlwaysStretched => 2,
-        ArtworkColumnMode::Never => 3,
-        ArtworkColumnMode::AlwaysVerticalNative => 4,
-        ArtworkColumnMode::AlwaysVerticalStretched => 5,
-    };
-    UI_MODE.artwork_column_mode.store(val, Ordering::Relaxed);
+    UI_MODE
+        .artwork_column_mode
+        .store(mode.to_u8(), Ordering::Relaxed);
 }
 
 /// Returns the active artwork stretch fit (only meaningful in AlwaysStretched mode).
 #[inline]
 pub(crate) fn artwork_column_stretch_fit() -> ArtworkStretchFit {
-    match UI_MODE.artwork_column_stretch_fit.load(Ordering::Relaxed) {
-        1 => ArtworkStretchFit::Fill,
-        _ => ArtworkStretchFit::Cover,
-    }
+    ArtworkStretchFit::from_u8(UI_MODE.artwork_column_stretch_fit.load(Ordering::Relaxed))
 }
 
 /// Set the artwork stretch fit.
 #[inline]
 pub(crate) fn set_artwork_column_stretch_fit(fit: ArtworkStretchFit) {
-    let val = match fit {
-        ArtworkStretchFit::Cover => 0,
-        ArtworkStretchFit::Fill => 1,
-    };
     UI_MODE
         .artwork_column_stretch_fit
-        .store(val, Ordering::Relaxed);
+        .store(fit.to_u8(), Ordering::Relaxed);
 }
 
 /// Returns the artwork column width fraction (0.05..=0.80).
@@ -1359,5 +1357,182 @@ mod tests {
         let (expected_darker_hi, expected_darker_lo) = border_3d_accent_from_base(accent());
         assert_color_eq(darker_hi, expected_darker_hi, "darker-raised highlight");
         assert_color_eq(darker_lo, expected_darker_lo, "darker-raised shadow");
+    }
+
+    // ------------------------------------------------------------------------
+    // atomic_u8_enum! macro — verifies that the loader/store impls emitted
+    // for every `UiModeFlags` enum preserve the on-disk byte encodings that
+    // app.redb depends on, and that unknown bytes fall back to the declared
+    // default variant (forward-compat for legacy `app.redb` files written by
+    // a future build).
+    // ------------------------------------------------------------------------
+
+    /// Roundtrip every variant of two enums (one with a small variant set, one
+    /// with a larger one) through `to_u8` / `from_u8`. Exercising the macro
+    /// expansion twice guarantees we're testing the macro itself, not just one
+    /// hand-written impl.
+    #[test]
+    fn atomic_u8_enum_macro_emits_roundtrip() {
+        // NavLayout: 3 variants, contiguous {0,1,2}.
+        for (byte, variant) in [
+            (0u8, NavLayout::Top),
+            (1u8, NavLayout::Side),
+            (2u8, NavLayout::None),
+        ] {
+            assert_eq!(
+                NavLayout::from_u8(byte),
+                variant,
+                "NavLayout::from_u8({byte})"
+            );
+            assert_eq!(variant.to_u8(), byte, "NavLayout::{variant:?}.to_u8()");
+        }
+
+        // StripSeparator: 6 variants, contiguous {0..=5}. Exercises a larger
+        // table so we catch any macro misexpansion that only manifests with
+        // more arms.
+        for (byte, variant) in [
+            (0u8, StripSeparator::Dot),
+            (1u8, StripSeparator::Bullet),
+            (2u8, StripSeparator::Pipe),
+            (3u8, StripSeparator::EmDash),
+            (4u8, StripSeparator::Slash),
+            (5u8, StripSeparator::Bar),
+        ] {
+            assert_eq!(
+                StripSeparator::from_u8(byte),
+                variant,
+                "StripSeparator::from_u8({byte})"
+            );
+            assert_eq!(variant.to_u8(), byte, "StripSeparator::{variant:?}.to_u8()");
+        }
+    }
+
+    /// An unknown stored byte (e.g. a future variant written by a newer build
+    /// then read by an older build) MUST decode to the declared default
+    /// variant. This preserves the original `match { _ => Default }` shape and
+    /// is the redb on-disk back-compat contract.
+    #[test]
+    fn atomic_u8_enum_unknown_byte_falls_back_to_default() {
+        // TrackInfoDisplay default = Off.
+        assert_eq!(TrackInfoDisplay::from_u8(255), TrackInfoDisplay::Off);
+        assert_eq!(TrackInfoDisplay::from_u8(99), TrackInfoDisplay::Off);
+        // Also verify a byte just past the highest known variant (3) falls back.
+        assert_eq!(TrackInfoDisplay::from_u8(4), TrackInfoDisplay::Off);
+    }
+
+    /// `ArtworkColumnMode`'s integer encoding has `Never` sitting at byte 3,
+    /// awkwardly between the two `Always*` clusters at bytes 1-2 and the two
+    /// `AlwaysVertical*` cluster at bytes 4-5 — declaration order and byte
+    /// order do not match. This is locked in for redb back-compat and any
+    /// renumbering would silently corrupt every existing user's queue/session
+    /// state. Roundtrip every variant byte-for-byte so we catch a future
+    /// "tidy up the enum" PR that flips Never to byte 5 or 6.
+    #[test]
+    fn artwork_column_mode_non_contiguous_encoding_preserved() {
+        // The full {byte → variant} table the redb on-disk format depends on.
+        let table = [
+            (0u8, ArtworkColumnMode::Auto),
+            (1u8, ArtworkColumnMode::AlwaysNative),
+            (2u8, ArtworkColumnMode::AlwaysStretched),
+            (3u8, ArtworkColumnMode::Never),
+            (4u8, ArtworkColumnMode::AlwaysVerticalNative),
+            (5u8, ArtworkColumnMode::AlwaysVerticalStretched),
+        ];
+
+        for (byte, variant) in table {
+            assert_eq!(
+                ArtworkColumnMode::from_u8(byte),
+                variant,
+                "ArtworkColumnMode byte {byte} must decode to {variant:?}"
+            );
+            assert_eq!(
+                variant.to_u8(),
+                byte,
+                "ArtworkColumnMode::{variant:?} must encode to byte {byte}"
+            );
+        }
+
+        // The two "AlwaysVertical" variants specifically must round-trip
+        // through byte 5 / byte 4, not through the bytes that the declaration
+        // order would suggest (5 is the last variant declared but its byte
+        // sits BELOW Never's variant-declaration position).
+        assert_eq!(
+            ArtworkColumnMode::AlwaysVerticalStretched.to_u8(),
+            5,
+            "AlwaysVerticalStretched MUST encode to byte 5"
+        );
+        assert_eq!(
+            ArtworkColumnMode::from_u8(5),
+            ArtworkColumnMode::AlwaysVerticalStretched,
+            "byte 5 MUST decode to AlwaysVerticalStretched"
+        );
+    }
+
+    /// End-to-end test through the actual `Theme` get/set helpers (not just
+    /// the macro impls in isolation): write a known variant via `set_*`,
+    /// then read it back via the matching getter and confirm the variant
+    /// survives a full store-then-load cycle through the live `AtomicU8`.
+    /// Exercises every migrated site at least once.
+    #[test]
+    fn store_then_load_preserves_variant_per_enum() {
+        let _guard = THEME_MODE_LOCK.lock();
+
+        // Snapshot every UI_MODE u8 we're about to mutate so neighboring
+        // tests don't observe leaked state.
+        let saved_tid = UI_MODE.track_info_display.load(Ordering::Relaxed);
+        let saved_nav = UI_MODE.nav_layout.load(Ordering::Relaxed);
+        let saved_ndm = UI_MODE.nav_display_mode.load(Ordering::Relaxed);
+        let saved_srh = UI_MODE.slot_row_height.load(Ordering::Relaxed);
+        let saved_sca = UI_MODE.strip_click_action.load(Ordering::Relaxed);
+        let saved_sep = UI_MODE.strip_separator.load(Ordering::Relaxed);
+        let saved_acm = UI_MODE.artwork_column_mode.load(Ordering::Relaxed);
+        let saved_asf = UI_MODE.artwork_column_stretch_fit.load(Ordering::Relaxed);
+
+        set_track_info_display(TrackInfoDisplay::TopBar);
+        assert_eq!(track_info_display(), TrackInfoDisplay::TopBar);
+
+        set_nav_layout(NavLayout::Side);
+        assert!(is_side_nav());
+        assert!(!is_top_nav());
+
+        set_nav_display_mode(NavDisplayMode::IconsOnly);
+        assert_eq!(nav_display_mode(), NavDisplayMode::IconsOnly);
+
+        set_slot_row_height(SlotRowHeight::Spacious);
+        assert_eq!(slot_row_height_variant(), SlotRowHeight::Spacious);
+
+        set_strip_click_action(StripClickAction::CopyTrackInfo);
+        assert_eq!(strip_click_action(), StripClickAction::CopyTrackInfo);
+
+        set_strip_separator(StripSeparator::EmDash);
+        assert_eq!(strip_separator(), StripSeparator::EmDash);
+
+        // Hit the non-contiguous slot specifically.
+        set_artwork_column_mode(ArtworkColumnMode::AlwaysVerticalStretched);
+        assert_eq!(
+            artwork_column_mode(),
+            ArtworkColumnMode::AlwaysVerticalStretched
+        );
+
+        set_artwork_column_stretch_fit(ArtworkStretchFit::Fill);
+        assert_eq!(artwork_column_stretch_fit(), ArtworkStretchFit::Fill);
+
+        // Restore every mutated atomic so the next test sees the baseline state.
+        UI_MODE
+            .track_info_display
+            .store(saved_tid, Ordering::Relaxed);
+        UI_MODE.nav_layout.store(saved_nav, Ordering::Relaxed);
+        UI_MODE.nav_display_mode.store(saved_ndm, Ordering::Relaxed);
+        UI_MODE.slot_row_height.store(saved_srh, Ordering::Relaxed);
+        UI_MODE
+            .strip_click_action
+            .store(saved_sca, Ordering::Relaxed);
+        UI_MODE.strip_separator.store(saved_sep, Ordering::Relaxed);
+        UI_MODE
+            .artwork_column_mode
+            .store(saved_acm, Ordering::Relaxed);
+        UI_MODE
+            .artwork_column_stretch_fit
+            .store(saved_asf, Ordering::Relaxed);
     }
 }

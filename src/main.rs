@@ -15,6 +15,7 @@
 
 mod app_message;
 mod app_view;
+mod atomic_u8_enum;
 mod config_writer;
 mod embedded_svg;
 mod hotkeys;
