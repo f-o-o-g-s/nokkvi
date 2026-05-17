@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Setting `queue_show_genre = true` or `songs_show_genre = true` directly in `config.toml` now actually shows the Genre column in the Queue or Songs view on next launch. Both keys shipped in the on-disk TOML format with full serde wiring, but the apply-side path had no handler for them, so the value was silently snapped back to off on every load regardless of what the file said. Toggling the column from the settings UI worked normally; only direct file edits and pre-existing config files with these keys set were affected.
 - EQ modal's preset dropdown now shows the correct saved custom preset as active after restarting nokkvi — previously the dropdown fell back to "Custom" even though your saved preset was still loaded and applied.
 - Settings → Hotkeys row now updates to the new key right after you rebind it — previously the row kept showing the old key even though the new binding was already saved and working.
 - Reordering the queue while a song is playing (drag-and-drop, Shift+↑/↓, right-click "Remove from queue" or "Play Next", sort, or clear) no longer leaves the player bar's title and the queue view's highlight out of sync with what's actually playing. The desync was most visible with shuffle and crossfade both on — every reorder now resets nokkvi's pre-buffered "next song" choice so the displayed track follows the actual audio.
