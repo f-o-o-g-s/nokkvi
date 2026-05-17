@@ -132,6 +132,24 @@ impl SettingsManager {
         }
     }
 
+    /// Test-only constructor — starts from default `UserSettings` but
+    /// overrides the `player` substruct with the caller-supplied value, so
+    /// round-trip tests can inject an exhaustive non-default `PlayerSettings`
+    /// without driving every setter individually.
+    #[cfg(test)]
+    pub(crate) fn for_test_with_player(
+        storage: StateStorage,
+        player: crate::types::settings::PlayerSettings,
+    ) -> Self {
+        let mut settings = UserSettings::default();
+        settings.player = player;
+        Self {
+            settings,
+            storage,
+            skip_toml_writes: true,
+        }
+    }
+
     /// Save to redb (always) + config.toml sections (for user-facing settings).
     fn save(&self) -> Result<()> {
         // 1. Always write to redb (volume, playlist IDs, backward compat)
@@ -1085,4 +1103,718 @@ impl From<crate::types::view_preferences::AllViewPreferences>
 /// can persist the toggle without per-view boilerplate.
 pub trait ColumnPersist: Copy + Send + 'static {
     fn apply_to_settings(self, sm: &mut SettingsManager, value: bool) -> Result<()>;
+}
+
+// =============================================================================
+// Sentinel round-trip tests (Group G Phase 2 — PlayerSettings TOML compat)
+// =============================================================================
+//
+// These tests pin the `PlayerSettings → TomlSettings → bytes → TomlSettings →
+// PlayerSettings` round-trip semantics that the on-disk config.toml contract
+// depends on. They guard subsequent commits that extend `define_view_columns!`
+// and `define_settings!` to collapse the ~238 lines of hand-written field
+// copies across `from_player_settings`, `get_player_settings`, and
+// `apply_toml_settings_to_internal`.
+//
+// `build_exhaustive_internal_player_settings()` deliberately lists every
+// persisted field — `..Default::default()` is BANNED so a future field
+// addition fails to compile here until the round-trip wiring is added.
+
+#[cfg(test)]
+mod sentinel_roundtrip_tests {
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::{
+        audio::eq::CustomEqPreset,
+        types::{
+            player_settings::{
+                ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, EnterBehavior,
+                LibraryPageSize, NavDisplayMode, NavLayout, NormalizationLevel, SlotRowHeight,
+                StripClickAction, StripSeparator, TrackInfoDisplay, VisualizationMode,
+                VolumeNormalizationMode,
+            },
+            settings::PlayerSettings as InternalPlayerSettings,
+            toml_settings::TomlSettings,
+        },
+    };
+
+    fn make_test_manager_with_player(player: InternalPlayerSettings) -> (SettingsManager, TempDir) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("test_settings.redb");
+        let storage = StateStorage::new(path).expect("StateStorage::new");
+        (SettingsManager::for_test_with_player(storage, player), tmp)
+    }
+
+    /// Exhaustive internal `PlayerSettings` with every persisted field set to
+    /// a non-default sentinel. Listed without `..Default::default()` so a new
+    /// field addition surfaces here as a missing-initializer compile error.
+    ///
+    /// Sentinels are chosen so that `field == Default::default()` is false
+    /// for every field: bools flipped from their default; enums set to a
+    /// non-`#[default]` variant; numerics offset; strings made non-empty.
+    fn build_exhaustive_internal_player_settings() -> InternalPlayerSettings {
+        InternalPlayerSettings {
+            // Runtime-only fields (excluded from the round-trip assertion):
+            volume: 0.42,
+            default_playlist_id: Some("playlist-42".to_string()),
+            default_playlist_name: "My Default Playlist".to_string(),
+            active_playlist_id: Some("playlist-99".to_string()),
+            active_playlist_name: "Active Playlist".to_string(),
+            active_playlist_comment: "comment text".to_string(),
+
+            // Audio knobs
+            sfx_volume: 0.3142,
+            sound_effects_enabled: false,                 // default true
+            visualization_mode: VisualizationMode::Lines, // default Bars
+            light_mode: true, // default false; UI-PS lacks this field — written as false
+            scrobbling_enabled: false, // default true
+            scrobble_threshold: 0.8123, // default 0.50
+
+            // General
+            start_view: "Albums".to_string(), // default "Queue"
+            stable_viewport: false,           // default true
+            auto_follow_playing: false,       // default true
+            enter_behavior: EnterBehavior::AppendAndPlay, // default PlayAll
+            local_music_path: "/tmp/sentinel/music".to_string(),
+            rounded_mode: true,                           // default false
+            nav_layout: NavLayout::Side,                  // default Top
+            nav_display_mode: NavDisplayMode::IconsOnly,  // default TextOnly
+            track_info_display: TrackInfoDisplay::TopBar, // default Off
+            slot_row_height: SlotRowHeight::Spacious,     // default Default
+            opacity_gradient: false,                      // default true
+            slot_text_links: false,                       // default true
+
+            // Playback / crossfade
+            crossfade_enabled: true,    // default false
+            crossfade_duration_secs: 9, // default 5
+
+            // Playlists
+            quick_add_to_playlist: true,       // default false
+            queue_show_default_playlist: true, // default false
+            horizontal_volume: true,           // default false
+            font_family: "Sentinel Mono".to_string(),
+
+            // Volume normalization
+            volume_normalization: VolumeNormalizationMode::ReplayGainAlbum, // default Off
+            normalization_level: NormalizationLevel::Loud,                  // default Normal
+            replay_gain_preamp_db: -3.2517,                                 // default 0.0
+            replay_gain_fallback_db: 1.7384,                                // default 0.0
+            replay_gain_fallback_to_agc: true,                              // default false
+            replay_gain_prevent_clipping: false,                            // default true
+
+            // Metadata strip
+            strip_show_title: false,       // default true
+            strip_show_artist: false,      // default true
+            strip_show_album: false,       // default true
+            strip_show_format_info: false, // default true
+            strip_merged_mode: true,       // default false
+            strip_click_action: StripClickAction::CopyTrackInfo, // default GoToQueue
+            strip_show_labels: false,      // default true
+            strip_separator: StripSeparator::Slash, // default Dot
+
+            // EQ
+            eq_enabled: true, // default false
+            eq_gains: [4.0, 3.5, 1.5, 0.0, -1.5, -0.5, 0.5, 2.0, 3.5, 4.0],
+            custom_eq_presets: vec![CustomEqPreset {
+                name: "Sentinel Preset".to_string(),
+                gains: [0.0, -3.5, 8.5, -8.25, 5.875, 0.0, 1.5, 3.0, 4.0, 5.0],
+            }],
+
+            // Verbose / library
+            verbose_config: true,                            // default false
+            library_page_size: LibraryPageSize::Massive,     // default Default
+            artwork_resolution: ArtworkResolution::Original, // default Default
+            show_album_artists_only: false,                  // default true
+            suppress_library_refresh_toasts: true,           // default false
+
+            // Queue columns
+            queue_show_stars: false,     // default true
+            queue_show_album: false,     // default true
+            queue_show_duration: false,  // default true
+            queue_show_love: false,      // default true
+            queue_show_plays: true,      // default false
+            queue_show_index: false,     // default true
+            queue_show_thumbnail: false, // default true
+            queue_show_genre: true,      // default false
+            queue_show_select: true,     // default false
+
+            // Albums columns
+            albums_show_stars: true,      // default false
+            albums_show_songcount: false, // default true
+            albums_show_plays: true,      // default false
+            albums_show_love: false,      // default true
+            albums_show_index: false,     // default true
+            albums_show_thumbnail: false, // default true
+            albums_show_select: true,     // default false
+
+            // Songs columns
+            songs_show_stars: true,      // default false
+            songs_show_album: false,     // default true
+            songs_show_duration: false,  // default true
+            songs_show_plays: true,      // default false
+            songs_show_love: false,      // default true
+            songs_show_index: false,     // default true
+            songs_show_thumbnail: false, // default true
+            songs_show_genre: true,      // default false
+            songs_show_select: true,     // default false
+
+            // Artists columns
+            artists_show_stars: false,      // default true
+            artists_show_albumcount: false, // default true
+            artists_show_songcount: false,  // default true
+            artists_show_plays: false,      // default true
+            artists_show_love: false,       // default true
+            artists_show_index: false,      // default true
+            artists_show_thumbnail: false,  // default true
+            artists_show_select: true,      // default false
+
+            // Genres columns
+            genres_show_index: false,      // default true
+            genres_show_thumbnail: false,  // default true
+            genres_show_albumcount: false, // default true
+            genres_show_songcount: false,  // default true
+            genres_show_select: true,      // default false
+
+            // Playlists columns
+            playlists_show_index: false,     // default true
+            playlists_show_thumbnail: false, // default true
+            playlists_show_songcount: true,  // default false
+            playlists_show_duration: true,   // default false
+            playlists_show_updatedat: true,  // default false
+            playlists_show_select: true,     // default false
+
+            // Similar columns
+            similar_show_index: false,     // default true
+            similar_show_thumbnail: false, // default true
+            similar_show_album: false,     // default true
+            similar_show_duration: false,  // default true
+            similar_show_love: false,      // default true
+            similar_show_select: true,     // default false
+
+            // Per-view artwork overlay
+            albums_artwork_overlay: false,    // default true
+            artists_artwork_overlay: false,   // default true
+            songs_artwork_overlay: false,     // default true
+            playlists_artwork_overlay: false, // default true
+
+            // Artwork column layout
+            artwork_column_mode: ArtworkColumnMode::AlwaysStretched, // default Auto
+            artwork_column_stretch_fit: ArtworkStretchFit::Fill,     // default Cover
+            artwork_column_width_pct: 0.6543,
+            artwork_auto_max_pct: 0.5234,
+            artwork_vertical_height_pct: 0.6789,
+
+            // System tray
+            show_tray_icon: true, // default false
+            close_to_tray: true,  // default false
+        }
+    }
+
+    /// Full-field round-trip: build exhaustive internal `PlayerSettings`, dump
+    /// to UI-facing `PlayerSettings`, convert to `TomlSettings`, serialize,
+    /// deserialize, apply back onto a fresh internal `PlayerSettings`, dump
+    /// again — and confirm every persisted field survives. The 6 f32 fields
+    /// routed through `round_f32` / `round_f32_array` use 1e-4 tolerance
+    /// (they are quantized to 4 decimals on TOML emit).
+    #[test]
+    fn player_settings_toml_roundtrip_full_field_coverage() {
+        let internal_src = build_exhaustive_internal_player_settings();
+
+        // Stamp the exhaustive sentinel onto a SettingsManager and dump.
+        let (sm, _tmp) = make_test_manager_with_player(internal_src.clone());
+        let ui_ps1 = sm.get_player_settings();
+
+        // UI → TOML → bytes → TOML.
+        let ts1 = TomlSettings::from_player_settings(&ui_ps1);
+        let serialized = toml::to_string(&ts1).expect("serialize TomlSettings");
+        let ts2: TomlSettings = toml::from_str(&serialized).expect("deserialize TomlSettings");
+
+        // Apply onto a fresh internal `PlayerSettings`, then dump again via a
+        // fresh manager — this exercises the same get_player_settings flow as
+        // production startup.
+        let mut internal_dst = InternalPlayerSettings::default();
+        apply_toml_settings_to_internal(&ts2, &mut internal_dst);
+        let (sm2, _tmp2) = make_test_manager_with_player(internal_dst);
+        let ui_ps2 = sm2.get_player_settings();
+
+        // Field-by-field — every persisted UI field except the runtime ones
+        // (volume / active_playlist_* / default_playlist_*, which live in
+        // redb only).
+
+        // Audio knobs
+        assert!(
+            (ui_ps1.sfx_volume - ui_ps2.sfx_volume).abs() < 1e-4,
+            "sfx_volume: {} vs {}",
+            ui_ps1.sfx_volume,
+            ui_ps2.sfx_volume
+        );
+        assert_eq!(ui_ps1.sound_effects_enabled, ui_ps2.sound_effects_enabled);
+        assert_eq!(ui_ps1.visualization_mode, ui_ps2.visualization_mode);
+        assert_eq!(ui_ps1.scrobbling_enabled, ui_ps2.scrobbling_enabled);
+        assert!(
+            (ui_ps1.scrobble_threshold - ui_ps2.scrobble_threshold).abs() < 1e-4,
+            "scrobble_threshold: {} vs {}",
+            ui_ps1.scrobble_threshold,
+            ui_ps2.scrobble_threshold
+        );
+
+        // General
+        assert_eq!(ui_ps1.start_view, ui_ps2.start_view);
+        assert_eq!(ui_ps1.stable_viewport, ui_ps2.stable_viewport);
+        assert_eq!(ui_ps1.auto_follow_playing, ui_ps2.auto_follow_playing);
+        assert_eq!(ui_ps1.enter_behavior, ui_ps2.enter_behavior);
+        assert_eq!(ui_ps1.local_music_path, ui_ps2.local_music_path);
+        assert_eq!(ui_ps1.rounded_mode, ui_ps2.rounded_mode);
+        assert_eq!(ui_ps1.nav_layout, ui_ps2.nav_layout);
+        assert_eq!(ui_ps1.nav_display_mode, ui_ps2.nav_display_mode);
+        assert_eq!(ui_ps1.track_info_display, ui_ps2.track_info_display);
+        assert_eq!(ui_ps1.slot_row_height, ui_ps2.slot_row_height);
+        assert_eq!(ui_ps1.opacity_gradient, ui_ps2.opacity_gradient);
+        assert_eq!(ui_ps1.slot_text_links, ui_ps2.slot_text_links);
+
+        // Playback / crossfade
+        assert_eq!(ui_ps1.crossfade_enabled, ui_ps2.crossfade_enabled);
+        assert_eq!(
+            ui_ps1.crossfade_duration_secs,
+            ui_ps2.crossfade_duration_secs
+        );
+
+        // Playlists
+        assert_eq!(ui_ps1.quick_add_to_playlist, ui_ps2.quick_add_to_playlist);
+        assert_eq!(
+            ui_ps1.queue_show_default_playlist,
+            ui_ps2.queue_show_default_playlist
+        );
+        assert_eq!(ui_ps1.horizontal_volume, ui_ps2.horizontal_volume);
+        assert_eq!(ui_ps1.font_family, ui_ps2.font_family);
+
+        // Volume normalization
+        assert_eq!(ui_ps1.volume_normalization, ui_ps2.volume_normalization);
+        assert_eq!(ui_ps1.normalization_level, ui_ps2.normalization_level);
+        assert!(
+            (ui_ps1.replay_gain_preamp_db - ui_ps2.replay_gain_preamp_db).abs() < 1e-4,
+            "replay_gain_preamp_db: {} vs {}",
+            ui_ps1.replay_gain_preamp_db,
+            ui_ps2.replay_gain_preamp_db
+        );
+        assert!(
+            (ui_ps1.replay_gain_fallback_db - ui_ps2.replay_gain_fallback_db).abs() < 1e-4,
+            "replay_gain_fallback_db: {} vs {}",
+            ui_ps1.replay_gain_fallback_db,
+            ui_ps2.replay_gain_fallback_db
+        );
+        assert_eq!(
+            ui_ps1.replay_gain_fallback_to_agc,
+            ui_ps2.replay_gain_fallback_to_agc
+        );
+        assert_eq!(
+            ui_ps1.replay_gain_prevent_clipping,
+            ui_ps2.replay_gain_prevent_clipping
+        );
+
+        // Metadata strip
+        assert_eq!(ui_ps1.strip_show_title, ui_ps2.strip_show_title);
+        assert_eq!(ui_ps1.strip_show_artist, ui_ps2.strip_show_artist);
+        assert_eq!(ui_ps1.strip_show_album, ui_ps2.strip_show_album);
+        assert_eq!(ui_ps1.strip_show_format_info, ui_ps2.strip_show_format_info);
+        assert_eq!(ui_ps1.strip_merged_mode, ui_ps2.strip_merged_mode);
+        assert_eq!(ui_ps1.strip_click_action, ui_ps2.strip_click_action);
+        assert_eq!(ui_ps1.strip_show_labels, ui_ps2.strip_show_labels);
+        assert_eq!(ui_ps1.strip_separator, ui_ps2.strip_separator);
+
+        // EQ
+        assert_eq!(ui_ps1.eq_enabled, ui_ps2.eq_enabled);
+        for (i, (a, b)) in ui_ps1
+            .eq_gains
+            .iter()
+            .zip(ui_ps2.eq_gains.iter())
+            .enumerate()
+        {
+            assert!((a - b).abs() < 1e-4, "eq_gains[{i}]: {a} vs {b}");
+        }
+        assert_eq!(
+            ui_ps1.custom_eq_presets.len(),
+            ui_ps2.custom_eq_presets.len(),
+            "custom_eq_presets length"
+        );
+        for (idx, (pa, pb)) in ui_ps1
+            .custom_eq_presets
+            .iter()
+            .zip(ui_ps2.custom_eq_presets.iter())
+            .enumerate()
+        {
+            assert_eq!(pa.name, pb.name, "custom_eq_presets[{idx}].name");
+            for (band, (a, b)) in pa.gains.iter().zip(pb.gains.iter()).enumerate() {
+                assert!(
+                    (a - b).abs() < 1e-4,
+                    "custom_eq_presets[{idx}].gains[{band}]: {a} vs {b}",
+                );
+            }
+        }
+
+        // Library / verbose
+        assert_eq!(ui_ps1.verbose_config, ui_ps2.verbose_config);
+        assert_eq!(ui_ps1.library_page_size, ui_ps2.library_page_size);
+        assert_eq!(ui_ps1.artwork_resolution, ui_ps2.artwork_resolution);
+        assert_eq!(
+            ui_ps1.show_album_artists_only,
+            ui_ps2.show_album_artists_only
+        );
+        assert_eq!(
+            ui_ps1.suppress_library_refresh_toasts,
+            ui_ps2.suppress_library_refresh_toasts
+        );
+
+        // Queue columns
+        assert_eq!(ui_ps1.queue_show_stars, ui_ps2.queue_show_stars);
+        assert_eq!(ui_ps1.queue_show_album, ui_ps2.queue_show_album);
+        assert_eq!(ui_ps1.queue_show_duration, ui_ps2.queue_show_duration);
+        assert_eq!(ui_ps1.queue_show_love, ui_ps2.queue_show_love);
+        assert_eq!(ui_ps1.queue_show_plays, ui_ps2.queue_show_plays);
+        assert_eq!(ui_ps1.queue_show_index, ui_ps2.queue_show_index);
+        assert_eq!(ui_ps1.queue_show_thumbnail, ui_ps2.queue_show_thumbnail);
+        // BUG (pinned): `queue_show_genre` is silently dropped on apply —
+        // it ships in TomlSettings (with serde wiring) but is missing from
+        // both the hand-written `apply_toml_settings_to_internal` block AND
+        // every per-tab `define_settings!` invocation. ui_ps1 (built from
+        // sentinel internal) carries `true`; ui_ps2 (round-tripped through
+        // TOML and apply) snaps back to the type default (`false`). This
+        // assertion pins the bug for the strangler-fig refactor; the fold-in
+        // commit (after the macro extension adds the field) will flip it to
+        // a real round-trip assertion.
+        assert!(
+            ui_ps1.queue_show_genre,
+            "sentinel sets queue_show_genre=true"
+        );
+        assert!(
+            !ui_ps2.queue_show_genre,
+            "current bug: queue_show_genre drops to false on TOML→internal apply",
+        );
+        assert_eq!(ui_ps1.queue_show_select, ui_ps2.queue_show_select);
+
+        // Albums columns
+        assert_eq!(ui_ps1.albums_show_stars, ui_ps2.albums_show_stars);
+        assert_eq!(ui_ps1.albums_show_songcount, ui_ps2.albums_show_songcount);
+        assert_eq!(ui_ps1.albums_show_plays, ui_ps2.albums_show_plays);
+        assert_eq!(ui_ps1.albums_show_love, ui_ps2.albums_show_love);
+        assert_eq!(ui_ps1.albums_show_index, ui_ps2.albums_show_index);
+        assert_eq!(ui_ps1.albums_show_thumbnail, ui_ps2.albums_show_thumbnail);
+        assert_eq!(ui_ps1.albums_show_select, ui_ps2.albums_show_select);
+
+        // Songs columns
+        assert_eq!(ui_ps1.songs_show_stars, ui_ps2.songs_show_stars);
+        assert_eq!(ui_ps1.songs_show_album, ui_ps2.songs_show_album);
+        assert_eq!(ui_ps1.songs_show_duration, ui_ps2.songs_show_duration);
+        assert_eq!(ui_ps1.songs_show_plays, ui_ps2.songs_show_plays);
+        assert_eq!(ui_ps1.songs_show_love, ui_ps2.songs_show_love);
+        assert_eq!(ui_ps1.songs_show_index, ui_ps2.songs_show_index);
+        assert_eq!(ui_ps1.songs_show_thumbnail, ui_ps2.songs_show_thumbnail);
+        // BUG (pinned): `songs_show_genre` is silently dropped on apply for
+        // the same reason as `queue_show_genre` — present in TomlSettings,
+        // missing from the apply paths. See the queue_show_genre comment
+        // above. Fold-in commit will flip this to a real round-trip assert.
+        assert!(
+            ui_ps1.songs_show_genre,
+            "sentinel sets songs_show_genre=true"
+        );
+        assert!(
+            !ui_ps2.songs_show_genre,
+            "current bug: songs_show_genre drops to false on TOML→internal apply",
+        );
+        assert_eq!(ui_ps1.songs_show_select, ui_ps2.songs_show_select);
+
+        // Artists columns
+        assert_eq!(ui_ps1.artists_show_stars, ui_ps2.artists_show_stars);
+        assert_eq!(
+            ui_ps1.artists_show_albumcount,
+            ui_ps2.artists_show_albumcount
+        );
+        assert_eq!(ui_ps1.artists_show_songcount, ui_ps2.artists_show_songcount);
+        assert_eq!(ui_ps1.artists_show_plays, ui_ps2.artists_show_plays);
+        assert_eq!(ui_ps1.artists_show_love, ui_ps2.artists_show_love);
+        assert_eq!(ui_ps1.artists_show_index, ui_ps2.artists_show_index);
+        assert_eq!(ui_ps1.artists_show_thumbnail, ui_ps2.artists_show_thumbnail);
+        assert_eq!(ui_ps1.artists_show_select, ui_ps2.artists_show_select);
+
+        // Genres columns
+        assert_eq!(ui_ps1.genres_show_index, ui_ps2.genres_show_index);
+        assert_eq!(ui_ps1.genres_show_thumbnail, ui_ps2.genres_show_thumbnail);
+        assert_eq!(ui_ps1.genres_show_albumcount, ui_ps2.genres_show_albumcount);
+        assert_eq!(ui_ps1.genres_show_songcount, ui_ps2.genres_show_songcount);
+        assert_eq!(ui_ps1.genres_show_select, ui_ps2.genres_show_select);
+
+        // Playlists columns
+        assert_eq!(ui_ps1.playlists_show_index, ui_ps2.playlists_show_index);
+        assert_eq!(
+            ui_ps1.playlists_show_thumbnail,
+            ui_ps2.playlists_show_thumbnail
+        );
+        assert_eq!(
+            ui_ps1.playlists_show_songcount,
+            ui_ps2.playlists_show_songcount
+        );
+        assert_eq!(
+            ui_ps1.playlists_show_duration,
+            ui_ps2.playlists_show_duration
+        );
+        assert_eq!(
+            ui_ps1.playlists_show_updatedat,
+            ui_ps2.playlists_show_updatedat
+        );
+        assert_eq!(ui_ps1.playlists_show_select, ui_ps2.playlists_show_select);
+
+        // Similar columns
+        assert_eq!(ui_ps1.similar_show_index, ui_ps2.similar_show_index);
+        assert_eq!(ui_ps1.similar_show_thumbnail, ui_ps2.similar_show_thumbnail);
+        assert_eq!(ui_ps1.similar_show_album, ui_ps2.similar_show_album);
+        assert_eq!(ui_ps1.similar_show_duration, ui_ps2.similar_show_duration);
+        assert_eq!(ui_ps1.similar_show_love, ui_ps2.similar_show_love);
+        assert_eq!(ui_ps1.similar_show_select, ui_ps2.similar_show_select);
+
+        // Per-view artwork overlay
+        assert_eq!(ui_ps1.albums_artwork_overlay, ui_ps2.albums_artwork_overlay);
+        assert_eq!(
+            ui_ps1.artists_artwork_overlay,
+            ui_ps2.artists_artwork_overlay
+        );
+        assert_eq!(ui_ps1.songs_artwork_overlay, ui_ps2.songs_artwork_overlay);
+        assert_eq!(
+            ui_ps1.playlists_artwork_overlay,
+            ui_ps2.playlists_artwork_overlay
+        );
+
+        // Artwork column layout
+        assert_eq!(ui_ps1.artwork_column_mode, ui_ps2.artwork_column_mode);
+        assert_eq!(
+            ui_ps1.artwork_column_stretch_fit,
+            ui_ps2.artwork_column_stretch_fit
+        );
+        assert!(
+            (ui_ps1.artwork_column_width_pct - ui_ps2.artwork_column_width_pct).abs() < 1e-4,
+            "artwork_column_width_pct"
+        );
+        assert!(
+            (ui_ps1.artwork_auto_max_pct - ui_ps2.artwork_auto_max_pct).abs() < 1e-4,
+            "artwork_auto_max_pct"
+        );
+        assert!(
+            (ui_ps1.artwork_vertical_height_pct - ui_ps2.artwork_vertical_height_pct).abs() < 1e-4,
+            "artwork_vertical_height_pct"
+        );
+
+        // System tray
+        assert_eq!(ui_ps1.show_tray_icon, ui_ps2.show_tray_icon);
+        assert_eq!(ui_ps1.close_to_tray, ui_ps2.close_to_tray);
+    }
+
+    /// Current real-world `config.toml` shape (sanitized: paths/font/etc.
+    /// redacted to neutral placeholders). The snapshot guards against
+    /// field-rename / default-change regressions that would silently break
+    /// existing users' config files.
+    ///
+    /// Two-stage assertion:
+    /// 1. Parse → apply to fresh internal `PlayerSettings` → no panic.
+    /// 2. Reserialize the parsed `TomlSettings` and re-parse — both rounds
+    ///    must produce equal `TomlSettings` (modulo f32 quantization, which
+    ///    is absorbed by going through one parse-reparse cycle then comparing).
+    #[test]
+    fn current_user_config_toml_snapshot_parses() {
+        // Sanitized snapshot of the on-disk [settings] table at the time the
+        // sentinel test was authored. Personal values redacted to neutral
+        // placeholders (path → /tmp/test_library, font → "Default",
+        // start_view → "Albums"). Test exists to catch field-name / serde-
+        // attribute regressions, not to mirror the user's literal config.
+        const SNAPSHOT_TOML: &str = r#"
+albums_artwork_overlay = true
+albums_show_index = true
+albums_show_love = true
+albums_show_plays = false
+albums_show_select = false
+albums_show_songcount = true
+albums_show_stars = false
+albums_show_thumbnail = true
+artists_artwork_overlay = true
+artists_show_albumcount = true
+artists_show_index = false
+artists_show_love = true
+artists_show_plays = false
+artists_show_select = false
+artists_show_songcount = true
+artists_show_stars = false
+artists_show_thumbnail = true
+artwork_auto_max_pct = 0.7
+artwork_column_mode = "auto"
+artwork_column_stretch_fit = "fill"
+artwork_column_width_pct = 0.2345
+artwork_resolution = "original"
+artwork_vertical_height_pct = 0.4686
+auto_follow_playing = true
+close_to_tray = false
+crossfade_duration_secs = 10
+crossfade_enabled = true
+enter_behavior = "play_all"
+eq_enabled = true
+eq_gains = [
+    4.0,
+    3.5,
+    1.5,
+    0.0,
+    -1.5,
+    -0.5,
+    0.5,
+    2.0,
+    3.5,
+    4.0,
+]
+font_family = "Default"
+genres_show_albumcount = true
+genres_show_index = false
+genres_show_select = false
+genres_show_songcount = true
+genres_show_thumbnail = true
+horizontal_volume = false
+library_page_size = "massive"
+light_mode = false
+local_music_path = "/tmp/test_library"
+nav_display_mode = "icons_only"
+nav_layout = "none"
+normalization_level = "normal"
+opacity_gradient = false
+playlists_artwork_overlay = true
+playlists_show_duration = true
+playlists_show_index = true
+playlists_show_select = false
+playlists_show_songcount = true
+playlists_show_thumbnail = true
+playlists_show_updatedat = true
+queue_show_album = false
+queue_show_default_playlist = false
+queue_show_duration = true
+queue_show_genre = false
+queue_show_index = true
+queue_show_love = true
+queue_show_plays = false
+queue_show_select = false
+queue_show_stars = false
+queue_show_thumbnail = true
+quick_add_to_playlist = false
+replay_gain_fallback_db = 0.0
+replay_gain_fallback_to_agc = false
+replay_gain_preamp_db = 0.0
+replay_gain_prevent_clipping = true
+rounded_mode = true
+scrobble_threshold = 0.9
+scrobbling_enabled = true
+sfx_volume = 0.2253
+show_album_artists_only = true
+show_tray_icon = true
+similar_show_album = true
+similar_show_duration = true
+similar_show_index = true
+similar_show_love = true
+similar_show_select = false
+similar_show_thumbnail = true
+slot_row_height = "compact"
+slot_text_links = true
+songs_artwork_overlay = true
+songs_show_album = false
+songs_show_duration = true
+songs_show_genre = false
+songs_show_index = true
+songs_show_love = true
+songs_show_plays = false
+songs_show_select = false
+songs_show_stars = true
+songs_show_thumbnail = true
+sound_effects_enabled = true
+stable_viewport = true
+start_view = "Albums"
+strip_click_action = "go_to_queue"
+strip_merged_mode = true
+strip_separator = "slash"
+strip_show_album = true
+strip_show_artist = true
+strip_show_format_info = true
+strip_show_labels = true
+strip_show_title = true
+suppress_library_refresh_toasts = true
+track_info_display = "top_bar"
+verbose_config = true
+visualization_mode = "lines"
+volume_normalization_mode = "agc"
+
+[[custom_eq_presets]]
+gains = [
+    0.0,
+    -3.113941192626953,
+    8.52574348449707,
+    -8.307605743408203,
+    5.890437126159668,
+    0.0,
+    1.5,
+    3.0,
+    4.0,
+    5.0,
+]
+name = "sentinel preset"
+"#;
+
+        // 1. Parse must succeed.
+        let ts1: TomlSettings =
+            toml::from_str(SNAPSHOT_TOML).expect("parse sanitized config.toml [settings] snapshot");
+
+        // 2. Apply must succeed (no field type mismatches).
+        let mut internal = InternalPlayerSettings::default();
+        apply_toml_settings_to_internal(&ts1, &mut internal);
+
+        // 3. Reserialize and re-parse — produces a stable `TomlSettings`.
+        //    The first round absorbs any f32 → 4-decimal quantization; the
+        //    second round must be byte-identical to the first round's value.
+        let serialized1 = toml::to_string(&ts1).expect("first serialize");
+        let ts2: TomlSettings = toml::from_str(&serialized1).expect("reparse first serialize");
+        let serialized2 = toml::to_string(&ts2).expect("second serialize");
+        assert_eq!(
+            serialized1, serialized2,
+            "TomlSettings must reach a stable serialized form after one reparse"
+        );
+
+        // Spot-check that key sanitized values landed where expected.
+        assert_eq!(ts1.start_view, "Albums");
+        assert_eq!(ts1.local_music_path, "/tmp/test_library");
+        assert_eq!(ts1.font_family, "Default");
+        assert_eq!(ts1.library_page_size, LibraryPageSize::Massive);
+        assert_eq!(ts1.volume_normalization, VolumeNormalizationMode::Agc);
+        assert_eq!(ts1.visualization_mode, VisualizationMode::Lines);
+        assert_eq!(ts1.nav_layout, NavLayout::None);
+        assert_eq!(ts1.strip_separator, StripSeparator::Slash);
+        assert_eq!(ts1.custom_eq_presets.len(), 1);
+        assert_eq!(ts1.custom_eq_presets[0].name, "sentinel preset");
+    }
+
+    /// Pin the current `light_mode` write-as-false asymmetry: `TomlSettings::
+    /// from_player_settings` takes UI-facing `PlayerSettings`, which has no
+    /// `light_mode` field. The function therefore always emits
+    /// `light_mode = false` regardless of the internal redb-backed value.
+    /// The on-disk truth is maintained separately by the `SetLightModeAtomic`
+    /// side-effect handler in the UI crate, which writes `settings.light_mode`
+    /// via `update_config_value` (a targeted toml_edit write that doesn't go
+    /// through `from_player_settings`).
+    ///
+    /// This test pins the current behavior. If a future refactor closes the
+    /// asymmetry (e.g. by routing through internal-PS instead of UI-PS), this
+    /// test should be updated to assert the new behavior.
+    #[test]
+    fn from_player_settings_writes_light_mode_false_regardless_of_internal_value() {
+        let mut internal = InternalPlayerSettings::default();
+        internal.light_mode = true;
+
+        let (sm, _tmp) = make_test_manager_with_player(internal);
+        let ui_ps = sm.get_player_settings();
+        let ts = TomlSettings::from_player_settings(&ui_ps);
+        assert!(
+            !ts.light_mode,
+            "from_player_settings hard-codes light_mode = false (UI-PS lacks the field)"
+        );
+    }
 }
