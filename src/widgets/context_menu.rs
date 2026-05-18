@@ -328,6 +328,30 @@ pub(crate) fn open_state_for(
     }
 }
 
+/// Resolve the `(is_open, open_position, on_change)` trio every artwork-panel
+/// call site builds for `ContextMenuId::ArtworkPanel(view)`.
+///
+/// The returned closure maps the controlled-component callback (`Some(p)` →
+/// open at `p`, `None` → close) into the view's per-page `SetOpenMenu` message
+/// constructor. Each library view's `view.rs` previously inlined the same
+/// 18-line block; this helper collapses it to a single `let` destructure.
+pub(crate) fn artwork_panel_open_state<M>(
+    view: crate::View,
+    open_menu: Option<&crate::app_message::OpenMenu>,
+    on_set_open_menu: impl Fn(Option<crate::app_message::OpenMenu>) -> M + Clone,
+) -> (bool, Option<Point>, impl Fn(Option<Point>) -> M + Clone) {
+    let id = crate::app_message::ContextMenuId::ArtworkPanel(view);
+    let (is_open, position) = open_state_for(open_menu, &id);
+    let on_change = move |position: Option<Point>| match position {
+        Some(p) => on_set_open_menu(Some(crate::app_message::OpenMenu::Context {
+            id: id.clone(),
+            position: p,
+        })),
+        None => on_set_open_menu(None),
+    };
+    (is_open, position, on_change)
+}
+
 // ============================================================================
 // Public API
 // ============================================================================
@@ -948,4 +972,120 @@ pub(crate) fn menu_separator<'a, Message: 'a>() -> Element<'a, Message> {
             bottom: 2.0,
         })
         .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use iced::Point;
+
+    use super::*;
+    use crate::{
+        View,
+        app_message::{ContextMenuId, OpenMenu},
+    };
+
+    // --- open_state_for -----------------------------------------------------
+
+    #[test]
+    fn open_state_for_returns_closed_when_no_menu_open() {
+        let id = ContextMenuId::ArtworkPanel(View::Albums);
+        let (open, pos) = open_state_for(None, &id);
+        assert!(!open);
+        assert!(pos.is_none());
+    }
+
+    #[test]
+    fn open_state_for_returns_open_when_id_matches() {
+        let id = ContextMenuId::ArtworkPanel(View::Albums);
+        let menu = OpenMenu::Context {
+            id: id.clone(),
+            position: Point::new(12.0, 34.0),
+        };
+        let (open, pos) = open_state_for(Some(&menu), &id);
+        assert!(open);
+        assert_eq!(pos, Some(Point::new(12.0, 34.0)));
+    }
+
+    #[test]
+    fn open_state_for_returns_closed_when_id_differs() {
+        let queried_id = ContextMenuId::ArtworkPanel(View::Albums);
+        let other_menu = OpenMenu::Context {
+            id: ContextMenuId::ArtworkPanel(View::Songs),
+            position: Point::new(1.0, 2.0),
+        };
+        let (open, pos) = open_state_for(Some(&other_menu), &queried_id);
+        assert!(!open);
+        assert!(pos.is_none());
+    }
+
+    #[test]
+    fn open_state_for_returns_closed_for_non_context_variant() {
+        let id = ContextMenuId::ArtworkPanel(View::Queue);
+        let hamburger = OpenMenu::Hamburger;
+        let (open, pos) = open_state_for(Some(&hamburger), &id);
+        assert!(!open);
+        assert!(pos.is_none());
+    }
+
+    // --- artwork_panel_open_state ------------------------------------------
+
+    /// Tiny stand-in message type so the helper's generic-message bound
+    /// stays exercised without dragging the real `*Message` enums into the
+    /// test scope.
+    #[derive(Debug, Clone, PartialEq)]
+    enum TestMsg {
+        Set(Option<OpenMenu>),
+    }
+
+    #[test]
+    fn artwork_panel_open_state_reports_closed_when_no_menu_open() {
+        let (open, pos, _on_change) = artwork_panel_open_state(View::Albums, None, TestMsg::Set);
+        assert!(!open);
+        assert!(pos.is_none());
+    }
+
+    #[test]
+    fn artwork_panel_open_state_reports_open_for_matching_view() {
+        let menu = OpenMenu::Context {
+            id: ContextMenuId::ArtworkPanel(View::Albums),
+            position: Point::new(7.0, 9.0),
+        };
+        let (open, pos, _on_change) =
+            artwork_panel_open_state(View::Albums, Some(&menu), TestMsg::Set);
+        assert!(open);
+        assert_eq!(pos, Some(Point::new(7.0, 9.0)));
+    }
+
+    #[test]
+    fn artwork_panel_open_state_reports_closed_for_different_view() {
+        let other = OpenMenu::Context {
+            id: ContextMenuId::ArtworkPanel(View::Songs),
+            position: Point::new(0.0, 0.0),
+        };
+        let (open, pos, _on_change) =
+            artwork_panel_open_state(View::Albums, Some(&other), TestMsg::Set);
+        assert!(!open);
+        assert!(pos.is_none());
+    }
+
+    #[test]
+    fn artwork_panel_open_state_close_callback_emits_set_none() {
+        let (_open, _pos, on_change) = artwork_panel_open_state(View::Albums, None, TestMsg::Set);
+        assert_eq!(on_change(None), TestMsg::Set(None));
+    }
+
+    #[test]
+    fn artwork_panel_open_state_open_callback_wraps_context_with_view() {
+        let (_open, _pos, on_change) = artwork_panel_open_state(View::Queue, None, TestMsg::Set);
+        let pt = Point::new(100.0, 200.0);
+        let msg = on_change(Some(pt));
+        let TestMsg::Set(payload) = msg;
+        match payload {
+            Some(OpenMenu::Context { id, position }) => {
+                assert_eq!(id, ContextMenuId::ArtworkPanel(View::Queue));
+                assert_eq!(position, pt);
+            }
+            other => panic!("unexpected payload: {other:?}"),
+        }
+    }
 }

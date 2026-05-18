@@ -338,9 +338,12 @@ impl AlbumsPage {
                 col.into()
             });
 
-        let artwork_menu_id = crate::app_message::ContextMenuId::ArtworkPanel(crate::View::Albums);
-        let (artwork_menu_open, artwork_menu_position) =
-            crate::widgets::context_menu::open_state_for(data.open_menu, &artwork_menu_id);
+        let (artwork_menu_open, artwork_menu_position, on_artwork_menu_change) =
+            crate::widgets::context_menu::artwork_panel_open_state(
+                crate::View::Albums,
+                data.open_menu,
+                AlbumsMessage::SetOpenMenu,
+            );
         let artwork_content = Some(single_artwork_panel_with_pill(
             artwork_handle,
             overlay_content,
@@ -348,15 +351,7 @@ impl AlbumsPage {
             on_refresh,
             artwork_menu_open,
             artwork_menu_position,
-            move |position| match position {
-                Some(p) => {
-                    AlbumsMessage::SetOpenMenu(Some(crate::app_message::OpenMenu::Context {
-                        id: artwork_menu_id.clone(),
-                        position: p,
-                    }))
-                }
-                None => AlbumsMessage::SetOpenMenu(None),
-            },
+            on_artwork_menu_change,
         ));
 
         crate::widgets::base_slot_list_layout::base_slot_list_layout_with_handle(
