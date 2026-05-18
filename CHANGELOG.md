@@ -14,6 +14,9 @@ All notable changes to this project will be documented in this file.
 - EQ modal's preset dropdown now shows the correct saved custom preset as active after restarting nokkvi — previously the dropdown fell back to "Custom" even though your saved preset was still loaded and applied.
 - Settings → Hotkeys row now updates to the new key right after you rebind it — previously the row kept showing the old key even though the new binding was already saved and working.
 - Reordering the queue while a song is playing (drag-and-drop, Shift+↑/↓, right-click "Remove from queue" or "Play Next", sort, or clear) no longer leaves the player bar's title and the queue view's highlight out of sync with what's actually playing. The desync was most visible with shuffle and crossfade both on — every reorder now resets nokkvi's pre-buffered "next song" choice so the displayed track follows the actual audio.
+- Logging out now clears the same session-bound state as session-expiry — the hamburger menu closes, library data resets, and pending find-and-expand chains, in-progress roulette spins, and similar-songs results no longer carry over into the next login.
+- Album artwork no longer briefly flickers after every track. Navidrome's `library-changed` SSE event fires on every play-count bump, and the previous handler treated each one as a signal to re-fetch and re-upload the album's large artwork. SSE no longer auto-refreshes artwork; cover-art replacements still surface on the next library reload or via the right-click "Refresh Artwork" action.
+- Queue's vertical artwork no longer sits flush against the playlist context bar or playlist edit bar when one of those bars is showing — there's now a small bottom gap matching the artwork's other insets in Always-Vertical Native / Stretched and Auto's portrait-fallback modes.
 
 ### Removed
 
