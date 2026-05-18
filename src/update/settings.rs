@@ -676,35 +676,13 @@ impl Nokkvi {
     // System Actions
     // =========================================================================
 
-    fn handle_settings_logout(&mut self) -> Task<Message> {
+    pub(crate) fn handle_settings_logout(&mut self) -> Task<Message> {
         tracing::info!(" [SETTINGS] Logout requested");
-        let stop_task = if let Some(ref shell) = self.app_service {
-            shell.task_manager().shutdown();
-            if let Err(e) = nokkvi_data::credentials::clear_session(shell.storage()) {
-                tracing::warn!(" [SETTINGS] Failed to clear session: {e}");
-            }
-            self.cached_storage = Some(shell.storage().clone());
-
-            // Clone the engine Arc before dropping AppService so we can stop
-            // it asynchronously. This kills PipeWire streams, the decode loop,
-            // and the render thread — preventing orphaned audio after logout.
-            let engine = shell.audio_engine();
-            Task::perform(
-                async move {
-                    let mut guard = engine.lock().await;
-                    guard.stop().await;
-                    tracing::info!(" [SETTINGS] Audio engine stopped on logout");
-                },
-                |_| Message::NoOp,
-            )
-        } else {
-            Task::none()
-        };
-        self.app_service = None;
-        self.stored_session = None;
-        self.should_auto_login = false;
-        self.screen = crate::Screen::Login;
-        stop_task
+        // Shared session teardown — see `Nokkvi::reset_session_state` in
+        // `update/components.rs`. Logout is silent (user took the action,
+        // no toast); the helper handles the engine-stop Task + redb
+        // session clear + storage caching for re-login.
+        self.reset_session_state()
     }
 }
 

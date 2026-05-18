@@ -1237,4 +1237,128 @@ impl Nokkvi {
         self.toast_info("Copied to clipboard");
         iced::clipboard::write(info).map(|_| Message::NoOp)
     }
+
+    // -----------------------------------------------------------------
+    // Session teardown (logout + session-expired share this)
+    // -----------------------------------------------------------------
+
+    /// Tear down all session-bound state and return the engine-stop Task.
+    ///
+    /// Both `handle_settings_logout` (user-initiated) and
+    /// `handle_session_expired` (401 from API) end the active Navidrome
+    /// session and must leave `Nokkvi` in an identical post-teardown shape
+    /// before re-arriving at the Login screen. This helper is the single
+    /// source of truth for that shape, so a future field added to `Nokkvi`
+    /// gets reset uniformly from one site instead of drifting between the
+    /// two callers (the original split forgot `open_menu` + `library` in
+    /// the logout path — see #2.27).
+    ///
+    /// The async Task returned must be awaited by the caller (returned
+    /// from the handler) so PipeWire streams, the decode loop, and the
+    /// render thread are torn down cleanly — preventing orphaned audio
+    /// after logout. `StateStorage` is cached on `self.cached_storage`
+    /// (the redb exclusive lock would block a fresh open on re-login —
+    /// see gotchas.md "Database lock on re-login").
+    ///
+    /// Caller-specific concerns (toast, log prefix) stay at the call
+    /// site; this helper logs a single `debug!` line summarizing the
+    /// reset for forensic traces.
+    ///
+    /// Reset fields fall into three buckets:
+    /// - **Core session identity**: app_service, stored_session,
+    ///   should_auto_login, screen.
+    /// - **Server-specific data pointing at gone IDs**: library,
+    ///   similar_songs(+generation), active_playlist_info, playlist_edit,
+    ///   server_version, last_queue_current_index, active_progress,
+    ///   pending_expand(+center_only +top_pin), roulette.
+    /// - **Transient UI work tied to the prior session**: open_menu,
+    ///   browsing_panel, cross_pane_drag(+press_origin +pressed_item
+    ///   +selection_count), pending_queue_insert_position,
+    ///   start_view_applied, suppress_next_auto_center.
+    ///
+    /// Fields explicitly NOT reset (retained across login transitions):
+    /// - retained: cached_storage — explicit DB-lock workaround.
+    /// - retained: login_page — credentials kept so user can re-enter.
+    /// - retained: current_view, pre_settings_view — UI nav memory.
+    /// - retained: modes, settings, hotkey_config — user preferences.
+    /// - retained: sfx_engine, sfx, engine, artwork, window,
+    ///   player_bar_layout, visualizer(+config), boat — local UI/audio
+    ///   infrastructure independent of the server.
+    /// - retained: toast, text_input_dialog, info_modal, about_modal,
+    ///   eq_modal, default_playlist_picker — modal/overlay shells
+    ///   (toast queue intentionally survives so the session-expired
+    ///   message is visible after this returns).
+    /// - retained: mpris_connection, tray_connection, tray_window_hidden,
+    ///   main_window_id — system integrations.
+    /// - retained: playback, active_playback, scrobble — track-display
+    ///   fields. Engine-stop is async; resetting these here could race.
+    ///   They are overwritten on next session's first queue load and the
+    ///   Login screen doesn't render the player bar.
+    /// - retained: last_mpris_position_us — overwritten on next playback.
+    pub(crate) fn reset_session_state(&mut self) -> Task<Message> {
+        // Phase 1: stop background work + cache storage handle for re-login.
+        // The engine-stop Task is returned to the caller; everything else
+        // (TaskManager shutdown, redb session clear, storage caching)
+        // runs synchronously here.
+        let stop_task = if let Some(ref shell) = self.app_service {
+            shell.task_manager().shutdown();
+            if let Err(e) = nokkvi_data::credentials::clear_session(shell.storage()) {
+                tracing::warn!(" [SESSION-RESET] Failed to clear session: {e}");
+            }
+            self.cached_storage = Some(shell.storage().clone());
+
+            // Clone the engine Arc before dropping AppService so we can stop
+            // it asynchronously. This kills PipeWire streams, the decode
+            // loop, and the render thread — preventing orphaned audio.
+            let engine = shell.audio_engine();
+            Task::perform(
+                async move {
+                    let mut guard = engine.lock().await;
+                    guard.stop().await;
+                    tracing::debug!(" [SESSION-RESET] Audio engine stopped");
+                },
+                |_| Message::NoOp,
+            )
+        } else {
+            Task::none()
+        };
+
+        // Phase 2: reset every session-bound field on Nokkvi.
+        // Grouped by bucket (see doc-comment above).
+        //
+        // Core session identity
+        self.app_service = None;
+        self.stored_session = None;
+        self.should_auto_login = false;
+        self.screen = crate::Screen::Login;
+
+        // Server-specific data pointing at gone IDs
+        self.library = crate::state::LibraryData::default();
+        self.similar_songs = None;
+        self.similar_songs_generation = 0;
+        self.active_playlist_info = None;
+        self.playlist_edit = None;
+        self.server_version = None;
+        self.last_queue_current_index = None;
+        self.active_progress = Vec::new();
+        self.pending_expand = None;
+        self.pending_expand_center_only = false;
+        self.pending_top_pin = None;
+        self.roulette = None;
+
+        // Transient UI work tied to the prior session
+        self.open_menu = None;
+        self.browsing_panel = None;
+        self.cross_pane_drag = None;
+        self.cross_pane_drag_press_origin = None;
+        self.cross_pane_drag_pressed_item = None;
+        self.cross_pane_drag_selection_count = 1;
+        self.pending_queue_insert_position = None;
+        self.start_view_applied = false;
+        self.suppress_next_auto_center = false;
+
+        tracing::debug!(" [SESSION-RESET] cleared session-bound state");
+
+        stop_task
+    }
 }

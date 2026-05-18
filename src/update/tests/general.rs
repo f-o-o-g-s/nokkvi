@@ -395,6 +395,250 @@ fn test_albums_loaded_unauthorized_triggers_logout() {
 }
 
 // ============================================================================
+// Session reset — shared between logout + session-expired
+// (update/components.rs::reset_session_state)
+// ============================================================================
+//
+// These pin the centralized teardown helper so a future field added to
+// `Nokkvi` is reset uniformly from both call sites. Wedge #2.27 fixed the
+// drift where logout forgot `open_menu` + `library`; the
+// `logout_and_session_expired_reach_identical_state` test below is the
+// drift-class closure — any future field reset added only to one path
+// breaks it.
+
+/// Populate every session-bound field with a non-default sentinel value so
+/// the reset assertion has something to fail on. Mirrors the bucketing in
+/// `reset_session_state`'s doc-comment; if a bucket grows without a
+/// matching seed here, the assertion silently weakens.
+fn seed_session_bound_state(app: &mut crate::Nokkvi) {
+    app.screen = crate::Screen::Home;
+    app.should_auto_login = true;
+    app.stored_session = Some(crate::state::StoredSession {
+        server_url: "http://test".into(),
+        username: "user".into(),
+        jwt_token: "jwt".into(),
+        subsonic_credential: "sub".into(),
+    });
+
+    app.library
+        .albums
+        .set_from_vec(vec![make_album("a1", "A", "Artist")]);
+    app.library
+        .artists
+        .set_from_vec(vec![make_artist("ar1", "Artist")]);
+    app.similar_songs_generation = 7;
+    app.active_playlist_info = Some(crate::state::ActivePlaylistContext {
+        id: "pl1".into(),
+        name: "Mix".into(),
+        comment: String::new(),
+    });
+    app.server_version = Some("0.61.1".into());
+    app.last_queue_current_index = Some(3);
+    app.pending_expand = Some(pending_album("a1"));
+    app.pending_expand_center_only = true;
+
+    app.open_menu = Some(crate::app_message::OpenMenu::Hamburger);
+    app.cross_pane_drag_selection_count = 5;
+    app.pending_queue_insert_position = Some(2);
+    app.start_view_applied = true;
+    app.suppress_next_auto_center = true;
+}
+
+#[test]
+fn reset_session_state_clears_all_session_bound_fields() {
+    let mut app = test_app();
+    seed_session_bound_state(&mut app);
+
+    // Sanity: seed actually moved things off default.
+    assert_eq!(app.screen, crate::Screen::Home);
+    assert!(app.stored_session.is_some());
+    assert!(!app.library.albums.is_empty());
+    assert!(app.open_menu.is_some());
+
+    let _ = app.reset_session_state();
+
+    // Core session identity
+    assert!(app.app_service.is_none());
+    assert!(app.stored_session.is_none());
+    assert!(!app.should_auto_login);
+    assert_eq!(app.screen, crate::Screen::Login);
+
+    // Server-specific data pointing at gone IDs
+    assert!(app.library.albums.is_empty(), "library albums reset");
+    assert!(app.library.artists.is_empty(), "library artists reset");
+    assert!(app.similar_songs.is_none());
+    assert_eq!(app.similar_songs_generation, 0);
+    assert!(app.active_playlist_info.is_none());
+    assert!(app.playlist_edit.is_none());
+    assert!(app.server_version.is_none());
+    assert!(app.last_queue_current_index.is_none());
+    assert!(app.active_progress.is_empty());
+    assert!(app.pending_expand.is_none());
+    assert!(!app.pending_expand_center_only);
+    assert!(app.pending_top_pin.is_none());
+    assert!(app.roulette.is_none());
+
+    // Transient UI work tied to prior session
+    assert!(app.open_menu.is_none(), "open_menu cleared (drift bug fix)");
+    assert!(app.browsing_panel.is_none());
+    assert!(app.cross_pane_drag.is_none());
+    assert!(app.cross_pane_drag_press_origin.is_none());
+    assert!(app.cross_pane_drag_pressed_item.is_none());
+    assert_eq!(app.cross_pane_drag_selection_count, 1);
+    assert!(app.pending_queue_insert_position.is_none());
+    assert!(!app.start_view_applied);
+    assert!(!app.suppress_next_auto_center);
+}
+
+#[test]
+fn reset_session_state_preserves_non_session_fields() {
+    let mut app = test_app();
+
+    // Mutate retained fields to non-default values.
+    app.current_view = View::Albums;
+    app.pre_settings_view = View::Songs;
+    app.modes.random = true;
+    app.modes.repeat = true;
+    app.modes.consume = true;
+    app.settings.scrobble_threshold = 0.99;
+    app.window.width = 1234.0;
+    app.window.height = 567.0;
+    app.tray_window_hidden = true;
+    app.last_mpris_position_us = 42_000;
+    // Toast queue intentionally survives (session-expired's toast must
+    // remain visible after reset returns).
+    app.toast_info("pre-reset toast");
+    let pre_reset_toast_count = app.toast.toasts.len();
+
+    let _ = app.reset_session_state();
+
+    assert_eq!(app.current_view, View::Albums, "current_view retained");
+    assert_eq!(
+        app.pre_settings_view,
+        View::Songs,
+        "pre_settings_view retained"
+    );
+    assert!(app.modes.random, "modes.random retained");
+    assert!(app.modes.repeat, "modes.repeat retained");
+    assert!(app.modes.consume, "modes.consume retained");
+    assert!(
+        (app.settings.scrobble_threshold - 0.99).abs() < f32::EPSILON,
+        "settings retained"
+    );
+    assert!(
+        (app.window.width - 1234.0).abs() < f32::EPSILON,
+        "window state retained"
+    );
+    assert!(
+        (app.window.height - 567.0).abs() < f32::EPSILON,
+        "window state retained"
+    );
+    assert!(app.tray_window_hidden, "tray_window_hidden retained");
+    assert_eq!(
+        app.last_mpris_position_us, 42_000,
+        "mpris position retained"
+    );
+    assert_eq!(
+        app.toast.toasts.len(),
+        pre_reset_toast_count,
+        "toast queue survives reset (session-expired toast must remain)"
+    );
+}
+
+#[test]
+fn logout_and_session_expired_reach_identical_state() {
+    // Drive both handlers from the same starting state and assert their
+    // post-reset Nokkvi mirrors on every field reset_session_state
+    // touches. This is the drift-class closure: any future field reset
+    // added only to one path breaks this test.
+
+    let mut via_logout = test_app();
+    seed_session_bound_state(&mut via_logout);
+
+    let mut via_session_expired = test_app();
+    seed_session_bound_state(&mut via_session_expired);
+
+    let _ = via_logout.handle_settings_logout();
+    let _ = via_session_expired.handle_session_expired();
+
+    macro_rules! assert_eq_fields {
+        ($($field:ident),+ $(,)?) => {
+            $(
+                assert_eq!(
+                    via_logout.$field, via_session_expired.$field,
+                    concat!("field `", stringify!($field), "` diverges between logout and session-expired"),
+                );
+            )+
+        };
+    }
+
+    // Core session identity
+    assert!(via_logout.app_service.is_none() && via_session_expired.app_service.is_none());
+    assert_eq_fields!(should_auto_login, screen);
+    assert!(via_logout.stored_session.is_none() && via_session_expired.stored_session.is_none());
+
+    // Server-specific data
+    assert_eq_fields!(
+        similar_songs_generation,
+        server_version,
+        last_queue_current_index,
+        pending_expand_center_only,
+    );
+    assert!(via_logout.library.albums.is_empty() && via_session_expired.library.albums.is_empty());
+    assert!(
+        via_logout.library.artists.is_empty() && via_session_expired.library.artists.is_empty()
+    );
+    assert!(via_logout.similar_songs.is_none() && via_session_expired.similar_songs.is_none());
+    assert!(
+        via_logout.active_playlist_info.is_none()
+            && via_session_expired.active_playlist_info.is_none()
+    );
+    assert!(via_logout.playlist_edit.is_none() && via_session_expired.playlist_edit.is_none());
+    assert!(
+        via_logout.active_progress.is_empty() && via_session_expired.active_progress.is_empty()
+    );
+    assert!(via_logout.pending_expand.is_none() && via_session_expired.pending_expand.is_none());
+    assert!(via_logout.pending_top_pin.is_none() && via_session_expired.pending_top_pin.is_none());
+    assert!(via_logout.roulette.is_none() && via_session_expired.roulette.is_none());
+
+    // Transient UI work
+    assert_eq_fields!(
+        cross_pane_drag_selection_count,
+        start_view_applied,
+        suppress_next_auto_center,
+    );
+    assert!(via_logout.open_menu.is_none() && via_session_expired.open_menu.is_none());
+    assert!(via_logout.browsing_panel.is_none() && via_session_expired.browsing_panel.is_none());
+    assert!(via_logout.cross_pane_drag.is_none() && via_session_expired.cross_pane_drag.is_none());
+    assert!(
+        via_logout.cross_pane_drag_press_origin.is_none()
+            && via_session_expired.cross_pane_drag_press_origin.is_none()
+    );
+    assert!(
+        via_logout.cross_pane_drag_pressed_item.is_none()
+            && via_session_expired.cross_pane_drag_pressed_item.is_none()
+    );
+    assert!(
+        via_logout.pending_queue_insert_position.is_none()
+            && via_session_expired.pending_queue_insert_position.is_none()
+    );
+
+    // Caller-specific difference: session-expired pushes a toast, logout
+    // does not. Both ends behave identically on the reset bucket; the
+    // toast queue diff is intentional (and is the only diff that should
+    // exist between the two handlers post-refactor).
+    assert!(
+        via_logout.toast.toasts.is_empty(),
+        "logout is silent (user took the action)"
+    );
+    assert_eq!(
+        via_session_expired.toast.toasts.len(),
+        1,
+        "session-expired surfaces a user-facing toast"
+    );
+}
+
+// ============================================================================
 // Task Manager Notifications (mod.rs)
 // ============================================================================
 

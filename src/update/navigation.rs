@@ -166,37 +166,12 @@ impl Nokkvi {
 
     pub(crate) fn handle_session_expired(&mut self) -> Task<Message> {
         info!(" [SESSION] Session expired (401 Unauthorized)");
-        let stop_task = if let Some(ref shell) = self.app_service {
-            shell.task_manager().shutdown();
-            if let Err(e) = nokkvi_data::credentials::clear_session(shell.storage()) {
-                warn!(" [SESSION] Failed to clear session: {e}");
-            }
-            self.cached_storage = Some(shell.storage().clone());
-
-            let engine = shell.audio_engine();
-            Task::perform(
-                async move {
-                    let mut guard = engine.lock().await;
-                    guard.stop().await;
-                    debug!(" [SESSION] Audio engine stopped after expiry");
-                },
-                |_| Message::NoOp,
-            )
-        } else {
-            Task::none()
-        };
-
-        self.app_service = None;
-        self.stored_session = None;
-        self.should_auto_login = false;
-        self.screen = crate::Screen::Login;
-        self.open_menu = None;
-
-        // Reset library state to clear any stale data from the previous session
-        self.library = crate::state::LibraryData::default();
-
+        // Shared session teardown — see `Nokkvi::reset_session_state` in
+        // `update/components.rs`. Session-expired surfaces a user-facing
+        // toast (the user didn't take this action, so they need to know
+        // why they're back at the Login screen).
+        let stop_task = self.reset_session_state();
         self.toast_info("Session expired. Please log in again.");
-
         stop_task
     }
 
