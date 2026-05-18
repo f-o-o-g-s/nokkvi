@@ -7,7 +7,7 @@ use tracing::debug;
 use crate::{
     Nokkvi, View,
     app_message::{ArtworkMessage, FindMessage, Message, NavigationMessage},
-    update::{ArtistsTarget, components::PaginatedFetch},
+    update::ArtistsTarget,
     views::{self, ArtistsAction, ArtistsMessage, HasCommonAction},
     widgets,
 };
@@ -25,84 +25,44 @@ impl Nokkvi {
         });
     }
 
-    /// Shared paginated fetch for Artists. Used by both the initial load
-    /// (`handle_load_artists`, offset 0) and follow-up page loads
-    /// (`handle_artists_load_page`, offset N). Preserves the rating-sort
-    /// carve-out: when the user picks "Rating" sort, the API can't sort
-    /// for us, so we sort client-side after each page completes.
+    /// Per-entity fetch body for `Nokkvi::load_paged::<ArtistsTarget>`.
     ///
-    /// `force = true` skips the scroll-edge `needs_fetch` gate. Used by the
-    /// artist-find-and-expand chain, which leaves viewport at 0 while
-    /// paging through the library.
-    fn load_artists_internal<M>(&mut self, offset: usize, force: bool, msg_ctor: M) -> Task<Message>
-    where
-        M: FnOnce((Result<Vec<ArtistUIViewData>, String>, usize)) -> Message + Send + 'static,
-    {
-        let page_size = self.settings.library_page_size.to_usize();
-        // Phase 5A defensive gate — see load_albums_internal for rationale.
-        if !force
-            && offset > 0
-            && self
-                .library
-                .artists
-                .needs_fetch(
-                    self.artists_page.common.slot_list.viewport_offset,
-                    page_size,
-                )
-                .is_none()
+    /// Takes the rating-sort and album-artists-only flags as explicit args (the
+    /// call sites snapshot them before invoking `load_paged` so each dispatch
+    /// sees a consistent value); the shared invariant body (page_size,
+    /// defensive gate, `PaginatedFetch`, debug log, `set_loading(true)`) lives
+    /// in `loader_target.rs`. The `album_artists_only` plumbing stays on this
+    /// fn rather than on `PaginatedFetch` so the Albums/Songs fetch paths keep
+    /// their clean signature — Artists is the only entity with this carve-out.
+    async fn fetch_artists_page(
+        shell: nokkvi_data::backend::app_service::AppService,
+        params: super::components::PaginatedFetch,
+        is_rating_sort: bool,
+        album_artists_only: bool,
+    ) -> (Result<Vec<ArtistUIViewData>, String>, usize) {
+        let artists_vm = shell.artists().clone();
+        match artists_vm
+            .load_raw_artists_page(
+                Some(params.view_str),
+                Some(params.sort_order),
+                params.search_query.as_deref(),
+                params.filter.as_ref(),
+                album_artists_only,
+                params.offset,
+                params.page_size,
+            )
+            .await
         {
-            return Task::none();
-        }
-        let params = PaginatedFetch::from_common(
-            &self.artists_page.common,
-            views::ArtistsPage::sort_mode_to_api_string,
-            offset,
-            page_size,
-        );
-        let is_rating_sort =
-            self.artists_page.common.current_sort_mode == widgets::view_header::SortMode::Rating;
-        let album_artists_only = self.settings.show_album_artists_only;
-
-        debug!(
-            " LoadArtists: offset={}, page_size={}, view={}, sort={}, search={:?}, album_artists_only={}",
-            params.offset,
-            params.page_size,
-            params.view_str,
-            params.sort_order,
-            params.search_query,
-            album_artists_only,
-        );
-
-        self.library.artists.set_loading(true);
-
-        self.shell_task(
-            move |shell| async move {
-                let artists_vm = shell.artists().clone();
-                match artists_vm
-                    .load_raw_artists_page(
-                        Some(params.view_str),
-                        Some(params.sort_order),
-                        params.search_query.as_deref(),
-                        params.filter.as_ref(),
-                        album_artists_only,
-                        params.offset,
-                        params.page_size,
-                    )
-                    .await
-                {
-                    Ok(artists) => {
-                        let mut ui_artists: Vec<ArtistUIViewData> =
-                            artists.into_iter().map(ArtistUIViewData::from).collect();
-                        if is_rating_sort {
-                            Nokkvi::artists_rating_sort(&mut ui_artists);
-                        }
-                        (Ok(ui_artists), artists_vm.get_total_count() as usize)
-                    }
-                    Err(e) => (Err(format!("{e:#}")), 0),
+            Ok(artists) => {
+                let mut ui_artists: Vec<ArtistUIViewData> =
+                    artists.into_iter().map(ArtistUIViewData::from).collect();
+                if is_rating_sort {
+                    Nokkvi::artists_rating_sort(&mut ui_artists);
                 }
-            },
-            msg_ctor,
-        )
+                (Ok(ui_artists), artists_vm.get_total_count() as usize)
+            }
+            Err(e) => (Err(format!("{e:#}")), 0),
+        }
     }
 
     pub(crate) fn handle_load_artists(
@@ -110,35 +70,66 @@ impl Nokkvi {
         background: bool,
         anchor_id: Option<String>,
     ) -> Task<Message> {
-        self.load_artists_internal(0, false, move |(result, total_count)| {
-            Message::ArtistsLoader(crate::app_message::ArtistsLoaderMessage::Loaded {
-                result,
-                total_count,
-                background,
-                anchor_id: anchor_id.clone(),
-            })
-        })
+        let is_rating_sort =
+            self.artists_page.common.current_sort_mode == widgets::view_header::SortMode::Rating;
+        let album_artists_only = self.settings.show_album_artists_only;
+        debug!(album_artists_only, "LoadArtists per-call flags");
+        self.load_paged::<ArtistsTarget, _, _, _>(
+            0,
+            false,
+            move |(result, total_count)| {
+                Message::ArtistsLoader(crate::app_message::ArtistsLoaderMessage::Loaded {
+                    result,
+                    total_count,
+                    background,
+                    anchor_id: anchor_id.clone(),
+                })
+            },
+            move |shell, params| {
+                Self::fetch_artists_page(shell, params, is_rating_sort, album_artists_only)
+            },
+        )
     }
 
     /// Load a subsequent page of artists (triggered by scroll near edge of loaded data)
     pub(crate) fn handle_artists_load_page(&mut self, offset: usize) -> Task<Message> {
-        self.load_artists_internal(offset, false, |(result, total_count)| {
-            Message::ArtistsLoader(crate::app_message::ArtistsLoaderMessage::PageLoaded(
-                result,
-                total_count,
-            ))
-        })
+        let is_rating_sort =
+            self.artists_page.common.current_sort_mode == widgets::view_header::SortMode::Rating;
+        let album_artists_only = self.settings.show_album_artists_only;
+        self.load_paged::<ArtistsTarget, _, _, _>(
+            offset,
+            false,
+            |(result, total_count)| {
+                Message::ArtistsLoader(crate::app_message::ArtistsLoaderMessage::PageLoaded(
+                    result,
+                    total_count,
+                ))
+            },
+            move |shell, params| {
+                Self::fetch_artists_page(shell, params, is_rating_sort, album_artists_only)
+            },
+        )
     }
 
     /// Force-load an artists page regardless of the scroll-edge gate. Used
     /// by `try_resolve_pending_expand_artist` to walk the full library.
     pub(crate) fn force_load_artists_page(&mut self, offset: usize) -> Task<Message> {
-        self.load_artists_internal(offset, true, |(result, total_count)| {
-            Message::ArtistsLoader(crate::app_message::ArtistsLoaderMessage::PageLoaded(
-                result,
-                total_count,
-            ))
-        })
+        let is_rating_sort =
+            self.artists_page.common.current_sort_mode == widgets::view_header::SortMode::Rating;
+        let album_artists_only = self.settings.show_album_artists_only;
+        self.load_paged::<ArtistsTarget, _, _, _>(
+            offset,
+            true,
+            |(result, total_count)| {
+                Message::ArtistsLoader(crate::app_message::ArtistsLoaderMessage::PageLoaded(
+                    result,
+                    total_count,
+                ))
+            },
+            move |shell, params| {
+                Self::fetch_artists_page(shell, params, is_rating_sort, album_artists_only)
+            },
+        )
     }
 
     /// Fetch the 500 px artist artwork plus its dominant color and stash both

@@ -5,22 +5,32 @@
 //! `handle_loaded_with` and `handle_page_loaded_with` are the single bodies;
 //! per-view differences live in the five zero-sized `*Target` marker structs.
 //!
+//! The three paged views (Albums, Artists, Songs) additionally share the
+//! paged-fetch dispatch wrapper — `Nokkvi::load_paged<T>` owns the
+//! page-size, defensive-gate, `PaginatedFetch` build, and `set_loading(true)`
+//! sequence so the "always call `set_loading(true)` before dispatching"
+//! invariant (CLAUDE.md gotcha — "rapid scroll triggers duplicate fetches"
+//! otherwise) lives in one place. Per-view fetch closures supply only the
+//! per-entity backend call and the UI-projection mapping.
+//!
 //! `dead_code` is suppressed at module level because no callers exist until
 //! Lanes B and C migrate the existing handler bodies to delegate here.
 #![allow(dead_code)]
 
-use std::collections::HashSet;
+use std::{collections::HashSet, future::Future};
 
 use iced::Task;
-use nokkvi_data::types::paged_buffer::PagedBuffer;
+use nokkvi_data::{backend::app_service::AppService, types::paged_buffer::PagedBuffer};
 use tracing::{debug, error};
 
-use super::components::{prefetch_album_artwork_tasks, prefetch_song_artwork_tasks};
+use super::components::{
+    PaginatedFetch, prefetch_album_artwork_tasks, prefetch_song_artwork_tasks,
+};
 use crate::{
     Nokkvi,
     app_message::{ArtworkMessage, CollageTarget, Message},
     views,
-    widgets::SlotListView,
+    widgets::{SlotListPageState, SlotListView, view_header::SortMode},
 };
 
 /// Per-view hooks driving `handle_loaded_with` and `handle_page_loaded_with`.
@@ -102,6 +112,19 @@ pub(crate) trait LoaderTarget {
     /// Called after `set_first_page` and viewport reset, before artwork dispatch.
     /// Default: no-op. `PlaylistsTarget` overrides to refresh the default-playlist picker.
     fn post_load_ok_hook(_app: &mut Nokkvi) {}
+
+    // ── Required: page common state ───────────────────────────────────────
+    /// Borrow the page's `SlotListPageState` (search / sort / scroll). Used by
+    /// `Nokkvi::load_paged` to build `PaginatedFetch` params and read
+    /// `viewport_offset` for the defensive `needs_fetch` gate. All five
+    /// `*Target`s implement this even though only the three paged ones
+    /// (Albums / Artists / Songs) call `load_paged`; keeping it on the parent
+    /// trait avoids a sub-trait whose only members would be the same three.
+    fn page_common(app: &Nokkvi) -> &SlotListPageState;
+
+    /// Map a `SortMode` to the Subsonic API `type=` string for this entity.
+    /// Used by `Nokkvi::load_paged` to build `PaginatedFetch::view_str`.
+    fn sort_mode_to_api(mode: SortMode) -> &'static str;
 }
 
 // ── AlbumsTarget ─────────────────────────────────────────────────────────────
@@ -170,6 +193,14 @@ impl LoaderTarget for AlbumsTarget {
     fn try_resolve_pending_expand(app: &mut Nokkvi) -> Option<Task<Message>> {
         app.try_resolve_pending_expand_album()
     }
+
+    fn page_common(app: &Nokkvi) -> &SlotListPageState {
+        &app.albums_page.common
+    }
+
+    fn sort_mode_to_api(mode: SortMode) -> &'static str {
+        views::AlbumsPage::sort_mode_to_api_string(mode)
+    }
 }
 
 // ── ArtistsTarget ────────────────────────────────────────────────────────────
@@ -226,6 +257,14 @@ impl LoaderTarget for ArtistsTarget {
 
     fn try_resolve_pending_expand(app: &mut Nokkvi) -> Option<Task<Message>> {
         app.try_resolve_pending_expand_artist()
+    }
+
+    fn page_common(app: &Nokkvi) -> &SlotListPageState {
+        &app.artists_page.common
+    }
+
+    fn sort_mode_to_api(mode: SortMode) -> &'static str {
+        views::ArtistsPage::sort_mode_to_api_string(mode)
     }
 }
 
@@ -296,6 +335,14 @@ impl LoaderTarget for SongsTarget {
     fn try_resolve_pending_expand(app: &mut Nokkvi) -> Option<Task<Message>> {
         app.try_resolve_pending_expand_song()
     }
+
+    fn page_common(app: &Nokkvi) -> &SlotListPageState {
+        &app.songs_page.common
+    }
+
+    fn sort_mode_to_api(mode: SortMode) -> &'static str {
+        views::SongsPage::sort_mode_to_api_string(mode)
+    }
 }
 
 // ── GenresTarget ─────────────────────────────────────────────────────────────
@@ -356,6 +403,14 @@ impl LoaderTarget for GenresTarget {
 
     fn try_resolve_pending_expand(app: &mut Nokkvi) -> Option<Task<Message>> {
         app.try_resolve_pending_expand_genre()
+    }
+
+    fn page_common(app: &Nokkvi) -> &SlotListPageState {
+        &app.genres_page.common
+    }
+
+    fn sort_mode_to_api(mode: SortMode) -> &'static str {
+        views::GenresPage::sort_mode_to_api_string(mode)
     }
 }
 
@@ -424,9 +479,93 @@ impl LoaderTarget for PlaylistsTarget {
     fn try_resolve_pending_expand(_app: &mut Nokkvi) -> Option<Task<Message>> {
         None
     }
+
+    fn page_common(app: &Nokkvi) -> &SlotListPageState {
+        &app.playlists_page.common
+    }
+
+    fn sort_mode_to_api(mode: SortMode) -> &'static str {
+        views::PlaylistsPage::sort_mode_to_api_string(mode)
+    }
 }
 
 impl Nokkvi {
+    /// Shared paginated-fetch dispatch for the three paged library views
+    /// (Albums, Artists, Songs). Owns the pre-fetch invariant body so each
+    /// per-view `handle_load_*` / `handle_*_load_page` / `force_load_*_page`
+    /// can collapse to a one-line delegation.
+    ///
+    /// The body, in order:
+    /// 1. Read `library_page_size` from settings.
+    /// 2. **Phase 5A defensive gate** — when `force == false` and `offset > 0`,
+    ///    skip the dispatch if `PagedBuffer::needs_fetch` returns `None`.
+    ///    This catches duplicate dispatches that race past the upstream
+    ///    `needs_fetch` check at the action site. Initial loads (`offset == 0`)
+    ///    always proceed — sort/search changes need a fresh page even if the
+    ///    old one is still in flight.
+    /// 3. Build `PaginatedFetch` from the page's common state and the per-
+    ///    entity sort mapper (`T::sort_mode_to_api`).
+    /// 4. Emit a `LoadXxx` debug log keyed by `T::entity_label()`.
+    /// 5. **`set_loading(true)`** on the entity's `PagedBuffer` BEFORE
+    ///    dispatching — codifies the CLAUDE.md "always call `set_loading(true)`
+    ///    before dispatching a page fetch" invariant so rapid scroll cannot
+    ///    trigger duplicate fetches.
+    /// 6. `shell_task` with the caller-supplied `fetch` closure. The closure
+    ///    receives the prepared `PaginatedFetch` and the `AppService` shell,
+    ///    and is responsible for the per-entity backend call + UI-projection
+    ///    mapping. Per-call state that varies between calls of the same entity
+    ///    (e.g. Artists' `album_artists_only`, the rating-sort flag) is
+    ///    captured by the closure at the call site, not threaded through the
+    ///    trait — keeps Albums/Songs fetch signatures clean.
+    pub(crate) fn load_paged<T, F, Fut, M>(
+        &mut self,
+        offset: usize,
+        force: bool,
+        msg_ctor: M,
+        fetch: F,
+    ) -> Task<Message>
+    where
+        T: LoaderTarget,
+        F: FnOnce(AppService, PaginatedFetch) -> Fut + Send + 'static,
+        Fut: Future<Output = (Result<Vec<T::Item>, String>, usize)> + Send + 'static,
+        M: FnOnce((Result<Vec<T::Item>, String>, usize)) -> Message + Send + 'static,
+    {
+        let page_size = self.settings.library_page_size.to_usize();
+        let viewport_offset = T::page_common(self).slot_list.viewport_offset;
+        // Phase 5A defensive gate: page-load follow-ups (offset > 0) must
+        // pass needs_fetch. Catches duplicate dispatches that race past
+        // the upstream needs_fetch check at the action site. Initial
+        // loads (offset 0) always proceed — sort/search changes need a
+        // fresh page even if the old one is still in flight.
+        if !force
+            && offset > 0
+            && T::library(self)
+                .needs_fetch(viewport_offset, page_size)
+                .is_none()
+        {
+            return Task::none();
+        }
+        let params = PaginatedFetch::from_common(
+            T::page_common(self),
+            T::sort_mode_to_api,
+            offset,
+            page_size,
+        );
+        debug!(
+            " Load{}: offset={}, page_size={}, view={}, sort={}, search={:?}",
+            T::entity_label(),
+            params.offset,
+            params.page_size,
+            params.view_str,
+            params.sort_order,
+            params.search_query,
+        );
+
+        T::library_mut(self).set_loading(true);
+
+        self.shell_task(move |shell| fetch(shell, params), msg_ctor)
+    }
+
     pub(crate) fn handle_loaded_with<T: LoaderTarget>(
         &mut self,
         result: Result<Vec<T::Item>, String>,

@@ -6,7 +6,7 @@ use iced::{Task, widget::image};
 use nokkvi_data::{backend::albums::AlbumUIViewData, types::ItemKind};
 use tracing::{debug, error, warn};
 
-use super::components::{PaginatedFetch, prefetch_album_artwork_tasks};
+use super::components::prefetch_album_artwork_tasks;
 use crate::{
     Nokkvi, View,
     app_message::{ArtworkMessage, FindMessage, Message, NavigationMessage},
@@ -15,79 +15,37 @@ use crate::{
 };
 
 impl Nokkvi {
-    /// Shared paginated fetch for Albums. Used by both the initial load
-    /// (`handle_load_albums`, offset 0) and follow-up page loads
-    /// (`handle_albums_load_page`, offset N). The caller supplies a
-    /// message constructor so the result lands on the right
-    /// `AlbumsMessage` variant.
+    /// Per-entity fetch closure for `Nokkvi::load_paged::<AlbumsTarget>`.
     ///
-    /// `force = true` skips the scroll-edge `needs_fetch` gate. The
-    /// find-and-expand chain uses this so it can page through the entire
-    /// library without first scrolling the viewport to the edge.
-    fn load_albums_internal<M>(&mut self, offset: usize, force: bool, msg_ctor: M) -> Task<Message>
-    where
-        M: FnOnce((Result<Vec<AlbumUIViewData>, String>, usize)) -> Message + Send + 'static,
-    {
-        let page_size = self.settings.library_page_size.to_usize();
-        // Phase 5A defensive gate: page-load follow-ups (offset > 0) must
-        // pass needs_fetch. Catches duplicate dispatches that race past
-        // the upstream needs_fetch check at the action site. Initial
-        // loads (offset 0) always proceed — sort/search changes need a
-        // fresh page even if the old one is still in flight.
-        if !force
-            && offset > 0
-            && self
-                .library
-                .albums
-                .needs_fetch(self.albums_page.common.slot_list.viewport_offset, page_size)
-                .is_none()
+    /// The shared invariant body (page_size, defensive gate, `PaginatedFetch`,
+    /// debug log, `set_loading(true)`) lives in `loader_target.rs`; this
+    /// closure owns only the per-entity backend call and the UI projection.
+    async fn fetch_albums_page(
+        shell: nokkvi_data::backend::app_service::AppService,
+        params: super::components::PaginatedFetch,
+    ) -> (Result<Vec<AlbumUIViewData>, String>, usize) {
+        let albums_vm = shell.albums().clone();
+        match albums_vm
+            .load_raw_albums_page(
+                Some(params.view_str),
+                Some(params.sort_order),
+                params.search_query.as_deref(),
+                params.filter.as_ref(),
+                params.offset,
+                params.page_size,
+            )
+            .await
         {
-            return Task::none();
+            Ok(albums) => {
+                let (url, cred) = albums_vm.get_server_config().await;
+                let ui_albums: Vec<AlbumUIViewData> = albums
+                    .iter()
+                    .map(|album| AlbumUIViewData::from_album(album, &url, &cred))
+                    .collect();
+                (Ok(ui_albums), albums_vm.get_total_count() as usize)
+            }
+            Err(e) => (Err(format!("{e:#}")), 0),
         }
-        let params = PaginatedFetch::from_common(
-            &self.albums_page.common,
-            views::AlbumsPage::sort_mode_to_api_string,
-            offset,
-            page_size,
-        );
-        debug!(
-            " LoadAlbums: offset={}, page_size={}, view={}, sort={}, search={:?}",
-            params.offset,
-            params.page_size,
-            params.view_str,
-            params.sort_order,
-            params.search_query,
-        );
-
-        self.library.albums.set_loading(true);
-
-        self.shell_task(
-            move |shell| async move {
-                let albums_vm = shell.albums().clone();
-                match albums_vm
-                    .load_raw_albums_page(
-                        Some(params.view_str),
-                        Some(params.sort_order),
-                        params.search_query.as_deref(),
-                        params.filter.as_ref(),
-                        params.offset,
-                        params.page_size,
-                    )
-                    .await
-                {
-                    Ok(albums) => {
-                        let (url, cred) = albums_vm.get_server_config().await;
-                        let ui_albums: Vec<AlbumUIViewData> = albums
-                            .iter()
-                            .map(|album| AlbumUIViewData::from_album(album, &url, &cred))
-                            .collect();
-                        (Ok(ui_albums), albums_vm.get_total_count() as usize)
-                    }
-                    Err(e) => (Err(format!("{e:#}")), 0),
-                }
-            },
-            msg_ctor,
-        )
     }
 
     pub(crate) fn handle_load_albums(
@@ -95,24 +53,34 @@ impl Nokkvi {
         background: bool,
         anchor_id: Option<String>,
     ) -> Task<Message> {
-        self.load_albums_internal(0, false, move |(result, total_count)| {
-            Message::AlbumsLoader(crate::app_message::AlbumsLoaderMessage::Loaded {
-                result,
-                total_count,
-                background,
-                anchor_id: anchor_id.clone(),
-            })
-        })
+        self.load_paged::<AlbumsTarget, _, _, _>(
+            0,
+            false,
+            move |(result, total_count)| {
+                Message::AlbumsLoader(crate::app_message::AlbumsLoaderMessage::Loaded {
+                    result,
+                    total_count,
+                    background,
+                    anchor_id: anchor_id.clone(),
+                })
+            },
+            Self::fetch_albums_page,
+        )
     }
 
     /// Load a subsequent page of albums (triggered by scroll near edge of loaded data)
     pub(crate) fn handle_albums_load_page(&mut self, offset: usize) -> Task<Message> {
-        self.load_albums_internal(offset, false, |(result, total_count)| {
-            Message::AlbumsLoader(crate::app_message::AlbumsLoaderMessage::PageLoaded(
-                result,
-                total_count,
-            ))
-        })
+        self.load_paged::<AlbumsTarget, _, _, _>(
+            offset,
+            false,
+            |(result, total_count)| {
+                Message::AlbumsLoader(crate::app_message::AlbumsLoaderMessage::PageLoaded(
+                    result,
+                    total_count,
+                ))
+            },
+            Self::fetch_albums_page,
+        )
     }
 
     /// Force-load an albums page regardless of the scroll-edge `needs_fetch`
@@ -120,12 +88,17 @@ impl Nokkvi {
     /// library while the viewport stays at 0 (the user hasn't scrolled
     /// because they're waiting for the target to appear).
     pub(crate) fn force_load_albums_page(&mut self, offset: usize) -> Task<Message> {
-        self.load_albums_internal(offset, true, |(result, total_count)| {
-            Message::AlbumsLoader(crate::app_message::AlbumsLoaderMessage::PageLoaded(
-                result,
-                total_count,
-            ))
-        })
+        self.load_paged::<AlbumsTarget, _, _, _>(
+            offset,
+            true,
+            |(result, total_count)| {
+                Message::AlbumsLoader(crate::app_message::AlbumsLoaderMessage::PageLoaded(
+                    result,
+                    total_count,
+                ))
+            },
+            Self::fetch_albums_page,
+        )
     }
 
     pub(crate) fn handle_albums_page_loaded(

@@ -18,6 +18,7 @@ mod menus;
 #[macro_use]
 mod navigation_macros;
 mod navigation;
+mod page_loader;
 mod playback;
 mod queue;
 mod roulette;
