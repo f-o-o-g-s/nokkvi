@@ -31,7 +31,7 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 - **Source generation counter**: typed `SourceGeneration` wrapper (over `AtomicU64`) — every user-driven source change goes through `bump_for_user_action()`; renderer snapshots `current()` before releasing the engine lock and discards the callback if it changed. Prevents consume+shuffle replaying the just-consumed track.
 - **PagedBuffer pagination guard**: call `set_loading(true)` before dispatching a page fetch — prevents duplicate fetches on rapid scroll. `PaginatedFetch::from_common()` handles this in update handlers.
 - **PagedBuffer generation**: `generation()` bumps on every mutation. Use `(query, generation)` keys when memoizing filtered results.
-- **LRU artwork snapshot staleness**: call `refresh_album_art_snapshot()` after every `put()` / `get()` on `album_art`, and `refresh_large_artwork_snapshot()` for `large_artwork`. Forget either and the next render shows stale thumbnails.
+- **Artwork LRU caches go through `SnapshottedLru<K, V>`**: `album_art`, `large_artwork`, `album_dominant_colors`, and both `CollageArtworkCache.{mini,collage}` are `SnapshottedLru` newtypes that maintain the view-borrowable `HashMap` snapshot automatically. Never pair a bare `lru::LruCache` with a manual `HashMap` snapshot — the manual `refresh_*_snapshot()` discipline was deleted (Group U Lane A); a fresh cache must use `SnapshottedLru`.
 
 ## Widget Tree & Focus
 
@@ -67,7 +67,7 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 
 - **No client-side persistent cache**: every artwork fetch goes straight to Navidrome via `AlbumsService::fetch_album_artwork(...)`. Session-scoped Handle reuse comes from the UI's `album_art` (LRU 512) and `large_artwork` (LRU 200) maps in `ArtworkState`.
 - **Always `Handle::from_bytes`**: `from_bytes` allocates a fresh `Id::Unique` per call — safe **only** because Handles are stored in the LRUs and reused across renders. Never re-create from bytes per frame; that bypasses Iced's GPU texture cache (`reference-iced/wgpu/src/image/raster.rs:55`).
-- **Snapshot mirrors**: `view()` borrows `album_art_snapshot` and `large_artwork_snapshot` (HashMap mirrors), not the LRUs directly, because LRU `get` is `&mut`. Every `put` MUST be followed by the matching `refresh_*_snapshot()`.
+- **Snapshot mirrors**: `view()` borrows the `HashMap` snapshot inside each `SnapshottedLru`, not the LRU directly, because LRU `get` is `&mut`. The newtype keeps both in sync on every `put` / `promote`; no caller-side discipline needed.
 - **Queue mini vs large artwork**: queue songs request 80 px thumbs using `album_id` so `fetch_album_artwork` builds a consistent URL across consumers. Large artwork constructs the full-size URL (`size=artwork_resolution`) — never reuse the 80 px URL.
 - **Wildcard SSE skips artwork**: `LibraryChanged { is_wildcard: true }` (full-library scan) MUST NOT trigger silent re-fetch — it would re-download every cached cover. Slot-list reloads still run.
 - **Random-sort SSE protection**: background SSE reload mustn't corrupt the artwork ref when the active sort is Random — guarded in `library_refresh.rs`.

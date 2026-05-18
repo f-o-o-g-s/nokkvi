@@ -32,6 +32,7 @@ Steps to add a new slot-list-based view, in order.
    - Add `Message::{Name}Loader({Name}LoaderMessage)` to the root `Message`
    - Route in `src/update/mod.rs`: `Message::{Name}Loader(msg) => self.dispatch_{name}_loader(msg)`
    - Implement `dispatch_{name}_loader(msg)` in `src/update/{name}.rs`. Loader closures inside `shell_task(...)` construct `Message::{Name}Loader({Name}LoaderMessage::Loaded { ... })` instead of view-side variants, keeping the page's `{Name}Message` enum focused on user-driven UI events.
+   - For the actual paged-fetch dispatch, implement `LoaderTarget` for a `{Name}Target` in `src/update/loader_target.rs` (`page_common`, `sort_mode_to_api`, page-fetch closure) and call `self.load_paged::<{Name}Target>(...)` from your page handler. Avoid hand-writing a `set_loading(true)` + defensive-gate + `shell_task` body — the shared `load_paged` body owns that invariant.
 
 7. Render the page in `src/app_view.rs`.
 

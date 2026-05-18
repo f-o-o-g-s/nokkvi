@@ -13,6 +13,8 @@ All slot-list-based views implement `ViewPage` (in `views/mod.rs`) — explicit 
 - `CommonViewAction` + `HasCommonAction` — generic SearchChanged / SortModeChanged / SortOrderChanged dispatch (handled centrally in `handle_common_view_action()`)
 - `impl_expansion_update!` macro — deduplicates expansion handling (7 common arms for expansion views)
 - `synth_set_offset_message(&self, offset: usize) -> Option<Message>` — builds a per-view `SlotList(SlotListPageMessage::SetOffset(offset, default_modifiers))` message; used by `handle_seek_settled` to trigger artwork prefetch after scrollbar seek. Expansion views implement this; Queue and Settings return `None`.
+- `reload_message(&self) -> Option<Message>` — emits the view's "reload from server" message (the `R` hotkey + manual refresh button bind through this). Reloadable views return `Some(...)`; views without server backing return `None`. Replaces the prior `RefreshView` 7-arm match in update routing.
+- `slot_list_message(&self, msg: SlotListPageMessage) -> Message` — wraps a `SlotListPageMessage` in the view's per-view `*Message::SlotList(...)` variant. Lets cross-view dispatch (slot_list.rs, roulette.rs, center-on-playing) fan out without a manual match on `View`.
 
 Every per-view `*Message` enum carries a `SlotList(SlotListPageMessage)` variant as the unified slot-list carrier. This replaced the old per-view flat variants (`SetSearch`, `SetScrollOffset`, `NavigateUp`, `NavigateDown`, etc.). All slot-list state mutations route through `SlotListPageMessage`.
 
@@ -52,7 +54,7 @@ Every per-view message enum carries a unified `SlotList(SlotListPageMessage)` va
 
 Generic `ExpansionState<C>` + `SlotListEntry<P, C>`. When active, sort/search may target the expansion — check `expansion.is_expanded()`. Center-entry resolution is centralized in `views/expansion.rs`. Shift+Enter on Artists/Genres collapses the outer expansion.
 
-**Find-and-expand** (clicking an inline album/artist/genre link): the chain runs through a single `Nokkvi.pending_expand: Option<state::PendingExpand>` (variants `Album { album_id, for_browsing_pane }`, `Artist { ... }`, `Genre { ... }`). Per-view `try_resolve_pending_expand_*` consume it once the target appears in its library buffer; `PendingTopPin` re-pins the highlight after the matching `set_children` lands. `for_browsing_pane = true` routes the final `FocusAndExpand` into the browsing-panel tab instead of the top pane. `PendingExpand::host_view()` drives the cancel-on-navigation check in `handle_switch_view`.
+**Find-and-expand** (clicking an inline album/artist/genre link or Shift+C from Songs): the chain runs through a single `Nokkvi.pending_expand: Option<state::PendingExpand>` (variants `Album { album_id, for_browsing_pane }`, `Artist { ... }`, `Genre { ... }`, `Song { song_id, for_browsing_pane }`). The `Song` variant exists only for the CenterOnPlaying fallback in the Songs view — clear search, paginate until the playing track appears, center on it without dispatching `FocusAndExpand`. Per-view `try_resolve_pending_expand_*` consume it once the target appears in its library buffer; `PendingTopPin` re-pins the highlight after the matching `set_children` lands. `for_browsing_pane = true` routes the final `FocusAndExpand` into the browsing-panel tab instead of the top pane. `PendingExpand::host_view()` drives the cancel-on-navigation check in `handle_switch_view`. The carrier message is `Message::PendingExpandTimeout(PendingExpand)` (replaces the previous 12 per-entity timeout thunks).
 
 ## Column Visibility (Albums / Artists / Genres / Playlists / Queue / Songs / Similar)
 
@@ -105,7 +107,12 @@ Root dispatch in `update/mod.rs`. `ls src/update/` for handler files. The async-
 - `PaginatedFetch::from_common()` — needs_fetch-gated paginated load (Albums / Artists / Songs)
 - `prefetch_album_artwork_tasks` / `prefetch_song_artwork_tasks` — viewport-window artwork prefetch
 - `play_entity_task` / `add_entity_to_queue_task` / `insert_entity_to_queue_at_position_task` — generic entity-action builders
+- `reset_session_state(&mut self) -> Task<Message>` — full session-teardown reset (audio engine, task manager, queue/library/state/scrobble caches, focus, modals). Single source for logout + session-expired auth flows; callers add only their tail-specific work (toast, dialog) afterward.
 - Boilerplate extraction helpers in `widgets/slot_list_page.rs` (`get_queue_target_indices`, `get_batch_target_indices`) and `views/expansion.rs` (`build_batch_payload`)
+
+**`update/loader_target.rs`** — paged-loader unification (Group U Lane C):
+- `LoaderTarget` trait per entity: `AlbumsTarget`, `ArtistsTarget`, `SongsTarget`, `GenresTarget`, `PlaylistsTarget`. Encapsulates `page_size`, `page_common()` accessor, `sort_mode_to_api()`, and the entity-specific paged-fetch closure.
+- `Nokkvi::load_paged<T: LoaderTarget>(...)` owns the shared body (defensive `offset > 0 && needs_fetch().is_none()` gate, `set_loading(true)`, `shell_task` build). Per-entity `load_<entity>_internal` callers shrink to a single `self.load_paged::<TargetType>(...)` line. New paged views implement `LoaderTarget` rather than copying the body.
 
 ## View Data Refresh
 

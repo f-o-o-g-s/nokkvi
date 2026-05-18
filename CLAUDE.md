@@ -37,7 +37,7 @@ Two crates:
 
 Entry points: `src/main.rs` (Iced app + `Nokkvi` root state), `src/app_message.rs` (root `Message` enum), `src/update/mod.rs` (central dispatcher), `data/src/backend/app_service.rs` (`AppService` backend orchestrator).
 
-`reference-*/` directories are external repos cloned for reference (iced, symphonia, feishin, rmpc, navidrome, lucide icons, pipewire, rodio, etc.). They are **not** project code — do not edit them, but read freely. `target/`, `dist/`, `docs/`, `.venv/`, `tmp/` are also non-project.
+`reference-*/` directories are external repos cloned for reference (iced, symphonia, feishin, rmpc, navidrome, lucide icons, pipewire, rodio, etc.). They are **not** project code — do not edit them, but read freely. `target/`, `.venv/`, `tmp/`, `local/` are also non-project.
 
 ## Architecture: The Elm Architecture (TEA)
 
@@ -60,7 +60,7 @@ Key shared infrastructure:
 - `SlotListPageState` — shared state for every slot-list view (search, scroll, focus, multi-selection set).
 - Helpers: `shell_task` / `shell_spawn` are defined on `Nokkvi` in `src/main.rs` (run async work against `AppService`); `guard_play_action` (block plays during playlist edit / split-view conflicts), `set_item_rating_task`, `radio_mutation_task`, and `handle_common_view_action` live in `update/components.rs`.
 
-Root `Message` is namespaced via sub-enums (`PlaybackMessage`, `ScrobbleMessage`, `HotkeyMessage`, `ArtworkMessage`, `SlotListMessage` (carries `View`), `ToastMessage`). Flat variants remain only for cross-cutting concerns. See `src/app_message.rs`.
+Root `Message` is namespaced via sub-enums (`PlaybackMessage`, `ScrobbleMessage`, `HotkeyMessage`, `ArtworkMessage`, `SlotListMessage` (carries `View`), `NavigationMessage`, `FindMessage`, `SplitViewMessage`, `CrossPaneDragMessage`, `ToastMessage`). Flat variants remain only for cross-cutting concerns. See `src/app_message.rs`.
 
 ## Backend (`data/`) architecture
 
@@ -70,7 +70,7 @@ AppService (orchestrator)
 │                              (random/repeat/consume) + reset_next_track()
 ├── Domain Services          — Albums, Artists, Songs, Queue, Settings, Auth
 │                              (each lazy-inits its API client via tokio OnceCell)
-├── API factory methods      — genres_api(), playlists_api(), radios_api(), similar_api()
+├── API factory methods      — songs_api(), genres_api(), playlists_api(), radios_api(), similar_api()
 │                              (construct *ApiService instances on demand; not stored on AppService)
 └── TaskManager              — centralized spawn tracking + status channel for UI notifications
 ```
@@ -121,18 +121,18 @@ Critical invariants:
 
 When fixing a bug or adding a new update handler:
 
-1. **Red** — write tests in `src/update/tests.rs` using the `test_app()` helper. Assert against **observable state mutations** (e.g., `modes.random`, `modes.consume`, `search_query`) — never side effects requiring `app_service`. Run, confirm fail.
+1. **Red** — write tests in `src/update/tests/` (per-area files: `queue.rs`, `playback.rs`, `navigation.rs`, etc.) using the `test_app()` helper from `src/test_helpers.rs`. Assert against **observable state mutations** (e.g., `modes.random`, `modes.consume`, `search_query`) — never side effects requiring `app_service`. Run, confirm fail.
 2. **Green** — minimal implementation to pass.
 3. **Verify** — `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo +nightly fmt --all`.
 
 If structural plumbing (new fields, message variants) is needed, complete it first so the tests compile, but make no behavioral changes until the tests are red.
 
-Test placement: `update/tests.rs` for handler tests; inline `#[cfg(test)] mod tests` for self-contained logic (data types, widgets, pure functions).
+Test placement: `update/tests/` for handler tests; inline `#[cfg(test)] mod tests` for self-contained logic (data types, widgets, pure functions).
 
 ## Gotchas (the silent ones)
 
 - **Embedded SVG icons fall back silently to play.svg.** `build.rs` walks `assets/icons/` at compile time and emits the `get_svg()` lookup table + `KNOWN_PATHS` array, so adding an icon is a one-step drop into `assets/icons/` followed by a rebuild — no manual `const` / match arm / KNOWN-list edits. The silent fallback still bites when code references a path that doesn't exist on disk; `cargo test --bin nokkvi -- embedded_svg` runs `all_svg_paths_in_source_are_registered`, which scans every `.rs` file for `assets/icons/*.svg` string literals and asserts each one ships.
-- **Artwork**: use `iced::widget::image::Handle::from_bytes(data)` for refreshable artwork — `Handle::from_path` keys on path and produces stale GPU textures when the file is overwritten. After every `put()` / `get()` on the artwork LRU, call `refresh_large_artwork_snapshot()` so `ViewData.large_artwork` borrows the new map.
+- **Artwork**: use `iced::widget::image::Handle::from_bytes(data)` for refreshable artwork — `Handle::from_path` keys on path and produces stale GPU textures when the file is overwritten. All artwork LRUs are `SnapshottedLru<K, V>` newtypes (`src/state/snapshotted_lru.rs`); never pair a bare `lru::LruCache` with a manual `HashMap` snapshot.
 - **Queue artwork URLs**: queue song mini thumbnails MUST request 80px using `album_id` to hit the prefetch cache; large artwork fallback MUST construct the full-size URL (`size=1000`) — never reuse the 80px URL.
 - **Filtered queue indices**: when a search is active, slot-list indices are relative to `filtered_songs`. Always map through the filtered view before doing queue mutations.
 - **Queue navigation**: use `peek_next_song()` → `transition_to_queued()` for transitions. Use `reposition_to_index()` ONLY for non-transition updates like play-from-here.

@@ -17,7 +17,7 @@ A Rust/Iced desktop client for [Navidrome](https://www.navidrome.org/) music ser
 
 **Key data structure:** `PagedBuffer<T>` (`data/src/types/paged_buffer.rs`) replaces `Vec<T>` for library data. `Deref<Target=[T]>` makes it a drop-in. Tracks load state via `set_loading()` / `needs_fetch()`. Exposes a monotonic `generation()` counter that bumps on every mutation — pair with `(query, generation)` keys when memoizing.
 
-**Consolidated state** in `src/state/`: per-domain submodules (`panes`, `roulette`, `pending`, `session`, `playback`, `scrobble`, `audio`, `artwork`, `window`, `library`, `toast`, `similar`) re-exported via `state/mod.rs` so call sites use `crate::state::Foo`. Plus `Nokkvi.open_menu: Option<OpenMenu>` as the single-active overlay-menu coordinator (Hamburger / PlayerModes / CheckboxDropdown { view, trigger_bounds } / CheckboxDropdownSimilar { trigger_bounds } / Context { id: ContextMenuId, position }) and `Nokkvi.default_playlist_picker` for the modal picker overlay shared between Playlists and Queue views.
+**Consolidated state** in `src/state/`: per-domain submodules (`panes`, `roulette`, `pending`, `session`, `playback`, `scrobble`, `audio`, `artwork`, `window`, `library`, `toast`, `similar`, `snapshotted_lru`) re-exported via `state/mod.rs` so call sites use `crate::state::Foo`. `SnapshottedLru<K, V>` (`state/snapshotted_lru.rs`) bundles a `lru::LruCache` with its parallel `HashMap` snapshot so the borrow-friendly view-data slice always reflects the latest `put`/`promote` — never pair a bare `LruCache` with a manual snapshot, the newtype is the only legal shape. Plus `Nokkvi.open_menu: Option<OpenMenu>` as the single-active overlay-menu coordinator (Hamburger / PlayerModes / CheckboxDropdown { view, trigger_bounds } / CheckboxDropdownSimilar { trigger_bounds } / Context { id: ContextMenuId, position }) and `Nokkvi.default_playlist_picker` for the modal picker overlay shared between Playlists and Queue views.
 
 ## Core Pattern: TEA (The Elm Architecture)
 
@@ -44,7 +44,7 @@ Root routing in `update/mod.rs` dispatches `Message::Albums(msg)` → `albums_pa
 
 ## Message Architecture
 
-Root `Message` is namespaced: `PlaybackMessage`, `ScrobbleMessage`, `HotkeyMessage`, `ArtworkMessage`, `SlotListMessage` (carries `View`), `ToastMessage`. Cross-cutting variants stay flat. See `src/app_message.rs`.
+Root `Message` is namespaced: `PlaybackMessage`, `ScrobbleMessage`, `HotkeyMessage`, `ArtworkMessage`, `SlotListMessage` (carries `View`), `NavigationMessage`, `FindMessage`, `SplitViewMessage`, `CrossPaneDragMessage`, `ToastMessage`. Cross-cutting variants stay flat. See `src/app_message.rs`.
 
 ## Pages on `Nokkvi`
 
@@ -63,8 +63,8 @@ Root `Message` is namespaced: `PlaybackMessage`, `ScrobbleMessage`, `HotkeyMessa
 
 ## Directories to Skip
 
-`target/`, `dist/`, `tmp/`, `local/`, `.venv/` — not project code.
+`target/`, `tmp/`, `local/`, `.venv/` — not project code.
 
 ## Reference Codebases
 
-External repos cloned locally for read-only reference (not part of this project). `reference-{name}/`: `iced`, `iced-apps`, `iced-book`, `iced-docs`, `symphonia`, `feishin`, `lookas`, `lucide` (icons), `mpris`, `navidrome`, `rmpc`, `rmpc-docs`, `rodio`.
+External repos cloned locally for read-only reference (not part of this project). `reference-{name}/`: `iced`, `iced-apps`, `iced-book`, `iced-docs`, `symphonia`, `feishin`, `lookas`, `lucide` (icons), `mimalloc`, `mimalloc-rust`, `mpris`, `navidrome`, `rmpc`, `rmpc-docs`, `rodio`.

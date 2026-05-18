@@ -45,7 +45,7 @@ Custom `iced::advanced` seekable widget. `Vec<OverlaySegment>` for scrolling col
 | About Modal | `about_modal.rs` | Metadata + diagnostics, theme-adaptive logo, Ko-fi tip link |
 | Text Input Dialog | `text_input_dialog.rs` | Modal text input or confirmation. Save Queue uses `combo_box` |
 | EQ Slider | `eq_slider.rs` | Vertical ±15 dB slider for 10-band EQ |
-| EQ Modal | `eq_modal.rs` | 10-band EQ overlay with preset picker (`update/eq_modal.rs`) |
+| EQ Modal | `eq_modal.rs` | 10-band EQ overlay with preset picker (`update/eq_modal.rs`). State lives on `Nokkvi.eq_modal: EqModalState` (extracted as a sibling struct so the EQ overlay doesn't drift WindowState fields) |
 | Slot List Page | `slot_list_page.rs` | `SlotListPageState` + unified `SlotListPageMessage` dispatcher |
 | Slot List View | `slot_list_view.rs` | Scroll-position state owned by the view (decoupled from `SlotListPageState`) |
 | Visualizer | `visualizer/` | Pipeline + shader + wgsl modules (see `.agent/rules/visualizer.md`) |
