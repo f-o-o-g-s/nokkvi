@@ -564,13 +564,7 @@ impl Nokkvi {
             // Similar Songs
             // -----------------------------------------------------------------
             Message::Similar(msg) => self.handle_similar_message(msg),
-            Message::FindSimilar { id, label } => self.handle_find_similar(id, label),
-            Message::FindTopSongs { artist_name, label } => {
-                self.handle_find_top_songs(artist_name, label)
-            }
-            Message::SimilarSongsLoaded(generation, result, label) => {
-                self.handle_similar_songs_loaded(generation, result, label)
-            }
+            Message::Find(msg) => self.handle_find_message(msg),
 
             // -----------------------------------------------------------------
             // Surfing-Boat Overlay (lines mode)

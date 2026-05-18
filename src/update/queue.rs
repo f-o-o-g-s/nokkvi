@@ -12,7 +12,7 @@ use tracing::{debug, error, trace};
 use super::components::prefetch_album_artwork_tasks;
 use crate::{
     Nokkvi, View,
-    app_message::{ArtworkMessage, Message, PlaybackMessage},
+    app_message::{ArtworkMessage, FindMessage, Message, PlaybackMessage},
     views::{self, QueueAction, QueueMessage},
     widgets::SlotListPageMessage,
 };
@@ -525,20 +525,20 @@ impl Nokkvi {
                 if let Some(song) = filtered_queue.get(index) {
                     let id = song.id.clone();
                     let title = song.title.clone();
-                    return Task::done(Message::FindSimilar {
+                    return Task::done(Message::Find(FindMessage::Similar {
                         id,
                         label: format!("Similar to: {title}"),
-                    });
+                    }));
                 }
             }
             QueueAction::TopSongs(index) => {
                 if let Some(song) = filtered_queue.get(index) {
                     let artist = song.artist.clone();
                     if !artist.is_empty() {
-                        return Task::done(Message::FindTopSongs {
+                        return Task::done(Message::Find(FindMessage::TopSongs {
                             artist_name: artist.clone(),
                             label: format!("Top Songs: {artist}"),
-                        });
+                        }));
                     }
                 }
             }

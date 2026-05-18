@@ -30,7 +30,7 @@ use tracing::{debug, error, info};
 
 use crate::{
     Nokkvi, View,
-    app_message::{ArtworkMessage, HotkeyMessage, Message},
+    app_message::{ArtworkMessage, FindMessage, HotkeyMessage, Message},
     views,
     widgets::{SlotListPageState, SlotListView, view_header::SortMode},
 };
@@ -1152,10 +1152,10 @@ impl Nokkvi {
             return Task::none();
         };
         let title = self.playback.title.clone();
-        Task::done(Message::FindSimilar {
+        Task::done(Message::Find(FindMessage::Similar {
             id: song_id,
             label: format!("Similar to: {title}"),
-        })
+        }))
     }
 
     /// Open Top Songs tab for the currently playing track's artist.
@@ -1165,10 +1165,10 @@ impl Nokkvi {
             self.toast_warn("No artist metadata for currently playing track");
             return Task::none();
         }
-        Task::done(Message::FindTopSongs {
+        Task::done(Message::Find(FindMessage::TopSongs {
             artist_name: artist.clone(),
             label: format!("Top Songs: {artist}"),
-        })
+        }))
     }
 
     /// Open the currently playing track's folder in the file manager.

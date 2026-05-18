@@ -9,7 +9,7 @@ use tracing::{debug, info, warn};
 
 use crate::{
     Nokkvi,
-    app_message::Message,
+    app_message::{FindMessage, Message},
     state::SimilarSongsState,
     views::{BrowsingPanel, BrowsingView, SimilarAction, SimilarMessage},
 };
@@ -81,14 +81,14 @@ impl Nokkvi {
             SimilarAction::ShowInFolder(path) => self.handle_show_in_folder(path),
             SimilarAction::FindSimilar(id, title) => {
                 // Recursive discovery — find similar from within similar results
-                Task::done(Message::FindSimilar {
+                Task::done(Message::Find(FindMessage::Similar {
                     id,
                     label: format!("Similar to: {title}"),
-                })
+                }))
             }
             SimilarAction::FindTopSongs(artist_name, label) => {
                 // Top songs for artist — from within similar results
-                Task::done(Message::FindTopSongs { artist_name, label })
+                Task::done(Message::Find(FindMessage::TopSongs { artist_name, label }))
             }
             SimilarAction::ColumnVisibilityChanged(col, value) => {
                 self.persist_column_visibility(col, value)
@@ -97,6 +97,23 @@ impl Nokkvi {
         };
 
         Task::batch([task, action_task])
+    }
+
+    /// Dispatch `FindMessage` variants to the per-variant handlers below.
+    ///
+    /// Cross-cutting carrier for the find/similar lookup cluster — separate
+    /// from `handle_similar_message`, which handles the Similar VIEW's own
+    /// per-view interaction messages.
+    pub(crate) fn handle_find_message(&mut self, msg: FindMessage) -> Task<Message> {
+        match msg {
+            FindMessage::Similar { id, label } => self.handle_find_similar(id, label),
+            FindMessage::TopSongs { artist_name, label } => {
+                self.handle_find_top_songs(artist_name, label)
+            }
+            FindMessage::Loaded(generation, result, label) => {
+                self.handle_similar_songs_loaded(generation, result, label)
+            }
+        }
     }
 
     /// Handle "Find Similar" — opens browsing panel on Similar tab and fires API.
@@ -124,7 +141,11 @@ impl Nokkvi {
                 api.get_similar_songs(&id, 500).await
             },
             move |result| {
-                Message::SimilarSongsLoaded(generation, result.map_err(|e| e.to_string()), label)
+                Message::Find(FindMessage::Loaded(
+                    generation,
+                    result.map_err(|e| e.to_string()),
+                    label,
+                ))
             },
         )
     }
@@ -158,7 +179,11 @@ impl Nokkvi {
                 api.get_top_songs(&artist_name, 500).await
             },
             move |result| {
-                Message::SimilarSongsLoaded(generation, result.map_err(|e| e.to_string()), label)
+                Message::Find(FindMessage::Loaded(
+                    generation,
+                    result.map_err(|e| e.to_string()),
+                    label,
+                ))
             },
         )
     }

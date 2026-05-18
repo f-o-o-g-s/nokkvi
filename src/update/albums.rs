@@ -9,7 +9,7 @@ use tracing::{debug, error, warn};
 use super::components::{PaginatedFetch, prefetch_album_artwork_tasks};
 use crate::{
     Nokkvi, View,
-    app_message::{ArtworkMessage, Message},
+    app_message::{ArtworkMessage, FindMessage, Message},
     update::AlbumsTarget,
     views::{self, AlbumsAction, AlbumsMessage, HasCommonAction},
 };
@@ -692,7 +692,7 @@ impl Nokkvi {
                 )));
             }
             AlbumsAction::FindSimilar(id, label) => {
-                return Task::done(Message::FindSimilar { id, label });
+                return Task::done(Message::Find(FindMessage::Similar { id, label }));
             }
             AlbumsAction::ColumnVisibilityChanged(col, value) => {
                 return self.persist_column_visibility(col, value);

@@ -6,7 +6,7 @@ use tracing::debug;
 
 use crate::{
     Nokkvi, View,
-    app_message::{ArtworkMessage, Message},
+    app_message::{ArtworkMessage, FindMessage, Message},
     update::{ArtistsTarget, components::PaginatedFetch},
     views::{self, ArtistsAction, ArtistsMessage, HasCommonAction},
     widgets,
@@ -485,10 +485,10 @@ impl Nokkvi {
                 return self.handle_show_in_folder(path);
             }
             ArtistsAction::FindSimilar(id, label) => {
-                return Task::done(Message::FindSimilar { id, label });
+                return Task::done(Message::Find(FindMessage::Similar { id, label }));
             }
             ArtistsAction::TopSongs(artist_name, label) => {
-                return Task::done(Message::FindTopSongs { artist_name, label });
+                return Task::done(Message::Find(FindMessage::TopSongs { artist_name, label }));
             }
             ArtistsAction::ColumnVisibilityChanged(col, value) => {
                 return self.persist_column_visibility(col, value);

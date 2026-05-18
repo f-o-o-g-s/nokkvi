@@ -278,6 +278,26 @@ pub enum RouletteMessage {
     Cancel,
 }
 
+/// Cross-cutting Find/Similar lookup messages — triggered from any view to
+/// query similar/top songs.
+///
+/// Distinct from `Message::Similar(SimilarMessage)`, which is the Similar
+/// VIEW's per-view message. `FindMessage` covers the cross-view triggers and
+/// the API response that populates the Similar tab.
+#[derive(Debug, Clone)]
+pub enum FindMessage {
+    /// Trigger "Find Similar" from any view — opens browsing panel, fires getSimilarSongs2.
+    Similar { id: String, label: String },
+    /// Trigger "Top Songs" from artists view — opens browsing panel, fires getTopSongs.
+    TopSongs { artist_name: String, label: String },
+    /// API response for similar/top songs (generation counter, result, label).
+    Loaded(
+        u64,
+        Result<Vec<nokkvi_data::types::song::Song>, String>,
+        String,
+    ),
+}
+
 /// Toast notification messages, namespaced under `Message::Toast(..)`
 #[derive(Debug, Clone)]
 pub enum ToastMessage {
@@ -737,21 +757,76 @@ pub enum Message {
     /// Open a song's containing folder in the file manager (relative path from Navidrome)
     ShowInFolder(String),
 
-    // --- Similar Songs ---
-    /// Trigger "Find Similar" from any view — opens browsing panel, fires getSimilarSongs2
-    FindSimilar {
-        id: String,
-        label: String,
-    },
-    /// Trigger "Top Songs" from artists view — opens browsing panel, fires getTopSongs
-    FindTopSongs {
-        artist_name: String,
-        label: String,
-    },
-    /// API response for similar/top songs (generation counter, result)
-    SimilarSongsLoaded(
-        u64,
-        Result<Vec<nokkvi_data::types::song::Song>, String>,
-        String,
-    ),
+    // --- Similar Songs (cross-cutting find/load — distinct from Message::Similar per-view) ---
+    Find(FindMessage),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `FindMessage` sub-enum routing — the three flat root variants
+    /// (`FindSimilar` / `FindTopSongs` / `SimilarSongsLoaded`) collapsed
+    /// onto `Message::Find(FindMessage)`. This pins the carrier shape and
+    /// the variant payload for each of the three.
+    #[test]
+    fn find_message_sub_enum_routing() {
+        // Similar trigger
+        let msg = Message::Find(FindMessage::Similar {
+            id: "song-42".into(),
+            label: "Similar to: Lorem".into(),
+        });
+        match msg {
+            Message::Find(FindMessage::Similar { id, label }) => {
+                assert_eq!(id, "song-42");
+                assert_eq!(label, "Similar to: Lorem");
+            }
+            _ => panic!("expected Message::Find(FindMessage::Similar)"),
+        }
+
+        // TopSongs trigger
+        let msg = Message::Find(FindMessage::TopSongs {
+            artist_name: "Artist X".into(),
+            label: "Top Songs: Artist X".into(),
+        });
+        match msg {
+            Message::Find(FindMessage::TopSongs { artist_name, label }) => {
+                assert_eq!(artist_name, "Artist X");
+                assert_eq!(label, "Top Songs: Artist X");
+            }
+            _ => panic!("expected Message::Find(FindMessage::TopSongs)"),
+        }
+
+        // Loaded API response (success path)
+        let msg = Message::Find(FindMessage::Loaded(7, Ok(Vec::new()), "label".into()));
+        match msg {
+            Message::Find(FindMessage::Loaded(generation, result, label)) => {
+                assert_eq!(generation, 7);
+                assert!(result.is_ok());
+                assert_eq!(label, "label");
+            }
+            _ => panic!("expected Message::Find(FindMessage::Loaded)"),
+        }
+    }
+
+    /// `FindMessage::Loaded` carries the error string through the sub-enum
+    /// boundary unmodified — the renamed shape preserves the previous
+    /// `(generation, Result<_, String>, label)` payload of the old flat
+    /// `Message::SimilarSongsLoaded` variant.
+    #[test]
+    fn find_message_loaded_carries_error_string() {
+        let msg = Message::Find(FindMessage::Loaded(
+            42,
+            Err("boom".into()),
+            "test-label".into(),
+        ));
+        match msg {
+            Message::Find(FindMessage::Loaded(generation, Err(err), label)) => {
+                assert_eq!(generation, 42);
+                assert_eq!(err, "boom");
+                assert_eq!(label, "test-label");
+            }
+            _ => panic!("expected Message::Find(FindMessage::Loaded(_, Err(_), _))"),
+        }
+    }
 }

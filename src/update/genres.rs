@@ -6,7 +6,7 @@ use tracing::debug;
 
 use crate::{
     Nokkvi, View,
-    app_message::{ArtworkMessage, CollageTarget, Message},
+    app_message::{ArtworkMessage, CollageTarget, FindMessage, Message},
     update::GenresTarget,
     views::{self, GenresAction, GenresMessage, HasCommonAction},
 };
@@ -440,7 +440,7 @@ impl Nokkvi {
                 return self.play_next_batch_task(payload);
             }
             GenresAction::FindSimilar(id, label) => {
-                return Task::done(Message::FindSimilar { id, label });
+                return Task::done(Message::Find(FindMessage::Similar { id, label }));
             }
             GenresAction::ShowInfo(item) => {
                 return self.update(Message::InfoModal(
