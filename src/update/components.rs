@@ -970,6 +970,41 @@ impl Nokkvi {
         )
     }
 
+    /// Redirect a play action to a queue-add task when the browsing panel is open.
+    ///
+    /// All five library views (Albums, Artists, Genres, Playlists, Songs) share
+    /// the same play-redirect shape inside split-view: when `browsing_panel` is
+    /// present, instead of replacing the queue, they enqueue the entity — at a
+    /// drag-drop target position if one is pending, else appended to the end.
+    /// Per-entity differences (id parsing, name lookup, async backend call)
+    /// stay in the caller's `add_task` / `insert_task` closures, so this helper
+    /// owns only the shared shape:
+    /// - Returns `None` when `browsing_panel` is closed (caller proceeds with
+    ///   normal play flow).
+    /// - Returns `Some(insert_task(pos))` when a drag-drop position is pending
+    ///   (consumes it via `take()`).
+    /// - Otherwise returns `Some(add_task())`.
+    ///
+    /// **Contract**: call this AFTER `guard_play_action()` has returned `None`
+    /// — the helper does not re-guard. Pairing with `enter_new_playback_context`
+    /// is per-site (Songs skips it inside the browsing-panel branch; the four
+    /// entity sites call it before this helper).
+    pub(crate) fn redirect_play_to_queue_in_browsing_panel<A, I>(
+        &mut self,
+        add_task: A,
+        insert_task: I,
+    ) -> Option<Task<Message>>
+    where
+        A: FnOnce(&mut Self) -> Task<Message>,
+        I: FnOnce(&mut Self, usize) -> Task<Message>,
+    {
+        self.browsing_panel.as_ref()?;
+        if let Some(pos) = self.pending_queue_insert_position.take() {
+            return Some(insert_task(self, pos));
+        }
+        Some(add_task(self))
+    }
+
     /// Enqueue a batch, inserting at a drag-drop position when one is pending.
     ///
     /// Takes `pending_queue_insert_position` via `take()` — the position is consumed

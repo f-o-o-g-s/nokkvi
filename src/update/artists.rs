@@ -288,12 +288,24 @@ impl Nokkvi {
                     return task;
                 }
                 self.enter_new_playback_context();
-                // Browsing panel: redirect play → add to queue
-                if self.browsing_panel.is_some() {
-                    if let Some(pos) = self.pending_queue_insert_position.take() {
-                        return self.insert_entity_to_queue_at_position_task(
-                            &self.library.artists,
-                            &artist_id_str,
+                // Browsing panel: redirect play → add to queue (insert at
+                // drag-drop position when one is pending, else append).
+                let id_ref = artist_id_str.as_str();
+                if let Some(task) = self.redirect_play_to_queue_in_browsing_panel(
+                    |app| {
+                        app.add_entity_to_queue_task(
+                            &app.library.artists,
+                            id_ref,
+                            "artist",
+                            |a| a.id.clone(),
+                            |a| a.name.clone(),
+                            |shell, id| async move { shell.add_artist_to_queue(&id).await },
+                        )
+                    },
+                    |app, pos| {
+                        app.insert_entity_to_queue_at_position_task(
+                            &app.library.artists,
+                            id_ref,
                             "artist",
                             pos,
                             |a| a.id.clone(),
@@ -301,16 +313,10 @@ impl Nokkvi {
                             |shell, id, position| async move {
                                 shell.insert_artist_at_position(&id, position).await
                             },
-                        );
-                    }
-                    return self.add_entity_to_queue_task(
-                        &self.library.artists,
-                        &artist_id_str,
-                        "artist",
-                        |a| a.id.clone(),
-                        |a| a.name.clone(),
-                        |shell, id| async move { shell.add_artist_to_queue(&id).await },
-                    );
+                        )
+                    },
+                ) {
+                    return task;
                 }
                 // AppendAndPlay: append artist songs to queue and start playing
                 use nokkvi_data::types::player_settings::EnterBehavior;

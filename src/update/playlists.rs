@@ -97,7 +97,10 @@ impl Nokkvi {
                     return task;
                 }
                 self.enter_new_playback_context();
-                // Browsing panel: redirect play → add to queue
+                // Browsing panel: redirect play → add to queue. Playlists has
+                // no cross-pane-drag insert variant today, so the redirect is
+                // unconditional (we do NOT consume `pending_queue_insert_position`
+                // to preserve the pre-helper behavior).
                 if self.browsing_panel.is_some() {
                     let name = self
                         .library

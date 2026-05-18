@@ -152,3 +152,94 @@ fn guard_play_action_transitions_radio_to_queue() {
         "active radio must transition back to queue mode"
     );
 }
+
+// ============================================================================
+// redirect_play_to_queue_in_browsing_panel (components.rs)
+// ============================================================================
+
+#[test]
+fn redirect_play_returns_none_when_browsing_panel_closed() {
+    // Single-pane play actions must NOT be redirected — the caller proceeds
+    // to its normal "replace queue" play flow.
+    let mut app = test_app();
+    assert!(app.browsing_panel.is_none());
+
+    let mut add_fired = false;
+    let mut insert_fired = false;
+    let task = app.redirect_play_to_queue_in_browsing_panel(
+        |_app| {
+            add_fired = true;
+            iced::Task::none()
+        },
+        |_app, _pos| {
+            insert_fired = true;
+            iced::Task::none()
+        },
+    );
+
+    assert!(task.is_none(), "no redirect without browsing panel");
+    assert!(!add_fired, "add closure must not fire when closed");
+    assert!(!insert_fired, "insert closure must not fire when closed");
+}
+
+#[test]
+fn redirect_play_invokes_add_when_no_pending_insert() {
+    // Browsing panel open, no drag-drop position → append branch.
+    let mut app = test_app();
+    app.browsing_panel = Some(crate::views::BrowsingPanel::new());
+    app.pending_queue_insert_position = None;
+
+    let mut add_fired = false;
+    let mut insert_fired = false;
+    let task = app.redirect_play_to_queue_in_browsing_panel(
+        |_app| {
+            add_fired = true;
+            iced::Task::none()
+        },
+        |_app, _pos| {
+            insert_fired = true;
+            iced::Task::none()
+        },
+    );
+
+    assert!(task.is_some(), "browsing-panel redirect must return Some");
+    assert!(
+        add_fired,
+        "add closure must run when no insert position pending"
+    );
+    assert!(!insert_fired, "insert closure must NOT run");
+}
+
+#[test]
+fn redirect_play_invokes_insert_and_consumes_position() {
+    // Browsing panel open with a drag-drop position → insert branch, AND
+    // the position is consumed via `take()` so the next play sees None.
+    let mut app = test_app();
+    app.browsing_panel = Some(crate::views::BrowsingPanel::new());
+    app.pending_queue_insert_position = Some(3);
+
+    let mut add_fired = false;
+    let mut received_pos: Option<usize> = None;
+    let task = app.redirect_play_to_queue_in_browsing_panel(
+        |_app| {
+            add_fired = true;
+            iced::Task::none()
+        },
+        |_app, pos| {
+            received_pos = Some(pos);
+            iced::Task::none()
+        },
+    );
+
+    assert!(task.is_some(), "browsing-panel redirect must return Some");
+    assert!(!add_fired, "add closure must NOT run");
+    assert_eq!(
+        received_pos,
+        Some(3),
+        "insert closure receives the position"
+    );
+    assert!(
+        app.pending_queue_insert_position.is_none(),
+        "pending_queue_insert_position must be consumed via take()"
+    );
+}

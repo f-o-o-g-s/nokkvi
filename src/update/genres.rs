@@ -192,25 +192,32 @@ impl Nokkvi {
                     return task;
                 }
                 self.enter_new_playback_context();
-                // Browsing panel: redirect play → add to queue
-                if self.browsing_panel.is_some() {
-                    if let Some(pos) = self.pending_queue_insert_position.take() {
-                        let label = format!("Inserted '{genre_name}' at position {}", pos + 1);
-                        let name = genre_name.clone();
-                        return self.shell_fire_and_forget_task(
+                // Browsing panel: redirect play → add to queue (insert at
+                // drag-drop position when one is pending, else append).
+                let name_ref = genre_name.as_str();
+                if let Some(task) = self.redirect_play_to_queue_in_browsing_panel(
+                    |app| {
+                        let label = format!("Added '{name_ref}' to queue");
+                        let name = name_ref.to_string();
+                        app.shell_fire_and_forget_task(
+                            move |shell| async move { shell.add_genre_to_queue(&name).await },
+                            label,
+                            "add genre to queue",
+                        )
+                    },
+                    |app, pos| {
+                        let label = format!("Inserted '{name_ref}' at position {}", pos + 1);
+                        let name = name_ref.to_string();
+                        app.shell_fire_and_forget_task(
                             move |shell| async move {
                                 shell.insert_genre_at_position(&name, pos).await
                             },
                             label,
                             "insert genre to queue",
-                        );
-                    }
-                    let label = format!("Added '{genre_name}' to queue");
-                    return self.shell_fire_and_forget_task(
-                        move |shell| async move { shell.add_genre_to_queue(&genre_name).await },
-                        label,
-                        "add genre to queue",
-                    );
+                        )
+                    },
+                ) {
+                    return task;
                 }
                 // AppendAndPlay: append genre songs to queue and start playing
                 use nokkvi_data::types::player_settings::EnterBehavior;

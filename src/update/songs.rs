@@ -150,27 +150,38 @@ impl Nokkvi {
                     return task;
                 }
                 self.enter_new_playback_context();
-                // Browsing panel: redirect play → add to queue
+                // Browsing panel: redirect play → add to queue (insert at
+                // drag-drop position when one is pending, else append).
                 if self.browsing_panel.is_some() {
-                    if let Some(song) = self.library.songs.get(index) {
-                        let title = song.title.clone();
-                        let song: nokkvi_data::types::song::Song = song.clone().into();
-                        if let Some(pos) = self.pending_queue_insert_position.take() {
-                            return self.shell_fire_and_forget_task(
-                                move |shell| async move {
-                                    shell.insert_song_at_position(song, pos).await
-                                },
-                                format!("Inserted '{title}' at position {}", pos + 1),
-                                "insert song to queue",
-                            );
-                        }
-                        return self.shell_fire_and_forget_task(
-                            move |shell| async move { shell.add_song_to_queue(song).await },
-                            format!("Added '{title}' to queue"),
-                            "add song to queue",
-                        );
-                    }
-                    return Task::none();
+                    let Some(song_view) = self.library.songs.get(index) else {
+                        return Task::none();
+                    };
+                    let title = song_view.title.clone();
+                    let song: nokkvi_data::types::song::Song = song_view.clone().into();
+                    let song_for_add = song.clone();
+                    let title_for_add = title.clone();
+                    return self
+                        .redirect_play_to_queue_in_browsing_panel(
+                            move |app| {
+                                app.shell_fire_and_forget_task(
+                                    move |shell| async move {
+                                        shell.add_song_to_queue(song_for_add).await
+                                    },
+                                    format!("Added '{title_for_add}' to queue"),
+                                    "add song to queue",
+                                )
+                            },
+                            move |app, pos| {
+                                app.shell_fire_and_forget_task(
+                                    move |shell| async move {
+                                        shell.insert_song_at_position(song, pos).await
+                                    },
+                                    format!("Inserted '{title}' at position {}", pos + 1),
+                                    "insert song to queue",
+                                )
+                            },
+                        )
+                        .unwrap_or_else(Task::none);
                 }
                 if let Some(song) = self.library.songs.get(index) {
                     debug!(" Playing song from index: {} - {}", song.title, song.artist);
