@@ -8,12 +8,36 @@ use tracing::{debug, info};
 
 use crate::{
     Nokkvi, View,
-    app_message::Message,
+    app_message::{Message, SplitViewMessage},
     state::PaneFocus,
     views::{BrowsingPanel, BrowsingPanelMessage, BrowsingView},
 };
 
 impl Nokkvi {
+    /// Dispatch `SplitViewMessage` sub-enum variants to their per-variant
+    /// handlers. Mirrors the per-handler routing pattern other sub-enums
+    /// use (e.g. `handle_find_message` in `similar.rs`).
+    pub(crate) fn handle_split_view_message(&mut self, msg: SplitViewMessage) -> Task<Message> {
+        match msg {
+            SplitViewMessage::EnterEditMode {
+                playlist_id,
+                playlist_name,
+                playlist_comment,
+                playlist_public,
+            } => self.handle_enter_playlist_edit_mode(
+                playlist_id,
+                playlist_name,
+                playlist_comment,
+                playlist_public,
+            ),
+            SplitViewMessage::ExitEditMode => self.handle_exit_playlist_edit_mode(),
+            SplitViewMessage::ToggleBrowsingPanel => self.handle_toggle_browsing_panel(),
+            SplitViewMessage::SwitchPaneFocus => self.handle_switch_pane_focus(),
+            SplitViewMessage::SavePlaylistEdits => self.handle_save_playlist_edits(),
+            SplitViewMessage::PlaylistEditsSaved => self.handle_playlist_edits_saved(),
+        }
+    }
+
     /// Handle browsing panel messages (tab switching).
     pub(crate) fn handle_browsing_panel_message(
         &mut self,
@@ -225,7 +249,7 @@ impl Nokkvi {
                     .replace_playlist_tracks(&playlist_id, &song_ids)
                     .await
             },
-            Message::PlaylistEditsSaved,
+            Message::SplitView(SplitViewMessage::PlaylistEditsSaved),
             "save playlist edits",
         )
     }

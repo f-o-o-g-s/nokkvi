@@ -12,7 +12,7 @@ use tracing::{debug, error, trace};
 use super::components::prefetch_album_artwork_tasks;
 use crate::{
     Nokkvi, View,
-    app_message::{ArtworkMessage, FindMessage, Message, PlaybackMessage},
+    app_message::{ArtworkMessage, FindMessage, Message, PlaybackMessage, SplitViewMessage},
     views::{self, QueueAction, QueueMessage},
     widgets::SlotListPageMessage,
 };
@@ -441,10 +441,10 @@ impl Nokkvi {
                 }
             }
             QueueAction::SavePlaylist => {
-                return Task::done(Message::SavePlaylistEdits);
+                return Task::done(Message::SplitView(SplitViewMessage::SavePlaylistEdits));
             }
             QueueAction::DiscardEdits => {
-                return Task::done(Message::ExitPlaylistEditMode);
+                return Task::done(Message::SplitView(SplitViewMessage::ExitEditMode));
             }
             QueueAction::PlaylistNameChanged(name) => {
                 if let Some(edit_state) = &mut self.playlist_edit {
@@ -472,16 +472,16 @@ impl Nokkvi {
                         .iter()
                         .find(|p| p.id == ctx.id)
                         .is_none_or(|p| p.public);
-                    return Task::done(Message::EnterPlaylistEditMode {
+                    return Task::done(Message::SplitView(SplitViewMessage::EnterEditMode {
                         playlist_id: ctx.id.clone(),
                         playlist_name: ctx.name.clone(),
                         playlist_comment: ctx.comment.clone(),
                         playlist_public,
-                    });
+                    }));
                 }
             }
             QueueAction::OpenBrowsingPanel => {
-                return Task::done(Message::ToggleBrowsingPanel);
+                return Task::done(Message::SplitView(SplitViewMessage::ToggleBrowsingPanel));
             }
             QueueAction::ShowInfo(index) => {
                 // Fetch fresh Song data from the API to ensure full field coverage.

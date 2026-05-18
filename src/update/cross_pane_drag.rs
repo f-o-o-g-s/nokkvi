@@ -20,12 +20,32 @@
 use iced::Task;
 use tracing::debug;
 
-use crate::{Nokkvi, app_message::Message, state::CrossPaneDragState, views, widgets::HoveredSlot};
+use crate::{
+    Nokkvi,
+    app_message::{CrossPaneDragMessage, Message},
+    state::CrossPaneDragState,
+    views,
+    widgets::HoveredSlot,
+};
 
 /// Minimum pixel distance before a press becomes a drag
 const DRAG_THRESHOLD: f32 = 5.0;
 
 impl Nokkvi {
+    /// Dispatch `CrossPaneDragMessage` sub-enum variants to their per-variant
+    /// handlers. Mirrors the per-handler routing pattern other sub-enums
+    /// use (e.g. `handle_find_message` in `similar.rs`).
+    pub(crate) fn handle_cross_pane_drag_message(
+        &mut self,
+        msg: CrossPaneDragMessage,
+    ) -> Task<Message> {
+        match msg {
+            CrossPaneDragMessage::Pressed => self.handle_cross_pane_drag_pressed(),
+            CrossPaneDragMessage::Moved(pos) => self.handle_cross_pane_drag_moved(pos),
+            CrossPaneDragMessage::Released => self.handle_cross_pane_drag_released(),
+            CrossPaneDragMessage::Cancel => self.handle_cross_pane_drag_cancel(),
+        }
+    }
     /// Look up the currently-hovered slot for the browsing panel's active
     /// view. Returns `None` when no browsing panel is open or the cursor
     /// is not over any slot in the active view (chrome, gaps, queue pane).

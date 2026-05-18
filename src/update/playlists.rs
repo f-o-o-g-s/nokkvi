@@ -6,7 +6,7 @@ use tracing::{debug, info};
 
 use crate::{
     Nokkvi, View,
-    app_message::{ArtworkMessage, CollageTarget, Message},
+    app_message::{ArtworkMessage, CollageTarget, Message, SplitViewMessage},
     update::PlaylistsTarget,
     views::{self, HasCommonAction, PlaylistsAction, PlaylistsMessage},
 };
@@ -361,12 +361,12 @@ impl Nokkvi {
                 playlist_comment,
                 playlist_public,
             ) => {
-                return Task::done(Message::EnterPlaylistEditMode {
+                return Task::done(Message::SplitView(SplitViewMessage::EnterEditMode {
                     playlist_id,
                     playlist_name,
                     playlist_comment,
                     playlist_public,
-                });
+                }));
             }
             PlaylistsAction::ShowInfo(item) => {
                 return self.update(Message::InfoModal(

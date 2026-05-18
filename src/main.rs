@@ -486,14 +486,16 @@ impl Nokkvi {
             Event::Mouse(iced::mouse::Event::CursorMoved { position })
                 if status != iced::event::Status::Captured =>
             {
-                Some(Message::CrossPaneDragMoved(position))
+                Some(Message::CrossPaneDrag(
+                    app_message::CrossPaneDragMessage::Moved(position),
+                ))
             }
-            Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
-                Some(Message::CrossPaneDragPressed)
-            }
-            Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => {
-                Some(Message::CrossPaneDragReleased)
-            }
+            Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => Some(
+                Message::CrossPaneDrag(app_message::CrossPaneDragMessage::Pressed),
+            ),
+            Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)) => Some(
+                Message::CrossPaneDrag(app_message::CrossPaneDragMessage::Released),
+            ),
             _ => None,
         });
 

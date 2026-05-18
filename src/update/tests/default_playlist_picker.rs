@@ -298,16 +298,19 @@ fn open_create_playlist_dialog_defaults_to_public_and_no_combo() {
 
 #[test]
 fn create_playlist_dialog_refused_when_already_editing() {
-    use crate::{app_message::Message, views::PlaylistsMessage};
+    use crate::{
+        app_message::{Message, SplitViewMessage},
+        views::PlaylistsMessage,
+    };
 
     let mut app = test_app();
     // Enter split-view edit mode first.
-    let _ = app.update(Message::EnterPlaylistEditMode {
+    let _ = app.update(Message::SplitView(SplitViewMessage::EnterEditMode {
         playlist_id: "p1".into(),
         playlist_name: "Existing".into(),
         playlist_comment: String::new(),
         playlist_public: true,
-    });
+    }));
     assert!(app.playlist_edit.is_some());
 
     // User clicks the view-header `+` — message bubbles to root, guard fires.
@@ -353,7 +356,10 @@ fn create_playlist_dialog_opens_when_not_editing() {
 
 #[test]
 fn enter_edit_mode_aligns_active_playlist_info() {
-    use crate::{app_message::Message, state::ActivePlaylistContext};
+    use crate::{
+        app_message::{Message, SplitViewMessage},
+        state::ActivePlaylistContext,
+    };
 
     let mut app = test_app();
     // Pre-condition: a different playlist is currently "active" in the header.
@@ -363,12 +369,12 @@ fn enter_edit_mode_aligns_active_playlist_info() {
         comment: String::new(),
     });
 
-    let _ = app.update(Message::EnterPlaylistEditMode {
+    let _ = app.update(Message::SplitView(SplitViewMessage::EnterEditMode {
         playlist_id: "edited".into(),
         playlist_name: "Being Edited".into(),
         playlist_comment: "Edit me".into(),
         playlist_public: false,
-    });
+    }));
 
     let active = app
         .active_playlist_info
@@ -384,21 +390,21 @@ fn enter_edit_mode_aligns_active_playlist_info() {
 
 #[test]
 fn exit_edit_mode_preserves_aligned_context() {
-    use crate::app_message::Message;
+    use crate::app_message::{Message, SplitViewMessage};
 
     let mut app = test_app();
     // No active playlist initially (e.g., create-and-edit flow).
     assert!(app.active_playlist_info.is_none());
 
-    let _ = app.update(Message::EnterPlaylistEditMode {
+    let _ = app.update(Message::SplitView(SplitViewMessage::EnterEditMode {
         playlist_id: "new".into(),
         playlist_name: "Brand New".into(),
         playlist_comment: String::new(),
         playlist_public: true,
-    });
+    }));
 
     // Discard.
-    let _ = app.update(Message::ExitPlaylistEditMode);
+    let _ = app.update(Message::SplitView(SplitViewMessage::ExitEditMode));
 
     let active = app.active_playlist_info.as_ref().expect(
         "exit must leave active_playlist_info pointing at the edited playlist, \
@@ -413,15 +419,15 @@ fn exit_edit_mode_preserves_aligned_context() {
 
 #[test]
 fn enter_playlist_edit_mode_seeds_initial_public() {
-    use crate::app_message::Message;
+    use crate::app_message::{Message, SplitViewMessage};
 
     let mut app = test_app();
-    let _ = app.update(Message::EnterPlaylistEditMode {
+    let _ = app.update(Message::SplitView(SplitViewMessage::EnterEditMode {
         playlist_id: "p1".into(),
         playlist_name: "Mix".into(),
         playlist_comment: String::new(),
         playlist_public: false,
-    });
+    }));
 
     let edit = app
         .playlist_edit
@@ -439,15 +445,18 @@ fn enter_playlist_edit_mode_seeds_initial_public() {
 
 #[test]
 fn playlist_edit_public_toggle_flips_state() {
-    use crate::{app_message::Message, views::QueueMessage};
+    use crate::{
+        app_message::{Message, SplitViewMessage},
+        views::QueueMessage,
+    };
 
     let mut app = test_app();
-    let _ = app.update(Message::EnterPlaylistEditMode {
+    let _ = app.update(Message::SplitView(SplitViewMessage::EnterEditMode {
         playlist_id: "p1".into(),
         playlist_name: "Mix".into(),
         playlist_comment: String::new(),
         playlist_public: true,
-    });
+    }));
 
     let _ = app.update(Message::Queue(QueueMessage::PlaylistEditPublicToggled(
         false,
@@ -466,15 +475,18 @@ fn playlist_edit_public_toggle_flips_state() {
 
 #[test]
 fn playlist_edit_public_revert_clears_dirty() {
-    use crate::{app_message::Message, views::QueueMessage};
+    use crate::{
+        app_message::{Message, SplitViewMessage},
+        views::QueueMessage,
+    };
 
     let mut app = test_app();
-    let _ = app.update(Message::EnterPlaylistEditMode {
+    let _ = app.update(Message::SplitView(SplitViewMessage::EnterEditMode {
         playlist_id: "p1".into(),
         playlist_name: "Mix".into(),
         playlist_comment: String::new(),
         playlist_public: true,
-    });
+    }));
 
     let _ = app.update(Message::Queue(QueueMessage::PlaylistEditPublicToggled(
         false,
@@ -492,15 +504,18 @@ fn playlist_edit_public_revert_clears_dirty() {
 
 #[test]
 fn playlist_edit_public_only_change_is_metadata_dirty() {
-    use crate::{app_message::Message, views::QueueMessage};
+    use crate::{
+        app_message::{Message, SplitViewMessage},
+        views::QueueMessage,
+    };
 
     let mut app = test_app();
-    let _ = app.update(Message::EnterPlaylistEditMode {
+    let _ = app.update(Message::SplitView(SplitViewMessage::EnterEditMode {
         playlist_id: "p1".into(),
         playlist_name: "Mix".into(),
         playlist_comment: String::new(),
         playlist_public: true,
-    });
+    }));
 
     let _ = app.update(Message::Queue(QueueMessage::PlaylistEditPublicToggled(
         false,

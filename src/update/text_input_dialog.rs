@@ -4,7 +4,7 @@ use iced::Task;
 
 use crate::{
     Nokkvi,
-    app_message::{Message, PlaylistMutation},
+    app_message::{Message, PlaylistMutation, SplitViewMessage},
     widgets::text_input_dialog::{PlaylistOption, TextInputDialogAction, TextInputDialogMessage},
 };
 
@@ -161,12 +161,12 @@ impl Nokkvi {
                             // `LoadPlaylists` is fired by the EnterPlaylistEditMode
                             // handler's downstream save flow once edits land; we don't
                             // need to dispatch PlaylistMutated::Created separately.
-                            Message::EnterPlaylistEditMode {
+                            Message::SplitView(SplitViewMessage::EnterEditMode {
                                 playlist_id,
                                 playlist_name,
                                 playlist_comment: String::new(),
                                 playlist_public,
-                            }
+                            })
                         }
                         Err(e) => {
                             tracing::error!(" Failed to create new playlist: {e}");

@@ -4,7 +4,11 @@ use iced::Task;
 use nokkvi_data::audio;
 use tracing::{debug, trace};
 
-use crate::{Nokkvi, View, app_message::Message, views, widgets};
+use crate::{
+    Nokkvi, View,
+    app_message::{Message, SplitViewMessage},
+    views, widgets,
+};
 
 impl Nokkvi {
     pub(crate) fn handle_clear_search(&mut self) -> Task<Message> {
@@ -54,9 +58,9 @@ impl Nokkvi {
             let not_focused = page.is_none_or(|p| !p.common().search_input_focused);
             if search_empty && not_expanded && not_focused {
                 if self.playlist_edit.is_some() {
-                    return Task::done(Message::ExitPlaylistEditMode);
+                    return Task::done(Message::SplitView(SplitViewMessage::ExitEditMode));
                 }
-                return Task::done(Message::ToggleBrowsingPanel);
+                return Task::done(Message::SplitView(SplitViewMessage::ToggleBrowsingPanel));
             }
         }
 

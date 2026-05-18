@@ -510,22 +510,7 @@ impl Nokkvi {
             // Playlist Edit Mode (split-view)
             // -----------------------------------------------------------------
             Message::BrowsingPanel(msg) => self.handle_browsing_panel_message(msg),
-            Message::EnterPlaylistEditMode {
-                playlist_id,
-                playlist_name,
-                playlist_comment,
-                playlist_public,
-            } => self.handle_enter_playlist_edit_mode(
-                playlist_id,
-                playlist_name,
-                playlist_comment,
-                playlist_public,
-            ),
-            Message::ExitPlaylistEditMode => self.handle_exit_playlist_edit_mode(),
-            Message::ToggleBrowsingPanel => self.handle_toggle_browsing_panel(),
-            Message::SwitchPaneFocus => self.handle_switch_pane_focus(),
-            Message::SavePlaylistEdits => self.handle_save_playlist_edits(),
-            Message::PlaylistEditsSaved => self.handle_playlist_edits_saved(),
+            Message::SplitView(msg) => self.handle_split_view_message(msg),
 
             // -----------------------------------------------------------------
             // Info Modal
@@ -550,10 +535,7 @@ impl Nokkvi {
             // -----------------------------------------------------------------
             // Cross-Pane Drag (browsing panel → queue)
             // -----------------------------------------------------------------
-            Message::CrossPaneDragPressed => self.handle_cross_pane_drag_pressed(),
-            Message::CrossPaneDragMoved(pos) => self.handle_cross_pane_drag_moved(pos),
-            Message::CrossPaneDragReleased => self.handle_cross_pane_drag_released(),
-            Message::CrossPaneDragCancel => self.handle_cross_pane_drag_cancel(),
+            Message::CrossPaneDrag(msg) => self.handle_cross_pane_drag_message(msg),
 
             // -----------------------------------------------------------------
             // Show in File Manager

@@ -298,6 +298,44 @@ pub enum FindMessage {
     ),
 }
 
+/// Cross-cutting split-view shell control messages — playlist edit mode,
+/// browsing-panel toggle, pane focus, and save flow. Handled by
+/// `update/browsing_panel.rs`.
+#[derive(Debug, Clone)]
+pub enum SplitViewMessage {
+    /// Enter split-view playlist editing mode.
+    EnterEditMode {
+        playlist_id: String,
+        playlist_name: String,
+        playlist_comment: String,
+        playlist_public: bool,
+    },
+    /// Exit split-view playlist editing mode.
+    ExitEditMode,
+    /// Toggle browsing panel alongside queue (Ctrl+E).
+    ToggleBrowsingPanel,
+    /// Toggle keyboard focus between queue and browser panes.
+    SwitchPaneFocus,
+    /// Save current queue as the edited playlist's tracks.
+    SavePlaylistEdits,
+    /// Playlist edits saved successfully.
+    PlaylistEditsSaved,
+}
+
+/// Cross-pane drag state machine messages — drag from browsing panel into
+/// queue. Handled by `update/cross_pane_drag.rs`.
+#[derive(Debug, Clone)]
+pub enum CrossPaneDragMessage {
+    /// Mouse pressed in browser pane — record origin for threshold detection.
+    Pressed,
+    /// Cursor moved while mouse button held — check for drag threshold / update position.
+    Moved(iced::Point),
+    /// Mouse released — finalize drop or cancel.
+    Released,
+    /// Cancel active drag (e.g. pressing Escape).
+    Cancel,
+}
+
 /// Toast notification messages, namespaced under `Message::Toast(..)`
 #[derive(Debug, Clone)]
 pub enum ToastMessage {
@@ -726,33 +764,10 @@ pub enum Message {
 
     // --- Playlist Edit Mode (split-view) ---
     BrowsingPanel(views::BrowsingPanelMessage),
-    /// Enter split-view playlist editing mode
-    EnterPlaylistEditMode {
-        playlist_id: String,
-        playlist_name: String,
-        playlist_comment: String,
-        playlist_public: bool,
-    },
-    /// Exit split-view playlist editing mode
-    ExitPlaylistEditMode,
-    /// Toggle browsing panel alongside queue (Ctrl+E)
-    ToggleBrowsingPanel,
-    /// Toggle keyboard focus between queue and browser panes
-    SwitchPaneFocus,
-    /// Save current queue as the edited playlist's tracks
-    SavePlaylistEdits,
-    /// Playlist edits saved successfully
-    PlaylistEditsSaved,
+    SplitView(SplitViewMessage),
 
     // --- Cross-Pane Drag (browsing panel → queue) ---
-    /// Mouse pressed in browser pane — record origin for threshold detection
-    CrossPaneDragPressed,
-    /// Cursor moved while mouse button held — check for drag threshold / update position
-    CrossPaneDragMoved(iced::Point),
-    /// Mouse released — finalize drop or cancel
-    CrossPaneDragReleased,
-    /// Cancel active drag (e.g. pressing Escape)
-    CrossPaneDragCancel,
+    CrossPaneDrag(CrossPaneDragMessage),
 
     /// Open a song's containing folder in the file manager (relative path from Navidrome)
     ShowInFolder(String),
@@ -828,5 +843,110 @@ mod tests {
             }
             _ => panic!("expected Message::Find(FindMessage::Loaded(_, Err(_), _))"),
         }
+    }
+
+    /// `SplitViewMessage` sub-enum routing — the six flat root variants
+    /// (`EnterPlaylistEditMode` / `ExitPlaylistEditMode` / `ToggleBrowsingPanel`
+    /// / `SwitchPaneFocus` / `SavePlaylistEdits` / `PlaylistEditsSaved`)
+    /// collapsed onto `Message::SplitView(SplitViewMessage)`. This pins the
+    /// carrier shape and the variant payload for each of the six.
+    #[test]
+    fn split_view_message_sub_enum_routing() {
+        // EnterEditMode carries all four struct fields through the boundary.
+        let msg = Message::SplitView(SplitViewMessage::EnterEditMode {
+            playlist_id: "p1".into(),
+            playlist_name: "Mix".into(),
+            playlist_comment: "Notes".into(),
+            playlist_public: true,
+        });
+        match msg {
+            Message::SplitView(SplitViewMessage::EnterEditMode {
+                playlist_id,
+                playlist_name,
+                playlist_comment,
+                playlist_public,
+            }) => {
+                assert_eq!(playlist_id, "p1");
+                assert_eq!(playlist_name, "Mix");
+                assert_eq!(playlist_comment, "Notes");
+                assert!(playlist_public);
+            }
+            _ => panic!("expected Message::SplitView(SplitViewMessage::EnterEditMode)"),
+        }
+
+        // ExitEditMode
+        let msg = Message::SplitView(SplitViewMessage::ExitEditMode);
+        assert!(matches!(
+            msg,
+            Message::SplitView(SplitViewMessage::ExitEditMode)
+        ));
+
+        // ToggleBrowsingPanel
+        let msg = Message::SplitView(SplitViewMessage::ToggleBrowsingPanel);
+        assert!(matches!(
+            msg,
+            Message::SplitView(SplitViewMessage::ToggleBrowsingPanel)
+        ));
+
+        // SwitchPaneFocus
+        let msg = Message::SplitView(SplitViewMessage::SwitchPaneFocus);
+        assert!(matches!(
+            msg,
+            Message::SplitView(SplitViewMessage::SwitchPaneFocus)
+        ));
+
+        // SavePlaylistEdits
+        let msg = Message::SplitView(SplitViewMessage::SavePlaylistEdits);
+        assert!(matches!(
+            msg,
+            Message::SplitView(SplitViewMessage::SavePlaylistEdits)
+        ));
+
+        // PlaylistEditsSaved
+        let msg = Message::SplitView(SplitViewMessage::PlaylistEditsSaved);
+        assert!(matches!(
+            msg,
+            Message::SplitView(SplitViewMessage::PlaylistEditsSaved)
+        ));
+    }
+
+    /// `CrossPaneDragMessage` sub-enum routing — the four flat root variants
+    /// (`CrossPaneDragPressed` / `Moved` / `Released` / `Cancel`) collapsed
+    /// onto `Message::CrossPaneDrag(CrossPaneDragMessage)`. The `Moved`
+    /// variant uses a non-default `Point` so the test pins that both
+    /// coordinates survive the boundary.
+    #[test]
+    fn cross_pane_drag_message_sub_enum_routing() {
+        // Pressed
+        let msg = Message::CrossPaneDrag(CrossPaneDragMessage::Pressed);
+        assert!(matches!(
+            msg,
+            Message::CrossPaneDrag(CrossPaneDragMessage::Pressed)
+        ));
+
+        // Moved carries the iced::Point payload.
+        let msg =
+            Message::CrossPaneDrag(CrossPaneDragMessage::Moved(iced::Point::new(123.0, 456.0)));
+        match msg {
+            Message::CrossPaneDrag(CrossPaneDragMessage::Moved(point)) => {
+                assert!((point.x - 123.0).abs() < f32::EPSILON);
+                assert!((point.y - 456.0).abs() < f32::EPSILON);
+            }
+            _ => panic!("expected Message::CrossPaneDrag(CrossPaneDragMessage::Moved)"),
+        }
+
+        // Released
+        let msg = Message::CrossPaneDrag(CrossPaneDragMessage::Released);
+        assert!(matches!(
+            msg,
+            Message::CrossPaneDrag(CrossPaneDragMessage::Released)
+        ));
+
+        // Cancel
+        let msg = Message::CrossPaneDrag(CrossPaneDragMessage::Cancel);
+        assert!(matches!(
+            msg,
+            Message::CrossPaneDrag(CrossPaneDragMessage::Cancel)
+        ));
     }
 }

@@ -8,7 +8,7 @@ use nokkvi_data::types::hotkey_config::{HotkeyAction, HotkeyConfig, KeyCode};
 
 use crate::{
     Message, View,
-    app_message::{HotkeyMessage, PlaybackMessage, SlotListMessage},
+    app_message::{HotkeyMessage, PlaybackMessage, SlotListMessage, SplitViewMessage},
 };
 
 /// Convert an iced keyboard key to our `KeyCode` enum.
@@ -112,7 +112,9 @@ fn action_to_message(action: HotkeyAction) -> Message {
         HotkeyAction::Activate => Message::SlotList(SlotListMessage::ActivateCenter),
         HotkeyAction::ExpandCenter => Message::Hotkey(HotkeyMessage::ExpandCenter),
         // Browse
-        HotkeyAction::ToggleBrowsingPanel => Message::ToggleBrowsingPanel,
+        HotkeyAction::ToggleBrowsingPanel => {
+            Message::SplitView(SplitViewMessage::ToggleBrowsingPanel)
+        }
         HotkeyAction::CenterOnPlaying => Message::Hotkey(HotkeyMessage::CenterOnPlaying),
         HotkeyAction::ToggleStar => Message::Hotkey(HotkeyMessage::ToggleStar),
         HotkeyAction::AddToQueue => Message::Hotkey(HotkeyMessage::AddToQueue),
