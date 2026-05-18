@@ -1,13 +1,9 @@
 //! Handles Navidrome event-driven library refresh
-use std::collections::HashSet;
-
 use iced::Task;
 use tracing::info;
 
 use crate::{
-    Nokkvi,
-    app_message::{ArtworkMessage, Message},
-    services::navidrome_sse::LibraryChange,
+    Nokkvi, app_message::Message, services::navidrome_sse::LibraryChange,
     widgets::view_header::SortMode,
 };
 
@@ -93,40 +89,16 @@ impl Nokkvi {
             self.toast_info("Library refreshed automatically");
         }
 
-        // 6. On non-wildcard events, surgically refresh artwork for the changed
-        //    albums in any in-RAM Handle map. With no client-side disk cache,
-        //    "refresh" here means: re-fetch from server and replace the Handle
-        //    so Iced's GPU texture cache picks up the new bytes. Albums not
-        //    present in any UI map will simply re-fetch on next viewport entry.
-        //    Wildcards (full-library scans) skip this — per `gotchas.md`, we
-        //    don't want a silent re-download of every cover.
-        if !is_wildcard && !album_ids.is_empty() {
-            let unique: Vec<String> = album_ids
-                .into_iter()
-                .collect::<HashSet<_>>()
-                .into_iter()
-                .collect();
-
-            let mut refreshed_in_ui = 0usize;
-            for id in unique {
-                let in_ui = self.artwork.large_artwork.peek(&id).is_some()
-                    || self.artwork.album_art.contains(&id);
-
-                if in_ui {
-                    refreshed_in_ui += 1;
-                    tasks.push(Task::done(Message::Artwork(
-                        ArtworkMessage::RefreshAlbumArtworkSilent(id),
-                    )));
-                }
-            }
-
-            if refreshed_in_ui > 0 && !self.settings.suppress_library_refresh_toasts {
-                let suffix = if refreshed_in_ui == 1 { "" } else { "s" };
-                self.toast_info(format!(
-                    "Updated artwork for {refreshed_in_ui} album{suffix}"
-                ));
-            }
-        }
+        // Artwork refresh is NOT triggered from SSE library-changed events.
+        // Navidrome fires `library_changed` on every play-count bump, so an
+        // auto-refresh produced a one-frame GPU-upload flicker on the large
+        // artwork panel after every scrobble — see `update/albums.rs` for the
+        // `Handle::from_bytes` cache-busting mechanic. Cover-art replacements
+        // propagate via:
+        //   - the parallel paged reload above (mini thumbnails refetch from
+        //     fresh `AlbumUIViewData` rows);
+        //   - the user-initiated right-click "Refresh Artwork" path
+        //     (`ArtworkMessage::RefreshAlbumArtwork`).
 
         Task::batch(tasks)
     }

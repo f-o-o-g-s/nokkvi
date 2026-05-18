@@ -239,22 +239,22 @@ fn library_refresh_wildcard_reloads_all_kinds() {
 }
 
 #[test]
-fn library_refresh_wildcard_skips_artwork_refetch() {
-    // Gotcha: `LibraryChanged { is_wildcard: true }` must NOT emit per-album
-    // RefreshAlbumArtworkSilent — it would re-download every cached cover.
-    // We can't observe the dispatched Tasks directly, but we CAN observe that
-    // the "Updated artwork for N album(s)" toast does not fire (it only fires
-    // when the artwork-refetch branch enqueued at least one task).
+fn library_refresh_does_not_trigger_artwork_refetch() {
+    // SSE library-changed events MUST NOT auto-trigger artwork refresh —
+    // Navidrome fires the event on every play-count bump and the
+    // `Handle::from_bytes` cache-busting reupload causes a one-frame
+    // flicker. Cover-art replacements propagate via the parallel paged
+    // reload + the user-initiated right-click "Refresh Artwork" path.
     let mut app = test_app();
     seed_all(&mut app);
-    // Prime the album_art LRU so any album_id would otherwise count as
-    // "in UI" and trip the artwork refresh.
+    // Prime the album_art LRU so any album_id is "in UI" — historically
+    // this gated the artwork refresh; today it should not change behavior.
     app.artwork.album_art.put(
         "a0".to_string(),
         iced::widget::image::Handle::from_bytes(vec![]),
     );
 
-    let _ = app.handle_library_changed(wildcard_change());
+    let _ = app.handle_library_changed(change_with(&["a0"], &[], &[], &[], &[]));
 
     let updated_artwork_toast = app
         .toast
@@ -263,7 +263,7 @@ fn library_refresh_wildcard_skips_artwork_refetch() {
         .find(|t| t.message.contains("Updated artwork for"));
     assert!(
         updated_artwork_toast.is_none(),
-        "wildcard SSE must not trigger artwork re-fetch (would mass-redownload)"
+        "SSE library-changed must not trigger artwork re-fetch (causes per-scrobble flicker)"
     );
 }
 
