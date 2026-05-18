@@ -1,11 +1,13 @@
 //! Config writer — updates individual values in config.toml using toml_edit
 //!
 //! Uses `toml_edit` to preserve comments, formatting, and ordering when
-//! modifying a single key. Writes atomically via temp file + rename.
-
-use std::path::Path;
+//! modifying a single key. Writes route through
+//! `nokkvi_data::utils::paths::write_atomic`, which performs an atomic
+//! temp + rename and bumps `LAST_INTERNAL_WRITE` so the config-watcher
+//! suppresses the self-inflicted reload event.
 
 use anyhow::{Context, Result};
+use nokkvi_data::utils::paths::write_atomic;
 use toml_edit::{DocumentMut, Item, Value};
 use tracing::debug;
 
@@ -290,28 +292,6 @@ fn setting_value_to_toml(value: &SettingValue) -> Item {
         // Hotkeys and ToggleSet are stored in redb, not TOML — these branches should never be reached
         SettingValue::Hotkey(_) | SettingValue::ToggleSet(_) => Item::None,
     }
-}
-
-static TEMP_WRITE_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-/// Write content to a file atomically using temp file + rename.
-fn write_atomic(path: &Path, content: &str) -> Result<()> {
-    let id = TEMP_WRITE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let temp_name = format!(
-        "{}.{}.tmp",
-        path.file_name().unwrap_or_default().to_string_lossy(),
-        id
-    );
-    let temp_path = path.with_file_name(temp_name);
-
-    std::fs::write(&temp_path, content)
-        .with_context(|| format!("Failed to write temp file: {}", temp_path.display()))?;
-
-    nokkvi_data::utils::paths::suppress_config_reload(|| std::fs::rename(&temp_path, path))
-        .with_context(|| format!("Failed to rename temp file to: {}", path.display()))?;
-
-    debug!(" [CONFIG WRITER] Atomic write to {}", path.display());
-    Ok(())
 }
 
 /// Reset all `[visualizer]` settings to defaults while preserving user color
@@ -876,33 +856,5 @@ mod tests {
             result.is_err(),
             "Corrupted TOML string should return an error"
         );
-    }
-
-    #[test]
-    fn test_atomic_write_collision() {
-        // We write atomic quickly from multiple threads to the same path
-        let temp_dir = std::env::temp_dir().join("nokkvi_test_atomic_collision");
-        let _ = std::fs::create_dir_all(&temp_dir);
-        let path = temp_dir.join("config.toml");
-
-        let mut handles = vec![];
-        for i in 0..20 {
-            let p = path.clone();
-            handles.push(std::thread::spawn(move || {
-                let content = format!("thread_val = {i}\n");
-                let _ = super::write_atomic(&p, &content);
-            }));
-        }
-
-        for h in handles {
-            let _ = h.join();
-        }
-
-        let content = std::fs::read_to_string(&path).expect("Final file must exist");
-        assert!(
-            content.contains("thread_val = "),
-            "File must not be corrupted or deleted"
-        );
-        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

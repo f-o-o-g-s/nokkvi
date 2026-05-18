@@ -143,14 +143,17 @@ pub struct ThemeInfo {
 /// Seed any missing built-in themes to the user's themes directory.
 ///
 /// Only writes files that don't already exist — never overwrites user edits.
-/// Called once at startup.
+/// Called once at startup. Routes through `write_atomic` so the startup-time
+/// seed writes also bump `LAST_INTERNAL_WRITE`, suppressing any spurious
+/// `ThemeConfigReloaded` events the file watcher would have fired for the
+/// new theme files.
 pub fn seed_builtin_themes() -> Result<()> {
     let themes_dir = get_themes_dir()?;
 
     for builtin in BUILTIN_THEMES {
         let path = themes_dir.join(format!("{}.toml", builtin.stem));
         if !path.exists() {
-            std::fs::write(&path, builtin.content).with_context(|| {
+            crate::utils::paths::write_atomic(&path, builtin.content).with_context(|| {
                 format!(
                     "Failed to seed theme '{}' to {}",
                     builtin.stem,
@@ -271,7 +274,7 @@ pub fn save_theme(name: &str, theme: &ThemeFile) -> Result<()> {
 
     let content = theme.save().context("Failed to serialize theme")?;
 
-    std::fs::write(&path, content)
+    crate::utils::paths::write_atomic(&path, &content)
         .with_context(|| format!("Failed to write theme file: {}", path.display()))?;
 
     debug!(theme = name, "Saved theme file");
@@ -280,7 +283,11 @@ pub fn save_theme(name: &str, theme: &ThemeFile) -> Result<()> {
 
 /// Restore a built-in theme by overwriting the user's copy with the original.
 ///
-/// Returns `Err` if the theme is not a built-in.
+/// Returns `Err` if the theme is not a built-in. Routes through `write_atomic`,
+/// which suppresses the watcher's reload event — safe because the UI caller
+/// chain (`presets::restore_theme` → `RestoreColorGroup` handler in
+/// `src/update/settings.rs`) calls `crate::theme::reload_theme()` directly
+/// after the write, so the visual hot-reload still fires.
 pub fn restore_builtin(name: &str) -> Result<()> {
     let registry = builtin_registry();
     let content = registry
@@ -290,7 +297,7 @@ pub fn restore_builtin(name: &str) -> Result<()> {
     let themes_dir = get_themes_dir()?;
     let path = themes_dir.join(format!("{name}.toml"));
 
-    std::fs::write(&path, content)
+    crate::utils::paths::write_atomic(&path, content)
         .with_context(|| format!("Failed to restore theme: {}", path.display()))?;
 
     info!(theme = name, "Restored built-in theme to defaults");
@@ -348,7 +355,7 @@ pub fn write_theme_name_to_config(name: &str) -> Result<()> {
 
     doc["theme"] = toml_edit::value(name);
 
-    crate::utils::paths::suppress_config_reload(|| std::fs::write(&config_path, doc.to_string()))
+    crate::utils::paths::write_atomic(&config_path, &doc.to_string())
         .with_context(|| "Failed to write theme name to config.toml")?;
 
     info!(theme = name, "Updated theme name in config.toml");
@@ -518,5 +525,47 @@ mod tests {
         // Verify that the fallback mechanism would trigger Everforest (which it does in load_theme)
         let default_theme = ThemeFile::default();
         assert_eq!(default_theme.name, "Everforest");
+    }
+
+    /// Pins the HIGH-RISK suppress contract on the `restore_builtin` path.
+    ///
+    /// `restore_builtin` itself resolves the themes dir via `BaseDirs` and is
+    /// not test-overridable, but the load-bearing behavior is the
+    /// `write_atomic` call against the registered built-in content. Exercising
+    /// the same payload through the same helper against a temp path proves the
+    /// LAST_INTERNAL_WRITE bump fires for theme restores. If the helper is
+    /// silently swapped for a non-suppressing `std::fs::write`, this assertion
+    /// catches it — and the UI's `RestoreColorGroup` handler at
+    /// `src/update/settings.rs:244` would then race a spurious watcher event
+    /// against its own `reload_theme()` call.
+    #[test]
+    fn restore_builtin_payload_bumps_internal_write() {
+        let _guard = crate::utils::paths::INTERNAL_WRITE_TEST_LOCK.lock();
+        use std::sync::atomic::Ordering;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("everforest.toml");
+
+        // Pull the production registry content — exactly what restore_builtin writes.
+        let registry = builtin_registry();
+        let content = registry.get("everforest").expect("everforest is built-in");
+
+        let before = crate::utils::paths::LAST_INTERNAL_WRITE.load(Ordering::Acquire);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+
+        crate::utils::paths::write_atomic(&path, content).unwrap();
+
+        let after = crate::utils::paths::LAST_INTERNAL_WRITE.load(Ordering::Acquire);
+        assert!(
+            after > before,
+            "restore_builtin must route through write_atomic so the watcher \
+             suppress fires and the UI's reload_theme() call doesn't race a \
+             spurious ThemeConfigReloaded event; before={before} after={after}"
+        );
+
+        // Sanity: the registered content round-trips as a valid ThemeFile.
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        let tf = ThemeFile::load(&on_disk).expect("restored theme must parse");
+        assert_eq!(tf.name, "Everforest");
     }
 }

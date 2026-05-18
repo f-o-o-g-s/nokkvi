@@ -15,10 +15,10 @@
 //! cache directory.
 
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         OnceLock,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -54,6 +54,48 @@ pub fn suppress_config_reload<T>(f: impl FnOnce() -> T) -> T {
         LAST_INTERNAL_WRITE.store(now.as_millis() as u64, Ordering::Release);
     }
     result
+}
+
+/// Monotonic counter used to build unique temp-file names for `write_atomic`.
+/// A fixed temp suffix (e.g. `"config.toml.tmp"`) would race when two writers
+/// land on the same path concurrently — the counter eliminates collisions
+/// without forcing a global write lock.
+static TEMP_WRITE_ID: AtomicUsize = AtomicUsize::new(0);
+
+/// Serializes any test that observes / mutates the global `LAST_INTERNAL_WRITE`
+/// atomic. Lives at module scope (not inside `mod tests`) so behavioral tests
+/// in sibling modules (`credentials`, `services::theme_loader`) can take the
+/// same lock and avoid racing each other's bump assertions under parallel
+/// `cargo test`. `parking_lot::Mutex` is used so a test panic doesn't poison
+/// the lock and cascade-fail the group — same precedent as
+/// `src/widgets/boat_tests.rs::THEME_MUTATION_LOCK`.
+#[cfg(test)]
+pub(crate) static INTERNAL_WRITE_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+/// Atomically write `content` to `path`, suppressing the config-watcher's
+/// feedback event. Uses a per-write counter-suffixed temp name to avoid
+/// collisions under concurrent writers.
+///
+/// All production writes to `~/.config/nokkvi/` must route through this
+/// helper so that `LAST_INTERNAL_WRITE` is reliably bumped — bypassing it
+/// re-introduces the spurious-reload class the helper exists to close.
+pub fn write_atomic(path: &Path, content: &str) -> Result<()> {
+    let id = TEMP_WRITE_ID.fetch_add(1, Ordering::Relaxed);
+    let temp_name = format!(
+        "{}.{}.tmp",
+        path.file_name().unwrap_or_default().to_string_lossy(),
+        id
+    );
+    let temp_path = path.with_file_name(temp_name);
+
+    std::fs::write(&temp_path, content)
+        .with_context(|| format!("Failed to write temp file: {}", temp_path.display()))?;
+
+    suppress_config_reload(|| std::fs::rename(&temp_path, path))
+        .with_context(|| format!("Failed to rename temp file to: {}", path.display()))?;
+
+    tracing::debug!(" [ATOMIC WRITE] Atomic write to {}", path.display());
+    Ok(())
 }
 
 /// Get the configuration directory (`~/.config/nokkvi`).
@@ -271,5 +313,119 @@ mod tests {
 
         let log_path = get_log_path().unwrap();
         assert!(log_path.starts_with(&state_dir));
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    //  write_atomic — the consolidated config-write helper
+    // ══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_write_atomic_happy_path() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        write_atomic(&path, "key = \"value\"\n").unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(content, "key = \"value\"\n");
+
+        // No leftover *.tmp files in the directory
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .is_some_and(|s| s == "tmp")
+            })
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "expected no leftover .tmp files, got: {leftovers:?}"
+        );
+    }
+
+    #[test]
+    fn test_write_atomic_bumps_last_internal_write() {
+        let _guard = super::INTERNAL_WRITE_TEST_LOCK.lock();
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+
+        let before = LAST_INTERNAL_WRITE.load(Ordering::Acquire);
+        // Sleep one ms so the post-write timestamp is guaranteed to be > before
+        // even on systems with coarse-grained millisecond clocks.
+        std::thread::sleep(std::time::Duration::from_millis(2));
+
+        write_atomic(&path, "k = 1\n").unwrap();
+
+        let after = LAST_INTERNAL_WRITE.load(Ordering::Acquire);
+        assert!(
+            after > before,
+            "LAST_INTERNAL_WRITE must advance after write_atomic; before={before} after={after}"
+        );
+    }
+
+    #[test]
+    fn test_write_atomic_no_temp_collision() {
+        // 20 threads write concurrently to the same path. The counter-suffixed
+        // temp name must prevent collisions; the final file must hold one of
+        // the writes' content; no temp files may be left behind.
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+
+        let mut handles = vec![];
+        for i in 0..20 {
+            let p = path.clone();
+            handles.push(std::thread::spawn(move || {
+                let content = format!("thread_val = {i}\n");
+                let _ = write_atomic(&p, &content);
+            }));
+        }
+
+        for h in handles {
+            let _ = h.join();
+        }
+
+        let content = std::fs::read_to_string(&path).expect("final file must exist");
+        assert!(
+            content.starts_with("thread_val = "),
+            "file must hold one writer's content, got: {content:?}"
+        );
+
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .is_some_and(|s| s == "tmp")
+            })
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "expected no leftover .tmp files after concurrent writes, got: {leftovers:?}"
+        );
+    }
+
+    #[test]
+    fn test_write_atomic_overwrites_existing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+
+        write_atomic(&path, "first = true\n").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "first = true\n",
+            "first write must land"
+        );
+
+        write_atomic(&path, "second = true\n").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "second = true\n",
+            "second write must replace first via rename"
+        );
     }
 }

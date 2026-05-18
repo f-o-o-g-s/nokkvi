@@ -112,8 +112,9 @@ pub fn write_toml_views(views: &TomlViewPreferences) -> Result<()> {
 
 /// Replace a single top-level section in config.toml using `toml_edit`.
 ///
-/// Uses the same atomic write (temp file → rename) pattern as `config_writer.rs`.
-/// Preserves comments, formatting, and ordering in all other sections.
+/// Routes through the shared `write_atomic` helper for the temp + rename and
+/// watcher-suppress contract. Preserves comments, formatting, and ordering
+/// in all other sections.
 fn write_section(section_name: &str, value: &toml::Value) -> Result<()> {
     use toml_edit::{DocumentMut, Item};
 
@@ -145,14 +146,7 @@ fn write_section(section_name: &str, value: &toml::Value) -> Result<()> {
 
     debug!(" [TOML I/O] Updated [{section_name}] in config.toml");
 
-    // Write atomically: temp file → rename
-    let temp_path = config_path.with_extension("toml.tmp");
-    std::fs::write(&temp_path, doc.to_string())
-        .with_context(|| format!("Failed to write temp file: {}", temp_path.display()))?;
-    crate::utils::paths::suppress_config_reload(|| std::fs::rename(&temp_path, &config_path))
-        .with_context(|| format!("Failed to rename temp file to: {}", config_path.display()))?;
-
-    Ok(())
+    crate::utils::paths::write_atomic(&config_path, &doc.to_string())
 }
 
 pub fn write_all_toml_sections(
@@ -196,13 +190,7 @@ pub fn write_all_toml_sections(
 
     debug!(" [TOML I/O] Wrote [settings], [hotkeys], [views] to config.toml");
 
-    let temp_path = config_path.with_extension("toml.tmp");
-    std::fs::write(&temp_path, doc.to_string())
-        .with_context(|| format!("Failed to write temp file: {}", temp_path.display()))?;
-    crate::utils::paths::suppress_config_reload(|| std::fs::rename(&temp_path, &config_path))
-        .with_context(|| format!("Failed to rename temp file to: {}", config_path.display()))?;
-
-    Ok(())
+    crate::utils::paths::write_atomic(&config_path, &doc.to_string())
 }
 
 #[cfg(test)]

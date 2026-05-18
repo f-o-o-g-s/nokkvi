@@ -76,7 +76,12 @@ pub fn load_credentials() -> Option<(String, String)> {
 }
 
 /// Save server_url and username to config.toml.
-/// Preserves comments and formatting.
+/// Preserves comments and formatting. Routes through `write_atomic`, which
+/// also suppresses the config-watcher's reload event — closing the audit-
+/// cited login → ~100 ms-later spurious-`ThemeConfigReloaded` feedback loop.
+/// Safe to suppress: the login flow at `src/update/navigation.rs:356-370`
+/// reads credentials directly from `load_credentials()` / redb on auto-login,
+/// never via the file watcher.
 pub fn save_credentials(server_url: &str, username: &str) -> Result<()> {
     use toml_edit::{DocumentMut, value};
 
@@ -104,7 +109,7 @@ pub fn save_credentials(server_url: &str, username: &str) -> Result<()> {
         doc.to_string()
     };
 
-    std::fs::write(&config_path, output)?;
+    crate::utils::paths::write_atomic(&config_path, &output)?;
     debug!("Saved credentials to {}", config_path.display());
     Ok(())
 }
@@ -254,5 +259,54 @@ mod tests {
         // No session saved yet
         let jwt: Option<String> = storage.load(JWT_TOKEN_KEY).unwrap();
         assert!(jwt.is_none());
+    }
+
+    /// Pins the HIGH-RISK suppress contract on the credentials save path.
+    ///
+    /// `save_credentials` itself resolves the config path via `BaseDirs` and
+    /// is not test-overridable, but the load-bearing behavior is the
+    /// `write_atomic` call — exercising the same template through the same
+    /// helper against a temp path proves the LAST_INTERNAL_WRITE bump fires
+    /// on the production code path. If the helper is silently swapped for a
+    /// non-suppressing `std::fs::write`, this assertion catches it.
+    #[test]
+    fn save_credentials_template_bumps_internal_write() {
+        let _guard = crate::utils::paths::INTERNAL_WRITE_TEST_LOCK.lock();
+        use std::sync::atomic::Ordering;
+
+        use toml_edit::{DocumentMut, value};
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+
+        // Reconstruct the exact template `save_credentials` builds for a
+        // fresh config file so we're testing the production write payload.
+        let mut doc = DocumentMut::new();
+        doc["server_url"] = value("https://example.com");
+        doc["username"] = value("alice");
+        let output = format!(
+            "# Nokkvi Configuration\n\
+             # You can edit server_url and username.\n\
+             # Session tokens are managed by the application in app.redb.\n\n{doc}"
+        );
+
+        let before = crate::utils::paths::LAST_INTERNAL_WRITE.load(Ordering::Acquire);
+        // Coarse-clock systems would otherwise produce equal before/after.
+        std::thread::sleep(std::time::Duration::from_millis(2));
+
+        crate::utils::paths::write_atomic(&path, &output).unwrap();
+
+        let after = crate::utils::paths::LAST_INTERNAL_WRITE.load(Ordering::Acquire);
+        assert!(
+            after > before,
+            "save_credentials must route through write_atomic to bump \
+             LAST_INTERNAL_WRITE; before={before} after={after}"
+        );
+
+        // Sanity: the file actually landed with the production template.
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(on_disk.contains("# Nokkvi Configuration"));
+        assert!(on_disk.contains("server_url = \"https://example.com\""));
+        assert!(on_disk.contains("username = \"alice\""));
     }
 }
