@@ -18,7 +18,7 @@ use tracing::{debug, trace};
 
 use crate::{
     Nokkvi, View,
-    app_message::{Message, RouletteMessage},
+    app_message::{Message, NavigationMessage, RouletteMessage},
     state::{DecelKeyframe, RouletteState},
 };
 
@@ -331,7 +331,7 @@ impl Nokkvi {
                 self.clear_active_playlist();
                 self.shell_action_task(
                     move |shell| async move { shell.play_genre_random(&name).await },
-                    Message::SwitchView(View::Queue),
+                    Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
                     "play random song from genre",
                 )
             }
@@ -343,7 +343,7 @@ impl Nokkvi {
                 self.clear_active_playlist();
                 self.shell_action_task(
                     move |shell| async move { shell.play_artist_random(&id).await },
-                    Message::SwitchView(View::Queue),
+                    Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
                     "play random song from artist",
                 )
             }

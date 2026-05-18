@@ -6,7 +6,7 @@ use tracing::debug;
 
 use crate::{
     Nokkvi, View,
-    app_message::{ArtworkMessage, FindMessage, Message},
+    app_message::{ArtworkMessage, FindMessage, Message, NavigationMessage},
     update::{ArtistsTarget, components::PaginatedFetch},
     views::{self, ArtistsAction, ArtistsMessage, HasCommonAction},
     widgets,
@@ -370,7 +370,7 @@ impl Nokkvi {
                 }
                 return self.shell_action_task(
                     move |shell| async move { shell.play_album(&album_id).await },
-                    Message::SwitchView(View::Queue),
+                    Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
                     "play album",
                 );
             }

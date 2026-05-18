@@ -12,7 +12,9 @@ use tracing::{debug, error, trace};
 use super::components::prefetch_album_artwork_tasks;
 use crate::{
     Nokkvi, View,
-    app_message::{ArtworkMessage, FindMessage, Message, PlaybackMessage, SplitViewMessage},
+    app_message::{
+        ArtworkMessage, FindMessage, Message, NavigationMessage, PlaybackMessage, SplitViewMessage,
+    },
     views::{self, QueueAction, QueueMessage},
     widgets::SlotListPageMessage,
 };
@@ -548,16 +550,35 @@ impl Nokkvi {
                 )));
             }
             QueueAction::NavigateAndFilter(view, filter) => {
-                return Task::done(Message::NavigateAndFilter(view, filter));
+                return Task::done(Message::Navigation(NavigationMessage::NavigateAndFilter {
+                    view,
+                    filter,
+                    for_browsing_pane: false,
+                }));
             }
             QueueAction::NavigateAndExpandAlbum(album_id) => {
-                return Task::done(Message::NavigateAndExpandAlbum { album_id });
+                return Task::done(Message::Navigation(NavigationMessage::Expand(
+                    crate::state::PendingExpand::Album {
+                        album_id,
+                        for_browsing_pane: false,
+                    },
+                )));
             }
             QueueAction::NavigateAndExpandArtist(artist_id) => {
-                return Task::done(Message::NavigateAndExpandArtist { artist_id });
+                return Task::done(Message::Navigation(NavigationMessage::Expand(
+                    crate::state::PendingExpand::Artist {
+                        artist_id,
+                        for_browsing_pane: false,
+                    },
+                )));
             }
             QueueAction::NavigateAndExpandGenre(genre_id) => {
-                return Task::done(Message::NavigateAndExpandGenre { genre_id });
+                return Task::done(Message::Navigation(NavigationMessage::Expand(
+                    crate::state::PendingExpand::Genre {
+                        genre_id,
+                        for_browsing_pane: false,
+                    },
+                )));
             }
             QueueAction::ColumnVisibilityChanged(col, value) => {
                 return self.persist_column_visibility(col, value);

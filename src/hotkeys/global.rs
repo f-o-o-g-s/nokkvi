@@ -8,7 +8,9 @@ use nokkvi_data::types::hotkey_config::{HotkeyAction, HotkeyConfig, KeyCode};
 
 use crate::{
     Message, View,
-    app_message::{HotkeyMessage, PlaybackMessage, SlotListMessage, SplitViewMessage},
+    app_message::{
+        HotkeyMessage, NavigationMessage, PlaybackMessage, SlotListMessage, SplitViewMessage,
+    },
 };
 
 /// Convert an iced keyboard key to our `KeyCode` enum.
@@ -89,13 +91,27 @@ pub(crate) fn iced_key_to_keycode(key: &keyboard::Key) -> Option<KeyCode> {
 fn action_to_message(action: HotkeyAction) -> Message {
     match action {
         // Navigation
-        HotkeyAction::SwitchToQueue => Message::SwitchView(View::Queue),
-        HotkeyAction::SwitchToAlbums => Message::SwitchView(View::Albums),
-        HotkeyAction::SwitchToArtists => Message::SwitchView(View::Artists),
-        HotkeyAction::SwitchToSongs => Message::SwitchView(View::Songs),
-        HotkeyAction::SwitchToGenres => Message::SwitchView(View::Genres),
-        HotkeyAction::SwitchToPlaylists => Message::SwitchView(View::Playlists),
-        HotkeyAction::SwitchToRadios => Message::SwitchView(View::Radios),
+        HotkeyAction::SwitchToQueue => {
+            Message::Navigation(NavigationMessage::SwitchView(View::Queue))
+        }
+        HotkeyAction::SwitchToAlbums => {
+            Message::Navigation(NavigationMessage::SwitchView(View::Albums))
+        }
+        HotkeyAction::SwitchToArtists => {
+            Message::Navigation(NavigationMessage::SwitchView(View::Artists))
+        }
+        HotkeyAction::SwitchToSongs => {
+            Message::Navigation(NavigationMessage::SwitchView(View::Songs))
+        }
+        HotkeyAction::SwitchToGenres => {
+            Message::Navigation(NavigationMessage::SwitchView(View::Genres))
+        }
+        HotkeyAction::SwitchToPlaylists => {
+            Message::Navigation(NavigationMessage::SwitchView(View::Playlists))
+        }
+        HotkeyAction::SwitchToRadios => {
+            Message::Navigation(NavigationMessage::SwitchView(View::Radios))
+        }
         HotkeyAction::SwitchToSettings => Message::ToggleSettings,
         // Playback
         HotkeyAction::TogglePlay => Message::Playback(PlaybackMessage::TogglePlay),
@@ -327,14 +343,24 @@ mod tests {
         let key = keyboard::Key::Character("1".into());
         let msg = handle_hotkey(key, modifiers, &config);
         assert!(
-            matches!(msg, Some(Message::SwitchView(View::Queue))),
+            matches!(
+                msg,
+                Some(Message::Navigation(NavigationMessage::SwitchView(
+                    View::Queue
+                )))
+            ),
             "Key '1' should switch to Queue view"
         );
 
         // Key '2' → Albums
         let key = keyboard::Key::Character("2".into());
         let msg = handle_hotkey(key, modifiers, &config);
-        assert!(matches!(msg, Some(Message::SwitchView(View::Albums))));
+        assert!(matches!(
+            msg,
+            Some(Message::Navigation(NavigationMessage::SwitchView(
+                View::Albums
+            )))
+        ));
     }
 
     #[test]

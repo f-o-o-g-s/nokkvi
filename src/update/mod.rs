@@ -115,33 +115,8 @@ impl Nokkvi {
             // -----------------------------------------------------------------
             // Navigation
             // -----------------------------------------------------------------
-            Message::SwitchView(view) => self.handle_switch_view(view),
+            Message::Navigation(nav) => self.handle_navigation(nav),
             Message::LibraryChanged(change) => self.handle_library_changed(change),
-            Message::NavigateAndFilter(view, filter) => {
-                self.handle_navigate_and_filter(view, filter)
-            }
-            Message::BrowserPaneNavigateAndFilter(view, filter) => {
-                self.handle_browser_pane_navigate_and_filter(view, filter)
-            }
-            Message::NavigateAndExpandAlbum { album_id } => {
-                self.handle_navigate_and_expand_album(album_id)
-            }
-            Message::BrowserPaneNavigateAndExpandAlbum { album_id } => {
-                self.handle_browser_pane_navigate_and_expand_album(album_id)
-            }
-            Message::NavigateAndExpandArtist { artist_id } => {
-                self.handle_navigate_and_expand_artist(artist_id)
-            }
-            Message::BrowserPaneNavigateAndExpandArtist { artist_id } => {
-                self.handle_browser_pane_navigate_and_expand_artist(artist_id)
-            }
-            Message::NavigateAndExpandGenre { genre_id } => {
-                self.handle_navigate_and_expand_genre(genre_id)
-            }
-            Message::BrowserPaneNavigateAndExpandGenre { genre_id } => {
-                self.handle_browser_pane_navigate_and_expand_genre(genre_id)
-            }
-            Message::PendingExpandTimeout(pending) => self.handle_pending_expand_timeout(pending),
             Message::StripClicked => {
                 use nokkvi_data::types::player_settings::StripClickAction;
                 match crate::theme::strip_click_action() {
@@ -368,7 +343,8 @@ impl Nokkvi {
             Message::PlayerBar(msg) => self.handle_player_bar(msg),
             Message::NavBar(_msg) => {
                 // NavBar messages are handled via map() in navigation_bar()
-                // SwitchView -> Message::SwitchView, ToggleLightMode -> Message::ToggleLightMode, etc.
+                // SwitchView -> Message::Navigation(NavigationMessage::SwitchView(..)),
+                // ToggleLightMode -> Message::ToggleLightMode, etc.
                 Task::none()
             }
             Message::ToggleLightMode => self.handle_toggle_light_mode(),

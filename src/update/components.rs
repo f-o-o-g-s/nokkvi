@@ -30,7 +30,7 @@ use tracing::{debug, error, info};
 
 use crate::{
     Nokkvi, View,
-    app_message::{ArtworkMessage, FindMessage, HotkeyMessage, Message},
+    app_message::{ArtworkMessage, FindMessage, HotkeyMessage, Message, NavigationMessage},
     views,
     widgets::{SlotListPageState, SlotListView, view_header::SortMode},
 };
@@ -361,7 +361,7 @@ impl Nokkvi {
             return self.shell_task(
                 move |shell| async move { play_fn(shell, id).await },
                 move |result| match result {
-                    Ok(()) => Message::SwitchView(View::Queue),
+                    Ok(()) => Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
                     Err(e) => {
                         if let Some(msg) = session_expired_message(&e) {
                             return msg;
@@ -531,7 +531,7 @@ impl Nokkvi {
     /// ```ignore
     /// self.shell_action_task(
     ///     move |shell| async move { shell.play_genre(&name).await },
-    ///     Message::SwitchView(View::Queue),
+    ///     Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
     ///     "play genre",
     /// )
     /// ```
@@ -703,36 +703,70 @@ impl Nokkvi {
                         | crate::View::Settings => None,
                     };
                     if browse_view.is_some() {
-                        return Some(Task::done(Message::BrowserPaneNavigateAndFilter(
-                            view, filter,
+                        return Some(Task::done(Message::Navigation(
+                            NavigationMessage::NavigateAndFilter {
+                                view,
+                                filter,
+                                for_browsing_pane: true,
+                            },
                         )));
                     }
                 }
-                Some(Task::done(Message::NavigateAndFilter(view, filter)))
+                Some(Task::done(Message::Navigation(
+                    NavigationMessage::NavigateAndFilter {
+                        view,
+                        filter,
+                        for_browsing_pane: false,
+                    },
+                )))
             }
             views::CommonViewAction::NavigateAndExpandAlbum(album_id) => {
                 if self.browsing_panel.is_some() && self.current_view == crate::View::Queue {
-                    return Some(Task::done(Message::BrowserPaneNavigateAndExpandAlbum {
-                        album_id,
-                    }));
+                    return Some(Task::done(Message::Navigation(NavigationMessage::Expand(
+                        crate::state::PendingExpand::Album {
+                            album_id,
+                            for_browsing_pane: true,
+                        },
+                    ))));
                 }
-                Some(Task::done(Message::NavigateAndExpandAlbum { album_id }))
+                Some(Task::done(Message::Navigation(NavigationMessage::Expand(
+                    crate::state::PendingExpand::Album {
+                        album_id,
+                        for_browsing_pane: false,
+                    },
+                ))))
             }
             views::CommonViewAction::NavigateAndExpandArtist(artist_id) => {
                 if self.browsing_panel.is_some() && self.current_view == crate::View::Queue {
-                    return Some(Task::done(Message::BrowserPaneNavigateAndExpandArtist {
-                        artist_id,
-                    }));
+                    return Some(Task::done(Message::Navigation(NavigationMessage::Expand(
+                        crate::state::PendingExpand::Artist {
+                            artist_id,
+                            for_browsing_pane: true,
+                        },
+                    ))));
                 }
-                Some(Task::done(Message::NavigateAndExpandArtist { artist_id }))
+                Some(Task::done(Message::Navigation(NavigationMessage::Expand(
+                    crate::state::PendingExpand::Artist {
+                        artist_id,
+                        for_browsing_pane: false,
+                    },
+                ))))
             }
             views::CommonViewAction::NavigateAndExpandGenre(genre_id) => {
                 if self.browsing_panel.is_some() && self.current_view == crate::View::Queue {
-                    return Some(Task::done(Message::BrowserPaneNavigateAndExpandGenre {
-                        genre_id,
-                    }));
+                    return Some(Task::done(Message::Navigation(NavigationMessage::Expand(
+                        crate::state::PendingExpand::Genre {
+                            genre_id,
+                            for_browsing_pane: true,
+                        },
+                    ))));
                 }
-                Some(Task::done(Message::NavigateAndExpandGenre { genre_id }))
+                Some(Task::done(Message::Navigation(NavigationMessage::Expand(
+                    crate::state::PendingExpand::Genre {
+                        genre_id,
+                        for_browsing_pane: false,
+                    },
+                ))))
             }
             views::CommonViewAction::None | views::CommonViewAction::ViewSpecific => None,
         }

@@ -8,14 +8,15 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     Nokkvi, Screen, View,
-    app_message::{Message, PlaybackMessage},
+    app_message::{Message, NavigationMessage, PlaybackMessage},
     services, views, widgets,
 };
 
 // === pending-expand helpers ===
 
-/// 2s delayed task that emits a single `Message::PendingExpandTimeout` carrying
-/// the chain's `PendingExpand`. The collapsed `handle_pending_expand_timeout`
+/// 2s delayed task that emits a single
+/// `Message::Navigation(NavigationMessage::ExpandTimeout(..))` carrying the
+/// chain's `PendingExpand`. The collapsed `handle_pending_expand_timeout`
 /// verifies the variant + id still match the active target before toasting,
 /// so superseded clicks stay silent. Songs only enter the find-and-expand
 /// chain via the CenterOnPlaying (Shift+C) fallback.
@@ -24,7 +25,7 @@ pub(crate) fn pending_expand_timeout_task(pending: crate::state::PendingExpand) 
         async {
             tokio::time::sleep(Duration::from_secs(2)).await;
         },
-        move |()| Message::PendingExpandTimeout(pending.clone()),
+        move |()| Message::Navigation(NavigationMessage::ExpandTimeout(pending.clone())),
     )
 }
 
@@ -108,6 +109,61 @@ pub(crate) fn prime_expand_target(app: &mut Nokkvi, pending: crate::state::Pendi
 }
 
 impl Nokkvi {
+    /// Dispatch `NavigationMessage` variants to the per-variant handlers below.
+    ///
+    /// Cross-cutting carrier for view switches and navigate-and-filter /
+    /// navigate-and-expand chains. The 10 previously-flat `Message::*`
+    /// variants collapsed onto this one carrier; `for_browsing_pane: bool`
+    /// (on `NavigateAndFilter` directly, and inside `PendingExpand` for the
+    /// expand variants) discriminates the top-pane vs browsing-pane chain.
+    pub(crate) fn handle_navigation(&mut self, msg: NavigationMessage) -> Task<Message> {
+        use crate::state::PendingExpand;
+        match msg {
+            NavigationMessage::SwitchView(view) => self.handle_switch_view(view),
+            NavigationMessage::NavigateAndFilter {
+                view,
+                filter,
+                for_browsing_pane: false,
+            } => self.handle_navigate_and_filter(view, filter),
+            NavigationMessage::NavigateAndFilter {
+                view,
+                filter,
+                for_browsing_pane: true,
+            } => self.handle_browser_pane_navigate_and_filter(view, filter),
+            NavigationMessage::Expand(PendingExpand::Album {
+                album_id,
+                for_browsing_pane: false,
+            }) => self.handle_navigate_and_expand_album(album_id),
+            NavigationMessage::Expand(PendingExpand::Album {
+                album_id,
+                for_browsing_pane: true,
+            }) => self.handle_browser_pane_navigate_and_expand_album(album_id),
+            NavigationMessage::Expand(PendingExpand::Artist {
+                artist_id,
+                for_browsing_pane: false,
+            }) => self.handle_navigate_and_expand_artist(artist_id),
+            NavigationMessage::Expand(PendingExpand::Artist {
+                artist_id,
+                for_browsing_pane: true,
+            }) => self.handle_browser_pane_navigate_and_expand_artist(artist_id),
+            NavigationMessage::Expand(PendingExpand::Genre {
+                genre_id,
+                for_browsing_pane: false,
+            }) => self.handle_navigate_and_expand_genre(genre_id),
+            NavigationMessage::Expand(PendingExpand::Genre {
+                genre_id,
+                for_browsing_pane: true,
+            }) => self.handle_browser_pane_navigate_and_expand_genre(genre_id),
+            // Songs aren't an Expand call site today — `Expand(Song)` is a
+            // forward-compatible shape. The CenterOnPlaying flow primes Song
+            // targets via `start_center_on_playing_chain` (not Expand).
+            NavigationMessage::Expand(PendingExpand::Song { .. }) => Task::none(),
+            NavigationMessage::ExpandTimeout(pending) => {
+                self.handle_pending_expand_timeout(pending)
+            }
+        }
+    }
+
     pub(crate) fn handle_session_expired(&mut self) -> Task<Message> {
         info!(" [SESSION] Session expired (401 Unauthorized)");
         let stop_task = if let Some(ref shell) = self.app_service {

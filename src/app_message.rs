@@ -278,6 +278,40 @@ pub enum RouletteMessage {
     Cancel,
 }
 
+/// Cross-cutting navigation messages — view switches, navigate-and-filter,
+/// and navigate-and-expand chains (both top-pane and browsing-pane variants).
+/// Handled by `update/navigation.rs`.
+///
+/// The `Expand` and `ExpandTimeout` variants reuse `PendingExpand` as the
+/// carrier — it already encodes the entity kind (Album / Artist / Genre /
+/// Song) plus the `for_browsing_pane: bool` discriminator that picks between
+/// the top-pane and browsing-pane variants of each chain. Genre intentionally
+/// lacks a counterpart in `ItemKind` (see `data/src/types/item_kind.rs`),
+/// which is why `PendingExpand` is the right shared carrier here.
+#[derive(Debug, Clone)]
+pub enum NavigationMessage {
+    /// Switch the top pane to a new view.
+    SwitchView(crate::View),
+    /// Navigate to a view and populate its active filter. `for_browsing_pane`
+    /// routes the change into the browsing panel's internal tab instead of
+    /// the top pane (Queue stays put in split-view).
+    NavigateAndFilter {
+        view: crate::View,
+        filter: nokkvi_data::types::filter::LibraryFilter,
+        for_browsing_pane: bool,
+    },
+    /// Navigate to the entity's host view, clear any active search/filter, and
+    /// page through the unfiltered list until the target id appears, then
+    /// auto-expand it inline. `for_browsing_pane` on the inner `PendingExpand`
+    /// chooses between the top-pane and browsing-pane variant of the chain.
+    Expand(crate::state::PendingExpand),
+    /// Internal: 2s after a find-and-expand chain starts, this checks whether
+    /// the carried target is still pending and shows a "Finding {entity}…"
+    /// toast if so. No-op when the find resolved within the threshold.
+    /// Songs only enter the chain via the CenterOnPlaying (Shift+C) fallback.
+    ExpandTimeout(crate::state::PendingExpand),
+}
+
 /// Cross-cutting Find/Similar lookup messages — triggered from any view to
 /// query similar/top songs.
 ///
@@ -526,48 +560,8 @@ pub enum ContextMenuId {
 /// - Component Bubbling
 #[derive(Debug, Clone)]
 pub enum Message {
-    // --- Navigation ---
-    SwitchView(View),
-    /// Navigate to a view and populate its active filter
-    NavigateAndFilter(View, nokkvi_data::types::filter::LibraryFilter),
-    /// Navigate and filter exclusively targeting the browsing panel's internal tabs
-    BrowserPaneNavigateAndFilter(View, nokkvi_data::types::filter::LibraryFilter),
-    /// Navigate to the Albums view, clear any active search/filter, and page
-    /// through the unfiltered list until the target id appears, then auto-
-    /// expand it inline. Dispatched by album-text clicks in Songs/Queue.
-    NavigateAndExpandAlbum {
-        album_id: String,
-    },
-    /// Browsing-panel variant of `NavigateAndExpandAlbum` — switches the
-    /// browsing panel's tab to Albums and runs the same find chain there,
-    /// leaving the top pane (Queue) untouched in split-view.
-    BrowserPaneNavigateAndExpandAlbum {
-        album_id: String,
-    },
-    /// Artist-side mirror of `NavigateAndExpandAlbum`. Routes to the Artists
-    /// view, clears search/filter, pages through until the target id
-    /// appears, then auto-expands so the artist's albums show inline.
-    NavigateAndExpandArtist {
-        artist_id: String,
-    },
-    /// Browsing-pane variant — switches the browsing panel's tab to Artists
-    /// and runs the find chain there, leaving Queue intact in split-view.
-    BrowserPaneNavigateAndExpandArtist {
-        artist_id: String,
-    },
-    /// Genre-side mirror — navigate to Genres, find the genre, expand it.
-    NavigateAndExpandGenre {
-        genre_id: String,
-    },
-    /// Browsing-pane variant of `NavigateAndExpandGenre`.
-    BrowserPaneNavigateAndExpandGenre {
-        genre_id: String,
-    },
-    /// Internal: 2s after a find-and-expand chain starts, this checks whether
-    /// the carried target is still pending and shows a "Finding {entity}…"
-    /// toast if so. No-op when the find resolved within the threshold.
-    /// Songs only enter the chain via the CenterOnPlaying (Shift+C) fallback.
-    PendingExpandTimeout(crate::state::PendingExpand),
+    // --- Navigation (namespaced) ---
+    Navigation(NavigationMessage),
     /// Track info strip was clicked — dispatch depends on strip_click_action setting
     StripClicked,
     /// Track info strip right-click context menu action
@@ -948,5 +942,178 @@ mod tests {
             msg,
             Message::CrossPaneDrag(CrossPaneDragMessage::Cancel)
         ));
+    }
+
+    /// `NavigationMessage` sub-enum routing — the ten flat root variants
+    /// (`SwitchView` / `NavigateAndFilter` / `BrowserPaneNavigateAndFilter` /
+    /// `NavigateAndExpand{Album,Artist,Genre}` /
+    /// `BrowserPaneNavigateAndExpand{Album,Artist,Genre}` /
+    /// `PendingExpandTimeout`) collapsed onto
+    /// `Message::Navigation(NavigationMessage)`. The `Expand` and
+    /// `ExpandTimeout` variants reuse `PendingExpand` as the carrier —
+    /// `for_browsing_pane: bool` on the inner enum discriminates the
+    /// top-pane vs browsing-pane variant.
+    #[test]
+    fn navigation_message_sub_enum_routing() {
+        use nokkvi_data::types::filter::LibraryFilter;
+
+        use crate::state::PendingExpand;
+
+        // SwitchView carries the View payload.
+        let msg = Message::Navigation(NavigationMessage::SwitchView(View::Albums));
+        assert!(matches!(
+            msg,
+            Message::Navigation(NavigationMessage::SwitchView(View::Albums))
+        ));
+
+        // NavigateAndFilter (top pane).
+        let msg = Message::Navigation(NavigationMessage::NavigateAndFilter {
+            view: View::Albums,
+            filter: LibraryFilter::GenreId {
+                id: "Rock".into(),
+                name: "Rock".into(),
+            },
+            for_browsing_pane: false,
+        });
+        match msg {
+            Message::Navigation(NavigationMessage::NavigateAndFilter {
+                view,
+                filter,
+                for_browsing_pane,
+            }) => {
+                assert_eq!(view, View::Albums);
+                assert!(
+                    matches!(filter, LibraryFilter::GenreId { ref name, .. } if name == "Rock")
+                );
+                assert!(!for_browsing_pane);
+            }
+            _ => panic!("expected Message::Navigation(NavigationMessage::NavigateAndFilter)"),
+        }
+
+        // NavigateAndFilter (browsing pane) pins the `for_browsing_pane: true`
+        // discriminator that consolidates the old
+        // `BrowserPaneNavigateAndFilter` variant.
+        let msg = Message::Navigation(NavigationMessage::NavigateAndFilter {
+            view: View::Songs,
+            filter: LibraryFilter::ArtistId {
+                id: "ar-1".into(),
+                name: "Artist".into(),
+            },
+            for_browsing_pane: true,
+        });
+        match msg {
+            Message::Navigation(NavigationMessage::NavigateAndFilter {
+                for_browsing_pane: true,
+                ..
+            }) => {}
+            _ => panic!(
+                "expected Message::Navigation(NavigationMessage::NavigateAndFilter \
+                 with for_browsing_pane: true)"
+            ),
+        }
+
+        // Expand(Album, browsing-pane) — the browsing-pane discriminator now
+        // rides on `PendingExpand::Album.for_browsing_pane` rather than a
+        // separate root `BrowserPaneNavigateAndExpandAlbum` variant.
+        let msg = Message::Navigation(NavigationMessage::Expand(PendingExpand::Album {
+            album_id: "alb-9".into(),
+            for_browsing_pane: true,
+        }));
+        match msg {
+            Message::Navigation(NavigationMessage::Expand(PendingExpand::Album {
+                album_id,
+                for_browsing_pane,
+            })) => {
+                assert_eq!(album_id, "alb-9");
+                assert!(for_browsing_pane);
+            }
+            _ => panic!(
+                "expected Message::Navigation(NavigationMessage::Expand(PendingExpand::Album))"
+            ),
+        }
+
+        // Expand(Artist, top-pane).
+        let msg = Message::Navigation(NavigationMessage::Expand(PendingExpand::Artist {
+            artist_id: "ar-1".into(),
+            for_browsing_pane: false,
+        }));
+        assert!(matches!(
+            msg,
+            Message::Navigation(NavigationMessage::Expand(PendingExpand::Artist {
+                for_browsing_pane: false,
+                ..
+            }))
+        ));
+
+        // Expand(Genre, browsing-pane) — the carrier doubles for the genre
+        // path even though `ItemKind` (in `data/src/types/item_kind.rs`)
+        // intentionally lacks a Genre variant. Reusing `PendingExpand` is
+        // why the namespace doesn't need a parallel `ItemKind`-shaped enum.
+        let msg = Message::Navigation(NavigationMessage::Expand(PendingExpand::Genre {
+            genre_id: "Rock".into(),
+            for_browsing_pane: true,
+        }));
+        match msg {
+            Message::Navigation(NavigationMessage::Expand(PendingExpand::Genre {
+                genre_id,
+                for_browsing_pane,
+            })) => {
+                assert_eq!(genre_id, "Rock");
+                assert!(for_browsing_pane);
+            }
+            _ => panic!(
+                "expected Message::Navigation(NavigationMessage::Expand(PendingExpand::Genre))"
+            ),
+        }
+    }
+
+    /// `NavigationMessage::ExpandTimeout` is the renamed
+    /// `Message::PendingExpandTimeout(PendingExpand)` and routes through the
+    /// new namespaced carrier. This pins that all four `PendingExpand`
+    /// variants (Album / Artist / Genre / Song) survive the boundary —
+    /// Song lives here because `handle_pending_expand_timeout` already
+    /// encounters it via the CenterOnPlaying (Shift+C) fallback chain.
+    #[test]
+    fn navigation_message_expand_timeout_carries_pending_expand() {
+        use crate::state::PendingExpand;
+
+        // Album variant.
+        let msg = Message::Navigation(NavigationMessage::ExpandTimeout(PendingExpand::Album {
+            album_id: "alb-7".into(),
+            for_browsing_pane: false,
+        }));
+        match msg {
+            Message::Navigation(NavigationMessage::ExpandTimeout(PendingExpand::Album {
+                album_id,
+                for_browsing_pane,
+            })) => {
+                assert_eq!(album_id, "alb-7");
+                assert!(!for_browsing_pane);
+            }
+            _ => panic!(
+                "expected Message::Navigation(NavigationMessage::ExpandTimeout(\
+                 PendingExpand::Album))"
+            ),
+        }
+
+        // Song variant — only enters the chain via Shift+C, but the
+        // sub-enum carries it through the boundary unchanged.
+        let msg = Message::Navigation(NavigationMessage::ExpandTimeout(PendingExpand::Song {
+            song_id: "s-3".into(),
+            for_browsing_pane: true,
+        }));
+        match msg {
+            Message::Navigation(NavigationMessage::ExpandTimeout(PendingExpand::Song {
+                song_id,
+                for_browsing_pane,
+            })) => {
+                assert_eq!(song_id, "s-3");
+                assert!(for_browsing_pane);
+            }
+            _ => panic!(
+                "expected Message::Navigation(NavigationMessage::ExpandTimeout(\
+                 PendingExpand::Song))"
+            ),
+        }
     }
 }

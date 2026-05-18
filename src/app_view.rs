@@ -7,7 +7,11 @@ use iced::{
     widget::{Stack, column, container},
 };
 
-use crate::{Nokkvi, Screen, View, app_message::Message, views, widgets};
+use crate::{
+    Nokkvi, Screen, View,
+    app_message::{Message, NavigationMessage},
+    views, widgets,
+};
 
 // ============================================================================
 // View ⇄ NavView conversions
@@ -99,9 +103,13 @@ fn strip_context_state(
 /// side nav bar — avoids duplicating the `NavView → View` mapping.
 fn map_nav_bar_message(msg: widgets::NavBarMessage) -> Message {
     match msg {
-        widgets::NavBarMessage::SwitchView(nav_view) => Message::SwitchView(nav_view.into()),
+        widgets::NavBarMessage::SwitchView(nav_view) => {
+            Message::Navigation(NavigationMessage::SwitchView(nav_view.into()))
+        }
         widgets::NavBarMessage::ToggleLightMode => Message::ToggleLightMode,
-        widgets::NavBarMessage::OpenSettings => Message::SwitchView(View::Settings),
+        widgets::NavBarMessage::OpenSettings => {
+            Message::Navigation(NavigationMessage::SwitchView(View::Settings))
+        }
         widgets::NavBarMessage::StripClicked => Message::StripClicked,
         widgets::NavBarMessage::StripContextAction(entry) => Message::StripContextAction(entry),
         widgets::NavBarMessage::SetOpenMenu(next) => Message::SetOpenMenu(next),

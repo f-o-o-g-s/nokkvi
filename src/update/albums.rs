@@ -9,7 +9,7 @@ use tracing::{debug, error, warn};
 use super::components::{PaginatedFetch, prefetch_album_artwork_tasks};
 use crate::{
     Nokkvi, View,
-    app_message::{ArtworkMessage, FindMessage, Message},
+    app_message::{ArtworkMessage, FindMessage, Message, NavigationMessage},
     update::AlbumsTarget,
     views::{self, AlbumsAction, AlbumsMessage, HasCommonAction},
 };
@@ -495,7 +495,7 @@ impl Nokkvi {
                 return self.shell_task(
                     move |shell| async move { shell.play_batch(payload).await },
                     move |result| match result {
-                        Ok(()) => Message::SwitchView(View::Queue),
+                        Ok(()) => Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
                         Err(e) => {
                             error!(" Failed to play batch: {}", e);
                             Message::Toast(crate::app_message::ToastMessage::Push(
@@ -640,7 +640,8 @@ impl Nokkvi {
                 }
                 return self.shell_action_task(
                     move |shell| async move { shell.play_album_from_track(&album_id, track_idx).await },
-                    Message::SwitchView(View::Queue), "play album from track",
+                    Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
+                    "play album from track",
                 );
             }
 

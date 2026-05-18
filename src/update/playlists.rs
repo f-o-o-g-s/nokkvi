@@ -6,7 +6,7 @@ use tracing::{debug, info};
 
 use crate::{
     Nokkvi, View,
-    app_message::{ArtworkMessage, CollageTarget, Message, SplitViewMessage},
+    app_message::{ArtworkMessage, CollageTarget, Message, NavigationMessage, SplitViewMessage},
     update::PlaylistsTarget,
     views::{self, HasCommonAction, PlaylistsAction, PlaylistsMessage},
 };
@@ -142,7 +142,7 @@ impl Nokkvi {
                 self.persist_active_playlist_info();
                 return self.shell_action_task(
                     move |shell| async move { shell.play_playlist(&playlist_id).await },
-                    Message::SwitchView(View::Queue),
+                    Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
                     "play playlist",
                 );
             }
@@ -207,7 +207,7 @@ impl Nokkvi {
                             .play_playlist_from_track(&playlist_id, track_idx)
                             .await
                     },
-                    Message::SwitchView(View::Queue),
+                    Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
                     "play playlist from track",
                 );
             }
@@ -390,7 +390,11 @@ impl Nokkvi {
                 });
             }
             views::PlaylistsAction::NavigateAndFilter(view, filter) => {
-                return Task::done(Message::NavigateAndFilter(view, filter));
+                return Task::done(Message::Navigation(NavigationMessage::NavigateAndFilter {
+                    view,
+                    filter,
+                    for_browsing_pane: false,
+                }));
             }
             views::PlaylistsAction::OpenDefaultPlaylistPicker => {
                 return Task::done(Message::DefaultPlaylistPicker(

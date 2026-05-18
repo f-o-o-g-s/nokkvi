@@ -9,7 +9,7 @@ use tracing::{debug, error};
 use super::components::{PaginatedFetch, prefetch_song_artwork_tasks};
 use crate::{
     Nokkvi, View,
-    app_message::{ArtworkMessage, Message},
+    app_message::{ArtworkMessage, Message, NavigationMessage},
     update::SongsTarget,
     views::{self, HasCommonAction, SongsAction},
 };
@@ -203,7 +203,9 @@ impl Nokkvi {
                             let play_task = self.shell_task(
                                 move |shell| async move { shell.play_songs(vec![song], 0).await },
                                 |result| match result {
-                                    Ok(()) => Message::SwitchView(View::Queue),
+                                    Ok(()) => Message::Navigation(NavigationMessage::SwitchView(
+                                        View::Queue,
+                                    )),
                                     Err(e) => {
                                         error!(" Failed to play song: {}", e);
                                         Message::Toast(crate::app_message::ToastMessage::Push(
@@ -268,7 +270,9 @@ impl Nokkvi {
                             let play_task = self.shell_task(
                                 move |shell| async move { shell.play_songs(songs, index).await },
                                 |result| match result {
-                                    Ok(()) => Message::SwitchView(View::Queue),
+                                    Ok(()) => Message::Navigation(NavigationMessage::SwitchView(
+                                        View::Queue,
+                                    )),
                                     Err(e) => {
                                         error!(" Failed to play song: {}", e);
                                         Message::Toast(crate::app_message::ToastMessage::Push(
@@ -382,7 +386,7 @@ impl Nokkvi {
                 return self.shell_task(
                     move |shell| async move { shell.play_batch(payload).await },
                     move |result| match result {
-                        Ok(()) => Message::SwitchView(View::Queue),
+                        Ok(()) => Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
                         Err(e) => {
                             error!(" Failed to play batch: {}", e);
                             Message::Toast(crate::app_message::ToastMessage::Push(

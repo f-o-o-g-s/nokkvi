@@ -4,7 +4,7 @@ use iced::Task;
 
 use crate::{
     Nokkvi,
-    app_message::{Message, PlaybackMessage},
+    app_message::{Message, NavigationMessage, PlaybackMessage},
     widgets::PlayerBarMessage,
 };
 
@@ -56,10 +56,12 @@ impl Nokkvi {
             PlayerBarMessage::ScrollVolume(delta) => Task::done(
                 scroll_volume_to_committed_message(self.playback.volume, delta),
             ),
-            PlayerBarMessage::OpenSettings => {
-                Task::done(Message::SwitchView(crate::View::Settings))
-            }
-            PlayerBarMessage::GoToQueue => Task::done(Message::SwitchView(crate::View::Queue)),
+            PlayerBarMessage::OpenSettings => Task::done(Message::Navigation(
+                NavigationMessage::SwitchView(crate::View::Settings),
+            )),
+            PlayerBarMessage::GoToQueue => Task::done(Message::Navigation(
+                NavigationMessage::SwitchView(crate::View::Queue),
+            )),
             PlayerBarMessage::StripClicked => Task::done(Message::StripClicked),
             PlayerBarMessage::StripContextAction(entry) => {
                 Task::done(Message::StripContextAction(entry))

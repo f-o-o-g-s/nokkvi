@@ -6,7 +6,7 @@ use tracing::debug;
 
 use crate::{
     Nokkvi, View,
-    app_message::{ArtworkMessage, CollageTarget, FindMessage, Message},
+    app_message::{ArtworkMessage, CollageTarget, FindMessage, Message, NavigationMessage},
     update::GenresTarget,
     views::{self, GenresAction, GenresMessage, HasCommonAction},
 };
@@ -226,7 +226,7 @@ impl Nokkvi {
                 // PlayAll / PlaySingle: replace queue with genre
                 return self.shell_action_task(
                     move |shell| async move { shell.play_genre(&genre_name).await },
-                    Message::SwitchView(View::Queue),
+                    Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
                     "play genre",
                 );
             }
@@ -255,7 +255,7 @@ impl Nokkvi {
                 }
                 return self.shell_action_task(
                     move |shell| async move { shell.play_album(&album_id).await },
-                    Message::SwitchView(View::Queue),
+                    Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
                     "play album from genre",
                 );
             }
