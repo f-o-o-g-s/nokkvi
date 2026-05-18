@@ -182,7 +182,7 @@ fn playlist_deleted_does_not_set_active_playlist_info() {
 fn dominant_color_calculated_updates_global_snapshot() {
     let mut app = test_app();
     assert!(
-        app.artwork.album_dominant_colors_snapshot.is_empty(),
+        app.artwork.album_dominant_colors.snapshot.is_empty(),
         "dominant_color snapshot should start empty"
     );
 
@@ -194,13 +194,15 @@ fn dominant_color_calculated_updates_global_snapshot() {
 
     assert!(
         app.artwork
-            .album_dominant_colors_snapshot
+            .album_dominant_colors
+            .snapshot
             .contains_key("dummy"),
         "dominant_color snapshot should be set after DominantColorCalculated"
     );
     let stored = *app
         .artwork
-        .album_dominant_colors_snapshot
+        .album_dominant_colors
+        .snapshot
         .get("dummy")
         .unwrap();
     assert!((stored.r - 0.5).abs() < 0.01);

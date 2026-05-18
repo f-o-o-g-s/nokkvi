@@ -14,6 +14,7 @@ mod roulette;
 mod scrobble;
 mod session;
 mod similar;
+mod snapshotted_lru;
 mod toast;
 mod window;
 

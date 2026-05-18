@@ -153,7 +153,6 @@ impl Nokkvi {
     ) -> Task<Message> {
         if let Some(h) = handle {
             self.artwork.album_art.put(id, h);
-            self.artwork.refresh_album_art_snapshot();
         } else {
             warn!(" Mini artwork failed to load for album: {}", id);
         }
@@ -229,7 +228,6 @@ impl Nokkvi {
         // sharing this album_id. The old mini thumbnail stays visible until
         // RefreshComplete replaces it atomically.
         self.artwork.large_artwork.pop(&album_id);
-        self.artwork.refresh_large_artwork_snapshot();
 
         let Some(shell) = &self.app_service else {
             return Task::none();
@@ -302,11 +300,9 @@ impl Nokkvi {
         }
         if let Some(h) = thumb {
             self.artwork.album_art.put(album_id.clone(), h);
-            self.artwork.refresh_album_art_snapshot();
         }
         if let Some(h) = large {
             self.artwork.large_artwork.put(album_id, h);
-            self.artwork.refresh_large_artwork_snapshot();
         }
         if !silent {
             self.toast_success("Artwork refreshed");
@@ -325,7 +321,6 @@ impl Nokkvi {
         // This fixes the bug where rapid navigation discarded completed loads
         if let Some(h) = handle {
             self.artwork.large_artwork.put(id.clone(), h);
-            self.artwork.refresh_large_artwork_snapshot();
 
             if let Some(shell) = &self.app_service {
                 let albums_vm = shell.albums().clone();

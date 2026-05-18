@@ -365,7 +365,7 @@ impl Nokkvi {
                 }),
                 views::BrowsingView::Genres => self.library.genres.get(center_idx).map(|g| {
                     (
-                        self.artwork.genre.mini_snapshot.get(&g.id),
+                        self.artwork.genre.mini.snapshot.get(&g.id),
                         g.name.clone(),
                         format!("{} albums", g.album_count),
                         format!("{} songs", g.song_count),

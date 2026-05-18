@@ -140,7 +140,6 @@ impl Nokkvi {
     ) -> Task<Message> {
         if let Some(h) = handle {
             self.artwork.album_art.put(album_id, h);
-            self.artwork.refresh_album_art_snapshot();
         }
         Task::none()
     }

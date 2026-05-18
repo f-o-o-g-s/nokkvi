@@ -504,7 +504,7 @@ impl Nokkvi {
                 crate::widgets::default_playlist_picker::default_playlist_picker_overlay(
                     picker_state,
                     self.window.height,
-                    &self.artwork.playlist.mini_snapshot,
+                    &self.artwork.playlist.mini.snapshot,
                 );
             stack = stack.push(picker_overlay.map(Message::DefaultPlaylistPicker));
         }
@@ -680,7 +680,7 @@ impl Nokkvi {
     fn main_content(&self) -> Element<'_, Message> {
         // Borrow the pre-computed large_artwork snapshot (refreshed after each LRU mutation).
         // This avoids re-creating the HashMap on every render frame.
-        let large_artwork = &self.artwork.large_artwork_snapshot;
+        let large_artwork = &self.artwork.large_artwork.snapshot;
 
         // =====================================================================
         // Split-view layout for playlist edit mode or browsing panel toggle
@@ -716,7 +716,7 @@ impl Nokkvi {
                 column_dropdown_state(&self.open_menu, View::Queue);
             let queue_view_data = views::QueueViewData {
                 queue_songs: filtered_queue_songs,
-                album_art: &self.artwork.album_art_snapshot,
+                album_art: &self.artwork.album_art.snapshot,
                 large_artwork,
                 window_width: self.content_pane_width() * 0.55,
                 window_height: self.window.height,
@@ -806,9 +806,9 @@ impl Nokkvi {
                             column_dropdown_state(&self.open_menu, View::Albums);
                         let view_data = views::AlbumsViewData {
                             albums: &self.library.albums,
-                            album_art: &self.artwork.album_art_snapshot,
+                            album_art: &self.artwork.album_art.snapshot,
                             large_artwork,
-                            dominant_colors: &self.artwork.album_dominant_colors_snapshot,
+                            dominant_colors: &self.artwork.album_dominant_colors.snapshot,
                             window_width: self.content_pane_width() * 0.45,
                             window_height: browser_height,
                             scale_factor: self.window.scale_factor,
@@ -832,9 +832,9 @@ impl Nokkvi {
                             column_dropdown_state(&self.open_menu, View::Songs);
                         let view_data = views::SongsViewData {
                             songs: &self.library.songs,
-                            album_art: &self.artwork.album_art_snapshot,
+                            album_art: &self.artwork.album_art.snapshot,
                             large_artwork,
-                            dominant_colors: &self.artwork.album_dominant_colors_snapshot,
+                            dominant_colors: &self.artwork.album_dominant_colors.snapshot,
                             window_width: self.content_pane_width() * 0.45,
                             window_height: browser_height,
                             scale_factor: self.window.scale_factor,
@@ -854,10 +854,10 @@ impl Nokkvi {
                             column_dropdown_state(&self.open_menu, View::Artists);
                         let view_data = views::ArtistsViewData {
                             artists: &self.library.artists,
-                            artist_art: &self.artwork.album_art_snapshot,
-                            album_art: &self.artwork.album_art_snapshot,
+                            artist_art: &self.artwork.album_art.snapshot,
+                            album_art: &self.artwork.album_art.snapshot,
                             large_artwork,
-                            dominant_colors: &self.artwork.album_dominant_colors_snapshot,
+                            dominant_colors: &self.artwork.album_dominant_colors.snapshot,
                             window_width: self.content_pane_width() * 0.45,
                             window_height: browser_height,
                             scale_factor: self.window.scale_factor,
@@ -877,9 +877,9 @@ impl Nokkvi {
                             column_dropdown_state(&self.open_menu, View::Genres);
                         let view_data = views::GenresViewData {
                             genres: &self.library.genres,
-                            genre_artwork: &self.artwork.genre.mini_snapshot,
-                            genre_collage_artwork: &self.artwork.genre.collage_snapshot,
-                            album_art: &self.artwork.album_art_snapshot,
+                            genre_artwork: &self.artwork.genre.mini.snapshot,
+                            genre_collage_artwork: &self.artwork.genre.collage.snapshot,
+                            album_art: &self.artwork.album_art.snapshot,
                             window_width: self.content_pane_width() * 0.45,
                             window_height: browser_height,
                             scale_factor: self.window.scale_factor,
@@ -903,7 +903,7 @@ impl Nokkvi {
                             similar_column_dropdown_state(&self.open_menu);
                         let view_data = views::SimilarViewData {
                             songs,
-                            album_art: &self.artwork.album_art_snapshot,
+                            album_art: &self.artwork.album_art.snapshot,
                             large_artwork,
                             window_width: self.content_pane_width() * 0.45,
                             window_height: browser_height,
@@ -945,9 +945,9 @@ impl Nokkvi {
                     column_dropdown_state(&self.open_menu, View::Albums);
                 let view_data = views::AlbumsViewData {
                     albums: &self.library.albums,
-                    album_art: &self.artwork.album_art_snapshot,
+                    album_art: &self.artwork.album_art.snapshot,
                     large_artwork,
-                    dominant_colors: &self.artwork.album_dominant_colors_snapshot,
+                    dominant_colors: &self.artwork.album_dominant_colors.snapshot,
                     window_width: self.content_pane_width(),
                     window_height: self.window.height,
                     scale_factor: self.window.scale_factor,
@@ -969,7 +969,7 @@ impl Nokkvi {
                     column_dropdown_state(&self.open_menu, View::Queue);
                 let view_data = views::QueueViewData {
                     queue_songs: filtered_queue_songs,
-                    album_art: &self.artwork.album_art_snapshot,
+                    album_art: &self.artwork.album_art.snapshot,
                     large_artwork,
                     window_width: self.content_pane_width(),
                     window_height: self.window.height,
@@ -1001,10 +1001,10 @@ impl Nokkvi {
                     column_dropdown_state(&self.open_menu, View::Artists);
                 let view_data = views::ArtistsViewData {
                     artists: &self.library.artists,
-                    artist_art: &self.artwork.album_art_snapshot, // Reuse album art cache for artist images
-                    album_art: &self.artwork.album_art_snapshot,
+                    artist_art: &self.artwork.album_art.snapshot, // Reuse album art cache for artist images
+                    album_art: &self.artwork.album_art.snapshot,
                     large_artwork,
-                    dominant_colors: &self.artwork.album_dominant_colors_snapshot,
+                    dominant_colors: &self.artwork.album_dominant_colors.snapshot,
                     window_width: self.content_pane_width(),
                     window_height: self.window.height,
                     scale_factor: self.window.scale_factor,
@@ -1024,9 +1024,9 @@ impl Nokkvi {
                     column_dropdown_state(&self.open_menu, View::Songs);
                 let view_data = views::SongsViewData {
                     songs: &self.library.songs,
-                    album_art: &self.artwork.album_art_snapshot,
+                    album_art: &self.artwork.album_art.snapshot,
                     large_artwork,
-                    dominant_colors: &self.artwork.album_dominant_colors_snapshot,
+                    dominant_colors: &self.artwork.album_dominant_colors.snapshot,
                     window_width: self.content_pane_width(),
                     window_height: self.window.height,
                     scale_factor: self.window.scale_factor,
@@ -1046,9 +1046,9 @@ impl Nokkvi {
                     column_dropdown_state(&self.open_menu, View::Genres);
                 let view_data = views::GenresViewData {
                     genres: &self.library.genres,
-                    genre_artwork: &self.artwork.genre.mini_snapshot,
-                    genre_collage_artwork: &self.artwork.genre.collage_snapshot,
-                    album_art: &self.artwork.album_art_snapshot,
+                    genre_artwork: &self.artwork.genre.mini.snapshot,
+                    genre_collage_artwork: &self.artwork.genre.collage.snapshot,
+                    album_art: &self.artwork.album_art.snapshot,
                     window_width: self.content_pane_width(),
                     window_height: self.window.height,
                     scale_factor: self.window.scale_factor,
@@ -1068,8 +1068,8 @@ impl Nokkvi {
                     column_dropdown_state(&self.open_menu, View::Playlists);
                 let view_data = views::PlaylistsViewData {
                     playlists: &self.library.playlists,
-                    playlist_artwork: &self.artwork.playlist.mini_snapshot,
-                    playlist_collage_artwork: &self.artwork.playlist.collage_snapshot,
+                    playlist_artwork: &self.artwork.playlist.mini.snapshot,
+                    playlist_collage_artwork: &self.artwork.playlist.collage.snapshot,
                     window_width: self.content_pane_width(),
                     window_height: self.window.height,
                     scale_factor: self.window.scale_factor,

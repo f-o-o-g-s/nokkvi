@@ -74,7 +74,7 @@ impl Nokkvi {
     /// path — without this the artwork column stays blank until the user
     /// nudges the list.
     pub(crate) fn handle_load_genre_collage(&mut self, genre_id: String) -> Task<Message> {
-        if self.artwork.genre.collage_snapshot.contains_key(&genre_id)
+        if self.artwork.genre.collage.snapshot.contains_key(&genre_id)
             || self.artwork.genre.pending.contains(&genre_id)
         {
             return Task::none();
@@ -343,8 +343,8 @@ impl Nokkvi {
                     let ctx = CollageArtworkContext {
                         slot_list: &self.genres_page.common.slot_list,
                         pending_ids: &self.artwork.genre.pending,
-                        memory_artwork: &self.artwork.genre.mini_snapshot,
-                        memory_collage: &self.artwork.genre.collage_snapshot,
+                        memory_artwork: &self.artwork.genre.mini.snapshot,
+                        memory_collage: &self.artwork.genre.collage.snapshot,
                     };
 
                     let (pending_inserts, cache_inserts, tasks) =
@@ -378,7 +378,6 @@ impl Nokkvi {
                     // but the loop is kept for structural symmetry)
                     for (id, handle) in cache_inserts {
                         self.artwork.genre.mini.put(id, handle);
-                        self.artwork.genre.refresh_snapshot();
                     }
                     for id in pending_inserts {
                         self.artwork.genre.pending.insert(id);
@@ -402,8 +401,8 @@ impl Nokkvi {
                     let ctx = CollageArtworkContext {
                         slot_list: &self.genres_page.common.slot_list,
                         pending_ids: &self.artwork.genre.pending,
-                        memory_artwork: &self.artwork.genre.mini_snapshot,
-                        memory_collage: &self.artwork.genre.collage_snapshot,
+                        memory_artwork: &self.artwork.genre.mini.snapshot,
+                        memory_collage: &self.artwork.genre.collage.snapshot,
                     };
 
                     let (pending_inserts, task) = collage_artwork::preload_artwork(

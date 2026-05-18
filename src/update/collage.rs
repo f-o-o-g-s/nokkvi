@@ -323,7 +323,6 @@ impl Nokkvi {
         cache.pending.remove(&item_id);
         if let Some(handle) = handle_opt {
             cache.mini.put(item_id, handle);
-            cache.refresh_snapshot();
         }
         Task::none()
     }
@@ -340,17 +339,11 @@ impl Nokkvi {
         let cache = self.collage_cache_mut(target);
         cache.pending.remove(&item_id);
 
-        let mut mutated = false;
         if let Some(handle) = handle_opt {
             cache.mini.put(item_id.clone(), handle);
-            mutated = true;
         }
         if !collage_handles.is_empty() {
             cache.collage.put(item_id.clone(), collage_handles);
-            mutated = true;
-        }
-        if mutated {
-            cache.refresh_snapshot();
         }
 
         if !album_ids.is_empty() {
