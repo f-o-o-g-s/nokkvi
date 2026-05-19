@@ -682,6 +682,27 @@ fn task_status_changed_success_no_toast() {
     assert!(app.toast.toasts.is_empty());
 }
 
+#[test]
+fn task_status_changed_cancelled_no_toast() {
+    // After the body was extracted to `handle_task_status_changed`, Cancelled
+    // status must still be silent (debug-log only) — same as Completed and
+    // Running. The test directly invokes the helper to pin its contract
+    // (the central dispatcher is now a 1-line delegation).
+    let mut app = test_app();
+    let handle = nokkvi_data::services::task_manager::TaskHandle {
+        id: 7,
+        name: "CancelledTask".to_string(),
+    };
+    let status = nokkvi_data::services::task_manager::TaskStatus::Cancelled;
+
+    let _ = app.handle_task_status_changed(handle, status);
+
+    assert!(
+        app.toast.toasts.is_empty(),
+        "Cancelled status must NOT surface a user-facing toast"
+    );
+}
+
 // ============================================================================
 // Slot count resync — vertical artwork modes (update/window.rs)
 // ============================================================================

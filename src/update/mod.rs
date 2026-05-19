@@ -458,23 +458,7 @@ impl Nokkvi {
             // Task Manager Notifications
             // -----------------------------------------------------------------
             Message::TaskStatusChanged(handle, status) => {
-                use nokkvi_data::services::task_manager::TaskStatus;
-                match status {
-                    TaskStatus::Running => {
-                        // Optional: update active progress list or show a toast
-                        tracing::trace!(" [TASK] {} is running", handle.name);
-                    }
-                    TaskStatus::Completed => {
-                        tracing::debug!(" [TASK] {} completed", handle.name);
-                    }
-                    TaskStatus::Failed(e) => {
-                        self.toast_error(format!("Task failed: {} - {}", handle.name, e));
-                    }
-                    TaskStatus::Cancelled => {
-                        tracing::debug!(" [TASK] {} cancelled", handle.name);
-                    }
-                }
-                Task::none()
+                self.handle_task_status_changed(handle, status)
             }
 
             // -----------------------------------------------------------------

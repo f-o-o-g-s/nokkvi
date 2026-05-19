@@ -1140,6 +1140,38 @@ impl Nokkvi {
         }
     }
 
+    /// Handle a `TaskStatusChanged` notification from the centralized task
+    /// manager — surface failures as toasts, log lifecycle transitions for
+    /// forensics. `Running` traces, `Completed` / `Cancelled` debug, `Failed`
+    /// toasts the user. Returns `Task::none()` (no follow-up Task).
+    ///
+    /// Extracted from the inline arm in `update/mod.rs` so the central
+    /// dispatcher matches every other Message arm's one-line delegation
+    /// shape.
+    pub(crate) fn handle_task_status_changed(
+        &mut self,
+        handle: nokkvi_data::services::task_manager::TaskHandle,
+        status: nokkvi_data::services::task_manager::TaskStatus,
+    ) -> Task<Message> {
+        use nokkvi_data::services::task_manager::TaskStatus;
+        match status {
+            TaskStatus::Running => {
+                // Optional: update active progress list or show a toast
+                tracing::trace!(" [TASK] {} is running", handle.name);
+            }
+            TaskStatus::Completed => {
+                tracing::debug!(" [TASK] {} completed", handle.name);
+            }
+            TaskStatus::Failed(e) => {
+                self.toast_error(format!("Task failed: {} - {}", handle.name, e));
+            }
+            TaskStatus::Cancelled => {
+                tracing::debug!(" [TASK] {} cancelled", handle.name);
+            }
+        }
+        Task::none()
+    }
+
     /// Open the containing folder of a song file in the user's file manager.
     ///
     /// `relative_path` is the song's path as stored by Navidrome (relative to the
