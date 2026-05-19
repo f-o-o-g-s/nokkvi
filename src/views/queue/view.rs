@@ -111,8 +111,8 @@ impl QueuePage {
                 ],
                 QueueMessage::ToggleColumnVisible,
                 QueueMessage::SetOpenMenu,
-                data.column_dropdown_open,
-                data.column_dropdown_trigger_bounds,
+                data.overlay.column_dropdown_open,
+                data.overlay.column_dropdown_trigger_bounds,
             )
             .into();
 
@@ -871,7 +871,7 @@ impl QueuePage {
 
                 let cm_id = crate::app_message::ContextMenuId::QueueRow(item_idx);
                 let (cm_open, cm_position) =
-                    crate::widgets::context_menu::open_state_for(data.open_menu, &cm_id);
+                    crate::widgets::context_menu::open_state_for(data.overlay.open_menu, &cm_id);
                 let cm_id_for_msg = cm_id.clone();
                 context_menu(
                     slot_button,
@@ -1052,7 +1052,7 @@ impl QueuePage {
         let (artwork_menu_open, artwork_menu_position, on_artwork_menu_change) =
             crate::widgets::context_menu::artwork_panel_open_state(
                 crate::View::Queue,
-                data.open_menu,
+                data.overlay.open_menu,
                 QueueMessage::SetOpenMenu,
             );
         let artwork_content = Some(single_artwork_panel_with_menu(

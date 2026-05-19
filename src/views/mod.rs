@@ -511,6 +511,39 @@ macro_rules! impl_has_common_action {
 pub(crate) use impl_has_common_action;
 
 // ============================================================================
+// Shared ViewData fragments — small reusable bundles of fields that recur
+// across multiple `*ViewData<'a>` structs.
+// ============================================================================
+
+/// The three overlay-menu fields every library-view `*ViewData` carries:
+/// the column-visibility checkbox dropdown's open flag + trigger bounds, and
+/// the borrowed reference to the root `open_menu` state used by per-row and
+/// artwork-panel context menus to resolve their own open/closed status.
+///
+/// Embedding this as `pub overlay: OverlayMenuViewData<'a>` in each
+/// `*ViewData` keeps the per-view view-data structs honest about which fields
+/// are part of the shared overlay-menu plumbing vs. view-specific data, and
+/// lets construction sites in `app_view.rs` fold all three assignments into
+/// one nested-struct literal.
+///
+/// Visibility matches the surrounding `*ViewData` structs (`pub`) so the
+/// nested-field privacy lint doesn't fire even though the enclosing `views`
+/// module is `pub(crate)`.
+pub struct OverlayMenuViewData<'a> {
+    /// Whether the column-visibility checkbox dropdown is open. Driven by
+    /// `Nokkvi.open_menu` so a single root-level state enforces mutual
+    /// exclusion with other overlay menus.
+    pub column_dropdown_open: bool,
+    /// Trigger bounds captured when the dropdown was opened. The overlay
+    /// anchors below this rectangle.
+    pub column_dropdown_trigger_bounds: Option<iced::Rectangle>,
+    /// Borrowed reference to the root open-menu state, so per-row context
+    /// menus and the artwork-panel context menu can resolve their own
+    /// open/closed status.
+    pub open_menu: Option<&'a crate::app_message::OpenMenu>,
+}
+
+// ============================================================================
 // Shared closure factories — keep per-view view.rs/update.rs free of the
 // `(f * total as f32) as usize` boilerplate by composing the routing layer
 // (`{View}Message::SlotList(...)`) with the scroll-seek payload in one place.

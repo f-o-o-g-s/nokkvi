@@ -51,14 +51,9 @@ pub struct SimilarViewData<'a> {
     pub label: &'a str,
     /// Whether an API call is in flight
     pub loading: bool,
-    /// Borrowed reference to the root open-menu state, so per-row context
-    /// menus can resolve their own open/closed status.
-    pub open_menu: Option<&'a crate::app_message::OpenMenu>,
-    /// Whether the column-visibility checkbox dropdown is open (controlled
-    /// by `Nokkvi.open_menu`).
-    pub column_dropdown_open: bool,
-    /// Trigger bounds captured when the dropdown was opened.
-    pub column_dropdown_trigger_bounds: Option<iced::Rectangle>,
+    /// Shared overlay-menu plumbing (column-dropdown open/bounds + borrowed
+    /// `open_menu` reference). See `super::OverlayMenuViewData`.
+    pub overlay: super::OverlayMenuViewData<'a>,
 }
 
 /// Messages for local similar page interactions
@@ -308,8 +303,8 @@ impl SimilarPage {
                 ],
                 SimilarMessage::ToggleColumnVisible,
                 SimilarMessage::SetOpenMenu,
-                data.column_dropdown_open,
-                data.column_dropdown_trigger_bounds,
+                data.overlay.column_dropdown_open,
+                data.overlay.column_dropdown_trigger_bounds,
             )
             .into();
 
@@ -387,7 +382,7 @@ impl SimilarPage {
         let songs = data.songs;
         let song_artwork = data.album_art;
         let center_index = self.common.slot_list.get_center_item_index(songs.len());
-        let open_menu_for_rows = data.open_menu;
+        let open_menu_for_rows = data.overlay.open_menu;
         let column_visibility = self.column_visibility;
 
         // Render slot list

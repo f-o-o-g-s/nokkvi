@@ -52,8 +52,8 @@ impl GenresPage {
                 ],
                 GenresMessage::ToggleColumnVisible,
                 GenresMessage::SetOpenMenu,
-                data.column_dropdown_open,
-                data.column_dropdown_trigger_bounds,
+                data.overlay.column_dropdown_open,
+                data.overlay.column_dropdown_trigger_bounds,
             )
             .into();
 
@@ -151,7 +151,7 @@ impl GenresPage {
         let genres = data.genres; // Borrow slice to extend lifetime
         let genre_artwork = data.genre_artwork;
         let genre_collage_artwork = data.genre_collage_artwork;
-        let open_menu_for_rows = data.open_menu;
+        let open_menu_for_rows = data.overlay.open_menu;
 
         // Build flattened list (genres + injected albums when expanded)
         let flattened = self.expansion.build_flattened_list(genres, |g| &g.id);

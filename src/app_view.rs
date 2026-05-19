@@ -734,9 +734,11 @@ impl Nokkvi {
                 edit_mode_comment,
                 edit_mode_public,
                 playlist_context_info: self.active_playlist_info.clone(),
-                column_dropdown_open,
-                column_dropdown_trigger_bounds,
-                open_menu: self.open_menu.as_ref(),
+                overlay: views::OverlayMenuViewData {
+                    column_dropdown_open,
+                    column_dropdown_trigger_bounds,
+                    open_menu: self.open_menu.as_ref(),
+                },
                 show_default_playlist_chip: self.settings.queue_show_default_playlist,
                 default_playlist_name: &self.settings.default_playlist_name,
                 drop_indicator_slot: self.cross_pane_drop_indicator_slot(),
@@ -821,9 +823,11 @@ impl Nokkvi {
                             // pane is on Queue, so there is no main-pane
                             // Albums dropdown to compete with — claim the
                             // open-state directly via `View::Albums`.
-                            column_dropdown_open,
-                            column_dropdown_trigger_bounds,
-                            open_menu: self.open_menu.as_ref(),
+                            overlay: views::OverlayMenuViewData {
+                                column_dropdown_open,
+                                column_dropdown_trigger_bounds,
+                                open_menu: self.open_menu.as_ref(),
+                            },
                         };
                         self.albums_page.view(view_data).map(Message::Albums)
                     }
@@ -843,9 +847,11 @@ impl Nokkvi {
                             loading: self.library.songs.is_loading(),
                             stable_viewport: true, // Browser pane: click to highlight, not play
                             in_browsing_panel: true,
-                            column_dropdown_open,
-                            column_dropdown_trigger_bounds,
-                            open_menu: self.open_menu.as_ref(),
+                            overlay: views::OverlayMenuViewData {
+                                column_dropdown_open,
+                                column_dropdown_trigger_bounds,
+                                open_menu: self.open_menu.as_ref(),
+                            },
                         };
                         self.songs_page.view(view_data).map(Message::Songs)
                     }
@@ -866,9 +872,11 @@ impl Nokkvi {
                             loading: self.library.artists.is_loading(),
                             stable_viewport: true, // Browser pane: click to highlight, not play
                             in_browsing_panel: true,
-                            column_dropdown_open,
-                            column_dropdown_trigger_bounds,
-                            open_menu: self.open_menu.as_ref(),
+                            overlay: views::OverlayMenuViewData {
+                                column_dropdown_open,
+                                column_dropdown_trigger_bounds,
+                                open_menu: self.open_menu.as_ref(),
+                            },
                         };
                         self.artists_page.view(view_data).map(Message::Artists)
                     }
@@ -888,9 +896,11 @@ impl Nokkvi {
                             loading: self.library.genres.is_loading(),
                             stable_viewport: true, // Browser pane: click to highlight, not play
                             in_browsing_panel: true,
-                            column_dropdown_open,
-                            column_dropdown_trigger_bounds,
-                            open_menu: self.open_menu.as_ref(),
+                            overlay: views::OverlayMenuViewData {
+                                column_dropdown_open,
+                                column_dropdown_trigger_bounds,
+                                open_menu: self.open_menu.as_ref(),
+                            },
                         };
                         self.genres_page.view(view_data).map(Message::Genres)
                     }
@@ -911,9 +921,11 @@ impl Nokkvi {
                             modifiers: self.window.keyboard_modifiers,
                             label,
                             loading,
-                            open_menu: self.open_menu.as_ref(),
-                            column_dropdown_open,
-                            column_dropdown_trigger_bounds,
+                            overlay: views::OverlayMenuViewData {
+                                column_dropdown_open,
+                                column_dropdown_trigger_bounds,
+                                open_menu: self.open_menu.as_ref(),
+                            },
                         };
                         self.similar_page.view(view_data).map(Message::Similar)
                     }
@@ -956,9 +968,11 @@ impl Nokkvi {
                     loading: self.library.albums.is_loading(),
                     stable_viewport: self.settings.stable_viewport,
                     in_browsing_panel: false,
-                    column_dropdown_open,
-                    column_dropdown_trigger_bounds,
-                    open_menu: self.open_menu.as_ref(),
+                    overlay: views::OverlayMenuViewData {
+                        column_dropdown_open,
+                        column_dropdown_trigger_bounds,
+                        open_menu: self.open_menu.as_ref(),
+                    },
                 };
                 self.albums_page.view(view_data).map(Message::Albums)
             }
@@ -987,9 +1001,11 @@ impl Nokkvi {
                     edit_mode_comment: None,
                     edit_mode_public: None,
                     playlist_context_info: self.active_playlist_info.clone(),
-                    column_dropdown_open,
-                    column_dropdown_trigger_bounds,
-                    open_menu: self.open_menu.as_ref(),
+                    overlay: views::OverlayMenuViewData {
+                        column_dropdown_open,
+                        column_dropdown_trigger_bounds,
+                        open_menu: self.open_menu.as_ref(),
+                    },
                     show_default_playlist_chip: self.settings.queue_show_default_playlist,
                     default_playlist_name: &self.settings.default_playlist_name,
                     drop_indicator_slot: self.cross_pane_drop_indicator_slot(),
@@ -1013,9 +1029,11 @@ impl Nokkvi {
                     loading: self.library.artists.is_loading(),
                     stable_viewport: self.settings.stable_viewport,
                     in_browsing_panel: false,
-                    column_dropdown_open,
-                    column_dropdown_trigger_bounds,
-                    open_menu: self.open_menu.as_ref(),
+                    overlay: views::OverlayMenuViewData {
+                        column_dropdown_open,
+                        column_dropdown_trigger_bounds,
+                        open_menu: self.open_menu.as_ref(),
+                    },
                 };
                 self.artists_page.view(view_data).map(Message::Artists)
             }
@@ -1035,9 +1053,11 @@ impl Nokkvi {
                     loading: self.library.songs.is_loading(),
                     stable_viewport: self.settings.stable_viewport,
                     in_browsing_panel: false,
-                    column_dropdown_open,
-                    column_dropdown_trigger_bounds,
-                    open_menu: self.open_menu.as_ref(),
+                    overlay: views::OverlayMenuViewData {
+                        column_dropdown_open,
+                        column_dropdown_trigger_bounds,
+                        open_menu: self.open_menu.as_ref(),
+                    },
                 };
                 self.songs_page.view(view_data).map(Message::Songs)
             }
@@ -1057,9 +1077,11 @@ impl Nokkvi {
                     loading: self.library.genres.is_loading(),
                     stable_viewport: self.settings.stable_viewport,
                     in_browsing_panel: false,
-                    column_dropdown_open,
-                    column_dropdown_trigger_bounds,
-                    open_menu: self.open_menu.as_ref(),
+                    overlay: views::OverlayMenuViewData {
+                        column_dropdown_open,
+                        column_dropdown_trigger_bounds,
+                        open_menu: self.open_menu.as_ref(),
+                    },
                 };
                 self.genres_page.view(view_data).map(Message::Genres)
             }
@@ -1078,9 +1100,11 @@ impl Nokkvi {
                     loading: self.library.playlists.is_loading(),
                     stable_viewport: self.settings.stable_viewport,
                     default_playlist_name: &self.settings.default_playlist_name,
-                    column_dropdown_open,
-                    column_dropdown_trigger_bounds,
-                    open_menu: self.open_menu.as_ref(),
+                    overlay: views::OverlayMenuViewData {
+                        column_dropdown_open,
+                        column_dropdown_trigger_bounds,
+                        open_menu: self.open_menu.as_ref(),
+                    },
                 };
                 self.playlists_page.view(view_data).map(Message::Playlists)
             }

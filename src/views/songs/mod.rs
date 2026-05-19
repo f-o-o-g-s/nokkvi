@@ -76,15 +76,9 @@ pub struct SongsViewData<'a> {
     /// (split-view, right pane). Used to suppress chrome that doesn't fit
     /// the narrower pane — e.g. the "Center on Playing" header button.
     pub in_browsing_panel: bool,
-    /// Whether the column-visibility checkbox dropdown is open (controlled
-    /// by `Nokkvi.open_menu`).
-    pub column_dropdown_open: bool,
-    /// Trigger bounds captured when the dropdown was opened.
-    pub column_dropdown_trigger_bounds: Option<iced::Rectangle>,
-    /// Borrowed reference to the root open-menu state, so per-row context
-    /// menus and the artwork-panel context menu can resolve their own
-    /// open/closed status.
-    pub open_menu: Option<&'a crate::app_message::OpenMenu>,
+    /// Shared overlay-menu plumbing (column-dropdown open/bounds + borrowed
+    /// `open_menu` reference). See `super::OverlayMenuViewData`.
+    pub overlay: super::OverlayMenuViewData<'a>,
 }
 
 /// Messages for local song page interactions

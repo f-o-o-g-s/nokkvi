@@ -85,14 +85,9 @@ pub struct QueueViewData<'a> {
     pub edit_mode_public: Option<bool>,
     /// When a playlist is loaded for playback (not editing)
     pub playlist_context_info: Option<crate::state::ActivePlaylistContext>,
-    /// Whether the column-visibility checkbox dropdown is open (controlled
-    /// by `Nokkvi.open_menu`).
-    pub column_dropdown_open: bool,
-    /// Trigger bounds captured when the dropdown was opened.
-    pub column_dropdown_trigger_bounds: Option<iced::Rectangle>,
-    /// Borrowed reference to the root open-menu state, so per-row context
-    /// menus can resolve their own open/closed status.
-    pub open_menu: Option<&'a crate::app_message::OpenMenu>,
+    /// Shared overlay-menu plumbing (column-dropdown open/bounds + borrowed
+    /// `open_menu` reference). See `super::OverlayMenuViewData`.
+    pub overlay: super::OverlayMenuViewData<'a>,
     /// Whether the queue's view-header chip should render. Gated by the
     /// `queue_show_default_playlist` user setting.
     pub show_default_playlist_chip: bool,

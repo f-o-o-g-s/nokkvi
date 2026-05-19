@@ -44,8 +44,8 @@ impl SongsPage {
                 ],
                 SongsMessage::ToggleColumnVisible,
                 SongsMessage::SetOpenMenu,
-                data.column_dropdown_open,
-                data.column_dropdown_trigger_bounds,
+                data.overlay.column_dropdown_open,
+                data.overlay.column_dropdown_trigger_bounds,
             )
             .into();
 
@@ -147,7 +147,7 @@ impl SongsPage {
         let song_artwork = data.album_art;
         let current_sort_mode = self.common.current_sort_mode;
         let center_index = self.common.slot_list.get_center_item_index(songs.len());
-        let open_menu_for_rows = data.open_menu;
+        let open_menu_for_rows = data.overlay.open_menu;
 
         // Render slot list using generic component with item renderer closure
         let slot_list_content = slot_list_view_with_scroll(
@@ -566,7 +566,7 @@ impl SongsPage {
         let (artwork_menu_open, artwork_menu_position, on_artwork_menu_change) =
             crate::widgets::context_menu::artwork_panel_open_state(
                 crate::View::Songs,
-                data.open_menu,
+                data.overlay.open_menu,
                 SongsMessage::SetOpenMenu,
             );
         let artwork_content = Some(single_artwork_panel_with_pill(

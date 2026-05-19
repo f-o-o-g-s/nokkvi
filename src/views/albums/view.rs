@@ -54,8 +54,8 @@ impl AlbumsPage {
                 ],
                 AlbumsMessage::ToggleColumnVisible,
                 AlbumsMessage::SetOpenMenu,
-                data.column_dropdown_open,
-                data.column_dropdown_trigger_bounds,
+                data.overlay.column_dropdown_open,
+                data.overlay.column_dropdown_trigger_bounds,
             )
             .into();
 
@@ -183,7 +183,7 @@ impl AlbumsPage {
                         album_art,
                         current_sort_mode,
                         data.stable_viewport,
-                        data.open_menu,
+                        data.overlay.open_menu,
                     );
                     crate::widgets::slot_list::wrap_with_select_column(
                         select_header_visible,
@@ -206,7 +206,7 @@ impl AlbumsPage {
                         &ctx,
                         &sub_index_label,
                         data.stable_viewport,
-                        data.open_menu,
+                        data.overlay.open_menu,
                     );
                     crate::widgets::slot_list::wrap_with_select_column(
                         select_header_visible,
@@ -341,7 +341,7 @@ impl AlbumsPage {
         let (artwork_menu_open, artwork_menu_position, on_artwork_menu_change) =
             crate::widgets::context_menu::artwork_panel_open_state(
                 crate::View::Albums,
-                data.open_menu,
+                data.overlay.open_menu,
                 AlbumsMessage::SetOpenMenu,
             );
         let artwork_content = Some(single_artwork_panel_with_pill(

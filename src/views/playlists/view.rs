@@ -143,8 +143,8 @@ impl PlaylistsPage {
                 ],
                 PlaylistsMessage::ToggleColumnVisible,
                 PlaylistsMessage::SetOpenMenu,
-                data.column_dropdown_open,
-                data.column_dropdown_trigger_bounds,
+                data.overlay.column_dropdown_open,
+                data.overlay.column_dropdown_trigger_bounds,
             )
             .into();
 
@@ -239,7 +239,7 @@ impl PlaylistsPage {
         let playlists = data.playlists; // Borrow slice to extend lifetime
         let playlist_artwork = data.playlist_artwork;
         let playlist_collage_artwork = data.playlist_collage_artwork;
-        let open_menu_for_rows = data.open_menu;
+        let open_menu_for_rows = data.overlay.open_menu;
 
         // Build flattened list (playlists + injected tracks when expanded)
         let flattened = self.expansion.build_flattened_list(playlists, |p| &p.id);
