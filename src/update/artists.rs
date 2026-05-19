@@ -498,10 +498,7 @@ impl Nokkvi {
                 // here — `SlotListScrollSeek` returns `None` and lets the
                 // 150 ms `SeekSettled` debounce synthesise a `SetOffset`
                 // that lands in this arm exactly once per drag.
-                let mut batch: Vec<Task<Message>> = vec![
-                    cmd.map(Message::Artists),
-                    self.prefetch_artist_mini_artwork_tasks(),
-                ];
+                let mut batch: Vec<Task<Message>> = vec![cmd.map(Message::Artists)];
 
                 let total = self.library.artists.len();
                 if total > 0
@@ -516,15 +513,11 @@ impl Nokkvi {
                     batch.push(self.handle_load_artist_large_artwork(id));
                 }
 
-                let page_size = self.settings.library_page_size.to_usize();
-                if !self.library.artists.is_empty()
-                    && let Some((offset, _)) = self.library.artists.needs_fetch(
-                        self.artists_page.common.slot_list.viewport_offset,
-                        page_size,
-                    )
-                {
-                    batch.push(self.handle_artists_load_page(offset));
-                }
+                // Prefetch viewport mini artwork + chain a page-load if
+                // scrolling near the loaded edge.
+                batch.extend(self.prefetch_and_maybe_load_next_page::<ArtistsTarget>(
+                    Self::handle_artists_load_page,
+                ));
 
                 return Task::batch(batch);
             }

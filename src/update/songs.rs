@@ -1,12 +1,9 @@
 //! Song data loading and component message handlers
 
-use std::collections::HashSet;
-
 use iced::{Task, widget::image};
 use nokkvi_data::{backend::songs::SongUIViewData, types::ItemKind};
 use tracing::{debug, error};
 
-use super::components::prefetch_song_artwork_tasks;
 use crate::{
     Nokkvi, View,
     app_message::{ArtworkMessage, Message, NavigationMessage},
@@ -328,29 +325,11 @@ impl Nokkvi {
                 // so loading_large_artwork is set in the same tick as the action.
                 let mut tasks = vec![self.handle_load_large_artwork(album_id)];
 
-                // Prefetch mini artwork for visible viewport using canonical helper
-                if let Some(shell) = &self.app_service {
-                    let cached: HashSet<&String> =
-                        self.artwork.album_art.iter().map(|(k, _)| k).collect();
-                    let prefetch_tasks = prefetch_song_artwork_tasks(
-                        &self.songs_page.common.slot_list,
-                        &self.library.songs,
-                        &cached,
-                        shell.albums().clone(),
-                        |s| s.album_id.as_ref(),
-                    );
-                    tasks.extend(prefetch_tasks);
-                }
-
-                // Check if we need to fetch more pages while scrolling
-                let page_size = self.settings.library_page_size.to_usize();
-                if let Some((offset, _)) = self
-                    .library
-                    .songs
-                    .needs_fetch(self.songs_page.common.slot_list.viewport_offset, page_size)
-                {
-                    tasks.push(self.handle_songs_load_page(offset));
-                }
+                // Prefetch viewport mini artwork + chain a page-load if
+                // scrolling near the loaded edge.
+                tasks.extend(self.prefetch_and_maybe_load_next_page::<SongsTarget>(
+                    Self::handle_songs_load_page,
+                ));
 
                 return Task::batch(tasks);
             }

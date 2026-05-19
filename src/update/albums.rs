@@ -1,12 +1,9 @@
 //! Album data loading and component message handlers
 
-use std::collections::HashSet;
-
 use iced::{Task, widget::image};
 use nokkvi_data::{backend::albums::AlbumUIViewData, types::ItemKind};
 use tracing::warn;
 
-use super::components::prefetch_album_artwork_tasks;
 use crate::{
     Nokkvi, View,
     app_message::{ArtworkMessage, FindMessage, Message, NavigationMessage},
@@ -468,7 +465,8 @@ impl Nokkvi {
                 if let Ok(index) = album_id_str.parse::<usize>() {
                     // Resolve the actual album ID using the expansion state and
                     // the passed index. Drop the borrow before calling &mut self
-                    // methods below.
+                    // methods below. Albums uses expansion-aware lookup; the
+                    // other paged views (Artists, Songs) use direct lookups.
                     let resolved_album_id = self
                         .albums_page
                         .expansion
@@ -491,29 +489,13 @@ impl Nokkvi {
                         tasks.push(self.handle_load_large_artwork(album_id));
                     }
 
-                    // Prefetch mini artwork for viewport using canonical helper
-                    if let Some(shell) = &self.app_service {
-                        let cached: HashSet<&String> =
-                            self.artwork.album_art.iter().map(|(k, _)| k).collect();
-                        let prefetch_tasks = prefetch_album_artwork_tasks(
-                            &self.albums_page.common.slot_list,
-                            &self.library.albums,
-                            &cached,
-                            shell.albums().clone(),
-                            |album| (album.id.clone(), album.artwork_url.clone()),
-                        );
-                        tasks.extend(prefetch_tasks);
-                    }
+                    // Prefetch viewport mini artwork + chain a page-load if
+                    // scrolling near the loaded edge.
+                    tasks.extend(self.prefetch_and_maybe_load_next_page::<AlbumsTarget>(
+                        Self::handle_albums_load_page,
+                    ));
 
                     if !tasks.is_empty() {
-                        // Check if we need to fetch more pages while scrolling
-                        let page_size = self.settings.library_page_size.to_usize();
-                        if let Some((offset, _)) = self.library.albums.needs_fetch(
-                            self.albums_page.common.slot_list.viewport_offset,
-                            page_size,
-                        ) {
-                            tasks.push(self.handle_albums_load_page(offset));
-                        }
                         return Task::batch(tasks);
                     }
                 }

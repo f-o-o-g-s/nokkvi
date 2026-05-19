@@ -566,6 +566,36 @@ impl Nokkvi {
         self.shell_task(move |shell| fetch(shell, params), msg_ctor)
     }
 
+    /// Shared "prefetch viewport mini artwork + chain a page-load if scrolling
+    /// near the loaded edge" tail used by every paged view's
+    /// `LoadLargeArtwork` action arm. Returns the batched tasks ready to be
+    /// concatenated with the caller's site-specific large-artwork task.
+    ///
+    /// Callers are responsible for dispatching the per-site large-artwork
+    /// task themselves (Albums uses expansion-aware id resolution, Artists
+    /// derives the center artist, Songs takes the album_id directly) and
+    /// must call this AFTER pushing that task into their `tasks` Vec.
+    ///
+    /// `T::prefetch_artwork_tasks` runs the per-entity viewport prefetch
+    /// (skipping cached ids); the `needs_fetch` chain calls each entity's
+    /// per-view `handle_X_load_page` only when the scroll has crossed the
+    /// loaded edge.
+    pub(crate) fn prefetch_and_maybe_load_next_page<T: LoaderTarget>(
+        &mut self,
+        load_page: impl FnOnce(&mut Self, usize) -> Task<Message>,
+    ) -> Vec<Task<Message>> {
+        let mut tasks: Vec<Task<Message>> = T::prefetch_artwork_tasks(self);
+
+        let page_size = self.settings.library_page_size.to_usize();
+        let viewport_offset = T::page_common(self).slot_list.viewport_offset;
+        if !T::library(self).is_empty()
+            && let Some((offset, _)) = T::library(self).needs_fetch(viewport_offset, page_size)
+        {
+            tasks.push(load_page(self, offset));
+        }
+        tasks
+    }
+
     pub(crate) fn handle_loaded_with<T: LoaderTarget>(
         &mut self,
         result: Result<Vec<T::Item>, String>,

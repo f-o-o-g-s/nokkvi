@@ -156,3 +156,80 @@ fn load_paged_songs_sets_loading_before_dispatch() {
          shared load_paged body owns this invariant for every paged entity"
     );
 }
+
+// ============================================================================
+// prefetch_and_maybe_load_next_page (loader_target.rs)
+// ============================================================================
+//
+// The shared tail used by every paged view's LoadLargeArtwork action: prefetch
+// the viewport's mini artwork and chain a page-load if scrolling near the
+// loaded edge. Tests assert the load-page chain trigger (the user-observable
+// scroll-edge behavior); without `app_service` the prefetch helpers
+// short-circuit to empty Vecs, so we pin the needs_fetch chain.
+
+#[test]
+fn prefetch_and_maybe_load_next_page_chains_load_page_when_near_edge() {
+    use crate::update::AlbumsTarget;
+
+    let mut app = test_app();
+    // Buffer reports 500 loaded of 1000 total → needs_fetch will fire when
+    // viewport is near the loaded edge.
+    app.library.albums.set_first_page(albums_indexed(500), 1000);
+    app.albums_page.common.slot_list.viewport_offset = 480;
+
+    // Use a sentinel closure so we can observe whether the load_page chain
+    // fired. The `load_page` closure receives `&mut Self` + `offset`; the
+    // helper invokes it exactly when needs_fetch returns Some.
+    let mut chain_offset: Option<usize> = None;
+    let _tasks = app.prefetch_and_maybe_load_next_page::<AlbumsTarget>(|_app, offset| {
+        chain_offset = Some(offset);
+        iced::Task::none()
+    });
+
+    assert!(
+        chain_offset.is_some(),
+        "needs_fetch should have fired the load_page chain when viewport is near loaded edge"
+    );
+}
+
+#[test]
+fn prefetch_and_maybe_load_next_page_skips_load_page_when_fully_loaded() {
+    use crate::update::AlbumsTarget;
+
+    let mut app = test_app();
+    // Fully-loaded buffer: 50 of 50 total → needs_fetch always returns None.
+    seed_albums(&mut app, albums_indexed(50));
+    app.albums_page.common.slot_list.viewport_offset = 0;
+
+    let mut chain_fired = false;
+    let _tasks = app.prefetch_and_maybe_load_next_page::<AlbumsTarget>(|_app, _offset| {
+        chain_fired = true;
+        iced::Task::none()
+    });
+
+    assert!(
+        !chain_fired,
+        "fully-loaded buffer must not chain a page-load — needs_fetch returns None"
+    );
+}
+
+#[test]
+fn prefetch_and_maybe_load_next_page_skips_load_page_when_library_empty() {
+    use crate::update::SongsTarget;
+
+    let mut app = test_app();
+    // Empty library — needs_fetch can't meaningfully apply; the helper's
+    // `is_empty()` guard skips the chain entirely.
+    assert_eq!(app.library.songs.len(), 0);
+
+    let mut chain_fired = false;
+    let _tasks = app.prefetch_and_maybe_load_next_page::<SongsTarget>(|_app, _offset| {
+        chain_fired = true;
+        iced::Task::none()
+    });
+
+    assert!(
+        !chain_fired,
+        "empty library must not chain a page-load — the is_empty() guard fires first"
+    );
+}
