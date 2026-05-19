@@ -351,38 +351,31 @@ impl Nokkvi {
                         memory_collage: &self.artwork.genre.collage.snapshot,
                     };
 
-                    let (pending_inserts, cache_inserts, tasks) =
-                        collage_artwork::load_visible_artwork(
-                            &self.library.genres,
-                            &ctx,
-                            shell.auth().clone(),
-                            center_id.as_deref(),
-                            |a, b, c, d| {
-                                Message::Artwork(ArtworkMessage::LoadCollage(
-                                    CollageTarget::Genre,
-                                    a,
-                                    b,
-                                    c,
-                                    d,
-                                ))
-                            },
-                            |a, b, c, d| {
-                                Message::Artwork(ArtworkMessage::LoadCollageMini(
-                                    CollageTarget::Genre,
-                                    a,
-                                    b,
-                                    c,
-                                    d,
-                                ))
-                            },
-                        );
+                    let (pending_inserts, tasks) = collage_artwork::load_visible_artwork(
+                        &self.library.genres,
+                        &ctx,
+                        shell.auth().clone(),
+                        center_id.as_deref(),
+                        |a, b, c, d| {
+                            Message::Artwork(ArtworkMessage::LoadCollage(
+                                CollageTarget::Genre,
+                                a,
+                                b,
+                                c,
+                                d,
+                            ))
+                        },
+                        |a, b, c, d| {
+                            Message::Artwork(ArtworkMessage::LoadCollageMini(
+                                CollageTarget::Genre,
+                                a,
+                                b,
+                                c,
+                                d,
+                            ))
+                        },
+                    );
 
-                    // Insert disk-cached items and mark all as pending
-                    // (cache_inserts is always empty since the disk cache was retired,
-                    // but the loop is kept for structural symmetry)
-                    for (id, handle) in cache_inserts {
-                        self.artwork.genre.mini.put(id, handle);
-                    }
                     for id in pending_inserts {
                         self.artwork.genre.pending.insert(id);
                     }

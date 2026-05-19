@@ -1,7 +1,6 @@
 //! Collage artwork loading service for genres and playlists
 //!
-//! Provides a unified implementation for loading multi-album collage artwork
-//! with disk cache + network fallback pattern.
+//! Provides a unified implementation for loading multi-album collage artwork.
 //!
 //! ## Design
 //!
@@ -9,9 +8,7 @@
 //! The loading logic follows the same pattern:
 //! 1. Check if already pending (skip)
 //! 2. Check if fully cached in memory (skip)
-//! 3. Check disk cache for mini artwork
-//! 4. If disk cache hit but no collage, still need network for collage handles
-//! 5. If disk cache miss, need full network load
+//! 3. Otherwise, dispatch a network fetch
 //!
 //! This module extracts that shared pattern into reusable functions.
 
@@ -25,13 +22,8 @@ use crate::{app_message::Message, widgets::SlotListView};
 
 /// Result tuple from `load_visible_artwork`:
 /// - `pending_inserts`: Item IDs to mark as pending
-/// - `cache_inserts`: (id, handle) pairs loaded from disk cache
 /// - `tasks`: Network fetch tasks to execute
-pub(crate) type LoadArtworkResult = (
-    Vec<String>,
-    Vec<(String, image::Handle)>,
-    Vec<Task<Message>>,
-);
+pub(crate) type LoadArtworkResult = (Vec<String>, Vec<Task<Message>>);
 
 /// Trait for items that display collage artwork (genres, playlists)
 /// Re-exported from data crate for use in GUI service code
@@ -91,7 +83,6 @@ pub(crate) fn check_cache<T: CollageArtworkItem>(
 /// # Returns
 /// A tuple of:
 /// * `pending_inserts` - Item IDs to mark as pending
-/// * `cache_inserts` - (id, handle) pairs to insert from disk cache
 /// * `tasks` - Network fetch tasks to execute
 ///
 /// # Arguments
@@ -117,11 +108,10 @@ where
 {
     let total = items.len();
     if total == 0 {
-        return (Vec::new(), Vec::new(), Vec::new());
+        return (Vec::new(), Vec::new());
     }
 
     let mut pending_inserts: Vec<String> = Vec::new();
-    let cache_inserts: Vec<(String, image::Handle)> = Vec::new();
     let mut tasks: Vec<Task<Message>> = Vec::new();
 
     let indices_to_load: Vec<usize> = ctx.slot_list.prefetch_indices(total).collect();
@@ -159,13 +149,12 @@ where
     }
 
     trace!(
-        "Collage artwork: {} tasks, {} cache inserts, {} pending",
+        "Collage artwork: {} tasks, {} pending",
         tasks.len(),
-        cache_inserts.len(),
         pending_inserts.len()
     );
 
-    (pending_inserts, cache_inserts, tasks)
+    (pending_inserts, tasks)
 }
 
 /// Generate tasks to preload collage artwork for the slot list viewport
@@ -223,4 +212,101 @@ where
     );
 
     (pending_inserts, Some(task))
+}
+
+#[cfg(test)]
+mod tests {
+    use nokkvi_data::backend::auth::AuthGateway;
+
+    use super::*;
+    use crate::widgets::SlotListView;
+
+    struct FakeItem {
+        id: String,
+        album_ids: Vec<String>,
+    }
+
+    impl CollageArtworkItem for FakeItem {
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn artwork_album_ids(&self) -> &[String] {
+            &self.album_ids
+        }
+    }
+
+    fn fake(id: &str) -> FakeItem {
+        FakeItem {
+            id: id.to_string(),
+            album_ids: vec![format!("{id}-album-0")],
+        }
+    }
+
+    /// Empty items list short-circuits to two empty vecs. Pins the 2-tuple
+    /// shape that replaced the legacy 3-tuple (the middle `cache_inserts`
+    /// slot was always empty after the disk cache was retired).
+    #[test]
+    fn load_visible_artwork_empty_items_returns_empty_pair() {
+        let slot_list = SlotListView::new();
+        let memory_artwork = HashMap::new();
+        let memory_collage = HashMap::new();
+        let pending_ids = HashSet::new();
+        let ctx = CollageArtworkContext {
+            slot_list: &slot_list,
+            pending_ids: &pending_ids,
+            memory_artwork: &memory_artwork,
+            memory_collage: &memory_collage,
+        };
+        let auth_vm = AuthGateway::new().expect("auth gateway");
+
+        let (pending_inserts, tasks) = load_visible_artwork::<FakeItem, _, _>(
+            &[],
+            &ctx,
+            auth_vm,
+            None,
+            |_, _, _, _| panic!("full closure should not run for empty input"),
+            |_, _, _, _| panic!("mini closure should not run for empty input"),
+        );
+
+        assert!(pending_inserts.is_empty());
+        assert!(tasks.is_empty());
+    }
+
+    /// Items already pending or fully cached skip the network — no pending
+    /// markers added, no tasks dispatched.
+    #[test]
+    fn load_visible_artwork_skips_cached_and_pending_items() {
+        let items = vec![fake("g-pending"), fake("g-cached")];
+        let slot_list = SlotListView::new();
+        let mut memory_artwork: HashMap<String, image::Handle> = HashMap::new();
+        let mut memory_collage: HashMap<String, Vec<image::Handle>> = HashMap::new();
+        memory_artwork.insert(
+            "g-cached".to_string(),
+            image::Handle::from_bytes(Vec::<u8>::new()),
+        );
+        memory_collage.insert("g-cached".to_string(), Vec::new());
+
+        let mut pending_ids = HashSet::new();
+        pending_ids.insert("g-pending".to_string());
+
+        let ctx = CollageArtworkContext {
+            slot_list: &slot_list,
+            pending_ids: &pending_ids,
+            memory_artwork: &memory_artwork,
+            memory_collage: &memory_collage,
+        };
+        let auth_vm = AuthGateway::new().expect("auth gateway");
+
+        let (pending_inserts, tasks) = load_visible_artwork(
+            &items,
+            &ctx,
+            auth_vm,
+            Some("g-pending"),
+            |_, _, _, _| panic!("full closure should not run for cached/pending input"),
+            |_, _, _, _| panic!("mini closure should not run for cached/pending input"),
+        );
+
+        assert!(pending_inserts.is_empty(), "no new pending markers");
+        assert!(tasks.is_empty(), "no tasks dispatched");
+    }
 }

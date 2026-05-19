@@ -243,38 +243,31 @@ impl Nokkvi {
                         memory_collage: &self.artwork.playlist.collage.snapshot,
                     };
 
-                    let (pending_inserts, cache_inserts, tasks) =
-                        collage_artwork::load_visible_artwork(
-                            &self.library.playlists,
-                            &ctx,
-                            shell.auth().clone(),
-                            center_id.as_deref(),
-                            |a, b, c, d| {
-                                Message::Artwork(ArtworkMessage::LoadCollage(
-                                    CollageTarget::Playlist,
-                                    a,
-                                    b,
-                                    c,
-                                    d,
-                                ))
-                            },
-                            |a, b, c, d| {
-                                Message::Artwork(ArtworkMessage::LoadCollageMini(
-                                    CollageTarget::Playlist,
-                                    a,
-                                    b,
-                                    c,
-                                    d,
-                                ))
-                            },
-                        );
+                    let (pending_inserts, tasks) = collage_artwork::load_visible_artwork(
+                        &self.library.playlists,
+                        &ctx,
+                        shell.auth().clone(),
+                        center_id.as_deref(),
+                        |a, b, c, d| {
+                            Message::Artwork(ArtworkMessage::LoadCollage(
+                                CollageTarget::Playlist,
+                                a,
+                                b,
+                                c,
+                                d,
+                            ))
+                        },
+                        |a, b, c, d| {
+                            Message::Artwork(ArtworkMessage::LoadCollageMini(
+                                CollageTarget::Playlist,
+                                a,
+                                b,
+                                c,
+                                d,
+                            ))
+                        },
+                    );
 
-                    // Insert disk-cached items and mark all as pending
-                    // (cache_inserts is always empty since the disk cache was retired,
-                    // but the loop is kept for structural symmetry)
-                    for (id, handle) in cache_inserts {
-                        self.artwork.playlist.mini.put(id, handle);
-                    }
                     for id in pending_inserts {
                         self.artwork.playlist.pending.insert(id);
                     }
