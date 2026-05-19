@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use iced::{Task, widget::image};
 use nokkvi_data::{backend::albums::AlbumUIViewData, types::ItemKind};
-use tracing::{debug, error, warn};
+use tracing::warn;
 
 use super::components::prefetch_album_artwork_tasks;
 use crate::{
@@ -461,25 +461,8 @@ impl Nokkvi {
                 return self.add_or_insert_batch_to_queue_task(payload);
             }
             AlbumsAction::PlayBatch(payload) => {
-                let len = payload.items.len();
-                debug!(" Playing batch of {} items", len);
-                self.clear_active_playlist();
                 self.albums_page.common.slot_list.selected_indices.clear();
-                return self.shell_task(
-                    move |shell| async move { shell.play_batch(payload).await },
-                    move |result| match result {
-                        Ok(()) => Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
-                        Err(e) => {
-                            error!(" Failed to play batch: {}", e);
-                            Message::Toast(crate::app_message::ToastMessage::Push(
-                                nokkvi_data::types::toast::Toast::new(
-                                    format!("Failed to play batch: {e}"),
-                                    nokkvi_data::types::toast::ToastLevel::Error,
-                                ),
-                            ))
-                        }
-                    },
-                );
+                return self.play_batch_task(payload);
             }
             AlbumsAction::LoadLargeArtwork(album_id_str) => {
                 if let Ok(index) = album_id_str.parse::<usize>() {

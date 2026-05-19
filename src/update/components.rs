@@ -1028,6 +1028,51 @@ impl Nokkvi {
         )
     }
 
+    /// Replace the queue with a batch and navigate to the Queue view.
+    ///
+    /// Sibling of [`Self::add_or_insert_batch_to_queue_task`] /
+    /// [`Self::play_next_batch_task`] for the third batch-action shape:
+    /// queue replacement + navigation, used by Albums and Songs PlayBatch arms.
+    /// The helper always clears `active_playlist_info` (since the queue is
+    /// being replaced, the previously-loaded-playlist header is no longer
+    /// accurate) and uses `shell_task` + `Navigation::SwitchView(Queue)` on
+    /// success — matching the existing Albums/Songs UX.
+    ///
+    /// Callers should clear their per-view `selected_indices` BEFORE invoking
+    /// this helper (selection state is per-view and not accessible from here).
+    /// Similar's PlayBatch deliberately uses `shell_fire_and_forget_task` +
+    /// toast (no navigation) because it lives in the browsing panel where
+    /// the user is already viewing the queue — Similar does not call this
+    /// helper.
+    pub(crate) fn play_batch_task(
+        &mut self,
+        payload: nokkvi_data::types::batch::BatchPayload,
+    ) -> Task<Message> {
+        let len = payload.items.len();
+        debug!(" Playing batch of {} items", len);
+        self.clear_active_playlist();
+        self.shell_task(
+            move |shell| async move { shell.play_batch(payload).await },
+            move |result| match result {
+                Ok(()) => Message::Navigation(crate::app_message::NavigationMessage::SwitchView(
+                    crate::View::Queue,
+                )),
+                Err(e) => {
+                    if let Some(msg) = session_expired_message(&e) {
+                        return msg;
+                    }
+                    error!(" Failed to play batch: {}", e);
+                    Message::Toast(crate::app_message::ToastMessage::Push(
+                        nokkvi_data::types::toast::Toast::new(
+                            format!("Failed to play batch: {e}"),
+                            nokkvi_data::types::toast::ToastLevel::Error,
+                        ),
+                    ))
+                }
+            },
+        )
+    }
+
     /// Fire a play-next-batch task, warning if shuffle is active.
     pub(crate) fn play_next_batch_task(
         &mut self,

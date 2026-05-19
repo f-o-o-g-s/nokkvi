@@ -210,6 +210,28 @@ fn redirect_play_invokes_add_when_no_pending_insert() {
     assert!(!insert_fired, "insert closure must NOT run");
 }
 
+// ============================================================================
+// play_batch_task (components.rs)
+// ============================================================================
+
+#[test]
+fn play_batch_task_clears_active_playlist() {
+    // play_batch_task replaces the queue → the loaded-playlist header must
+    // be cleared so it doesn't outlive the playlist it was named after.
+    let mut app = test_app();
+    app.active_playlist_info = Some(make_playlist_ctx());
+
+    let payload = nokkvi_data::types::batch::BatchPayload::new().with_item(
+        nokkvi_data::types::batch::BatchItem::Album("a1".to_string()),
+    );
+    let _task = app.play_batch_task(payload);
+
+    assert!(
+        app.active_playlist_info.is_none(),
+        "play_batch_task must clear active_playlist_info — the queue is being replaced"
+    );
+}
+
 #[test]
 fn redirect_play_invokes_insert_and_consumes_position() {
     // Browsing panel open with a drag-drop position → insert branch, AND

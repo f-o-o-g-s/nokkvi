@@ -371,25 +371,8 @@ impl Nokkvi {
                 return self.play_next_batch_task(payload);
             }
             SongsAction::PlayBatch(payload) => {
-                let len = payload.items.len();
-                debug!(" Playing batch of {} items", len);
-                self.clear_active_playlist();
                 self.songs_page.common.slot_list.selected_indices.clear();
-                return self.shell_task(
-                    move |shell| async move { shell.play_batch(payload).await },
-                    move |result| match result {
-                        Ok(()) => Message::Navigation(NavigationMessage::SwitchView(View::Queue)),
-                        Err(e) => {
-                            error!(" Failed to play batch: {}", e);
-                            Message::Toast(crate::app_message::ToastMessage::Push(
-                                nokkvi_data::types::toast::Toast::new(
-                                    format!("Failed to play batch: {e}"),
-                                    nokkvi_data::types::toast::ToastLevel::Error,
-                                ),
-                            ))
-                        }
-                    },
-                );
+                return self.play_batch_task(payload);
             }
             SongsAction::ShowInfo(item) => {
                 return self.update(Message::InfoModal(
