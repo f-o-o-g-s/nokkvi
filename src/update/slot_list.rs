@@ -6,13 +6,29 @@ use tracing::debug;
 
 use crate::{
     Nokkvi, View,
-    app_message::{Message, SlotListMessage},
+    app_message::{Message, RouletteMessage, SlotListMessage},
     views,
 };
 
 impl Nokkvi {
     /// Top-level slot list message dispatcher
     pub(crate) fn handle_slot_list_message(&mut self, msg: SlotListMessage) -> Task<Message> {
+        // Roulette in cruise: Enter is what stops the wheel and rolls the
+        // landing target. Intercept here so the keypress never reaches the
+        // page's ActivateCenter (which would play whatever is mid-spin in
+        // the center slot). During the decel walk Enter is swallowed —
+        // the spin is committed and the user shouldn't be able to fire a
+        // play against a moving target.
+        if let Some(state) = self.roulette.as_ref()
+            && matches!(msg, SlotListMessage::ActivateCenter)
+        {
+            return if state.decel.is_none() {
+                Task::done(Message::Roulette(RouletteMessage::Stop))
+            } else {
+                Task::none()
+            };
+        }
+
         // Default-playlist picker takes priority — when its modal is open,
         // arrow keys / Tab / Enter steer the picker, not the underlying view.
         if self.default_playlist_picker.is_some() {

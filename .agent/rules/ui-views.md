@@ -90,7 +90,7 @@ Re-shuffles the order array when a shuffled queue with repeat-playlist wraps bac
 
 ## Roulette (slot-machine random pick)
 
-Available on every slot-list view via the "Roulette" entry in the sort dropdown or the `Roulette` hotkey (default `Ctrl+R`). State on `Nokkvi.roulette: Option<state::RouletteState>` is snapshotted at start so live data churn (page loads, search edits, queue mutations) cannot drift the landing target. Tick handlers in `update/roulette.rs` derive the offset purely from elapsed time via a constant-velocity cruise → ease-out-quad deceleration → keyframe fake-out walk. Cancelled by view change or activating a slot.
+Available on every slot-list view via the "Roulette" entry in the sort dropdown or the `Roulette` hotkey (default `Ctrl+R`). State on `Nokkvi.roulette: Option<state::RouletteState>` is snapshotted at start so live data churn (page loads, search edits, queue mutations) cannot drift the math. Two-phase: the cruise runs at constant velocity indefinitely until the user presses **Enter** (intercepted in `handle_slot_list_message` and dispatched as `RouletteMessage::Stop`), which rolls the landing target and arms `state.decel`. Tick handlers in `update/roulette.rs` derive the offset purely from elapsed time — cruise loops cyclically; decel walks the pre-rolled keyframe sequence (cubic-distributed holds + fake-out wobble) anchored at `stop_time`. Cancelled by Escape or view change; in-decel Enter is swallowed (the spin is committed once Stop fires).
 
 ## Update Handler Pattern
 

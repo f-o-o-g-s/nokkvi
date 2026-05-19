@@ -14,7 +14,11 @@ fn roulette_start_with_no_items_is_noop() {
 }
 
 #[test]
-fn roulette_start_arms_state_when_library_has_items() {
+fn roulette_start_arms_indefinite_cruise() {
+    // Start kicks off the cruise phase only — target and decel keyframes
+    // are rolled later by Stop. State.decel should be None and the snapshot
+    // fields (view, total_items, original_offset, cruise rate) should be
+    // populated.
     let mut app = test_app();
     app.library.albums.set_from_vec(vec![
         make_album("a1", "First", "Artist"),
@@ -33,16 +37,142 @@ fn roulette_start_arms_state_when_library_has_items() {
     assert_eq!(state.view, View::Albums);
     assert_eq!(state.total_items, 4);
     assert_eq!(state.original_offset, 1);
-    assert!(state.target_idx < 4);
     assert!(
-        !state.decel_keyframes.is_empty(),
-        "decel keyframes must be pre-rolled"
+        state.decel.is_none(),
+        "decel must stay None until the user presses Enter to stop"
+    );
+    assert!(
+        state.cruise_pos_per_sec > 0,
+        "cruise rate must be a positive positions-per-second figure"
+    );
+}
+
+#[test]
+fn roulette_stop_without_state_is_noop() {
+    let mut app = test_app();
+    let _ = app.handle_roulette_message(crate::app_message::RouletteMessage::Stop);
+    assert!(app.roulette.is_none());
+}
+
+#[test]
+fn roulette_stop_arms_decel_with_target_and_keyframes() {
+    // Stop commits the spin: rolls a random target, builds the decel walk
+    // anchored at `now`, and transitions state.decel from None to Some.
+    let mut app = test_app();
+    app.library.albums.set_from_vec(vec![
+        make_album("a1", "First", "Artist"),
+        make_album("a2", "Second", "Artist"),
+        make_album("a3", "Third", "Artist"),
+        make_album("a4", "Fourth", "Artist"),
+    ]);
+
+    let _ = app.handle_roulette_message(crate::app_message::RouletteMessage::Start(View::Albums));
+    assert!(
+        app.roulette.as_ref().unwrap().decel.is_none(),
+        "freshly-started spin must be in cruise (decel = None)"
+    );
+
+    let _ = app.handle_roulette_message(crate::app_message::RouletteMessage::Stop);
+
+    let state = app.roulette.as_ref().expect("spin must still be armed");
+    let arm = state.decel.as_ref().expect("Stop must arm the decel walk");
+    assert!(arm.target_idx < 4, "rolled target must be in range");
+    assert!(
+        !arm.decel_keyframes.is_empty(),
+        "decel keyframes must be pre-rolled on Stop"
     );
     assert_eq!(
-        state.decel_keyframes.last().map(|k| k.offset),
-        Some(state.target_idx),
+        arm.decel_keyframes.last().map(|k| k.offset),
+        Some(arm.target_idx),
         "decel sequence must terminate on target"
     );
+}
+
+#[test]
+fn decel_per_click_advance_stays_small_on_huge_library() {
+    // Regression: the original "1 revolution + walk-to-target" decel
+    // gave ~800-position-per-click jumps on a 13 k-song library because
+    // natural_steps scaled with total_items. The new walk is bounded
+    // ([NATURAL_KEYFRAME_COUNT, 3×NATURAL_KEYFRAME_COUNT]) so per-click
+    // advance stays at 1–3 positions regardless of library size. With
+    // the wheel ratcheting that gently, the user actually sees the
+    // deceleration instead of seeing teleportation between clicks.
+    let mut app = test_app();
+    let albums: Vec<_> = (0..15_000)
+        .map(|i| make_album(&format!("a{i}"), &format!("Album {i}"), "Artist"))
+        .collect();
+    app.library.albums.set_from_vec(albums);
+
+    let _ = app.handle_roulette_message(crate::app_message::RouletteMessage::Start(View::Albums));
+    let _ = app.handle_roulette_message(crate::app_message::RouletteMessage::Stop);
+
+    let arm = app
+        .roulette
+        .as_ref()
+        .unwrap()
+        .decel
+        .as_ref()
+        .expect("Stop must arm decel");
+
+    // Inspect each adjacent-keyframe delta — going through total_items
+    // because the walk may wrap. Reasonable visual ceiling: ≤ 10 positions
+    // per click (well within the ~3 that the current bounds produce, with
+    // slack for the pattern tail's overshoot/false-settle hops).
+    let total_items = app.roulette.as_ref().unwrap().total_items as i64;
+    for w in arm.decel_keyframes.windows(2) {
+        let a = w[0].offset as i64;
+        let b = w[1].offset as i64;
+        let forward = (b - a).rem_euclid(total_items);
+        let backward = (a - b).rem_euclid(total_items);
+        let step = forward.min(backward);
+        assert!(
+            step <= 10,
+            "decel per-click jump must stay readable on huge libraries — got {step} positions \
+             between offset {a} and {b}"
+        );
+    }
+}
+
+#[test]
+fn roulette_stop_during_decel_is_noop() {
+    // A second Stop press while the decel walk is already underway must
+    // not re-roll the target or rebuild the keyframes — the spin is
+    // committed.
+    let mut app = test_app();
+    app.library.albums.set_from_vec(vec![
+        make_album("a1", "First", "Artist"),
+        make_album("a2", "Second", "Artist"),
+        make_album("a3", "Third", "Artist"),
+        make_album("a4", "Fourth", "Artist"),
+    ]);
+
+    let _ = app.handle_roulette_message(crate::app_message::RouletteMessage::Start(View::Albums));
+    let _ = app.handle_roulette_message(crate::app_message::RouletteMessage::Stop);
+    let first_target = app
+        .roulette
+        .as_ref()
+        .unwrap()
+        .decel
+        .as_ref()
+        .unwrap()
+        .target_idx;
+    let first_stop_time = app
+        .roulette
+        .as_ref()
+        .unwrap()
+        .decel
+        .as_ref()
+        .unwrap()
+        .stop_time;
+
+    // Stagger to make sure a second Stop would land in a different
+    // nanosecond bucket and roll a different target.
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    let _ = app.handle_roulette_message(crate::app_message::RouletteMessage::Stop);
+
+    let arm = app.roulette.as_ref().unwrap().decel.as_ref().unwrap();
+    assert_eq!(arm.target_idx, first_target);
+    assert_eq!(arm.stop_time, first_stop_time);
 }
 
 #[test]
@@ -75,6 +205,8 @@ fn roulette_cancel_clears_state_and_restores_offset() {
 fn roulette_start_is_reentrant_safe() {
     // A second Start while a spin is already armed must be a no-op so the
     // user can't double-click their way into a weird mid-spin re-roll.
+    // start_time is the witness — a fresh init would bump it past the
+    // first call.
     let mut app = test_app();
     app.library.albums.set_from_vec(vec![
         make_album("a1", "One", "X"),
@@ -84,12 +216,14 @@ fn roulette_start_is_reentrant_safe() {
     ]);
 
     let _ = app.handle_roulette_message(crate::app_message::RouletteMessage::Start(View::Albums));
-    let target_first = app.roulette.as_ref().map(|s| s.target_idx);
+    let first_start = app.roulette.as_ref().map(|s| s.start_time);
 
+    // Stagger so a re-init would land on a later Instant.
+    std::thread::sleep(std::time::Duration::from_millis(2));
     let _ = app.handle_roulette_message(crate::app_message::RouletteMessage::Start(View::Albums));
-    let target_second = app.roulette.as_ref().map(|s| s.target_idx);
+    let second_start = app.roulette.as_ref().map(|s| s.start_time);
 
-    assert_eq!(target_first, target_second);
+    assert_eq!(first_start, second_start);
 }
 
 #[test]

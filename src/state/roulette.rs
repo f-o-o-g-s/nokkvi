@@ -14,35 +14,53 @@ pub struct DecelKeyframe {
     pub duration_ms: u64,
 }
 
+/// Decel-phase parameters, populated when the user presses Enter to stop
+/// the spin. While `RouletteState.decel` is `None` the wheel is in the
+/// indefinite cruise phase (constant velocity, waiting for the user).
+/// Once armed, the decel walk is committed and the animation rides it to
+/// settle on `target_idx`.
+#[derive(Debug, Clone)]
+pub struct DecelArmed {
+    /// Walltime when Stop fired. The decel keyframe walk is anchored to
+    /// this — `position_at(now)` walks from `(now - stop_time)` through
+    /// `decel_keyframes` in order.
+    pub stop_time: std::time::Instant,
+    /// Pre-rolled landing index. The animation always settles here.
+    pub target_idx: usize,
+    /// Pre-rolled decel + fake-out walk. Each entry holds at its `offset`
+    /// for `duration_ms`; the terminal entry sits at `target_idx` with
+    /// `duration_ms = 0`. Holds escalate via a cubic curve over the
+    /// natural-walk keyframes, with the last 0–2 entries carrying
+    /// pattern-specific wobble timing.
+    pub decel_keyframes: Vec<DecelKeyframe>,
+}
+
 /// Time-driven state for an in-progress "Roulette" pick.
 ///
 /// Snapshotted at start so subsequent data churn (page loads, search
 /// edits, queue mutations) cannot drift the animation off the chosen
-/// target. The final position lands at `target_idx`; intermediate
-/// offsets are derived purely from `(start_time, cruise_duration_ms,
-/// cruise_steps, decel_keyframes)`, so a tick handler is stateless
-/// beyond bookkeeping.
+/// target. Intermediate offsets are derived purely from `(start_time,
+/// cruise_pos_per_sec, decel)`, so a tick handler is stateless beyond
+/// bookkeeping.
 ///
 /// Two phases:
-/// - **Cruise** (continuous): for the first `cruise_duration_ms`, the
-///   wheel scrolls at constant velocity through `cruise_steps`
-///   positions. Visually a fast blur; SFX fires at the throttled rate.
-/// - **Decel** (discrete keyframe walk): the wheel ticks through
-///   `decel_keyframes` one at a time, holding at each offset for the
-///   keyframe's `duration_ms`. Holds escalate via a cubic curve from
-///   ~50 ms (cruise-like rate) to ~950 ms (slot-machine final click),
-///   so the click cadence audibly slows from ~20 Hz down to ~1 Hz
-///   over the decel phase. The last 0-3 keyframes carry the chosen
-///   FakeoutPattern wobble (overshoot, false-settle, etc.) with
-///   explicit holds tuned to feel like a "rebound" after the long
-///   final natural-walk hold.
+/// - **Cruise** (`decel = None`): the wheel scrolls at a constant
+///   velocity through the slot list, cycling indefinitely. SFX fires at
+///   the throttled rate. Continues until the user presses Enter, which
+///   dispatches `RouletteMessage::Stop` and arms `decel`.
+/// - **Decel** (`decel = Some(arm)`): the wheel ticks through
+///   `arm.decel_keyframes` one at a time from `arm.stop_time`, holding
+///   at each offset for the keyframe's `duration_ms`. Holds escalate
+///   via a cubic curve from ~50 ms (cruise-like rate) to ~1190 ms
+///   (slot-machine final click), so the click cadence audibly slows
+///   from ~20 Hz down to ~1 Hz over the decel phase. The last 0–2
+///   keyframes carry the chosen FakeoutPattern wobble (overshoot,
+///   false-settle, etc.).
 ///
-/// All-decel variant: when `cruise_duration_ms == 0`, the cruise phase
-/// is skipped and the wheel starts directly into the decel keyframe
-/// walk. The natural-walk keyframes then advance multiple positions
-/// each (velocity-weighted) instead of one, so the wheel still
-/// traverses several revolutions even without a cruise blur — the
-/// "thrown hard" feel.
+/// `target_idx` and the keyframe walk are rolled when Stop fires, not at
+/// Start — the cruise phase has no committed landing until the user
+/// decides to halt it. This is what makes the feature feel like the user
+/// is *controlling* the spin rather than watching a pre-baked animation.
 #[derive(Debug, Clone)]
 pub struct RouletteState {
     /// Slot-list view this roulette runs in.
@@ -51,24 +69,16 @@ pub struct RouletteState {
     pub total_items: usize,
     /// Viewport offset captured at start; restored on cancel.
     pub original_offset: usize,
-    /// Pre-rolled landing index. The animation always settles here.
-    pub target_idx: usize,
-    /// Cruise phase duration in milliseconds. Jittered per spin, and
-    /// occasionally zero (all-decel variant) so the wheel runs as a
-    /// single continuous slowdown from start to settle.
-    pub cruise_duration_ms: u64,
-    /// Number of positions the cruise phase walks (continuous-velocity
-    /// linear interpolation). At end of cruise the wheel is at
-    /// `(original_offset + cruise_steps) % total_items` — typically
-    /// the position the decel keyframes' first entry starts from.
-    /// Zero in the all-decel variant.
-    pub cruise_steps: usize,
-    /// Pre-rolled decel + fake-out walk. Each entry holds at its
-    /// `offset` for `duration_ms`; the terminal entry is at
-    /// `target_idx` with `duration_ms = 0`. Holds escalate via a cubic
-    /// curve over the natural-walk keyframes, with the last 0-3
-    /// entries carrying pattern-specific wobble timing.
-    pub decel_keyframes: Vec<DecelKeyframe>,
+    /// Indefinite cruise rate, positions per second. Constant for the
+    /// lifetime of the spin. Picked at start to match the old cruise feel
+    /// (≈ `revolutions × total_items / 1.5 s`), so visual velocity stays
+    /// consistent with library size — small lists cycle slowly enough to
+    /// read, large lists blur the way a real wheel would.
+    pub cruise_pos_per_sec: u32,
+    /// Decel phase: `None` while cruising, `Some(arm)` once Stop has
+    /// fired. Once armed the spin is committed — further Stop messages
+    /// are no-ops.
+    pub decel: Option<DecelArmed>,
     /// Animation start timestamp.
     pub start_time: std::time::Instant,
     /// Last offset actually applied to the slot list. Tick handlers
@@ -99,37 +109,38 @@ impl RouletteState {
             return (self.original_offset, true);
         }
 
-        let elapsed = now.saturating_duration_since(self.start_time);
-        let cruise_d = std::time::Duration::from_millis(self.cruise_duration_ms);
-
-        if elapsed < cruise_d {
-            // Constant-velocity cruise: linear interpolation through
-            // `cruise_steps` positions. With `cruise_duration_ms = 0`
-            // this branch is skipped entirely (no cruise — the
-            // all-decel variant).
-            let cruise_s = cruise_d.as_secs_f32().max(f32::EPSILON);
-            let elapsed_s = elapsed.as_secs_f32();
-            let progress = (elapsed_s / cruise_s) * (self.cruise_steps as f32);
-            let steps = progress as usize;
-            return ((self.original_offset + steps) % self.total_items, false);
-        }
-
-        // Decel + fake-out keyframe walk. Each non-terminal keyframe
-        // holds for its `duration_ms`; the terminal keyframe is
-        // entered and immediately reports settled.
-        let mut remaining = elapsed - cruise_d;
-        let last_idx = self.decel_keyframes.len().saturating_sub(1);
-        for (i, kf) in self.decel_keyframes.iter().enumerate() {
-            if i == last_idx {
-                return (kf.offset, true);
+        match &self.decel {
+            None => {
+                // Indefinite cruise: integer-math linear interpolation at
+                // constant rate. `position_at` is called every frame so
+                // accumulated rounding from integer division is invisible —
+                // visual rate is steps/sec exactly. Wraps via modulo.
+                let elapsed = now.saturating_duration_since(self.start_time);
+                let elapsed_ms = elapsed.as_millis() as u64;
+                let steps = elapsed_ms.saturating_mul(self.cruise_pos_per_sec as u64) / 1000;
+                let offset = (self.original_offset + steps as usize) % self.total_items;
+                (offset, false)
             }
-            let kf_d = std::time::Duration::from_millis(kf.duration_ms);
-            if remaining < kf_d {
-                return (kf.offset, false);
+            Some(arm) => {
+                // Decel + fake-out keyframe walk, anchored at stop_time.
+                // Each non-terminal keyframe holds for its `duration_ms`;
+                // the terminal keyframe is entered and immediately reports
+                // settled.
+                let mut remaining = now.saturating_duration_since(arm.stop_time);
+                let last_idx = arm.decel_keyframes.len().saturating_sub(1);
+                for (i, kf) in arm.decel_keyframes.iter().enumerate() {
+                    if i == last_idx {
+                        return (kf.offset, true);
+                    }
+                    let kf_d = std::time::Duration::from_millis(kf.duration_ms);
+                    if remaining < kf_d {
+                        return (kf.offset, false);
+                    }
+                    remaining -= kf_d;
+                }
+                // Empty keyframe list — degenerate but safe: settle on target.
+                (arm.target_idx, true)
             }
-            remaining -= kf_d;
         }
-        // Empty keyframe list — degenerate but safe: settle on target.
-        (self.target_idx, true)
     }
 }

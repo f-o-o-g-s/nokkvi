@@ -274,8 +274,15 @@ pub enum SlotListMessage {
 #[derive(Debug, Clone)]
 pub enum RouletteMessage {
     /// User selected the "Roulette" entry from a view's sort dropdown.
-    /// Snapshots item count, picks a target, and arms the spin subscription.
+    /// Snapshots item count and starts the indefinite cruise; target and
+    /// decel keyframes are rolled later when `Stop` fires.
     Start(View),
+    /// User pressed Enter while the wheel was cruising. Rolls the landing
+    /// target, builds the decel walk anchored at the keypress instant, and
+    /// transitions the spin into its decel phase. No-op if `decel` is
+    /// already armed (during the decel walk itself) — the spin is
+    /// committed once Stop has fired.
+    Stop,
     /// Animation tick from the per-frame subscription.
     Tick(std::time::Instant),
     /// Escape / view change / explicit cancel — restore the original

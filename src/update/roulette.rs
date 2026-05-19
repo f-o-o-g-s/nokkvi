@@ -1,14 +1,17 @@
 //! Roulette (slot-machine random pick) handler.
 //!
-//! Drives a fixed-viewport "wheel spin" through any slot-list view, lands on
-//! a pre-rolled random index, and dispatches the view's normal play action.
-//! Animation is fully time-derived from `RouletteState.position_at(now)` —
-//! tick handlers are pure bookkeeping (advance offset, fire Tab SFX, detect
-//! settle).
+//! Drives a fixed-viewport "wheel spin" through any slot-list view. The
+//! cruise phase runs at a constant rate indefinitely — the user presses
+//! Enter to stop it, which rolls the landing target and arms the decel
+//! walk. Animation is fully time-derived from `RouletteState.position_at`
+//! — tick handlers are pure bookkeeping (advance offset, fire Tab SFX,
+//! detect settle).
 //!
-//! Trigger: the "Roulette" entry appended to each view's sort dropdown emits
-//! `Message::Roulette(RouletteMessage::Start(view))`. Cancel paths (Escape,
-//! view switch) emit `Cancel`.
+//! Trigger: the "Roulette" entry appended to each view's sort dropdown
+//! (or the bound hotkey, default Ctrl+R) emits
+//! `Message::Roulette(RouletteMessage::Start(view))`. The Enter key during
+//! a spin emits `RouletteMessage::Stop`. Cancel paths (Escape, view
+//! switch) emit `Cancel`.
 
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -19,31 +22,44 @@ use tracing::{debug, trace};
 use crate::{
     Nokkvi, View,
     app_message::{Message, NavigationMessage, RouletteMessage},
-    state::{DecelKeyframe, RouletteState},
+    state::{DecelArmed, DecelKeyframe, RouletteState},
 };
 
 /// Below this item count the spin animation is too short to feel like a
 /// roulette — just dispatch the play immediately.
 const MIN_ITEMS_FOR_SPIN: usize = 3;
 
-/// Cruise phase length — how long the wheel scrolls at constant
-/// velocity (continuous interpolation) before discrete-click decel
-/// begins. Jittered per spin so consecutive plays don't lock onto an
-/// identical "spin up, slow down" cadence.
-const CRUISE_DURATION_MIN_MS: u64 = 1300;
-const CRUISE_DURATION_MAX_MS: u64 = 1700;
+/// Reference window the cruise rate is computed against. The rate is
+/// chosen so the wheel walks `revolutions × total_items` positions over
+/// this window, matching the visual velocity of the old time-bounded
+/// cruise. With the cruise now indefinite, only the *rate* matters — the
+/// window length is just the denominator that turns
+/// `revolutions × total_items` into a positions-per-second figure.
+const CRUISE_RATE_REFERENCE_WINDOW_MS: u64 = 1500;
+
+/// Hard ceiling on cruise velocity. Without this, a 13 k-item library
+/// would cruise at ~27 000 positions/sec — completely unreadable, each
+/// 60 Hz frame jumping ~450 items. Cap so the eye can at least half-
+/// perceive items strobing past during the cruise. 600 pos/sec ≈ 10
+/// items per frame at 60 Hz, which still reads as fast motion blur but
+/// shows enough texture to feel like a wheel rather than a uniform smear.
+const CRUISE_RATE_MAX_POS_PER_SEC: u32 = 600;
+
+/// Decel walk distance, in slot positions. The wheel decelerates over
+/// `NATURAL_KEYFRAME_COUNT` clicks and lands `DECEL_WALK_*` positions
+/// past the cruise-end offset. Tight bounds keep the per-click advance
+/// readable on any library size (1–3 positions/click) — the previous
+/// "1 revolution + walk-to-target" model gave ~800 positions/click for
+/// a 13 k-song library, which read as teleportation, not deceleration.
+const DECEL_WALK_MIN: usize = NATURAL_KEYFRAME_COUNT;
+const DECEL_WALK_MAX: usize = NATURAL_KEYFRAME_COUNT * 3;
+
 /// Decel phase length — how long the audible click cadence takes to
 /// slow from ~20 Hz (cruise-rate-matching first click) down to ~1 Hz
 /// (slot-machine final click). Jittered per spin.
 const DECEL_DURATION_MIN_MS: u64 = 2400;
 const DECEL_DURATION_MAX_MS: u64 = 3200;
-/// Per-spin weight (out of 16) for the "all-decel" variant: skip the
-/// cruise blur and run the entire spin as the discrete-click decel.
-/// Each natural-walk keyframe then advances multiple positions per
-/// click (uniformly distributed over the spin's total step budget) so
-/// the wheel still traverses several revolutions even without a
-/// cruise prelude — the "thrown hard" feel.
-const ALL_DECEL_WEIGHT: u64 = 4;
+
 /// Number of cubic-distributed keyframes in the natural-walk portion
 /// of the decel phase. With 17 keyframes over 2400–3200 ms the click
 /// holds escalate from ~47 ms (cruise-rate-matching) to ~1190 ms
@@ -63,6 +79,7 @@ impl Nokkvi {
     pub(crate) fn handle_roulette_message(&mut self, msg: RouletteMessage) -> Task<Message> {
         match msg {
             RouletteMessage::Start(view) => self.handle_roulette_start(view),
+            RouletteMessage::Stop => self.handle_roulette_stop(),
             RouletteMessage::Tick(now) => self.handle_roulette_tick(now),
             RouletteMessage::Cancel => self.handle_roulette_cancel(),
         }
@@ -111,18 +128,12 @@ impl Nokkvi {
         // Snapshot original offset before mutating it during the spin.
         let original_offset = self.roulette_view_viewport_offset(view).unwrap_or(0);
 
-        // Single PRNG seeded once per spin so every random choice (target
-        // index, fake-out pattern, direction, per-keyframe holds, total
-        // duration) shares entropy without correlating — a multi-call
-        // SystemTime approach can land on the same nanosecond bucket on
-        // fast hardware and produce visibly repeating spins.
-        let mut rng = XorShift64::seeded_now();
-
-        let target_idx = (rng.next() as usize) % total_items;
-
         // Skip animation entirely for tiny lists — a 3-tick spin feels
-        // anticlimactic and the user can't really tell anyway.
+        // anticlimactic and the user can't really tell anyway. Roll the
+        // target here since there's no cruise phase to await a Stop on.
         if total_items < MIN_ITEMS_FOR_SPIN {
+            let mut rng = XorShift64::seeded_now();
+            let target_idx = (rng.next() as usize) % total_items;
             debug!(
                 "Roulette: {:?} has only {} items; settling immediately on idx {}",
                 view, total_items, target_idx
@@ -131,40 +142,76 @@ impl Nokkvi {
         }
 
         let revolutions = revolutions_for(total_items);
+        let cruise_pos_per_sec = cruise_rate_for(revolutions, total_items);
+
+        debug!(
+            "Roulette start: view={:?} total_items={} original_offset={} \
+             cruise_pos_per_sec={} (revolutions={}) — awaiting Enter to stop",
+            view, total_items, original_offset, cruise_pos_per_sec, revolutions
+        );
+
+        self.roulette = Some(RouletteState {
+            view,
+            total_items,
+            original_offset,
+            cruise_pos_per_sec,
+            decel: None,
+            start_time: Instant::now(),
+            last_offset: original_offset,
+            last_sfx_at: None,
+            last_prefetch_at: None,
+        });
+
+        Task::none()
+    }
+
+    fn handle_roulette_stop(&mut self) -> Task<Message> {
+        // Require an in-cruise spin. If decel is already armed the spin is
+        // committed — second Stop press is a no-op.
+        let Some(state) = self.roulette.as_ref() else {
+            return Task::none();
+        };
+        if state.decel.is_some() {
+            return Task::none();
+        }
+
+        let now = Instant::now();
+        let total_items = state.total_items;
+        let view = state.view;
+
+        // Current cruise position becomes the starting offset of the decel
+        // walk. position_at() in the cruise branch is the same computation
+        // a fresh tick would have made — keeps the wheel visually continuous
+        // across the cruise→decel transition.
+        let (cruise_end_offset, _) = state.position_at(now);
+
+        let mut rng = XorShift64::seeded_now();
         let pattern = FakeoutPattern::roll(&mut rng);
         let direction: i32 = if rng.next() & 1 == 0 { 1 } else { -1 };
-
-        // All-decel variant: occasionally zero the cruise so the wheel
-        // runs the entire spin as discrete decel clicks (no continuous
-        // blur). The decel keyframes then absorb every step the cruise
-        // would have walked.
-        let cruise_duration_ms = if rng.next() % 16 < ALL_DECEL_WEIGHT {
-            0
-        } else {
-            rng.range_inclusive(CRUISE_DURATION_MIN_MS, CRUISE_DURATION_MAX_MS)
-        };
         let decel_duration_ms = rng.range_inclusive(DECEL_DURATION_MIN_MS, DECEL_DURATION_MAX_MS);
 
-        // Natural walk lands one position short of target; the pattern
-        // tail (0–2 extra keyframes) carries the wheel from there onto
-        // target with pattern-specific wobble.
-        let natural_end_offset = (target_idx + total_items - 1) % total_items;
-        let total_natural_steps = revolutions * total_items
-            + ((natural_end_offset + total_items - (original_offset % total_items)) % total_items);
-
-        let cruise_steps = if cruise_duration_ms == 0 {
-            0
-        } else {
-            total_natural_steps.saturating_sub(NATURAL_KEYFRAME_COUNT)
-        };
-        let decel_natural_steps = total_natural_steps - cruise_steps;
-        let cruise_end_offset = (original_offset + cruise_steps) % total_items;
+        // Decel walks a small fixed-ish number of positions independent
+        // of library size — the wheel coasts ~1–3 items per click,
+        // ratcheting down from the cruise rate to a final visible step.
+        // Randomness in "where it lands" lives in (a) when the user
+        // pressed Enter (cruise position is timing-driven), and (b) this
+        // jittered walk distance. Computing `natural_steps` directly
+        // (rather than deriving from a freely-rolled `target_idx`) is
+        // what keeps the per-click advance bounded: the old "roll a
+        // random target across the whole library, walk to it" path gave
+        // ~800 positions/click for 13 k items.
+        let natural_steps =
+            rng.range_inclusive(DECEL_WALK_MIN as u64, DECEL_WALK_MAX as u64) as usize;
+        // Natural walk ends at `target - 1`, so target sits one position
+        // beyond the walk's end. Wrap modulo total_items so tiny libraries
+        // (which the walk may lap several times) still produce a valid index.
+        let target_idx = (cruise_end_offset + natural_steps + 1) % total_items;
 
         let decel_keyframes = build_decel_keyframes(
             cruise_end_offset,
             target_idx,
             total_items,
-            decel_natural_steps,
+            natural_steps,
             decel_duration_ms,
             pattern,
             direction,
@@ -172,35 +219,33 @@ impl Nokkvi {
         );
 
         debug!(
-            "Roulette start: view={:?} total_items={} target={} original_offset={} \
-             revolutions={} cruise_steps={} cruise_duration_ms={} \
-             decel_duration_ms={} pattern={:?} direction={} keyframe_count={}",
+            "Roulette stop: view={:?} total_items={} target={} cruise_end_offset={} \
+             natural_steps={} decel_duration_ms={} pattern={:?} direction={} keyframe_count={}",
             view,
             total_items,
             target_idx,
-            original_offset,
-            revolutions,
-            cruise_steps,
-            cruise_duration_ms,
+            cruise_end_offset,
+            natural_steps,
             decel_duration_ms,
             pattern,
             direction,
             decel_keyframes.len()
         );
 
-        self.roulette = Some(RouletteState {
-            view,
-            total_items,
-            original_offset,
-            target_idx,
-            cruise_duration_ms,
-            cruise_steps,
-            decel_keyframes,
-            start_time: Instant::now(),
-            last_offset: original_offset,
-            last_sfx_at: None,
-            last_prefetch_at: None,
-        });
+        // Commit decel. No Enter SFX here — the keypress kicks off the
+        // decel walk, but the audible "Enter" is reserved for the final
+        // landing on the picked song (fired by the settle branch in
+        // handle_roulette_tick). The Tab clicks of the decel sequence are
+        // what confirm the keypress registered. Reset last_sfx_at so the
+        // first decel click isn't suppressed by the cruise-rattle throttle.
+        if let Some(s) = self.roulette.as_mut() {
+            s.decel = Some(DecelArmed {
+                stop_time: now,
+                target_idx,
+                decel_keyframes,
+            });
+            s.last_sfx_at = None;
+        }
 
         Task::none()
     }
@@ -213,12 +258,15 @@ impl Nokkvi {
         };
         let view = state.view;
         let total_items = state.total_items;
-        let target_idx = state.target_idx;
         let last_offset = state.last_offset;
         let last_sfx_at = state.last_sfx_at;
         let last_prefetch_at = state.last_prefetch_at;
 
         let (offset, settled) = state.position_at(now);
+        // Pull target_idx for the settle dispatch from the decel arm if
+        // it's committed; settle never fires during cruise (`settled` is
+        // always false in that branch).
+        let target_idx = state.decel.as_ref().map(|a| a.target_idx);
 
         let mut prefetch_task: Option<Task<Message>> = None;
         if offset != last_offset {
@@ -257,10 +305,11 @@ impl Nokkvi {
         }
 
         if settled {
-            trace!("Roulette settle on view={:?} idx={}", view, target_idx);
+            let idx = target_idx.unwrap_or(offset);
+            trace!("Roulette settle on view={:?} idx={}", view, idx);
             self.sfx_engine.play(SfxType::Enter);
             self.roulette = None;
-            let settle_task = self.roulette_settle_play(view, target_idx, total_items);
+            let settle_task = self.roulette_settle_play(view, idx, total_items);
             return match prefetch_task {
                 Some(p) => Task::batch([p, settle_task]),
                 None => settle_task,
@@ -363,9 +412,10 @@ impl Nokkvi {
     }
 }
 
-/// How many full revolutions the wheel makes before settling. Smaller lists
-/// need more revolutions to feel like a real spin (otherwise the wheel
-/// barely moves).
+/// How many full revolutions the wheel makes per cruise-rate reference
+/// window. Smaller lists need more "revolutions per window" to feel like
+/// a real spin (otherwise the wheel barely moves at the same visual rate
+/// big libraries cruise at).
 fn revolutions_for(total_items: usize) -> usize {
     if total_items < 10 {
         6
@@ -374,6 +424,19 @@ fn revolutions_for(total_items: usize) -> usize {
     } else {
         3
     }
+}
+
+/// Constant cruise rate (positions per second) for the indefinite cruise
+/// phase. Computed once at start so visual velocity stays steady through
+/// the spin regardless of how long the user holds before pressing Enter.
+/// Capped at `CRUISE_RATE_MAX_POS_PER_SEC` so massive libraries don't
+/// turn the cruise into an unreadable smear (a 13 k-song library would
+/// otherwise cruise at ~27 k positions/sec — ~450 items per 60 Hz frame).
+fn cruise_rate_for(revolutions: usize, total_items: usize) -> u32 {
+    let steps_per_window = (revolutions as u64).saturating_mul(total_items as u64);
+    let rate = steps_per_window.saturating_mul(1000) / CRUISE_RATE_REFERENCE_WINDOW_MS;
+    // Floor at 1 pos/sec so empty/degenerate inputs can't stall the spin.
+    rate.clamp(1, CRUISE_RATE_MAX_POS_PER_SEC as u64) as u32
 }
 
 /// Tiny xorshift64* PRNG. Not cryptographic — just enough variety for
@@ -461,8 +524,7 @@ impl FakeoutPattern {
 ///
 /// Layout:
 /// 1. `NATURAL_KEYFRAME_COUNT` natural-walk keyframes with cubic-
-///    distributed holds. In cruise mode each advances 1 position;
-///    in all-decel mode each advances `natural_steps / N` (with
+///    distributed holds. Each advances `natural_steps / N` (with
 ///    remainder front-loaded so early clicks are slightly chunkier).
 ///    The walk lands at `target - 1`.
 /// 2. 0–2 pattern tail keyframes with explicit jittered holds — the
@@ -490,8 +552,7 @@ fn build_decel_keyframes(
     // most; the first `remainder` keyframes advance `base + 1` so the
     // sum is exact. Front-loading the remainder means early (fast)
     // clicks are slightly chunkier than late (slow) clicks, which
-    // reinforces the "audible slowdown" feel — though for cruise mode
-    // base = 1 and remainder = 0 so every click advances exactly 1.
+    // reinforces the "audible slowdown" feel.
     let base = natural_steps / n;
     let remainder = natural_steps - base * n;
 
@@ -581,36 +642,16 @@ mod tests {
 
     use super::*;
 
-    /// Build a deterministic cruise-mode state landing on `target` with
-    /// a known single-pattern (CleanLand) tail. Used by position-
-    /// tracking tests that need exact offsets without depending on the
-    /// random pattern roll.
-    fn cruise_state(total_items: usize, original: usize, target: usize) -> RouletteState {
+    /// Build an indefinite-cruise state (decel = None) for cruise-phase
+    /// position tests. Uses the same rate the start handler would pick.
+    fn cruise_state(total_items: usize, original: usize) -> RouletteState {
         let revs = revolutions_for(total_items);
-        let natural_end = (target + total_items - 1) % total_items;
-        let total_natural_steps = revs * total_items
-            + ((natural_end + total_items - (original % total_items)) % total_items);
-        let cruise_steps = total_natural_steps - NATURAL_KEYFRAME_COUNT;
-        let cruise_end_offset = (original + cruise_steps) % total_items;
-        let mut rng = XorShift64(0xDEAD_BEEF_DEAD_BEEF);
-        let decel_keyframes = build_decel_keyframes(
-            cruise_end_offset,
-            target,
-            total_items,
-            NATURAL_KEYFRAME_COUNT,
-            2800,
-            FakeoutPattern::CleanLand,
-            1,
-            &mut rng,
-        );
         RouletteState {
             view: View::Albums,
             total_items,
             original_offset: original,
-            target_idx: target,
-            cruise_duration_ms: 1500,
-            cruise_steps,
-            decel_keyframes,
+            cruise_pos_per_sec: cruise_rate_for(revs, total_items),
+            decel: None,
             start_time: Instant::now(),
             last_offset: original,
             last_sfx_at: None,
@@ -618,33 +659,40 @@ mod tests {
         }
     }
 
-    /// All-decel-mode counterpart of `cruise_state`. cruise_duration is
-    /// zero, decel keyframes absorb every position.
-    fn all_decel_state(total_items: usize, original: usize, target: usize) -> RouletteState {
+    /// Build a decel-armed state — cruise + Stop has fired and the decel
+    /// walk is committed. Used by decel-phase position tests. Picks a
+    /// walk wide enough to span original→target across at least one
+    /// revolution; production uses a small fixed-ish walk (DECEL_WALK_*)
+    /// and derives target from cruise_end + walk, but for these tests
+    /// we want to exercise the "can hit any target" math path.
+    fn decel_state(total_items: usize, original: usize, target: usize) -> RouletteState {
         let revs = revolutions_for(total_items);
         let natural_end = (target + total_items - 1) % total_items;
-        let total_natural_steps = revs * total_items
-            + ((natural_end + total_items - (original % total_items)) % total_items);
+        let natural_steps =
+            total_items + ((natural_end + total_items - (original % total_items)) % total_items);
         let mut rng = XorShift64(0xCAFE_BABE_CAFE_BABE);
         let decel_keyframes = build_decel_keyframes(
             original,
             target,
             total_items,
-            total_natural_steps,
+            natural_steps,
             2800,
             FakeoutPattern::CleanLand,
             1,
             &mut rng,
         );
+        let now = Instant::now();
         RouletteState {
             view: View::Albums,
             total_items,
             original_offset: original,
-            target_idx: target,
-            cruise_duration_ms: 0,
-            cruise_steps: 0,
-            decel_keyframes,
-            start_time: Instant::now(),
+            cruise_pos_per_sec: cruise_rate_for(revs, total_items),
+            decel: Some(DecelArmed {
+                stop_time: now,
+                target_idx: target,
+                decel_keyframes,
+            }),
+            start_time: now,
             last_offset: original,
             last_sfx_at: None,
             last_prefetch_at: None,
@@ -683,98 +731,81 @@ mod tests {
 
     #[test]
     fn position_at_zero_returns_original_offset() {
-        let state = cruise_state(100, 5, 73);
+        let state = cruise_state(100, 5);
         let (offset, settled) = state.position_at(state.start_time);
         assert_eq!(offset, 5);
         assert!(!settled);
     }
 
     #[test]
-    fn position_at_mid_cruise_advances_proportionally() {
-        // Halfway through the 1500ms cruise the wheel should be roughly
-        // halfway through cruise_steps positions. Exact offset is
-        // (original + cruise_steps/2) mod total_items.
-        let state = cruise_state(100, 0, 50);
-        let mid = state.start_time + Duration::from_millis(state.cruise_duration_ms / 2);
-        let (offset, settled) = state.position_at(mid);
-        assert!(!settled);
-        let expected = state.cruise_steps / 2 % state.total_items;
-        // Allow small slack for f32 rounding in the proportional math.
+    fn cruise_advances_at_constant_rate_indefinitely() {
+        // After one cruise-rate reference window the wheel should have
+        // walked revolutions × total_items positions. Mod total_items
+        // for a 100-item list with 3 revolutions: 300 % 100 = 0, so the
+        // offset returns to original.
+        let state = cruise_state(100, 0);
+        let one_window =
+            state.start_time + Duration::from_millis(super::CRUISE_RATE_REFERENCE_WINDOW_MS);
+        let (offset, settled) = state.position_at(one_window);
+        assert!(!settled, "cruise never settles on its own");
+        let revs = revolutions_for(100);
+        let expected = (revs * 100) % 100;
         let diff = (offset as i64 - expected as i64).abs();
         assert!(
             diff <= 1,
-            "mid-cruise offset {offset} should be near {expected} (diff <= 1)"
+            "after one ref window, offset {offset} should be near {expected} (diff <= 1)"
         );
     }
 
     #[test]
-    fn position_at_cruise_end_returns_first_decel_keyframe() {
-        let state = cruise_state(100, 0, 50);
-        let cruise_end = state.start_time + Duration::from_millis(state.cruise_duration_ms);
-        let (offset, settled) = state.position_at(cruise_end);
+    fn cruise_never_settles_no_matter_how_long() {
+        // Indefinite cruise: even after 60 seconds, position_at must not
+        // report settled. This is the headline behavioural change — the
+        // wheel waits for the user to press Enter.
+        let state = cruise_state(50, 0);
+        let way_later = state.start_time + Duration::from_secs(60);
+        let (_, settled) = state.position_at(way_later);
         assert!(!settled);
-        assert_eq!(
-            offset, state.decel_keyframes[0].offset,
-            "first sample after cruise must land on the first decel keyframe"
-        );
     }
 
     #[test]
-    fn position_settles_on_target_after_full_duration() {
-        let state = cruise_state(100, 5, 73);
-        let total_decel: u64 = state
+    fn decel_state_settles_on_target_after_full_duration() {
+        let state = decel_state(100, 5, 73);
+        let arm = state.decel.as_ref().unwrap();
+        let total_decel: u64 = arm
             .decel_keyframes
             .iter()
-            .take(state.decel_keyframes.len() - 1)
+            .take(arm.decel_keyframes.len() - 1)
             .map(|k| k.duration_ms)
             .sum();
-        let after =
-            state.start_time + Duration::from_millis(state.cruise_duration_ms + total_decel + 200);
+        let after = arm.stop_time + Duration::from_millis(total_decel + 200);
         let (offset, settled) = state.position_at(after);
-        assert!(settled, "spin should be settled after cruise + decel");
+        assert!(settled, "spin should be settled after the full decel walk");
         assert_eq!(offset, 73, "settled offset must equal target_idx");
     }
 
     #[test]
-    fn position_during_keyframe_hold_returns_that_keyframe_offset() {
-        let state = cruise_state(100, 0, 50);
+    fn decel_state_starts_with_first_click() {
+        // The decel branch enters the first keyframe immediately at
+        // stop_time — there is no resting frame. Mirrors the old all-decel
+        // behaviour: Enter triggers a click, not a pause.
+        let state = decel_state(100, 7, 60);
+        let arm = state.decel.as_ref().unwrap();
+        let (offset, settled) = state.position_at(arm.stop_time);
+        assert_eq!(offset, arm.decel_keyframes[0].offset);
+        assert!(!settled);
+    }
+
+    #[test]
+    fn decel_state_position_during_keyframe_hold_returns_that_keyframe() {
+        let state = decel_state(100, 0, 50);
+        let arm = state.decel.as_ref().unwrap();
         // Halfway through the first decel keyframe's hold.
-        let half = state.decel_keyframes[0].duration_ms / 2;
-        let probe = state.start_time + Duration::from_millis(state.cruise_duration_ms + half);
+        let half = arm.decel_keyframes[0].duration_ms / 2;
+        let probe = arm.stop_time + Duration::from_millis(half);
         let (offset, settled) = state.position_at(probe);
         assert!(!settled);
-        assert_eq!(offset, state.decel_keyframes[0].offset);
-    }
-
-    #[test]
-    fn all_decel_state_starts_with_first_click() {
-        // In all-decel mode the first click fires immediately at t=0:
-        // the wheel snaps from `original_offset` to the first decel
-        // keyframe's offset (= original + advance_0). This is the
-        // "thrown hard, ratcheting down" feel — no cruise pause.
-        let state = all_decel_state(100, 7, 60);
-        let (offset, settled) = state.position_at(state.start_time);
-        assert_eq!(offset, state.decel_keyframes[0].offset);
-        assert!(!settled);
-        assert_ne!(
-            offset, 7,
-            "all-decel must have moved at t=0 (first click fired)"
-        );
-    }
-
-    #[test]
-    fn all_decel_state_settles_on_target() {
-        let state = all_decel_state(100, 7, 60);
-        let total_decel: u64 = state
-            .decel_keyframes
-            .iter()
-            .take(state.decel_keyframes.len() - 1)
-            .map(|k| k.duration_ms)
-            .sum();
-        let after = state.start_time + Duration::from_millis(total_decel + 200);
-        let (offset, settled) = state.position_at(after);
-        assert!(settled);
-        assert_eq!(offset, 60);
+        assert_eq!(offset, arm.decel_keyframes[0].offset);
     }
 
     #[test]
@@ -831,7 +862,7 @@ mod tests {
     }
 
     #[test]
-    fn cruise_mode_natural_walk_advances_one_per_keyframe() {
+    fn one_step_per_keyframe_when_natural_steps_equals_n() {
         // With natural_steps == N each keyframe should advance exactly
         // one position from the previous.
         let mut rng = XorShift64(0x5678);
@@ -853,7 +884,7 @@ mod tests {
     }
 
     #[test]
-    fn all_decel_natural_walk_advances_sum_to_natural_steps() {
+    fn natural_walk_advances_sum_to_natural_steps() {
         // With natural_steps spread across N keyframes, the cumulative
         // advance from cruise_end_offset to the last natural-walk
         // keyframe must equal natural_steps. The caller computes
@@ -1001,6 +1032,32 @@ mod tests {
         assert_eq!(revolutions_for(5), 6);
         assert_eq!(revolutions_for(20), 4);
         assert_eq!(revolutions_for(500), 3);
+    }
+
+    #[test]
+    fn cruise_rate_scales_with_library_size() {
+        // Bigger libraries cruise faster (more positions per second) so
+        // each item still flickers by at a readable rate — the visual
+        // velocity of the *items* stays similar rather than the visual
+        // velocity of the *whole list*.
+        let small = cruise_rate_for(revolutions_for(8), 8);
+        let medium = cruise_rate_for(revolutions_for(50), 50);
+        let large = cruise_rate_for(revolutions_for(500), 500);
+        assert!(small > 0);
+        assert!(medium > small);
+        assert!(large > medium);
+    }
+
+    #[test]
+    fn cruise_rate_clamps_at_ceiling_for_massive_libraries() {
+        // Without the cap a 13 k-song library would cruise at ~27 k pos/sec,
+        // 450 items per 60 Hz frame — perceptually a uniform smear. The
+        // cap keeps the cruise readable as motion rather than blur.
+        let huge = cruise_rate_for(revolutions_for(13_546), 13_546);
+        assert_eq!(huge, super::CRUISE_RATE_MAX_POS_PER_SEC);
+
+        let bigger = cruise_rate_for(revolutions_for(100_000), 100_000);
+        assert_eq!(bigger, super::CRUISE_RATE_MAX_POS_PER_SEC);
     }
 
     #[test]
