@@ -924,49 +924,12 @@ impl AppService {
         Ok(())
     }
 
-    /// Multi-selection drag reorder: remove the rows named by
-    /// `raw_indices_desc` (which must already be in descending order) and
-    /// re-insert their songs at `raw_target`, with the insertion point
-    /// adjusted by however many of the removed rows fell before it.
-    /// Discharges the resulting `NextTrackResetEffect` against the engine.
-    pub async fn move_queue_batch(
-        &self,
-        raw_indices_desc: Vec<usize>,
-        raw_target: usize,
-    ) -> Result<()> {
-        let effect = {
-            let qm_arc = self.queue_service.queue_manager();
-            let mut qm = qm_arc.lock().await;
-            let mut extracted = Vec::new();
-            for &qi in &raw_indices_desc {
-                if let Some(id) = qm.get_queue().song_ids.get(qi).cloned()
-                    && let Some(song) = qm.get_song(&id)
-                {
-                    extracted.push(song.clone());
-                }
-            }
-            for &qi in &raw_indices_desc {
-                let _ = qm.remove_song(qi);
-            }
-            extracted.reverse();
-            let removed_before = raw_indices_desc
-                .iter()
-                .filter(|&&qi| qi < raw_target)
-                .count();
-            let adj = raw_target.saturating_sub(removed_before);
-            let pos = adj.min(qm.get_queue().song_ids.len());
-            qm.insert_songs_at(pos, extracted)?
-        };
-        self.queue_service.refresh_from_queue().await?;
-        effect.apply_to(&self.audio_engine()).await;
-        Ok(())
-    }
-
-    /// Drift-immune sibling of [`Self::move_queue_batch`]. Resolves
-    /// `entry_id`s → current queue positions under the queue lock, then
-    /// reorders atomically. See
+    /// Multi-selection drag reorder, addressed by per-row `entry_id`.
+    /// Resolves entry_ids → current queue positions under the queue lock,
+    /// then reorders atomically. See
     /// [`crate::services::queue::QueueManager::move_batch_by_entry_ids`]
-    /// for the per-row identity preservation contract.
+    /// for the per-row identity preservation contract; discharges the
+    /// resulting `NextTrackResetEffect` against the engine.
     pub async fn move_queue_batch_by_entry_ids(
         &self,
         entry_ids: Vec<u64>,

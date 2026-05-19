@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use iced::Task;
 use nokkvi_data::{
     backend::queue::QueueSongUIViewData,
-    types::{ItemKind, queue_sort_mode::QueueSortMode},
+    types::{ItemKind, queue::MoveBatchTarget, queue_sort_mode::QueueSortMode},
 };
 use tracing::{debug, error, trace};
 
@@ -292,39 +292,69 @@ impl Nokkvi {
                 });
             }
             QueueAction::MoveBatch { indices, target } => {
-                // Multi-selection drag reorder: extract selected songs,
-                // remove in descending order, then insert at target.
-                let mut raw_indices_desc: Vec<usize> = indices
+                // Multi-selection drag reorder, addressed end-to-end by
+                // per-row entry_id: every position lookup resolves through
+                // the row's `entry_id` so a stale `track_number` projection
+                // (post-optimistic-mutation) can't pick the wrong row to
+                // remove or land before.
+                let entry_ids: Vec<u64> = indices
                     .iter()
-                    .filter_map(|&idx| filtered_queue.get(idx).map(|s| s.track_number as usize - 1))
+                    .filter_map(|&idx| filtered_queue.get(idx).map(|s| s.entry_id))
+                    .collect();
+                if entry_ids.is_empty() {
+                    return Task::none();
+                }
+
+                // Target — either a row's entry_id, or "end of queue" if
+                // the user dragged past the last filtered row.
+                let target_entry_id = filtered_queue.get(target).map(|s| s.entry_id);
+                let target_for_backend =
+                    target_entry_id.map_or(MoveBatchTarget::End, MoveBatchTarget::AboveEntry);
+
+                // Resolve every entry_id to its current position in
+                // `library.queue_songs` so the optimistic local reorder
+                // operates on the same rows the backend will. entry_id
+                // lookups survive the previous batch's optimistic shift,
+                // closing the rapid-drag drift window.
+                let mut raw_indices_desc: Vec<usize> = entry_ids
+                    .iter()
+                    .filter_map(|&eid| {
+                        self.library
+                            .queue_songs
+                            .iter()
+                            .position(|s| s.entry_id == eid)
+                    })
                     .collect();
                 if raw_indices_desc.is_empty() {
                     return Task::none();
                 }
-                // Target also needs raw conversion
-                let raw_target = filtered_queue.get(target).map_or_else(
-                    || self.library.queue_songs.len(),
-                    |s| s.track_number as usize - 1,
-                );
+                raw_indices_desc.sort_unstable_by(|a, b| b.cmp(a)); // descending
 
-                raw_indices_desc.sort_unstable_by(|a, b| b.cmp(a)); // Descending
+                let raw_target = target_entry_id
+                    .and_then(|eid| {
+                        self.library
+                            .queue_songs
+                            .iter()
+                            .position(|s| s.entry_id == eid)
+                    })
+                    .unwrap_or(self.library.queue_songs.len());
 
                 debug!(
-                    "📦 [QUEUE] Batch move: {} items → target {}",
+                    "📦 [QUEUE] Batch move: {} items → target_eid {:?} (raw {})",
                     raw_indices_desc.len(),
-                    raw_target
+                    target_entry_id,
+                    raw_target,
                 );
 
-                // Optimistic local reorder
+                // Optimistic local reorder.
                 let mut moved = Vec::new();
                 for &qi in &raw_indices_desc {
                     if qi < self.library.queue_songs.len() {
                         moved.push(self.library.queue_songs.remove(qi));
                     }
                 }
-                moved.reverse(); // Now original ascending order
+                moved.reverse(); // ascending order matches insertion
 
-                // Calculate adjusted insertion point after removals
                 let removed_before_target = raw_indices_desc
                     .iter()
                     .filter(|&&qi| qi < raw_target)
@@ -337,7 +367,9 @@ impl Nokkvi {
                 }
 
                 self.shell_spawn("queue_move_batch", move |shell| async move {
-                    shell.move_queue_batch(raw_indices_desc, raw_target).await
+                    shell
+                        .move_queue_batch_by_entry_ids(entry_ids, target_for_backend)
+                        .await
                 });
             }
             QueueAction::RemoveFromQueue(entry_ids) => {
