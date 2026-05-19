@@ -311,13 +311,12 @@ impl Nokkvi {
             }
 
             SongsAction::SetRating(song_id, new_rating) => {
-                let current = self
-                    .library
-                    .songs
-                    .iter()
-                    .find(|s| s.id == song_id)
-                    .and_then(|s| s.rating)
-                    .unwrap_or(0);
+                let current = Self::find_current_rating(
+                    &self.library.songs,
+                    &song_id,
+                    |s| &s.id,
+                    |s| s.rating,
+                );
                 return self.set_item_rating_task(song_id, ItemKind::Song, new_rating, current);
             }
             SongsAction::LoadLargeArtwork(album_id) => {

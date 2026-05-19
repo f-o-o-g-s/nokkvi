@@ -211,6 +211,56 @@ fn redirect_play_invokes_add_when_no_pending_insert() {
 }
 
 // ============================================================================
+// find_current_rating (components.rs)
+// ============================================================================
+
+#[test]
+fn find_current_rating_returns_zero_on_miss() {
+    // Optimistic rating updates need the prior value to revert on API
+    // failure. When the id isn't in the slice, the helper must return 0
+    // (the prior contract before the lookup was lifted from 4 inline sites).
+    use crate::Nokkvi;
+
+    let mut song = make_song("s1", "Song 1", "Artist");
+    song.rating = Some(4);
+    let items = vec![song];
+
+    let rating = Nokkvi::find_current_rating(&items, "missing-id", |s| s.id.as_str(), |s| s.rating);
+
+    assert_eq!(
+        rating, 0,
+        "miss must default to 0 — the inline `.unwrap_or(0)` contract"
+    );
+}
+
+#[test]
+fn find_current_rating_returns_rating_on_hit() {
+    use crate::Nokkvi;
+
+    let mut song = make_song("s1", "Song 1", "Artist");
+    song.rating = Some(4);
+    let items = vec![song, make_song("s2", "Song 2", "Artist")];
+
+    let rating = Nokkvi::find_current_rating(&items, "s1", |s| s.id.as_str(), |s| s.rating);
+
+    assert_eq!(rating, 4, "hit must return the item's rating");
+}
+
+#[test]
+fn find_current_rating_unrated_item_returns_zero() {
+    // Item is found but its rating is None → still 0 (the `.and_then` →
+    // `.unwrap_or(0)` chain in the original).
+    use crate::Nokkvi;
+
+    let song = make_song("s1", "Song 1", "Artist"); // rating defaults to None
+    let items = vec![song];
+
+    let rating = Nokkvi::find_current_rating(&items, "s1", |s| s.id.as_str(), |s| s.rating);
+
+    assert_eq!(rating, 0, "unrated item must yield 0 — same as miss");
+}
+
+// ============================================================================
 // play_batch_task (components.rs)
 // ============================================================================
 

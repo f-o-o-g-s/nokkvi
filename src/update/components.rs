@@ -772,6 +772,30 @@ impl Nokkvi {
         }
     }
 
+    /// Look up an item by id and return its rating, defaulting to 0 on miss.
+    ///
+    /// Used by every `SetRating` handler to read the item's current rating
+    /// before dispatching the optimistic update + API call — the optimistic
+    /// revert needs the prior value if the API errors. Defaulting to 0 on
+    /// miss matches the original inline behavior (`.unwrap_or(0)`).
+    ///
+    /// Generic over `T` and the rating accessor closure so the same helper
+    /// serves AlbumUIViewData, ArtistUIViewData, SongUIViewData,
+    /// QueueSongUIViewData, etc. — the per-entity rating field name
+    /// (`a.rating`, `s.rating`) stays at the call site.
+    pub(crate) fn find_current_rating<T>(
+        items: &[T],
+        id: &str,
+        get_id: impl Fn(&T) -> &str,
+        get_rating: impl Fn(&T) -> Option<u32>,
+    ) -> u32 {
+        items
+            .iter()
+            .find(|item| get_id(item) == id)
+            .and_then(get_rating)
+            .unwrap_or(0)
+    }
+
     /// Star or unstar an item via the Subsonic API.
     /// Optimistic local state updates should be done inline at the call site before calling this.
     /// On failure, emits a revert message to restore the original starred state.

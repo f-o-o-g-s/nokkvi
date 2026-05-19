@@ -262,11 +262,12 @@ impl Nokkvi {
                 }
             }
             QueueAction::SetRating(song_id, new_rating) => {
-                let current = filtered_queue
-                    .iter()
-                    .find(|s| s.id == song_id)
-                    .and_then(|s| s.rating)
-                    .unwrap_or(0);
+                let current = Self::find_current_rating(
+                    &filtered_queue,
+                    &song_id,
+                    |s| s.id.as_str(),
+                    |s| s.rating,
+                );
                 return self.set_item_rating_task(song_id, ItemKind::Song, new_rating, current);
             }
             QueueAction::ToggleStar(song_id, star) => {

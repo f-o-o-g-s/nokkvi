@@ -440,21 +440,20 @@ impl Nokkvi {
             }
             ArtistsAction::SetRating(item_id, kind, new_rating) => {
                 let current = if matches!(kind, ItemKind::Artist) {
-                    self.library
-                        .artists
-                        .iter()
-                        .find(|a| a.id == item_id)
-                        .and_then(|a| a.rating)
-                        .unwrap_or(0)
+                    Self::find_current_rating(
+                        &self.library.artists,
+                        &item_id,
+                        |a| &a.id,
+                        |a| a.rating,
+                    )
                 } else {
                     // Album within expanded artist
-                    self.artists_page
-                        .expansion
-                        .children
-                        .iter()
-                        .find(|a| a.id == item_id)
-                        .and_then(|a| a.rating)
-                        .unwrap_or(0)
+                    Self::find_current_rating(
+                        &self.artists_page.expansion.children,
+                        &item_id,
+                        |a| &a.id,
+                        |a| a.rating,
+                    )
                 };
                 return self.set_item_rating_task(item_id, kind, new_rating, current);
             }
