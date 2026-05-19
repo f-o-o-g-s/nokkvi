@@ -73,7 +73,10 @@ pub struct QueueViewData<'a> {
     pub scale_factor: f32,
     pub modifiers: iced::keyboard::Modifiers,
     pub current_playing_song_id: Option<String>,
-    pub current_playing_queue_index: Option<usize>,
+    /// Per-row `entry_id` of the playing row. Drift-immune handle used
+    /// by the header's "Center on Playing" button and by the auto-
+    /// follow producers (see `FocusCurrentPlaying`).
+    pub current_playing_entry_id: Option<u64>,
     pub is_playing: bool, // True if playback is active (not stopped/paused)
     pub total_queue_count: usize, // Total count before filtering (for empty state detection)
     pub stable_viewport: bool,
@@ -122,7 +125,7 @@ pub enum QueueMessage {
     // Shared slot-list navigation/activation/selection/sort/search
     SlotList(SlotListPageMessage),
 
-    FocusCurrentPlaying(usize, bool), // Auto-scroll slot list to center currently playing track (by queue index, flash)
+    FocusCurrentPlaying(u64, bool), // Auto-scroll slot list to center currently playing track (by per-row entry_id, flash)
 
     // Mouse click on star/heart (item_index, value)
     ClickSetRating(usize, usize), // (item_index, rating 1-5)
@@ -176,7 +179,7 @@ pub enum QueueMessage {
 #[derive(Debug, Clone)]
 pub enum QueueAction {
     PlaySong(usize),                // song index in queue
-    FocusOnSong(usize, bool),       // queue index to scroll to (bubbles up to handler), flash
+    FocusOnSong(u64, bool),         // per-row entry_id to scroll to (bubbles up to handler), flash
     SortModeChanged(QueueSortMode), // trigger reload/resort
     SortOrderChanged(bool),         // trigger resort
     SearchChanged(String),          // trigger filter

@@ -60,6 +60,11 @@ pub struct PlaybackStateUpdate {
     pub repeat_queue: bool,
     pub consume: bool,
     pub current_index: Option<usize>,
+    /// Snapshot of the playing row's per-row `entry_id`, taken under the
+    /// same queue lock as `current_index`. Drift-immune handle that
+    /// survives intervening optimistic UI mutations — see
+    /// `QueueAction::FocusOnSong`.
+    pub current_entry_id: Option<u64>,
     pub song_id: Option<String>,
     pub format_suffix: String,
     pub sample_rate: u32,

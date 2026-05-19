@@ -868,7 +868,7 @@ impl Nokkvi {
                 scale_factor: self.window.scale_factor,
                 modifiers: self.window.keyboard_modifiers,
                 current_playing_song_id,
-                current_playing_queue_index: self.last_queue_current_index,
+                current_playing_entry_id: self.last_queue_current_entry_id,
                 is_playing: self.playback.playing && !self.playback.paused,
                 total_queue_count: self
                     .library
@@ -1059,7 +1059,7 @@ impl Nokkvi {
                     scale_factor: self.window.scale_factor,
                     modifiers: self.window.keyboard_modifiers,
                     current_playing_song_id,
-                    current_playing_queue_index: self.last_queue_current_index,
+                    current_playing_entry_id: self.last_queue_current_entry_id,
                     is_playing: self.playback.playing && !self.playback.paused,
                     total_queue_count: self
                         .library

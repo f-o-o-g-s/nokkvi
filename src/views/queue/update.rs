@@ -46,14 +46,14 @@ impl QueuePage {
                     _ => (Task::none(), QueueAction::None),
                 }
             }
-            QueueMessage::FocusCurrentPlaying(queue_index, flash) => {
-                // Auto-scroll slot list to center the currently playing track by queue index
-                // Bubble up to handler which has access to queue_songs to find the slot
+            QueueMessage::FocusCurrentPlaying(entry_id, flash) => {
+                // Auto-scroll slot list to center the currently playing row by
+                // its per-row entry_id (drift-immune across optimistic mutations).
                 trace!(
-                    " [QUEUE PAGE] FocusCurrentPlaying({}) called, current_offset={}",
-                    queue_index, self.common.slot_list.viewport_offset
+                    " [QUEUE PAGE] FocusCurrentPlaying(entry_id={}) called, current_offset={}",
+                    entry_id, self.common.slot_list.viewport_offset
                 );
-                (Task::none(), QueueAction::FocusOnSong(queue_index, flash))
+                (Task::none(), QueueAction::FocusOnSong(entry_id, flash))
             }
             QueueMessage::NavigateAndFilter(view, filter) => {
                 (Task::none(), QueueAction::NavigateAndFilter(view, filter))

@@ -173,6 +173,12 @@ pub struct Nokkvi {
     // Misc State
     // -------------------------------------------------------------------------
     pub last_queue_current_index: Option<usize>,
+    /// Drift-immune mirror of `last_queue_current_index`. Stamped from
+    /// `PlaybackStateUpdate::current_entry_id` (read under the same qm
+    /// lock as `current_index`) so producers of `FocusCurrentPlaying`
+    /// can dispatch a per-row handle that survives the optimistic-
+    /// mutation window.
+    pub last_queue_current_entry_id: Option<u64>,
 
     // -------------------------------------------------------------------------
     // Playlist Edit Mode (split-view)
@@ -368,6 +374,7 @@ impl Default for Nokkvi {
             player_bar_layout: crate::widgets::player_bar::PlayerBarLayout::default(),
             // Misc state
             last_queue_current_index: None,
+            last_queue_current_entry_id: None,
             playlist_edit: None,
             active_playlist_info: None,
             browsing_panel: None,

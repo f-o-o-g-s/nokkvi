@@ -153,9 +153,9 @@ impl QueuePage {
                 let mut btns = vec![HeaderButton::SortToggle(QueueMessage::SlotList(
                     crate::widgets::SlotListPageMessage::ToggleSortOrder,
                 ))];
-                if let Some(idx) = data.current_playing_queue_index {
+                if let Some(entry_id) = data.current_playing_entry_id {
                     btns.push(HeaderButton::CenterOnPlaying(
-                        QueueMessage::FocusCurrentPlaying(idx, true),
+                        QueueMessage::FocusCurrentPlaying(entry_id, true),
                     ));
                 }
                 btns.push(HeaderButton::Trailing(trailing));
@@ -573,7 +573,7 @@ impl QueuePage {
         // Capture values needed in closure
         let _scale_factor = data.scale_factor;
         let current_playing_song_id = data.current_playing_song_id;
-        let current_playing_queue_index = data.current_playing_queue_index;
+        let current_playing_entry_id = data.current_playing_entry_id;
         let current_sort_mode = self.queue_sort_mode; // For conditional column/genre display
         let album_art = data.album_art; // Move artwork maps
         let large_artwork = data.large_artwork;
@@ -603,15 +603,19 @@ impl QueuePage {
             let play_count = song.play_count.unwrap_or(0);
             let song_id = song.id.clone();
             let artist_id = song.artist_id.clone();
-            let track_number = song.track_number;
             let stable_viewport = data.stable_viewport;
 
-            // Match on both song ID AND queue position (track_number) to
-            // disambiguate duplicate tracks sharing the same song ID.
-            // Suppressed while ctrl/shift is held (active multi-selection) so
-            // users can clearly see which items are selected.
+            // Match on per-row entry_id — drift-immune and duplicate-aware
+            // by construction. The song_id check is kept as a defense-in-
+            // depth filter while the projection settles after a queue swap
+            // (e.g. PlayAlbum re-stamps fresh entry_ids on rows that briefly
+            // collide with the previous queue's ids).
+            //
+            // Suppressed while ctrl/shift is held (active multi-selection)
+            // so users can clearly see which items are selected.
+            let entry_id = song.entry_id;
             let is_current = !(ctx.modifiers.shift() || ctx.modifiers.control())
-                && current_playing_queue_index.is_some_and(|idx| idx == track_number as usize - 1)
+                && current_playing_entry_id.is_some_and(|eid| eid == entry_id)
                 && current_playing_song_id.as_ref() == Some(&song_id);
 
             // Wrap the row in `responsive(...)` so the queue-stars column hide

@@ -333,6 +333,44 @@ fn remove_from_queue_uses_id_lookup_immune_to_stale_track_number() {
     );
 }
 
+/// Regression: `QueueAction::FocusOnSong` must find the playing row by
+/// per-row `entry_id`, drift-immune across the optimistic-mutation window
+/// where `track_number` would still carry stale stamps from the
+/// pre-mutation projection. The legacy handler did
+/// `position(|s| s.track_number == queue_index + 1)`, which silently picked
+/// the wrong row when filtered_queue carried out-of-date stamps.
+#[test]
+fn focus_on_song_finds_row_by_entry_id_through_stale_track_number() {
+    use crate::views::QueueMessage;
+
+    let mut app = test_app();
+    // Simulate a post-reorder UI: track_numbers are stale (still labelled
+    // {1, 2, 3} from the pre-reorder projection, but the rows now sit in
+    // a different physical order). entry_ids carry the true row identity.
+    let mut song_a = make_queue_song("a", "A", "Artist", "Album");
+    song_a.track_number = 3; // stale — UI shows "A" but the pre-reorder
+    //                          backend slot for A was index 2 (track_number=3)
+    song_a.entry_id = 100;
+    let mut song_b = make_queue_song("b", "B", "Artist", "Album");
+    song_b.track_number = 1;
+    song_b.entry_id = 101;
+    let mut song_c = make_queue_song("c", "C", "Artist", "Album");
+    song_c.track_number = 2;
+    song_c.entry_id = 102;
+    app.library.queue_songs = vec![song_a, song_b, song_c];
+
+    // Backend reports "play the row identified by entry_id 101" — that's B,
+    // physically at filtered index 1. (The pre-fix handler would have done
+    // queue_index + 1 = N+1 and searched track_number == N+1, which would
+    // have picked a different row entirely.)
+    let _ = app.handle_queue(QueueMessage::FocusCurrentPlaying(101, false));
+
+    assert_eq!(
+        app.queue_page.common.slot_list.viewport_offset, 1,
+        "FocusOnSong must scroll to entry_id 101's current filtered index, not derive it from stale track_number"
+    );
+}
+
 /// Regression: two queue rows with the same `song_id` (e.g. "Speak to Me" by
 /// Pink Floyd queued twice). Right-clicking one row → Remove must take only
 /// that row, never the duplicate sibling. The legacy `Vec<String>` payload

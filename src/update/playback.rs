@@ -59,6 +59,7 @@ impl Nokkvi {
                 let qm = qm_arc.lock().await;
                 let song = qm.get_current_song();
                 let current_index = qm.get_queue().current_index;
+                let current_entry_id = current_index.and_then(|i| qm.entry_id_at(i));
                 let (title, artist, album, cover_art, album_id, song_id, format_suffix, bitrate) =
                     if let Some(station) = &radio_station {
                         (
@@ -170,6 +171,7 @@ impl Nokkvi {
                     repeat_queue,
                     consume,
                     current_index,
+                    current_entry_id,
                     song_id,
                     format_suffix,
                     sample_rate,
@@ -201,6 +203,7 @@ impl Nokkvi {
             repeat_queue,
             consume,
             current_index,
+            current_entry_id,
             song_id,
             format_suffix,
             sample_rate,
@@ -325,7 +328,7 @@ impl Nokkvi {
             self.track_listening_time(playing, paused, &song_id, pos, dur, &mut tasks);
 
             // Queue focus tracking + gapless preparation
-            self.handle_queue_focus_change(current_index, &mut tasks);
+            self.handle_queue_focus_change(current_index, current_entry_id, &mut tasks);
             if playing && !paused && dur > 0 {
                 let threshold = (f64::from(dur) * 0.8) as u32;
                 if pos >= threshold {
@@ -474,6 +477,7 @@ impl Nokkvi {
     fn handle_queue_focus_change(
         &mut self,
         current_index: Option<usize>,
+        current_entry_id: Option<u64>,
         tasks: &mut Vec<Task<Message>>,
     ) {
         let index_changed = self.last_queue_current_index != current_index;
@@ -486,18 +490,20 @@ impl Nokkvi {
             self.last_queue_current_index, current_index
         );
         self.last_queue_current_index = current_index;
+        self.last_queue_current_entry_id = current_entry_id;
 
         // Reset gapless preparation flag for the new track
         self.engine.gapless_preparing = false;
 
-        // Use queue index for focus (not song_id) to correctly handle duplicate tracks
-        if let Some(idx) = current_index
+        // Focus by per-row entry_id (drift-immune across the
+        // optimistic-mutation window — see QueueAction::FocusOnSong).
+        if let Some(entry_id) = current_entry_id
             && self.current_view == View::Queue
             && self.settings.auto_follow_playing
         {
             trace!(
-                "🎯 [FOCUS] Triggering FocusCurrentPlaying({}) with queue reload",
-                idx
+                "🎯 [FOCUS] Triggering FocusCurrentPlaying(entry_id={}) with queue reload",
+                entry_id
             );
             tasks.push(Task::done(Message::LoadQueue));
             // Suppress auto-scroll if this track change was triggered by a click-play
@@ -507,7 +513,7 @@ impl Nokkvi {
                 self.suppress_next_auto_center = false;
             } else {
                 tasks.push(Task::done(Message::Queue(
-                    views::QueueMessage::FocusCurrentPlaying(idx, true),
+                    views::QueueMessage::FocusCurrentPlaying(entry_id, true),
                 )));
             }
         }

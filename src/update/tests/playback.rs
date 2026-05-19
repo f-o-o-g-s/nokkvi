@@ -68,6 +68,7 @@ fn make_playback_update() -> PlaybackStateUpdate {
         repeat_queue: false,
         consume: false,
         current_index: Some(0),
+        current_entry_id: Some(0),
         song_id: Some("song_1".to_string()),
         format_suffix: "flac".to_string(),
         sample_rate: 44100,

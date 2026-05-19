@@ -86,14 +86,17 @@ impl Nokkvi {
                     self.queue_page.common.slot_list.viewport_offset = queue_len.saturating_sub(1);
                 }
 
-                // Focus slot list on current playing track if on Queue view
-                // (only when auto_follow_playing is ON)
+                // Focus slot list on current playing row by per-row entry_id
+                // (only when auto_follow_playing is ON). entry_id was captured
+                // alongside current_index in PlaybackStateUpdate under the qm
+                // lock, so it identifies the right duplicate even across the
+                // post-reload re-stamp.
                 if self.settings.auto_follow_playing
                     && self.current_view == View::Queue
-                    && let Some(queue_index) = self.last_queue_current_index
+                    && let Some(entry_id) = self.last_queue_current_entry_id
                 {
                     tasks.push(Task::done(Message::Queue(
-                        views::QueueMessage::FocusCurrentPlaying(queue_index, false),
+                        views::QueueMessage::FocusCurrentPlaying(entry_id, false),
                     )));
                 }
 
@@ -232,17 +235,15 @@ impl Nokkvi {
                     .slot_list
                     .set_offset(0, filtered_queue.len());
             }
-            QueueAction::FocusOnSong(queue_index, flash) => {
-                // Find the song in the FILTERED list by its original queue position
-                // (track_number is 1-based, queue_index is 0-based)
-                let target_track_number = queue_index as i32 + 1;
-                if let Some(idx) = filtered_queue
-                    .iter()
-                    .position(|s| s.track_number == target_track_number)
-                {
+            QueueAction::FocusOnSong(entry_id, flash) => {
+                // Find the row in the FILTERED list by its per-row entry_id —
+                // drift-immune across the optimistic-mutation window where
+                // `track_number` would still carry stale stamps from the
+                // pre-mutation projection.
+                if let Some(idx) = filtered_queue.iter().position(|s| s.entry_id == entry_id) {
                     trace!(
-                        " [FOCUS] Found queue_index {} at filtered index {}",
-                        queue_index, idx
+                        " [FOCUS] Found entry_id {} at filtered index {}",
+                        entry_id, idx
                     );
                     self.queue_page
                         .common
@@ -255,10 +256,7 @@ impl Nokkvi {
                         self.queue_page.common.slot_list.flash_center();
                     }
                 } else {
-                    trace!(
-                        " [FOCUS] Queue index {} not found in filtered list",
-                        queue_index
-                    );
+                    trace!(" [FOCUS] entry_id {} not found in filtered list", entry_id);
                 }
             }
             QueueAction::SetRating(song_id, new_rating) => {
