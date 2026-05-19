@@ -704,6 +704,55 @@ fn task_status_changed_cancelled_no_toast() {
 }
 
 // ============================================================================
+// Auto-login wiring — boot() fires ResumeSession (update/mod.rs + main.rs)
+// ============================================================================
+//
+// The previous design hijacked the first `PlaybackMessage::Tick` inside the
+// central `update()` dispatcher to fire `Message::ResumeSession` whenever
+// `should_auto_login` was set. That hijack has been deleted; `boot()` now
+// includes a `Task::done(Message::ResumeSession)` in its returned Task when
+// `should_auto_login == true` at construction (see the `boot()` doc-comment
+// in `main.rs`). These tests pin the new contract:
+// 1. A `PlaybackMessage::Tick` is NOT hijacked — it dispatches normally.
+// 2. `should_auto_login` is set when `stored_session.is_some()` at construction.
+
+#[test]
+fn tick_does_not_hijack_for_resume_session() {
+    // The Tick-hijack used to fire ResumeSession on the first tick when
+    // should_auto_login was true. After Item 7 the hijack is removed: a
+    // Tick MUST flow through the normal dispatch path. We assert the
+    // observable side: should_auto_login is NOT mutated by an incoming
+    // Tick (the hijack used to set it to false unconditionally).
+    let mut app = test_app();
+    app.should_auto_login = true;
+
+    let _ = app.update(crate::app_message::Message::Playback(
+        crate::app_message::PlaybackMessage::Tick,
+    ));
+
+    assert!(
+        app.should_auto_login,
+        "Tick must NOT consume should_auto_login — the hijack was removed; \
+         boot() owns the auto-login dispatch now"
+    );
+}
+
+#[test]
+fn should_auto_login_reflects_stored_session_at_construction() {
+    // The auto-login signal is computed once at construction from
+    // `stored_session.is_some()`. Default `Nokkvi` has no stored session,
+    // so it should be false. boot() consults this field to decide whether
+    // to fire ResumeSession alongside the window-open task.
+    let app = test_app();
+
+    assert!(
+        !app.should_auto_login,
+        "fresh app with no stored session must have should_auto_login = false"
+    );
+    assert!(app.stored_session.is_none());
+}
+
+// ============================================================================
 // Slot count resync — vertical artwork modes (update/window.rs)
 // ============================================================================
 

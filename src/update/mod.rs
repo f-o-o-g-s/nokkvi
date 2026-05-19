@@ -90,7 +90,6 @@ pub(crate) use loader_target::{
     AlbumsTarget, ArtistsTarget, GenresTarget, LoaderTarget, PlaylistsTarget, SongsTarget,
 };
 pub(crate) use pending_expand_resolve::{AlbumSpec, ArtistSpec, GenreSpec, SongSpec};
-use tracing::debug;
 
 use crate::{Nokkvi, View, app_message::Message};
 
@@ -99,18 +98,6 @@ impl Nokkvi {
     ///
     /// Routes messages to appropriate handlers organized by domain.
     pub fn update(&mut self, message: Message) -> Task<Message> {
-        // Auto-login check on first update
-        if self.should_auto_login
-            && matches!(
-                message,
-                Message::Playback(crate::app_message::PlaybackMessage::Tick)
-            )
-        {
-            self.should_auto_login = false;
-            debug!(" Triggering session resume...");
-            return Task::done(Message::ResumeSession);
-        }
-
         match message {
             // -----------------------------------------------------------------
             // Navigation

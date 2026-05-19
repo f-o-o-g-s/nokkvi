@@ -1042,10 +1042,25 @@ fn print_cli_help() {
 /// `iced::window::open_events()` subscription (already wired up), so we
 /// `.discard()` the open task's payload here to avoid a double-fire of
 /// `Message::WindowOpened`.
+///
+/// **Auto-login wiring**: when `Nokkvi::default()` finds a stored session in
+/// redb it sets `should_auto_login = true`. We fire `Message::ResumeSession`
+/// from the boot task here (rather than hijacking the first subscription
+/// `Tick` inside `update()`) so the resume kick-off is co-located with state
+/// construction. Iced's `run` spawns the boot task BEFORE registering
+/// subscriptions (see `reference-iced/winit/src/lib.rs::run` — `runtime.run`
+/// happens at line ~119, `runtime.track(... subscriptions ...)` at ~123), so
+/// the `ResumeSession` message lands before any `Tick` would fire.
 fn boot() -> (Nokkvi, Task<Message>) {
     let state = Nokkvi::default();
+    let auto_login = state.should_auto_login;
     let (_id, open_task) = iced::window::open(main_window_settings());
-    (state, open_task.discard())
+    let task = if auto_login {
+        Task::batch([open_task.discard(), Task::done(Message::ResumeSession)])
+    } else {
+        open_task.discard()
+    };
+    (state, task)
 }
 
 /// Settings for the main window. Reused by `boot()` and by the tray's
