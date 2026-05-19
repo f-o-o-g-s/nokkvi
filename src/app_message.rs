@@ -40,7 +40,7 @@ impl std::fmt::Display for PlaylistMutation {
 }
 
 /// Named struct for player settings — canonical definition in data crate
-pub(crate) use nokkvi_data::types::player_settings::PlayerSettings;
+pub(crate) use nokkvi_data::types::player_settings::LivePlayerSettings;
 /// Named struct for all view sort preferences — canonical definition in data crate
 pub(crate) use nokkvi_data::types::view_preferences::AllViewPreferences;
 
@@ -113,7 +113,7 @@ pub enum PlaybackMessage {
     /// Trigger gapless preparation when track is ~80% complete
     PrepareNextForGapless,
     /// Persisted player settings loaded from redb
-    PlayerSettingsLoaded(Box<PlayerSettings>),
+    PlayerSettingsLoaded(Box<LivePlayerSettings>),
     /// Initialize scrobble state with current song ID from persisted queue
     InitializeScrobbleState(Option<String>),
     /// Live ICY-metadata parsed from internet radio stream (Artist, Title)
@@ -724,7 +724,7 @@ pub enum Message {
     SettingsReloadDataLoaded(
         nokkvi_data::types::view_preferences::AllViewPreferences,
         nokkvi_data::types::hotkey_config::HotkeyConfig,
-        Box<nokkvi_data::types::player_settings::PlayerSettings>,
+        Box<nokkvi_data::types::player_settings::LivePlayerSettings>,
     ),
 
     // --- Theme Hot-Reload ---

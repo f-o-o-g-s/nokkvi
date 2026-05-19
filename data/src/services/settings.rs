@@ -134,12 +134,12 @@ impl SettingsManager {
 
     /// Test-only constructor — starts from default `UserSettings` but
     /// overrides the `player` substruct with the caller-supplied value, so
-    /// round-trip tests can inject an exhaustive non-default `PlayerSettings`
-    /// without driving every setter individually.
+    /// round-trip tests can inject an exhaustive non-default
+    /// `PersistedPlayerSettings` without driving every setter individually.
     #[cfg(test)]
     pub(crate) fn for_test_with_player(
         storage: StateStorage,
-        player: crate::types::settings::PlayerSettings,
+        player: crate::types::settings::PersistedPlayerSettings,
     ) -> Self {
         let mut settings = UserSettings::default();
         settings.player = player;
@@ -908,14 +908,14 @@ impl SettingsManager {
 
     /// Get player settings for Message::PlayerSettingsLoaded.
     ///
-    /// Composition: start from default UI-facing `PlayerSettings`, populate
-    /// the runtime-only fields (volume, playlist IDs that don't round-trip
-    /// through `config.toml`) and the scalar residuals not yet owned by any
-    /// per-tab or per-view-column macro, then run the 3 per-tab dumpers and
-    /// 7 per-view-column dumpers to cover the migrated entries.
-    pub fn get_player_settings(&self) -> crate::types::player_settings::PlayerSettings {
+    /// Composition: start from default UI-facing `LivePlayerSettings`,
+    /// populate the runtime-only fields (volume, playlist IDs that don't
+    /// round-trip through `config.toml`) and the scalar residuals not yet
+    /// owned by any per-tab or per-view-column macro, then run the 3 per-tab
+    /// dumpers and 7 per-view-column dumpers to cover the migrated entries.
+    pub fn get_player_settings(&self) -> crate::types::player_settings::LivePlayerSettings {
         let p = &self.settings.player;
-        let mut out = crate::types::player_settings::PlayerSettings {
+        let mut out = crate::types::player_settings::LivePlayerSettings {
             // Runtime-only fields — these live in redb only and never
             // round-trip through config.toml. The dumpers below intentionally
             // do NOT touch these.
@@ -976,7 +976,8 @@ impl SettingsManager {
 // Helpers
 // =============================================================================
 
-/// Apply TOML settings values onto the internal redb `PlayerSettings` struct.
+/// Apply TOML settings values onto the redb-backed
+/// `PersistedPlayerSettings` struct.
 ///
 /// Only overwrites user-facing preference fields — volume, playlist IDs, and
 /// other runtime state are left untouched.
@@ -994,7 +995,7 @@ impl SettingsManager {
 /// macro entry — see the inline comments.
 fn apply_toml_settings_to_internal(
     ts: &TomlSettings,
-    p: &mut crate::types::settings::PlayerSettings,
+    p: &mut crate::types::settings::PersistedPlayerSettings,
 ) {
     // Per-tab macro-emitted appliers (define_settings! `toml_apply:` closures).
     crate::services::settings_tables::apply_toml_general_tab(ts, p);
@@ -1055,17 +1056,17 @@ pub trait ColumnPersist: Copy + Send + 'static {
 }
 
 // =============================================================================
-// Sentinel round-trip tests (Group G Phase 2 — PlayerSettings TOML compat)
+// Sentinel round-trip tests (Group G Phase 2 — PersistedPlayerSettings TOML compat)
 // =============================================================================
 //
-// These tests pin the `PlayerSettings → TomlSettings → bytes → TomlSettings →
-// PlayerSettings` round-trip semantics that the on-disk config.toml contract
-// depends on. They guard subsequent commits that extend `define_view_columns!`
-// and `define_settings!` to collapse the ~238 lines of hand-written field
-// copies across `from_player_settings`, `get_player_settings`, and
-// `apply_toml_settings_to_internal`.
+// These tests pin the `PersistedPlayerSettings → TomlSettings → bytes →
+// TomlSettings → PersistedPlayerSettings` round-trip semantics that the
+// on-disk config.toml contract depends on. They guard subsequent commits
+// that extend `define_view_columns!` and `define_settings!` to collapse the
+// ~238 lines of hand-written field copies across `from_player_settings`,
+// `get_player_settings`, and `apply_toml_settings_to_internal`.
 //
-// `build_exhaustive_internal_player_settings()` deliberately lists every
+// `build_exhaustive_persisted_player_settings()` deliberately lists every
 // persisted field — `..Default::default()` is BANNED so a future field
 // addition fails to compile here until the round-trip wiring is added.
 
@@ -1083,27 +1084,29 @@ mod sentinel_roundtrip_tests {
                 StripClickAction, StripSeparator, TrackInfoDisplay, VisualizationMode,
                 VolumeNormalizationMode,
             },
-            settings::PlayerSettings as InternalPlayerSettings,
+            settings::PersistedPlayerSettings,
             toml_settings::TomlSettings,
         },
     };
 
-    fn make_test_manager_with_player(player: InternalPlayerSettings) -> (SettingsManager, TempDir) {
+    fn make_test_manager_with_player(
+        player: PersistedPlayerSettings,
+    ) -> (SettingsManager, TempDir) {
         let tmp = tempfile::tempdir().expect("tempdir");
         let path = tmp.path().join("test_settings.redb");
         let storage = StateStorage::new(path).expect("StateStorage::new");
         (SettingsManager::for_test_with_player(storage, player), tmp)
     }
 
-    /// Exhaustive internal `PlayerSettings` with every persisted field set to
+    /// Exhaustive `PersistedPlayerSettings` with every persisted field set to
     /// a non-default sentinel. Listed without `..Default::default()` so a new
     /// field addition surfaces here as a missing-initializer compile error.
     ///
     /// Sentinels are chosen so that `field == Default::default()` is false
     /// for every field: bools flipped from their default; enums set to a
     /// non-`#[default]` variant; numerics offset; strings made non-empty.
-    fn build_exhaustive_internal_player_settings() -> InternalPlayerSettings {
-        InternalPlayerSettings {
+    fn build_exhaustive_persisted_player_settings() -> PersistedPlayerSettings {
+        PersistedPlayerSettings {
             // Runtime-only fields (excluded from the round-trip assertion):
             volume: 0.42,
             default_playlist_id: Some("playlist-42".to_string()),
@@ -1260,15 +1263,16 @@ mod sentinel_roundtrip_tests {
         }
     }
 
-    /// Full-field round-trip: build exhaustive internal `PlayerSettings`, dump
-    /// to UI-facing `PlayerSettings`, convert to `TomlSettings`, serialize,
-    /// deserialize, apply back onto a fresh internal `PlayerSettings`, dump
-    /// again — and confirm every persisted field survives. The 6 f32 fields
-    /// routed through `round_f32` / `round_f32_array` use 1e-4 tolerance
-    /// (they are quantized to 4 decimals on TOML emit).
+    /// Full-field round-trip: build exhaustive `PersistedPlayerSettings`, dump
+    /// to UI-facing `LivePlayerSettings`, convert to `TomlSettings`,
+    /// serialize, deserialize, apply back onto a fresh
+    /// `PersistedPlayerSettings`, dump again — and confirm every persisted
+    /// field survives. The 6 f32 fields routed through `round_f32` /
+    /// `round_f32_array` use 1e-4 tolerance (they are quantized to 4 decimals
+    /// on TOML emit).
     #[test]
     fn player_settings_toml_roundtrip_full_field_coverage() {
-        let internal_src = build_exhaustive_internal_player_settings();
+        let internal_src = build_exhaustive_persisted_player_settings();
 
         // Stamp the exhaustive sentinel onto a SettingsManager and dump.
         let (sm, _tmp) = make_test_manager_with_player(internal_src.clone());
@@ -1279,10 +1283,10 @@ mod sentinel_roundtrip_tests {
         let serialized = toml::to_string(&ts1).expect("serialize TomlSettings");
         let ts2: TomlSettings = toml::from_str(&serialized).expect("deserialize TomlSettings");
 
-        // Apply onto a fresh internal `PlayerSettings`, then dump again via a
+        // Apply onto a fresh `PersistedPlayerSettings`, then dump again via a
         // fresh manager — this exercises the same get_player_settings flow as
         // production startup.
-        let mut internal_dst = InternalPlayerSettings::default();
+        let mut internal_dst = PersistedPlayerSettings::default();
         apply_toml_settings_to_internal(&ts2, &mut internal_dst);
         let (sm2, _tmp2) = make_test_manager_with_player(internal_dst);
         let ui_ps2 = sm2.get_player_settings();
@@ -1563,7 +1567,7 @@ mod sentinel_roundtrip_tests {
     /// existing users' config files.
     ///
     /// Two-stage assertion:
-    /// 1. Parse → apply to fresh internal `PlayerSettings` → no panic.
+    /// 1. Parse → apply to fresh `PersistedPlayerSettings` → no panic.
     /// 2. Reserialize the parsed `TomlSettings` and re-parse — both rounds
     ///    must produce equal `TomlSettings` (modulo f32 quantization, which
     ///    is absorbed by going through one parse-reparse cycle then comparing).
@@ -1714,7 +1718,7 @@ name = "sentinel preset"
             toml::from_str(SNAPSHOT_TOML).expect("parse sanitized config.toml [settings] snapshot");
 
         // 2. Apply must succeed (no field type mismatches).
-        let mut internal = InternalPlayerSettings::default();
+        let mut internal = PersistedPlayerSettings::default();
         apply_toml_settings_to_internal(&ts1, &mut internal);
 
         // 3. Reserialize and re-parse — produces a stable `TomlSettings`.
@@ -1742,7 +1746,7 @@ name = "sentinel preset"
     }
 
     /// Pin the current `light_mode` write-as-false asymmetry: `TomlSettings::
-    /// from_player_settings` takes UI-facing `PlayerSettings`, which has no
+    /// from_player_settings` takes UI-facing `LivePlayerSettings`, which has no
     /// `light_mode` field. The function therefore always emits
     /// `light_mode = false` regardless of the internal redb-backed value.
     /// The on-disk truth is maintained separately by the `SetLightModeAtomic`
@@ -1755,7 +1759,7 @@ name = "sentinel preset"
     /// test should be updated to assert the new behavior.
     #[test]
     fn from_player_settings_writes_light_mode_false_regardless_of_internal_value() {
-        let mut internal = InternalPlayerSettings::default();
+        let mut internal = PersistedPlayerSettings::default();
         internal.light_mode = true;
 
         let (sm, _tmp) = make_test_manager_with_player(internal);
@@ -1764,6 +1768,128 @@ name = "sentinel preset"
         assert!(
             !ts.light_mode,
             "from_player_settings hard-codes light_mode = false (UI-PS lacks the field)"
+        );
+    }
+
+    /// Pin the persistence invariant for `PersistedPlayerSettings`: the
+    /// rename in Group 3.5 Lane 1 is byte-stable because `state_storage::
+    /// StateStorage::save` writes `serde_json::to_vec(&UserSettings)` and
+    /// serde_json keys by field name, never by struct name. This test
+    /// exercises the production save → reopen → load path with a
+    /// non-default sentinel and asserts every persisted field survives.
+    ///
+    /// If a future change reroutes `UserSettings` persistence through
+    /// `save_binary` (bincode-next) instead of `save` (serde_json), bincode
+    /// IS sensitive to struct names — this test will then need to be paired
+    /// with a migration. Today the path is JSON, so the rename is safe.
+    #[test]
+    fn persisted_player_settings_redb_roundtrip() {
+        use crate::types::settings::UserSettings;
+
+        let sentinel = build_exhaustive_persisted_player_settings();
+        let user = UserSettings {
+            player: sentinel.clone(),
+            ..UserSettings::default()
+        };
+
+        // Save through a real StateStorage, reopen, load. Mirrors the
+        // production startup path in SettingsManager::new() at line 81.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("persisted_roundtrip.redb");
+        {
+            let storage = StateStorage::new(path.clone()).expect("create redb");
+            storage
+                .save(crate::services::storage_keys::USER_SETTINGS, &user)
+                .expect("save UserSettings");
+        }
+        let storage = StateStorage::new(path).expect("reopen redb");
+        let loaded: UserSettings = storage
+            .load(crate::services::storage_keys::USER_SETTINGS)
+            .expect("load result")
+            .expect("UserSettings present after save");
+
+        let lhs = &user.player;
+        let rhs = &loaded.player;
+
+        // Spot-check fields drawn from every "section" of the exhaustive
+        // sentinel — covers bools, strings, enums, f32/f64, Option, Vec,
+        // and the array-of-f32 (eq_gains). A full field-by-field walk
+        // already exists in player_settings_toml_roundtrip_full_field_coverage;
+        // here we just need to prove the redb wire format survives the
+        // struct rename.
+        assert_eq!(lhs.volume, rhs.volume, "volume (f64)");
+        assert_eq!(lhs.sfx_volume, rhs.sfx_volume, "sfx_volume");
+        assert_eq!(lhs.scrobbling_enabled, rhs.scrobbling_enabled);
+        assert_eq!(lhs.scrobble_threshold, rhs.scrobble_threshold);
+        assert_eq!(lhs.start_view, rhs.start_view);
+        assert_eq!(lhs.stable_viewport, rhs.stable_viewport);
+        assert_eq!(lhs.light_mode, rhs.light_mode);
+        assert_eq!(lhs.enter_behavior, rhs.enter_behavior);
+        assert_eq!(lhs.nav_layout, rhs.nav_layout);
+        assert_eq!(lhs.volume_normalization, rhs.volume_normalization);
+        assert_eq!(lhs.default_playlist_id, rhs.default_playlist_id);
+        assert_eq!(lhs.local_music_path, rhs.local_music_path);
+        assert_eq!(lhs.font_family, rhs.font_family);
+        assert_eq!(lhs.eq_gains, rhs.eq_gains, "eq_gains [f32; 10]");
+        assert_eq!(
+            lhs.custom_eq_presets.len(),
+            rhs.custom_eq_presets.len(),
+            "custom_eq_presets Vec<>"
+        );
+        assert_eq!(
+            lhs.custom_eq_presets[0].name, rhs.custom_eq_presets[0].name,
+            "custom_eq_presets[0].name"
+        );
+        assert_eq!(
+            lhs.queue_show_genre, rhs.queue_show_genre,
+            "queue_show_genre (the silent-drop sentinel)"
+        );
+        assert_eq!(lhs.artwork_column_mode, rhs.artwork_column_mode);
+        assert_eq!(lhs.show_tray_icon, rhs.show_tray_icon);
+    }
+
+    /// Field-mapping integrity test for the `define_settings!` `read:`
+    /// closures: build a `PersistedPlayerSettings` with three sentinel
+    /// values, run it through `get_player_settings()` (which exercises
+    /// every per-tab `dump_*_player_settings` and every per-view-column
+    /// `dump_*_columns_to_player`), and assert the corresponding fields
+    /// land on the resulting `LivePlayerSettings`. Pins that the rename
+    /// didn't silently mismap any field across the redb↔UI boundary.
+    #[test]
+    fn live_and_persisted_field_overlap() {
+        let mut persisted = PersistedPlayerSettings::default();
+        // Pick one field from each of the 3 tabs the macro owns:
+        //   General  — start_view
+        //   Interface — nav_display_mode
+        //   Playback  — crossfade_duration_secs
+        // Plus one view-column field (Queue) so the
+        // define_view_column_toml_helpers! dump_*_columns_to_player path is
+        // also exercised end-to-end:
+        //   queue_show_select
+        persisted.start_view = "Albums".to_string();
+        persisted.nav_display_mode = NavDisplayMode::IconsOnly;
+        persisted.crossfade_duration_secs = 11;
+        persisted.queue_show_select = true;
+
+        let (sm, _tmp) = make_test_manager_with_player(persisted);
+        let live = sm.get_player_settings();
+
+        assert_eq!(
+            live.start_view, "Albums",
+            "General tab read: closure must copy start_view"
+        );
+        assert_eq!(
+            live.nav_display_mode,
+            NavDisplayMode::IconsOnly,
+            "Interface tab read: closure must copy nav_display_mode"
+        );
+        assert_eq!(
+            live.crossfade_duration_secs, 11,
+            "Playback tab read: closure must copy crossfade_duration_secs"
+        );
+        assert!(
+            live.queue_show_select,
+            "Queue view-column dump must copy queue_show_select"
         );
     }
 }

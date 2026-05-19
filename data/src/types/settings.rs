@@ -13,8 +13,14 @@ use crate::types::{
 };
 
 /// Player-related settings (volume, visualizer, theme, general)
+///
+/// Redb-shaped: persisted via `serde_json::to_vec` in
+/// `services/state_storage.rs`. Renamed from `PlayerSettings` so it no longer
+/// collides with the UI-facing `LivePlayerSettings` in the adjacent
+/// `player_settings` module. Persistence is byte-stable across this rename:
+/// serde_json keys by field name, never by struct name.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlayerSettings {
+pub struct PersistedPlayerSettings {
     #[serde(default = "default_volume")]
     pub volume: f64,
     #[serde(default = "default_sfx_volume")]
@@ -447,7 +453,7 @@ fn default_true() -> bool {
     true
 }
 
-impl Default for PlayerSettings {
+impl Default for PersistedPlayerSettings {
     fn default() -> Self {
         Self {
             volume: default_volume(),
@@ -625,7 +631,7 @@ impl Default for ViewPreferences {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UserSettings {
     #[serde(default)]
-    pub player: PlayerSettings,
+    pub player: PersistedPlayerSettings,
     #[serde(default)]
     pub views: ViewPreferences,
     #[serde(default)]
@@ -638,18 +644,18 @@ mod tests {
 
     #[test]
     fn strip_merged_mode_default_is_off() {
-        let p = PlayerSettings::default();
+        let p = PersistedPlayerSettings::default();
         assert!(!p.strip_merged_mode);
     }
 
     #[test]
     fn strip_merged_mode_roundtrips_through_serde() {
-        let p = PlayerSettings {
+        let p = PersistedPlayerSettings {
             strip_merged_mode: true,
-            ..PlayerSettings::default()
+            ..PersistedPlayerSettings::default()
         };
         let json = serde_json::to_string(&p).expect("serialize");
-        let parsed: PlayerSettings = serde_json::from_str(&json).expect("deserialize");
+        let parsed: PersistedPlayerSettings = serde_json::from_str(&json).expect("deserialize");
         assert!(parsed.strip_merged_mode);
     }
 
@@ -657,14 +663,14 @@ mod tests {
     fn strip_merged_mode_missing_field_defaults_to_false() {
         // Simulate older redb-stored settings without the field.
         let json = r#"{}"#;
-        let parsed: PlayerSettings = serde_json::from_str(json).expect("deserialize");
+        let parsed: PersistedPlayerSettings = serde_json::from_str(json).expect("deserialize");
         assert!(!parsed.strip_merged_mode);
     }
 
     #[test]
     fn replay_gain_prevent_clipping_defaults_to_true_for_missing_field() {
         let json = r#"{}"#;
-        let parsed: PlayerSettings = serde_json::from_str(json).expect("deserialize");
+        let parsed: PersistedPlayerSettings = serde_json::from_str(json).expect("deserialize");
         assert!(parsed.replay_gain_prevent_clipping);
     }
 }

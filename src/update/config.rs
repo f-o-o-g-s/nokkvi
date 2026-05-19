@@ -124,7 +124,7 @@ impl Nokkvi {
         &mut self,
         vp: nokkvi_data::types::view_preferences::AllViewPreferences,
         hotkeys: nokkvi_data::types::hotkey_config::HotkeyConfig,
-        settings: Box<nokkvi_data::types::player_settings::PlayerSettings>,
+        settings: Box<nokkvi_data::types::player_settings::LivePlayerSettings>,
     ) -> Task<Message> {
         // Settings loaded from TOML re-apply to the UI
         self.settings_page.config_dirty = true;

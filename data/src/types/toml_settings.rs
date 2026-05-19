@@ -385,7 +385,7 @@ impl Default for TomlSettings {
 }
 
 impl TomlSettings {
-    /// Build a `TomlSettings` from a `PlayerSettings` (for migration from redb).
+    /// Build a `TomlSettings` from a `LivePlayerSettings` (for migration from redb).
     ///
     /// Composition: start from default TOML, apply each tab's macro-emitted
     /// `write_<tab>_toml` (covers ~53 migrated setting keys), apply each
@@ -400,7 +400,7 @@ impl TomlSettings {
     /// via a targeted `update_config_value` write that does not go through
     /// this function. The default `TomlSettings { light_mode: false, .. }`
     /// matches the pre-refactor behavior of hard-coding `false`.
-    pub fn from_player_settings(ps: &crate::types::player_settings::PlayerSettings) -> Self {
+    pub fn from_player_settings(ps: &crate::types::player_settings::LivePlayerSettings) -> Self {
         let mut ts = Self::default();
 
         // Per-tab macro-emitted writers (define_settings! `write:` closures).

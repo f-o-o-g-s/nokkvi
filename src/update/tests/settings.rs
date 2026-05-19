@@ -19,7 +19,7 @@
 
 use nokkvi_data::{
     services::settings_tables::SettingsSideEffect,
-    types::{player_settings::PlayerSettings, toast::ToastLevel},
+    types::{player_settings::LivePlayerSettings, toast::ToastLevel},
 };
 
 use crate::test_helpers::*;
@@ -178,7 +178,7 @@ fn player_settings_loaded_albums_artwork_overlay_false_clears_atomic() {
     let mut app = test_app();
     let prior = crate::theme::albums_artwork_overlay();
 
-    let _ = app.handle_player_settings_loaded(PlayerSettings {
+    let _ = app.handle_player_settings_loaded(LivePlayerSettings {
         albums_artwork_overlay: false,
         ..Default::default()
     });
@@ -199,7 +199,7 @@ fn player_settings_loaded_albums_artwork_overlay_true_sets_atomic() {
     crate::theme::set_albums_artwork_overlay(false);
     let mut app = test_app();
 
-    let _ = app.handle_player_settings_loaded(PlayerSettings {
+    let _ = app.handle_player_settings_loaded(LivePlayerSettings {
         albums_artwork_overlay: true,
         ..Default::default()
     });
@@ -218,7 +218,7 @@ fn player_settings_loaded_artists_artwork_overlay_flips_atomic() {
     let mut app = test_app();
     let prior = crate::theme::artists_artwork_overlay();
 
-    let _ = app.handle_player_settings_loaded(PlayerSettings {
+    let _ = app.handle_player_settings_loaded(LivePlayerSettings {
         artists_artwork_overlay: false,
         ..Default::default()
     });
@@ -232,7 +232,7 @@ fn player_settings_loaded_songs_artwork_overlay_flips_atomic() {
     let mut app = test_app();
     let prior = crate::theme::songs_artwork_overlay();
 
-    let _ = app.handle_player_settings_loaded(PlayerSettings {
+    let _ = app.handle_player_settings_loaded(LivePlayerSettings {
         songs_artwork_overlay: false,
         ..Default::default()
     });
@@ -246,7 +246,7 @@ fn player_settings_loaded_playlists_artwork_overlay_flips_atomic() {
     let mut app = test_app();
     let prior = crate::theme::playlists_artwork_overlay();
 
-    let _ = app.handle_player_settings_loaded(PlayerSettings {
+    let _ = app.handle_player_settings_loaded(LivePlayerSettings {
         playlists_artwork_overlay: false,
         ..Default::default()
     });

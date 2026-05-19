@@ -27,6 +27,7 @@ use crate::{
 define_settings! {
     tab: Tab::General,
     data_type: GeneralSettingsData,
+    mgr_type: crate::services::settings::SettingsManager,
     items_fn: build_general_tab_settings_items,
     settings_const: TAB_GENERAL_SETTINGS,
     contains_fn: tab_general_contains,
@@ -187,7 +188,7 @@ define_settings! {
             setter: |_mgr, _v: String| Ok(()),
             toml_apply: |ts, p| p.light_mode = ts.light_mode,
             // `light_mode` lives in the theme atomic + config.toml, not on the
-            // UI-facing `PlayerSettings` (see player_settings/mod.rs:25). The
+            // UI-facing `LivePlayerSettings` (see player_settings/mod.rs). The
             // dump and write are intentionally no-ops; on_dispatch carries
             // the truth, and the on-disk TOML write is owned by the
             // `SetLightModeAtomic` side-effect handler in the UI crate via a
@@ -299,8 +300,9 @@ mod tests {
     use crate::{
         services::{settings::SettingsManager, state_storage::StateStorage},
         types::{
-            setting_item::SettingsEntry, setting_value::SettingValue, settings::PlayerSettings,
-            settings_data::GeneralSettingsData, toml_settings::TomlSettings,
+            setting_item::SettingsEntry, setting_value::SettingValue,
+            settings::PersistedPlayerSettings, settings_data::GeneralSettingsData,
+            toml_settings::TomlSettings,
         },
     };
 
@@ -359,7 +361,7 @@ mod tests {
     fn apply_toml_general_copies_stable_viewport() {
         let mut ts = TomlSettings::default();
         ts.stable_viewport = false;
-        let mut p = PlayerSettings::default();
+        let mut p = PersistedPlayerSettings::default();
         p.stable_viewport = true;
         apply_toml_general_tab(&ts, &mut p);
         assert!(!p.stable_viewport);
@@ -468,7 +470,7 @@ mod tests {
         ts.show_tray_icon = true;
         ts.close_to_tray = true;
 
-        let mut p = PlayerSettings::default();
+        let mut p = PersistedPlayerSettings::default();
         apply_toml_general_tab(&ts, &mut p);
 
         assert!(!p.stable_viewport);
@@ -482,14 +484,14 @@ mod tests {
     }
 
     /// Write-side: `write_general_tab_toml` copies the migrated fields from
-    /// the UI-facing `PlayerSettings` onto `TomlSettings` for serialization
+    /// the UI-facing `LivePlayerSettings` onto `TomlSettings` for serialization
     /// back to `config.toml`. Inverse of `apply_toml_general_tab`. The
     /// `light_mode` entry deliberately declares a no-op `write:` closure
     /// (UI-PS has no light_mode field); this test confirms `ts.light_mode`
     /// keeps the value it had before `write_general_tab_toml` ran.
     #[test]
     fn write_general_round_trip_copies_migrated_fields_to_toml() {
-        let mut ps = crate::types::player_settings::PlayerSettings::default();
+        let mut ps = crate::types::player_settings::LivePlayerSettings::default();
         ps.stable_viewport = false;
         ps.start_view = "Songs".to_string();
         ps.enter_behavior = EnterBehavior::PlaySingle;
@@ -531,8 +533,9 @@ mod tests {
     }
 
     /// Read-side: `dump_general_tab_player_settings` copies the migrated
-    /// fields from the redb-backed internal `PlayerSettings` onto the
-    /// UI-facing struct consumed by `Message::PlayerSettingsLoaded`. Set every
+    /// fields from the redb-backed `PersistedPlayerSettings` onto the
+    /// UI-facing `LivePlayerSettings` consumed by
+    /// `Message::PlayerSettingsLoaded`. Set every
     /// migrated field on the source to a non-default value, dump, and confirm
     /// the destination received each one — including the `String` clone for
     /// `start_view`.
@@ -541,7 +544,7 @@ mod tests {
         let (mgr, _tmp) = make_test_manager();
         let mut ui = mgr.get_player_settings();
 
-        let mut src = PlayerSettings::default();
+        let mut src = PersistedPlayerSettings::default();
         src.stable_viewport = false;
         src.start_view = "Songs".to_string();
         src.enter_behavior = EnterBehavior::PlaySingle;

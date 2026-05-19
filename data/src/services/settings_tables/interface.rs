@@ -26,6 +26,7 @@ use crate::{
 define_settings! {
     tab: Tab::Interface,
     data_type: InterfaceSettingsData,
+    mgr_type: crate::services::settings::SettingsManager,
     items_fn: build_interface_tab_settings_items,
     settings_const: TAB_INTERFACE_SETTINGS,
     contains_fn: tab_interface_contains,
@@ -377,8 +378,9 @@ mod tests {
     use crate::{
         services::{settings::SettingsManager, state_storage::StateStorage},
         types::{
-            setting_item::SettingsEntry, setting_value::SettingValue, settings::PlayerSettings,
-            settings_data::InterfaceSettingsData, toml_settings::TomlSettings,
+            setting_item::SettingsEntry, setting_value::SettingValue,
+            settings::PersistedPlayerSettings, settings_data::InterfaceSettingsData,
+            toml_settings::TomlSettings,
         },
     };
 
@@ -535,7 +537,7 @@ mod tests {
     fn apply_toml_interface_copies_nav_layout() {
         let mut ts = TomlSettings::default();
         ts.nav_layout = NavLayout::Side;
-        let mut p = PlayerSettings::default();
+        let mut p = PersistedPlayerSettings::default();
         p.nav_layout = NavLayout::Top;
         apply_toml_interface_tab(&ts, &mut p);
         assert_eq!(p.nav_layout, NavLayout::Side);
@@ -545,7 +547,7 @@ mod tests {
     fn apply_toml_interface_copies_strip_show_title() {
         let mut ts = TomlSettings::default();
         ts.strip_show_title = false;
-        let mut p = PlayerSettings::default();
+        let mut p = PersistedPlayerSettings::default();
         p.strip_show_title = true;
         apply_toml_interface_tab(&ts, &mut p);
         assert!(!p.strip_show_title);
@@ -555,7 +557,7 @@ mod tests {
     fn apply_toml_interface_copies_artwork_column_mode() {
         let mut ts = TomlSettings::default();
         ts.artwork_column_mode = ArtworkColumnMode::from_label("Never");
-        let mut p = PlayerSettings::default();
+        let mut p = PersistedPlayerSettings::default();
         p.artwork_column_mode = ArtworkColumnMode::default();
         apply_toml_interface_tab(&ts, &mut p);
         assert_eq!(
@@ -593,7 +595,7 @@ mod tests {
         let (mgr, _tmp) = make_test_manager();
         let mut ui = mgr.get_player_settings();
 
-        let mut src = PlayerSettings::default();
+        let mut src = PersistedPlayerSettings::default();
         src.nav_layout = NavLayout::Side;
         src.strip_show_title = false;
         src.albums_artwork_overlay = false;
@@ -617,7 +619,7 @@ mod tests {
     /// f32 round-trip pre-serialize.
     #[test]
     fn write_interface_round_trip_copies_migrated_fields_to_toml() {
-        let mut ps = crate::types::player_settings::PlayerSettings::default();
+        let mut ps = crate::types::player_settings::LivePlayerSettings::default();
         ps.nav_layout = NavLayout::Side;
         ps.strip_show_title = false;
         ps.albums_artwork_overlay = false;

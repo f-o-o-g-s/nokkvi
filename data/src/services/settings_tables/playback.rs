@@ -6,7 +6,7 @@
 //! booleans, and the `general.opacity_gradient` / `general.rounded_mode`
 //! Theme-tab top scalars. The macro emits dispatch + apply in lockstep;
 //! audio-engine pushes still happen via `PlayerSettingsLoaded` after the
-//! refreshed `PlayerSettings` round-trips back to the UI.
+//! refreshed `LivePlayerSettings` round-trips back to the UI.
 //!
 //! Notes on the deliberately-omitted keys:
 //!
@@ -29,6 +29,7 @@ use crate::{
 define_settings! {
     tab: crate::types::setting_def::Tab::Playback,
     data_type: PlaybackSettingsData,
+    mgr_type: crate::services::settings::SettingsManager,
     items_fn: build_playback_tab_settings_items,
     settings_const: TAB_PLAYBACK_SETTINGS,
     contains_fn: tab_playback_contains,
@@ -277,7 +278,7 @@ mod tests {
             player_settings::{NormalizationLevel, VolumeNormalizationMode},
             setting_item::SettingsEntry,
             setting_value::SettingValue,
-            settings::PlayerSettings,
+            settings::PersistedPlayerSettings,
             settings_data::PlaybackSettingsData,
             toml_settings::TomlSettings,
         },
@@ -492,7 +493,7 @@ mod tests {
     }
 
     /// Apply-side: `apply_toml_playback_tab` copies every declared key
-    /// from `TomlSettings` onto the redb-backed `PlayerSettings`. Spot-check
+    /// from `TomlSettings` onto the redb-backed `PersistedPlayerSettings`. Spot-check
     /// a Bool, a Number, and an Enum to prove the closures all wired up.
     #[test]
     fn apply_toml_playback_copies_declared_fields() {
@@ -506,7 +507,7 @@ mod tests {
         ts.rounded_mode = true;
         ts.queue_show_stars = false;
 
-        let mut p = PlayerSettings::default();
+        let mut p = PersistedPlayerSettings::default();
         apply_toml_playback_tab(&ts, &mut p);
 
         assert!(p.crossfade_enabled);
@@ -530,7 +531,7 @@ mod tests {
         let (mgr, _tmp) = make_test_manager();
         let mut ui = mgr.get_player_settings();
 
-        let mut src = PlayerSettings::default();
+        let mut src = PersistedPlayerSettings::default();
         src.crossfade_enabled = true;
         src.crossfade_duration_secs = 9;
         src.replay_gain_preamp_db = 4.0;
@@ -559,13 +560,13 @@ mod tests {
 
     /// Write-side: `write_playback_tab_toml` copies the migrated fields
     /// from the UI-facing struct onto `TomlSettings` for config.toml
-    /// serialization. The `scrobble_threshold` field is f32 on both UI-PS
-    /// and TomlSettings (the f64 only exists on the redb-backed internal
-    /// `PlayerSettings`) — the write closure is therefore a plain copy
-    /// without cast.
+    /// serialization. The `scrobble_threshold` field is f32 on both
+    /// `LivePlayerSettings` and `TomlSettings` (the f64 only exists on the
+    /// redb-backed `PersistedPlayerSettings`) — the write closure is
+    /// therefore a plain copy without cast.
     #[test]
     fn write_playback_round_trip_copies_migrated_fields_to_toml() {
-        let mut ps = crate::types::player_settings::PlayerSettings::default();
+        let mut ps = crate::types::player_settings::LivePlayerSettings::default();
         ps.crossfade_enabled = true;
         ps.crossfade_duration_secs = 9;
         ps.replay_gain_preamp_db = 4.0;

@@ -14,19 +14,21 @@
 //!   load); `Some(Err(_))` on type mismatch or setter failure. Caller chains
 //!   all three tab dispatchers; a `None` from every tab means the key is
 //!   still owned by the legacy hand-written `match key.as_str()` arm in the
-//!   UI crate.
+//!   UI crate. The manager type is parametric — call sites pass `mgr_type:`
+//!   explicitly so the macro doesn't hardcode `SettingsManager`.
 //! - `pub fn apply_toml_<tab>_tab(ts, p)` — runs the per-setting
 //!   `toml_apply` closures. Called from `apply_toml_settings_to_internal`.
 //! - `pub fn dump_<tab>_tab_player_settings(src, out)` — runs the per-setting
-//!   `read` closures, copying the redb-backed internal `PlayerSettings` into
-//!   the UI-facing `PlayerSettings` consumed by `Message::PlayerSettingsLoaded`.
-//!   Called from `SettingsManager::get_player_settings`.
+//!   `read` closures, copying the redb-backed `PersistedPlayerSettings` into
+//!   the UI-facing `LivePlayerSettings` consumed by
+//!   `Message::PlayerSettingsLoaded`. Called from
+//!   `SettingsManager::get_player_settings`.
 //! - `pub fn write_<tab>_tab_toml(ps, ts)` — runs the per-setting `write`
-//!   closures, copying the UI-facing `PlayerSettings` back onto `TomlSettings`
-//!   for serialization to `config.toml`. Inverse of `apply_toml_<tab>_tab`.
-//!   Called from `TomlSettings::from_player_settings`.
+//!   closures, copying the UI-facing `LivePlayerSettings` back onto
+//!   `TomlSettings` for serialization to `config.toml`. Inverse of
+//!   `apply_toml_<tab>_tab`. Called from `TomlSettings::from_player_settings`.
 //!
-//! The dispatcher takes `&mut SettingsManager` (sync). The UI handler in
+//! The dispatcher takes `&mut <mgr_type>` (sync). The UI handler in
 //! `update/settings.rs` locks the manager mutex inside an async task before
 //! calling the dispatcher chain, mirroring the pattern of the existing
 //! `shell.settings().set_X(v).await` calls. After the dispatcher returns,
@@ -74,6 +76,7 @@ pub struct SettingDef {
 /// nokkvi_data::define_settings! {
 ///     tab: nokkvi_data::types::setting_def::Tab::General,
 ///     data_type: nokkvi_data::types::settings_data::GeneralSettingsData,
+///     mgr_type: nokkvi_data::services::settings::SettingsManager,
 ///     items_fn: build_general_tab_settings_items,
 ///     settings_const: TAB_GENERAL_SETTINGS,
 ///     contains_fn: tab_general_contains,
@@ -123,17 +126,19 @@ pub struct SettingDef {
 /// `Some(Err(anyhow::Error))`.
 ///
 /// `read` carries the per-field cast/clone semantics needed to land the
-/// redb-stored internal `PlayerSettings` value onto the UI-facing struct
-/// (e.g. `out.scrobble_threshold = src.scrobble_threshold as f32` or
+/// redb-stored `PersistedPlayerSettings` value onto the UI-facing
+/// `LivePlayerSettings` struct (e.g.
+/// `out.scrobble_threshold = src.scrobble_threshold as f32` or
 /// `out.start_view = src.start_view.clone()`).
 ///
 /// `write` carries the per-field cast/clone semantics needed to land the
-/// UI-facing `PlayerSettings` value onto `TomlSettings` for serialization —
-/// the inverse of `read`. Field types are usually identical between UI-PS
-/// and TomlSettings (both f32 for `scrobble_threshold`, both `String` for
-/// `start_view`), so most `write` closures are a simple assignment of the
-/// matching field name. Entries whose UI-facing struct lacks the field
-/// (only `light_mode` today) declare a `|_ps, _ts| {}` no-op.
+/// UI-facing `LivePlayerSettings` value onto `TomlSettings` for serialization
+/// — the inverse of `read`. Field types are usually identical between
+/// `LivePlayerSettings` and `TomlSettings` (both f32 for `scrobble_threshold`,
+/// both `String` for `start_view`), so most `write` closures are a simple
+/// assignment of the matching field name. Entries whose UI-facing struct
+/// lacks the field (only `light_mode` today) declare a `|_ps, _ts| {}`
+/// no-op.
 ///
 /// `on_dispatch` (when supplied) receives the same unpacked payload — for
 /// `Text` and `Enum` keys the macro hands it a clone so the setter can still
@@ -160,6 +165,7 @@ macro_rules! define_settings {
     (
         tab: $tab:expr,
         data_type: $data_type:ty,
+        mgr_type: $mgr_type:ty,
         items_fn: $items_fn:ident,
         settings_const: $settings_const:ident,
         contains_fn: $contains_fn:ident,
@@ -216,7 +222,7 @@ macro_rules! define_settings {
         pub fn $dispatch_fn(
             key: &str,
             value: $crate::types::setting_value::SettingValue,
-            mgr: &mut $crate::services::settings::SettingsManager,
+            mgr: &mut $mgr_type,
         ) -> ::core::option::Option<
             ::anyhow::Result<$crate::types::settings_side_effect::SettingsSideEffect>,
         > {
@@ -238,12 +244,12 @@ macro_rules! define_settings {
         #[allow(unused_variables)]
         pub fn $apply_fn(
             ts: &$crate::types::toml_settings::TomlSettings,
-            p: &mut $crate::types::settings::PlayerSettings,
+            p: &mut $crate::types::settings::PersistedPlayerSettings,
         ) {
             $(
                 {
                     let $ats: &$crate::types::toml_settings::TomlSettings = ts;
-                    let $ap: &mut $crate::types::settings::PlayerSettings = p;
+                    let $ap: &mut $crate::types::settings::PersistedPlayerSettings = p;
                     $abody;
                 }
             )*
@@ -251,34 +257,35 @@ macro_rules! define_settings {
 
         #[allow(unused_variables)]
         pub fn $dump_fn(
-            src: &$crate::types::settings::PlayerSettings,
-            out: &mut $crate::types::player_settings::PlayerSettings,
+            src: &$crate::types::settings::PersistedPlayerSettings,
+            out: &mut $crate::types::player_settings::LivePlayerSettings,
         ) {
             $(
                 {
-                    let $rsrc: &$crate::types::settings::PlayerSettings = src;
-                    let $rout: &mut $crate::types::player_settings::PlayerSettings = out;
+                    let $rsrc: &$crate::types::settings::PersistedPlayerSettings = src;
+                    let $rout: &mut $crate::types::player_settings::LivePlayerSettings = out;
                     $rbody;
                 }
             )*
         }
 
         /// Macro-emitted writer — copies the per-tab declared fields from the
-        /// UI-facing `PlayerSettings` onto `TomlSettings` for serialization
-        /// back to `config.toml`. Inverse of `$apply_fn` (TOML→internal) and
-        /// `$dump_fn` (internal→UI). Entries whose UI-facing struct does not
-        /// carry the field (e.g. `light_mode`, which lives only on the
-        /// internal redb-backed `PlayerSettings`) declare a no-op `write:`
-        /// closure so the per-tab function still claims the key even though
-        /// the wire copy is a no-op.
+        /// UI-facing `LivePlayerSettings` onto `TomlSettings` for
+        /// serialization back to `config.toml`. Inverse of `$apply_fn`
+        /// (TOML→`PersistedPlayerSettings`) and `$dump_fn`
+        /// (`PersistedPlayerSettings`→`LivePlayerSettings`). Entries whose
+        /// UI-facing struct does not carry the field (e.g. `light_mode`,
+        /// which lives only on the redb-backed `PersistedPlayerSettings`)
+        /// declare a no-op `write:` closure so the per-tab function still
+        /// claims the key even though the wire copy is a no-op.
         #[allow(unused_variables)]
         pub fn $write_fn(
-            ps: &$crate::types::player_settings::PlayerSettings,
+            ps: &$crate::types::player_settings::LivePlayerSettings,
             ts: &mut $crate::types::toml_settings::TomlSettings,
         ) {
             $(
                 {
-                    let $wps: &$crate::types::player_settings::PlayerSettings = ps;
+                    let $wps: &$crate::types::player_settings::LivePlayerSettings = ps;
                     let $wts: &mut $crate::types::toml_settings::TomlSettings = ts;
                     $wbody;
                 }
@@ -552,14 +559,14 @@ macro_rules! define_settings_build_item_arm {
 /// three free functions per invocation:
 ///
 /// - `$apply_fn(ts, p)` — copy `ts.field → p.field` for each declared field,
-///   moving the column toggle from TOML onto the redb-backed internal
-///   `PlayerSettings`.
+///   moving the column toggle from TOML onto the redb-backed
+///   `PersistedPlayerSettings`.
 /// - `$dump_fn(src, out)` — copy `src.field → out.field` for each declared
-///   field, moving the column toggle from the redb-backed internal
-///   `PlayerSettings` onto the UI-facing `PlayerSettings` consumed by
-///   `Message::PlayerSettingsLoaded`.
+///   field, moving the column toggle from the redb-backed
+///   `PersistedPlayerSettings` onto the UI-facing `LivePlayerSettings`
+///   consumed by `Message::PlayerSettingsLoaded`.
 /// - `$write_fn(ps, ts)` — copy `ps.field → ts.field` for each declared field,
-///   moving the column toggle from the UI-facing `PlayerSettings` onto the
+///   moving the column toggle from the UI-facing `LivePlayerSettings` onto the
 ///   TOML representation written to `config.toml`.
 ///
 /// Companion to `define_view_columns!` (UI crate, `src/views/mod.rs`): the
@@ -569,8 +576,8 @@ macro_rules! define_settings_build_item_arm {
 /// crate's test module asserts the column counts match so a column added on
 /// one side without the other surfaces as a test failure.
 ///
-/// All declared fields must be `bool` on `TomlSettings`, the redb-backed
-/// internal `PlayerSettings`, and the UI-facing `PlayerSettings` — i.e. the
+/// All declared fields must be `bool` on `TomlSettings`,
+/// `PersistedPlayerSettings`, and `LivePlayerSettings` — i.e. the
 /// per-view-column toggles. The macro relies on identical field names across
 /// all three types, which is the case today for every `<view>_show_<column>`
 /// field.
@@ -604,11 +611,11 @@ macro_rules! define_view_column_toml_helpers {
         fields: [ $( $field:ident ),* $(,)? ] $(,)?
     ) => {
         /// Macro-emitted: copy declared view-column-visibility fields from
-        /// `TomlSettings` onto the redb-backed internal `PlayerSettings`.
+        /// `TomlSettings` onto the redb-backed `PersistedPlayerSettings`.
         #[allow(dead_code)]
         pub fn $apply_fn(
             ts: &$crate::types::toml_settings::TomlSettings,
-            p: &mut $crate::types::settings::PlayerSettings,
+            p: &mut $crate::types::settings::PersistedPlayerSettings,
         ) {
             $(
                 p.$field = ts.$field;
@@ -616,12 +623,12 @@ macro_rules! define_view_column_toml_helpers {
         }
 
         /// Macro-emitted: copy declared view-column-visibility fields from
-        /// the redb-backed internal `PlayerSettings` onto the UI-facing
-        /// `PlayerSettings`.
+        /// the redb-backed `PersistedPlayerSettings` onto the UI-facing
+        /// `LivePlayerSettings`.
         #[allow(dead_code)]
         pub fn $dump_fn(
-            src: &$crate::types::settings::PlayerSettings,
-            out: &mut $crate::types::player_settings::PlayerSettings,
+            src: &$crate::types::settings::PersistedPlayerSettings,
+            out: &mut $crate::types::player_settings::LivePlayerSettings,
         ) {
             $(
                 out.$field = src.$field;
@@ -629,11 +636,11 @@ macro_rules! define_view_column_toml_helpers {
         }
 
         /// Macro-emitted: copy declared view-column-visibility fields from
-        /// the UI-facing `PlayerSettings` onto `TomlSettings` (for writing
+        /// the UI-facing `LivePlayerSettings` onto `TomlSettings` (for writing
         /// back to `config.toml`).
         #[allow(dead_code)]
         pub fn $write_fn(
-            ps: &$crate::types::player_settings::PlayerSettings,
+            ps: &$crate::types::player_settings::LivePlayerSettings,
             ts: &mut $crate::types::toml_settings::TomlSettings,
         ) {
             $(
@@ -641,4 +648,111 @@ macro_rules! define_view_column_toml_helpers {
             )*
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    /// Stand-in for `SettingsManager` to prove `define_settings!` is
+    /// genuinely parametric on its `mgr_type:` argument. If the macro ever
+    /// regresses to hardcoding `SettingsManager`, this module fails to
+    /// compile (the macro would try to call `MockMgr::set_*` on a
+    /// `SettingsManager` borrow).
+    pub struct MockMgr {
+        pub last_flag: bool,
+    }
+
+    impl MockMgr {
+        pub fn set_flag(&mut self, v: bool) -> ::anyhow::Result<()> {
+            self.last_flag = v;
+            Ok(())
+        }
+    }
+
+    crate::define_settings! {
+        tab: crate::types::setting_def::Tab::General,
+        data_type: crate::types::settings_data::GeneralSettingsData,
+        mgr_type: MockMgr,
+        items_fn: mock_items_fn,
+        settings_const: MOCK_SETTINGS_TABLE,
+        contains_fn: mock_contains,
+        dispatch_fn: mock_dispatch,
+        apply_fn: mock_apply_toml,
+        dump_fn: mock_dump_ps,
+        write_fn: mock_write_toml,
+        settings: [
+            MockFlag {
+                key: "mock.flag",
+                value_type: Bool,
+                setter: |mgr, v: bool| mgr.set_flag(v),
+                toml_apply: |_ts, _p| {},
+                read: |_src, _out| {},
+                write: |_ps, _ts| {},
+            },
+        ]
+    }
+
+    /// The macro is parametric on the manager type: instantiated above with
+    /// `mgr_type: MockMgr`, the generated `mock_dispatch` accepts
+    /// `&mut MockMgr` and forwards the unpacked Bool to `MockMgr::set_flag`.
+    #[test]
+    fn define_settings_macro_accepts_alternate_mgr_type() {
+        let mut mgr = MockMgr { last_flag: false };
+        let result = mock_dispatch(
+            "mock.flag",
+            crate::types::setting_value::SettingValue::Bool(true),
+            &mut mgr,
+        );
+        assert!(
+            result.is_some(),
+            "mock_dispatch must claim mock.flag (containment check)"
+        );
+        let effect = result.unwrap().expect("setter must succeed");
+        assert!(
+            matches!(
+                effect,
+                crate::types::settings_side_effect::SettingsSideEffect::None
+            ),
+            "setter-only entry must return SettingsSideEffect::None"
+        );
+        assert!(
+            mgr.last_flag,
+            "MockMgr::set_flag must have been invoked with v=true"
+        );
+
+        // Containment helper and miss path also verified for completeness.
+        assert!(mock_contains("mock.flag"));
+        assert!(!mock_contains("mock.unknown"));
+        let miss = mock_dispatch(
+            "mock.unknown",
+            crate::types::setting_value::SettingValue::Bool(true),
+            &mut mgr,
+        );
+        assert!(miss.is_none(), "unknown key must return None");
+    }
+
+    /// Smoke test for the other three macro-emitted functions on the same
+    /// `MockMgr` invocation. Each has a no-op closure body (this entry
+    /// declares `toml_apply`, `read`, and `write` as `|_, _| {}`), so the
+    /// test only proves that the macro still emits the functions and that
+    /// they accept the renamed `PersistedPlayerSettings` /
+    /// `LivePlayerSettings` types in their signatures.
+    #[test]
+    fn define_settings_macro_emits_apply_dump_write_functions() {
+        let ts = crate::types::toml_settings::TomlSettings::default();
+        let mut p = crate::types::settings::PersistedPlayerSettings::default();
+        mock_apply_toml(&ts, &mut p);
+
+        let src = crate::types::settings::PersistedPlayerSettings::default();
+        let mut out = crate::types::player_settings::LivePlayerSettings::default();
+        mock_dump_ps(&src, &mut out);
+
+        let ps = crate::types::player_settings::LivePlayerSettings::default();
+        let mut ts2 = crate::types::toml_settings::TomlSettings::default();
+        mock_write_toml(&ps, &mut ts2);
+
+        // Nothing to assert — the entry's read/write closures are no-ops.
+        // The body of this test is the signature check itself; if the
+        // macro had used the old `PlayerSettings` names anywhere, this
+        // wouldn't compile.
+    }
 }

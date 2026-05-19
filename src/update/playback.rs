@@ -1085,7 +1085,7 @@ impl Nokkvi {
 
     pub(crate) fn handle_player_settings_loaded(
         &mut self,
-        settings: crate::app_message::PlayerSettings,
+        settings: crate::app_message::LivePlayerSettings,
     ) -> Task<Message> {
         self.playback.volume = settings.volume;
         self.sfx.volume = settings.sfx_volume;
@@ -1157,9 +1157,9 @@ impl Nokkvi {
 
         // Persisted player settings — single substruct replacement collapses
         // the per-field mirror writes that previously fanned out 1:1 with
-        // `PlayerSettings`. Local `settings` binding remains available for the
-        // subsequent column-visibility / theme-atomic / engine-push steps that
-        // read individual fields.
+        // `LivePlayerSettings`. Local `settings` binding remains available
+        // for the subsequent column-visibility / theme-atomic / engine-push
+        // steps that read individual fields.
         self.settings = settings.clone();
 
         // Restore queue column visibility from persisted settings.

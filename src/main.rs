@@ -242,15 +242,15 @@ pub struct Nokkvi {
     pub hotkey_config: HotkeyConfig,
 
     // -------------------------------------------------------------------------
-    // Persisted player settings (mirrors PlayerSettings 1:1 — see
+    // Persisted player settings (mirrors LivePlayerSettings 1:1 — see
     // data/src/types/player_settings/mod.rs). Loaded from redb on login via
     // `PlayerSettingsLoaded`. Adding a new persisted setting is a one-side
-    // edit in `PlayerSettings`; this substruct picks it up automatically.
+    // edit in `LivePlayerSettings`; this substruct picks it up automatically.
     // -------------------------------------------------------------------------
-    pub settings: nokkvi_data::types::player_settings::PlayerSettings,
+    pub settings: nokkvi_data::types::player_settings::LivePlayerSettings,
 
     // -------------------------------------------------------------------------
-    // UI runtime flags (NOT persisted to PlayerSettings)
+    // UI runtime flags (NOT persisted to LivePlayerSettings)
     // -------------------------------------------------------------------------
     /// One-shot flag: has start_view been applied yet?
     pub start_view_applied: bool,
@@ -343,17 +343,17 @@ impl Default for Nokkvi {
             similar_songs: None,
             similar_songs_generation: 0,
             // Persisted player settings (overridden by PlayerSettingsLoaded).
-            // PlayerSettings derives Default, which zeros every field — the
-            // 18 fields previously hand-defaulted on Nokkvi are restored
+            // LivePlayerSettings derives Default, which zeros every field —
+            // the 18 fields previously hand-defaulted on Nokkvi are restored
             // here so first-launch behavior (before PlayerSettingsLoaded
             // fires) matches the pre-substruct shape.
-            settings: nokkvi_data::types::player_settings::PlayerSettings {
+            settings: nokkvi_data::types::player_settings::LivePlayerSettings {
                 scrobbling_enabled: true,
                 scrobble_threshold: 0.50,
                 start_view: "Queue".to_string(),
                 stable_viewport: true,
                 auto_follow_playing: true,
-                ..nokkvi_data::types::player_settings::PlayerSettings::default()
+                ..nokkvi_data::types::player_settings::LivePlayerSettings::default()
             },
             // UI runtime flags (not persisted)
             start_view_applied: false,

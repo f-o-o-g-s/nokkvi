@@ -20,12 +20,19 @@ pub use slot_list::*;
 pub use strip::*;
 pub use visualizer::*;
 
-/// Player settings loaded from persistence (redb).
+/// Live, UI-facing player settings — the in-memory shape that
+/// `Nokkvi.settings` mirrors and `Message::PlayerSettingsLoaded` carries.
 ///
-/// Note: `light_mode` is stored in config.toml, not redb.
-/// See `theme_config::load_light_mode_from_config()`.
+/// Constructed from the redb-shaped
+/// [`PersistedPlayerSettings`][crate::types::settings::PersistedPlayerSettings]
+/// via `SettingsManager::get_player_settings`. Renamed from `PlayerSettings`
+/// so it no longer collides with the persisted struct in the adjacent
+/// `crate::types::settings` module.
+///
+/// Note: `light_mode` is stored in config.toml, not redb. See
+/// `theme_config::load_light_mode_from_config()`.
 #[derive(Debug, Clone, Default)]
-pub struct PlayerSettings {
+pub struct LivePlayerSettings {
     pub volume: f32,
     pub sfx_volume: f32,
     pub sound_effects_enabled: bool,

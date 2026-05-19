@@ -1,8 +1,8 @@
-//! Tests for the `Nokkvi.settings: PlayerSettings` substruct
+//! Tests for the `Nokkvi.settings: LivePlayerSettings` substruct
 //!
 //! Pins the shape of the player-settings consolidation: the 18 persisted
 //! fields that previously hung loose on `Nokkvi` now live inside the
-//! `settings: PlayerSettings` substruct. UI-runtime flags (e.g.
+//! `settings: LivePlayerSettings` substruct. UI-runtime flags (e.g.
 //! `start_view_applied`, `pending_expand`) stay loose on `Nokkvi` and
 //! must remain directly accessible.
 //!
@@ -11,20 +11,20 @@
 //! fields that previously lived on `WindowState`.
 
 use nokkvi_data::types::player_settings::{
-    ArtworkResolution, EnterBehavior, LibraryPageSize, PlayerSettings,
+    ArtworkResolution, EnterBehavior, LibraryPageSize, LivePlayerSettings,
 };
 
 use crate::test_helpers::*;
 
 // ══════════════════════════════════════════════════════════════════════
-//  PlayerSettings substruct — pin shape and load behavior
+//  LivePlayerSettings substruct — pin shape and load behavior
 // ══════════════════════════════════════════════════════════════════════
 
 #[test]
 fn nokkvi_default_preserves_pre_substruct_field_values() {
     // Pins the pre-consolidation default values for the 18 mirror fields.
     //
-    // `PlayerSettings` derives `Default`, which would zero every field
+    // `LivePlayerSettings` derives `Default`, which would zero every field
     // (scrobbling_enabled=false, scrobble_threshold=0.0, start_view="",
     // stable_viewport=false, auto_follow_playing=false). Before the
     // substruct refactor these five were hand-defaulted to non-zero
@@ -32,7 +32,7 @@ fn nokkvi_default_preserves_pre_substruct_field_values() {
     // struct-update syntax; this test prevents that restoration from
     // silently disappearing.
     let app = test_app();
-    let defaults = PlayerSettings::default();
+    let defaults = LivePlayerSettings::default();
 
     // Five fields hand-restored on Nokkvi (different from derive defaults).
     assert!(
@@ -56,7 +56,7 @@ fn nokkvi_default_preserves_pre_substruct_field_values() {
         "auto_follow_playing must default to true"
     );
 
-    // The remaining 13 mirror fields follow PlayerSettings::default()
+    // The remaining 13 mirror fields follow LivePlayerSettings::default()
     // (all bool=false, all empty String/Option=None/Default enum).
     assert_eq!(
         app.settings.show_album_artists_only,
@@ -100,7 +100,7 @@ fn handle_player_settings_loaded_replaces_settings_substruct() {
     // theme atomics) that requires an app_service or theme state — those
     // side effects are tested elsewhere. Here we only pin that the
     // substruct itself ends up holding the loaded values.
-    let settings = PlayerSettings {
+    let settings = LivePlayerSettings {
         scrobbling_enabled: false,
         scrobble_threshold: 0.75,
         start_view: "Albums".to_string(),
@@ -119,7 +119,7 @@ fn handle_player_settings_loaded_replaces_settings_substruct() {
         queue_show_default_playlist: true,
         verbose_config: true,
         artwork_resolution: ArtworkResolution::High,
-        ..PlayerSettings::default()
+        ..LivePlayerSettings::default()
     };
 
     let _ = app.handle_player_settings_loaded(settings);

@@ -9,11 +9,13 @@
 //!   strangler-fig caller before locking the manager mutex).
 //! - `dispatch_<tab>_tab_setting(key, value, &mut SettingsManager)` — sync
 //!   persistence dispatcher.
-//! - `apply_toml_<tab>_tab(ts, p)` — TOML→internal `PlayerSettings` copy step.
-//! - `dump_<tab>_tab_player_settings(src, out)` — internal→UI-facing
-//!   `PlayerSettings` copy step (drives `Message::PlayerSettingsLoaded`).
-//! - `write_<tab>_tab_toml(ps, ts)` — UI-facing→TOML copy step (inverse of
-//!   `apply_toml_<tab>_tab`; called from `TomlSettings::from_player_settings`).
+//! - `apply_toml_<tab>_tab(ts, p)` — TOML→`PersistedPlayerSettings` copy step.
+//! - `dump_<tab>_tab_player_settings(src, out)` — `PersistedPlayerSettings`→
+//!   UI-facing `LivePlayerSettings` copy step (drives
+//!   `Message::PlayerSettingsLoaded`).
+//! - `write_<tab>_tab_toml(ps, ts)` — UI-facing `LivePlayerSettings`→TOML
+//!   copy step (inverse of `apply_toml_<tab>_tab`; called from
+//!   `TomlSettings::from_player_settings`).
 //!
 //! See [`crate::types::setting_def`] for the macro and supporting types and
 //! [`crate::types::settings_side_effect`] for the typed side-effect enum the

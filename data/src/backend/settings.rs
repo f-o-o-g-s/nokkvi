@@ -21,7 +21,7 @@ use crate::{
         hotkey_config::{HotkeyAction, HotkeyConfig, KeyCombo},
         player_settings::{
             ArtworkColumnMode, ArtworkResolution, ArtworkStretchFit, EnterBehavior,
-            LibraryPageSize, NavDisplayMode, NavLayout, NormalizationLevel, PlayerSettings,
+            LibraryPageSize, LivePlayerSettings, NavDisplayMode, NavLayout, NormalizationLevel,
             SlotRowHeight, StripClickAction, StripSeparator, TrackInfoDisplay, VisualizationMode,
             VolumeNormalizationMode,
         },
@@ -158,7 +158,7 @@ impl SettingsService {
     // Player Settings — bulk getter and volume (f32→f64 cast, kept inline)
     // =========================================================================
 
-    delegate_getter!(get_player_settings, PlayerSettings);
+    delegate_getter!(get_player_settings, LivePlayerSettings);
 
     /// Persist volume setting
     pub async fn set_volume(&self, volume: f32) -> anyhow::Result<()> {

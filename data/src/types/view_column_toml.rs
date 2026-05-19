@@ -4,9 +4,9 @@
 //! emits three free functions for one slot-list view (Albums / Artists / Songs
 //! / Genres / Playlists / Similar / Queue):
 //!
-//! - `apply_toml_<view>_columns(ts, p)` — TOML → redb-backed internal `PlayerSettings`
-//! - `dump_<view>_columns_to_player(src, out)` — redb-backed → UI-facing `PlayerSettings`
-//! - `write_<view>_columns_to_toml(ps, ts)` — UI-facing → TOML
+//! - `apply_toml_<view>_columns(ts, p)` — TOML → redb-backed `PersistedPlayerSettings`
+//! - `dump_<view>_columns_to_player(src, out)` — redb-backed → UI-facing `LivePlayerSettings`
+//! - `write_<view>_columns_to_toml(ps, ts)` — UI-facing `LivePlayerSettings` → TOML
 //!
 //! Companion to `define_view_columns!` (UI crate, `src/views/mod.rs`): the UI
 //! macro owns the column enum + visibility struct + `ColumnPersist` impl (UI
@@ -16,8 +16,8 @@
 //! other surfaces as a test failure rather than a silent drop.
 //!
 //! Field naming is mechanical: `<view>_show_<column>`. Every TOML field, every
-//! redb-backed internal `PlayerSettings` field, and every UI-facing
-//! `PlayerSettings` field share the same name.
+//! redb-backed `PersistedPlayerSettings` field, and every UI-facing
+//! `LivePlayerSettings` field share the same name.
 //!
 //! `queue_show_genre` and `songs_show_genre` are declared here even though
 //! they are currently missing from the hand-written `apply_toml_settings_to_internal`
@@ -164,9 +164,7 @@ pub(crate) const VIEW_COLUMN_COUNTS: &[(&str, usize)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{
-        settings::PlayerSettings as InternalPlayerSettings, toml_settings::TomlSettings,
-    };
+    use crate::types::{settings::PersistedPlayerSettings, toml_settings::TomlSettings};
 
     /// Round-trip Bool: set TOML→ apply → set internal → dump → confirm UI
     /// receives the flipped value for every declared Albums column.
@@ -182,7 +180,7 @@ mod tests {
             albums_show_love: false,
             ..TomlSettings::default()
         };
-        let mut p = InternalPlayerSettings::default();
+        let mut p = PersistedPlayerSettings::default();
         apply_toml_albums_columns(&ts, &mut p);
         assert!(p.albums_show_select);
         assert!(!p.albums_show_index);
@@ -192,7 +190,7 @@ mod tests {
         assert!(p.albums_show_plays);
         assert!(!p.albums_show_love);
 
-        let mut out = crate::types::player_settings::PlayerSettings::default();
+        let mut out = crate::types::player_settings::LivePlayerSettings::default();
         dump_albums_columns_to_player(&p, &mut out);
         assert!(out.albums_show_select);
         assert!(!out.albums_show_index);
@@ -206,7 +204,7 @@ mod tests {
     /// Write direction: UI→ TOML for every declared Albums column.
     #[test]
     fn albums_columns_write_back_to_toml() {
-        let ps = crate::types::player_settings::PlayerSettings {
+        let ps = crate::types::player_settings::LivePlayerSettings {
             albums_show_select: true,
             albums_show_index: false,
             albums_show_thumbnail: false,
@@ -238,7 +236,7 @@ mod tests {
             songs_show_genre: true,
             ..TomlSettings::default()
         };
-        let mut p = InternalPlayerSettings::default();
+        let mut p = PersistedPlayerSettings::default();
         apply_toml_queue_columns(&ts, &mut p);
         apply_toml_songs_columns(&ts, &mut p);
         assert!(
@@ -263,17 +261,17 @@ mod tests {
             genres_show_songcount: false,
             ..TomlSettings::default()
         };
-        let mut p = InternalPlayerSettings::default();
+        let mut p = PersistedPlayerSettings::default();
         apply_toml_genres_columns(&ts, &mut p);
         assert!(p.genres_show_select);
         assert!(!p.genres_show_index);
 
-        let mut out = crate::types::player_settings::PlayerSettings::default();
+        let mut out = crate::types::player_settings::LivePlayerSettings::default();
         dump_genres_columns_to_player(&p, &mut out);
         assert!(out.genres_show_select);
         assert!(!out.genres_show_index);
 
-        let ps = crate::types::player_settings::PlayerSettings {
+        let ps = crate::types::player_settings::LivePlayerSettings {
             genres_show_select: false,
             genres_show_index: true,
             genres_show_thumbnail: true,
