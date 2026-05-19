@@ -631,27 +631,29 @@ impl Nokkvi {
         }
 
         // Nothing loaded — cold start. Use the same path as Enter-key:
-        // play_song_from_queue() with the selected (or first) queue item.
-        // This ensures all metadata, artwork, and navigator wiring fires correctly.
+        // play_entry_from_queue() with the selected (or first) queue row's
+        // per-row entry_id. Drift-immune handle keeps the click resolving
+        // to the exact row the user sees, even across optimistic mutations.
         let selected_index = self
             .queue_page
             .common
             .slot_list
             .get_center_item_index(self.library.queue_songs.len())
             .unwrap_or(0);
-        let selected_song = self.library.queue_songs.get(selected_index).map(|s| {
-            let queue_index = s.track_number as usize - 1;
-            (s.id.clone(), queue_index)
-        });
+        let selected_entry_id = self
+            .library
+            .queue_songs
+            .get(selected_index)
+            .map(|s| s.entry_id);
 
-        if let Some((song_id, queue_index)) = selected_song {
+        if let Some(entry_id) = selected_entry_id {
             // Optimistic UI update
             self.playback.playing = true;
             self.playback.paused = false;
             self.queue_page.common.slot_list.flash_center();
             self.suppress_next_auto_center = true;
             return self.shell_task(
-                move |shell| async move { shell.play_song_from_queue(&song_id, queue_index).await },
+                move |shell| async move { shell.play_entry_from_queue(entry_id).await },
                 |result| match result {
                     Ok(()) => Message::Playback(PlaybackMessage::Tick),
                     Err(e) => {

@@ -179,15 +179,13 @@ impl Nokkvi {
                     // sees the item they clicked/activated in the slot list.
                     self.suppress_next_auto_center = true;
 
-                    // Use track_number (1-based original queue position) to get the
-                    // actual queue index, avoiding the index_of first-match bug
-                    // with duplicate tracks.
-                    let queue_index = song.track_number as usize - 1;
-                    let song_id = song.id.clone();
+                    // Per-row entry_id is drift-immune across the optimistic-
+                    // mutation window AND disambiguates duplicate tracks (the
+                    // legacy track_number-1 dance did the latter but not the
+                    // former — a stale projection silently picked the wrong row).
+                    let entry_id = song.entry_id;
                     return self.shell_task(
-                        move |shell| async move {
-                            shell.play_song_from_queue(&song_id, queue_index).await
-                        },
+                        move |shell| async move { shell.play_entry_from_queue(entry_id).await },
                         |result| match result {
                             Ok(()) => Message::Playback(PlaybackMessage::Tick), // Trigger immediate UI update
                             Err(e) => {

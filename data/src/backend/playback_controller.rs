@@ -733,10 +733,13 @@ impl PlaybackController {
 
     /// Play a song that's already in the queue by its ID and queue index.
     ///
-    /// This sets the queue's current index directly and starts playback.
-    /// Use this for "jump to song in queue" operations.
-    /// The `queue_index` parameter identifies the specific queue position,
-    /// avoiding the `index_of` first-match bug with duplicate tracks.
+    /// **Internal/orchestrator use only.** UI handlers must use
+    /// [`Self::play_entry_from_queue`] — `queue_index` is drift-prone
+    /// across the optimistic-mutation window. The orchestrator
+    /// (`queue_orchestrator::enqueue_and_play`) uses this method legitimately:
+    /// it appends songs and immediately plays the first new row at the
+    /// known just-appended index, so no other mutation has had a chance
+    /// to shift positions.
     pub async fn play_song_from_queue(&self, song_id: &str, queue_index: usize) -> Result<()> {
         // 0. Record current song in history before jumping
         let queue_manager = self.queue_service.queue_manager();
