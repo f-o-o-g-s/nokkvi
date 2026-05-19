@@ -213,6 +213,115 @@ fn prefetch_and_maybe_load_next_page_skips_load_page_when_fully_loaded() {
     );
 }
 
+// ============================================================================
+// pin_after_load (loader_target.rs)
+// ============================================================================
+//
+// Common helper for the 3 set_children-triggering load handlers (Albums
+// TracksLoaded, Artists/Genres AlbumsLoaded) that need to re-pin the
+// find-and-expand chain's intended highlight after the page's `update`
+// clears `selected_offset`. Tests pin the 4 observable contracts:
+// 1. Match + position-found → pin fires + pending_top_pin clears.
+// 2. Match + position-miss → no pin, no clear.
+// 3. No-match (kind/id) → no pin, no clear.
+// 4. No pin set → no-op.
+
+#[test]
+fn pin_after_load_clears_pin_on_match() {
+    let mut app = test_app();
+    seed_albums(&mut app, albums_indexed(3));
+    app.pending_top_pin = Some(crate::state::PendingTopPin::Album("a2".to_string()));
+
+    app.pin_after_load(
+        "a2",
+        |pin, id| matches!(pin, crate::state::PendingTopPin::Album(p) if p == id),
+        |app, id| app.library.albums.iter().position(|a| a.id == id),
+        |app, _idx| {
+            // No-op for the test; we observe pending_top_pin clearing.
+            // `pin_after_load` must have called this — which it can't if it
+            // bailed early. The clear-state assertion below proves it ran.
+            let _ = app;
+        },
+    );
+
+    assert!(
+        app.pending_top_pin.is_none(),
+        "matching pin must be consumed after the pin fn runs"
+    );
+}
+
+#[test]
+fn pin_after_load_preserves_pin_on_kind_mismatch() {
+    // Pin is an Album but the matches_pin closure looks for Genre — no fire.
+    let mut app = test_app();
+    seed_albums(&mut app, albums_indexed(3));
+    app.pending_top_pin = Some(crate::state::PendingTopPin::Album("a2".to_string()));
+
+    let mut pin_called = false;
+    app.pin_after_load(
+        "a2",
+        // Mismatched kind: looking for Genre, pin is Album → never matches.
+        |pin, id| matches!(pin, crate::state::PendingTopPin::Genre(p) if p == id),
+        |app, id| app.library.albums.iter().position(|a| a.id == id),
+        |_app, _idx| {
+            pin_called = true;
+        },
+    );
+
+    assert!(!pin_called, "pin fn must not run when kinds disagree");
+    assert!(
+        app.pending_top_pin.is_some(),
+        "pin must NOT be cleared on kind mismatch"
+    );
+}
+
+#[test]
+fn pin_after_load_preserves_pin_on_position_miss() {
+    // Match on kind+id, but find_position returns None → pin survives so
+    // a subsequent load with the same id can still resolve it.
+    let mut app = test_app();
+    seed_albums(&mut app, albums_indexed(3)); // a0..a2
+    app.pending_top_pin = Some(crate::state::PendingTopPin::Album("missing".to_string()));
+
+    let mut pin_called = false;
+    app.pin_after_load(
+        "missing",
+        |pin, id| matches!(pin, crate::state::PendingTopPin::Album(p) if p == id),
+        |app, id| app.library.albums.iter().position(|a| a.id == id),
+        |_app, _idx| {
+            pin_called = true;
+        },
+    );
+
+    assert!(!pin_called, "pin fn must not run on position miss");
+    assert!(
+        app.pending_top_pin.is_some(),
+        "pin must survive a position miss so the next load can resolve it"
+    );
+}
+
+#[test]
+fn pin_after_load_no_op_when_no_pin_set() {
+    let mut app = test_app();
+    seed_albums(&mut app, albums_indexed(3));
+    assert!(app.pending_top_pin.is_none(), "precondition: no pin");
+
+    let mut pin_called = false;
+    app.pin_after_load(
+        "a2",
+        |pin, id| matches!(pin, crate::state::PendingTopPin::Album(p) if p == id),
+        |app, id| app.library.albums.iter().position(|a| a.id == id),
+        |_app, _idx| {
+            pin_called = true;
+        },
+    );
+
+    assert!(
+        !pin_called,
+        "pin fn must not run when pending_top_pin is None"
+    );
+}
+
 #[test]
 fn prefetch_and_maybe_load_next_page_skips_load_page_when_library_empty() {
     use crate::update::SongsTarget;

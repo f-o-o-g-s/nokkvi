@@ -354,19 +354,16 @@ impl Nokkvi {
             self.albums_page
                 .update(msg, self.library.albums.len(), &self.library.albums);
 
-        if let Some(loaded_id) = pin_after_tracks
-            && matches!(
-                self.pending_top_pin,
-                Some(crate::state::PendingTopPin::Album(ref pinned)) if pinned == &loaded_id
-            )
-            && let Some(idx) = self.library.albums.iter().position(|a| a.id == loaded_id)
-        {
-            let total = self
-                .albums_page
-                .expansion
-                .flattened_len(&self.library.albums);
-            self.albums_page.common.slot_list.pin_selected(idx, total);
-            self.pending_top_pin = None;
+        if let Some(loaded_id) = pin_after_tracks {
+            self.pin_after_load(
+                &loaded_id,
+                |pin, id| matches!(pin, crate::state::PendingTopPin::Album(p) if p == id),
+                |app, id| app.library.albums.iter().position(|a| a.id == id),
+                |app, idx| {
+                    let total = app.albums_page.expansion.flattened_len(&app.library.albums);
+                    app.albums_page.common.slot_list.pin_selected(idx, total);
+                },
+            );
         }
 
         // User-driven changes (search edit, sort, refresh) supersede any

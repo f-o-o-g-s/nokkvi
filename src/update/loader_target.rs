@@ -566,6 +566,49 @@ impl Nokkvi {
         self.shell_task(move |shell| fetch(shell, params), msg_ctor)
     }
 
+    /// Re-pin the slot-list highlight after a `set_children`-triggering load
+    /// (Albums `TracksLoaded`, Artists/Genres `AlbumsLoaded`) when the load
+    /// resolves the active find-and-expand chain target.
+    ///
+    /// The page's `update` clears `selected_offset` when it calls
+    /// `set_children`, which would lose the find-chain's intended highlight
+    /// position. This helper:
+    /// 1. Checks `pending_top_pin` matches the supplied `loaded_id` and
+    ///    `expected_kind`.
+    /// 2. Looks up the entity index in `library` via `find_position`.
+    /// 3. Computes the post-expansion flat-list length via `flattened_len`.
+    /// 4. Calls `slot_list.pin_selected(idx, total)` to restore the
+    ///    highlight.
+    /// 5. Clears `pending_top_pin` so a later, unrelated load doesn't
+    ///    re-fire the pin.
+    ///
+    /// The three callers (Albums, Artists, Genres) differ only in their
+    /// `PendingTopPin` variant and their per-view library / expansion / page
+    /// references — encoded by the caller's closures.
+    pub(crate) fn pin_after_load<F1, F2, F3>(
+        &mut self,
+        loaded_id: &str,
+        matches_pin: F1,
+        find_position: F2,
+        pin: F3,
+    ) where
+        F1: FnOnce(&crate::state::PendingTopPin, &str) -> bool,
+        F2: FnOnce(&Self, &str) -> Option<usize>,
+        F3: FnOnce(&mut Self, usize),
+    {
+        let Some(pin_state) = &self.pending_top_pin else {
+            return;
+        };
+        if !matches_pin(pin_state, loaded_id) {
+            return;
+        }
+        let Some(idx) = find_position(self, loaded_id) else {
+            return;
+        };
+        pin(self, idx);
+        self.pending_top_pin = None;
+    }
+
     /// Shared "prefetch viewport mini artwork + chain a page-load if scrolling
     /// near the loaded edge" tail used by every paged view's
     /// `LoadLargeArtwork` action arm. Returns the batched tasks ready to be

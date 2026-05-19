@@ -148,19 +148,16 @@ impl Nokkvi {
             self.genres_page
                 .update(msg, self.library.genres.len(), &self.library.genres);
 
-        if let Some(loaded_id) = pin_after_albums
-            && matches!(
-                self.pending_top_pin,
-                Some(crate::state::PendingTopPin::Genre(ref pinned)) if pinned == &loaded_id
-            )
-            && let Some(idx) = self.library.genres.iter().position(|g| g.id == loaded_id)
-        {
-            let total = self
-                .genres_page
-                .expansion
-                .flattened_len(&self.library.genres);
-            self.genres_page.common.slot_list.pin_selected(idx, total);
-            self.pending_top_pin = None;
+        if let Some(loaded_id) = pin_after_albums {
+            self.pin_after_load(
+                &loaded_id,
+                |pin, id| matches!(pin, crate::state::PendingTopPin::Genre(p) if p == id),
+                |app, id| app.library.genres.iter().position(|g| g.id == id),
+                |app, idx| {
+                    let total = app.genres_page.expansion.flattened_len(&app.library.genres);
+                    app.genres_page.common.slot_list.pin_selected(idx, total);
+                },
+            );
         }
 
         // User-driven changes supersede any in-flight find-and-expand chain.
