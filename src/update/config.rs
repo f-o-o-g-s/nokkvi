@@ -43,15 +43,13 @@ impl Nokkvi {
         &mut self,
         config: crate::visualizer_config::VisualizerConfig,
     ) -> Task<Message> {
-        // Update shared config state
-        {
-            let mut cfg = self.visualizer_config.write();
-            debug!(
-                " Applying new visualizer config: noise_reduction={:.2}, waves={}, bar_spacing={:.1}",
-                config.noise_reduction, config.waves, config.bars.bar_spacing
-            );
-            *cfg = config;
-        }
+        use crate::visualizer_config::SharedVisualizerConfigExt;
+        debug!(
+            " Applying new visualizer config: noise_reduction={:.2}, waves={}, bar_spacing={:.1}",
+            config.noise_reduction, config.waves, config.bars.bar_spacing
+        );
+        // Update shared config state (held for the minimum write-lock window).
+        self.visualizer_config.apply(config);
         // Apply config to visualizer (reinitializes spectrum engine with new params)
         if let Some(ref vis) = self.visualizer {
             vis.apply_config();

@@ -17,7 +17,8 @@ impl Nokkvi {
             GeneralSettingsData, InterfaceSettingsData, PlaybackSettingsData,
         };
 
-        let viz_config = self.visualizer_config.read().clone();
+        use crate::visualizer_config::SharedVisualizerConfigExt;
+        let viz_config = self.visualizer_config.snapshot();
         let theme_file = crate::theme_config::load_active_theme_file();
         let active_theme_stem = nokkvi_data::services::theme_loader::read_theme_name_from_config();
 
@@ -108,8 +109,9 @@ impl Nokkvi {
     /// Reload the visualizer config from disk and apply it to the live engine.
     /// Used after any visualizer TOML write to keep the UI and audio in sync.
     pub(crate) fn reload_visualizer_config(&mut self) {
+        use crate::visualizer_config::SharedVisualizerConfigExt;
         if let Ok(new_config) = crate::visualizer_config::load_visualizer_config() {
-            *self.visualizer_config.write() = new_config;
+            self.visualizer_config.apply(new_config);
             self.settings_page.config_dirty = true;
             if let Some(ref vis) = self.visualizer {
                 vis.apply_config();
@@ -643,7 +645,8 @@ impl Nokkvi {
                 // own the synchronous TOML write/strip + the deferred
                 // `write_all_toml_public` flush.
                 if enabled {
-                    let viz_config = self.visualizer_config.read().clone();
+                    use crate::visualizer_config::SharedVisualizerConfigExt;
+                    let viz_config = self.visualizer_config.snapshot();
                     if let Err(e) = crate::config_writer::write_full_visualizer(&viz_config) {
                         tracing::warn!(" [SETTINGS] Failed to write full config: {e}");
                         self.toast_warn(format!("Failed to write verbose config: {e}"));

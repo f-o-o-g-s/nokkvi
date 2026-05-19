@@ -725,6 +725,32 @@ struct ConfigFile {
 /// Shared config state for thread-safe access
 pub(crate) type SharedVisualizerConfig = Arc<RwLock<VisualizerConfig>>;
 
+/// Tiny extension trait that fronts the two patterns every call site of
+/// `SharedVisualizerConfig` was open-coding: full-swap on hot-reload /
+/// settings dispatch (`apply`) and read-clone for view-data assembly
+/// (`snapshot`).
+///
+/// Both methods are intentionally one-liners that hold the read/write
+/// lock for the absolute minimum window — the snapshot pump that feeds
+/// shader parameters depends on writers never holding the lock across
+/// any closure or async point.
+pub(crate) trait SharedVisualizerConfigExt {
+    /// Replace the inner config under a single write-lock acquisition.
+    fn apply(&self, new: VisualizerConfig);
+    /// Clone the current config out from under a single read-lock acquisition.
+    fn snapshot(&self) -> VisualizerConfig;
+}
+
+impl SharedVisualizerConfigExt for SharedVisualizerConfig {
+    fn apply(&self, new: VisualizerConfig) {
+        *self.write() = new;
+    }
+
+    fn snapshot(&self) -> VisualizerConfig {
+        self.read().clone()
+    }
+}
+
 /// Load visualizer config from config.toml
 pub(crate) fn load_visualizer_config() -> Result<VisualizerConfig> {
     let config_path = nokkvi_data::utils::paths::get_config_path()?;
@@ -923,6 +949,41 @@ pub(crate) fn config_watcher_subscription() -> impl futures::Stream<Item = Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `apply` writes the new config under the write lock and `snapshot` reads
+    /// a fresh clone under the read lock. Round-trips a non-default config to
+    /// confirm the helper pair is a wire-equivalent replacement for the
+    /// previous `*shared.write() = new` / `shared.read().clone()` inline
+    /// patterns at the 4 call sites.
+    #[test]
+    fn shared_visualizer_config_apply_snapshot_roundtrip() {
+        let shared: SharedVisualizerConfig = Arc::new(RwLock::new(VisualizerConfig::default()));
+
+        let mut custom = VisualizerConfig::default();
+        custom.noise_reduction = 0.42;
+        custom.waves = !custom.waves;
+        custom.waves_smoothing = 7;
+        custom.bars.bar_spacing = 7.5;
+        custom.lines.point_count = 256;
+        let expected_waves = custom.waves;
+
+        shared.apply(custom);
+
+        let read_back = shared.snapshot();
+        assert_eq!(read_back.noise_reduction, 0.42);
+        assert_eq!(read_back.waves, expected_waves);
+        assert_eq!(read_back.waves_smoothing, 7);
+        assert_eq!(read_back.bars.bar_spacing, 7.5);
+        assert_eq!(read_back.lines.point_count, 256);
+
+        // `snapshot` returns an owned clone, so mutating it must not leak
+        // back into the shared state — the write lock is only acquired
+        // explicitly via `apply`. A second `snapshot()` therefore yields
+        // the same field values that the first one observed.
+        let second_snapshot = shared.snapshot();
+        assert_eq!(second_snapshot.noise_reduction, 0.42);
+        assert_eq!(second_snapshot.bars.bar_spacing, 7.5);
+    }
 
     /// Pins the `BarsConfig::get_gradient_mode_value` emitted u32 set so a future agent
     /// who adds a `1`-valued variant fails immediately — `bars.wgsl` has no branch for
