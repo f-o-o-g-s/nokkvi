@@ -96,3 +96,18 @@ impl Default for Queue {
         }
     }
 }
+
+/// Where a multi-row drag-reorder should land. The target is named by the
+/// `entry_id` of the row to insert above (drift-immune across optimistic UI
+/// mutations) rather than a raw index that may have shifted in the window
+/// between UI dispatch and backend ack.
+#[derive(Debug, Clone, Copy)]
+pub enum MoveBatchTarget {
+    /// Insert the moved rows immediately above the row with this `entry_id`.
+    /// If the entry_id is itself among the moved rows, the move resolves
+    /// against the entry's current position before the descending-removal
+    /// pass — i.e. the moved block lands where that entry sat.
+    AboveEntry(u64),
+    /// Append the moved rows at the end of the queue.
+    End,
+}

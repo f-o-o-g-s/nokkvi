@@ -20,7 +20,7 @@ use crate::{
     services::state_storage::StateStorage,
     types::{
         NextTrackResetEffect,
-        queue::{Queue, RepeatMode},
+        queue::{MoveBatchTarget, Queue, RepeatMode},
         queue_sort_mode::QueueSortMode,
         song::Song,
         song_pool::SongPool,
@@ -609,6 +609,105 @@ impl QueueManager {
         tx.commit_save_order()
     }
 
+    /// Multi-row reorder addressed by per-row `entry_id`s. Drift-immune
+    /// across the UI's optimistic-mutation window: the `entry_id` → current
+    /// queue position resolution happens under the write guard, not at the
+    /// dispatch site, so a stale UI snapshot cannot send a wrong raw index.
+    ///
+    /// The moved rows keep their `entry_id`s (mirroring [`Self::move_item`]'s
+    /// single-row preservation), so a follow-up action that addresses any
+    /// of them by `entry_id` still resolves correctly before the projection
+    /// catches up.
+    ///
+    /// Unknown `entry_id`s are silently skipped. Duplicate `entry_id`s in
+    /// the input slice de-duplicate to a single move. If the target is itself
+    /// in the move set, the moved block lands where that target sat
+    /// pre-removal.
+    pub fn move_batch_by_entry_ids(
+        &mut self,
+        entry_ids: &[u64],
+        target: MoveBatchTarget,
+    ) -> Result<NextTrackResetEffect> {
+        // Resolve entry_ids → (index, song_id, entry_id) triples,
+        // dropping unknown ids silently. Sort + dedup by index so a
+        // single entry_id passed twice still moves one row.
+        let mut to_move: Vec<(usize, String, u64)> = entry_ids
+            .iter()
+            .filter_map(|&eid| {
+                let idx = self.index_of_entry(eid)?;
+                let song_id = self.queue.song_ids.get(idx)?.clone();
+                Some((idx, song_id, eid))
+            })
+            .collect();
+        if to_move.is_empty() {
+            return Ok(NextTrackResetEffect::new());
+        }
+        to_move.sort_unstable_by_key(|&(i, _, _)| i);
+        to_move.dedup_by_key(|&mut (i, _, _)| i);
+
+        // Resolve target → raw position BEFORE any removal. `End` and an
+        // unknown `AboveEntry` both fall through to "append".
+        let target_idx = match target {
+            MoveBatchTarget::AboveEntry(eid) => self
+                .index_of_entry(eid)
+                .unwrap_or(self.queue.song_ids.len()),
+            MoveBatchTarget::End => self.queue.song_ids.len(),
+        };
+
+        // Capture the playing row's `entry_id` so current_index can be
+        // restored by identity (not by position arithmetic) after the
+        // reorder. Handles the duplicate-row case `move_item`'s
+        // position-arithmetic cannot.
+        let current_entry_id = self
+            .queue
+            .current_index
+            .and_then(|i| self.entry_ids.get(i).copied());
+
+        let mut tx = self.write();
+
+        // Remove rows in descending order so surviving indices stay valid.
+        let mut descending: Vec<usize> = to_move.iter().map(|&(i, _, _)| i).collect();
+        descending.sort_unstable_by(|a, b| b.cmp(a));
+        for &i in &descending {
+            tx.queue.song_ids.remove(i);
+            tx.entry_ids.remove(i);
+        }
+
+        // Post-removal insert position: shift the original target back by
+        // the count of removed rows that sat before it, then clamp.
+        let removed_before_target = descending.iter().filter(|&&i| i < target_idx).count();
+        let insert_at = target_idx
+            .saturating_sub(removed_before_target)
+            .min(tx.queue.song_ids.len());
+
+        // Insert in original ascending order so the moved block preserves
+        // the user's selection ordering.
+        for (offset, (_, song_id, entry_id)) in to_move.iter().enumerate() {
+            let pos = insert_at + offset;
+            tx.queue.song_ids.insert(pos, song_id.clone());
+            tx.entry_ids.insert(pos, *entry_id);
+        }
+
+        // Restore current_index by entry_id identity (duplicate-aware).
+        tx.queue.current_index =
+            current_entry_id.and_then(|eid| tx.entry_ids.iter().position(|&id| id == eid));
+
+        // Order array depends on the physical positions — full rebuild,
+        // then re-shuffle if shuffle is on. Mirrors `sort_queue`.
+        tx.rebuild_order_and_sync();
+        if tx.queue.shuffle {
+            tx.shuffle_order();
+        }
+
+        debug!(
+            "📦 [QUEUE] Moved batch of {} rows to position {} (target {:?})",
+            to_move.len(),
+            insert_at,
+            target,
+        );
+        tx.commit_save_order()
+    }
+
     /// Insert songs right after the currently playing position ("Play Next").
     /// If nothing is playing, appends to the end.
     /// Does NOT change `current_index` — the currently playing song stays the same.
@@ -872,6 +971,186 @@ pub(crate) mod tests {
         let _ = qm.move_item(0, 2).unwrap();
         let ids: Vec<&str> = qm.queue.song_ids.iter().map(|s| s.as_str()).collect();
         assert_eq!(ids, vec!["b", "a"]);
+    }
+
+    // ── move_batch_by_entry_ids tests ──
+
+    fn songs_n(n: usize) -> Vec<Song> {
+        (0..n).map(|i| make_test_song(&format!("s{i}"))).collect()
+    }
+
+    #[test]
+    fn move_batch_by_entry_ids_above_target_collects_block() {
+        let (mut qm, _t) = make_test_manager(songs_n(5), None);
+        let eids = qm.entry_ids().to_vec();
+
+        // Move s0, s2, s4 to above s1 → block lands at position 0
+        // (s1's index 1 minus 1 row removed before it = 0).
+        let _: NextTrackResetEffect = qm
+            .move_batch_by_entry_ids(
+                &[eids[0], eids[2], eids[4]],
+                MoveBatchTarget::AboveEntry(eids[1]),
+            )
+            .unwrap();
+
+        let ids: Vec<&str> = qm.queue.song_ids.iter().map(|s| s.as_str()).collect();
+        assert_eq!(ids, vec!["s0", "s2", "s4", "s1", "s3"]);
+        assert_eq!(
+            qm.entry_ids(),
+            &[eids[0], eids[2], eids[4], eids[1], eids[3]],
+            "entry_ids must ride with their songs through a batch move",
+        );
+    }
+
+    #[test]
+    fn move_batch_by_entry_ids_to_end_appends_block() {
+        let (mut qm, _t) = make_test_manager(songs_n(4), None);
+        let eids = qm.entry_ids().to_vec();
+
+        let _ = qm
+            .move_batch_by_entry_ids(&[eids[0], eids[2]], MoveBatchTarget::End)
+            .unwrap();
+
+        let ids: Vec<&str> = qm.queue.song_ids.iter().map(|s| s.as_str()).collect();
+        assert_eq!(ids, vec!["s1", "s3", "s0", "s2"]);
+        assert_eq!(qm.entry_ids(), &[eids[1], eids[3], eids[0], eids[2]]);
+    }
+
+    #[test]
+    fn move_batch_by_entry_ids_unknown_ids_silently_skipped() {
+        let (mut qm, _t) = make_test_manager(songs_n(3), None);
+        let eids = qm.entry_ids().to_vec();
+
+        // 9999 is a fresh u64 that hasn't been handed out.
+        let _ = qm
+            .move_batch_by_entry_ids(&[eids[0], 9999, eids[2]], MoveBatchTarget::End)
+            .unwrap();
+
+        let ids: Vec<&str> = qm.queue.song_ids.iter().map(|s| s.as_str()).collect();
+        assert_eq!(ids, vec!["s1", "s0", "s2"]);
+    }
+
+    #[test]
+    fn move_batch_by_entry_ids_empty_is_noop() {
+        let (mut qm, _t) = make_test_manager(songs_n(3), None);
+        let before_ids = qm.queue.song_ids.clone();
+        let before_eids = qm.entry_ids().to_vec();
+
+        let _ = qm
+            .move_batch_by_entry_ids(&[], MoveBatchTarget::End)
+            .unwrap();
+
+        assert_eq!(qm.queue.song_ids, before_ids);
+        assert_eq!(qm.entry_ids(), before_eids.as_slice());
+    }
+
+    #[test]
+    fn move_batch_by_entry_ids_dedups_repeated_input() {
+        let (mut qm, _t) = make_test_manager(songs_n(3), None);
+        let eids = qm.entry_ids().to_vec();
+
+        // Same entry_id passed twice → resolves to one move.
+        let _ = qm
+            .move_batch_by_entry_ids(&[eids[0], eids[0]], MoveBatchTarget::End)
+            .unwrap();
+
+        let ids: Vec<&str> = qm.queue.song_ids.iter().map(|s| s.as_str()).collect();
+        assert_eq!(ids, vec!["s1", "s2", "s0"]);
+    }
+
+    #[test]
+    fn move_batch_by_entry_ids_preserves_current_song_through_shift() {
+        // s1 playing; move s0 to end → s1 shifts to index 0 but stays current.
+        let (mut qm, _t) = make_test_manager(songs_n(4), Some(1));
+        let eids = qm.entry_ids().to_vec();
+
+        let _ = qm
+            .move_batch_by_entry_ids(&[eids[0]], MoveBatchTarget::End)
+            .unwrap();
+
+        assert_eq!(qm.queue.song_ids, vec!["s1", "s2", "s3", "s0"]);
+        assert_eq!(qm.queue.current_index, Some(0));
+        assert_eq!(qm.entry_id_at(0), Some(eids[1]));
+    }
+
+    #[test]
+    fn move_batch_by_entry_ids_preserves_current_when_current_is_moved() {
+        // s2 playing; move s1, s2 to end → s2 still current at new position.
+        let (mut qm, _t) = make_test_manager(songs_n(4), Some(2));
+        let eids = qm.entry_ids().to_vec();
+
+        let _ = qm
+            .move_batch_by_entry_ids(&[eids[1], eids[2]], MoveBatchTarget::End)
+            .unwrap();
+
+        assert_eq!(qm.queue.song_ids, vec!["s0", "s3", "s1", "s2"]);
+        assert_eq!(qm.queue.current_index, Some(3));
+        assert_eq!(qm.entry_id_at(3), Some(eids[2]));
+    }
+
+    #[test]
+    fn move_batch_by_entry_ids_disambiguates_duplicates() {
+        // Two rows share song_id "a" but have distinct entry_ids.
+        let songs = vec![
+            make_test_song("a"),
+            make_test_song("b"),
+            make_test_song("a"),
+        ];
+        let (mut qm, _t) = make_test_manager(songs, None);
+        let eids = qm.entry_ids().to_vec();
+
+        // Move only the FIRST "a" to end; the second "a" stays put.
+        let _ = qm
+            .move_batch_by_entry_ids(&[eids[0]], MoveBatchTarget::End)
+            .unwrap();
+
+        assert_eq!(qm.queue.song_ids, vec!["b", "a", "a"]);
+        assert_eq!(
+            qm.entry_ids(),
+            &[eids[1], eids[2], eids[0]],
+            "the SPECIFIC duplicate moved, identified by entry_id",
+        );
+    }
+
+    #[test]
+    fn move_batch_by_entry_ids_drift_immune_against_external_insert() {
+        // Models the drift window: UI captured eids before some other
+        // mutation shifted positions. The batch move resolves entry_ids
+        // freshly under its own lock and lands rows correctly.
+        let (mut qm, _t) = make_test_manager(songs_n(5), None);
+        let eids = qm.entry_ids().to_vec();
+        let target_eid = eids[2];
+
+        // External insert shifts s2 from index 2 to index 3.
+        let _ = qm.insert_songs_at(0, vec![make_test_song("X")]).unwrap();
+        assert_eq!(qm.queue.song_ids[3], "s2");
+
+        // The pre-shift entry_id still resolves to s2.
+        let _ = qm
+            .move_batch_by_entry_ids(&[target_eid], MoveBatchTarget::End)
+            .unwrap();
+
+        assert_eq!(qm.queue.song_ids.last(), Some(&"s2".to_string()));
+    }
+
+    #[test]
+    fn move_batch_by_entry_ids_target_in_move_set_lands_contiguous() {
+        // Move s1, s2, s3 above s2. s2 is in the move set; the block
+        // lands where s2 originally sat (index 2), minus the removed
+        // count before it (1 → s1), so insert_at = 1. Result is the
+        // original order (effectively a no-op for a contiguous run).
+        let (mut qm, _t) = make_test_manager(songs_n(5), None);
+        let eids = qm.entry_ids().to_vec();
+
+        let _ = qm
+            .move_batch_by_entry_ids(
+                &[eids[1], eids[2], eids[3]],
+                MoveBatchTarget::AboveEntry(eids[2]),
+            )
+            .unwrap();
+
+        let ids: Vec<&str> = qm.queue.song_ids.iter().map(|s| s.as_str()).collect();
+        assert_eq!(ids, vec!["s0", "s1", "s2", "s3", "s4"]);
     }
 
     // remove_song current_index tracking tests
@@ -1737,5 +2016,8 @@ pub(crate) mod tests {
         let _: NextTrackResetEffect = qm.set_repeat(RepeatMode::Track).unwrap();
         let _: NextTrackResetEffect = qm.reposition_to_index(Some(0));
         let _: NextTrackResetEffect = qm.set_queue(vec![make_test_song("h")], Some(0)).unwrap();
+        let _: NextTrackResetEffect = qm
+            .move_batch_by_entry_ids(&[], MoveBatchTarget::End)
+            .unwrap();
     }
 }

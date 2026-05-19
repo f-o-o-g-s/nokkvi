@@ -263,6 +263,20 @@ impl AppService {
             .play_song_from_queue(song_id, queue_index)
             .await
     }
+    /// Drift-immune sibling of [`Self::play_song_from_queue`]. See
+    /// [`crate::backend::playback_controller::PlaybackController::play_entry_from_queue`].
+    pub async fn play_entry_from_queue(&self, entry_id: u64) -> Result<()> {
+        self.playback.play_entry_from_queue(entry_id).await
+    }
+
+    /// Snapshot the `entry_id` at a given backend queue position. `None`
+    /// if the position is out of bounds. Used by producers that need to
+    /// resolve a position-keyed event to a drift-immune row handle.
+    pub async fn entry_id_at(&self, queue_index: usize) -> Option<u64> {
+        let qm_arc = self.queue_service.queue_manager();
+        let qm = qm_arc.lock().await;
+        qm.entry_id_at(queue_index)
+    }
 
     // =========================================================================
     // Intent-Based Orchestration Methods
@@ -944,6 +958,24 @@ impl AppService {
             qm.insert_songs_at(pos, extracted)?
         };
         self.queue_service.refresh_from_queue().await?;
+        effect.apply_to(&self.audio_engine()).await;
+        Ok(())
+    }
+
+    /// Drift-immune sibling of [`Self::move_queue_batch`]. Resolves
+    /// `entry_id`s → current queue positions under the queue lock, then
+    /// reorders atomically. See
+    /// [`crate::services::queue::QueueManager::move_batch_by_entry_ids`]
+    /// for the per-row identity preservation contract.
+    pub async fn move_queue_batch_by_entry_ids(
+        &self,
+        entry_ids: Vec<u64>,
+        target: crate::types::queue::MoveBatchTarget,
+    ) -> Result<()> {
+        let effect = self
+            .queue_service
+            .move_batch_by_entry_ids(&entry_ids, target)
+            .await?;
         effect.apply_to(&self.audio_engine()).await;
         Ok(())
     }

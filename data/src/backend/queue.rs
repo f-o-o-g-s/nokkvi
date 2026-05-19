@@ -234,6 +234,23 @@ impl QueueService {
         Ok(effect)
     }
 
+    /// Multi-row reorder addressed by per-row `entry_id`s. Drift-immune
+    /// across the UI's optimistic-mutation window — see
+    /// [`crate::services::queue::QueueManager::move_batch_by_entry_ids`]
+    /// for the resolution contract.
+    ///
+    /// Returns a [`NextTrackResetEffect`] obligation — see [`Self::add_songs`].
+    pub async fn move_batch_by_entry_ids(
+        &self,
+        entry_ids: &[u64],
+        target: crate::types::queue::MoveBatchTarget,
+    ) -> Result<NextTrackResetEffect> {
+        let mut qm = self.queue_manager.lock().await;
+        let effect = qm.move_batch_by_entry_ids(entry_ids, target)?;
+        self.refresh_from_locked_manager(&qm).await?;
+        Ok(effect)
+    }
+
     /// Remove a song from the queue by index. Returns a [`NextTrackResetEffect`]
     /// obligation — see [`Self::add_songs`].
     pub async fn remove_song(&self, index: usize) -> Result<NextTrackResetEffect> {

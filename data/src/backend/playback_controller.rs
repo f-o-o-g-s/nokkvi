@@ -654,6 +654,83 @@ impl PlaybackController {
         Ok(())
     }
 
+    /// Play an already-queued song addressed by its per-row `entry_id`.
+    ///
+    /// Drift-immune sibling of [`Self::play_song_from_queue`]: the
+    /// `entry_id` → (queue_index, song_id) resolution happens under the
+    /// queue lock, so a stale UI snapshot cannot send a wrong raw index.
+    /// Duplicate-aware — two queue rows that share a `song_id` carry
+    /// distinct `entry_id`s, so the user gets the exact instance they
+    /// clicked.
+    pub async fn play_entry_from_queue(&self, entry_id: u64) -> Result<()> {
+        let queue_manager = self.queue_service.queue_manager();
+
+        // 0+1. Record history, resolve entry_id, reposition — all under
+        //      one qm lock so the resolution is atomic with the reposition.
+        let (song_id, reposition_effect) = {
+            let current_id = self
+                .queue_navigator
+                .lock()
+                .await
+                .get_current_song_id()
+                .await;
+
+            let mut qm = queue_manager.lock().await;
+            if let Some(ref cid) = current_id
+                && let Some(current_song) = qm.get_song(cid).cloned()
+            {
+                qm.add_to_history(current_song);
+            }
+
+            let queue_index = qm.index_of_entry(entry_id).ok_or_else(|| {
+                anyhow::anyhow!("play_entry_from_queue: entry_id {entry_id} not in queue")
+            })?;
+            let song_id = qm.queue.song_ids.get(queue_index).cloned().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "play_entry_from_queue: song_id missing at queue position {queue_index}"
+                )
+            })?;
+            let effect = qm.reposition_to_index(Some(queue_index));
+            qm.save_order()?;
+            (song_id, effect)
+        };
+
+        // 2. Sync the reactive current_index property with queue state
+        self.queue_service.refresh_from_queue().await?;
+
+        // 3. Build stream URL and play (mirrors play_song_from_queue)
+        let (server_url, subsonic_credential) = self.queue_service.get_server_config().await;
+        let stream_url = crate::utils::artwork_url::build_stream_url(
+            &song_id,
+            &server_url,
+            &subsonic_credential,
+        );
+
+        if stream_url.is_empty() {
+            return Err(anyhow::anyhow!("Failed to build stream URL"));
+        }
+
+        let rg = {
+            let qm = queue_manager.lock().await;
+            qm.get_song(&song_id).and_then(|s| s.replay_gain.clone())
+        };
+
+        let mut engine = self.audio_engine.lock().await;
+        engine.load_track_with_rg(&stream_url, rg).await;
+        engine.play().await?;
+        reposition_effect.apply_locked(&mut engine).await;
+        drop(engine);
+
+        // Update navigator's current_song_id so consume mode knows what's playing
+        self.queue_navigator
+            .lock()
+            .await
+            .set_current_song_id(Some(song_id))
+            .await;
+
+        Ok(())
+    }
+
     /// Play a song that's already in the queue by its ID and queue index.
     ///
     /// This sets the queue's current index directly and starts playback.
