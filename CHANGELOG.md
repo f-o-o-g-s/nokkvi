@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Roulette spin no longer plays automatically — the wheel cruises until you press Enter, then decelerates onto the picked song. Escape during the spin still cancels without auto-play. The cruise rate and decel walk are also tuned so each visible click advances a small number of items instead of skipping hundreds per click on libraries above a few thousand songs.
+
 ### Fixed
 
 - Setting `queue_show_genre = true` or `songs_show_genre = true` directly in `config.toml` now actually shows the Genre column in the Queue or Songs view on next launch. Both keys shipped in the on-disk TOML format with full serde wiring, but the apply-side path had no handler for them, so the value was silently snapped back to off on every load regardless of what the file said. Toggling the column from the settings UI worked normally; only direct file edits and pre-existing config files with these keys set were affected.
@@ -17,6 +19,7 @@ All notable changes to this project will be documented in this file.
 - Logging out now clears the same session-bound state as session-expiry — the hamburger menu closes, library data resets, and pending find-and-expand chains, in-progress roulette spins, and similar-songs results no longer carry over into the next login.
 - Album artwork no longer briefly flickers after every track. Navidrome's `library-changed` SSE event fires on every play-count bump, and the previous handler treated each one as a signal to re-fetch and re-upload the album's large artwork. SSE no longer auto-refreshes artwork; cover-art replacements still surface on the next library reload or via the right-click "Refresh Artwork" action.
 - Queue's vertical artwork no longer sits flush against the playlist context bar or playlist edit bar when one of those bars is showing — there's now a small bottom gap matching the artwork's other insets in Always-Vertical Native / Stretched and Auto's portrait-fallback modes.
+- Play, "Center on Playing", and multi-row drag-reorder in the queue now reliably target the clicked/dragged row even with duplicates of the same song in the queue, or when a second drag is started before the first has fully settled. v0.4.1 closed this gap for right-click and Delete; the same per-row addressing now covers Play, Focus, and batch Move as well.
 
 ### Removed
 
