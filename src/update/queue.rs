@@ -270,23 +270,25 @@ impl Nokkvi {
                 return self.toggle_star_with_revert_task(song_id, ItemKind::Song, star);
             }
             QueueAction::MoveItem { from, to } => {
-                // Optimistic local reorder so the UI updates instantly
+                // `from` and `to` are indices into `library.queue_songs` (the
+                // FULL queue). This is safe because the drag-reorder dispatch
+                // at `views/queue/update.rs::DragReorder` blocks the action
+                // entirely while search is active (filtered_queue would
+                // otherwise differ from library.queue_songs and the indices
+                // could not be reused). The hotkey path also guards on
+                // empty search. If a future caller plumbs MoveItem from a
+                // filtered context, migrate it to `entry_id` like
+                // `MoveBatch` (see `move_queue_batch_by_entry_ids`) — raw
+                // indices are also drift-prone across the optimistic-
+                // mutation window for a second action issued before the
+                // backend acks the first.
                 let len = self.library.queue_songs.len();
                 if from < len && to <= len && from != to {
                     let item = self.library.queue_songs.remove(from);
                     let insert_at = if from < to { to - 1 } else { to };
                     self.library.queue_songs.insert(insert_at, item);
-
-                    // Update current_index tracking in the queue page
-                    // (the backend handles its own current_index in QueueManager)
                 }
 
-                // Persist to backend and reload queue state. The
-                // AppService bundle method handles the queue mutation,
-                // the reactive projection, and — critically — the
-                // engine's gapless-prep invalidation so the shuffle +
-                // crossfade reorder path doesn't desync the UI from the
-                // audible stream.
                 self.shell_spawn("queue_move_item", move |shell| async move {
                     shell.move_queue_item(from, to).await
                 });

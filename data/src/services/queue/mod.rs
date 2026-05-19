@@ -1976,6 +1976,27 @@ pub(crate) mod tests {
         );
     }
 
+    /// Sibling of [`entry_ids_survive_move_and_sort`] specifically for
+    /// `move_item` — the original test only covered `sort_queue`, leaving
+    /// the single-row reorder's parallelism implicit on the
+    /// `entry_ids.remove`/`entry_ids.insert` pair in
+    /// [`QueueManager::move_item`].
+    #[test]
+    fn entry_ids_survive_move_item() {
+        let (mut qm, _temp) = make_test_manager(songs_n(3), None);
+        let eids = qm.entry_ids().to_vec();
+
+        // Move s0 to position 3 (end). entry_ids must travel with the row.
+        let _ = qm.move_item(0, 3).unwrap();
+
+        assert_eq!(qm.queue.song_ids, vec!["s1", "s2", "s0"]);
+        assert_eq!(
+            qm.entry_ids(),
+            &[eids[1], eids[2], eids[0]],
+            "move_item must keep entry_ids parallel to song_ids through the reorder",
+        );
+    }
+
     // ══════════════════════════════════════════════════════════════════════
     //  `NextTrackResetEffect` contract
     // ══════════════════════════════════════════════════════════════════════
