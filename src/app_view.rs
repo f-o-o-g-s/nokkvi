@@ -614,6 +614,151 @@ impl Nokkvi {
     }
 
     // -------------------------------------------------------------------------
+    // Per-view ViewData builders
+    //
+    // Each library view (Albums, Artists, Songs, Genres) renders twice — once
+    // as the main pane and once inside the browsing panel — and the only
+    // differences between the two construction sites are the
+    // `(window_width, window_height, in_browsing_panel, stable_viewport)`
+    // tuple. Folding `column_dropdown_state(...)` into the helper keeps both
+    // branches limited to a one-line call.
+    //
+    // Queue/Playlists/Similar each render in only one branch (or have
+    // branch-specific extra fields like queue's edit-mode info) so they stay
+    // inline at the call site.
+    // -------------------------------------------------------------------------
+
+    /// Build `AlbumsViewData` from current app state. Shared by the main pane
+    /// and the browsing-panel split-view branch.
+    fn build_albums_view_data(
+        &self,
+        window_width: f32,
+        window_height: f32,
+        in_browsing_panel: bool,
+        stable_viewport: bool,
+    ) -> views::AlbumsViewData<'_> {
+        let (column_dropdown_open, column_dropdown_trigger_bounds) =
+            column_dropdown_state(&self.open_menu, View::Albums);
+        views::AlbumsViewData {
+            albums: &self.library.albums,
+            album_art: &self.artwork.album_art.snapshot,
+            large_artwork: &self.artwork.large_artwork.snapshot,
+            dominant_colors: &self.artwork.album_dominant_colors.snapshot,
+            window_width,
+            window_height,
+            scale_factor: self.window.scale_factor,
+            modifiers: self.window.keyboard_modifiers,
+            total_album_count: self.library.counts.albums,
+            loading: self.library.albums.is_loading(),
+            stable_viewport,
+            in_browsing_panel,
+            overlay: views::OverlayMenuViewData {
+                column_dropdown_open,
+                column_dropdown_trigger_bounds,
+                open_menu: self.open_menu.as_ref(),
+            },
+        }
+    }
+
+    /// Build `ArtistsViewData` from current app state. Shared by the main pane
+    /// and the browsing-panel split-view branch.
+    fn build_artists_view_data(
+        &self,
+        window_width: f32,
+        window_height: f32,
+        in_browsing_panel: bool,
+        stable_viewport: bool,
+    ) -> views::ArtistsViewData<'_> {
+        let (column_dropdown_open, column_dropdown_trigger_bounds) =
+            column_dropdown_state(&self.open_menu, View::Artists);
+        views::ArtistsViewData {
+            artists: &self.library.artists,
+            // Reuse album art cache for artist images.
+            artist_art: &self.artwork.album_art.snapshot,
+            album_art: &self.artwork.album_art.snapshot,
+            large_artwork: &self.artwork.large_artwork.snapshot,
+            dominant_colors: &self.artwork.album_dominant_colors.snapshot,
+            window_width,
+            window_height,
+            scale_factor: self.window.scale_factor,
+            modifiers: self.window.keyboard_modifiers,
+            total_artist_count: self.library.counts.artists,
+            loading: self.library.artists.is_loading(),
+            stable_viewport,
+            in_browsing_panel,
+            overlay: views::OverlayMenuViewData {
+                column_dropdown_open,
+                column_dropdown_trigger_bounds,
+                open_menu: self.open_menu.as_ref(),
+            },
+        }
+    }
+
+    /// Build `SongsViewData` from current app state. Shared by the main pane
+    /// and the browsing-panel split-view branch.
+    fn build_songs_view_data(
+        &self,
+        window_width: f32,
+        window_height: f32,
+        in_browsing_panel: bool,
+        stable_viewport: bool,
+    ) -> views::SongsViewData<'_> {
+        let (column_dropdown_open, column_dropdown_trigger_bounds) =
+            column_dropdown_state(&self.open_menu, View::Songs);
+        views::SongsViewData {
+            songs: &self.library.songs,
+            album_art: &self.artwork.album_art.snapshot,
+            large_artwork: &self.artwork.large_artwork.snapshot,
+            dominant_colors: &self.artwork.album_dominant_colors.snapshot,
+            window_width,
+            window_height,
+            scale_factor: self.window.scale_factor,
+            modifiers: self.window.keyboard_modifiers,
+            total_song_count: self.library.counts.songs,
+            loading: self.library.songs.is_loading(),
+            stable_viewport,
+            in_browsing_panel,
+            overlay: views::OverlayMenuViewData {
+                column_dropdown_open,
+                column_dropdown_trigger_bounds,
+                open_menu: self.open_menu.as_ref(),
+            },
+        }
+    }
+
+    /// Build `GenresViewData` from current app state. Shared by the main pane
+    /// and the browsing-panel split-view branch.
+    fn build_genres_view_data(
+        &self,
+        window_width: f32,
+        window_height: f32,
+        in_browsing_panel: bool,
+        stable_viewport: bool,
+    ) -> views::GenresViewData<'_> {
+        let (column_dropdown_open, column_dropdown_trigger_bounds) =
+            column_dropdown_state(&self.open_menu, View::Genres);
+        views::GenresViewData {
+            genres: &self.library.genres,
+            genre_artwork: &self.artwork.genre.mini.snapshot,
+            genre_collage_artwork: &self.artwork.genre.collage.snapshot,
+            album_art: &self.artwork.album_art.snapshot,
+            window_width,
+            window_height,
+            scale_factor: self.window.scale_factor,
+            modifiers: self.window.keyboard_modifiers,
+            total_genre_count: self.library.counts.genres,
+            loading: self.library.genres.is_loading(),
+            stable_viewport,
+            in_browsing_panel,
+            overlay: views::OverlayMenuViewData {
+                column_dropdown_open,
+                column_dropdown_trigger_bounds,
+                open_menu: self.open_menu.as_ref(),
+            },
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Navigation Bar: Delegate to nav_bar component
     // -------------------------------------------------------------------------
 
@@ -804,104 +949,43 @@ impl Nokkvi {
                 // Delegate to the active view's existing page
                 let view_content: Element<'_, Message> = match panel.active_view {
                     views::BrowsingView::Albums => {
-                        let (column_dropdown_open, column_dropdown_trigger_bounds) =
-                            column_dropdown_state(&self.open_menu, View::Albums);
-                        let view_data = views::AlbumsViewData {
-                            albums: &self.library.albums,
-                            album_art: &self.artwork.album_art.snapshot,
-                            large_artwork,
-                            dominant_colors: &self.artwork.album_dominant_colors.snapshot,
-                            window_width: self.content_pane_width() * 0.45,
-                            window_height: browser_height,
-                            scale_factor: self.window.scale_factor,
-                            modifiers: self.window.keyboard_modifiers,
-                            total_album_count: self.library.counts.albums,
-                            loading: self.library.albums.is_loading(),
-                            stable_viewport: true, // Browser pane: click to highlight, not play
-                            in_browsing_panel: true,
-                            // The browsing panel only renders while the main
-                            // pane is on Queue, so there is no main-pane
-                            // Albums dropdown to compete with — claim the
-                            // open-state directly via `View::Albums`.
-                            overlay: views::OverlayMenuViewData {
-                                column_dropdown_open,
-                                column_dropdown_trigger_bounds,
-                                open_menu: self.open_menu.as_ref(),
-                            },
-                        };
+                        // Browser pane: stable_viewport hardcoded `true`
+                        // (click to highlight, not play); 0.45 width portion
+                        // of the content pane; `in_browsing_panel = true`
+                        // suppresses the "Center on Playing" header button.
+                        let view_data = self.build_albums_view_data(
+                            self.content_pane_width() * 0.45,
+                            browser_height,
+                            true,
+                            true,
+                        );
                         self.albums_page.view(view_data).map(Message::Albums)
                     }
                     views::BrowsingView::Songs => {
-                        let (column_dropdown_open, column_dropdown_trigger_bounds) =
-                            column_dropdown_state(&self.open_menu, View::Songs);
-                        let view_data = views::SongsViewData {
-                            songs: &self.library.songs,
-                            album_art: &self.artwork.album_art.snapshot,
-                            large_artwork,
-                            dominant_colors: &self.artwork.album_dominant_colors.snapshot,
-                            window_width: self.content_pane_width() * 0.45,
-                            window_height: browser_height,
-                            scale_factor: self.window.scale_factor,
-                            modifiers: self.window.keyboard_modifiers,
-                            total_song_count: self.library.counts.songs,
-                            loading: self.library.songs.is_loading(),
-                            stable_viewport: true, // Browser pane: click to highlight, not play
-                            in_browsing_panel: true,
-                            overlay: views::OverlayMenuViewData {
-                                column_dropdown_open,
-                                column_dropdown_trigger_bounds,
-                                open_menu: self.open_menu.as_ref(),
-                            },
-                        };
+                        let view_data = self.build_songs_view_data(
+                            self.content_pane_width() * 0.45,
+                            browser_height,
+                            true,
+                            true,
+                        );
                         self.songs_page.view(view_data).map(Message::Songs)
                     }
                     views::BrowsingView::Artists => {
-                        let (column_dropdown_open, column_dropdown_trigger_bounds) =
-                            column_dropdown_state(&self.open_menu, View::Artists);
-                        let view_data = views::ArtistsViewData {
-                            artists: &self.library.artists,
-                            artist_art: &self.artwork.album_art.snapshot,
-                            album_art: &self.artwork.album_art.snapshot,
-                            large_artwork,
-                            dominant_colors: &self.artwork.album_dominant_colors.snapshot,
-                            window_width: self.content_pane_width() * 0.45,
-                            window_height: browser_height,
-                            scale_factor: self.window.scale_factor,
-                            modifiers: self.window.keyboard_modifiers,
-                            total_artist_count: self.library.counts.artists,
-                            loading: self.library.artists.is_loading(),
-                            stable_viewport: true, // Browser pane: click to highlight, not play
-                            in_browsing_panel: true,
-                            overlay: views::OverlayMenuViewData {
-                                column_dropdown_open,
-                                column_dropdown_trigger_bounds,
-                                open_menu: self.open_menu.as_ref(),
-                            },
-                        };
+                        let view_data = self.build_artists_view_data(
+                            self.content_pane_width() * 0.45,
+                            browser_height,
+                            true,
+                            true,
+                        );
                         self.artists_page.view(view_data).map(Message::Artists)
                     }
                     views::BrowsingView::Genres => {
-                        let (column_dropdown_open, column_dropdown_trigger_bounds) =
-                            column_dropdown_state(&self.open_menu, View::Genres);
-                        let view_data = views::GenresViewData {
-                            genres: &self.library.genres,
-                            genre_artwork: &self.artwork.genre.mini.snapshot,
-                            genre_collage_artwork: &self.artwork.genre.collage.snapshot,
-                            album_art: &self.artwork.album_art.snapshot,
-                            window_width: self.content_pane_width() * 0.45,
-                            window_height: browser_height,
-                            scale_factor: self.window.scale_factor,
-                            modifiers: self.window.keyboard_modifiers,
-                            total_genre_count: self.library.counts.genres,
-                            loading: self.library.genres.is_loading(),
-                            stable_viewport: true, // Browser pane: click to highlight, not play
-                            in_browsing_panel: true,
-                            overlay: views::OverlayMenuViewData {
-                                column_dropdown_open,
-                                column_dropdown_trigger_bounds,
-                                open_menu: self.open_menu.as_ref(),
-                            },
-                        };
+                        let view_data = self.build_genres_view_data(
+                            self.content_pane_width() * 0.45,
+                            browser_height,
+                            true,
+                            true,
+                        );
                         self.genres_page.view(view_data).map(Message::Genres)
                     }
                     views::BrowsingView::Similar => {
@@ -953,27 +1037,12 @@ impl Nokkvi {
         // =====================================================================
         match self.current_view {
             View::Albums => {
-                let (column_dropdown_open, column_dropdown_trigger_bounds) =
-                    column_dropdown_state(&self.open_menu, View::Albums);
-                let view_data = views::AlbumsViewData {
-                    albums: &self.library.albums,
-                    album_art: &self.artwork.album_art.snapshot,
-                    large_artwork,
-                    dominant_colors: &self.artwork.album_dominant_colors.snapshot,
-                    window_width: self.content_pane_width(),
-                    window_height: self.window.height,
-                    scale_factor: self.window.scale_factor,
-                    modifiers: self.window.keyboard_modifiers,
-                    total_album_count: self.library.counts.albums,
-                    loading: self.library.albums.is_loading(),
-                    stable_viewport: self.settings.stable_viewport,
-                    in_browsing_panel: false,
-                    overlay: views::OverlayMenuViewData {
-                        column_dropdown_open,
-                        column_dropdown_trigger_bounds,
-                        open_menu: self.open_menu.as_ref(),
-                    },
-                };
+                let view_data = self.build_albums_view_data(
+                    self.content_pane_width(),
+                    self.window.height,
+                    false,
+                    self.settings.stable_viewport,
+                );
                 self.albums_page.view(view_data).map(Message::Albums)
             }
             View::Queue => {
@@ -1013,76 +1082,30 @@ impl Nokkvi {
                 self.queue_page.view(view_data).map(Message::Queue)
             }
             View::Artists => {
-                let (column_dropdown_open, column_dropdown_trigger_bounds) =
-                    column_dropdown_state(&self.open_menu, View::Artists);
-                let view_data = views::ArtistsViewData {
-                    artists: &self.library.artists,
-                    artist_art: &self.artwork.album_art.snapshot, // Reuse album art cache for artist images
-                    album_art: &self.artwork.album_art.snapshot,
-                    large_artwork,
-                    dominant_colors: &self.artwork.album_dominant_colors.snapshot,
-                    window_width: self.content_pane_width(),
-                    window_height: self.window.height,
-                    scale_factor: self.window.scale_factor,
-                    modifiers: self.window.keyboard_modifiers,
-                    total_artist_count: self.library.counts.artists,
-                    loading: self.library.artists.is_loading(),
-                    stable_viewport: self.settings.stable_viewport,
-                    in_browsing_panel: false,
-                    overlay: views::OverlayMenuViewData {
-                        column_dropdown_open,
-                        column_dropdown_trigger_bounds,
-                        open_menu: self.open_menu.as_ref(),
-                    },
-                };
+                let view_data = self.build_artists_view_data(
+                    self.content_pane_width(),
+                    self.window.height,
+                    false,
+                    self.settings.stable_viewport,
+                );
                 self.artists_page.view(view_data).map(Message::Artists)
             }
             View::Songs => {
-                let (column_dropdown_open, column_dropdown_trigger_bounds) =
-                    column_dropdown_state(&self.open_menu, View::Songs);
-                let view_data = views::SongsViewData {
-                    songs: &self.library.songs,
-                    album_art: &self.artwork.album_art.snapshot,
-                    large_artwork,
-                    dominant_colors: &self.artwork.album_dominant_colors.snapshot,
-                    window_width: self.content_pane_width(),
-                    window_height: self.window.height,
-                    scale_factor: self.window.scale_factor,
-                    modifiers: self.window.keyboard_modifiers,
-                    total_song_count: self.library.counts.songs,
-                    loading: self.library.songs.is_loading(),
-                    stable_viewport: self.settings.stable_viewport,
-                    in_browsing_panel: false,
-                    overlay: views::OverlayMenuViewData {
-                        column_dropdown_open,
-                        column_dropdown_trigger_bounds,
-                        open_menu: self.open_menu.as_ref(),
-                    },
-                };
+                let view_data = self.build_songs_view_data(
+                    self.content_pane_width(),
+                    self.window.height,
+                    false,
+                    self.settings.stable_viewport,
+                );
                 self.songs_page.view(view_data).map(Message::Songs)
             }
             View::Genres => {
-                let (column_dropdown_open, column_dropdown_trigger_bounds) =
-                    column_dropdown_state(&self.open_menu, View::Genres);
-                let view_data = views::GenresViewData {
-                    genres: &self.library.genres,
-                    genre_artwork: &self.artwork.genre.mini.snapshot,
-                    genre_collage_artwork: &self.artwork.genre.collage.snapshot,
-                    album_art: &self.artwork.album_art.snapshot,
-                    window_width: self.content_pane_width(),
-                    window_height: self.window.height,
-                    scale_factor: self.window.scale_factor,
-                    modifiers: self.window.keyboard_modifiers,
-                    total_genre_count: self.library.counts.genres,
-                    loading: self.library.genres.is_loading(),
-                    stable_viewport: self.settings.stable_viewport,
-                    in_browsing_panel: false,
-                    overlay: views::OverlayMenuViewData {
-                        column_dropdown_open,
-                        column_dropdown_trigger_bounds,
-                        open_menu: self.open_menu.as_ref(),
-                    },
-                };
+                let view_data = self.build_genres_view_data(
+                    self.content_pane_width(),
+                    self.window.height,
+                    false,
+                    self.settings.stable_viewport,
+                );
                 self.genres_page.view(view_data).map(Message::Genres)
             }
             View::Playlists => {
