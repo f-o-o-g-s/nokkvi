@@ -19,6 +19,17 @@ use crate::{
 /// Normalises shifted characters back to their base key (e.g. `$` → `4`)
 /// so that bindings stored as `Shift + 4` match the actual key event
 /// that Iced reports as `Key::Character("$")` with `modifiers.shift()`.
+///
+/// # Keyboard layout assumption
+///
+/// Assumes a **US QWERTY** layout. The shifted-symbol → base-key table
+/// below (`!` → `1`, `@` → `2`, `#` → `3`, etc.) is the US-shift map;
+/// other layouts (AZERTY, Dvorak, German QWERTZ, etc.) produce different
+/// shifted characters for the same physical keys, and bindings registered
+/// against US base keys will not normalise correctly. This is a known
+/// limitation — Iced does not currently expose hardware scancodes that
+/// would let us key off the physical position rather than the produced
+/// character.
 pub(crate) fn iced_key_to_keycode(key: &keyboard::Key) -> Option<KeyCode> {
     use keyboard::key;
     match key {
