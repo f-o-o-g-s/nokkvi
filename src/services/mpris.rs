@@ -9,12 +9,24 @@
 //! dedicated thread with its own tokio runtime. Communication happens via
 //! thread-safe channels.
 
-use std::sync::mpsc as std_mpsc;
+use std::{sync::mpsc as std_mpsc, time::Duration};
 
 use iced::task::{Never, Sipper, sipper};
 use mpris_server::{LoopStatus, Metadata, PlaybackStatus, Player, Time, Volume};
 use tokio::sync::mpsc as tokio_mpsc;
 use tracing::{debug, error, warn};
+
+/// MPRIS gets a deeper event channel because zbus method calls can burst
+/// (Seek + SetPosition + SetVolume from a single playerctl invocation).
+const MPRIS_EVENT_CHANNEL_DEPTH: usize = 100;
+
+/// Event-poll fallback timeout so the cmd loop wakes even when no MPRIS
+/// events are ready.
+const MPRIS_EVENT_POLL_TIMEOUT: Duration = Duration::from_millis(100);
+
+/// MPRIS cmd loop polls quickly so set_metadata / Seeked land within
+/// one tick.
+const MPRIS_CMD_IDLE_SLEEP: Duration = Duration::from_millis(10);
 
 /// Events sent from MPRIS callbacks to the Iced app.
 #[derive(Debug, Clone)]
@@ -136,7 +148,7 @@ impl MprisConnection {
 pub(crate) fn run() -> impl Sipper<Never, MprisEvent> {
     sipper(async |mut output| {
         // Channels for communication with MPRIS thread
-        let (event_tx, mut event_rx) = tokio_mpsc::channel::<MprisEvent>(100);
+        let (event_tx, mut event_rx) = tokio_mpsc::channel::<MprisEvent>(MPRIS_EVENT_CHANNEL_DEPTH);
         let (cmd_tx, cmd_rx) = std_mpsc::channel::<MprisCommand>();
 
         // Spawn MPRIS server on dedicated thread
@@ -152,9 +164,7 @@ pub(crate) fn run() -> impl Sipper<Never, MprisEvent> {
         // Use timeout-based polling to detect shutdown faster
         loop {
             // Use a short timeout so we can detect when the runtime is shutting down
-            match tokio::time::timeout(tokio::time::Duration::from_millis(100), event_rx.recv())
-                .await
-            {
+            match tokio::time::timeout(MPRIS_EVENT_POLL_TIMEOUT, event_rx.recv()).await {
                 Ok(Some(event)) => {
                     output.send(event).await;
                 }
@@ -334,7 +344,7 @@ fn run_mpris_thread(
                 }
                 Err(std_mpsc::TryRecvError::Empty) => {
                     // No commands, yield for a bit
-                    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                    tokio::time::sleep(MPRIS_CMD_IDLE_SLEEP).await;
                 }
                 Err(std_mpsc::TryRecvError::Disconnected) => {
                     warn!(" MPRIS command channel disconnected");
@@ -343,4 +353,20 @@ fn run_mpris_thread(
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// HIGH RISK byte-identity pin: MPRIS publishing latency is visible
+    /// to `playerctl` and other zbus consumers. If a future change to
+    /// any of these three values is intentional, update this test and
+    /// note the user-visible behavior change in the commit body.
+    #[test]
+    fn mpris_timing_constants_byte_identity() {
+        assert_eq!(MPRIS_EVENT_CHANNEL_DEPTH, 100);
+        assert_eq!(MPRIS_EVENT_POLL_TIMEOUT, Duration::from_millis(100));
+        assert_eq!(MPRIS_CMD_IDLE_SLEEP, Duration::from_millis(10));
+    }
 }

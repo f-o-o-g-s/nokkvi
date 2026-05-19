@@ -20,7 +20,7 @@
 //!    the command channel is closed, the thread breaks out of its loop, and
 //!    the tray icon is dropped.
 
-use std::sync::mpsc as std_mpsc;
+use std::{sync::mpsc as std_mpsc, time::Duration};
 
 use iced::task::{Never, Sipper, sipper};
 use ksni::{
@@ -31,6 +31,17 @@ use tokio::sync::mpsc as tokio_mpsc;
 use tracing::{debug, error, warn};
 
 const TRAY_ICON_PNG: &[u8] = include_bytes!("../../assets/org.nokkvi.nokkvi.png");
+
+/// Tray event channel is shallow — menu activations are user-paced.
+const TRAY_EVENT_CHANNEL_DEPTH: usize = 32;
+
+/// Event-poll fallback timeout so the cmd loop wakes even when no tray
+/// events are ready.
+const TRAY_EVENT_POLL_TIMEOUT: Duration = Duration::from_millis(100);
+
+/// Tray cmd loop can idle longer — only set_playing_state is sent, and
+/// only on track changes.
+const TRAY_CMD_IDLE_SLEEP: Duration = Duration::from_millis(50);
 
 /// Events emitted by tray menu activations / icon clicks.
 #[derive(Debug, Clone)]
@@ -198,7 +209,7 @@ fn load_icon_pixmap() -> Option<Icon> {
 /// Iced subscription entrypoint — spawns the tray thread and bridges events.
 pub(crate) fn run() -> impl Sipper<Never, TrayEvent> {
     sipper(async |mut output| {
-        let (event_tx, mut event_rx) = tokio_mpsc::channel::<TrayEvent>(32);
+        let (event_tx, mut event_rx) = tokio_mpsc::channel::<TrayEvent>(TRAY_EVENT_CHANNEL_DEPTH);
         let (cmd_tx, cmd_rx) = std_mpsc::channel::<TrayCommand>();
 
         let tray_thread = std::thread::spawn(move || {
@@ -209,9 +220,7 @@ pub(crate) fn run() -> impl Sipper<Never, TrayEvent> {
         output.send(TrayEvent::Connected(connection)).await;
 
         loop {
-            match tokio::time::timeout(tokio::time::Duration::from_millis(100), event_rx.recv())
-                .await
-            {
+            match tokio::time::timeout(TRAY_EVENT_POLL_TIMEOUT, event_rx.recv()).await {
                 Ok(Some(event)) => output.send(event).await,
                 Ok(None) => {
                     debug!(" Tray event channel closed; subscription ending");
@@ -274,7 +283,7 @@ fn run_tray_thread(
                         .await;
                 }
                 Err(std_mpsc::TryRecvError::Empty) => {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                    tokio::time::sleep(TRAY_CMD_IDLE_SLEEP).await;
                 }
                 Err(std_mpsc::TryRecvError::Disconnected) => {
                     debug!(" Tray command channel disconnected; shutting down tray");
@@ -284,4 +293,20 @@ fn run_tray_thread(
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// HIGH RISK byte-identity pin: tray-menu cadence is visible to
+    /// `ksni` system-tray hosts. If a future change to any of these
+    /// three values is intentional, update this test and note the
+    /// user-visible behavior change in the commit body.
+    #[test]
+    fn tray_timing_constants_byte_identity() {
+        assert_eq!(TRAY_EVENT_CHANNEL_DEPTH, 32);
+        assert_eq!(TRAY_EVENT_POLL_TIMEOUT, Duration::from_millis(100));
+        assert_eq!(TRAY_CMD_IDLE_SLEEP, Duration::from_millis(50));
+    }
 }
