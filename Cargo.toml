@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "data"]
+members = [".", "data", "nokkvi-ipc"]
 
 [workspace.package]
 repository = "https://github.com/f-o-o-g-s/nokkvi"

@@ -1,0 +1,16 @@
+[package]
+name = "nokkvi-ipc"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+# Structural invariant per nokkvi-new-feats.md §14C: this crate is
+# iced-free. Do not add an iced dependency — it would break the
+# fork-before-iced startup-latency contract for the CLI client path.
+
+[lints]
+workspace = true
+
+[dependencies]
