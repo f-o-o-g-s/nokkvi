@@ -508,8 +508,7 @@ impl ArtistsPage {
             content_row = content_row.push(slot_list_star_rating(
                 rating,
                 star_icon_size,
-                ctx.is_center,
-                ctx.opacity,
+                style,
                 Some(STARS_PORTION),
                 Some(move |star: usize| ArtistsMessage::ClickSetRating(idx, star)),
             ));
@@ -570,9 +569,7 @@ impl ArtistsPage {
             content_row = content_row.push(
                 container(slot_list_favorite_icon(
                     is_starred,
-                    ctx.is_center,
-                    false,
-                    ctx.opacity,
+                    style,
                     star_size,
                     "heart",
                     Some(ArtistsMessage::ClickToggleStar(ctx.item_index)),

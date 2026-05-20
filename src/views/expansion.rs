@@ -502,9 +502,7 @@ pub(crate) fn render_child_track_row<'a, M: Clone + 'a + 'static>(
             .align_y(Alignment::Center),
         container(slot_list_favorite_icon::<M>(
             song.is_starred,
-            ctx.is_center,
-            false,
-            ctx.opacity,
+            style,
             star_size,
             "heart",
             on_star_click,
@@ -653,9 +651,7 @@ pub(crate) fn render_child_album_row<'a, M: Clone + 'a + 'static>(
         .push(
             container(slot_list_favorite_icon::<M>(
                 album.is_starred,
-                ctx.is_center,
-                false,
-                ctx.opacity,
+                style,
                 star_size,
                 "heart",
                 on_star_click,

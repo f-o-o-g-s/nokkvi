@@ -758,6 +758,27 @@ pub(crate) fn slot_list_index_column<'a, Message: 'a>(
     slot_list_labeled_index_column(format!("{}", index + 1), font_size, style, opacity)
 }
 
+/// Resolve the color for a static tinted icon (lock, sub-index label,
+/// empty heart/star outline) inside a slot-list row. Returns `bg0_hard()`
+/// on dark-text rows (selected / highlighted / centered) so the icon stays
+/// readable against the light selected-row fill; otherwise `fallback` with
+/// the given alpha. Always prefer this over hardcoding a `theme::fg*()`
+/// color in a row renderer.
+pub(crate) fn slot_list_static_icon_color(
+    style: SlotListSlotStyle,
+    fallback: Color,
+    opacity: f32,
+) -> Color {
+    if style.text_color == theme::bg0_hard() {
+        theme::bg0_hard()
+    } else {
+        Color {
+            a: opacity,
+            ..fallback
+        }
+    }
+}
+
 /// Render an index column with a free-form label (e.g. dotted decimal "236.1"
 /// for expanded child rows). Shares styling with `slot_list_index_column` so
 /// child sub-indices visually match parent indices in font, color, and width.
@@ -772,14 +793,7 @@ pub(crate) fn slot_list_labeled_index_column<'a, Message: 'a>(
     container(slot_list_text(
         label.into(),
         font_size,
-        if style.text_color == theme::bg0_hard() {
-            theme::bg0_hard()
-        } else {
-            iced::Color {
-                a: opacity * 0.7,
-                ..theme::fg4()
-            }
-        },
+        slot_list_static_icon_color(style, theme::fg4(), opacity * 0.7),
     ))
     .width(Length::Fixed(SLOT_LIST_INDEX_WIDTH))
     .align_x(Alignment::Center)
@@ -1246,24 +1260,24 @@ fn outlined_svg_icon<'a, M: 'a>(
         .into()
 }
 
-/// Render a star rating display (1-5 stars) for slot list slots
+/// Render a star rating display (1-5 stars) for slot list slots.
 ///
-/// Replaces per-star copy-paste with a loop. Uses filled/empty star SVGs
-/// with yellow for filled stars and contextual colors for empty stars.
+/// Filled stars use the brand `star_bright` color; empty stars use
+/// `slot_list_static_icon_color(style, fg4, 1.0)` so the outline darkens in
+/// lockstep with row text on selected / highlighted / centered rows. Per-star
+/// opacity tracks `style.text_color.a` to fade with the row.
 ///
 /// # Arguments
 /// * `rating` - Star count (0-5), clamped internally
 /// * `icon_size` - Size of each star icon in pixels
-/// * `is_center` - Whether this is the centered slot list slot
-/// * `opacity` - Opacity for non-center slots (0.0-1.0)
+/// * `style` - Resolved slot style (drives color + opacity adaptation)
 /// * `portion` - When `Some(n)`, wraps the stars in a `FillPortion(n)` container
 ///   for use as a standalone slot list column. When `None`, returns the bare star row
 ///   for embedding inside caller-controlled layouts (e.g. a column).
 pub(crate) fn slot_list_star_rating<'a, Message: Clone + 'a>(
     rating: usize,
     icon_size: f32,
-    is_center: bool,
-    opacity: f32,
+    style: SlotListSlotStyle,
     portion: Option<u16>,
     on_click: Option<impl Fn(usize) -> Message + 'a>,
 ) -> Element<'a, Message> {
@@ -1272,13 +1286,9 @@ pub(crate) fn slot_list_star_rating<'a, Message: Clone + 'a>(
         widget::{row, svg},
     };
 
-    let svg_opacity = if is_center { 1.0 } else { opacity };
+    let svg_opacity = style.text_color.a;
     let filled_color = theme::star_bright();
-    let empty_color = if is_center {
-        theme::bg0_hard()
-    } else {
-        theme::fg4()
-    };
+    let empty_color = slot_list_static_icon_color(style, theme::fg4(), 1.0);
 
     let stars = (1..=5).fold(row![].spacing(2), |r, i| {
         let star_element: Element<'a, Message> = if rating >= i {
@@ -1321,24 +1331,23 @@ pub(crate) fn slot_list_star_rating<'a, Message: Clone + 'a>(
     }
 }
 
-/// Render a favorite icon (heart or star) with proper colors for slot list slots
+/// Render a favorite icon (heart or star) for a slot-list row.
 ///
-/// Handles color logic for starred items, centered slots, highlighted slots, and regular slots.
-/// Use this for consistent favorite icon rendering across all slot-list-based views.
+/// Both color and opacity are derived from `style` so the icon stays in
+/// lockstep with the row's text — empty outlines darken on selected /
+/// highlighted / centered rows via `slot_list_static_icon_color`, filled
+/// icons keep their brand colors (`danger_bright` / `star_bright`) and
+/// fade with `style.text_color.a` to match the surrounding text.
 ///
 /// # Arguments
 /// * `is_starred` - Whether the item is starred/favorited
-/// * `is_center` - Whether this is the centered slot
-/// * `is_highlighted` - Whether this slot is highlighted (e.g., currently playing)
-/// * `opacity` - Opacity for non-highlighted slots (0.0-1.0)
+/// * `style` - Resolved slot style (drives color + opacity adaptation)
 /// * `icon_size` - Size of the icon in pixels
 /// * `icon_type` - "heart" for songs/queue, "star" for albums
 /// * `on_click` - Optional message to emit when clicked (toggles starred state)
 pub(crate) fn slot_list_favorite_icon<'a, Message: Clone + 'a>(
     is_starred: bool,
-    is_center: bool,
-    is_highlighted: bool,
-    opacity: f32,
+    style: SlotListSlotStyle,
     icon_size: f32,
     icon_type: &'a str,
     on_click: Option<Message>,
@@ -1348,17 +1357,12 @@ pub(crate) fn slot_list_favorite_icon<'a, Message: Clone + 'a>(
     let (filled_icon, empty_icon) = match icon_type {
         "heart" => ("assets/icons/heart-filled.svg", "assets/icons/heart.svg"),
         "star" => ("assets/icons/star-filled.svg", "assets/icons/star.svg"),
-        _ => ("assets/icons/heart-filled.svg", "assets/icons/heart.svg"), // default to heart
+        _ => ("assets/icons/heart-filled.svg", "assets/icons/heart.svg"),
     };
 
-    let svg_opacity = if is_center || is_highlighted {
-        1.0
-    } else {
-        opacity
-    };
+    let svg_opacity = style.text_color.a;
 
     let svg_element: Element<'a, Message> = if is_starred {
-        // Starred: layer filled icon + outline on top for contrast
         let fill_color = match icon_type {
             "heart" => theme::danger_bright(),
             "star" => theme::star_bright(),
@@ -1366,12 +1370,7 @@ pub(crate) fn slot_list_favorite_icon<'a, Message: Clone + 'a>(
         };
         outlined_svg_icon(filled_icon, empty_icon, icon_size, fill_color, svg_opacity)
     } else {
-        // Not starred: just the empty outline
-        let color = if is_center || is_highlighted {
-            theme::bg0_hard()
-        } else {
-            theme::fg4()
-        };
+        let color = slot_list_static_icon_color(style, theme::fg4(), 1.0);
         crate::embedded_svg::svg_widget(empty_icon)
             .width(Length::Fixed(icon_size))
             .height(Length::Fixed(icon_size))

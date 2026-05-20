@@ -767,8 +767,7 @@ impl QueuePage {
                     content_row = content_row.push(slot_list_star_rating(
                         rating,
                         star_icon_size,
-                        ctx.is_center,
-                        ctx.opacity,
+                        style,
                         Some(15),
                         Some(move |star: usize| QueueMessage::ClickSetRating(idx, star)),
                     ));
@@ -807,9 +806,7 @@ impl QueuePage {
                             use crate::widgets::slot_list::slot_list_favorite_icon;
                             slot_list_favorite_icon(
                                 starred,
-                                ctx.is_center,
-                                is_current,
-                                ctx.opacity,
+                                style,
                                 icon_size,
                                 "heart",
                                 Some(QueueMessage::ClickToggleStar(ctx.item_index)),

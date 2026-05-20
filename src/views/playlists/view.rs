@@ -534,19 +534,24 @@ impl PlaylistsPage {
 
         // Visibility glyph slot — always pushed so the row's widget tree
         // shape stays identical between public/private states. Public renders
-        // a zero-width Space; private renders a lock SVG in muted fg3 with a
-        // tooltip explaining why the icon is there.
+        // a zero-width Space; private renders a lock SVG whose tint tracks
+        // the row's text color (dark on selected/expanded rows, fg3 otherwise).
         columns.push(if playlist.public {
             iced::widget::Space::new()
                 .width(Length::Fixed(0.0))
                 .height(Length::Fixed(14.0))
                 .into()
         } else {
+            let lock_color = crate::widgets::slot_list::slot_list_static_icon_color(
+                style,
+                crate::theme::fg3(),
+                1.0,
+            );
             let lock_icon = crate::embedded_svg::svg_widget("assets/icons/lock.svg")
                 .width(Length::Fixed(14.0))
                 .height(Length::Fixed(14.0))
-                .style(|_theme, _status| iced::widget::svg::Style {
-                    color: Some(crate::theme::fg3()),
+                .style(move |_theme, _status| iced::widget::svg::Style {
+                    color: Some(lock_color),
                 });
             iced::widget::tooltip(
                 lock_icon,

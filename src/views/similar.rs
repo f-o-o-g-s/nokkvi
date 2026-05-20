@@ -508,9 +508,7 @@ impl SimilarPage {
                             use crate::widgets::slot_list::slot_list_favorite_icon;
                             slot_list_favorite_icon(
                                 is_starred,
-                                ctx.is_center,
-                                false,
-                                ctx.opacity,
+                                style,
                                 star_size,
                                 "heart",
                                 Some(SimilarMessage::ClickToggleStar(ctx.item_index)),
