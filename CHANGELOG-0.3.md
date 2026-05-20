@@ -1,0 +1,304 @@
+# Changelog — v0.3.x archive
+
+Releases v0.3.1 through v0.3.17, covering 2026-04-27 to 2026-05-14. The current changelog (v0.4.0 onward) lives in [CHANGELOG.md](./CHANGELOG.md).
+
+## v0.3.17 — 2026-05-14
+
+### Fixed
+
+- Queue counter, displayed track list, and current-track highlight now refresh immediately after removing songs from the queue (right-click, multi-select delete, Ctrl+D) or dragging songs to reorder within the queue — previously these stayed on stale values until the next queue refresh fired. Closes the parallel projection race to the v0.3.16 fix that covered append / "play next" splice.
+- Local-storage write volume during typical browsing dropped to roughly zero. The JWT-refresh interceptor was firing a burst of ~130 redb disk writes per Navidrome library-refresh (SSE `refreshResource`) event because every concurrent paged-loader response took the same check-then-write path. The check is now folded into the same write-lock critical section as the in-memory swap, and persistence is gated by whether the stored token is actually near expiry (decoded from its `exp` claim) rather than a wall-clock throttle — steady-state browsing produces zero writes.
+- Re-opening nokkvi the day after closing it no longer prompts for a fresh login on default Navidrome installs (48-hour `SessionTimeout`). The token-persistence margin was a flat 10% of the new token's lifetime, leaving as little as ~5 hours of stored grace at close time; it's now clamped to at least 24 hours so a typical close-then-reopen-tomorrow flow always has a valid stored token to resume from.
+- Playback no longer silently halts when auto-advancing past a track whose successor has a different channel count (e.g. mono → stereo). A stale completion flag from the previous track's EOF was leaking past the start of the new track and permanently blocking its own completion gate, so the engine would play the new track in full and then never advance to the one after. Surfaced by an overnight burn-in where a 13,473-song queue stopped at index 2870.
+
+## v0.3.16 — 2026-05-12
+
+### Added
+
+- Auto mode now stacks the artwork above the slot list on portrait windows where the horizontal column would crowd the rows. The stacked artwork aligns with the slot rows' inset and only appears when the window is tall and narrow enough for it to fill the inset edge-to-edge, so the panel never shows bg-color bars inside the pane.
+- "Auto-mode artwork size" slider in Settings → Interface → Artwork Column (0.30–0.70 in 5% steps, default 0.40) grows or shrinks the Auto-mode artwork — affects both the horizontal column and the portrait-fallback vertical artwork.
+- Two new "Always (Vertical Native)" and "Always (Vertical Stretched)" artwork-column modes — both stack a fixed-height artwork above the slot list with a horizontal drag handle below the artwork for live resize, controlled by the new "Always-Vertical artwork height" slider (0.10–0.80, default 0.40). Unlike Auto, these modes allow letterboxing as the deliberate tradeoff for "always show big artwork above the list" regardless of window orientation.
+- Surfing boat in the lines visualizer's mirrored mode now flips upside-down on each off-screen wrap and surfs the bottom (reflected) wave on the next leg, alternating between the upper and lower halves of the visualizer each wrap-cycle. The anchor stays out of the water while the boat is inverted and resumes dropping once the boat flips upright again.
+
+### Changed
+
+- The "X songs" count on Artists and Genres rows is now clickable — clicking it jumps to the Songs view scoped to that artist or genre. Songs load via a server-side filter, so the result is the full backing catalog (e.g. all 391 Black Metal songs) rather than what a text search for the name would have matched. Matches the existing click affordance on the sibling "X albums" cell, and is gated by the same Settings → Theme "slot text links" toggle.
+
+### Fixed
+
+- Side nav layout no longer letterboxes the Auto-mode portrait artwork on top and bottom — the artwork resolver was sizing against the full window width instead of the available content pane (which has the 30 px sidebar subtracted). The same correction tightens the horizontal Auto candidate's auto-hide threshold by 30 px in Side layouts so the column hides at the right point.
+- View header now sits between the vertical artwork and the slot list it controls in Auto portrait fallback and Always-Vertical modes — previously it floated at the top of the pane disconnected from its list. Padding around the artwork is now even on all three exposed sides so the gap before the header is a single natural inset rather than a doubled one.
+- Toggling between artwork-column modes mid-session no longer drops focus from the active text input — the slot-list layout keeps a stable root widget across the off / horizontal / vertical branches instead of switching widget types underneath the focused field.
+- Strip Merged mode now applies to radio playback in both the player-bar metadata strip and the top nav-bar — toggling Merged with a station playing produces a single merged marquee (station → playing title → artist, with URL fallback) instead of being silently ignored.
+- Top nav-bar's columnar radio ICY title is now labeled "playing:" to match the player-bar strip — the bar previously labeled the same data "title:", colliding with the regular track-title label and swapping captions for the same field when Merged was toggled.
+- Closing the window after pausing a radio stream no longer hangs the app — the radio buffer producer no longer parks the tokio blocking pool on a full channel, and shutdown now runs a bounded async cleanup of in-flight tasks before exiting.
+- Paused radio playback no longer keeps the audio decode loop spinning at ~200 wake-ups per second — the loop now sleeps on a consume-notified rendezvous and idles at ~2 wake-ups per second while paused, cutting CPU and battery use during paused radio to near-zero.
+- Radio streams now detect stalled or half-open server connections within ~15 seconds via per-read and TCP-keepalive timeouts, replacing the previous indefinite wait that could leave the player wedged on a silently-dropped Icecast connection.
+- Clicking an artist, album, or genre link in the queue view now lands the auto-expanded row at the top of the visible list in vertical artwork modes (Always-Vertical Native / Stretched and Auto's portrait fallback). Previously the row ended up above the viewport so you had to scroll up to find it — the stored slot count wasn't being refreshed when the artwork stacked above the slot list, leaving the centering math off by several rows.
+- Settings → Hotkeys "Restore Defaults" row now opens the reset confirmation dialog when activated — previously the press fell through to a no-op match arm and silently did nothing.
+- Multi-selection drag-count badge now honors the theme's Rounded vs Square radius setting in both the in-pane drag preview and the cross-pane preview (dragging from the library browser into the queue pane in split-view). Both badges were previously hardcoded to an 8 px pill regardless of theme.
+- Playlist tracks now display the correct sample rate, channel count, track number, rating, tags, and participants, and accurately reflect their starred state. The playlist API path's hand-rolled Song parser had drifted from the canonical shape and silently dropped or mis-mapped those fields — most visibly leaving track-number, sample-rate, and channel-count columns empty for songs loaded via a playlist.
+- Starring, rating changes, radio CRUD, and replacing playlist tracks now drop to the login screen on session expiry (HTTP 401) instead of toasting a generic error, matching the behavior already in place for read fetches.
+- Artist, song, playlist, and genre changes pushed over Navidrome's SSE channel now refresh only the affected cache (with playlists and genres routed through their existing reload handlers) instead of triggering a full albums/artists/songs reload regardless of what changed. Playlist and genre SSE notifications were previously dropped entirely.
+- Queue counter in the UI now updates immediately after a drag-drop append or "play next" splice — previously it stayed on the pre-append value until the next full queue refresh fired.
+- Settings → Interface "Font Family" row and Settings → Playback "Default Playlist Name" row now show the "Enter ↵" hint that signals Enter opens the picker dialog — previously only the local-music-path row had the affordance even though all three rows behave the same way.
+- Renaming a playlist (and any other text-input dialog) now dismisses when you click outside the dialog box, matching the about / info / EQ modal behavior. Clicks on the input field or the OK / Cancel buttons are absorbed and don't bubble to the backdrop.
+- Loaded playlist header in the queue view now survives play actions that don't replace queue contents — clicking play on a song already in the queue, or rolling Queue-view roulette (Ctrl+R), no longer drops the playlist name/comment bar. The play guard was clearing the loaded-playlist context for every play action, including ones that only advance the playback pointer within the existing queue.
+- Surfing boat, anchor, and rope now fade with the Settings → Visualizer → Visualizer Opacity slider — the SVG sprites and the rope canvas previously drew at full alpha regardless of the slider, so dimming the visualizer left the boat punching through at 1.0 alpha while the bars/lines underneath fell away.
+- Surfing boat now rides the actual wave line when the lines visualizer is in mirrored mode — the boat's vertical math was anchored to the canvas bottom while the rendered wave baseline sat at the canvas vertical center, so the boat floated roughly half a canvas height below the line it was meant to surf. The dropped anchor and its rope likewise now sit on that centerline baseline instead of stretching from the boat (at center) all the way down through the lower-half reflection to the canvas floor.
+- Starring with Shift+L and bumping a rating with Shift+± via hotkey now confirm with a success toast again — the toasts were silently dropped during a recent hotkey refactor that routed both handlers through the shared optimistic-update helpers, so the only feedback you got was the optimistic star/rating fill plus the boundary-skip "Rating already at 5/5" toast when you pressed past the cap.
+- Failed album-tracks fetch on album expansion now drops to the login screen on session expiry (HTTP 401) or surfaces the error as a toast, instead of leaving the row collapsed with no feedback — completes the parity with artist, genre, and playlist expansion, which had already received this treatment in a prior audit.
+
+## v0.3.15 — 2026-05-10
+
+### Changed
+
+- Memory usage on long sessions roughly halves. The glibc malloc-arena cap is now set to 2 at startup, so freed pages return to the OS instead of getting parked in per-tokio-worker arenas; a typical session now sits around 450–700 MiB resident over a day of playback instead of climbing past 1 GiB.
+- Log files are dramatically smaller. The per-tick render and stream-health heartbeats — together about 58% of a typical session's log volume — are off at the default level (stream-health still emits on underruns or empty buffers), and a handful of UI focus, task-start, and duplicate-layer lines moved to trace. A 60-minute session now produces roughly a quarter as many lines with the same diagnostic content.
+- New `RUST_LOG` escape hatch is documented for verbose bug-report logs (e.g. `RUST_LOG=trace nokkvi`). The build doc's stale log-path reference is corrected to `~/.local/state/nokkvi/nokkvi.log`.
+
+### Fixed
+
+- Cold-start visit to Genres no longer briefly shows slot thumbnails and then drops them to gray — the eager collage mini prefetch that evicted visible-viewport entries from the bounded artwork LRU is gone.
+- Scrollbar drag or rapid scroll on Genres / Playlists no longer leaves the right-side 3×3 collage panel showing gray tiles — collage fetches retry on Navidrome's request-throttle 429s, a per-app concurrent-fetch cap (16) keeps bursts under the server's backlog, and only the centered slot fans out the full 9-tile collage instead of every visible row.
+- Right-side artwork panel now keeps up with rapid viewport changes — holding Tab, dragging the scrollbar, or letting a roulette spin decelerate through slots refreshes the panel each time the centered slot changes (instead of staying stuck on whatever was cached when the motion started), and during fast cruise the slot-list mini fills in as a blurry placeholder until the full-res image arrives.
+- Subsonic auth tokens no longer appear in the local log file — four log call sites that emitted the full Navidrome stream URL now strip the `s=`/`t=` salt-and-MD5 pair used for authentication. The rest of the URL (track id, username, API version, client) is preserved so logs stay useful for bug reports.
+
+## v0.3.14 — 2026-05-10
+
+### Added
+
+- Ctrl+R hotkey for Roulette — spins the current view's wheel and auto-plays the landing item, equivalent to picking the Roulette entry in the sort dropdown. The binding is rebindable in Settings → Hotkeys (under Sort & View). The hotkey is a no-op in Settings, and in split-view it always rolls the main pane regardless of pane focus.
+- Toggle toasts on shuffle, repeat, consume, UI SFX, and crossfade — flipping any of these via hotkey or menu now confirms the new state in-place, so you can see what you switched to without re-opening the menu.
+
+### Changed
+
+- Roulette deceleration is now a 17-keyframe discrete-click sequence with cubic-distributed hold times — the slot-machine click cadence audibly slows from ~20 Hz to ~1 Hz over the decel phase, ending on one of four randomized tail patterns (clean land, overshoot-and-snap-back, false-settle fake-out, or a no-cruise variant where the entire spin is the slowing decel). Replaces the previous smoothly-eased decel + scripted fake-out wobble model; the spin now reads as discrete ticks ratcheting onto the target, inspired by StepMania's MusicWheel.
+- About modal shipwright credits updated to Claude Opus 4.7.
+
+### Fixed
+
+- Nokkvi now reliably registers as an MPRIS player on the user's session bus after launch — previously, if another nokkvi process was alive at startup (a second build under test, or an instance kicked to the login screen by Navidrome's session lock that the user hadn't closed yet), the newly launched instance silently got queued for the bus name and stayed invisible to `playerctl`, KDE Connect, GNOME media keys, and other MPRIS clients. The bus name now includes the process ID (`org.mpris.MediaPlayer2.nokkvi.instance<pid>`) per the MPRIS spec; `playerctl -p nokkvi` still matches via prefix, so existing keybinds are unaffected.
+- Artwork-resolution toast no longer suggests rebuilding a cache — it now accurately describes the LRU behavior (new fetches at the chosen size; already-loaded images keep their size until they cycle out).
+- Visualizer live config now reloads after a mutually-exclusive setting writes its secondary value — enabling Waves auto-zeroes Monstercat (and vice versa), and the engine immediately renders the new mode instead of holding the stale one until the next manual change.
+- Login text inputs (server URL, username, password) and the info-modal scrollbar now honor the theme's Rounded vs Square radius setting instead of always rendering rounded.
+- Queue header keeps a stable widget-tree shape across edit / playlist-context / read-only modes — the search field no longer loses focus when the mode changes.
+- Press animations on the nav-bar tabs, side-nav tabs, and the login submit button now fire correctly; previously the hover overlay wrapped the native button and the button captured the press event first.
+- Failed sub-fetches in genre album expansion, playlist track expansion, and artist albums expansion now surface as session-expired or error toasts instead of silently dropping.
+- Surfing boat no longer cuts through steep wave peaks — a feed-forward wave-velocity term in the Y spring keeps the boat above the crest as the wave rises beneath it.
+- Player-bar nav text in merged mode now keeps all fields visible at narrow window widths (the marquee scrolls instead of dropping album/artist), and the marquee starts scrolling immediately after a window resize instead of pausing for ~2 s.
+- Roulette spin now prefetches viewport artwork as the wheel scrolls past slots, so thumbnails appear during the spin instead of as a wave of gray boxes that only filled in after settle.
+
+### Removed
+
+- UI SFX toggle removed from the hamburger menu — Settings → Audio remains the place to toggle it.
+
+## v0.3.13 — 2026-05-05
+
+### Added
+
+- Roulette pick mode in every slot-list view's sort dropdown — selects a random item, animates the slot list as a ~5-second slot-machine spin with ease-out deceleration plus a fake-out near the end, then auto-plays the landing item. Per-frame Tab nav SFX track the slowing wheel for the slot-machine click. Genres and Artists load all songs in the picked entity and start playback at a random song; Queue/Songs/Albums/Playlists/Radios use the view's normal play-from-here action. Press Escape during the spin (or switch views) to cancel — the original viewport is restored, no auto-play. Roulette is disabled in the browsing panel since play actions there route to add-to-queue instead.
+- Expanded child rows in Artists, Albums, Genres, and Playlists views now show a dotted-decimal sub-index (e.g. 236.1, 236.2) in their leading column with a slight indent — previously children had no index at all and sat less indented than their parent, leaving an unexplained gap in the parent-row index sequence.
+
+### Changed
+
+- Surfing boat sprite size is now clamped to a 48–160 px pixel range so it stays readable at any window size — the boat previously shrank to ~14 px on small/short windows and ballooned past 230 px on 4K. Rope thickness now scales with the boat (1.5–3.5 px) so it never looks hairline against a large boat or chunky against a small one, and the anchor inherits the new bounds automatically.
+- Queue's header shuffle button is now a Random sort mode in the sort dropdown — selecting Random shuffles the queue, and re-selecting it (or toggling the order arrow while Random is active) reshuffles. The mode isn't persisted to config, so a relaunch restores whichever deterministic sort was active before.
+- Shift+C (center on currently-playing) in Albums, Artists, Songs, and Genres views no longer overwrites the active search query with the playing item's title — when the item isn't already in view, the search clears and the library pages forward until the item appears, then centers it.
+- Library browser panel (Ctrl+E) view header no longer renders the Center on Playing button on Albums, Songs, Artists, and Genres tabs — the narrower 45% pane needs that space for sort/refresh/columns/search. The button is unchanged on the corresponding full-page views.
+- Sort-mode dropdown in every view header now sizes itself to its widest option instead of always reserving a fixed 200 px — views with short sort lists (Radios's single Name, narrower picker sets) reclaim that space for the search field and the item count, and the open dropdown still spans the trigger so all options stay visible.
+- Roulette fake-out now varies per spin instead of always landing two short of the target and walking forward in two evenly-spaced ticks — each spin rolls a random pattern (none, single near-miss, two-step walk, overshoot bounce, or zigzag) plus a random direction, individually jitters every tick's hold duration, and splits a ~4.4–5.4 s total budget between the wobble and the main eased ramp. About one in five spins skips the fake-out entirely and decelerates straight onto the target, and the slot-machine ticks at the end no longer sound metronomic.
+
+### Fixed
+
+- Surfing boat now moves on ambient and soundtrack tracks (sustained pads, drones, slow swells) that produce loud but slowly-changing spectra — these previously made the boat coast to a stop because the cruise signal listened only to spectral change.
+- Surfing boat's top speed now scales with the music's energy stack instead of pinning every percussive track at the same ceiling — energetic tracks (brick-walled, blast-beat, heavy-onset material) now read visibly faster than steady punchy tracks, and the baseline cruise speed is lifted across the board.
+- Username in config.toml is now populated automatically on auto-login resume — previously the field stayed empty whenever it was empty at startup, so the field never recovered without a manual logout/login.
+- Scrolling or Tab-navigating after clicking a name link to inline-expand a target in another view now visibly walks the cursor highlight through adjacent rows instead of leaving no cursor visible until the next click — previously the cursor stayed frozen on the auto-pinned row even after that row scrolled off-screen.
+
+## v0.3.12 — 2026-05-04
+
+### Added
+
+- Drop-anchor doodad on the surfing boat — every 45–120 s the boat anchors for 10–15 s, dropping a lucide-anchor icon to the bottom of the visualizer with a curved theme-colored rope back up to the boat. The rope sways with local wave amplitude, the anchor stays planted on the floor while the boat bobs above it, and tacks/wind shifts are paused for the duration.
+
+### Changed
+
+- Surfing boat is now propelled entirely by the music — silence brings the boat to a stop, and tagged BPM + onset energy + a slow-window energy envelope together drive both the cruise speed and the velocity floor. Different songs now produce visibly different boat motion instead of every track looking the same.
+- Surfing boat now eases into and out of direction changes instead of snapping on a dime — sail thrust drops to zero at the moment of a tack and ramps back to full over four seconds, so the boat decelerates through zero and accelerates smoothly onto its new heading.
+- Surfing boat slope force now only resists motion — going up a wave still slows the boat, but going down a wave no longer accelerates it. A sailboat doesn't surf the way a board does.
+
+### Fixed
+
+- Right-edge spacing on the Queue and Songs row text (duration or play count) when the Love column is toggled off — the trailing text was previously flush against the row's right edge instead of carrying the same padding it has when Love is on.
+
+## v0.3.11 — 2026-05-03
+
+### Added
+
+- Genre column toggle on Queue and Songs views — stacks under the album when both are visible, takes over the album slot at album-size font when album is hidden, and auto-shows when the list is sorted by Genre.
+- Multi-select column UI-wide — opt in per view (Albums, Artists, Genres, Playlists, Queue, Songs, Similar) under each view's columns-cog dropdown to add a row-level checkbox plus a tri-state select-all header that mirrors ctrl/shift+click selections.
+
+### Changed
+
+- Surfing boat now sails continuously through the screen edges instead of bouncing back: when it reaches one side it keeps its momentum and emerges from the opposite side, drawn split across the seam during the crossing so the wrap looks seamless.
+- Surfing boat now wanders both directions evenly instead of drifting consistently toward bass: the soft pull-toward-center spring and the captain's bias toward the louder half of the spectrum are gone, since on a torus they conspired to favor whichever wrap direction the music's spectrum happened to lean.
+- Surfing boat now tilts to match the local wave slope (spring-damped so it eases into the lean instead of snapping to spectrum jitter, capped at ~17°) and horizontally mirrors itself based on travel direction so the sail catches wind from behind whichever way the boat is sailing. Tilt is baked into the SVG path data each frame (rotation applied in vector space and then rasterized fresh, rather than rotating an upright bitmap in the GPU shader) so the rotated boat stays sharp even at small sprite sizes; the resulting handle is cached per quantized angle to keep resvg cost bounded.
+- Surfing boat now carries a thin outline that uses the same `border_color` / `border_opacity` as the lines-mode wave outline, so it reads as part of the same theme. The outline tracks the active theme automatically and follows whichever opacity the theme defines (so it matches the wave's behavior in light mode where the border is intentionally hidden).
+- Surfing boat outline is now half as thick (~0.5 px instead of ~1 px) — the previous stroke read as too heavy on the small sprite and competed with the fill instead of just tracing it. Wave-line outline thickness is unchanged.
+- Clicking an album, artist, or genre name link in any list now navigates to that item's view and expands it inline at the top, instead of leaving you on a one-row filtered list with the contents hidden behind a follow-up Shift+Enter.
+- Surfing boat now gets a brief off-screen stretch past each screen edge with a quiet eject impulse — when it leaves frame, slope-tracking pauses and a firm push eases it through the seam, so music with loud bins near a spectrum edge can no longer keep dragging it back to the edge it just tried to leave.
+
+### Fixed
+
+- Thumbnails in large genre and artist expansion rows no longer leave a stray slot or two permanently blank — failed cover-art fetches now retry up to three times instead of caching the empty result.
+- Clicking an artist name link in the queue or songs view now loads the large artist image and dominant color in the artwork column on arrival — previously it stayed blank until you scrolled to a different artist and back. Same fix for the genre 3×3 collage column when clicking a genre name link.
+- Surfing boat no longer gets pinned at the wrap seam or dwells near either screen edge, and the captain's rowing charges now ramp in and out smoothly (half-sine envelope) instead of feeling like motor thrust kicking on and off.
+- Columns-cog dropdown in the library browsing panel now opens — previously it was wired closed and never showed its menu.
+- Surfing boat no longer clips its corners off when tilting to extreme angles.
+- Multi-select checkbox toggles in the library browsing panel now add or remove only the clicked row — previously, clicking an already-checked checkbox kept it checked while every other selected row was wiped.
+- Drop indicator during cross-pane drag-and-drop now aligns with the queue rows when the queue's Select column is enabled, instead of riding 24 px above where it should have been.
+- First mouse-wheel scroll after clicking a name link to inline-expand a target in another view no longer jerks the highlighted target row from the top of the list down to the middle — the highlight now stays on the row and rides the scroll naturally until it leaves the viewport.
+
+### Removed
+
+- Third-tier inline expansion in Artists and Genres views (album → tracks). Both views are now 2 levels deep like the others; the "X songs" link on a child album row and Shift+Enter on a centered child album now jump to the Albums view and expand the album there.
+
+## v0.3.10 — 2026-05-02
+
+### Changed
+
+- Surfing boat now makes periodic rowing charges toward the louder side of the waveform instead of camping on the calm side, and sits slightly into the wave line instead of hovering above it.
+
+### Fixed
+
+- Surfing boat no longer gets stuck against the far left or right of the window — a soft wall bumper pushes it back inward — and the boat is now clipped to the visualizer area so it doesn't draw on top of the player bar.
+- Surfing boat now picks up theme changes immediately — switching presets, toggling light/dark, or editing colors no longer leaves it painting the previous palette until restart.
+- Surfing boat now freezes when audio is paused — previously it kept drifting against the held waveform and ended up off the line with no way to resync on resume.
+- Surfing boat now stays aligned with the wave line during play and sinks to the bottom during silence — previously the visualizer's frozen baseline at the end of a track could leave it parked well above the visible wave with no way back down.
+- Remove from queue (right-click or Ctrl+D) and Play next now consistently target the song you clicked — previously, after sorting the queue or removing other songs in the same session, the action could hit a different row or silently do nothing.
+- Multi-selection in the queue now clears on background queue refreshes (consume mode advancing, navigation reload) and on sort changes — previously the selection kept its row positions across the reorder and could target the wrong songs on the next bulk action.
+- Removing the currently-playing song from the queue now stops that track and rolls forward to the next song (or stops if the queue empties) — previously the audio kept streaming the deleted song while the strip advertised a different one as "now playing".
+
+## v0.3.9 — 2026-05-01
+
+### Added
+
+- Column visibility toggles for Index and Thumbnail on Queue, Albums, Songs, and Artists views.
+- Album thumbnails in nested album expansion rows (Artists→Album and Genres→Album), and a full column-visibility menu on Genres view (Index, Thumbnail, Album count, Song count).
+- Center-on-playing button in the Radios view header (previously only available via keyboard shortcut).
+- Full column-visibility menu on Playlists view (Index, Thumbnail, Song count, Duration, Updated at).
+- Public/private playlist support. New playlists default to public; toggle visibility in the create dialog or via a lock/unlock button in the split-view edit bar. Private playlists show a lock glyph in the list view, with hover tooltips on every control.
+- Create-new-playlist button in the Playlists view header — opens a name + public dialog and drops you into split-view edit mode for the new empty playlist.
+- Optional surfing-boat overlay for the lines visualizer — a small boat drifts across the waveform and rides each wave's slope. Toggle under Settings → Visualizer → Lines.
+
+### Changed
+
+- Hiding the Song count or Duration column in Playlists now hides those values entirely — they no longer fall back to a subtitle line under the playlist name.
+- Save Queue / Add to Playlist modal: pencil icon prefix on the playlist-name input aligns it with the combo-box, and the Public checkbox indents under the input.
+- Public row in the playlist info modal now renders ✓ in green and ✗ in red/orange (theme-aware) instead of plain glyphs.
+
+### Fixed
+
+- Partial dark themes that omit `[dark.success]` / `[dark.warning]` / `[dark.star]` now inherit the correct dark-mode greens/yellows instead of silently falling back to light-mode hexes.
+- Merged metadata strip no longer renders orphan `title:` / `artist:` / `album:` labels when the field is empty but its show-label toggle is on.
+- Keyboard-focus contrast restored in nested expansion rows — focused vs. unfocused stays clearly distinct at every depth across all built-in themes.
+- Playlist context header no longer points at the wrong playlist after exiting edit mode on a playlist different from the one currently playing.
+
+## v0.3.8 — 2026-04-30
+
+### Added
+
+- Settings → toggle the `title:` / `artist:` / `album:` prefixes on the metadata strip and pick the field separator (·, •, |, —, /, │).
+
+### Changed
+
+- First-run default theme is now Everforest, matching the docs site styling.
+- Retuned Everforest visualizer gradients: bars ramp green → tan → orange → red and peaks soften to cream/yellow; light mode picks up the same colors plus a visible dark border for readability on the cream background.
+- Visualizer first-run defaults now match the shipped reference config — fresh installs get the intended look without editing `config.toml`.
+- Metadata strip text bumped one point for readability.
+
+### Fixed
+
+- ProgressTrack metadata mode now honors the show-labels and field-separator settings instead of silently ignoring them.
+- Top-bar merged marquee centers properly and the scroll lane spans the full center section on narrow windows; narrowing the window mid-track restarts the scroll cleanly instead of resuming mid-stride.
+- Merged marquee scroll lane now stretches all the way between the codec/bitrate bookends — no more visible gaps inside each edge.
+
+## v0.3.7 — 2026-04-29
+
+### Added
+
+- Default-playlist chip in the view header: always visible in the Playlists view; opt-in in the Queue view via a new `queue_show_default_playlist` setting (default off).
+- Searchable picker overlay for choosing the default playlist, with thumbnail, song count, and total duration on each row, plus a "Clear default" entry that survives filtering. Also reachable from Settings → Playback → Playlists → Default Playlist.
+
+### Fixed
+
+- Merged player-bar metadata strip stays centered on narrow windows; codec/bitrate edge text no longer clips into the marquee.
+- Dropped the redundant pair of separators flanking the merged metadata strip — the codec/bitrate sections already provide them.
+
+## v0.3.6 — 2026-04-29
+
+### Added
+
+- `nokkvi --version` and `nokkvi --help`
+
+### Changed
+
+- Per-user data layout now follows XDG: `app.redb` and `nokkvi.log` move from `~/.config/nokkvi/` to `~/.local/state/nokkvi/` (one-time migration on first launch). `config.toml`, `themes/`, and `sfx/` stay in `~/.config/nokkvi/`.
+- Debug builds now read and write `config.debug.toml` so a debug binary can run alongside a release install without overwriting each other's settings.
+- Minimum supported Rust version is now 1.87 (only relevant when building from source).
+
+### Fixed
+
+- Auto-login no longer floods stderr with pre-login `shell_task` warnings; auth lifecycle (resume / success / failure) is now visible at default verbosity.
+- Artwork panel is now properly centered in the always-mode artwork column.
+
+## v0.3.5 — 2026-04-28
+
+### Fixed
+
+- Close-to-tray now actually hides the window on Wayland (Hyprland, KDE, GNOME, sway)
+
+## v0.3.4 — 2026-04-28
+
+### Added
+
+- System tray integration with optional close-to-tray
+- Artwork column display modes (Auto / Native / Stretched / Never) with draggable column width
+- Per-mode hysteresis on the player bar; folded modes move into a kebab menu, transports collapse to prev/play/next at narrow widths
+
+### Fixed
+
+- Only one overlay menu (hamburger, kebab, view-header dropdowns, right-click) can be open at a time
+
+## v0.3.3 — 2026-04-27
+
+### Fixed
+
+- Crash and missing artwork at certain window sizes caused by an iced sub-pixel image bug
+- Cargo `license` field updated to current SPDX `GPL-3.0-only`
+
+### Changed
+
+- Added a 512px PNG launcher icon as a fallback for desktops that mis-render the SVG
+
+## v0.3.2 — 2026-04-27
+
+### Fixed
+
+- About modal no longer shows "Commit: unknown" when built outside a git context
+
+## v0.3.1 — 2026-04-27
+
+### Added
+
+- ReplayGain track/album volume normalization with pre-amp, untagged-track fallback, and clipping prevention; replaces the boolean AGC toggle with Off / RG Track / RG Album / AGC
+
+### Changed
+
+- Quieter default terminal logging (WARN+); full debug still goes to `~/.config/nokkvi/nokkvi.log`
+- Tarball releases on GitHub; `install.sh` auto-detects tarball vs source build
+
+### Fixed
+
+- Workspace `license` field corrected so `nokkvi` and `nokkvi-data` crates report GPL-3.0

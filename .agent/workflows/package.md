@@ -21,13 +21,16 @@ Promote the existing `## [Unreleased]` section in `CHANGELOG.md` to `## vX.Y.Z �
 
 **Style rubric** (matches the rmpc-style format the repo settled on):
 
-- Categories: **Added** (new features), **Changed** (visible behavior changes that aren't fixes), **Fixed** (bug fixes), **Removed** (removed features). Omit any category with no entries.
-- One bullet per change, one line if at all possible.
-- Frame by user-visible effect, not internal mechanism. No internal type names, file paths, or PR numbers — those live in the commit body / git log.
-- Drop CI, workflow, lockfile, and other internal-only churn entirely. If a CI change matters to users, it belongs under **Changed** phrased as user effect; otherwise let the commit message carry it.
-- Keep the version-header format exactly `## vX.Y.Z — YYYY-MM-DD` — the release workflow's awk extractor matches on it.
+- **Categories**: **Added** / **Changed** / **Fixed** / **Removed**. Omit any with no entries.
+- **One bullet = one sentence = one user-visible effect.** Aim for ≤ 25 words. Lead with what the user perceives now ("Volume changes via the wheel now persist past the 500ms throttle.") and stop.
+- **Root-cause prose stays in the commit body.** When a fix has an interesting "why" worth keeping (incidents, races, surprising mechanisms), put it in the commit message body — `git log` is the engineering record; CHANGELOG is the user-facing summary. If a single change needs more than one sentence to describe its effect, that usually means two changes — split into two bullets.
+- **Frame by user-visible effect**, not internal mechanism. Skip internal type names, file paths, function names, PR numbers.
+- **Drop internal-only churn**: CI, workflow, lockfile, dep bumps with no runtime effect, refactors with no behavior change. If a refactor produces a perceptible effect (memory, startup time, fewer crashes), record the effect, not the refactor.
+- **Version-header format**: keep `## vX.Y.Z — YYYY-MM-DD` exact — `.github/workflows/release.yml`'s awk extractor matches on it character-by-character.
 
-The release workflow extracts the section matching the pushed tag verbatim into the GitHub Release body, so write it for end users.
+The release workflow extracts the section matching the pushed tag verbatim into the GitHub Release body — write for someone deciding whether to upgrade.
+
+**Archive boundary**: only the current minor series (e.g. `0.4.x`) plus `## [Unreleased]` lives in `CHANGELOG.md`. Older minors are archived to `CHANGELOG-X.Y.md` siblings (e.g. `CHANGELOG-0.3.md`). When promoting `## [Unreleased]` to a release, you only ever touch `CHANGELOG.md`; do not edit archive files. When a new minor opens (e.g. `0.4.x` → `0.5.x`), close out the old minor by moving its block into a new `CHANGELOG-0.4.md` archive and refresh the "Older releases" footer link in `CHANGELOG.md`.
 
 ## 2. Update README.md
 

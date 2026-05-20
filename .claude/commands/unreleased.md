@@ -18,7 +18,13 @@ Propose entries for the `## [Unreleased]` block of `CHANGELOG.md` from commits m
    - Removed features or `BREAKING CHANGE:` → **Removed**
    - `chore:` / `ci:` / `build:` / `test:` / `docs:` → drop unless the effect is user-visible (e.g. a runtime dep bump users will notice → **Changed**; a docs-only commit → drop, that's the docs site's concern).
 
-4. Apply the style rubric from `.agent/workflows/package.md` § 1: one line per bullet, framed by user-visible effect, no internal type names / file paths / PR numbers, no CI/workflow/lockfile churn. Collapse multi-commit features into a single bullet.
+4. Apply the style rubric from `.agent/workflows/package.md` § 1:
+   - **One bullet = one sentence = one user-visible effect**, ≤ 25 words. Lead with what the user perceives now and stop.
+   - **Root-cause prose stays in the commit body, not here.** If a commit's body has interesting "why" (incident, race, surprising mechanism), that stays where `git log -1 <sha>` will surface it. The changelog is the user-facing summary; the commit log is the engineering record.
+   - If a single change needs more than one sentence to describe its effect, that usually means two changes — split into two bullets.
+   - No internal type names, file paths, function names, or PR numbers.
+   - No CI/workflow/lockfile/dep-bump churn.
+   - Collapse multi-commit features into a single bullet.
 
 5. Skip any commit whose user-visible effect is already covered by an existing bullet under `## [Unreleased]`. When in doubt, ask the user rather than duplicate.
 
