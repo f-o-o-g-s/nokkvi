@@ -900,9 +900,20 @@ pub fn main() -> iced::Result {
         unsafe { libc::mallopt(libc::M_ARENA_MAX, 2) };
     }
 
-    // Handle --version / --help before tracing init so these short-lived
-    // invocations don't truncate ~/.local/state/nokkvi/nokkvi.log.
-    for arg in std::env::args().skip(1) {
+    // Handle --version / --help / ping / single-instance probe before tracing
+    // init so these short-lived invocations don't truncate
+    // ~/.local/state/nokkvi/nokkvi.log and so the IPC client path never
+    // initializes iced / PipeWire / Symphonia (the §6.1 fork-before-iced
+    // pattern — see ~/nokkvi-new-feats.md).
+    let args: Vec<String> = std::env::args().collect();
+
+    // `nokkvi ping` — IPC smoke command. Connects to the long-running
+    // instance's socket, sends a ping request, prints the response, exits.
+    if args.get(1).map(String::as_str) == Some("ping") {
+        return forward_ipc_ping();
+    }
+
+    for arg in args.iter().skip(1) {
         match arg.as_str() {
             "-V" | "--version" => {
                 #[allow(clippy::print_stdout)]
@@ -917,6 +928,14 @@ pub fn main() -> iced::Result {
             }
             _ => {}
         }
+    }
+
+    // Bare `nokkvi` launch (no positional args, no flags we recognize) —
+    // probe the IPC socket. If another instance answers, refuse this launch
+    // so we don't trip the redb single-instance lock at session-load time
+    // and crash with a confusing error halfway into boot.
+    if args.len() == 1 && refuse_if_already_running() {
+        return Ok(());
     }
 
     // Initialize tracing.
@@ -1025,7 +1044,10 @@ fn print_cli_help() {
     let repo = env!("CARGO_PKG_REPOSITORY");
     println!("{name} {version} — {description}");
     println!();
-    println!("Usage: {name} [OPTIONS]");
+    println!("Usage: {name} [OPTIONS] [COMMAND]");
+    println!();
+    println!("Commands:");
+    println!("  ping             Probe the running instance over the IPC socket");
     println!();
     println!("Options:");
     println!("  -h, --help       Print this help and exit");
@@ -1050,6 +1072,85 @@ fn print_cli_help() {
     println!();
     println!("Documentation:");
     println!("  {repo}");
+}
+
+/// Send a single `ping` request to the running nokkvi instance and print the
+/// response. Returns `Ok(())` on a successful round-trip, `Err(iced::Error)`
+/// when no instance is reachable — both paths exit before any
+/// iced / PipeWire / Symphonia initialization runs.
+///
+/// Exit codes are documented at:
+///   0 — server answered with a non-error payload.
+///   1 — could not reach a running instance (no socket, refused, garbled).
+fn forward_ipc_ping() -> iced::Result {
+    let path = nokkvi_ipc::default_socket_path();
+    let request = nokkvi_ipc::IpcRequest::new(1, "ping", serde_json::Value::Null);
+
+    match nokkvi_ipc::client::send_request(&path, &request) {
+        Ok(response) => {
+            if let Some(err) = response.error {
+                #[allow(clippy::print_stderr)]
+                {
+                    eprintln!(
+                        "nokkvi ping: server returned error: {} ({})",
+                        err.message, err.code
+                    );
+                }
+                std::process::exit(1);
+            }
+            #[allow(clippy::print_stdout)]
+            {
+                let payload = response
+                    .data
+                    .as_ref()
+                    .map(|v| match v {
+                        serde_json::Value::String(s) => s.clone(),
+                        other => other.to_string(),
+                    })
+                    .unwrap_or_default();
+                println!("{payload}");
+            }
+            Ok(())
+        }
+        Err(err) => {
+            #[allow(clippy::print_stderr)]
+            {
+                eprintln!("nokkvi ping: {err}");
+            }
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Probe the IPC socket. If a running instance answers, print "already
+/// running" and return `true` so `main()` exits without starting iced.
+/// Returns `false` only when the connect attempt fails — the kernel's
+/// "no such file" / "connection refused" / "no listener" responses all
+/// collapse to [`nokkvi_ipc::client::ClientError::Connect`], which is the
+/// unambiguous "no live instance" signal.
+///
+/// Any *other* outcome — successful response, post-connect I/O error,
+/// garbled reply — is treated as "an instance is there, even if its socket
+/// behavior is funky," because the alternative (starting a second instance
+/// alongside one whose socket is being used) trips redb's exclusive lock
+/// at session-load time and crashes the new process partway into boot.
+fn refuse_if_already_running() -> bool {
+    let path = nokkvi_ipc::default_socket_path();
+    let probe = nokkvi_ipc::IpcRequest::new(0, "ping", serde_json::Value::Null);
+
+    match nokkvi_ipc::client::send_request(&path, &probe) {
+        Err(nokkvi_ipc::client::ClientError::Connect { .. }) => false,
+        Ok(_) | Err(_) => {
+            #[allow(clippy::print_stderr)]
+            {
+                eprintln!(
+                    "nokkvi is already running (socket: {}). Refusing second launch.",
+                    path.display()
+                );
+            }
+            std::process::exit(1);
+        }
+    }
 }
 
 /// Daemon boot: build the initial state and queue a task to open the main
