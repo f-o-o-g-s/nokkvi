@@ -16,18 +16,36 @@ use crate::{
 };
 
 fn make_incoming(command: &str) -> (IpcIncoming, oneshot::Receiver<IpcResponse>) {
+    make_incoming_with_args(command, serde_json::Value::Null)
+}
+
+fn make_incoming_with_args(
+    command: &str,
+    args: serde_json::Value,
+) -> (IpcIncoming, oneshot::Receiver<IpcResponse>) {
     let (tx, rx) = oneshot::channel::<IpcResponse>();
     let request = IpcRequest {
         protocol_version: PROTOCOL_VERSION,
         request_id: 7,
         command: command.to_string(),
-        args: serde_json::Value::Null,
+        args,
     };
     let incoming = IpcIncoming {
         request,
         responder: IpcResponder::new(tx),
     };
     (incoming, rx)
+}
+
+fn drive_with_args(command: &str, args: serde_json::Value) -> IpcResponse {
+    let mut app = test_app();
+    let (incoming, rx) = make_incoming_with_args(command, args);
+
+    let dispatched = app.update(Message::Ipc(Box::new(incoming)));
+    drop(dispatched);
+
+    rx.blocking_recv()
+        .unwrap_or_else(|_| panic!("responder must fire for {command} command"))
 }
 
 /// Drive one verb through the dispatcher and return the response that the
@@ -77,4 +95,50 @@ fn unknown_command_yields_structured_error() {
     let err = resp.error.expect("error populated");
     assert_eq!(err.code, "unknown_command");
     assert!(err.message.contains("bogus-verb"));
+}
+
+#[test]
+fn seek_accepts_f32_position_arg() {
+    let resp = drive_with_args("seek", json!({"position": 42.5}));
+    assert_eq!(resp.request_id, 7);
+    assert!(resp.data.is_none());
+    assert!(resp.error.is_none());
+}
+
+#[test]
+fn seek_accepts_integer_arg_via_json_number_coercion() {
+    // JSON `30` (integer) should still parse as f32 — covers the common case
+    // where a CLI user types `nokkvi seek 30` without a decimal.
+    let resp = drive_with_args("seek", json!({"position": 30}));
+    assert!(resp.error.is_none());
+}
+
+#[test]
+fn seek_missing_arg_returns_invalid_args_error() {
+    let resp = drive_with_args("seek", json!({}));
+    let err = resp.error.expect("missing arg must error");
+    assert_eq!(err.code, "invalid_args");
+    assert!(err.message.contains("position"));
+}
+
+#[test]
+fn seek_wrong_arg_type_returns_invalid_args_error() {
+    let resp = drive_with_args("seek", json!({"position": "thirty"}));
+    let err = resp.error.expect("non-numeric arg must error");
+    assert_eq!(err.code, "invalid_args");
+    assert!(err.message.contains("must be a number"));
+}
+
+#[test]
+fn volume_accepts_f32_value_arg() {
+    let resp = drive_with_args("volume", json!({"value": 0.6}));
+    assert!(resp.error.is_none());
+}
+
+#[test]
+fn volume_missing_arg_returns_invalid_args_error() {
+    let resp = drive_with_args("volume", json!({}));
+    let err = resp.error.expect("missing arg must error");
+    assert_eq!(err.code, "invalid_args");
+    assert!(err.message.contains("value"));
 }
