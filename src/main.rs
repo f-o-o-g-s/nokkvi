@@ -1092,8 +1092,12 @@ fn print_cli_help() {
 
 /// Build the JSON `args` object for one of the arg-taking IPC verbs from a
 /// single positional CLI string. Returns `Value::Null` for verbs that don't
-/// take args (the macro-generated `with_f32` arms will surface their own
-/// `invalid_args` error if a number was actually required).
+/// take args.
+///
+/// On parse failure the raw string is forwarded under the expected arg name
+/// so the server's `with_f32` arm returns the precise "must be a number"
+/// error rather than the misleading "missing required arg" path. Only a
+/// truly omitted positional yields an empty args object.
 ///
 /// Per-verb arg mapping is hand-rolled in Phase 1; once the §14D macro grows
 /// to also generate this CLI-side parser, the match collapses to a single
@@ -1104,12 +1108,12 @@ fn build_ipc_cli_args(verb: &str, positional: Option<&str>) -> serde_json::Value
         "volume" => "value",
         _ => return serde_json::Value::Null,
     };
-    match positional.and_then(|s| s.parse::<f64>().ok()) {
-        Some(n) => serde_json::json!({ arg_name: n }),
-        // Forward an empty args object — the server's `with_f32` arm returns
-        // the canonical `missing required arg` error, keeping the failure
-        // shape consistent across CLI / scripted clients.
-        None => serde_json::json!({}),
+    let Some(raw) = positional else {
+        return serde_json::json!({});
+    };
+    match raw.parse::<f64>() {
+        Ok(n) => serde_json::json!({ arg_name: n }),
+        Err(_) => serde_json::json!({ arg_name: raw }),
     }
 }
 
@@ -1234,5 +1238,57 @@ pub(crate) fn main_window_settings() -> iced::window::Settings {
         // close + reopen the window instead of exiting the runtime.
         exit_on_close_request: false,
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod build_ipc_cli_args_tests {
+    use serde_json::json;
+
+    use super::build_ipc_cli_args;
+
+    #[test]
+    fn seek_numeric_arg_round_trips_as_json_number() {
+        assert_eq!(
+            build_ipc_cli_args("seek", Some("30")),
+            json!({"position": 30.0}),
+        );
+        assert_eq!(
+            build_ipc_cli_args("seek", Some("42.5")),
+            json!({"position": 42.5}),
+        );
+    }
+
+    #[test]
+    fn volume_numeric_arg_round_trips_as_json_number() {
+        assert_eq!(
+            build_ipc_cli_args("volume", Some("0.7")),
+            json!({"value": 0.7}),
+        );
+    }
+
+    #[test]
+    fn unparseable_arg_forwards_raw_string_under_expected_key() {
+        // Sends the server a wrong-type value so its `with_f32` arm returns
+        // the precise "must be a number" error rather than the misleading
+        // "missing required arg" path.
+        assert_eq!(
+            build_ipc_cli_args("seek", Some("not-a-number")),
+            json!({"position": "not-a-number"}),
+        );
+    }
+
+    #[test]
+    fn missing_positional_yields_empty_args_object() {
+        assert_eq!(build_ipc_cli_args("seek", None), json!({}));
+    }
+
+    #[test]
+    fn verbs_without_args_return_json_null() {
+        assert_eq!(build_ipc_cli_args("ping", None), serde_json::Value::Null);
+        assert_eq!(
+            build_ipc_cli_args("ping", Some("ignored")),
+            serde_json::Value::Null,
+        );
     }
 }
