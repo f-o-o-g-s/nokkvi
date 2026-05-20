@@ -1062,6 +1062,8 @@ fn print_cli_help() {
     println!("  stop             Stop playback");
     println!("  seek <seconds>   Seek to absolute position in seconds (float)");
     println!("  volume <0..1>    Set playback volume (clamped to [0.0, 1.0])");
+    println!("  shuffle          Toggle shuffle (random) mode");
+    println!("  repeat           Cycle repeat mode (off → one → queue)");
     println!();
     println!("Options:");
     println!("  -h, --help       Print this help and exit");

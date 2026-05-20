@@ -137,4 +137,9 @@ define_commands! {
     "stop"       => dispatch (Message::Playback(PlaybackMessage::Stop));
     "seek"       => with_f32 ("position", |v: f32| Message::Playback(PlaybackMessage::Seek(v)));
     "volume"     => with_f32 ("value",    |v: f32| Message::Playback(PlaybackMessage::VolumeCommitted(v.clamp(0.0, 1.0))));
+    // Toggle-only in Phase 1 — matches WM-hotkey ergonomics. Arg-taking
+    // variants (shuffle on/off, repeat none/track/queue) are deferred until
+    // direct-setter PlaybackMessage variants exist. See §6 of new-feats.md.
+    "shuffle"    => dispatch (Message::Playback(PlaybackMessage::ToggleRandom));
+    "repeat"     => dispatch (Message::Playback(PlaybackMessage::ToggleRepeat));
 }

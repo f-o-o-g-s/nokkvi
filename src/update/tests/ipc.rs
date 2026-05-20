@@ -76,7 +76,16 @@ fn fire_and_forget_verbs_all_respond_ok_with_no_payload() {
     // a new test function. Pins the IPC-layer contract (responder fires,
     // request_id echoed, data empty, no error). Playback side-effects are
     // covered by the existing playback handler tests.
-    for verb in ["next", "previous", "play", "pause", "play-pause", "stop"] {
+    for verb in [
+        "next",
+        "previous",
+        "play",
+        "pause",
+        "play-pause",
+        "stop",
+        "shuffle",
+        "repeat",
+    ] {
         let resp = drive(verb);
         assert_eq!(resp.request_id, 7, "{verb}: request_id must echo");
         assert!(
