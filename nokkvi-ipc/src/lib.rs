@@ -28,11 +28,25 @@
 //!   path; one request → one response → close.
 //! - [`socket_path`] — XDG-aware default socket path resolution.
 //!
-//! # Phase 0 wiring
+//! # UI-side wiring
 //!
 //! The iced subscription glue and the argv fork in `nokkvi`'s `main.rs` live
 //! in the UI crate, not here. This crate intentionally knows nothing about
 //! iced, `Message`, or the surrounding app — it just speaks the wire.
+//!
+//! The dispatch macro (`define_commands!`) that maps verb names to UI
+//! `Message` variants also lives in the UI crate (`src/update/ipc.rs`),
+//! because its inputs reference iced-land types. Verb catalogs published by
+//! the macro are not part of this crate's API.
+//!
+//! # Phase 0 + Phase 1 verbs (informative — the wire accepts any string)
+//!
+//! - **Phase 0:** `ping`.
+//! - **Phase 1:** `next`, `previous`, `play`, `pause`, `play-pause`, `stop`,
+//!   `seek` (arg `position: f32` seconds), `volume` (arg `value: f32` 0–1),
+//!   `shuffle` (toggle), `repeat` (cycle).
+//!
+//! The full per-verb dispatch catalog lives in `src/update/ipc.rs`.
 
 pub mod client;
 pub mod protocol;

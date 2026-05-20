@@ -18,23 +18,44 @@
 //!
 //! # How it dispatches
 //!
-//! Each command row maps to one of two arm shapes:
+//! Each command row maps to one of three arm shapes:
 //!
-//! - `respond <payload>` — synchronous reply with a JSON payload. The
+//! - `respond (<payload>)` — synchronous reply with a JSON payload. The
 //!   responder is filled in and `Task::none()` is returned. Use this for
 //!   compute-and-return verbs (`ping`'s `"pong"` today, `current`/`queue`/
 //!   `state` in Phase 3).
-//! - `dispatch <Message>` — fire-and-forget. The responder is filled with an
-//!   empty success and the message is queued via [`Task::done`] for the
+//! - `dispatch (<Message>)` — fire-and-forget. The responder is filled with
+//!   an empty success and the message is queued via [`Task::done`] for the
 //!   normal update loop to handle. Use this for transport verbs whose
 //!   side-effects (UI updates, MPRIS broadcasts, scrobble timing) belong on
 //!   the regular pipeline.
-//! - `with_f32 <arg_name>, <closure>` — fire-and-forget with a single named
+//! - `with_f32 (<arg_name>, <closure>)` — fire-and-forget with a single named
 //!   `f32` argument extracted from `incoming.request.args`. The closure
 //!   builds the `Message`. Missing or non-numeric args return an
 //!   `invalid_args` error response instead of dispatching.
 //!
+//! Per-row arg groups are parenthesized so the macro can capture them as a
+//! single token tree (`:tt`) and re-destructure them in the inner @arm
+//! rules — `:expr` metavars can't be re-matched after forwarding.
+//!
 //! Unknown verbs return a structured `unknown_command` error response.
+//!
+//! # Phase 0 + Phase 1 catalog
+//!
+//! | Verb         | Arm shape | Notes                                          |
+//! |--------------|-----------|------------------------------------------------|
+//! | `ping`       | respond   | Returns the JSON string `"pong"`.              |
+//! | `next`       | dispatch  | `PlaybackMessage::NextTrack`                   |
+//! | `previous`   | dispatch  | `PlaybackMessage::PrevTrack`                   |
+//! | `play`       | dispatch  | `PlaybackMessage::Play`                        |
+//! | `pause`      | dispatch  | `PlaybackMessage::Pause`                       |
+//! | `play-pause` | dispatch  | `PlaybackMessage::TogglePlay`                  |
+//! | `stop`       | dispatch  | `PlaybackMessage::Stop`                        |
+//! | `seek`       | with_f32  | arg `position` (seconds, absolute).            |
+//! | `volume`     | with_f32  | arg `value` 0.0–1.0; routes through            |
+//! |              |           | `VolumeCommitted` to bypass the 500ms throttle.|
+//! | `shuffle`    | dispatch  | Toggle (`ToggleRandom`).                       |
+//! | `repeat`     | dispatch  | Cycle off → one → queue (`ToggleRepeat`).      |
 
 use iced::Task;
 use nokkvi_ipc::IpcResponse;
