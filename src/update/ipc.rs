@@ -1,35 +1,54 @@
 //! Dispatcher for IPC requests routed in via [`Message::Ipc`].
 //!
-//! Phase 0 implements a single hand-rolled command (`ping`) plus the
-//! `unknown_command` default arm. The `define_commands!` macro called out in
-//! `~/nokkvi-new-feats.md` §14D is deliberately deferred until Phase 1 has
-//! at least three concrete commands to refactor against (Rule of Three).
+//! Phase 0 shipped the hand-rolled `ping` arm. Phase 1 adds two more
+//! fire-and-forget transport verbs (`next`, `previous`) so the boilerplate
+//! has actually shown up before the `define_commands!` macro from
+//! `~/nokkvi-new-feats.md` §14D gets extracted — Rule of Three.
 //!
-//! Adding a new command before the macro arrives means: append a match arm
-//! here, fill in the response shape, and add a handler-level test in
-//! `src/update/tests/ipc.rs`. The macro will collapse the verbose arms once
-//! the boilerplate has actually shown up.
+//! Each fire-and-forget verb follows the same shape:
+//! 1. Build a success [`IpcResponse`] and post it back over the responder
+//!    immediately so the client unblocks. We don't wait for the dispatched
+//!    `Message` to actually complete — that's the mpv/MPRIS contract for
+//!    transport commands and matches what scripts expect.
+//! 2. Return `Task::done(Message::Playback(PlaybackMessage::Variant))` so
+//!    the message flows through the normal update loop and any side-effects
+//!    (UI updates, MPRIS broadcasts, scrobble timing) fire as usual.
 
 use iced::Task;
 use nokkvi_ipc::IpcResponse;
 use serde_json::json;
 
-use crate::{Nokkvi, app_message::Message, services::ipc::IpcIncoming};
+use crate::{
+    Nokkvi,
+    app_message::{Message, PlaybackMessage},
+    services::ipc::IpcIncoming,
+};
 
-/// Top-level entry called from `src/update/mod.rs` when [`Message::Ipc`]
-/// fires. Builds the response synchronously and posts it back over the
-/// embedded responder. Phase 0 has no async commands; everything completes
-/// in-handler, so the returned task is always `Task::none()`.
 pub(crate) fn handle(_app: &mut Nokkvi, incoming: IpcIncoming) -> Task<Message> {
     let request_id = incoming.request.request_id;
-    let response = match incoming.request.command.as_str() {
-        "ping" => IpcResponse::ok(request_id, Some(json!("pong"))),
-        other => IpcResponse::err(
-            request_id,
-            "unknown_command",
-            format!("unknown command: {other}"),
-        ),
-    };
-    incoming.responder.send(response);
-    Task::none()
+
+    match incoming.request.command.as_str() {
+        "ping" => {
+            incoming
+                .responder
+                .send(IpcResponse::ok(request_id, Some(json!("pong"))));
+            Task::none()
+        }
+        "next" => {
+            incoming.responder.send(IpcResponse::ok(request_id, None));
+            Task::done(Message::Playback(PlaybackMessage::NextTrack))
+        }
+        "previous" => {
+            incoming.responder.send(IpcResponse::ok(request_id, None));
+            Task::done(Message::Playback(PlaybackMessage::PrevTrack))
+        }
+        other => {
+            incoming.responder.send(IpcResponse::err(
+                request_id,
+                "unknown_command",
+                format!("unknown command: {other}"),
+            ));
+            Task::none()
+        }
+    }
 }

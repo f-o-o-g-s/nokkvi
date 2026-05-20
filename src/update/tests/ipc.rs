@@ -47,6 +47,38 @@ fn ping_command_yields_pong_payload() {
 }
 
 #[test]
+fn next_command_responds_ok_immediately() {
+    let mut app = test_app();
+    let (incoming, rx) = make_incoming("next");
+
+    let dispatched = app.update(Message::Ipc(Box::new(incoming)));
+    drop(dispatched);
+
+    let resp = rx
+        .blocking_recv()
+        .expect("responder must fire for next command");
+    assert_eq!(resp.request_id, 7);
+    assert!(resp.data.is_none(), "next is fire-and-forget — no payload");
+    assert!(resp.error.is_none());
+}
+
+#[test]
+fn previous_command_responds_ok_immediately() {
+    let mut app = test_app();
+    let (incoming, rx) = make_incoming("previous");
+
+    let dispatched = app.update(Message::Ipc(Box::new(incoming)));
+    drop(dispatched);
+
+    let resp = rx
+        .blocking_recv()
+        .expect("responder must fire for previous command");
+    assert_eq!(resp.request_id, 7);
+    assert!(resp.data.is_none());
+    assert!(resp.error.is_none());
+}
+
+#[test]
 fn unknown_command_yields_structured_error() {
     let mut app = test_app();
     let (incoming, rx) = make_incoming("bogus-verb");

@@ -907,10 +907,14 @@ pub fn main() -> iced::Result {
     // pattern — see ~/nokkvi-new-feats.md).
     let args: Vec<String> = std::env::args().collect();
 
-    // `nokkvi ping` — IPC smoke command. Connects to the long-running
-    // instance's socket, sends a ping request, prints the response, exits.
-    if args.get(1).map(String::as_str) == Some("ping") {
-        return forward_ipc_ping();
+    // `nokkvi <verb>` — IPC subcommand. Forwards the verb to the long-running
+    // instance's socket, prints the response, exits. The list is hand-rolled
+    // until commit 2 of Phase 1 extracts the `define_commands!` macro and
+    // exposes a single source of truth for known verbs.
+    if let Some(verb) = args.get(1)
+        && IPC_VERBS.contains(&verb.as_str())
+    {
+        return forward_ipc_command(verb, serde_json::Value::Null);
     }
 
     for arg in args.iter().skip(1) {
@@ -1048,6 +1052,8 @@ fn print_cli_help() {
     println!();
     println!("Commands:");
     println!("  ping             Probe the running instance over the IPC socket");
+    println!("  next             Skip to the next track in the queue");
+    println!("  previous         Return to the previous track in the queue");
     println!();
     println!("Options:");
     println!("  -h, --help       Print this help and exit");
@@ -1074,17 +1080,28 @@ fn print_cli_help() {
     println!("  {repo}");
 }
 
-/// Send a single `ping` request to the running nokkvi instance and print the
-/// response. Returns `Ok(())` on a successful round-trip, `Err(iced::Error)`
-/// when no instance is reachable — both paths exit before any
-/// iced / PipeWire / Symphonia initialization runs.
+/// Verbs the CLI argv parser recognizes and forwards to the IPC server.
+/// Anything not in this list falls through to the regular iced startup
+/// path, preserving the Phase 0 behavior that unknown args don't accidentally
+/// connect to a sibling instance.
 ///
-/// Exit codes are documented at:
-///   0 — server answered with a non-error payload.
-///   1 — could not reach a running instance (no socket, refused, garbled).
-fn forward_ipc_ping() -> iced::Result {
+/// **Replaced in commit 2** by a macro-generated `KNOWN_COMMANDS` const.
+const IPC_VERBS: &[&str] = &["ping", "next", "previous"];
+
+/// Forward a single IPC verb (with optional structured args) to the running
+/// nokkvi instance, print the response, exit.
+///
+/// Returns `Ok(())` on success. Errors print to stderr and call
+/// [`std::process::exit(1)`] — we don't return `Err(iced::Error)` because the
+/// caller would otherwise initialize iced just to surface the error.
+///
+/// Exit codes:
+///   0 — server answered with a non-error payload (data printed to stdout, or
+///       nothing for fire-and-forget verbs whose response carries no `data`).
+///   1 — could not reach a running instance, or server returned an error.
+fn forward_ipc_command(verb: &str, args: serde_json::Value) -> iced::Result {
     let path = nokkvi_ipc::default_socket_path();
-    let request = nokkvi_ipc::IpcRequest::new(1, "ping", serde_json::Value::Null);
+    let request = nokkvi_ipc::IpcRequest::new(1, verb, args);
 
     match nokkvi_ipc::client::send_request(&path, &request) {
         Ok(response) => {
@@ -1092,30 +1109,28 @@ fn forward_ipc_ping() -> iced::Result {
                 #[allow(clippy::print_stderr)]
                 {
                     eprintln!(
-                        "nokkvi ping: server returned error: {} ({})",
+                        "nokkvi {verb}: server returned error: {} ({})",
                         err.message, err.code
                     );
                 }
                 std::process::exit(1);
             }
-            #[allow(clippy::print_stdout)]
-            {
-                let payload = response
-                    .data
-                    .as_ref()
-                    .map(|v| match v {
+            if let Some(value) = response.data.as_ref() {
+                #[allow(clippy::print_stdout)]
+                {
+                    let payload = match value {
                         serde_json::Value::String(s) => s.clone(),
                         other => other.to_string(),
-                    })
-                    .unwrap_or_default();
-                println!("{payload}");
+                    };
+                    println!("{payload}");
+                }
             }
             Ok(())
         }
         Err(err) => {
             #[allow(clippy::print_stderr)]
             {
-                eprintln!("nokkvi ping: {err}");
+                eprintln!("nokkvi {verb}: {err}");
             }
             std::process::exit(1);
         }
