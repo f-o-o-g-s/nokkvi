@@ -30,65 +30,48 @@ fn make_incoming(command: &str) -> (IpcIncoming, oneshot::Receiver<IpcResponse>)
     (incoming, rx)
 }
 
-#[test]
-fn ping_command_yields_pong_payload() {
+/// Drive one verb through the dispatcher and return the response that the
+/// responder receives. Shared by every fire-and-forget verb test.
+fn drive(command: &str) -> IpcResponse {
     let mut app = test_app();
-    let (incoming, rx) = make_incoming("ping");
+    let (incoming, rx) = make_incoming(command);
 
     let dispatched = app.update(Message::Ipc(Box::new(incoming)));
     drop(dispatched);
 
-    let resp = rx
-        .blocking_recv()
-        .expect("responder must fire for ping command");
+    rx.blocking_recv()
+        .unwrap_or_else(|_| panic!("responder must fire for {command} command"))
+}
+
+#[test]
+fn ping_command_yields_pong_payload() {
+    let resp = drive("ping");
     assert_eq!(resp.request_id, 7);
     assert_eq!(resp.data, Some(json!("pong")));
     assert!(resp.error.is_none());
 }
 
 #[test]
-fn next_command_responds_ok_immediately() {
-    let mut app = test_app();
-    let (incoming, rx) = make_incoming("next");
-
-    let dispatched = app.update(Message::Ipc(Box::new(incoming)));
-    drop(dispatched);
-
-    let resp = rx
-        .blocking_recv()
-        .expect("responder must fire for next command");
-    assert_eq!(resp.request_id, 7);
-    assert!(resp.data.is_none(), "next is fire-and-forget — no payload");
-    assert!(resp.error.is_none());
-}
-
-#[test]
-fn previous_command_responds_ok_immediately() {
-    let mut app = test_app();
-    let (incoming, rx) = make_incoming("previous");
-
-    let dispatched = app.update(Message::Ipc(Box::new(incoming)));
-    drop(dispatched);
-
-    let resp = rx
-        .blocking_recv()
-        .expect("responder must fire for previous command");
-    assert_eq!(resp.request_id, 7);
-    assert!(resp.data.is_none());
-    assert!(resp.error.is_none());
+fn fire_and_forget_verbs_all_respond_ok_with_no_payload() {
+    // Single table-driven test for every Phase 0 + Phase 1 verb whose contract
+    // is "ack now, side-effects later" — adding the next verb is one row, not
+    // a new test function. Pins the IPC-layer contract (responder fires,
+    // request_id echoed, data empty, no error). Playback side-effects are
+    // covered by the existing playback handler tests.
+    for verb in ["next", "previous", "play", "pause", "play-pause", "stop"] {
+        let resp = drive(verb);
+        assert_eq!(resp.request_id, 7, "{verb}: request_id must echo");
+        assert!(
+            resp.data.is_none(),
+            "{verb}: fire-and-forget verbs should not carry data"
+        );
+        assert!(resp.error.is_none(), "{verb}: should not error");
+    }
 }
 
 #[test]
 fn unknown_command_yields_structured_error() {
-    let mut app = test_app();
-    let (incoming, rx) = make_incoming("bogus-verb");
-
-    let dispatched = app.update(Message::Ipc(Box::new(incoming)));
-    drop(dispatched);
-
-    let resp = rx
-        .blocking_recv()
-        .expect("responder must fire for unknown command");
+    let resp = drive("bogus-verb");
     assert_eq!(resp.request_id, 7);
     assert!(resp.data.is_none());
     let err = resp.error.expect("error populated");

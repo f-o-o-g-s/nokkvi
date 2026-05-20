@@ -1054,6 +1054,10 @@ fn print_cli_help() {
     println!("  ping             Probe the running instance over the IPC socket");
     println!("  next             Skip to the next track in the queue");
     println!("  previous         Return to the previous track in the queue");
+    println!("  play             Start playback");
+    println!("  pause            Pause playback");
+    println!("  play-pause       Toggle between play and pause");
+    println!("  stop             Stop playback");
     println!();
     println!("Options:");
     println!("  -h, --help       Print this help and exit");

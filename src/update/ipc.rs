@@ -88,7 +88,11 @@ macro_rules! define_commands {
 }
 
 define_commands! {
-    "ping"     => respond  json!("pong");
-    "next"     => dispatch Message::Playback(PlaybackMessage::NextTrack);
-    "previous" => dispatch Message::Playback(PlaybackMessage::PrevTrack);
+    "ping"       => respond  json!("pong");
+    "next"       => dispatch Message::Playback(PlaybackMessage::NextTrack);
+    "previous"   => dispatch Message::Playback(PlaybackMessage::PrevTrack);
+    "play"       => dispatch Message::Playback(PlaybackMessage::Play);
+    "pause"      => dispatch Message::Playback(PlaybackMessage::Pause);
+    "play-pause" => dispatch Message::Playback(PlaybackMessage::TogglePlay);
+    "stop"       => dispatch Message::Playback(PlaybackMessage::Stop);
 }
