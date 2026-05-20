@@ -780,6 +780,13 @@ pub enum Message {
 
     // --- Similar Songs (cross-cutting find/load — distinct from Message::Similar per-view) ---
     Find(FindMessage),
+
+    // --- IPC (nokkvi-ipc workspace crate; see services::ipc + update::ipc) ---
+    /// A request arrived over the Unix-socket IPC channel. The wrapper
+    /// carries the parsed `IpcRequest` plus a cloneable
+    /// [`services::ipc::IpcResponder`] handle; the dispatcher builds an
+    /// `IpcResponse` and calls `incoming.responder.send(resp)`.
+    Ipc(Box<services::ipc::IpcIncoming>),
 }
 
 #[cfg(test)]

@@ -52,6 +52,7 @@ mod eq_modal;
 mod genres;
 mod hotkeys;
 mod info_modal;
+mod ipc;
 mod library_refresh;
 mod loader_target;
 mod menus;
@@ -499,6 +500,11 @@ impl Nokkvi {
             // Surfing-Boat Overlay (lines mode)
             // -----------------------------------------------------------------
             Message::BoatTick(now) => boat::handle_boat_tick(self, now),
+
+            // -----------------------------------------------------------------
+            // IPC (nokkvi-ipc workspace crate)
+            // -----------------------------------------------------------------
+            Message::Ipc(incoming) => ipc::handle(self, *incoming),
         }
     }
 

@@ -572,6 +572,13 @@ impl Nokkvi {
         let task_status_sub = iced::Subscription::run(services::task_subscription::run)
             .map(|(handle, status)| Message::TaskStatusChanged(handle, status));
 
+        // IPC subscription: binds `$XDG_RUNTIME_DIR/nokkvi.sock` at boot and
+        // yields each incoming request as a `Message::Ipc`. The single-instance
+        // guard in argv parsing keeps the bind from colliding with another
+        // live nokkvi process.
+        let ipc_sub = iced::Subscription::run(services::ipc::run)
+            .map(|incoming| Message::Ipc(Box::new(incoming)));
+
         // Per-frame redraw events drive the surfing-boat overlay's eased
         // motion. Always-on (cost = one closure call per frame) — the boat
         // handler bails fast when not in lines mode, so the work is trivial
@@ -602,6 +609,7 @@ impl Nokkvi {
             queue_changed_sub,
             sse_sub,
             task_status_sub,
+            ipc_sub,
             boat_frames,
             roulette_tick,
         ])

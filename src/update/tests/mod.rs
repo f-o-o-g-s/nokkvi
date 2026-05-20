@@ -13,6 +13,7 @@ mod cross_pane_drag;
 mod default_playlist_picker;
 mod general;
 mod hotkeys;
+mod ipc;
 mod library_refresh;
 mod menus;
 #[macro_use]
