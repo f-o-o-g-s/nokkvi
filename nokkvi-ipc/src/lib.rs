@@ -7,7 +7,7 @@
 //! runtime is constructed, so adding an iced dependency here would break
 //! the startup-latency contract (and the build).
 //!
-//! # Wire-protocol invariants (locked from Phase 0; see `protocol` module)
+//! # Wire-protocol invariants (locked from Phase 0; see [`protocol`])
 //!
 //! 1. `protocol_version` accompanies every request.
 //! 2. `request_id` is echoed on every response so callers can multiplex
@@ -18,18 +18,26 @@
 //!    `command`, `args`, `data`, `error`, `event`, `name`. Anything else
 //!    is namespaced under `args` / `data`.
 //!
-//! # Phase 0 surface
+//! # Module surface
 //!
-//! Only the `protocol` module is wired today. The socket transport
-//! (`server`, `client`, `socket_path`) and the iced subscription / dispatch
-//! glue land in subsequent commits on this branch.
+//! - [`protocol`] — wire envelope types (`IpcRequest` / `IpcResponse` / …).
+//! - [`server`] — async `listen(path)` returning a stream of
+//!   [`server::IncomingRequest`] values, each with an embedded oneshot
+//!   responder. Phase 0 is one-request-per-connection.
+//! - [`client`] — sync [`client::send_request`] for the fork-before-iced
+//!   path; one request → one response → close.
+//! - [`socket_path`] — XDG-aware default socket path resolution.
+//!
+//! # Phase 0 wiring
+//!
+//! The iced subscription glue and the argv fork in `nokkvi`'s `main.rs` live
+//! in the UI crate, not here. This crate intentionally knows nothing about
+//! iced, `Message`, or the surrounding app — it just speaks the wire.
 
+pub mod client;
 pub mod protocol;
+pub mod server;
+pub mod socket_path;
 
 pub use protocol::{IpcError, IpcEvent, IpcRequest, IpcResponse, PROTOCOL_VERSION};
-
-/// Phase 0 smoke command. Retained until `nokkvi ping` is wired end-to-end
-/// through the socket — at which point this trivial helper goes away.
-pub fn ping() -> &'static str {
-    "pong"
-}
+pub use socket_path::default_socket_path;
