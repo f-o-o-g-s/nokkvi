@@ -37,7 +37,7 @@ jobs:
           new="${RELEASE_TAG#v}"
           IFS='.' read -r new_major new_minor new_patch <<<"$new"
 
-          if prev_full=$(git describe --tags --abbrev=0 "${RELEASE_TAG}^" 2>/dev/null); then
+          if prev_full=$(git describe --tags --abbrev=0 --match 'v*.*.*' "${RELEASE_TAG}^" 2>/dev/null); then
             prev="${prev_full#v}"
             IFS='.' read -r prev_major prev_minor prev_patch <<<"$prev"
             echo "Previous tag: $prev_full"
