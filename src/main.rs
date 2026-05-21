@@ -936,13 +936,14 @@ pub fn main() -> iced::Result {
         }
     }
 
-    // Bare `nokkvi` launch (no positional args, no flags we recognize) —
-    // probe the IPC socket. If another instance answers, refuse this launch
-    // so we don't trip the redb single-instance lock at session-load time
-    // and crash with a confusing error halfway into boot.
-    if args.len() == 1 && refuse_if_already_running() {
-        return Ok(());
-    }
+    // Any path that reaches here is about to start iced — including args we
+    // don't recognize (typos like `nokkvi haha`, unknown flags like
+    // `nokkvi --foo`, or `cargo run -- whatever`). Probe for a live daemon
+    // and refuse the second launch regardless of argv shape. Without this
+    // the second iced startup wastes ~8s of init before crashing on the
+    // redb single-instance lock — and prior to PID-suffixed sockets it
+    // also unlinked the live daemon's socket on its way down.
+    refuse_if_already_running();
 
     // Initialize tracing.
     //
@@ -1196,15 +1197,16 @@ fn forward_ipc_command(verb: &str, args: serde_json::Value) -> iced::Result {
 }
 
 /// Probe for a running nokkvi instance. If one is found, print "already
-/// running" and return `true` so `main()` exits without starting iced.
-/// Returns `false` only when no live socket is enumerated — preventing a
-/// second daemon from tripping redb's exclusive lock at session-load time
-/// and crashing partway into boot.
+/// running" and exit with status 1 so this process never reaches iced.
+/// Returns normally only when no live socket is enumerated — at which point
+/// the caller proceeds to daemon boot. Prevents a second daemon from
+/// tripping redb's exclusive lock at session-load time and crashing
+/// partway into boot.
 ///
 /// Uses [`nokkvi_ipc::find_live_socket`] to enumerate `nokkvi-*.sock` in
 /// `$XDG_RUNTIME_DIR` (or `/tmp` fallback) and connect-probe each. Dead
 /// corpse files from `SIGKILL`'d daemons are skipped automatically.
-fn refuse_if_already_running() -> bool {
+fn refuse_if_already_running() {
     if let Some(path) = nokkvi_ipc::find_live_socket() {
         #[allow(clippy::print_stderr)]
         {
@@ -1215,7 +1217,6 @@ fn refuse_if_already_running() -> bool {
         }
         std::process::exit(1);
     }
-    false
 }
 
 /// Daemon boot: build the initial state and queue a task to open the main
