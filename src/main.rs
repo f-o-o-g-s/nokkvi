@@ -1036,6 +1036,8 @@ pub fn main() -> iced::Result {
     iced::daemon(boot, Nokkvi::update, Nokkvi::view)
         .title(Nokkvi::title)
         .default_font(theme::ui_font())
+        .font(include_bytes!("../assets/fonts/FiraSans-Medium.ttf").as_slice())
+        .font(include_bytes!("../assets/fonts/FiraSans-Bold.ttf").as_slice())
         .subscription(Nokkvi::subscription)
         .antialiasing(true)
         .run()
