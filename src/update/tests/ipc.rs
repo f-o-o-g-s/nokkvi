@@ -164,3 +164,43 @@ fn clear_queue_responds_ok_from_any_view() {
     assert!(resp.data.is_none());
     assert!(resp.error.is_none());
 }
+
+#[test]
+fn switch_view_with_valid_view_name_responds_ok() {
+    for view_name in [
+        "albums",
+        "queue",
+        "songs",
+        "artists",
+        "genres",
+        "playlists",
+        "radios",
+        "settings",
+    ] {
+        let resp = drive_with_args("switch-view", json!({"view": view_name}));
+        assert!(
+            resp.error.is_none(),
+            "{view_name}: should be a valid view target"
+        );
+        assert!(resp.data.is_none());
+    }
+}
+
+#[test]
+fn switch_view_missing_view_arg_returns_invalid_args_error() {
+    let resp = drive_with_args("switch-view", json!({}));
+    let err = resp.error.expect("missing view arg must error");
+    assert_eq!(err.code, "invalid_args");
+    assert!(err.message.contains("view"));
+}
+
+#[test]
+fn switch_view_unknown_view_returns_invalid_args_error_listing_options() {
+    let resp = drive_with_args("switch-view", json!({"view": "favorites"}));
+    let err = resp.error.expect("unknown view must error");
+    assert_eq!(err.code, "invalid_args");
+    // The error message lists the supported names so the caller can self-correct.
+    assert!(err.message.contains("favorites"));
+    assert!(err.message.contains("albums"));
+    assert!(err.message.contains("settings"));
+}

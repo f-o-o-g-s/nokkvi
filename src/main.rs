@@ -1066,6 +1066,8 @@ fn print_cli_help() {
     println!("  repeat           Cycle repeat mode (off → one → queue)");
     println!("  consume          Toggle consume mode (drop played tracks)");
     println!("  clear-queue      Empty the queue and stop playback");
+    println!("  switch-view <v>  Switch the top pane to <v> (albums/queue/songs/");
+    println!("                   artists/genres/playlists/radios/settings)");
     println!();
     println!("Options:");
     println!("  -h, --help       Print this help and exit");
@@ -1105,11 +1107,23 @@ fn print_cli_help() {
 /// to also generate this CLI-side parser, the match collapses to a single
 /// macro invocation.
 fn build_ipc_cli_args(verb: &str, positional: Option<&str>) -> serde_json::Value {
-    let arg_name = match verb {
-        "seek" => "position",
-        "volume" => "value",
-        _ => return serde_json::Value::Null,
-    };
+    match verb {
+        "seek" => numeric_or_raw(positional, "position"),
+        "volume" => numeric_or_raw(positional, "value"),
+        // String-typed positional args go through unchanged so the server-
+        // side `try_act` arm can validate against its enum/range.
+        "switch-view" => match positional {
+            Some(raw) => serde_json::json!({ "view": raw }),
+            None => serde_json::json!({}),
+        },
+        _ => serde_json::Value::Null,
+    }
+}
+
+/// Wrap a positional CLI arg as a named JSON number when it parses, or as
+/// the raw string when it doesn't — letting the server return the precise
+/// "must be a number" error rather than "missing required arg".
+fn numeric_or_raw(positional: Option<&str>, arg_name: &str) -> serde_json::Value {
     let Some(raw) = positional else {
         return serde_json::json!({});
     };
@@ -1292,5 +1306,24 @@ mod build_ipc_cli_args_tests {
             build_ipc_cli_args("ping", Some("ignored")),
             serde_json::Value::Null,
         );
+    }
+
+    #[test]
+    fn switch_view_forwards_view_string_unchanged() {
+        assert_eq!(
+            build_ipc_cli_args("switch-view", Some("albums")),
+            json!({"view": "albums"}),
+        );
+        // No numeric coercion — strings stay strings so the server's view
+        // parser surfaces the proper "unknown view" error.
+        assert_eq!(
+            build_ipc_cli_args("switch-view", Some("not-a-view")),
+            json!({"view": "not-a-view"}),
+        );
+    }
+
+    #[test]
+    fn switch_view_with_no_positional_yields_empty_args() {
+        assert_eq!(build_ipc_cli_args("switch-view", None), json!({}));
     }
 }

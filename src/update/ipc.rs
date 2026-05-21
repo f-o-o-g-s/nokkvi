@@ -65,14 +65,17 @@
 //! | `repeat`      | dispatch  | Cycle off → one → queue (`ToggleRepeat`).      |
 //! | `consume`     | dispatch  | Toggle (`ToggleConsume`).                      |
 //! | `clear-queue` | try_act   | Calls `clear_queue_action()` (gate-free).      |
+//! | `switch-view` | try_act   | arg `view` (one of `albums`/`queue`/`songs`/   |
+//! |               |           | `artists`/`genres`/`playlists`/`radios`/       |
+//! |               |           | `settings`). Invalid name → `invalid_args`.    |
 
 use iced::Task;
 use nokkvi_ipc::IpcResponse;
 use serde_json::json;
 
 use crate::{
-    Nokkvi,
-    app_message::{Message, PlaybackMessage},
+    Nokkvi, View,
+    app_message::{Message, NavigationMessage, PlaybackMessage},
     services::ipc::IpcIncoming,
 };
 
@@ -178,6 +181,27 @@ fn extract_f32_arg(args: &serde_json::Value, name: &str) -> Result<f32, String> 
     }
 }
 
+/// Map a CLI / wire view-name to the corresponding [`View`] variant. Accepts
+/// the lowercase canonical names matching the CLI surface. Returns the list
+/// of supported names in the error message so the caller (or curious user)
+/// can self-correct.
+pub(crate) fn parse_view_name(name: &str) -> Result<View, String> {
+    match name {
+        "albums" => Ok(View::Albums),
+        "queue" => Ok(View::Queue),
+        "songs" => Ok(View::Songs),
+        "artists" => Ok(View::Artists),
+        "genres" => Ok(View::Genres),
+        "playlists" => Ok(View::Playlists),
+        "radios" => Ok(View::Radios),
+        "settings" => Ok(View::Settings),
+        other => Err(format!(
+            "unknown view `{other}` (expected one of: albums, queue, songs, \
+             artists, genres, playlists, radios, settings)"
+        )),
+    }
+}
+
 // VolumeCommitted bypasses the 500ms VolumeChanged throttle — discrete
 // external commands (playerctl, IPC) must persist immediately so rapid
 // presses don't silently drop on next launch. Mirrors the MPRIS SetVolume
@@ -203,5 +227,18 @@ define_commands! {
     // clear_queue_action() lives in src/update/hotkeys/queue.rs.
     "clear-queue" => try_act  (|app: &mut Nokkvi, _args: &serde_json::Value| {
         Ok(app.clear_queue_action())
+    });
+    // Switch the top-pane view. The `view` arg is required and validated
+    // against the View enum before dispatch; the actual switch goes through
+    // the normal NavigationMessage::SwitchView path so view-change side
+    // effects (data loads, focus shifts) fire as usual.
+    "switch-view" => try_act  (|_app: &mut Nokkvi, args: &serde_json::Value| {
+        let raw = args
+            .get("view")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ("invalid_args", "missing required arg: view".into()))?;
+        let view = parse_view_name(raw)
+            .map_err(|message| ("invalid_args", message))?;
+        Ok(Task::done(Message::Navigation(NavigationMessage::SwitchView(view))))
     });
 }
