@@ -123,13 +123,19 @@ pub fn find_live_socket() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    use serial_test::serial;
+
     use super::*;
 
+    // Every test that calls `with_env` must be tagged `#[serial]` so the
+    // serial_test mutex serializes them. Env mutation is process-wide, and
+    // cargo test parallelizes by default — without #[serial], concurrent
+    // tests clobber each other's XDG_RUNTIME_DIR / UID setup.
     fn with_env<F: FnOnce()>(key: &str, value: Option<&str>, f: F) {
         let prev = env::var(key).ok();
-        // SAFETY: env mutation is process-wide; cargo test runs these tests
-        // serially within one binary by default. The risk is acceptable for a
-        // path-resolution unit test.
+        // SAFETY: caller is #[serial] (see module-level comment above), so
+        // the serial_test mutex guarantees no other env-mutating test runs
+        // concurrently for the duration of this call.
         unsafe {
             match value {
                 Some(v) => env::set_var(key, v),
@@ -146,6 +152,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn socket_path_uses_xdg_runtime_dir_when_set() {
         with_env("XDG_RUNTIME_DIR", Some("/run/user/4242"), || {
             assert_eq!(
@@ -156,6 +163,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn socket_path_falls_back_to_tmp_with_uid_and_pid() {
         with_env("XDG_RUNTIME_DIR", Some(""), || {
             with_env("UID", Some("1000"), || {
@@ -165,6 +173,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn socket_path_tmp_fallback_handles_missing_uid_env() {
         with_env("XDG_RUNTIME_DIR", None, || {
             with_env("UID", None, || {
@@ -174,6 +183,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn socket_dir_prefers_xdg_then_tmp() {
         with_env("XDG_RUNTIME_DIR", Some("/run/user/4242"), || {
             assert_eq!(socket_dir(), PathBuf::from("/run/user/4242"));
@@ -201,6 +211,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn find_live_socket_returns_none_in_empty_dir() {
         // Point XDG at an empty tempdir so the enumerator finds nothing.
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -214,6 +225,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn all_socket_paths_filters_by_prefix_and_suffix() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let dir = tmp.path();
