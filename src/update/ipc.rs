@@ -18,7 +18,7 @@
 //!
 //! # How it dispatches
 //!
-//! Each command row maps to one of four arm shapes:
+//! Each command row maps to one of five arm shapes:
 //!
 //! - `respond (<payload>)` — synchronous reply with a JSON payload. The
 //!   responder is filled in and `Task::none()` is returned. Use this for
@@ -38,14 +38,45 @@
 //!   String)>`. On `Ok(task)` the responder gets an empty success and the
 //!   task is returned; on `Err((code, message))` the responder gets an
 //!   error response with those fields and `Task::none()` is returned. Use
-//!   this for verbs that need direct app-state access (resolving the
-//!   currently-playing track, view switches, bypassing UI-gate handlers).
+//!   this for verbs that need direct app-state access *and* don't accept a
+//!   single named arg (bypassing UI-gate handlers, queries with no params).
+//! - `try_act_str (<arg_name>, <closure>)` — `try_act` with auto-extracted
+//!   string arg. Closure receives `&mut Nokkvi` and `&str` (the already-
+//!   extracted arg value). Missing-arg returns `invalid_args` before the
+//!   closure runs. **Use this** instead of `try_act` whenever a verb takes
+//!   a single named string arg — it (a) keeps the closure focused on the
+//!   verb's logic and (b) lets the macro publish the CLI arg name, which
+//!   prevents the macro/CLI-parser drift class that plagued earlier
+//!   designs.
+//!
+//! ## Decision rule (which arm shape to pick)
+//!
+//! 1. **No args, fire-and-forget Message** → `dispatch`.
+//! 2. **No args, returns a compute-and-return JSON payload** → `respond`.
+//! 3. **Single `f32` arg** → `with_f32`.
+//! 4. **Single string arg** → `try_act_str`.
+//! 5. **No args but needs `&mut Nokkvi` (gate-bypass / app-state read)** →
+//!    `try_act` with `|app, _args|`.
+//! 6. **Multiple args or a complex arg shape** → `try_act` with manual
+//!    extraction from the `&Value`. Document the arg names in the verb's
+//!    catalog entry; the CLI side will need a matching `build_ipc_cli_args`
+//!    arm (drift risk — minimize this case).
 //!
 //! Per-row arg groups are parenthesized so the macro can capture them as a
 //! single token tree (`:tt`) and re-destructure them in the inner @arm
 //! rules — `:expr` metavars can't be re-matched after forwarding.
 //!
 //! Unknown verbs return a structured `unknown_command` error response.
+//!
+//! # Single source of truth for CLI arg routing
+//!
+//! Alongside `KNOWN_COMMANDS`, the macro emits `CLI_ARGS` — a const slice
+//! of `(verb, Option<(arg_name, CliArgType)>)` pairs. `main.rs`'s
+//! [`crate::build_ipc_cli_args`] looks up the verb in `CLI_ARGS` to decide
+//! how to wrap the positional CLI string before forwarding. That eliminates
+//! the per-verb match arms a previous design relied on, and with them the
+//! drift risk of "added a new verb to the macro, forgot to register its
+//! CLI arg name."
 //!
 //! # Phase 0 + Phase 1 + Phase 2 catalog
 //!
@@ -65,14 +96,14 @@
 //! | `repeat`      | dispatch  | Cycle off → one → queue (`ToggleRepeat`).      |
 //! | `consume`     | dispatch  | Toggle (`ToggleConsume`).                      |
 //! | `clear-queue` | try_act   | Calls `clear_queue_action()` (gate-free).      |
-//! | `switch-view` | try_act   | arg `view` (one of `albums`/`queue`/`songs`/   |
-//! |               |           | `artists`/`genres`/`playlists`/`radios`/       |
-//! |               |           | `settings`). Invalid name → `invalid_args`.    |
-//! | `love`        | try_act   | Toggle star on the currently-playing track.    |
-//! |               |           | `no_playing_track` error if nothing's playing. |
-//! | `rate`        | try_act   | arg `delta` string. `"+N"`/`"-N"` (delta from  |
-//! |               |           | current, clamped 0..=5) or `"0".."5"` absolute.|
-//! |               |           | Same playing-track rules as `love`.            |
+//! | `switch-view` | try_act_str | arg `view` (one of `albums`/`queue`/`songs`/ |
+//! |               |             | `artists`/`genres`/`playlists`/`radios`/     |
+//! |               |             | `settings`). Invalid name → `invalid_args`.  |
+//! | `love`        | try_act     | Toggle star on the currently-playing track.  |
+//! |               |             | `no_playing_track` error if nothing playing. |
+//! | `rate`        | try_act_str | arg `delta` string. `"+N"`/`"-N"` (delta from|
+//! |               |             | current, clamped 0..=5) or `"0".."5"` abs.   |
+//! |               |             | Same playing-track rules as `love`.          |
 
 use iced::Task;
 use nokkvi_data::types::ItemKind;
@@ -85,18 +116,42 @@ use crate::{
     services::ipc::IpcIncoming,
 };
 
-/// Generate a fire-and-forget / synchronous-respond IPC dispatcher plus a
-/// `KNOWN_COMMANDS` const that callers (the argv parser in `main.rs`) can
-/// use to decide whether an argument is a known IPC verb.
+/// CLI-side JSON wrapping shape for a verb's positional arg. The macro
+/// emits one of these per arg-taking verb in `CLI_ARGS`;
+/// [`crate::build_ipc_cli_args`] reads them to construct the `args` object
+/// without per-verb match arms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CliArgType {
+    /// CLI string is parsed as a JSON number first; unparseable inputs
+    /// fall back to forwarding as a raw string (lets the server emit the
+    /// precise "must be a number" error rather than "missing required arg").
+    Number,
+    /// CLI string forwarded verbatim as a JSON string. The server-side
+    /// closure owns parsing.
+    String,
+}
+
+/// Generate the IPC dispatcher plus three companion consts that
+/// `main.rs`'s argv parser reads to stay drift-free:
 ///
-/// See the module-level docs for the four arm shapes
-/// (`respond` / `dispatch` / `with_f32` / `try_act`) and the rationale for
-/// keeping this macro in the UI crate.
+/// - `KNOWN_COMMANDS: &[&str]` — every declared verb name.
+/// - `CLI_ARGS: &[(&'static str, Option<(&'static str, CliArgType)>)]` —
+///   per verb, the CLI arg-name and forwarding type (or `None` for no-arg
+///   verbs).
+///
+/// See the module-level docs for the five arm shapes and the decision rule.
 macro_rules! define_commands {
     (
         $( $verb:literal => $kind:ident $arg:tt ; )+ $(,)?
     ) => {
         pub(crate) const KNOWN_COMMANDS: &[&str] = &[ $( $verb ),+ ];
+
+        pub(crate) const CLI_ARGS: &[(
+            &'static str,
+            Option<(&'static str, CliArgType)>,
+        )] = &[
+            $( ($verb, define_commands!(@cli_arg $kind $arg)) ),+
+        ];
 
         pub(crate) fn handle(app: &mut Nokkvi, incoming: IpcIncoming) -> Task<Message> {
             let request_id = incoming.request.request_id;
@@ -115,6 +170,20 @@ macro_rules! define_commands {
             }
         }
     };
+
+    // ----- Per-arm CLI arg metadata (consumed by the CLI_ARGS const) -----
+
+    (@cli_arg respond ($payload:expr))                              => { None };
+    (@cli_arg dispatch ($msg:expr))                                 => { None };
+    (@cli_arg with_f32 ($arg_name:literal, $build:expr))            => {
+        Some(($arg_name, CliArgType::Number))
+    };
+    (@cli_arg try_act ($closure:expr))                              => { None };
+    (@cli_arg try_act_str ($arg_name:literal, $closure:expr))       => {
+        Some(($arg_name, CliArgType::String))
+    };
+
+    // ----- Per-arm dispatch bodies -----
 
     (@arm respond ($payload:expr), $incoming:ident, $request_id:ident, $app:ident) => {{
         let _ = &$app;
@@ -155,6 +224,40 @@ macro_rules! define_commands {
     (@arm try_act ($closure:expr), $incoming:ident, $request_id:ident, $app:ident) => {{
         let result: Result<Task<Message>, (&'static str, String)> =
             ($closure)($app, &$incoming.request.args);
+        match result {
+            Ok(task) => {
+                $incoming
+                    .responder
+                    .send(IpcResponse::ok($request_id, None));
+                task
+            }
+            Err((code, message)) => {
+                $incoming.responder.send(IpcResponse::err(
+                    $request_id,
+                    code,
+                    message,
+                ));
+                Task::none()
+            }
+        }
+    }};
+
+    (@arm try_act_str ($arg_name:literal, $closure:expr), $incoming:ident, $request_id:ident, $app:ident) => {{
+        let raw = $incoming
+            .request
+            .args
+            .get($arg_name)
+            .and_then(|v| v.as_str());
+        let Some(raw) = raw else {
+            $incoming.responder.send(IpcResponse::err(
+                $request_id,
+                "invalid_args",
+                format!("missing required arg: {}", $arg_name),
+            ));
+            return Task::none();
+        };
+        let result: Result<Task<Message>, (&'static str, String)> =
+            ($closure)($app, raw);
         match result {
             Ok(task) => {
                 $incoming
@@ -238,11 +341,7 @@ define_commands! {
     // against the View enum before dispatch; the actual switch goes through
     // the normal NavigationMessage::SwitchView path so view-change side
     // effects (data loads, focus shifts) fire as usual.
-    "switch-view" => try_act  (|_app: &mut Nokkvi, args: &serde_json::Value| {
-        let raw = args
-            .get("view")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ("invalid_args", "missing required arg: view".into()))?;
+    "switch-view" => try_act_str ("view", |_app: &mut Nokkvi, raw: &str| {
         let view = parse_view_name(raw)
             .map_err(|message| ("invalid_args", message))?;
         Ok(Task::done(Message::Navigation(NavigationMessage::SwitchView(view))))
@@ -251,16 +350,12 @@ define_commands! {
     // ("rate from a WM hotkey without focusing the window"). Acts on
     // `scrobble.current_song_id` (authoritative for "the playing track")
     // rather than the slot-list centered item the in-app hotkey targets.
-    "love"        => try_act  (|app: &mut Nokkvi, _args: &serde_json::Value| {
+    "love"        => try_act     (|app: &mut Nokkvi, _args: &serde_json::Value| {
         let song_id = current_playing_song_id(app)?;
         let starred = current_starred(app, &song_id);
         Ok(app.toggle_star_with_revert_task(song_id, ItemKind::Song, !starred))
     });
-    "rate"        => try_act  (|app: &mut Nokkvi, args: &serde_json::Value| {
-        let raw = args
-            .get("delta")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ("invalid_args", "missing required arg: delta".into()))?;
+    "rate"        => try_act_str ("delta", |app: &mut Nokkvi, raw: &str| {
         let song_id = current_playing_song_id(app)?;
         let current = current_rating(app, &song_id);
         let new_rating = parse_rating_change(raw, current)

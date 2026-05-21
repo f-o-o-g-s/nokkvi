@@ -1109,33 +1109,31 @@ fn print_cli_help() {
 /// to also generate this CLI-side parser, the match collapses to a single
 /// macro invocation.
 fn build_ipc_cli_args(verb: &str, positional: Option<&str>) -> serde_json::Value {
-    match verb {
-        "seek" => numeric_or_raw(positional, "position"),
-        "volume" => numeric_or_raw(positional, "value"),
-        // String-typed positional args go through unchanged so the server-
-        // side `try_act` arm can validate against its enum/range.
-        "switch-view" => match positional {
-            Some(raw) => serde_json::json!({ "view": raw }),
-            None => serde_json::json!({}),
-        },
-        "rate" => match positional {
-            Some(raw) => serde_json::json!({ "delta": raw }),
-            None => serde_json::json!({}),
-        },
-        _ => serde_json::Value::Null,
-    }
-}
+    let Some(arg_spec) = update::IPC_CLI_ARGS
+        .iter()
+        .find(|(v, _)| *v == verb)
+        .and_then(|(_, spec)| spec.as_ref())
+    else {
+        // Verbs without a CLI arg slot get a null body — the server's
+        // dispatcher arm decides whether that's an error.
+        return serde_json::Value::Null;
+    };
+    let (arg_name, arg_type) = arg_spec;
 
-/// Wrap a positional CLI arg as a named JSON number when it parses, or as
-/// the raw string when it doesn't — letting the server return the precise
-/// "must be a number" error rather than "missing required arg".
-fn numeric_or_raw(positional: Option<&str>, arg_name: &str) -> serde_json::Value {
     let Some(raw) = positional else {
+        // Verb expected an arg but the CLI user gave none — forward an
+        // empty object so the server's "missing required arg" error fires.
         return serde_json::json!({});
     };
-    match raw.parse::<f64>() {
-        Ok(n) => serde_json::json!({ arg_name: n }),
-        Err(_) => serde_json::json!({ arg_name: raw }),
+
+    match arg_type {
+        update::CliArgType::Number => match raw.parse::<f64>() {
+            Ok(n) => serde_json::json!({ *arg_name: n }),
+            // Unparseable input goes through as a raw string so the
+            // server's `must be a number` path emits the precise error.
+            Err(_) => serde_json::json!({ *arg_name: raw }),
+        },
+        update::CliArgType::String => serde_json::json!({ *arg_name: raw }),
     }
 }
 

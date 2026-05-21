@@ -107,6 +107,77 @@ fn unknown_command_yields_structured_error() {
     assert!(err.message.contains("bogus-verb"));
 }
 
+/// Catalog tripwire — pins the exact set of verbs the macro publishes.
+/// Adding a verb without updating this list (and the doc tables that
+/// readers consult) becomes a compile-then-test failure rather than a
+/// silent drift between the macro and its surrounding documentation.
+#[test]
+fn known_commands_lists_the_documented_phase0_through_phase2_set() {
+    use std::collections::BTreeSet;
+
+    let expected: BTreeSet<&str> = [
+        // Phase 0
+        "ping",
+        // Phase 1
+        "next",
+        "previous",
+        "play",
+        "pause",
+        "play-pause",
+        "stop",
+        "seek",
+        "volume",
+        "shuffle",
+        "repeat",
+        // Phase 2
+        "consume",
+        "clear-queue",
+        "switch-view",
+        "love",
+        "rate",
+    ]
+    .into_iter()
+    .collect();
+
+    let actual: BTreeSet<&str> = crate::update::IPC_KNOWN_COMMANDS.iter().copied().collect();
+
+    assert_eq!(
+        actual, expected,
+        "macro-generated KNOWN_COMMANDS drifted from the documented catalog \
+         (extra/missing verbs are the symmetric difference of the two sets)"
+    );
+}
+
+/// CLI arg routing is macro-driven via `IPC_CLI_ARGS`. Adding a verb that
+/// takes an arg without using `with_f32` / `try_act_str` would silently
+/// land it in `IPC_CLI_ARGS` as `None`, so the CLI would forward
+/// `Value::Null` and the server would always return `invalid_args`. This
+/// pins the exact set of verbs the CLI knows how to wrap and which arg
+/// name it forwards, so a future macro-row drift trips a test.
+#[test]
+fn cli_args_const_lists_every_arg_taking_verb() {
+    use std::collections::BTreeMap;
+
+    let actual: BTreeMap<&str, &str> = crate::update::IPC_CLI_ARGS
+        .iter()
+        .filter_map(|(verb, spec)| spec.map(|(arg, _)| (*verb, arg)))
+        .collect();
+
+    let expected: BTreeMap<&str, &str> = [
+        ("seek", "position"),
+        ("volume", "value"),
+        ("switch-view", "view"),
+        ("rate", "delta"),
+    ]
+    .into_iter()
+    .collect();
+
+    assert_eq!(
+        actual, expected,
+        "macro-generated CLI_ARGS drifted from the documented arg-taking set"
+    );
+}
+
 #[test]
 fn seek_accepts_f32_position_arg() {
     let resp = drive_with_args("seek", json!({"position": 42.5}));
@@ -151,6 +222,14 @@ fn volume_missing_arg_returns_invalid_args_error() {
     let err = resp.error.expect("missing arg must error");
     assert_eq!(err.code, "invalid_args");
     assert!(err.message.contains("value"));
+}
+
+#[test]
+fn volume_wrong_arg_type_returns_invalid_args_error() {
+    let resp = drive_with_args("volume", json!({"value": "loud"}));
+    let err = resp.error.expect("non-numeric volume must error");
+    assert_eq!(err.code, "invalid_args");
+    assert!(err.message.contains("must be a number"));
 }
 
 #[test]
