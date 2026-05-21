@@ -1149,7 +1149,16 @@ fn build_ipc_cli_args(verb: &str, positional: Option<&str>) -> serde_json::Value
 ///       nothing for fire-and-forget verbs whose response carries no `data`).
 ///   1 — could not reach a running instance, or server returned an error.
 fn forward_ipc_command(verb: &str, args: serde_json::Value) -> iced::Result {
-    let path = nokkvi_ipc::default_socket_path();
+    let Some(path) = nokkvi_ipc::find_live_socket() else {
+        #[allow(clippy::print_stderr)]
+        {
+            eprintln!(
+                "nokkvi {verb}: no live nokkvi instance found in {}",
+                nokkvi_ipc::socket_dir().display()
+            );
+        }
+        std::process::exit(1);
+    };
     let request = nokkvi_ipc::IpcRequest::new(1, verb, args);
 
     match nokkvi_ipc::client::send_request(&path, &request) {
@@ -1186,35 +1195,27 @@ fn forward_ipc_command(verb: &str, args: serde_json::Value) -> iced::Result {
     }
 }
 
-/// Probe the IPC socket. If a running instance answers, print "already
+/// Probe for a running nokkvi instance. If one is found, print "already
 /// running" and return `true` so `main()` exits without starting iced.
-/// Returns `false` only when the connect attempt fails — the kernel's
-/// "no such file" / "connection refused" / "no listener" responses all
-/// collapse to [`nokkvi_ipc::client::ClientError::Connect`], which is the
-/// unambiguous "no live instance" signal.
+/// Returns `false` only when no live socket is enumerated — preventing a
+/// second daemon from tripping redb's exclusive lock at session-load time
+/// and crashing partway into boot.
 ///
-/// Any *other* outcome — successful response, post-connect I/O error,
-/// garbled reply — is treated as "an instance is there, even if its socket
-/// behavior is funky," because the alternative (starting a second instance
-/// alongside one whose socket is being used) trips redb's exclusive lock
-/// at session-load time and crashes the new process partway into boot.
+/// Uses [`nokkvi_ipc::find_live_socket`] to enumerate `nokkvi-*.sock` in
+/// `$XDG_RUNTIME_DIR` (or `/tmp` fallback) and connect-probe each. Dead
+/// corpse files from `SIGKILL`'d daemons are skipped automatically.
 fn refuse_if_already_running() -> bool {
-    let path = nokkvi_ipc::default_socket_path();
-    let probe = nokkvi_ipc::IpcRequest::new(0, "ping", serde_json::Value::Null);
-
-    match nokkvi_ipc::client::send_request(&path, &probe) {
-        Err(nokkvi_ipc::client::ClientError::Connect { .. }) => false,
-        Ok(_) | Err(_) => {
-            #[allow(clippy::print_stderr)]
-            {
-                eprintln!(
-                    "nokkvi is already running (socket: {}). Refusing second launch.",
-                    path.display()
-                );
-            }
-            std::process::exit(1);
+    if let Some(path) = nokkvi_ipc::find_live_socket() {
+        #[allow(clippy::print_stderr)]
+        {
+            eprintln!(
+                "nokkvi is already running (socket: {}). Refusing second launch.",
+                path.display()
+            );
         }
+        std::process::exit(1);
     }
+    false
 }
 
 /// Daemon boot: build the initial state and queue a task to open the main

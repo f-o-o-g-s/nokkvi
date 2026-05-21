@@ -26,7 +26,9 @@
 //!   responder. Phase 0 is one-request-per-connection.
 //! - [`client`] — sync [`client::send_request`] for the fork-before-iced
 //!   path; one request → one response → close.
-//! - [`socket_path`] — XDG-aware default socket path resolution.
+//! - [`socket_path`] — XDG-aware per-PID socket paths and live-instance
+//!   enumeration (rmpc-style; replaced the previous single-fixed-path
+//!   design to close the orphan-socket bug class).
 //!
 //! # UI-side wiring
 //!
@@ -59,4 +61,4 @@ pub mod server;
 pub mod socket_path;
 
 pub use protocol::{IpcError, IpcEvent, IpcRequest, IpcResponse, PROTOCOL_VERSION};
-pub use socket_path::default_socket_path;
+pub use socket_path::{find_live_socket, socket_dir, socket_path};

@@ -77,16 +77,17 @@ impl From<IncomingRequest> for IpcIncoming {
 
 /// Iced subscription: bind the IPC socket and yield each parsed request.
 ///
-/// Binds at the path returned by [`nokkvi_ipc::default_socket_path`]
-/// (`$XDG_RUNTIME_DIR/nokkvi.sock` with a `/tmp` fallback). If the bind
-/// fails — the most common cause being a parallel nokkvi instance that
-/// holds a live socket — the error is logged and the sipper stalls on
+/// Binds at the per-PID path returned by [`nokkvi_ipc::socket_path`]
+/// (`$XDG_RUNTIME_DIR/nokkvi-{pid}.sock`, or a `/tmp` fallback with the UID
+/// in the filename to avoid cross-user collisions). Because each instance
+/// gets a unique filename, a second nokkvi launch cannot accidentally
+/// unlink a healthy peer's socket. If the bind still fails for some
+/// unrelated reason, the error is logged and the sipper stalls on
 /// `pending::<Never>()` so the iced subscription identity stays alive but
-/// emits nothing. The single-instance refuse-guard in `main.rs` keeps this
-/// from happening in normal operation.
+/// emits nothing.
 pub(crate) fn run() -> impl Sipper<Never, IpcIncoming> {
     sipper(async move |mut output| {
-        let path = nokkvi_ipc::default_socket_path();
+        let path = nokkvi_ipc::socket_path(std::process::id());
         match nokkvi_ipc::server::listen(&path).await {
             Ok(mut stream) => {
                 while let Some(req) = stream.next().await {
