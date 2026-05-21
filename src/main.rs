@@ -1069,6 +1069,7 @@ fn print_cli_help() {
     println!("  switch-view <v>  Switch the top pane to <v> (albums/queue/songs/");
     println!("                   artists/genres/playlists/radios/settings)");
     println!("  love             Toggle star on the currently-playing track");
+    println!("  rate <±N | 0-5>  Adjust playing track rating: delta (+1/-1) or 0..5");
     println!();
     println!("Options:");
     println!("  -h, --help       Print this help and exit");
@@ -1115,6 +1116,10 @@ fn build_ipc_cli_args(verb: &str, positional: Option<&str>) -> serde_json::Value
         // side `try_act` arm can validate against its enum/range.
         "switch-view" => match positional {
             Some(raw) => serde_json::json!({ "view": raw }),
+            None => serde_json::json!({}),
+        },
+        "rate" => match positional {
+            Some(raw) => serde_json::json!({ "delta": raw }),
             None => serde_json::json!({}),
         },
         _ => serde_json::Value::Null,
@@ -1326,5 +1331,20 @@ mod build_ipc_cli_args_tests {
     #[test]
     fn switch_view_with_no_positional_yields_empty_args() {
         assert_eq!(build_ipc_cli_args("switch-view", None), json!({}));
+    }
+
+    #[test]
+    fn rate_forwards_positional_as_delta_string() {
+        assert_eq!(
+            build_ipc_cli_args("rate", Some("+1")),
+            json!({"delta": "+1"}),
+        );
+        assert_eq!(build_ipc_cli_args("rate", Some("3")), json!({"delta": "3"}),);
+        // Garbage is forwarded verbatim — server-side parser owns the
+        // precise error message.
+        assert_eq!(
+            build_ipc_cli_args("rate", Some("loud")),
+            json!({"delta": "loud"}),
+        );
     }
 }

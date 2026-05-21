@@ -234,3 +234,76 @@ fn love_with_playing_track_responds_ok() {
     assert!(resp.data.is_none());
     assert!(resp.error.is_none());
 }
+
+#[test]
+fn rate_with_no_playing_track_returns_no_playing_track_error() {
+    let resp = drive_with_args("rate", json!({"delta": "+1"}));
+    let err = resp.error.expect("no playing track → error");
+    assert_eq!(err.code, "no_playing_track");
+}
+
+#[test]
+fn rate_missing_arg_returns_invalid_args_error() {
+    // Even with a playing track, an absent delta arg should error before
+    // reaching the playing-track resolver. (Order: arg check first.)
+    let mut app = test_app();
+    app.scrobble.current_song_id = Some("song-123".into());
+    let (incoming, rx) = make_incoming_with_args("rate", json!({}));
+
+    let dispatched = app.update(Message::Ipc(Box::new(incoming)));
+    drop(dispatched);
+
+    let resp = rx.blocking_recv().expect("responder must fire");
+    let err = resp.error.expect("missing arg must error");
+    assert_eq!(err.code, "invalid_args");
+    assert!(err.message.contains("delta"));
+}
+
+fn drive_rate_with_song(delta: &str) -> IpcResponse {
+    let mut app = test_app();
+    app.scrobble.current_song_id = Some("song-123".into());
+    let (incoming, rx) = make_incoming_with_args("rate", json!({"delta": delta}));
+
+    let dispatched = app.update(Message::Ipc(Box::new(incoming)));
+    drop(dispatched);
+
+    rx.blocking_recv().expect("responder must fire for rate")
+}
+
+#[test]
+fn rate_accepts_delta_strings() {
+    for delta in ["+1", "-1", "+2", "-2", "+0", "-0"] {
+        let resp = drive_rate_with_song(delta);
+        assert!(resp.error.is_none(), "{delta}: should accept");
+    }
+}
+
+#[test]
+fn rate_accepts_absolute_zero_through_five() {
+    for abs in ["0", "1", "2", "3", "4", "5"] {
+        let resp = drive_rate_with_song(abs);
+        assert!(resp.error.is_none(), "{abs}: should accept");
+    }
+}
+
+#[test]
+fn rate_rejects_absolute_above_five() {
+    let resp = drive_rate_with_song("7");
+    let err = resp.error.expect("out-of-range absolute must error");
+    assert_eq!(err.code, "invalid_args");
+    assert!(err.message.contains("out of range"));
+}
+
+#[test]
+fn rate_rejects_non_numeric_arg() {
+    let resp = drive_rate_with_song("loud");
+    let err = resp.error.expect("non-numeric must error");
+    assert_eq!(err.code, "invalid_args");
+}
+
+#[test]
+fn rate_rejects_empty_delta() {
+    let resp = drive_rate_with_song("");
+    let err = resp.error.expect("empty delta must error");
+    assert_eq!(err.code, "invalid_args");
+}

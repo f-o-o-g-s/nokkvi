@@ -70,6 +70,9 @@
 //! |               |           | `settings`). Invalid name → `invalid_args`.    |
 //! | `love`        | try_act   | Toggle star on the currently-playing track.    |
 //! |               |           | `no_playing_track` error if nothing's playing. |
+//! | `rate`        | try_act   | arg `delta` string. `"+N"`/`"-N"` (delta from  |
+//! |               |           | current, clamped 0..=5) or `"0".."5"` absolute.|
+//! |               |           | Same playing-track rules as `love`.            |
 
 use iced::Task;
 use nokkvi_data::types::ItemKind;
@@ -253,6 +256,17 @@ define_commands! {
         let starred = current_starred(app, &song_id);
         Ok(app.toggle_star_with_revert_task(song_id, ItemKind::Song, !starred))
     });
+    "rate"        => try_act  (|app: &mut Nokkvi, args: &serde_json::Value| {
+        let raw = args
+            .get("delta")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ("invalid_args", "missing required arg: delta".into()))?;
+        let song_id = current_playing_song_id(app)?;
+        let current = current_rating(app, &song_id);
+        let new_rating = parse_rating_change(raw, current)
+            .map_err(|message| ("invalid_args", message))?;
+        Ok(app.set_item_rating_task(song_id, ItemKind::Song, new_rating, current))
+    });
 }
 
 /// Resolve the song id of whatever's currently playing, returning the
@@ -276,4 +290,46 @@ fn current_starred(app: &Nokkvi, song_id: &str) -> bool {
         .iter()
         .find(|s| s.id == song_id)
         .is_some_and(|s| s.starred)
+}
+
+/// Best-effort lookup of the current rating (0–5) for a song id from the
+/// queue snapshot. Falls back to `0` when the song isn't in the queue.
+fn current_rating(app: &Nokkvi, song_id: &str) -> u32 {
+    app.library
+        .queue_songs
+        .iter()
+        .find(|s| s.id == song_id)
+        .and_then(|s| s.rating)
+        .unwrap_or(0)
+}
+
+/// Parse a rate-arg string into a final 0..=5 rating. Two accepted shapes:
+///
+/// - **Delta**: `"+N"` / `"-N"` — added to the current rating, clamped to
+///   the 0..=5 range. `"+0"` and `"-0"` are no-ops by construction.
+/// - **Absolute**: `"0"`–`"5"` — replaces the current rating outright.
+///   Out-of-range absolute values (e.g. `"7"`) error rather than clamp,
+///   so a typo doesn't silently produce a different rating than asked.
+fn parse_rating_change(raw: &str, current: u32) -> Result<usize, String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err("rate arg `delta` must not be empty".into());
+    }
+
+    let first = raw.as_bytes()[0];
+    if first == b'+' || first == b'-' {
+        let delta = raw
+            .parse::<i32>()
+            .map_err(|_| format!("rate arg `delta` `{raw}` must be ±integer or 0..=5"))?;
+        let new = (current as i32 + delta).clamp(0, 5);
+        Ok(new as usize)
+    } else {
+        let abs = raw
+            .parse::<u32>()
+            .map_err(|_| format!("rate arg `delta` `{raw}` must be ±integer or 0..=5"))?;
+        if abs > 5 {
+            return Err(format!("absolute rating `{abs}` out of range (0..=5)"));
+        }
+        Ok(abs as usize)
+    }
 }
