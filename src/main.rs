@@ -1068,6 +1068,7 @@ fn print_cli_help() {
     println!("  clear-queue      Empty the queue and stop playback");
     println!("  switch-view <v>  Switch the top pane to <v> (albums/queue/songs/");
     println!("                   artists/genres/playlists/radios/settings)");
+    println!("  love             Toggle star on the currently-playing track");
     println!();
     println!("Options:");
     println!("  -h, --help       Print this help and exit");

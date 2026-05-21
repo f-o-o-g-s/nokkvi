@@ -68,8 +68,11 @@
 //! | `switch-view` | try_act   | arg `view` (one of `albums`/`queue`/`songs`/   |
 //! |               |           | `artists`/`genres`/`playlists`/`radios`/       |
 //! |               |           | `settings`). Invalid name → `invalid_args`.    |
+//! | `love`        | try_act   | Toggle star on the currently-playing track.    |
+//! |               |           | `no_playing_track` error if nothing's playing. |
 
 use iced::Task;
+use nokkvi_data::types::ItemKind;
 use nokkvi_ipc::IpcResponse;
 use serde_json::json;
 
@@ -241,4 +244,36 @@ define_commands! {
             .map_err(|message| ("invalid_args", message))?;
         Ok(Task::done(Message::Navigation(NavigationMessage::SwitchView(view))))
     });
+    // Toggle star on whatever's currently playing — the original seed's pain
+    // ("rate from a WM hotkey without focusing the window"). Acts on
+    // `scrobble.current_song_id` (authoritative for "the playing track")
+    // rather than the slot-list centered item the in-app hotkey targets.
+    "love"        => try_act  (|app: &mut Nokkvi, _args: &serde_json::Value| {
+        let song_id = current_playing_song_id(app)?;
+        let starred = current_starred(app, &song_id);
+        Ok(app.toggle_star_with_revert_task(song_id, ItemKind::Song, !starred))
+    });
+}
+
+/// Resolve the song id of whatever's currently playing, returning the
+/// `no_playing_track` IPC error when nothing's loaded. Used by every
+/// playing-track-scoped verb (`love`, `rate`, future `current` queries).
+fn current_playing_song_id(app: &Nokkvi) -> Result<String, (&'static str, String)> {
+    app.scrobble
+        .current_song_id
+        .clone()
+        .ok_or_else(|| ("no_playing_track", "no track is currently playing".into()))
+}
+
+/// Best-effort lookup of the currently-known starred state for a song id,
+/// using the queue snapshot. Falls back to `false` when the song isn't in
+/// the queue (rare edge case — e.g. server-side race during track change);
+/// the API call still goes through, and the optimistic UI update gets
+/// reverted on failure either way.
+fn current_starred(app: &Nokkvi, song_id: &str) -> bool {
+    app.library
+        .queue_songs
+        .iter()
+        .find(|s| s.id == song_id)
+        .is_some_and(|s| s.starred)
 }

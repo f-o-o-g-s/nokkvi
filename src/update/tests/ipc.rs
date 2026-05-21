@@ -204,3 +204,33 @@ fn switch_view_unknown_view_returns_invalid_args_error_listing_options() {
     assert!(err.message.contains("albums"));
     assert!(err.message.contains("settings"));
 }
+
+#[test]
+fn love_with_no_playing_track_returns_no_playing_track_error() {
+    // Default test_app() has scrobble.current_song_id = None, so `love`
+    // should bail with a structured error rather than dispatching anything.
+    let resp = drive("love");
+    let err = resp.error.expect("no playing track → error");
+    assert_eq!(err.code, "no_playing_track");
+    assert!(err.message.contains("no track"));
+}
+
+#[test]
+fn love_with_playing_track_responds_ok() {
+    // Plant a song_id in the scrobble state so the playing-track resolver
+    // sees something live. The actual API call goes through shell_task but
+    // never executes (no AppService in test_app), and the optimistic local
+    // toggle has nothing to find in the empty queue — both paths are no-ops
+    // at the level we're pinning here (IPC responder fires ok with no data).
+    let mut app = test_app();
+    app.scrobble.current_song_id = Some("song-123".into());
+    let (incoming, rx) = make_incoming("love");
+
+    let dispatched = app.update(Message::Ipc(Box::new(incoming)));
+    drop(dispatched);
+
+    let resp = rx.blocking_recv().expect("responder must fire for love");
+    assert_eq!(resp.request_id, 7);
+    assert!(resp.data.is_none());
+    assert!(resp.error.is_none());
+}
