@@ -18,7 +18,7 @@
 //!
 //! # How it dispatches
 //!
-//! Each command row maps to one of three arm shapes:
+//! Each command row maps to one of four arm shapes:
 //!
 //! - `respond (<payload>)` — synchronous reply with a JSON payload. The
 //!   responder is filled in and `Task::none()` is returned. Use this for
@@ -33,6 +33,13 @@
 //!   `f32` argument extracted from `incoming.request.args`. The closure
 //!   builds the `Message`. Missing or non-numeric args return an
 //!   `invalid_args` error response instead of dispatching.
+//! - `try_act (<closure>)` — closure receives `&mut Nokkvi` and the args
+//!   `serde_json::Value`, returns `Result<Task<Message>, (&'static str,
+//!   String)>`. On `Ok(task)` the responder gets an empty success and the
+//!   task is returned; on `Err((code, message))` the responder gets an
+//!   error response with those fields and `Task::none()` is returned. Use
+//!   this for verbs that need direct app-state access (resolving the
+//!   currently-playing track, view switches, bypassing UI-gate handlers).
 //!
 //! Per-row arg groups are parenthesized so the macro can capture them as a
 //! single token tree (`:tt`) and re-destructure them in the inner @arm
@@ -40,22 +47,24 @@
 //!
 //! Unknown verbs return a structured `unknown_command` error response.
 //!
-//! # Phase 0 + Phase 1 catalog
+//! # Phase 0 + Phase 1 + Phase 2 catalog
 //!
-//! | Verb         | Arm shape | Notes                                          |
-//! |--------------|-----------|------------------------------------------------|
-//! | `ping`       | respond   | Returns the JSON string `"pong"`.              |
-//! | `next`       | dispatch  | `PlaybackMessage::NextTrack`                   |
-//! | `previous`   | dispatch  | `PlaybackMessage::PrevTrack`                   |
-//! | `play`       | dispatch  | `PlaybackMessage::Play`                        |
-//! | `pause`      | dispatch  | `PlaybackMessage::Pause`                       |
-//! | `play-pause` | dispatch  | `PlaybackMessage::TogglePlay`                  |
-//! | `stop`       | dispatch  | `PlaybackMessage::Stop`                        |
-//! | `seek`       | with_f32  | arg `position` (seconds, absolute).            |
-//! | `volume`     | with_f32  | arg `value` 0.0–1.0; routes through            |
-//! |              |           | `VolumeCommitted` to bypass the 500ms throttle.|
-//! | `shuffle`    | dispatch  | Toggle (`ToggleRandom`).                       |
-//! | `repeat`     | dispatch  | Cycle off → one → queue (`ToggleRepeat`).      |
+//! | Verb          | Arm shape | Notes                                          |
+//! |---------------|-----------|------------------------------------------------|
+//! | `ping`        | respond   | Returns the JSON string `"pong"`.              |
+//! | `next`        | dispatch  | `PlaybackMessage::NextTrack`                   |
+//! | `previous`    | dispatch  | `PlaybackMessage::PrevTrack`                   |
+//! | `play`        | dispatch  | `PlaybackMessage::Play`                        |
+//! | `pause`       | dispatch  | `PlaybackMessage::Pause`                       |
+//! | `play-pause`  | dispatch  | `PlaybackMessage::TogglePlay`                  |
+//! | `stop`        | dispatch  | `PlaybackMessage::Stop`                        |
+//! | `seek`        | with_f32  | arg `position` (seconds, absolute).            |
+//! | `volume`      | with_f32  | arg `value` 0.0–1.0; routes through            |
+//! |               |           | `VolumeCommitted` to bypass the 500ms throttle.|
+//! | `shuffle`     | dispatch  | Toggle (`ToggleRandom`).                       |
+//! | `repeat`      | dispatch  | Cycle off → one → queue (`ToggleRepeat`).      |
+//! | `consume`     | dispatch  | Toggle (`ToggleConsume`).                      |
+//! | `clear-queue` | try_act   | Calls `clear_queue_action()` (gate-free).      |
 
 use iced::Task;
 use nokkvi_ipc::IpcResponse;
@@ -71,19 +80,20 @@ use crate::{
 /// `KNOWN_COMMANDS` const that callers (the argv parser in `main.rs`) can
 /// use to decide whether an argument is a known IPC verb.
 ///
-/// See the module-level docs for the two arm shapes (`respond` / `dispatch`)
-/// and the rationale for keeping this macro in the UI crate.
+/// See the module-level docs for the four arm shapes
+/// (`respond` / `dispatch` / `with_f32` / `try_act`) and the rationale for
+/// keeping this macro in the UI crate.
 macro_rules! define_commands {
     (
         $( $verb:literal => $kind:ident $arg:tt ; )+ $(,)?
     ) => {
         pub(crate) const KNOWN_COMMANDS: &[&str] = &[ $( $verb ),+ ];
 
-        pub(crate) fn handle(_app: &mut Nokkvi, incoming: IpcIncoming) -> Task<Message> {
+        pub(crate) fn handle(app: &mut Nokkvi, incoming: IpcIncoming) -> Task<Message> {
             let request_id = incoming.request.request_id;
             match incoming.request.command.as_str() {
                 $(
-                    $verb => define_commands!(@arm $kind $arg, incoming, request_id),
+                    $verb => define_commands!(@arm $kind $arg, incoming, request_id, app),
                 )+
                 other => {
                     incoming.responder.send(IpcResponse::err(
@@ -97,21 +107,24 @@ macro_rules! define_commands {
         }
     };
 
-    (@arm respond ($payload:expr), $incoming:ident, $request_id:ident) => {{
+    (@arm respond ($payload:expr), $incoming:ident, $request_id:ident, $app:ident) => {{
+        let _ = &$app;
         $incoming
             .responder
             .send(IpcResponse::ok($request_id, Some($payload)));
         Task::none()
     }};
 
-    (@arm dispatch ($msg:expr), $incoming:ident, $request_id:ident) => {{
+    (@arm dispatch ($msg:expr), $incoming:ident, $request_id:ident, $app:ident) => {{
+        let _ = &$app;
         $incoming
             .responder
             .send(IpcResponse::ok($request_id, None));
         Task::done($msg)
     }};
 
-    (@arm with_f32 ($arg_name:literal, $build:expr), $incoming:ident, $request_id:ident) => {{
+    (@arm with_f32 ($arg_name:literal, $build:expr), $incoming:ident, $request_id:ident, $app:ident) => {{
+        let _ = &$app;
         match extract_f32_arg(&$incoming.request.args, $arg_name) {
             Ok(value) => {
                 $incoming
@@ -123,6 +136,27 @@ macro_rules! define_commands {
                 $incoming.responder.send(IpcResponse::err(
                     $request_id,
                     "invalid_args",
+                    message,
+                ));
+                Task::none()
+            }
+        }
+    }};
+
+    (@arm try_act ($closure:expr), $incoming:ident, $request_id:ident, $app:ident) => {{
+        let result: Result<Task<Message>, (&'static str, String)> =
+            ($closure)($app, &$incoming.request.args);
+        match result {
+            Ok(task) => {
+                $incoming
+                    .responder
+                    .send(IpcResponse::ok($request_id, None));
+                task
+            }
+            Err((code, message)) => {
+                $incoming.responder.send(IpcResponse::err(
+                    $request_id,
+                    code,
                     message,
                 ));
                 Task::none()
@@ -149,18 +183,25 @@ fn extract_f32_arg(args: &serde_json::Value, name: &str) -> Result<f32, String> 
 // presses don't silently drop on next launch. Mirrors the MPRIS SetVolume
 // handler at src/update/mpris.rs:66.
 define_commands! {
-    "ping"       => respond  (json!("pong"));
-    "next"       => dispatch (Message::Playback(PlaybackMessage::NextTrack));
-    "previous"   => dispatch (Message::Playback(PlaybackMessage::PrevTrack));
-    "play"       => dispatch (Message::Playback(PlaybackMessage::Play));
-    "pause"      => dispatch (Message::Playback(PlaybackMessage::Pause));
-    "play-pause" => dispatch (Message::Playback(PlaybackMessage::TogglePlay));
-    "stop"       => dispatch (Message::Playback(PlaybackMessage::Stop));
-    "seek"       => with_f32 ("position", |v: f32| Message::Playback(PlaybackMessage::Seek(v)));
-    "volume"     => with_f32 ("value",    |v: f32| Message::Playback(PlaybackMessage::VolumeCommitted(v.clamp(0.0, 1.0))));
+    "ping"        => respond  (json!("pong"));
+    "next"        => dispatch (Message::Playback(PlaybackMessage::NextTrack));
+    "previous"    => dispatch (Message::Playback(PlaybackMessage::PrevTrack));
+    "play"        => dispatch (Message::Playback(PlaybackMessage::Play));
+    "pause"       => dispatch (Message::Playback(PlaybackMessage::Pause));
+    "play-pause"  => dispatch (Message::Playback(PlaybackMessage::TogglePlay));
+    "stop"        => dispatch (Message::Playback(PlaybackMessage::Stop));
+    "seek"        => with_f32 ("position", |v: f32| Message::Playback(PlaybackMessage::Seek(v)));
+    "volume"      => with_f32 ("value",    |v: f32| Message::Playback(PlaybackMessage::VolumeCommitted(v.clamp(0.0, 1.0))));
     // Toggle-only in Phase 1 — matches WM-hotkey ergonomics. Arg-taking
     // variants (shuffle on/off, repeat none/track/queue) are deferred until
     // direct-setter PlaybackMessage variants exist. See §6 of new-feats.md.
-    "shuffle"    => dispatch (Message::Playback(PlaybackMessage::ToggleRandom));
-    "repeat"     => dispatch (Message::Playback(PlaybackMessage::ToggleRepeat));
+    "shuffle"     => dispatch (Message::Playback(PlaybackMessage::ToggleRandom));
+    "repeat"      => dispatch (Message::Playback(PlaybackMessage::ToggleRepeat));
+    "consume"     => dispatch (Message::Playback(PlaybackMessage::ToggleConsume));
+    // IPC bypasses handle_clear_queue's "not in queue view" gate — external
+    // callers expect `nokkvi clear-queue` to clear from any view. The shared
+    // clear_queue_action() lives in src/update/hotkeys/queue.rs.
+    "clear-queue" => try_act  (|app: &mut Nokkvi, _args: &serde_json::Value| {
+        Ok(app.clear_queue_action())
+    });
 }

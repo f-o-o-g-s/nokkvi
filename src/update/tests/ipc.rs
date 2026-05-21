@@ -85,6 +85,7 @@ fn fire_and_forget_verbs_all_respond_ok_with_no_payload() {
         "stop",
         "shuffle",
         "repeat",
+        "consume",
     ] {
         let resp = drive(verb);
         assert_eq!(resp.request_id, 7, "{verb}: request_id must echo");
@@ -150,4 +151,16 @@ fn volume_missing_arg_returns_invalid_args_error() {
     let err = resp.error.expect("missing arg must error");
     assert_eq!(err.code, "invalid_args");
     assert!(err.message.contains("value"));
+}
+
+#[test]
+fn clear_queue_responds_ok_from_any_view() {
+    // `clear-queue` is a try_act verb that bypasses the in-app handler's
+    // "Not in queue view" gate. The IPC contract is: responder fires ok with
+    // no payload regardless of which view the running instance is on. The
+    // actual backend wipe is exercised by the playback-handler tests.
+    let resp = drive("clear-queue");
+    assert_eq!(resp.request_id, 7);
+    assert!(resp.data.is_none());
+    assert!(resp.error.is_none());
 }

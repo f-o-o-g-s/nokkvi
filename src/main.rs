@@ -1064,6 +1064,8 @@ fn print_cli_help() {
     println!("  volume <0..1>    Set playback volume (clamped to [0.0, 1.0])");
     println!("  shuffle          Toggle shuffle (random) mode");
     println!("  repeat           Cycle repeat mode (off → one → queue)");
+    println!("  consume          Toggle consume mode (drop played tracks)");
+    println!("  clear-queue      Empty the queue and stop playback");
     println!();
     println!("Options:");
     println!("  -h, --help       Print this help and exit");

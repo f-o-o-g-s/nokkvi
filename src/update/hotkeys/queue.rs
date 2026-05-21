@@ -58,12 +58,24 @@ impl Nokkvi {
     pub(crate) fn handle_clear_queue(&mut self) -> Task<Message> {
         debug!("  ClearQueue (Shift+D) hotkey pressed");
 
-        // Only works in Queue view
+        // Only works in Queue view — keypress gate. IPC bypasses this by
+        // calling clear_queue_action directly.
         if self.current_view != View::Queue {
             self.toast_warn("Not in queue view");
             return Task::none();
         }
 
+        self.clear_queue_action()
+    }
+
+    /// The actual clear-queue work without the in-Queue-view gate: reset the
+    /// visualizer, drop the active playlist context, success toast, async
+    /// shell call, and a `LoadQueue` follow-up.
+    ///
+    /// Shared by `handle_clear_queue` (in-app `Shift+D` hotkey, gated to the
+    /// Queue view) and the `nokkvi clear-queue` IPC verb (ungated — external
+    /// commands run from any view).
+    pub(crate) fn clear_queue_action(&mut self) -> Task<Message> {
         // Reset visualizer to clear bars (same as stop)
         if let Some(ref viz) = self.visualizer {
             viz.reset();
