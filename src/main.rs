@@ -1280,10 +1280,21 @@ mod build_ipc_cli_args_tests {
     }
 
     #[test]
-    fn volume_numeric_arg_round_trips_as_json_number() {
+    fn volume_arg_forwards_as_string() {
+        // The volume verb's CLI arg is `CliArgType::String` (server-side parser
+        // owns absolute-vs-delta dispatch), so the CLI wraps the positional
+        // verbatim — no f64 coercion that would silently drop a leading `+`/`-`.
         assert_eq!(
             build_ipc_cli_args("volume", Some("0.7")),
-            json!({"value": 0.7}),
+            json!({"value": "0.7"}),
+        );
+        assert_eq!(
+            build_ipc_cli_args("volume", Some("+0.05")),
+            json!({"value": "+0.05"}),
+        );
+        assert_eq!(
+            build_ipc_cli_args("volume", Some("-0.1")),
+            json!({"value": "-0.1"}),
         );
     }
 

@@ -90,8 +90,11 @@
 //! | `play-pause`  | dispatch  | `PlaybackMessage::TogglePlay`                  |
 //! | `stop`        | dispatch  | `PlaybackMessage::Stop`                        |
 //! | `seek`        | with_f32  | arg `position` (seconds, absolute).            |
-//! | `volume`      | with_f32  | arg `value` 0.0–1.0; routes through            |
-//! |               |           | `VolumeCommitted` to bypass the 500ms throttle.|
+//! | `volume`      | try_act_str | arg `value`. `"+N"`/`"-N"` (delta from       |
+//! |               |             | current, clamped 0.0..=1.0) or `"N"` absolute|
+//! |               |             | (0.0..=1.0, rejected if out of range).       |
+//! |               |             | Routes through `VolumeCommitted` to bypass   |
+//! |               |             | the 500ms throttle.                          |
 //! | `shuffle`     | dispatch  | Toggle (`ToggleRandom`).                       |
 //! | `repeat`      | dispatch  | Cycle off → one → queue (`ToggleRepeat`).      |
 //! | `consume`     | dispatch  | Toggle (`ToggleConsume`).                      |
@@ -324,7 +327,12 @@ define_commands! {
     "play-pause"  => dispatch (Message::Playback(PlaybackMessage::TogglePlay));
     "stop"        => dispatch (Message::Playback(PlaybackMessage::Stop));
     "seek"        => with_f32 ("position", |v: f32| Message::Playback(PlaybackMessage::Seek(v)));
-    "volume"      => with_f32 ("value",    |v: f32| Message::Playback(PlaybackMessage::VolumeCommitted(v.clamp(0.0, 1.0))));
+    "volume"      => try_act_str ("value", |app: &mut Nokkvi, raw: &str| {
+        let current = app.playback.volume;
+        let new = parse_volume_change(raw, current)
+            .map_err(|message| ("invalid_args", message))?;
+        Ok(Task::done(Message::Playback(PlaybackMessage::VolumeCommitted(new))))
+    });
     // Toggle-only in Phase 1 — matches WM-hotkey ergonomics. Arg-taking
     // variants (shuffle on/off, repeat none/track/queue) are deferred until
     // direct-setter PlaybackMessage variants exist. See §6 of new-feats.md.
@@ -396,6 +404,44 @@ fn current_rating(app: &Nokkvi, song_id: &str) -> u32 {
         .find(|s| s.id == song_id)
         .and_then(|s| s.rating)
         .unwrap_or(0)
+}
+
+/// Parse a volume-arg string into a final 0.0..=1.0 value. Two accepted shapes:
+///
+/// - **Delta**: `"+N"` / `"-N"` (e.g. `"+0.05"`, `"-0.1"`) — added to the
+///   current volume, then clamped to the 0.0..=1.0 range. Delta clamps
+///   silently rather than erroring so repeated `volume +0.05` keypresses at
+///   the ceiling are a no-op instead of a stream of errors.
+/// - **Absolute**: `"N"` (e.g. `"0.5"`) — replaces the current volume.
+///   Out-of-range absolutes (e.g. `"1.5"`) error rather than clamp, so a
+///   typo doesn't silently produce a different volume than asked.
+fn parse_volume_change(raw: &str, current: f32) -> Result<f32, String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err("volume arg `value` must not be empty".into());
+    }
+
+    let first = raw.as_bytes()[0];
+    if first == b'+' || first == b'-' {
+        let delta = raw.parse::<f32>().map_err(|_| {
+            format!(
+                "volume arg `value` `{raw}` must be a number, optionally \
+                 ±-prefixed for delta"
+            )
+        })?;
+        Ok((current + delta).clamp(0.0, 1.0))
+    } else {
+        let abs = raw.parse::<f32>().map_err(|_| {
+            format!(
+                "volume arg `value` `{raw}` must be a number, optionally \
+                 ±-prefixed for delta"
+            )
+        })?;
+        if !(0.0..=1.0).contains(&abs) {
+            return Err(format!("absolute volume `{abs}` out of range (0.0..=1.0)"));
+        }
+        Ok(abs)
+    }
 }
 
 /// Parse a rate-arg string into a final 0..=5 rating. Two accepted shapes:

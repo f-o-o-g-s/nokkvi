@@ -211,9 +211,27 @@ fn seek_wrong_arg_type_returns_invalid_args_error() {
 }
 
 #[test]
-fn volume_accepts_f32_value_arg() {
-    let resp = drive_with_args("volume", json!({"value": 0.6}));
+fn volume_accepts_absolute_string_arg() {
+    let resp = drive_with_args("volume", json!({"value": "0.6"}));
     assert!(resp.error.is_none());
+}
+
+#[test]
+fn volume_accepts_boundary_absolutes() {
+    for v in ["0", "0.0", "1", "1.0"] {
+        let resp = drive_with_args("volume", json!({"value": v}));
+        assert!(resp.error.is_none(), "{v}: boundary absolute must accept");
+    }
+}
+
+#[test]
+fn volume_accepts_delta_strings() {
+    // Default test_app volume is 1.0, so positive deltas clamp; negatives
+    // produce in-range values. Either way the responder must fire ok.
+    for delta in ["+0.05", "-0.05", "+0.5", "-0.5", "+0", "-0"] {
+        let resp = drive_with_args("volume", json!({"value": delta}));
+        assert!(resp.error.is_none(), "{delta}: delta must accept");
+    }
 }
 
 #[test]
@@ -225,11 +243,41 @@ fn volume_missing_arg_returns_invalid_args_error() {
 }
 
 #[test]
-fn volume_wrong_arg_type_returns_invalid_args_error() {
+fn volume_numeric_arg_returns_invalid_args_error() {
+    // try_act_str arm requires the arg as a JSON string; legacy CLIs sending
+    // `{"value": 0.6}` (number) get the macro's "missing required string arg"
+    // error rather than silently mis-parsing.
+    let resp = drive_with_args("volume", json!({"value": 0.6}));
+    let err = resp
+        .error
+        .expect("numeric volume must error post try_act_str");
+    assert_eq!(err.code, "invalid_args");
+    assert!(err.message.contains("value"));
+}
+
+#[test]
+fn volume_unparseable_string_returns_invalid_args_error() {
     let resp = drive_with_args("volume", json!({"value": "loud"}));
     let err = resp.error.expect("non-numeric volume must error");
     assert_eq!(err.code, "invalid_args");
     assert!(err.message.contains("must be a number"));
+}
+
+#[test]
+fn volume_rejects_absolute_out_of_range() {
+    for v in ["1.5", "2"] {
+        let resp = drive_with_args("volume", json!({"value": v}));
+        let err = resp.error.expect("out-of-range absolute must error");
+        assert_eq!(err.code, "invalid_args");
+        assert!(err.message.contains("out of range"));
+    }
+}
+
+#[test]
+fn volume_rejects_empty_value() {
+    let resp = drive_with_args("volume", json!({"value": ""}));
+    let err = resp.error.expect("empty value must error");
+    assert_eq!(err.code, "invalid_args");
 }
 
 #[test]
