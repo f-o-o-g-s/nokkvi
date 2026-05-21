@@ -39,12 +39,17 @@
 //! because its inputs reference iced-land types. Verb catalogs published by
 //! the macro are not part of this crate's API.
 //!
-//! # Phase 0 + Phase 1 verbs (informative — the wire accepts any string)
+//! # Phase 0 + Phase 1 + Phase 2 verbs (informative — the wire accepts any string)
 //!
 //! - **Phase 0:** `ping`.
 //! - **Phase 1:** `next`, `previous`, `play`, `pause`, `play-pause`, `stop`,
 //!   `seek` (arg `position: f32` seconds), `volume` (arg `value: f32` 0–1),
 //!   `shuffle` (toggle), `repeat` (cycle).
+//! - **Phase 2:** `consume` (toggle), `clear-queue`, `switch-view` (arg
+//!   `view: string` — one of albums/queue/songs/artists/genres/playlists/
+//!   radios/settings), `love` (toggle star on playing track), `rate` (arg
+//!   `delta: string` — `"+N"`/`"-N"` delta or `"0".."5"` absolute on
+//!   playing track).
 //!
 //! The full per-verb dispatch catalog lives in `src/update/ipc.rs`.
 
