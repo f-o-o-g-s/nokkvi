@@ -133,7 +133,7 @@ fn open_change_with_none_bounds_defaults_to_zero_rect() {
 /// Mutual exclusion smoke test: opening the LibrarySelector overlay must
 /// replace any previously-open overlay (`SetOpenMenu` semantics). The
 /// dispatcher enforces this via the implicit `open_menu = next` assignment
-/// — Lane D's handler mirrors that contract by assigning directly.
+/// — the library-filter handler mirrors that contract by assigning directly.
 #[test]
 fn library_selector_replaces_open_hamburger_menu() {
     let mut app = test_app();
@@ -151,6 +151,29 @@ fn library_selector_replaces_open_hamburger_menu() {
             trigger_bounds: bounds
         }),
         "opening LibrarySelector must atomically replace Hamburger"
+    );
+}
+
+/// Reverse direction of [`library_selector_replaces_open_hamburger_menu`]:
+/// opening Hamburger (or any other overlay) via the shared
+/// `handle_set_open_menu` dispatcher while the LibrarySelector is open
+/// must clear the selector. The dispatcher is the single source of truth
+/// for mutual exclusion across every `OpenMenu` variant — proving the
+/// reverse direction here guards against future regressions that might
+/// special-case LibrarySelector dismissal somewhere else (plan §14.10).
+#[test]
+fn opening_hamburger_clears_library_selector() {
+    let mut app = test_app();
+    app.open_menu = Some(OpenMenu::LibrarySelector {
+        trigger_bounds: dummy_bounds(),
+    });
+
+    let _ = app.handle_set_open_menu(Some(OpenMenu::Hamburger));
+
+    assert_eq!(
+        app.open_menu,
+        Some(OpenMenu::Hamburger),
+        "opening Hamburger via handle_set_open_menu must dismiss LibrarySelector"
     );
 }
 

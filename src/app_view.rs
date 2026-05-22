@@ -84,7 +84,7 @@ fn similar_column_dropdown_state(
 
 /// Sibling of [`column_dropdown_state`] for the library selector popover.
 /// Called from `navigation_bar` to feed `(is_open, trigger_bounds)` into
-/// the nav-bar trigger; Lane D's popover overlay reads the same state.
+/// the nav-bar trigger; the paired popover overlay reads the same state.
 fn library_selector_state(
     open_menu: &Option<crate::app_message::OpenMenu>,
 ) -> (bool, Option<iced::Rectangle>) {

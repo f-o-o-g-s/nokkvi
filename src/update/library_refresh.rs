@@ -1,4 +1,11 @@
-//! Handles Navidrome event-driven library refresh
+//! Navidrome SSE-driven library refresh.
+//!
+//! Reacts to server-side `library_changed` events on the Navidrome SSE
+//! stream by reloading affected browse buffers (Albums / Artists /
+//! Songs / Playlists / Genres) and, on wildcard full-scan events, also
+//! refreshing the multi-library list itself. Sibling file
+//! [`super::library_filter`] handles the user-initiated nav-bar
+//! popover open / toggle / explicit-refresh code path.
 use iced::Task;
 use tracing::info;
 

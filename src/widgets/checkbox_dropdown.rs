@@ -10,14 +10,17 @@
 //!   toggles in one open.
 //! - Items render with a check-or-empty icon + label.
 //!
-//! Two flavors share the same widget chassis (overlay positioning, escape /
-//! click-outside, persisted hover state):
+//! Two entry points share the same widget chassis (overlay positioning,
+//! escape / click-outside, persisted hover state):
 //!
 //! 1. [`checkbox_dropdown`] — **single-column rows** with `&'static str` labels,
-//!    used by view-header column-visibility menus.
-//! 2. [`checkbox_dropdown_dynamic`] — **two-column rows** with owned `String`
-//!    name + right-aligned dim metadata label, used when the row contents come
-//!    from runtime data (e.g. the library-filter popover).
+//!    used by view-header column-visibility menus. Renders its own trigger
+//!    button (icon + tooltip chrome).
+//! 2. [`library_selector_popover`] — **two-column rows** with owned `String`
+//!    name + right-aligned dim metadata label. The trigger is supplied
+//!    externally (the nav-bar `library_filter_trigger` widget has its own
+//!    icon + count + pip chrome that the standard trigger button can't
+//!    represent); this constructor only renders the overlay panel.
 //!
 //! ```ignore
 //! checkbox_dropdown(
@@ -64,14 +67,8 @@ const MAX_NAME_WIDTH: f32 = 110.0;
 
 /// One row in the dropdown menu. Single-column rows carry a static label
 /// (used by view-header column dropdowns); two-column rows carry an owned
-/// name + dim right-aligned metadata label (used by runtime-data popovers
-/// like the library filter).
-///
-/// `TwoColumn` is constructed by [`checkbox_dropdown_dynamic`]; the
-/// `dead_code` allow is in place until Lane C wires up the library-filter
-/// popover at its call site, after which the production reachability check
-/// will satisfy itself.
-#[allow(dead_code)]
+/// name + dim right-aligned metadata label (constructed by
+/// [`library_selector_popover`] for the runtime-data library filter).
 enum DropdownItemData<Key> {
     SingleColumn {
         key: Key,
@@ -127,64 +124,11 @@ where
     }
 }
 
-/// Runtime-data sibling of [`checkbox_dropdown`] for popovers whose row
-/// contents are owned `String`s (e.g. the library-filter popover, whose
-/// library names + song counts come from the Navidrome server).
-///
-/// Each item is `(id, name, right_label, checked)`:
-/// - `name` is the primary label (ellipsized at [`MAX_NAME_WIDTH`]).
-/// - `right_label` is the dim right-aligned metadata (e.g. a song count).
-/// - `checked` drives the leading check-or-empty glyph.
-///
-/// Shares overlay positioning, escape / click-outside handling, and the
-/// same `OpenMenu`-style controlled open state with [`checkbox_dropdown`].
-/// `items` is consumed by value (moved into the widget); `on_item_toggle`
-/// is invoked once per row press, never on every render.
-///
-/// `dead_code` allow is in place until Lane C wires this into the
-/// library-filter popover; the tests in this module exercise the
-/// constructor so it never genuinely rots.
-#[allow(dead_code)]
-pub(crate) fn checkbox_dropdown_dynamic<'a, Key, Message>(
-    trigger_icon: &'static str,
-    tooltip: &'static str,
-    items: Vec<(Key, String, String, bool)>,
-    on_item_toggle: impl Fn(Key) -> Message + 'a,
-    on_open_change: impl Fn(Option<Rectangle>) -> Message + 'a,
-    is_open: bool,
-    trigger_bounds: Option<Rectangle>,
-) -> CheckboxDropdown<'a, Key, Message>
-where
-    Key: Copy + Eq + std::hash::Hash + 'a,
-    Message: Clone + 'a,
-{
-    let items = items
-        .into_iter()
-        .map(
-            |(key, name, right_label, checked)| DropdownItemData::TwoColumn {
-                key,
-                name,
-                right_label,
-                checked,
-            },
-        )
-        .collect();
-
-    CheckboxDropdown {
-        trigger: trigger_button(trigger_icon, tooltip),
-        items,
-        on_item_toggle: Box::new(on_item_toggle),
-        on_open_change: Box::new(on_open_change),
-        is_open,
-        trigger_bounds,
-        menu: None,
-    }
-}
-
-/// Overlay-only variant of [`checkbox_dropdown_dynamic`] for popovers
-/// whose trigger lives outside this widget (e.g. the library-filter nav-bar
-/// trigger, which has its own icon + count + pip chrome that the standard
-/// `trigger_button()` cannot represent).
+/// Overlay-only constructor for the library-filter popover. Renders the
+/// two-column row variant with owned `String` name + dim right-aligned
+/// metadata label; the trigger lives outside this widget (the nav-bar
+/// `library_filter_trigger` has its own icon + count + pip chrome that
+/// the standard internal trigger button cannot represent).
 ///
 /// The widget itself renders a zero-size `Space` as its "trigger" — it
 /// takes no layout space and intercepts no clicks. The overlay still
@@ -194,6 +138,12 @@ where
 /// The parent's trigger button is responsible for emitting the
 /// open / close `on_open_change` messages on left-click; this widget
 /// only handles row clicks, click-outside-to-close, and Escape.
+///
+/// Each item is `(id, name, right_label, checked)`:
+/// - `name` is the primary label (ellipsized at [`MAX_NAME_WIDTH`]).
+/// - `right_label` is the dim right-aligned metadata (e.g. a song count).
+///   Pass an empty string when no metadata is available.
+/// - `checked` drives the leading check-or-empty glyph.
 pub(crate) fn library_selector_popover<'a, Message>(
     items: Vec<(i32, String, String, bool)>,
     on_item_toggle: impl Fn(i32) -> Message + 'a,
@@ -957,14 +907,12 @@ mod tests {
     }
 
     #[test]
-    fn checkbox_dropdown_dynamic_compiles_with_zero_items() {
-        // Degenerate-but-valid input: empty popover. Must not panic during
-        // construction or conversion to Element; the overlay path will short-
-        // circuit at `items.is_empty()` if it ever opens.
+    fn library_selector_popover_compiles_with_zero_items() {
+        // Degenerate-but-valid input: empty popover (pre-login, cold cache).
+        // Must not panic during construction or conversion to Element; the
+        // overlay path short-circuits at `items.is_empty()` if it ever opens.
         let items: Vec<(i32, String, String, bool)> = Vec::new();
-        let _el: Element<'_, TestMessage> = checkbox_dropdown_dynamic(
-            "assets/icons/library.svg",
-            "Libraries",
+        let _el: Element<'_, TestMessage> = library_selector_popover(
             items,
             TestMessage::Toggle,
             TestMessage::OpenChange,
@@ -975,9 +923,9 @@ mod tests {
     }
 
     #[test]
-    fn checkbox_dropdown_dynamic_compiles_with_three_items() {
-        // Typical input: three rows with owned name + right-label strings, the
-        // shape the library-filter popover (Lane C) will produce. Mixed
+    fn library_selector_popover_compiles_with_three_items() {
+        // Typical input: three rows with owned name + right-label strings —
+        // the shape the nav-bar library-filter popover produces. Mixed
         // checked / unchecked covers both row-icon code paths.
         let items: Vec<(i32, String, String, bool)> = vec![
             (1, "Music Library".to_string(), "13,627".to_string(), true),
@@ -989,9 +937,7 @@ mod tests {
             ),
             (3, "Field Recordings".to_string(), "58".to_string(), true),
         ];
-        let _el: Element<'_, TestMessage> = checkbox_dropdown_dynamic(
-            "assets/icons/library.svg",
-            "Libraries",
+        let _el: Element<'_, TestMessage> = library_selector_popover(
             items,
             TestMessage::Toggle,
             TestMessage::OpenChange,

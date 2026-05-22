@@ -398,8 +398,8 @@ pub enum ToastMessage {
 /// Library filter messages, namespaced under `Message::Library(..)`.
 ///
 /// Drives the nav-bar library selector popover and the active-library
-/// filter state on `AppService`. Behavior bodies land in Wave 2 Lane D —
-/// this enum is the message-contract stub for the parallel lanes.
+/// filter state on `AppService`. Handler bodies live in
+/// [`crate::update::library_filter`].
 #[derive(Debug, Clone)]
 pub enum LibraryMessage {
     /// Open or close the library selector popover. `trigger_bounds` is
