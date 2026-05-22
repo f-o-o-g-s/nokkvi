@@ -4,9 +4,10 @@
 //! `PlaybackController`. Provides intent-based methods (play album, add to queue)
 //! that encapsulate multi-step workflows.
 
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use anyhow::Result;
+use parking_lot::RwLock;
 use tokio::sync::{Mutex, mpsc::UnboundedReceiver};
 use tracing::{debug, warn};
 
@@ -17,8 +18,8 @@ use crate::{
         playback_controller::PlaybackController, queue::QueueService, settings::SettingsService,
         songs::SongsService,
     },
-    services::task_manager::TaskManager,
-    types::queue_sort_mode::QueueSortMode,
+    services::{state_storage::ACTIVE_LIBRARY_IDS_KEY, task_manager::TaskManager},
+    types::{library::Library, queue_sort_mode::QueueSortMode},
 };
 
 /// AppService — Application-level orchestration and state management.
@@ -44,6 +45,16 @@ pub struct AppService {
     /// Fires after each track auto-advance (post-consume, post-refresh).
     /// The UI takes this once via `take_queue_changed_receiver()` to build a subscription.
     queue_changed_rx: Arc<Mutex<Option<UnboundedReceiver<()>>>>,
+    /// User's currently-active library (music folder) ID selection.
+    /// Empty == "no filter" (treated as "all"). Shared across clones via
+    /// `Arc`, with `parking_lot::RwLock` for cheap read-mostly access on
+    /// the hot path (every `load_*` reads on dispatch).
+    active_library_ids: Arc<RwLock<HashSet<i32>>>,
+    /// Last-seen full list of accessible libraries reported by the
+    /// server. Refreshed via [`refresh_libraries`]; the popover renders
+    /// from this snapshot. Shared across clones for the same reason as
+    /// `active_library_ids`.
+    all_libraries: Arc<RwLock<Vec<Library>>>,
 }
 
 impl std::fmt::Debug for AppService {
@@ -77,6 +88,30 @@ impl AppService {
         // Initialize the queue service with persisted data
         queue_service.initialize().await?;
 
+        // Restore the persisted multi-library selection. A read failure
+        // is non-fatal — the user gets the "no filter" default for this
+        // session and a warning lands in the file log. The pruning step
+        // (validating each ID against the server's current library list)
+        // happens lazily on the first `refresh_libraries` call.
+        let active_library_ids: HashSet<i32> = match storage
+            .load_binary::<HashSet<i32>>(ACTIVE_LIBRARY_IDS_KEY)
+        {
+            Ok(Some(set)) => {
+                debug!(
+                    " [APP SERVICE] restored {} active library IDs from storage",
+                    set.len()
+                );
+                set
+            }
+            Ok(None) => HashSet::new(),
+            Err(e) => {
+                warn!(
+                    "[APP SERVICE] failed to load active_library_ids ({e}); defaulting to empty selection"
+                );
+                HashSet::new()
+            }
+        };
+
         let task_manager = Arc::new(TaskManager::new());
         let albums_service = AlbumsService::new().with_auth(auth_gateway.clone());
         let artists_service = ArtistsService::new().with_auth(auth_gateway.clone());
@@ -102,6 +137,8 @@ impl AppService {
             storage,
             loop_rx: Arc::new(Mutex::new(Some(loop_rx))),
             queue_changed_rx: Arc::new(Mutex::new(Some(queue_changed_rx))),
+            active_library_ids: Arc::new(RwLock::new(active_library_ids)),
+            all_libraries: Arc::new(RwLock::new(Vec::new())),
         })
     }
 
@@ -709,6 +746,10 @@ impl AppService {
     subsonic_api_factory!(
         (genres_api, crate::services::api::genres::GenresApiService),
         (
+            libraries_api,
+            crate::services::api::libraries::LibrariesApiService
+        ),
+        (
             playlists_api,
             crate::services::api::playlists::PlaylistsApiService
         ),
@@ -1014,6 +1055,465 @@ impl AppService {
         let effect = self.queue_service.set_queue(Vec::new(), None).await?;
         effect.apply_to(&engine_arc).await;
         Ok(())
+    }
+}
+
+// =============================================================================
+// === Multi-library filter ===
+// =============================================================================
+impl AppService {
+    /// Snapshot the currently-active library (music folder) IDs.
+    ///
+    /// An empty set is the explicit "all libraries" default — every
+    /// `load_*` wrapper should omit the `library_id` filter param in
+    /// that case (Navidrome auto-scopes to user-accessible libraries).
+    pub fn active_library_ids(&self) -> HashSet<i32> {
+        self.active_library_ids.read().clone()
+    }
+
+    /// Snapshot the currently-active library IDs as a sorted `Vec<i32>`.
+    /// Convenience for callers that want to pass the IDs to a
+    /// `library_ids: &[i32]` argument — sorting yields a stable wire
+    /// order across calls so cache keys can use the slice directly.
+    pub fn active_library_ids_vec(&self) -> Vec<i32> {
+        let mut v: Vec<i32> = self.active_library_ids.read().iter().copied().collect();
+        v.sort_unstable();
+        v
+    }
+
+    /// Snapshot the last-seen full list of libraries reported by the
+    /// server. Empty until [`refresh_libraries`] succeeds at least
+    /// once.
+    pub fn all_libraries(&self) -> Vec<Library> {
+        self.all_libraries.read().clone()
+    }
+
+    /// Number of libraries currently known to the client (the size of
+    /// the popover's list). Cheap, avoids cloning the `Vec`.
+    pub fn library_count(&self) -> usize {
+        self.all_libraries.read().len()
+    }
+
+    /// Toggle the membership of a library ID in the active selection,
+    /// persisting the new set to redb. Returns the *next* membership
+    /// state (`true` == library is now active, `false` == removed).
+    ///
+    /// Persistence is a best-effort sync write — a failure is logged
+    /// at `warn!` and the in-memory state still reflects the toggle so
+    /// the UI doesn't appear to swallow the click. The next successful
+    /// toggle will re-attempt persistence with the latest snapshot.
+    pub fn toggle_library(&self, id: i32) -> bool {
+        let (snapshot, now_active) = {
+            let mut guard = self.active_library_ids.write();
+            let now_active = if guard.contains(&id) {
+                guard.remove(&id);
+                false
+            } else {
+                guard.insert(id);
+                true
+            };
+            (guard.clone(), now_active)
+        };
+
+        if let Err(e) = self.storage.save_binary(ACTIVE_LIBRARY_IDS_KEY, &snapshot) {
+            warn!("[APP SERVICE] failed to persist active_library_ids after toggling {id}: {e}");
+        }
+
+        now_active
+    }
+
+    /// Replace the active library selection wholesale and persist it.
+    /// Used by the "select all" / "clear all" affordances and by the
+    /// pruning path inside [`refresh_libraries`]. Mirrors
+    /// [`toggle_library`]'s persistence policy (best-effort).
+    pub fn set_active_library_ids(&self, ids: HashSet<i32>) {
+        {
+            let mut guard = self.active_library_ids.write();
+            *guard = ids.clone();
+        }
+        if let Err(e) = self.storage.save_binary(ACTIVE_LIBRARY_IDS_KEY, &ids) {
+            warn!("[APP SERVICE] failed to persist active_library_ids set wholesale: {e}");
+        }
+    }
+
+    /// Refresh the cached library list from the server and prune the
+    /// active selection of any IDs no longer present.
+    ///
+    /// Returns the new `Vec<Library>` so callers can update view state
+    /// without re-reading the lock. The pruning step persists the
+    /// pruned `active_library_ids` only if at least one ID was actually
+    /// removed (avoids redundant redb writes).
+    pub async fn refresh_libraries(&self) -> Result<Vec<Library>> {
+        let service = self.libraries_api().await?;
+        let libraries = service.load().await?;
+        self.apply_library_refresh(libraries.clone());
+        Ok(libraries)
+    }
+
+    /// Apply a refreshed library list to the in-memory caches, pruning
+    /// `active_library_ids` of any IDs no longer present and persisting
+    /// the pruned set when the delta is non-empty. Factored out of
+    /// [`refresh_libraries`] so the pruning logic can be exercised by
+    /// unit tests that don't have a live server.
+    pub fn apply_library_refresh(&self, libraries: Vec<Library>) {
+        // Compute the pruning delta under the lock — keep this hot
+        // path tight so we don't hold the write lock across the redb
+        // commit below.
+        let snapshot_for_persist = {
+            let valid_ids: HashSet<i32> = libraries.iter().map(|l| l.id).collect();
+            let mut guard = self.active_library_ids.write();
+            let before = guard.len();
+            guard.retain(|id| valid_ids.contains(id));
+            let after = guard.len();
+            if after < before {
+                Some(guard.clone())
+            } else {
+                None
+            }
+        };
+
+        if let Some(pruned) = snapshot_for_persist {
+            debug!(
+                " [APP SERVICE] pruned active_library_ids to {} entries after server refresh",
+                pruned.len()
+            );
+            if let Err(e) = self.storage.save_binary(ACTIVE_LIBRARY_IDS_KEY, &pruned) {
+                warn!("[APP SERVICE] failed to persist pruned active_library_ids: {e}");
+            }
+        }
+
+        *self.all_libraries.write() = libraries;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::state_storage::StateStorage;
+
+    /// Build a minimal `AppService` for tests. Uses an isolated redb
+    /// path under `std::env::temp_dir()` so independent tests don't
+    /// collide on the shared file lock. `CustomAudioEngine::new()`
+    /// grabs `tokio::runtime::Handle::current()` inside
+    /// `AudioRenderer::new()`, which is why every test below is
+    /// annotated `#[tokio::test]`.
+    async fn test_app() -> (AppService, std::path::PathBuf) {
+        // Use a process-and-nanosecond-suffixed db file. `std::env::temp_dir`
+        // is shared across the test runner's threads, and two
+        // concurrent tests opening the same redb would race the
+        // exclusive lock.
+        let suffix = format!(
+            "test_app_libraries_{}_{}.redb",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let db_path = std::env::temp_dir().join(suffix);
+        let _ = std::fs::remove_file(&db_path);
+        let storage = StateStorage::new(db_path.clone()).expect("redb open");
+        let app = AppService::new_with_storage(storage)
+            .await
+            .expect("app service");
+        (app, db_path)
+    }
+
+    /// Fresh storage means no persisted selection — the active set
+    /// starts empty and is interpreted as "no filter / show all".
+    #[tokio::test]
+    async fn fresh_app_service_has_empty_active_library_ids() {
+        let (app, db_path) = test_app().await;
+        assert!(
+            app.active_library_ids().is_empty(),
+            "fresh app must report no active library IDs (== all)"
+        );
+        assert!(
+            app.all_libraries().is_empty(),
+            "fresh app must report no cached library list yet"
+        );
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// `toggle_library(id)` flips membership and reports the new state.
+    /// First call adds, second call removes — the round-trip is what
+    /// the popover checkbox row binds to.
+    #[tokio::test]
+    async fn toggle_library_adds_then_removes_membership() {
+        let (app, db_path) = test_app().await;
+
+        let after_add = app.toggle_library(7);
+        assert!(after_add, "first toggle must report `now_active = true`");
+        assert!(app.active_library_ids().contains(&7));
+
+        let after_remove = app.toggle_library(7);
+        assert!(
+            !after_remove,
+            "second toggle must report `now_active = false`"
+        );
+        assert!(!app.active_library_ids().contains(&7));
+
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// Toggled selection must survive an AppService rebuild — that's
+    /// the persistence contract behind the "restart nokkvi, keep the
+    /// same libraries selected" UX requirement.
+    #[tokio::test]
+    async fn toggled_selection_persists_across_rebuild() {
+        let suffix = format!(
+            "test_app_libraries_persist_{}_{}.redb",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let db_path = std::env::temp_dir().join(suffix);
+        let _ = std::fs::remove_file(&db_path);
+
+        // First boot: toggle two libraries on, then drop everything.
+        {
+            let storage = StateStorage::new(db_path.clone()).expect("first storage");
+            let app = AppService::new_with_storage(storage)
+                .await
+                .expect("first app");
+            assert!(app.toggle_library(1));
+            assert!(app.toggle_library(2));
+            assert_eq!(app.active_library_ids().len(), 2);
+            // Drop forces redb to flush its WAL — the next `new` must
+            // see the persisted set.
+            drop(app);
+        }
+
+        // Second boot: a fresh AppService over the same redb file must
+        // restore exactly the two IDs we toggled.
+        {
+            let storage = StateStorage::new(db_path.clone()).expect("second storage");
+            let app = AppService::new_with_storage(storage)
+                .await
+                .expect("second app");
+            let restored = app.active_library_ids();
+            assert!(restored.contains(&1));
+            assert!(restored.contains(&2));
+            assert_eq!(restored.len(), 2);
+            drop(app);
+        }
+
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// `apply_library_refresh` must prune IDs that are no longer
+    /// present in the refreshed server list, and the pruned set must
+    /// be persisted so the next launch doesn't see the ghost IDs.
+    #[tokio::test]
+    async fn apply_library_refresh_prunes_missing_ids_and_persists() {
+        let suffix = format!(
+            "test_app_libraries_prune_{}_{}.redb",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let db_path = std::env::temp_dir().join(suffix);
+        let _ = std::fs::remove_file(&db_path);
+
+        // Boot 1: pre-seed the active set with IDs 1, 2, 3.
+        {
+            let storage = StateStorage::new(db_path.clone()).expect("boot1 storage");
+            let app = AppService::new_with_storage(storage)
+                .await
+                .expect("boot1 app");
+            app.set_active_library_ids([1, 2, 3].into_iter().collect());
+
+            // Refresh with a server list that only contains IDs 1, 2 —
+            // ID 3 (the "deleted" library) must be pruned.
+            app.apply_library_refresh(vec![
+                Library {
+                    id: 1,
+                    name: "Music".to_string(),
+                    song_count: None,
+                },
+                Library {
+                    id: 2,
+                    name: "Audiobooks".to_string(),
+                    song_count: None,
+                },
+            ]);
+
+            let active = app.active_library_ids();
+            assert!(active.contains(&1));
+            assert!(active.contains(&2));
+            assert!(
+                !active.contains(&3),
+                "ID 3 (no longer in server list) must be pruned"
+            );
+            assert_eq!(active.len(), 2);
+            assert_eq!(app.all_libraries().len(), 2);
+            drop(app);
+        }
+
+        // Boot 2: the pruned set must be persisted.
+        {
+            let storage = StateStorage::new(db_path.clone()).expect("boot2 storage");
+            let app = AppService::new_with_storage(storage)
+                .await
+                .expect("boot2 app");
+            let restored = app.active_library_ids();
+            assert!(restored.contains(&1));
+            assert!(restored.contains(&2));
+            assert!(
+                !restored.contains(&3),
+                "pruned ID must not resurrect from disk"
+            );
+            assert_eq!(restored.len(), 2);
+            drop(app);
+        }
+
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// When every active ID is still present in the refreshed list,
+    /// `apply_library_refresh` must NOT touch the active set — the
+    /// "no-op refresh skips the redb write" optimization.
+    #[tokio::test]
+    async fn apply_library_refresh_is_no_op_when_no_pruning_needed() {
+        let (app, db_path) = test_app().await;
+        app.set_active_library_ids([1, 2].into_iter().collect());
+
+        app.apply_library_refresh(vec![
+            Library {
+                id: 1,
+                name: "Music".to_string(),
+                song_count: None,
+            },
+            Library {
+                id: 2,
+                name: "Audiobooks".to_string(),
+                song_count: None,
+            },
+            Library {
+                id: 3,
+                name: "Podcasts".to_string(),
+                song_count: None,
+            },
+        ]);
+
+        let active = app.active_library_ids();
+        assert!(active.contains(&1));
+        assert!(active.contains(&2));
+        assert!(
+            !active.contains(&3),
+            "ID 3 was NOT in the active set before; refresh must not auto-select it"
+        );
+        assert_eq!(active.len(), 2);
+        assert_eq!(app.all_libraries().len(), 3);
+
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// `active_library_ids_vec` must return a stable sorted slice so
+    /// callers can use it as a cache key without re-sorting per call.
+    #[tokio::test]
+    async fn active_library_ids_vec_is_sorted() {
+        let (app, db_path) = test_app().await;
+        // Insert in non-monotonic order to make sure sorting is the
+        // accessor's responsibility, not the underlying HashSet's.
+        app.toggle_library(5);
+        app.toggle_library(1);
+        app.toggle_library(3);
+
+        let v = app.active_library_ids_vec();
+        assert_eq!(v, vec![1, 3, 5]);
+
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// `library_count` reflects the cached `all_libraries` length —
+    /// the popover hides at N <= 1 (Phase 7 trigger logic) so this is
+    /// the source of truth for the Phase-7 gate too.
+    #[tokio::test]
+    async fn library_count_reflects_apply_refresh_payload() {
+        let (app, db_path) = test_app().await;
+        assert_eq!(app.library_count(), 0);
+
+        app.apply_library_refresh(vec![Library {
+            id: 1,
+            name: "Music".to_string(),
+            song_count: None,
+        }]);
+        assert_eq!(app.library_count(), 1);
+
+        app.apply_library_refresh(vec![
+            Library {
+                id: 1,
+                name: "Music".to_string(),
+                song_count: None,
+            },
+            Library {
+                id: 2,
+                name: "Audiobooks".to_string(),
+                song_count: None,
+            },
+        ]);
+        assert_eq!(app.library_count(), 2);
+
+        drop(app);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// `set_active_library_ids` replaces the selection wholesale and
+    /// persists the new set immediately. Two consecutive calls must
+    /// honor the second call's contents — no leak from the first.
+    #[tokio::test]
+    async fn set_active_library_ids_replaces_wholesale_and_persists() {
+        let suffix = format!(
+            "test_app_libraries_set_{}_{}.redb",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let db_path = std::env::temp_dir().join(suffix);
+        let _ = std::fs::remove_file(&db_path);
+
+        // Boot 1: assign {1, 2, 3}, then wholesale-replace with {4, 5}.
+        {
+            let storage = StateStorage::new(db_path.clone()).expect("boot1 storage");
+            let app = AppService::new_with_storage(storage)
+                .await
+                .expect("boot1 app");
+            app.set_active_library_ids([1, 2, 3].into_iter().collect());
+            app.set_active_library_ids([4, 5].into_iter().collect());
+
+            let active = app.active_library_ids();
+            assert_eq!(active.len(), 2);
+            assert!(active.contains(&4));
+            assert!(active.contains(&5));
+            assert!(!active.contains(&1));
+            drop(app);
+        }
+
+        // Boot 2: confirms the wholesale-replace was the persisted shape.
+        {
+            let storage = StateStorage::new(db_path.clone()).expect("boot2 storage");
+            let app = AppService::new_with_storage(storage)
+                .await
+                .expect("boot2 app");
+            let restored = app.active_library_ids();
+            assert_eq!(restored.len(), 2);
+            assert!(restored.contains(&4));
+            assert!(restored.contains(&5));
+            drop(app);
+        }
+
+        let _ = std::fs::remove_file(&db_path);
     }
 }
 

@@ -22,12 +22,14 @@ impl Nokkvi {
         params: super::components::PaginatedFetch,
     ) -> (Result<Vec<AlbumUIViewData>, String>, usize) {
         let albums_vm = shell.albums().clone();
+        let library_ids = shell.active_library_ids_vec();
         match albums_vm
-            .load_raw_albums_page(
+            .load_raw_albums_page_with_libraries(
                 Some(params.view_str),
                 Some(params.sort_order),
                 params.search_query.as_deref(),
                 params.filter.as_ref(),
+                &library_ids,
                 params.offset,
                 params.page_size,
             )

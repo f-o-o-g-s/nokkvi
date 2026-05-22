@@ -969,7 +969,10 @@ impl Nokkvi {
             move |shell| async move {
                 let song_ids = resolve_fn(shell.clone()).await?;
                 let service = shell.playlists_api().await?;
-                let (playlists, _) = service.load_playlists("name", "ASC", None).await?;
+                let library_ids = shell.active_library_ids_vec();
+                let (playlists, _) = service
+                    .load_playlists_with_libraries("name", "ASC", None, &library_ids)
+                    .await?;
                 let playlist_pairs: Vec<(String, String)> =
                     playlists.into_iter().map(|p| (p.id, p.name)).collect();
                 Ok((playlist_pairs, song_ids))

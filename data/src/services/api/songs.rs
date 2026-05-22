@@ -26,6 +26,7 @@ struct SongQueryShape<'a> {
     order: &'a str,
     search_query: Option<&'a str>,
     filter: Option<&'a crate::types::filter::LibraryFilter>,
+    library_ids: &'a [i32],
     sort_mode: &'a str,
 }
 
@@ -41,18 +42,24 @@ impl SongsApiService {
     /// * `sort_order` — `"ASC"` or `"DESC"`. Empty falls back to the per-mode default.
     /// * `search_query` — Optional title-substring search.
     /// * `filter` — Optional `LibraryFilter` (artist / album / genre scope).
+    /// * `library_ids` — When non-empty, restrict results to the given library
+    ///   (music folder) IDs by appending repeatable `library_id` params. An
+    ///   empty slice omits the param entirely — Navidrome's auto-scoping
+    ///   already limits to libraries the user has access to.
     /// * `offset` — Optional starting index (defaults to 0).
     /// * `limit` — `Some(n)` issues a single page of `n` rows; `None` paginates
     ///   internally in `FULL_LOAD_PAGE_SIZE` chunks until the server reports a
     ///   short page or the cumulative count meets `X-Total-Count`. The latter
     ///   replaced the legacy `_end=50000` ceiling that silently truncated
     ///   libraries with more than 50_000 songs.
+    #[allow(clippy::too_many_arguments)]
     pub async fn load_songs(
         &self,
         sort_mode: &str,
         sort_order: &str,
         search_query: Option<&str>,
         filter: Option<&crate::types::filter::LibraryFilter>,
+        library_ids: &[i32],
         offset: Option<usize>,
         limit: Option<usize>,
     ) -> Result<(Vec<Song>, usize)> {
@@ -68,6 +75,7 @@ impl SongsApiService {
             order,
             search_query,
             filter,
+            library_ids,
             sort_mode,
         };
 
@@ -81,12 +89,19 @@ impl SongsApiService {
     }
 
     /// Build the `_sort` / `_order` / `_start` / `_end` / filter / favorited
-    /// params for a single Songs request. Shared between the single-page and
-    /// paginated paths so the per-request shape stays in lockstep.
+    /// / library_id params for a single Songs request. Shared between the
+    /// single-page and paginated paths so the per-request shape stays in
+    /// lockstep.
+    ///
+    /// `library_id_strings` must be a slice of `String` values that
+    /// outlives the returned params vec. The caller owns the Vec — pushing
+    /// `as_str()` borrows directly from the slice keeps the lifetime
+    /// gymnastics off the helper signature.
     fn build_song_params<'a>(
         shape: &SongQueryShape<'a>,
         start_str: &'a str,
         end_str: &'a str,
+        library_id_strings: &'a [String],
     ) -> Vec<(&'a str, &'a str)> {
         let mut params: Vec<(&str, &str)> = vec![
             ("_sort", shape.sort_param),
@@ -105,6 +120,12 @@ impl SongsApiService {
                 crate::types::filter::LibraryFilter::AlbumId { id, .. } => {
                     params.push(("album_id", id));
                 }
+                // LibraryFilter::LibraryIds threaded through the orthogonal
+                // `library_id_strings` slot — see callers, which fold both
+                // the orthogonal `library_ids` argument and any
+                // `LibraryFilter::LibraryIds` payload into a single owned
+                // Vec<String> before invoking this helper.
+                crate::types::filter::LibraryFilter::LibraryIds(_) => {}
             }
         } else if let Some(query) = shape.search_query
             && !query.is_empty()
@@ -114,7 +135,22 @@ impl SongsApiService {
         if shape.sort_mode == "favorited" {
             params.push(("starred", "true"));
         }
+        for s in library_id_strings {
+            params.push(("library_id", s.as_str()));
+        }
         params
+    }
+
+    /// Fold the orthogonal `library_ids` slice and any
+    /// `LibraryFilter::LibraryIds` payload into a single owned
+    /// `Vec<String>` so the borrows pushed into `build_song_params` outlive
+    /// the params Vec. Shared by both the single-page and paginated paths.
+    fn collect_library_id_strings(shape: &SongQueryShape<'_>) -> Vec<String> {
+        let mut strings: Vec<String> = shape.library_ids.iter().map(|id| id.to_string()).collect();
+        if let Some(crate::types::filter::LibraryFilter::LibraryIds(ids)) = shape.filter {
+            strings.extend(ids.iter().map(|id| id.to_string()));
+        }
+        strings
     }
 
     /// Single `/api/song` request, used when the caller specified an explicit
@@ -126,7 +162,8 @@ impl SongsApiService {
         limit: u32,
     ) -> Result<(Vec<Song>, usize)> {
         let range = pagination::paged_range(offset, Some(limit));
-        let params = Self::build_song_params(shape, &range.start, &range.end);
+        let library_id_strings = Self::collect_library_id_strings(shape);
+        let params = Self::build_song_params(shape, &range.start, &range.end, &library_id_strings);
         let response = self
             .client
             .get_with_headers("/api/song", &params)
@@ -157,6 +194,7 @@ impl SongsApiService {
         let order = shape.order.to_string();
         let search_query = shape.search_query.map(str::to_string);
         let filter = shape.filter.cloned();
+        let library_ids: Vec<i32> = shape.library_ids.to_vec();
         let sort_mode = shape.sort_mode.to_string();
 
         pagination::fetch_all_pages(FULL_LOAD_PAGE_SIZE, |start, end| {
@@ -165,6 +203,7 @@ impl SongsApiService {
             let order = order.clone();
             let search_query = search_query.clone();
             let filter = filter.clone();
+            let library_ids = library_ids.clone();
             let sort_mode = sort_mode.clone();
             async move {
                 let absolute_start = starting_offset.saturating_add(start);
@@ -176,9 +215,12 @@ impl SongsApiService {
                     order: &order,
                     search_query: search_query.as_deref(),
                     filter: filter.as_ref(),
+                    library_ids: &library_ids,
                     sort_mode: &sort_mode,
                 };
-                let params = Self::build_song_params(&shape, &start_str, &end_str);
+                let library_id_strings = Self::collect_library_id_strings(&shape);
+                let params =
+                    Self::build_song_params(&shape, &start_str, &end_str, &library_id_strings);
                 let response = client
                     .get_with_headers("/api/song", &params)
                     .await
@@ -312,5 +354,133 @@ impl SongsApiService {
         let songs = Self::parse_song_response(response_text)?;
         let total = total_header.map_or(songs.len(), |t| t as usize);
         Ok((songs, total))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::filter::LibraryFilter;
+
+    /// Empty `library_ids` slice + no `LibraryFilter::LibraryIds` means
+    /// `collect_library_id_strings` produces an empty Vec, and
+    /// `build_song_params` emits zero `library_id` params — Navidrome
+    /// auto-scopes to the user's accessible libraries when the param
+    /// is absent.
+    #[test]
+    fn empty_library_ids_emits_zero_library_id_params() {
+        let shape = SongQueryShape {
+            sort_param: "album",
+            order: "ASC",
+            search_query: None,
+            filter: None,
+            library_ids: &[],
+            sort_mode: "title",
+        };
+        let library_id_strings = SongsApiService::collect_library_id_strings(&shape);
+        assert!(library_id_strings.is_empty());
+
+        let params = SongsApiService::build_song_params(&shape, "0", "100", &library_id_strings);
+        let library_id_count = params.iter().filter(|(k, _)| *k == "library_id").count();
+        assert_eq!(library_id_count, 0);
+    }
+
+    /// Non-empty `library_ids` emits one `library_id` repeat per ID —
+    /// matches Navidrome's react-admin `arrayFormat: 'none'` wire shape.
+    #[test]
+    fn nonempty_library_ids_emit_one_repeat_per_id() {
+        let shape = SongQueryShape {
+            sort_param: "album",
+            order: "ASC",
+            search_query: None,
+            filter: None,
+            library_ids: &[1, 2, 3],
+            sort_mode: "title",
+        };
+        let library_id_strings = SongsApiService::collect_library_id_strings(&shape);
+        assert_eq!(library_id_strings, vec!["1", "2", "3"]);
+
+        let params = SongsApiService::build_song_params(&shape, "0", "100", &library_id_strings);
+        let library_id_values: Vec<&str> = params
+            .iter()
+            .filter(|(k, _)| *k == "library_id")
+            .map(|(_, v)| *v)
+            .collect();
+        assert_eq!(library_id_values, vec!["1", "2", "3"]);
+    }
+
+    /// `LibraryFilter::LibraryIds` and the orthogonal `library_ids`
+    /// argument are merged into a single set of repeats — both
+    /// navigation surfaces are treated identically.
+    #[test]
+    fn library_filter_ids_and_orthogonal_arg_are_merged() {
+        let filter = LibraryFilter::LibraryIds(vec![10, 20]);
+        let shape = SongQueryShape {
+            sort_param: "album",
+            order: "ASC",
+            search_query: None,
+            filter: Some(&filter),
+            library_ids: &[1, 2],
+            sort_mode: "title",
+        };
+        let library_id_strings = SongsApiService::collect_library_id_strings(&shape);
+        // Orthogonal arg first, then filter payload — order doesn't
+        // matter to Navidrome (Squirrel's `Eq{}` is a SQL `IN (...)`)
+        // but stable iteration order is nice for snapshot tests.
+        assert_eq!(library_id_strings, vec!["1", "2", "10", "20"]);
+    }
+
+    /// `LibraryFilter::ArtistId` does NOT contribute to library_ids —
+    /// only the dedicated `LibraryIds` variant does.
+    #[test]
+    fn library_filter_artist_id_does_not_contribute_library_ids() {
+        let filter = LibraryFilter::ArtistId {
+            id: "abc".to_string(),
+            name: "Some Artist".to_string(),
+        };
+        let shape = SongQueryShape {
+            sort_param: "album",
+            order: "ASC",
+            search_query: None,
+            filter: Some(&filter),
+            library_ids: &[],
+            sort_mode: "title",
+        };
+        let library_id_strings = SongsApiService::collect_library_id_strings(&shape);
+        assert!(library_id_strings.is_empty());
+
+        let params = SongsApiService::build_song_params(&shape, "0", "100", &library_id_strings);
+        // ArtistId is still honored on its own param key.
+        assert!(
+            params
+                .iter()
+                .any(|(k, v)| *k == "artists_id" && *v == "abc")
+        );
+        assert_eq!(params.iter().filter(|(k, _)| *k == "library_id").count(), 0);
+    }
+
+    /// Negative library IDs (defensive — server uses signed int32) and
+    /// large IDs round-trip through `to_string` correctly.
+    #[test]
+    fn large_and_negative_ids_format_correctly() {
+        let shape = SongQueryShape {
+            sort_param: "album",
+            order: "ASC",
+            search_query: None,
+            filter: None,
+            library_ids: &[i32::MIN, -1, 0, 1, i32::MAX],
+            sort_mode: "title",
+        };
+        let library_id_strings = SongsApiService::collect_library_id_strings(&shape);
+        assert_eq!(
+            library_id_strings,
+            vec![
+                i32::MIN.to_string(),
+                (-1).to_string(),
+                "0".to_string(),
+                "1".to_string(),
+                i32::MAX.to_string(),
+            ]
+        );
     }
 }

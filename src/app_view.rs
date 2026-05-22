@@ -82,6 +82,19 @@ fn similar_column_dropdown_state(
     }
 }
 
+/// Sibling of [`column_dropdown_state`] for the library selector popover.
+/// Called from `navigation_bar` to feed `(is_open, trigger_bounds)` into
+/// the nav-bar trigger; the paired popover overlay reads the same state.
+fn library_selector_state(
+    open_menu: &Option<crate::app_message::OpenMenu>,
+) -> (bool, Option<iced::Rectangle>) {
+    use crate::app_message::OpenMenu;
+    match open_menu {
+        Some(OpenMenu::LibrarySelector { trigger_bounds }) => (true, Some(*trigger_bounds)),
+        _ => (false, None),
+    }
+}
+
 /// Extract `(is_open, position)` for the now-playing strip context menu (only
 /// one strip is on-screen at a time, so the `Strip` id is unambiguous).
 fn strip_context_state(
@@ -113,6 +126,16 @@ fn map_nav_bar_message(msg: widgets::NavBarMessage) -> Message {
         widgets::NavBarMessage::StripClicked => Message::StripClicked,
         widgets::NavBarMessage::StripContextAction(entry) => Message::StripContextAction(entry),
         widgets::NavBarMessage::SetOpenMenu(next) => Message::SetOpenMenu(next),
+        widgets::NavBarMessage::LibraryOpenChange {
+            open,
+            trigger_bounds,
+        } => Message::Library(crate::app_message::LibraryMessage::OpenChange {
+            open,
+            trigger_bounds,
+        }),
+        widgets::NavBarMessage::LibraryToggle(id) => {
+            Message::Library(crate::app_message::LibraryMessage::Toggle(id))
+        }
         widgets::NavBarMessage::About => {
             Message::AboutModal(crate::widgets::about_modal::AboutModalMessage::Open)
         }
@@ -344,9 +367,42 @@ impl Nokkvi {
                 let side_nav_view: widgets::NavView =
                     Option::<widgets::NavView>::from(self.current_view)
                         .unwrap_or(widgets::NavView::Queue);
+                // Mirror the top-nav library state into the side-nav so
+                // the footer trigger + popover see the same source of
+                // truth.
+                let (sn_library_count, sn_active_library_count, sn_library_rows) =
+                    match &self.app_service {
+                        Some(svc) => {
+                            let active = svc.active_library_ids();
+                            let all_checked = active.is_empty();
+                            let mut rows: Vec<(i32, String, Option<u32>, bool)> = svc
+                                .all_libraries()
+                                .into_iter()
+                                .map(|lib| {
+                                    let checked = all_checked || active.contains(&lib.id);
+                                    (lib.id, lib.name, lib.song_count, checked)
+                                })
+                                .collect();
+                            rows.sort_by(|a, b| a.1.cmp(&b.1));
+                            let active_for_display = if all_checked {
+                                rows.len()
+                            } else {
+                                active.len()
+                            };
+                            (svc.library_count(), active_for_display, rows)
+                        }
+                        None => (0, 0, Vec::new()),
+                    };
+                let (sn_library_selector_open, sn_library_selector_bounds) =
+                    library_selector_state(&self.open_menu);
                 let side_data = widgets::SideNavBarData {
                     current_view: side_nav_view,
                     settings_open: self.current_view == View::Settings,
+                    library_count: sn_library_count,
+                    active_library_count: sn_active_library_count,
+                    library_selector_open: sn_library_selector_open,
+                    library_selector_bounds: sn_library_selector_bounds,
+                    library_rows: sn_library_rows,
                 };
                 outer = outer.push(iced::widget::row![
                     widgets::side_nav_bar(side_data).map(map_nav_bar_message),
@@ -785,6 +841,42 @@ impl Nokkvi {
             crate::state::ActivePlayback::Queue => (None, None, None, None),
         };
 
+        // Library-filter chrome state — `library_count == 0` (pre-login or
+        // before `refresh_libraries` lands) suppresses the trigger so the user
+        // never sees a chrome flicker before the count is known.
+        let (library_count, active_library_count, library_rows) = match &self.app_service {
+            Some(svc) => {
+                let active = svc.active_library_ids();
+                // Empty active set = "all" semantically; render each row
+                // as checked so the popover reflects the user's mental
+                // model ("everything is on") instead of an unchecked
+                // wall of rows that toggle into a subset on click.
+                let all_checked = active.is_empty();
+                let mut rows: Vec<(i32, String, Option<u32>, bool)> = svc
+                    .all_libraries()
+                    .into_iter()
+                    .map(|lib| {
+                        let checked = all_checked || active.contains(&lib.id);
+                        (lib.id, lib.name, lib.song_count, checked)
+                    })
+                    .collect();
+                rows.sort_by(|a, b| a.1.cmp(&b.1));
+                // When the empty-as-all convention is in effect the
+                // popover counter reads "{total} / {total}" so the
+                // header matches the all-checked row state instead of
+                // showing "0 / {total}" while every box looks ticked.
+                let active_for_display = if all_checked {
+                    rows.len()
+                } else {
+                    active.len()
+                };
+                (svc.library_count(), active_for_display, rows)
+            }
+            None => (0, 0, Vec::new()),
+        };
+        let (library_selector_open, library_selector_bounds) =
+            library_selector_state(&self.open_menu);
+
         let nav_bar_data = widgets::NavBarViewData {
             current_view: current_nav_view,
             track_title,
@@ -815,6 +907,11 @@ impl Nokkvi {
                 let (_, pos) = strip_context_state(&self.open_menu);
                 pos
             },
+            library_count,
+            active_library_count,
+            library_selector_open,
+            library_selector_bounds,
+            library_rows,
         };
 
         // Use the nav_bar component, mapping NavBarMessage to app Message

@@ -55,6 +55,20 @@ const INDICATOR_WIDTH: f32 = 2.5;
 pub(crate) struct SideNavBarData {
     pub current_view: NavView,
     pub settings_open: bool,
+    /// Total libraries known to the client. `<= 1` hides the footer
+    /// library trigger entirely (same suppression rule as the top-nav
+    /// variant — see `libraries_imp_plan.md` §2).
+    pub library_count: usize,
+    /// Subset of `library_count` currently in the active selection.
+    pub active_library_count: usize,
+    /// Whether the library-filter popover is currently open.
+    pub library_selector_open: bool,
+    /// Trigger bounds captured at click time so the popover overlay
+    /// anchors next to the footer trigger.
+    pub library_selector_bounds: Option<iced::Rectangle>,
+    /// Library-filter popover rows: `(id, name, song_count, checked)`.
+    /// Mirrors `NavBarViewData::library_rows`.
+    pub library_rows: Vec<(i32, String, Option<u32>, bool)>,
 }
 
 /// Canvas program that draws rotated text with optional active/hover indicator.
@@ -326,8 +340,76 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
         None
     };
 
-    // Build vertical column of tabs from shared NAV_TABS
-    let mut tabs = column![].spacing(0).width(Length::Fixed(SIDE_NAV_WIDTH));
+    // -------------------------------------------------------------------------
+    // Library-filter trigger + popover (rendered ABOVE the Queue tab)
+    // -------------------------------------------------------------------------
+    //
+    // The trigger renders compact: icon-only 28 × 28 in the neutral
+    // state, icon + pip + `N/M` text stacked vertically in 28 × 44
+    // when filtered. Mounting at the top of the column (rather than
+    // the footer) keeps the button visible on short windows and
+    // matches the top-nav layout that puts the trigger before the
+    // Queue tab.
+    //
+    // The popover is a zero-size `library_selector_popover` sibling
+    // whose only render output is the iced overlay anchored to
+    // `library_selector_bounds`. From the top of the sidebar the
+    // overlay opens downward; the overlay positioning logic falls
+    // back to anchoring above when there's no room below (cheap
+    // safety for very short windows).
+    //
+    // Trigger self-suppresses to `Space::new()` when
+    // `library_count <= 1`, so the slot collapses naturally on
+    // single-library servers.
+    let library_count = data.library_count;
+    let active_library_count = data.active_library_count;
+    let library_selector_open = data.library_selector_open;
+    let library_selector_bounds = data.library_selector_bounds;
+    let library_rows = data.library_rows.clone();
+
+    let library_trigger = super::hover_overlay::HoverOverlay::new(
+        container(super::library_filter_trigger::library_filter_trigger(
+            library_count,
+            active_library_count,
+            library_selector_open,
+            true, // compact — side-nav width drives the vertical stack
+            library_selector_bounds,
+            |open, trigger_bounds| NavBarMessage::LibraryOpenChange {
+                open,
+                trigger_bounds,
+            },
+        ))
+        .width(Length::Fixed(SIDE_NAV_WIDTH))
+        .align_x(iced::Alignment::Center),
+    )
+    .border_radius(theme::ui_border_radius());
+
+    let popover_items: Vec<(i32, String, String, bool)> = library_rows
+        .into_iter()
+        .map(|(id, name, song_count, checked)| {
+            let right_label = song_count
+                .map(super::format_count_with_commas)
+                .unwrap_or_default();
+            (id, name, right_label, checked)
+        })
+        .collect();
+    let library_popover = super::checkbox_dropdown::library_selector_popover(
+        popover_items,
+        active_library_count,
+        library_count,
+        NavBarMessage::LibraryToggle,
+        |bounds| NavBarMessage::LibraryOpenChange {
+            open: bounds.is_some(),
+            trigger_bounds: bounds,
+        },
+        library_selector_open,
+        library_selector_bounds,
+    );
+
+    // Build vertical column: library trigger first, then NAV_TABS.
+    let mut tabs = column![library_trigger, library_popover, separator()]
+        .spacing(0)
+        .width(Length::Fixed(SIDE_NAV_WIDTH));
     for &(label, icon_path, view) in NAV_TABS {
         tabs = tabs.push(nav_tab(label, icon_path, view)).push(separator());
     }

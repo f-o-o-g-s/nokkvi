@@ -53,6 +53,7 @@ mod genres;
 mod hotkeys;
 mod info_modal;
 mod ipc;
+mod library_filter;
 mod library_refresh;
 mod loader_target;
 mod menus;
@@ -325,6 +326,7 @@ impl Nokkvi {
             // Hotkey Actions (namespaced)
             // -----------------------------------------------------------------
             Message::Hotkey(msg) => self.dispatch_hotkey(msg),
+            Message::Library(msg) => self.handle_library_message(msg),
 
             // -----------------------------------------------------------------
             // Component Message Bubbling

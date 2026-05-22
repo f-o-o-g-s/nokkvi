@@ -62,11 +62,36 @@ impl GenresApiService {
     /// sort_mode: Sort mode (name, albumCount, songCount, random)
     /// sort_order: Sort order (ASC or DESC)
     /// search_query: Optional search query
+    ///
+    /// Shim that forwards an empty `library_ids` slice — preserved for
+    /// existing UI handler call sites. New library-aware code paths
+    /// should call [`load_genres_with_libraries`] directly.
     pub async fn load_genres(
         &self,
         sort_mode: &str,
         sort_order: &str,
         search_query: Option<&str>,
+    ) -> Result<(Vec<Genre>, u32)> {
+        self.load_genres_with_libraries(sort_mode, sort_order, search_query, &[])
+            .await
+    }
+
+    /// Library-aware variant of [`load_genres`]: scopes the Native
+    /// `/api/genre` result to the given library (music folder) IDs via
+    /// the `library_tag.library_id` join
+    /// (`reference-navidrome/persistence/sql_tags.go:60-86`). The Subsonic
+    /// `getGenres` enrichment call is left unfiltered — its counts cover
+    /// the user's full accessible set and a future commit can teach it to
+    /// honor `musicFolderId` when Navidrome ships that filter.
+    ///
+    /// An empty `library_ids` slice omits the param entirely (Navidrome
+    /// auto-scopes to libraries the user can access).
+    pub async fn load_genres_with_libraries(
+        &self,
+        sort_mode: &str,
+        sort_order: &str,
+        search_query: Option<&str>,
+        library_ids: &[i32],
     ) -> Result<(Vec<Genre>, u32)> {
         // For random view, we load by name and shuffle client-side
         let is_random = sort_mode == "random";
@@ -96,6 +121,14 @@ impl GenresApiService {
         {
             search_query_string = query.to_string();
             params.push(("name", &search_query_string));
+        }
+
+        // Owned `String`s for any `library_id` filter param values. Owned
+        // alongside `params` so the `&str` borrows pushed below outlive
+        // the call to `get_with_headers`.
+        let library_id_strings: Vec<String> = library_ids.iter().map(|id| id.to_string()).collect();
+        for s in &library_id_strings {
+            params.push(("library_id", s.as_str()));
         }
 
         // Fetch from both APIs in parallel

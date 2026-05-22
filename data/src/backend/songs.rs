@@ -217,6 +217,10 @@ impl SongsService {
 
     /// Load songs and return raw Song structs (first page only).
     /// Uses PAGE_SIZE as the default limit for pagination.
+    ///
+    /// Shim that forwards an empty `library_ids` slice — preserved for
+    /// existing UI handler call sites. New library-aware code paths
+    /// should call [`load_raw_songs_with_libraries`] directly.
     pub async fn load_raw_songs(
         &self,
         sort_mode: Option<&str>,
@@ -224,19 +228,68 @@ impl SongsService {
         search_query: Option<&str>,
         filter: Option<&crate::types::filter::LibraryFilter>,
     ) -> Result<Vec<Song>> {
-        use crate::types::paged_buffer::PAGE_SIZE;
-        self.load_raw_songs_page(sort_mode, sort_order, search_query, filter, 0, PAGE_SIZE)
+        self.load_raw_songs_with_libraries(sort_mode, sort_order, search_query, filter, &[])
             .await
+    }
+
+    /// Library-aware variant of [`load_raw_songs`].
+    pub async fn load_raw_songs_with_libraries(
+        &self,
+        sort_mode: Option<&str>,
+        sort_order: Option<&str>,
+        search_query: Option<&str>,
+        filter: Option<&crate::types::filter::LibraryFilter>,
+        library_ids: &[i32],
+    ) -> Result<Vec<Song>> {
+        use crate::types::paged_buffer::PAGE_SIZE;
+        self.load_raw_songs_page_with_libraries(
+            sort_mode,
+            sort_order,
+            search_query,
+            filter,
+            library_ids,
+            0,
+            PAGE_SIZE,
+        )
+        .await
     }
 
     /// Load a specific page of songs with explicit offset/limit.
     /// Returns (songs, total_count) for use with PagedBuffer.
+    ///
+    /// Shim that forwards an empty `library_ids` slice — preserved for
+    /// existing UI handler call sites. New library-aware code paths
+    /// should call [`load_raw_songs_page_with_libraries`] directly.
     pub async fn load_raw_songs_page(
         &self,
         sort_mode: Option<&str>,
         sort_order: Option<&str>,
         search_query: Option<&str>,
         filter: Option<&crate::types::filter::LibraryFilter>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<Song>> {
+        self.load_raw_songs_page_with_libraries(
+            sort_mode,
+            sort_order,
+            search_query,
+            filter,
+            &[],
+            offset,
+            limit,
+        )
+        .await
+    }
+
+    /// Library-aware variant of [`load_raw_songs_page`].
+    #[allow(clippy::too_many_arguments)]
+    pub async fn load_raw_songs_page_with_libraries(
+        &self,
+        sort_mode: Option<&str>,
+        sort_order: Option<&str>,
+        search_query: Option<&str>,
+        filter: Option<&crate::types::filter::LibraryFilter>,
+        library_ids: &[i32],
         offset: usize,
         limit: usize,
     ) -> Result<Vec<Song>> {
@@ -252,6 +305,7 @@ impl SongsService {
                 sort_order,
                 search_opt,
                 filter,
+                library_ids,
                 Some(offset),
                 Some(limit),
             )

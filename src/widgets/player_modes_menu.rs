@@ -47,11 +47,10 @@ use crate::{
 const TRIGGER_ICON_SIZE: f32 = 20.0;
 const TRIGGER_BORDER_WIDTH: f32 = 2.0;
 
-/// Diameter of the badge dot drawn in the trigger's top-right corner when any
-/// menu item is active and the menu is closed.
-const BADGE_DIAMETER: f32 = 8.0;
-/// Inset from the trigger's right and top edges to the badge dot's outer edge.
-const BADGE_INSET: f32 = 5.0;
+// Badge pip geometry lives in `super::badge_pip` so the kebab trigger and the
+// library-filter trigger render identical "something is on" dots. Use
+// `super::badge_pip::draw_badge_pip()` to emit one in the top-right corner
+// of any trigger.
 
 const MENU_ROW_INSET: f32 = 6.0;
 const MENU_CHECK_GAP: f32 = 8.0;
@@ -203,7 +202,7 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Player
         _cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
-        use iced::advanced::{Renderer, svg::Renderer as SvgRenderer};
+        use iced::advanced::svg::Renderer as SvgRenderer;
 
         let bounds = layout.bounds();
 
@@ -247,26 +246,7 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Player
         // Active-state badge dot — only when closed (open state shows the
         // checkmarks directly so the badge would be redundant).
         if !self.is_open && self.any_active() {
-            let badge_x = bounds.x + bounds.width - BADGE_INSET - BADGE_DIAMETER;
-            let badge_y = bounds.y + BADGE_INSET;
-            let badge_bounds = Rectangle {
-                x: badge_x,
-                y: badge_y,
-                width: BADGE_DIAMETER,
-                height: BADGE_DIAMETER,
-            };
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: badge_bounds,
-                    border: iced::Border {
-                        radius: (BADGE_DIAMETER / 2.0).into(),
-                        width: 1.0,
-                        color: theme::bg0_hard(),
-                    },
-                    ..Default::default()
-                },
-                theme::accent_bright(),
-            );
+            super::badge_pip::draw_badge_pip(renderer, bounds);
         }
     }
 

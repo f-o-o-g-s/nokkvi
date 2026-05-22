@@ -41,12 +41,14 @@ impl Nokkvi {
         album_artists_only: bool,
     ) -> (Result<Vec<ArtistUIViewData>, String>, usize) {
         let artists_vm = shell.artists().clone();
+        let library_ids = shell.active_library_ids_vec();
         match artists_vm
-            .load_raw_artists_page(
+            .load_raw_artists_page_with_libraries(
                 Some(params.view_str),
                 Some(params.sort_order),
                 params.search_query.as_deref(),
                 params.filter.as_ref(),
+                &library_ids,
                 album_artists_only,
                 params.offset,
                 params.page_size,

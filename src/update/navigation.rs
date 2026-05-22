@@ -499,6 +499,7 @@ impl Nokkvi {
                 let shell_for_player = shell.clone();
                 let shell_for_prefs = shell.clone();
                 let shell_for_hotkeys = shell.clone();
+                let shell_for_libraries = shell.clone();
                 return Task::batch([
                     Task::done(Message::LoadQueue), // Queue is always needed (sort-independent)
                     Task::perform(
@@ -524,6 +525,27 @@ impl Nokkvi {
                             async move { shell_for_version.auth().fetch_server_version().await.ok() }
                         },
                         Message::ServerVersionFetched,
+                    ),
+                    // Fetch the multi-library list at login so the nav-bar
+                    // trigger knows the count (and hides itself when
+                    // N<=1). Persisted active_library_ids was already
+                    // restored by AppService::new_with_storage; this
+                    // refresh prunes any now-deleted libraries from that
+                    // set against the live server (plan §14.4).
+                    Task::perform(
+                        async move { shell_for_libraries.refresh_libraries().await },
+                        |result: anyhow::Result<Vec<nokkvi_data::types::library::Library>>| {
+                            match result {
+                                Ok(libs) => Message::Library(
+                                    crate::app_message::LibraryMessage::Loaded(libs),
+                                ),
+                                Err(e) => Message::Library(
+                                    crate::app_message::LibraryMessage::LoadFailed(format!(
+                                        "{e:#}"
+                                    )),
+                                ),
+                            }
+                        },
                     ),
                 ]);
             }

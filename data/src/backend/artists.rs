@@ -135,6 +135,10 @@ impl ArtistsService {
 
     /// Load artists and return raw Artist structs (first page only).
     /// Uses PAGE_SIZE as the default limit for pagination.
+    ///
+    /// Shim that forwards an empty `library_ids` slice — preserved for
+    /// existing UI handler call sites. New library-aware code paths
+    /// should call [`load_raw_artists_with_libraries`] directly.
     pub async fn load_raw_artists(
         &self,
         sort_mode: Option<&str>,
@@ -143,12 +147,35 @@ impl ArtistsService {
         filter: Option<&crate::types::filter::LibraryFilter>,
         album_artists_only: bool,
     ) -> Result<Vec<Artist>> {
-        use crate::types::paged_buffer::PAGE_SIZE;
-        self.load_raw_artists_page(
+        self.load_raw_artists_with_libraries(
             sort_mode,
             sort_order,
             search_query,
             filter,
+            &[],
+            album_artists_only,
+        )
+        .await
+    }
+
+    /// Library-aware variant of [`load_raw_artists`].
+    #[allow(clippy::too_many_arguments)]
+    pub async fn load_raw_artists_with_libraries(
+        &self,
+        sort_mode: Option<&str>,
+        sort_order: Option<&str>,
+        search_query: Option<&str>,
+        filter: Option<&crate::types::filter::LibraryFilter>,
+        library_ids: &[i32],
+        album_artists_only: bool,
+    ) -> Result<Vec<Artist>> {
+        use crate::types::paged_buffer::PAGE_SIZE;
+        self.load_raw_artists_page_with_libraries(
+            sort_mode,
+            sort_order,
+            search_query,
+            filter,
+            library_ids,
             album_artists_only,
             0,
             PAGE_SIZE,
@@ -157,6 +184,10 @@ impl ArtistsService {
     }
 
     /// Load a specific page of artists with explicit offset/limit.
+    ///
+    /// Shim that forwards an empty `library_ids` slice — preserved for
+    /// existing UI handler call sites. New library-aware code paths
+    /// should call [`load_raw_artists_page_with_libraries`] directly.
     #[allow(clippy::too_many_arguments)]
     pub async fn load_raw_artists_page(
         &self,
@@ -164,6 +195,32 @@ impl ArtistsService {
         sort_order: Option<&str>,
         search_query: Option<&str>,
         filter: Option<&crate::types::filter::LibraryFilter>,
+        album_artists_only: bool,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<Artist>> {
+        self.load_raw_artists_page_with_libraries(
+            sort_mode,
+            sort_order,
+            search_query,
+            filter,
+            &[],
+            album_artists_only,
+            offset,
+            limit,
+        )
+        .await
+    }
+
+    /// Library-aware variant of [`load_raw_artists_page`].
+    #[allow(clippy::too_many_arguments)]
+    pub async fn load_raw_artists_page_with_libraries(
+        &self,
+        sort_mode: Option<&str>,
+        sort_order: Option<&str>,
+        search_query: Option<&str>,
+        filter: Option<&crate::types::filter::LibraryFilter>,
+        library_ids: &[i32],
         album_artists_only: bool,
         offset: usize,
         limit: usize,
@@ -180,6 +237,7 @@ impl ArtistsService {
                 sort_order,
                 search_opt,
                 filter,
+                library_ids,
                 album_artists_only,
                 Some(offset),
                 Some(limit),
