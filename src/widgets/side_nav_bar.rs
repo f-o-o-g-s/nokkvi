@@ -69,6 +69,8 @@ pub(crate) struct SideNavBarData {
     /// Library-filter popover rows: `(id, name, song_count, checked)`.
     /// Mirrors `NavBarViewData::library_rows`.
     pub library_rows: Vec<(i32, String, Option<u32>, bool)>,
+    pub hamburger_open: bool,
+    pub is_light_mode: bool,
 }
 
 /// Canvas program that draws rotated text with optional active/hover indicator.
@@ -367,6 +369,28 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
     let library_selector_bounds = data.library_selector_bounds;
     let library_rows = data.library_rows.clone();
 
+    let hamburger: Element<'static, NavBarMessage> = super::hover_overlay::HoverOverlay::new(
+        crate::widgets::hamburger_menu::HamburgerMenu::new(
+            |action| match action {
+                crate::widgets::hamburger_menu::MenuAction::ToggleLightMode => {
+                    NavBarMessage::ToggleLightMode
+                }
+                crate::widgets::hamburger_menu::MenuAction::OpenSettings => {
+                    NavBarMessage::OpenSettings
+                }
+                crate::widgets::hamburger_menu::MenuAction::About => NavBarMessage::About,
+                crate::widgets::hamburger_menu::MenuAction::Quit => NavBarMessage::Quit,
+            },
+            |open| {
+                NavBarMessage::SetOpenMenu(open.then_some(crate::app_message::OpenMenu::Hamburger))
+            },
+            data.hamburger_open,
+            data.is_light_mode,
+        ),
+    )
+    .border_radius(theme::ui_border_radius())
+    .into();
+
     let library_trigger = super::hover_overlay::HoverOverlay::new(
         container(super::library_filter_trigger::library_filter_trigger(
             library_count,
@@ -407,9 +431,15 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
     );
 
     // Build vertical column: library trigger first, then NAV_TABS.
-    let mut tabs = column![library_trigger, library_popover, separator()]
-        .spacing(0)
-        .width(Length::Fixed(SIDE_NAV_WIDTH));
+    let mut tabs = column![
+        hamburger,
+        separator(),
+        library_trigger,
+        library_popover,
+        separator()
+    ]
+    .spacing(0)
+    .width(Length::Fixed(SIDE_NAV_WIDTH));
     for &(label, icon_path, view) in NAV_TABS {
         tabs = tabs.push(nav_tab(label, icon_path, view)).push(separator());
     }
