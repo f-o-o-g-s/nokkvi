@@ -27,3 +27,4 @@ mod settings;
 mod slot_list;
 mod star_rating;
 mod state;
+mod window;
