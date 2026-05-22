@@ -38,8 +38,7 @@ async fn test_app_with_shell() -> (crate::Nokkvi, std::path::PathBuf) {
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
+            .map_or(0, |d| d.as_nanos())
     );
     let db_path = std::env::temp_dir().join(suffix);
     let _ = std::fs::remove_file(&db_path);

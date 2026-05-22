@@ -83,6 +83,26 @@ impl Nokkvi {
             tasks.push(self.handle_load_genres());
         }
 
+        // 6. Library list refresh on wildcard (full-scan) events. Navidrome
+        //    does not emit a dedicated `library_changed` SSE event today (see
+        //    plan §14.3), so the popover's source-of-truth would otherwise
+        //    drift if an admin adds / renames / removes a library while the
+        //    client is running. Re-fetch on every wildcard refresh so the
+        //    next time the user opens the popover, the row count matches
+        //    the server. `Library::Loaded` also prunes `active_library_ids`
+        //    of any IDs no longer in the refreshed list.
+        if is_wildcard {
+            tasks.push(self.shell_task(
+                |shell| async move { shell.refresh_libraries().await },
+                |result: anyhow::Result<Vec<nokkvi_data::types::library::Library>>| match result {
+                    Ok(libs) => Message::Library(crate::app_message::LibraryMessage::Loaded(libs)),
+                    Err(e) => Message::Library(crate::app_message::LibraryMessage::LoadFailed(
+                        format!("{e:#}"),
+                    )),
+                },
+            ));
+        }
+
         // Notify the user gently (skipped when the user has opted to suppress
         // these notifications via Settings → General → Application).
         if !self.settings.suppress_library_refresh_toasts {

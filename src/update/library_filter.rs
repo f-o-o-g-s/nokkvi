@@ -102,16 +102,13 @@ impl Nokkvi {
             let now_active = shell.toggle_library(id);
             trace!(
                 id,
-                now_active,
-                "library toggled; invalidating paged buffers"
+                now_active, "library toggled; invalidating paged buffers"
             );
         } else {
             // No shell yet (pre-login) — handler shouldn't ever fire in
             // this state because the trigger widget is hidden until
             // `library_count > 1`, but stay defensive.
-            warn!(
-                "Library::Toggle dispatched without an active AppService; dropping"
-            );
+            warn!("Library::Toggle dispatched without an active AppService; dropping");
             return Task::none();
         }
 
@@ -152,9 +149,7 @@ impl Nokkvi {
             shell.apply_library_refresh(libs);
             trace!(count, "library list applied to backend cache");
         } else {
-            warn!(
-                "Library::Loaded dispatched without an active AppService; dropping"
-            );
+            warn!("Library::Loaded dispatched without an active AppService; dropping");
         }
         Task::none()
     }
