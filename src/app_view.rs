@@ -403,6 +403,11 @@ impl Nokkvi {
                     library_selector_open: sn_library_selector_open,
                     library_selector_bounds: sn_library_selector_bounds,
                     library_rows: sn_library_rows,
+                    hamburger_open: matches!(
+                        self.open_menu,
+                        Some(crate::app_message::OpenMenu::Hamburger)
+                    ),
+                    is_light_mode: crate::theme::is_light_mode(),
                 };
                 outer = outer.push(iced::widget::row![
                     widgets::side_nav_bar(side_data).map(map_nav_bar_message),

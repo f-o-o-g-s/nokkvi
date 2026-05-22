@@ -876,10 +876,10 @@ pub(crate) fn player_bar<'a>(
             ))));
     }
 
-    // Application menu — always visible when there is no top nav bar
-    // (i.e. in side and none layouts), since otherwise the user has no way to
-    // reach Settings/About/Quit.
-    if !crate::theme::is_top_nav() {
+    // Application menu — only visible in NavLayout::None (no nav chrome of
+    // any kind). Top has the hamburger in the top nav bar; Side has it in
+    // the side nav column.
+    if crate::theme::is_none_nav() {
         use crate::widgets::hamburger_menu::{HamburgerMenu, MenuAction};
         let is_light = data.is_light_mode;
         let hamburger_open = data.hamburger_open;
