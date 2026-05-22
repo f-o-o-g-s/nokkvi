@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Multi-library filter — a new nav-bar popover (top-nav layout) lets users
+  scope every browse view (Albums, Artists, Songs, Genres) to a subset of
+  Navidrome libraries. Empty selection is treated as "all". The trigger is
+  hidden when only one library exists, so single-library servers see no UI
+  change. Selection persists across restarts (redb), and libraries deleted
+  on the server are pruned from the active set at next launch. Playlists
+  are intentionally not filtered — Navidrome's `/api/playlist` endpoint
+  ignores `library_id` and the server's per-user library access already
+  filters playlists.
+
 ### Changed
 
 ### Fixed
