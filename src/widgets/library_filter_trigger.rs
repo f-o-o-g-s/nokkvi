@@ -93,11 +93,6 @@ const FILTERED_HPAD: f32 = 4.0;
 ///   trigger's screen-space layout rectangle so the popover overlay
 ///   can anchor below it.
 /// - `(false, None)` — user clicked the open trigger to close.
-///
-/// `dead_code` allow lives here until the nav-bar call site lands in a
-/// follow-up commit on this branch — at that point the production
-/// reachability check makes the allow redundant and it can come off.
-#[allow(dead_code)]
 pub(crate) fn library_filter_trigger<'a, Message>(
     library_count: usize,
     active_count: usize,
