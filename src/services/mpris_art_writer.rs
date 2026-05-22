@@ -115,13 +115,8 @@ where
 /// Reset the cache state and best-effort remove the cache file. Safe to call
 /// from teardown paths (logout, server switch) — missing files are not an error.
 ///
-/// Provided for the upcoming NF7 fix (server-switch credential rotation) which
-/// will call this on logout to drop the cached file before the new session
-/// starts writing under the same per-pid path.
-#[allow(
-    dead_code,
-    reason = "Wired up by the NF7 logout/server-switch lane (post-NF2 commit)."
-)]
+/// Called from `reset_session_state` on logout / session-expired so server-B's
+/// MPRIS metadata doesn't reuse the file written by server-A.
 pub(crate) async fn clear() {
     let mut state = STATE.lock().await;
     clear_inner(&mut state, cache_file_path().as_deref());

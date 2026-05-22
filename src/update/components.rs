@@ -1511,8 +1511,18 @@ impl Nokkvi {
         // overwrites the slot via `register()`.
         crate::services::navidrome_sse::clear();
 
+        // Drop the per-process MPRIS art cache (the file at
+        // ~/.cache/nokkvi/mpris-art-<pid>.jpg plus the in-memory last-written
+        // key). Without this, server-B's MPRIS metadata would emit a file://
+        // URL whose contents are still server-A's bytes from before logout,
+        // until the next track change forces a rewrite.
+        let mpris_art_clear_task =
+            Task::perform(crate::services::mpris_art_writer::clear(), |_| {
+                Message::NoOp
+            });
+
         tracing::debug!(" [SESSION-RESET] cleared session-bound state");
 
-        stop_task
+        Task::batch([stop_task, mpris_art_clear_task])
     }
 }
