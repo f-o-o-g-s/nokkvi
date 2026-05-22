@@ -133,7 +133,7 @@ fn open_change_with_none_bounds_defaults_to_zero_rect() {
 /// Mutual exclusion smoke test: opening the LibrarySelector overlay must
 /// replace any previously-open overlay (`SetOpenMenu` semantics). The
 /// dispatcher enforces this via the implicit `open_menu = next` assignment
-/// — Lane D's handler mirrors that contract by assigning directly.
+/// — the library-filter handler mirrors that contract by assigning directly.
 #[test]
 fn library_selector_replaces_open_hamburger_menu() {
     let mut app = test_app();

@@ -1,5 +1,10 @@
 //! Multi-library filter — popover open/close, toggle, refresh.
 //!
+//! Handles user-initiated [`LibraryMessage`] events from the nav-bar
+//! library selector. Sibling file [`super::library_refresh`] handles
+//! Navidrome-SSE-driven library reloads (a different code path that
+//! refetches the whole browse buffer set on wildcard refresh events).
+//!
 //! Drives the nav-bar library selector. The four `LibraryMessage`
 //! variants split as:
 //!

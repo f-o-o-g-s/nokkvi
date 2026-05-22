@@ -26,10 +26,11 @@
 //! trigger without re-reading layout each frame (same contract as
 //! [`super::checkbox_dropdown::CheckboxDropdown`]).
 //!
-//! The trigger only emits the open-change message; the actual popover
-//! (built via [`super::checkbox_dropdown::checkbox_dropdown_dynamic`])
-//! is mounted separately by Lane D once the toggle handler and the
-//! library-list fetch are wired into the update tree.
+//! The trigger only emits the open-change message; the popover panel
+//! (built via [`super::checkbox_dropdown::library_selector_popover`])
+//! is mounted separately by the nav-bar row layout (see
+//! [`super::nav_bar`] `library_trigger_slot`) so the visible trigger and
+//! the overlay panel share the same captured trigger bounds.
 //!
 //! Chassis dimensions match [`super::hamburger_menu`] — 28 px button,
 //! 18 px icon — so the trigger reads as a peer of the hamburger when
@@ -156,9 +157,9 @@ struct LibraryFilterTrigger<'a, Message> {
     /// Plumbed in for completeness with the controlled-component
     /// contract; the trigger itself doesn't need to read it (the parent
     /// derives open-state from `OpenMenu::LibrarySelector` and passes
-    /// `is_open`). Held with a leading underscore so unused-field lints
-    /// don't fire when Lane D later wires the popover overlay using the
-    /// same bounds.
+    /// `is_open`). Held with a leading underscore — the bounds are
+    /// consumed by the popover overlay sibling in the nav-bar row layout
+    /// rather than by this widget.
     _trigger_bounds: Option<Rectangle>,
     icon_handle: Handle,
     on_open_change: Box<dyn Fn(bool, Option<Rectangle>) -> Message + 'a>,
