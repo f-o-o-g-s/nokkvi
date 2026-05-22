@@ -123,7 +123,10 @@ impl Nokkvi {
         self.shell_task(
             |shell| async move {
                 let service = shell.playlists_api().await?;
-                let (playlists, _) = service.load_playlists("name", "ASC", None).await?;
+                let library_ids = shell.active_library_ids_vec();
+                let (playlists, _) = service
+                    .load_playlists_with_libraries("name", "ASC", None, &library_ids)
+                    .await?;
                 Ok(playlists
                     .into_iter()
                     .map(|p| (p.id, p.name))
@@ -154,7 +157,10 @@ impl Nokkvi {
         self.shell_task(
             |shell| async move {
                 let service = shell.playlists_api().await?;
-                let (playlists, _) = service.load_playlists("name", "ASC", None).await?;
+                let library_ids = shell.active_library_ids_vec();
+                let (playlists, _) = service
+                    .load_playlists_with_libraries("name", "ASC", None, &library_ids)
+                    .await?;
                 Ok(playlists
                     .into_iter()
                     .map(|p| (p.id, p.name))

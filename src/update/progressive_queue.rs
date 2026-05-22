@@ -36,13 +36,15 @@ impl Nokkvi {
         let page_size = self.settings.library_page_size.to_usize();
         let fetch_task = self.shell_task(
             move |shell| async move {
+                let library_ids = shell.active_library_ids_vec();
                 let songs = shell
                     .songs()
-                    .load_raw_songs_page(
+                    .load_raw_songs_page_with_libraries(
                         Some(&sort_m),
                         Some(&sort_o),
                         search_q.as_deref(),
                         None,
+                        &library_ids,
                         offset,
                         page_size,
                     )

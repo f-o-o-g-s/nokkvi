@@ -30,8 +30,9 @@ impl Nokkvi {
                 };
 
                 let sort_order_str = if sort_ascending { "ASC" } else { "DESC" };
+                let library_ids = shell.active_library_ids_vec();
                 match service
-                    .load_genres(
+                    .load_genres_with_libraries(
                         view_str,
                         sort_order_str,
                         if search_query_clone.is_empty() {
@@ -39,6 +40,7 @@ impl Nokkvi {
                         } else {
                             Some(search_query_clone.as_str())
                         },
+                        &library_ids,
                     )
                     .await
                 {
