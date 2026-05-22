@@ -6,19 +6,25 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Multi-library filter — a new nav-bar popover (top-nav layout) lets users
-  scope every browse view (Albums, Artists, Songs, Genres) to a subset of
-  Navidrome libraries. Empty selection is treated as "all". The trigger is
-  hidden when only one library exists, so single-library servers see no UI
-  change. Selection persists across restarts (redb), and libraries deleted
-  on the server are pruned from the active set at next launch. Playlists
-  are intentionally not filtered — Navidrome's `/api/playlist` endpoint
-  ignores `library_id` and the server's per-user library access already
-  filters playlists.
+- Multi-library filter — a new nav-bar popover (top-nav and side-nav
+  layouts) lets users scope every browse view (Albums, Artists, Songs,
+  Genres) to a subset of Navidrome libraries. Empty selection is treated
+  as "all". The trigger is hidden when only one library exists, so
+  single-library servers see no UI change. Selection persists across
+  restarts (redb), and libraries deleted on the server are pruned from
+  the active set at next launch. Playlists are intentionally not
+  filtered — Navidrome's `/api/playlist` endpoint ignores `library_id`
+  and the server's per-user library access already filters playlists.
 
 ### Changed
 
 ### Fixed
+
+- MPRIS `LoopStatus` requests from clients like `playerctl` now set the requested mode directly instead of cycling, so `playerctl loop Track` from Playlist state no longer lands on None.
+- MPRIS cover art is published on D-Bus as a local file URL instead of an authenticated Navidrome link, no longer exposing the Subsonic credential triple to other same-user processes.
+- Switching Navidrome servers no longer shows the prior server's covers for overlapping album IDs, retries SSE against the old host, or emits the old server's cover via MPRIS until the next track change.
+- Radios and Similar views now render the right number of rows after a window resize, matching every other slot-list view.
+- Library-changed SSE events with non-ASCII metadata (artist names with diacritics, Japanese titles, …) are no longer dropped when a multi-byte character spans an HTTP chunk boundary.
 
 ### Removed
 
