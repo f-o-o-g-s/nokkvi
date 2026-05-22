@@ -67,6 +67,8 @@ impl Nokkvi {
         self.genres_page.common.slot_list.slot_count = sc;
         self.playlists_page.common.slot_list.slot_count = sc;
         self.queue_page.common.slot_list.slot_count = sc;
+        self.radios_page.common.slot_list.slot_count = sc;
+        self.similar_page.common.slot_list.slot_count = sc;
     }
 
     /// Prefetch mini artwork for whatever slots are currently visible in the
