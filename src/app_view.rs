@@ -82,6 +82,19 @@ fn similar_column_dropdown_state(
     }
 }
 
+/// Sibling of [`column_dropdown_state`] for the library selector popover.
+/// Wired into the nav-bar trigger; Wave 2 Lane D / Lane C consume this.
+#[allow(dead_code)]
+fn library_selector_state(
+    open_menu: &Option<crate::app_message::OpenMenu>,
+) -> (bool, Option<iced::Rectangle>) {
+    use crate::app_message::OpenMenu;
+    match open_menu {
+        Some(OpenMenu::LibrarySelector { trigger_bounds }) => (true, Some(*trigger_bounds)),
+        _ => (false, None),
+    }
+}
+
 /// Extract `(is_open, position)` for the now-playing strip context menu (only
 /// one strip is on-screen at a time, so the `Strip` id is unambiguous).
 fn strip_context_state(

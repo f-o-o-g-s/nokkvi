@@ -395,6 +395,27 @@ pub enum ToastMessage {
     DismissKey(String),
 }
 
+/// Library filter messages, namespaced under `Message::Library(..)`.
+///
+/// Drives the nav-bar library selector popover and the active-library
+/// filter state on `AppService`. Behavior bodies land in Wave 2 Lane D —
+/// this enum is the message-contract stub for the parallel lanes.
+#[derive(Debug, Clone)]
+pub enum LibraryMessage {
+    /// Open or close the library selector popover. `trigger_bounds` is
+    /// captured at click time so the overlay anchors below the trigger.
+    OpenChange {
+        open: bool,
+        trigger_bounds: Option<iced::Rectangle>,
+    },
+    /// Toggle a single library in the active set. Empty set = "all libraries".
+    Toggle(i32),
+    /// Library list fetched from server (Subsonic `getMusicFolders`).
+    Loaded(Vec<nokkvi_data::types::library::Library>),
+    /// Library list fetch failed; surface as a toast.
+    LoadFailed(String),
+}
+
 // ============================================================================
 // Loader Result Messages — backend data-loading results, namespaced per domain.
 // ============================================================================
@@ -538,6 +559,10 @@ pub enum OpenMenu {
         id: ContextMenuId,
         position: iced::Point,
     },
+    /// Library filter popover anchored below the nav-bar trigger. The bounds
+    /// are captured at click time so the overlay positioning matches the
+    /// other dropdown overlays (column dropdown, similar columns).
+    LibrarySelector { trigger_bounds: iced::Rectangle },
 }
 
 /// Identifies a specific `context_menu` widget instance for `OpenMenu::Context`.
@@ -655,6 +680,8 @@ pub enum Message {
     Hotkey(HotkeyMessage),
     /// Hotkey config updated after async persistence (hot-reload)
     HotkeyConfigUpdated(nokkvi_data::types::hotkey_config::HotkeyConfig),
+    // --- Library Filter (namespaced) ---
+    Library(LibraryMessage),
     NoOp,
     /// Quit application (from hamburger menu or tray)
     QuitApp,
