@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.5.1 — 2026-05-22
+
+### Added
+
 - Multi-library filter — a new nav-bar popover (top-nav and side-nav
   layouts) lets users scope every browse view (Albums, Artists, Songs,
   Genres) to a subset of Navidrome libraries. Empty selection is treated
@@ -18,6 +28,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- Hamburger menu moved from the far-right of the top nav to the left edge, next to the library-filter trigger in both top-nav and side-nav layouts.
+
 ### Fixed
 
 - MPRIS `LoopStatus` requests from clients like `playerctl` now set the requested mode directly instead of cycling, so `playerctl loop Track` from Playlist state no longer lands on None.
@@ -25,8 +37,6 @@ All notable changes to this project will be documented in this file.
 - Switching Navidrome servers no longer shows the prior server's covers for overlapping album IDs, retries SSE against the old host, or emits the old server's cover via MPRIS until the next track change.
 - Radios and Similar views now render the right number of rows after a window resize, matching every other slot-list view.
 - Library-changed SSE events with non-ASCII metadata (artist names with diacritics, Japanese titles, …) are no longer dropped when a multi-byte character spans an HTTP chunk boundary.
-
-### Removed
 
 ## v0.5.0 — 2026-05-21
 
