@@ -1,9 +1,9 @@
 //! Navigation Bar Component
 //!
 //! Waybar-style flat navigation bar with three sections:
-//! - Left: Navigation tabs (Queue, Albums, etc.) - flat, no 3D effect
+//! - Left: Hamburger menu, library-filter trigger, navigation tabs (Queue, Albums, etc.) - flat, no 3D effect
 //! - Center: Track info text
-//! - Right: Audio format info + hamburger menu
+//! - Right: Audio format info
 
 use iced::{
     Alignment, Background, Border, Element, Length,
@@ -264,12 +264,12 @@ fn tab_content<'a>(
 /// Build the Waybar-style navigation bar
 ///
 /// Three-section layout:
-/// - Left: Flat navigation tabs with active highlight
+/// - Left: Hamburger menu, library-filter trigger, flat navigation tabs with active highlight
 /// - Center: Track info text
 /// - Right: Audio format info
 pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // -------------------------------------------------------------------------
-    // Left Section: Flat Navigation Tabs
+    // Left Section: Hamburger + Library Filter + Flat Navigation Tabs
     // -------------------------------------------------------------------------
     let settings_open = data.settings_open;
     // Shared tab builder — used for both regular nav tabs AND the settings indicator.
@@ -373,6 +373,26 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     let is_side_nav = theme::is_side_nav();
 
     // -------------------------------------------------------------------------
+    // Hamburger Menu (head of left_section, beside library filter)
+    // -------------------------------------------------------------------------
+    let hamburger: Element<'static, NavBarMessage> =
+        super::hover_overlay::HoverOverlay::new(HamburgerMenu::new(
+            |action| match action {
+                MenuAction::ToggleLightMode => NavBarMessage::ToggleLightMode,
+                MenuAction::OpenSettings => NavBarMessage::OpenSettings,
+                MenuAction::About => NavBarMessage::About,
+                MenuAction::Quit => NavBarMessage::Quit,
+            },
+            |open| {
+                NavBarMessage::SetOpenMenu(open.then_some(crate::app_message::OpenMenu::Hamburger))
+            },
+            data.hamburger_open,
+            data.is_light_mode,
+        ))
+        .border_radius(theme::ui_border_radius())
+        .into();
+
+    // -------------------------------------------------------------------------
     // Library-filter trigger + popover (icon button + dropdown panel)
     // -------------------------------------------------------------------------
     //
@@ -460,10 +480,15 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             .height(Length::Fill)
             .align_y(Alignment::Center)
     } else {
-        let mut tabs = row![library_trigger_slot, tab_separator(false)]
-            .spacing(0)
-            .height(Length::Fill)
-            .align_y(Alignment::Center);
+        let mut tabs = row![
+            hamburger,
+            tab_separator(false),
+            library_trigger_slot,
+            tab_separator(false)
+        ]
+        .spacing(0)
+        .height(Length::Fill)
+        .align_y(Alignment::Center);
         let tab_count = NAV_TABS.len();
         for (i, &(label, icon_path, view)) in NAV_TABS.iter().enumerate() {
             let is_last = i == tab_count - 1;
@@ -771,40 +796,16 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         };
 
     // -------------------------------------------------------------------------
-    // Hamburger Menu (far right)
-    // -------------------------------------------------------------------------
-    let hamburger: Element<'static, NavBarMessage> =
-        super::hover_overlay::HoverOverlay::new(HamburgerMenu::new(
-            |action| match action {
-                MenuAction::ToggleLightMode => NavBarMessage::ToggleLightMode,
-                MenuAction::OpenSettings => NavBarMessage::OpenSettings,
-                MenuAction::About => NavBarMessage::About,
-                MenuAction::Quit => NavBarMessage::Quit,
-            },
-            |open| {
-                NavBarMessage::SetOpenMenu(open.then_some(crate::app_message::OpenMenu::Hamburger))
-            },
-            data.hamburger_open,
-            data.is_light_mode,
-        ))
-        .border_radius(theme::ui_border_radius())
-        .into();
-
-    // -------------------------------------------------------------------------
-    // Assemble Layout: LibraryFilter + Tabs | Track Info | Format Info | Hamburger
+    // Assemble Layout: Hamburger + LibraryFilter + Tabs | Track Info | Format Info
     // -------------------------------------------------------------------------
     let nav_content = container(
         row![
-            // Left: Library filter trigger then navigation tabs
+            // Left: Hamburger + Library filter trigger + navigation tabs
             left_section,
             // Center: Track info (collapses at narrow widths)
             center_section,
             // Format info (stays visible independently)
             format_section,
-            // Hamburger menu
-            tab_separator(false),
-            hamburger,
-            tab_separator(false),
         ]
         .align_y(Alignment::Center)
         .padding(0)
@@ -840,7 +841,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
 mod layout_invariants {
     //! Verifies the layout pattern used by `nav_content`'s outer row. The
     //! merged-mode marquee depends on `center_section` being given a max width
-    //! equal to the *visible* center area (window − tabs − format − hamburger).
+    //! equal to the *visible* center area (window − hamburger − tabs − format).
     //!
     //! iced's flex layout caches a `compression.width` flag in `Limits`. A row
     //! with default `Length::Shrink` width forces `compression.width = true`
@@ -871,8 +872,9 @@ mod layout_invariants {
     type TestMessage = ();
 
     /// Build a 3-child row [Fixed(left_w), Fill, Fixed(right_w)] mimicking the
-    /// nav bar's [tabs, center_section, format+hamburger] layout. `outer_width`
-    /// is the row's own `.width(...)` setting — the variable under test.
+    /// nav bar's [hamburger+library+tabs, center_section, format_section]
+    /// layout. `outer_width` is the row's own `.width(...)` setting — the
+    /// variable under test.
     fn build_three_child_row(
         outer_width: Length,
         left_w: f32,
