@@ -6,6 +6,12 @@ use serde::{Deserialize, Serialize};
 
 const STATE_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("queue");
 
+/// Key under which the user's active multi-library (music folder)
+/// selection is persisted. Value is a `HashSet<i32>` (bincode). An
+/// empty set is the explicit "no filter" / "show all libraries"
+/// default — the same shape the brand-new state reports.
+pub const ACTIVE_LIBRARY_IDS_KEY: &str = "active_library_ids";
+
 /// Redb-based storage backend for application state persistence
 ///
 /// This provides ACID transaction guarantees and better performance

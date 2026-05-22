@@ -24,6 +24,10 @@ impl ArtistsApiService {
     /// sort_mode: Sort mode (name, favorited, albumCount, songCount, random)
     /// sort_order: Sort order (ASC or DESC)
     /// search_query: Optional search query
+    /// library_ids: When non-empty, restrict results to the given library
+    /// (music folder) IDs by appending repeatable `library_id` params. An
+    /// empty slice omits the param entirely — Navidrome's auto-scoping
+    /// already limits to libraries the user has access to.
     #[allow(clippy::too_many_arguments)]
     pub async fn load_artists(
         &self,
@@ -31,6 +35,7 @@ impl ArtistsApiService {
         sort_order: &str,
         search_query: Option<&str>,
         filter: Option<&crate::types::filter::LibraryFilter>,
+        library_ids: &[i32],
         album_artists_only: bool,
         offset: Option<usize>,
         limit: Option<usize>,
@@ -61,15 +66,35 @@ impl ArtistsApiService {
         params.push(("_start", &range.start));
         params.push(("_end", &range.end));
 
+        // Owned `String`s for any `library_id` filter param values. Owned
+        // alongside `params` so the `&str` borrows pushed below outlive
+        // the call to `get_with_headers`. See `albums.rs` for the
+        // companion comment.
+        let mut library_id_strings: Vec<String> =
+            library_ids.iter().map(|id| id.to_string()).collect();
+
         // Apply ID filter if present
         if let Some(f) = filter {
-            if let crate::types::filter::LibraryFilter::ArtistId { id, .. } = f {
-                params.push(("id", id));
+            match f {
+                crate::types::filter::LibraryFilter::ArtistId { id, .. } => {
+                    params.push(("id", id));
+                }
+                crate::types::filter::LibraryFilter::LibraryIds(ids) => {
+                    library_id_strings.extend(ids.iter().map(|id| id.to_string()));
+                }
+                // AlbumId / GenreId are not meaningful filters on the
+                // /api/artist endpoint — leave the request unfiltered.
+                crate::types::filter::LibraryFilter::AlbumId { .. }
+                | crate::types::filter::LibraryFilter::GenreId { .. } => {}
             }
         } else if let Some(query) = search_query
             && !query.is_empty()
         {
             params.push(("name", query));
+        }
+
+        for s in &library_id_strings {
+            params.push(("library_id", s.as_str()));
         }
 
         // Make API request

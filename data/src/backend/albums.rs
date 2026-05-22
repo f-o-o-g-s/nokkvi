@@ -394,6 +394,10 @@ impl AlbumsService {
 
     /// Load albums and return raw Album structs (first page only).
     /// Uses PAGE_SIZE as the default limit for pagination.
+    ///
+    /// Shim that forwards an empty `library_ids` slice — preserved for
+    /// existing UI handler call sites. New library-aware code paths
+    /// should call [`load_raw_albums_with_libraries`] directly.
     pub async fn load_raw_albums(
         &self,
         sort_mode: Option<&str>,
@@ -401,18 +405,71 @@ impl AlbumsService {
         search_query: Option<&str>,
         filter: Option<&crate::types::filter::LibraryFilter>,
     ) -> Result<Vec<Album>> {
-        use crate::types::paged_buffer::PAGE_SIZE;
-        self.load_raw_albums_page(sort_mode, sort_order, search_query, filter, 0, PAGE_SIZE)
+        self.load_raw_albums_with_libraries(sort_mode, sort_order, search_query, filter, &[])
             .await
     }
 
+    /// Library-aware variant of [`load_raw_albums`]: scopes the result to
+    /// the given `library_ids` via the orthogonal Native API filter. An
+    /// empty slice omits the param entirely (Navidrome auto-scopes to
+    /// libraries the user can access).
+    pub async fn load_raw_albums_with_libraries(
+        &self,
+        sort_mode: Option<&str>,
+        sort_order: Option<&str>,
+        search_query: Option<&str>,
+        filter: Option<&crate::types::filter::LibraryFilter>,
+        library_ids: &[i32],
+    ) -> Result<Vec<Album>> {
+        use crate::types::paged_buffer::PAGE_SIZE;
+        self.load_raw_albums_page_with_libraries(
+            sort_mode,
+            sort_order,
+            search_query,
+            filter,
+            library_ids,
+            0,
+            PAGE_SIZE,
+        )
+        .await
+    }
+
     /// Load a specific page of albums with explicit offset/limit.
+    ///
+    /// Shim that forwards an empty `library_ids` slice — preserved for
+    /// existing UI handler call sites. New library-aware code paths
+    /// should call [`load_raw_albums_page_with_libraries`] directly.
     pub async fn load_raw_albums_page(
         &self,
         sort_mode: Option<&str>,
         sort_order: Option<&str>,
         search_query: Option<&str>,
         filter: Option<&crate::types::filter::LibraryFilter>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<Album>> {
+        self.load_raw_albums_page_with_libraries(
+            sort_mode,
+            sort_order,
+            search_query,
+            filter,
+            &[],
+            offset,
+            limit,
+        )
+        .await
+    }
+
+    /// Library-aware variant of [`load_raw_albums_page`]: scopes the page
+    /// to the given `library_ids`.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn load_raw_albums_page_with_libraries(
+        &self,
+        sort_mode: Option<&str>,
+        sort_order: Option<&str>,
+        search_query: Option<&str>,
+        filter: Option<&crate::types::filter::LibraryFilter>,
+        library_ids: &[i32],
         offset: usize,
         limit: usize,
     ) -> Result<Vec<Album>> {
@@ -428,6 +485,7 @@ impl AlbumsService {
                 sort_order,
                 search_opt,
                 filter,
+                library_ids,
                 Some(offset),
                 Some(limit),
             )

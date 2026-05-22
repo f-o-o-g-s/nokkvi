@@ -65,12 +65,44 @@ impl PlaylistsApiService {
     /// sort_mode: Sort mode (name, songCount, duration, updatedAt, random)
     /// sort_order: Sort order (ASC or DESC)
     /// search_query: Optional search query
+    ///
+    /// Shim that forwards an empty `library_ids` slice — preserved for
+    /// existing UI handler call sites. New library-aware code paths
+    /// should call [`load_playlists_with_libraries`] directly (even
+    /// though the parameter is currently a no-op for this endpoint, see
+    /// that method's doc-comment).
     pub async fn load_playlists(
         &self,
         sort_mode: &str,
         sort_order: &str,
         search_query: Option<&str>,
     ) -> Result<(Vec<Playlist>, u32)> {
+        self.load_playlists_with_libraries(sort_mode, sort_order, search_query, &[])
+            .await
+    }
+
+    /// Library-aware variant of [`load_playlists`].
+    ///
+    /// `library_ids` is accepted for signature symmetry with the other
+    /// browse endpoints but intentionally NOT forwarded — Navidrome's
+    /// `/api/playlist` filter map registers only `q` + `smart`
+    /// (`reference-navidrome/persistence/playlist_repository.go:48-60`),
+    /// so an unrecognized `library_id` filter would either be silently
+    /// ignored or surface as a `LIKE 'playlist.library_id ...'` error
+    /// (the `playlist` table has no `library_id` column). User-accessible
+    /// library auto-scoping already filters this list server-side.
+    pub async fn load_playlists_with_libraries(
+        &self,
+        sort_mode: &str,
+        sort_order: &str,
+        search_query: Option<&str>,
+        library_ids: &[i32],
+    ) -> Result<(Vec<Playlist>, u32)> {
+        // Touch the param so callers passing a non-empty set in good faith
+        // don't trip `unused_variables`. We make a no-op consume here
+        // rather than wiring through a fake param, since Navidrome would
+        // reject the wire form.
+        let _ = library_ids;
         // For random view, we load by name and shuffle client-side
         let is_random = sort_mode == "random";
         let actual_sort_mode = if is_random { "name" } else { sort_mode };
