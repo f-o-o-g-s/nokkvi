@@ -55,6 +55,20 @@ const INDICATOR_WIDTH: f32 = 2.5;
 pub(crate) struct SideNavBarData {
     pub current_view: NavView,
     pub settings_open: bool,
+    /// Total libraries known to the client. `<= 1` hides the footer
+    /// library trigger entirely (same suppression rule as the top-nav
+    /// variant — see `libraries_imp_plan.md` §2).
+    pub library_count: usize,
+    /// Subset of `library_count` currently in the active selection.
+    pub active_library_count: usize,
+    /// Whether the library-filter popover is currently open.
+    pub library_selector_open: bool,
+    /// Trigger bounds captured at click time so the popover overlay
+    /// anchors next to the footer trigger.
+    pub library_selector_bounds: Option<iced::Rectangle>,
+    /// Library-filter popover rows: `(id, name, song_count, checked)`.
+    /// Mirrors `NavBarViewData::library_rows`.
+    pub library_rows: Vec<(i32, String, Option<u32>, bool)>,
 }
 
 /// Canvas program that draws rotated text with optional active/hover indicator.
@@ -338,6 +352,69 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
 
     // Fill remaining space
     tabs = tabs.push(Space::new().height(Length::Fill));
+
+    // -------------------------------------------------------------------------
+    // Library-filter footer (icon button + 0-size popover anchor)
+    // -------------------------------------------------------------------------
+    //
+    // The trigger renders compact (28 × 28 icon-only, pip overlay in the
+    // filtered case — no `N/M` count text because the 28-px sidebar can't
+    // fit it). The popover is a zero-size `library_selector_popover`
+    // sibling whose only render output is the iced overlay anchored to
+    // `library_selector_bounds`; the overlay positioning fall-back
+    // automatically flips above-trigger when there's no room below
+    // (this sits at the sidebar's bottom edge so the popover lands above).
+    //
+    // Trigger widget self-suppresses to `Space::new()` when
+    // `library_count <= 1`, so the footer area collapses naturally on
+    // single-library servers (no flicker, no flex jitter).
+    let library_count = data.library_count;
+    let active_library_count = data.active_library_count;
+    let library_selector_open = data.library_selector_open;
+    let library_selector_bounds = data.library_selector_bounds;
+    let library_rows = data.library_rows.clone();
+
+    let library_trigger = super::hover_overlay::HoverOverlay::new(
+        container(super::library_filter_trigger::library_filter_trigger(
+            library_count,
+            active_library_count,
+            library_selector_open,
+            true, // compact — side-nav width can't fit count text
+            library_selector_bounds,
+            |open, trigger_bounds| NavBarMessage::LibraryOpenChange {
+                open,
+                trigger_bounds,
+            },
+        ))
+        .width(Length::Fixed(SIDE_NAV_WIDTH))
+        .height(Length::Fixed(SIDE_NAV_WIDTH))
+        .center(Length::Fixed(SIDE_NAV_WIDTH)),
+    )
+    .border_radius(theme::ui_border_radius());
+
+    let popover_items: Vec<(i32, String, String, bool)> = library_rows
+        .into_iter()
+        .map(|(id, name, song_count, checked)| {
+            let right_label = song_count
+                .map(super::format_count_with_commas)
+                .unwrap_or_default();
+            (id, name, right_label, checked)
+        })
+        .collect();
+    let library_popover = super::checkbox_dropdown::library_selector_popover(
+        popover_items,
+        active_library_count,
+        library_count,
+        NavBarMessage::LibraryToggle,
+        |bounds| NavBarMessage::LibraryOpenChange {
+            open: bounds.is_some(),
+            trigger_bounds: bounds,
+        },
+        library_selector_open,
+        library_selector_bounds,
+    );
+
+    tabs = tabs.push(library_trigger).push(library_popover);
 
     // Right edge separator (vertical line)
     let right_edge: Element<'_, NavBarMessage> = container(Space::new())

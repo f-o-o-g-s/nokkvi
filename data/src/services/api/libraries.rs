@@ -1,15 +1,22 @@
 //! Libraries (music folders) API service.
 //!
-//! v1 fetches the list via the Subsonic `getMusicFolders` endpoint because
-//! the Native API `/api/library` is gated by `adminOnlyMiddleware` and
-//! returns 403 for non-admin users
-//! (`reference-navidrome/server/nativeapi/native_api.go:88-94`).
+//! Two-tier fetch:
+//!
+//! 1. **Native `/api/library`** (admin-only — gated by
+//!    `adminOnlyMiddleware` in
+//!    `reference-navidrome/server/nativeapi/native_api.go:88-94`). Returns
+//!    a JSON array of rich library records including `totalSongs`. When
+//!    this succeeds, the popover's right-column counts populate.
+//! 2. **Subsonic `getMusicFolders`** — fallback for non-admin sessions
+//!    where step 1 returns 403. The Subsonic wire shape is `id` + `name`
+//!    only (no counts), so the popover renders the right column blank
+//!    for non-admins.
 //!
 //! Subsonic `getMusicFolders` already filters server-side to the libraries
 //! each user has access to via `getUserAccessibleLibraries`
 //! (`reference-navidrome/server/subsonic/browsing.go:20-31`), so the
-//! returned set is what nokkvi should show in the selector regardless of
-//! whether the active session is admin or regular.
+//! returned set matches what the admin endpoint would have returned for
+//! the same user — only the counts differ.
 //!
 //! Wire shape (Subsonic JSON):
 //! ```json
@@ -25,11 +32,18 @@
 //! }
 //! ```
 //!
+//! Wire shape (Native `/api/library` JSON):
+//! ```json
+//! [
+//!   { "id": 1, "name": "Music", "totalSongs": 13627, "path": "/music", ... },
+//!   { "id": 2, "name": "Audiobooks", "totalSongs": 312, "path": "/audio", ... }
+//! ]
+//! ```
+//!
 //! The `id` is a stable `int32` matching the server's `library_id` column,
 //! which is the value to pass as the `library_id` query parameter on Native
 //! API browse endpoints. Default serde behavior is used — Navidrome may add
-//! extra fields (e.g. `path`, `lastScanAt`), and the parser must not start
-//! failing when that happens.
+//! extra fields, and the parser must not start failing when that happens.
 
 use anyhow::{Context, Result};
 use tracing::debug;
@@ -72,6 +86,9 @@ impl From<MusicFolderEntry> for Library {
         Library {
             id: value.id,
             name: value.name,
+            // Subsonic getMusicFolders does not carry a count. The
+            // UI renders the right column blank in that case.
+            song_count: None,
         }
     }
 }
@@ -86,12 +103,9 @@ pub struct LibrariesApiService {
 impl LibrariesApiService {
     /// Create with a pre-authenticated `ApiClient` and the cached
     /// Subsonic credential string (`u=...&t=...&s=...` or
-    /// `u=...&p=enc:...`). The `ApiClient` is unused today — the call goes
-    /// through `subsonic_post` against the cached HTTP client — but is
-    /// retained so a future migration to the Native `/api/library`
-    /// endpoint (if admin-gating is relaxed upstream) doesn't change the
-    /// constructor shape that the `subsonic_api_factory!` macro on
-    /// `AppService` emits.
+    /// `u=...&p=enc:...`). The `ApiClient` is used for the Native
+    /// `/api/library` first-try; the credential string drives the
+    /// Subsonic fallback.
     pub fn new(client: ApiClient, server_url: String, subsonic_credential: String) -> Self {
         Self {
             client,
@@ -100,14 +114,60 @@ impl LibrariesApiService {
         }
     }
 
-    /// Fetch the list of libraries (music folders) accessible to the
-    /// authenticated user, sorted alphabetically by name.
+    /// Fetch the list of libraries accessible to the authenticated user,
+    /// sorted alphabetically by name.
     ///
-    /// Returns an empty `Vec` when the server reports no folders or the
-    /// response omits the `musicFolders` envelope entirely; both shapes
-    /// are observed in practice on freshly-provisioned servers and on
-    /// users with no library assignments.
+    /// Tries Native `/api/library` first (admin sessions get
+    /// per-library `totalSongs`); on any failure (403 for non-admin,
+    /// connection drop, parse mismatch) falls back to Subsonic
+    /// `getMusicFolders`. The fallback returns the same id+name set
+    /// minus the count column, so non-admin users still see the
+    /// popover — the right-side count column just renders blank.
+    ///
+    /// Returns an empty `Vec` when the server reports no folders;
+    /// shapes that report an empty list (e.g. brand-new install, user
+    /// with no library assignments) yield `Vec::new()`, not an error.
     pub async fn load(&self) -> Result<Vec<Library>> {
+        match self.load_native().await {
+            Ok(libraries) => {
+                debug!(
+                    "LibrariesApiService: loaded {} libraries from /api/library (with counts)",
+                    libraries.len()
+                );
+                Ok(libraries)
+            }
+            Err(native_err) => {
+                debug!(
+                    "LibrariesApiService: /api/library failed ({native_err:#}); falling back to Subsonic getMusicFolders"
+                );
+                self.load_via_subsonic().await
+            }
+        }
+    }
+
+    /// Hit the Native admin-only `/api/library` endpoint. Returns the
+    /// parsed library list with `song_count` populated. Errors when the
+    /// session is non-admin (403), when the endpoint is unreachable, or
+    /// when the response doesn't parse — all of which are caller-side
+    /// signals to fall back to Subsonic.
+    async fn load_native(&self) -> Result<Vec<Library>> {
+        let body = self
+            .client
+            .get("/api/library", &[])
+            .await
+            .context("GET /api/library failed")?;
+
+        let mut libraries: Vec<Library> =
+            parse::parse_json_with_preview(&body, "Native /api/library response")
+                .context("parse /api/library JSON array")?;
+
+        libraries.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(libraries)
+    }
+
+    /// Fall back to Subsonic `getMusicFolders`. Returns the id+name
+    /// list without per-library counts.
+    async fn load_via_subsonic(&self) -> Result<Vec<Library>> {
         let response = subsonic::subsonic_post(
             &self.client.http_client(),
             &self.server_url,
@@ -136,7 +196,7 @@ impl LibrariesApiService {
         libraries.sort_by(|a, b| a.name.cmp(&b.name));
 
         debug!(
-            " LibrariesApiService: Loaded {} libraries from getMusicFolders",
+            "LibrariesApiService: loaded {} libraries from getMusicFolders (no counts)",
             libraries.len()
         );
 
@@ -240,6 +300,40 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].id, 1);
         assert_eq!(entries[0].name, "Music Library");
+    }
+
+    /// Native `/api/library` response shape — JSON array with rich
+    /// records including `totalSongs`. Locks in the `song_count`
+    /// population path so a future server-side rename of the field
+    /// surfaces as a test failure rather than a silent count-loss.
+    #[test]
+    fn native_api_library_shape_populates_song_count() {
+        let body = r#"[
+            {
+                "id": 1,
+                "name": "Music",
+                "path": "/music",
+                "totalSongs": 13627,
+                "totalAlbums": 1502,
+                "totalArtists": 437,
+                "lastScanAt": "2026-05-21T00:00:00Z"
+            },
+            {
+                "id": 2,
+                "name": "Audiobooks",
+                "path": "/audio",
+                "totalSongs": 312
+            }
+        ]"#;
+
+        let libraries: Vec<Library> = serde_json::from_str(body).expect("native shape parse");
+        assert_eq!(libraries.len(), 2);
+        assert_eq!(libraries[0].id, 1);
+        assert_eq!(libraries[0].name, "Music");
+        assert_eq!(libraries[0].song_count, Some(13_627));
+        assert_eq!(libraries[1].id, 2);
+        assert_eq!(libraries[1].name, "Audiobooks");
+        assert_eq!(libraries[1].song_count, Some(312));
     }
 
     /// Empty `musicFolder` array is the explicit "no folders" shape some

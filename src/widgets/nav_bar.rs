@@ -104,10 +104,13 @@ pub(crate) struct NavBarViewData {
     /// Trigger bounds captured at open time — re-passed each render so
     /// the popover overlay can anchor below the trigger.
     pub library_selector_bounds: Option<iced::Rectangle>,
-    /// Library-filter popover rows: `(id, name, checked)`. Sorted by
-    /// name. `library_count == 0` while the cache is cold; the popover
-    /// renders an empty row list during that brief gap, which is fine.
-    pub library_rows: Vec<(i32, String, bool)>,
+    /// Library-filter popover rows: `(id, name, song_count, checked)`.
+    /// Sorted alphabetically by name. `song_count` is `Some(n)` when the
+    /// admin-only `/api/library` endpoint succeeded; `None` when the
+    /// Subsonic `getMusicFolders` fallback was used (non-admin session)
+    /// — in that case the popover renders the right column blank rather
+    /// than spamming N getSongs requests for per-library counts.
+    pub library_rows: Vec<(i32, String, Option<u32>, bool)>,
 }
 
 /// Messages emitted by nav bar interactions
@@ -717,6 +720,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                 library_count,
                 active_library_count,
                 library_selector_open,
+                false, // not compact — top nav has room for the N/M text
                 library_selector_bounds,
                 |open, trigger_bounds| NavBarMessage::LibraryOpenChange {
                     open,
@@ -726,20 +730,27 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         )
         .border_radius(theme::ui_border_radius());
 
-        // Popover rows: `(id, name, "", checked)`. Library has only
-        // (id, name) today; the right_label slot is reserved for a
-        // future song-count column (deferred — Subsonic getMusicFolders
-        // doesn't carry counts, and admin-only /api/library can't be
-        // relied on for non-admin users).
+        // Popover rows: format song_count into a comma-grouped string
+        // for the dim right column; `None` → empty string (Subsonic
+        // fallback case for non-admin sessions).
         let popover_items: Vec<(i32, String, String, bool)> = data
             .library_rows
             .clone()
             .into_iter()
-            .map(|(id, name, checked)| (id, name, String::new(), checked))
+            .map(|(id, name, song_count, checked)| {
+                let right_label = song_count
+                    .map(super::format_count_with_commas)
+                    .unwrap_or_default();
+                (id, name, right_label, checked)
+            })
             .collect();
 
+        let total_count = data.library_count;
+        let active_count = data.active_library_count;
         let popover = super::checkbox_dropdown::library_selector_popover(
             popover_items,
+            active_count,
+            total_count,
             NavBarMessage::LibraryToggle,
             |bounds| NavBarMessage::LibraryOpenChange {
                 open: bounds.is_some(),

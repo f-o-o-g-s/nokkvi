@@ -66,6 +66,7 @@ fn library(id: i32, name: &str) -> Library {
     Library {
         id,
         name: name.to_string(),
+        song_count: None,
     }
 }
 

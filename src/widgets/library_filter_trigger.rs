@@ -62,9 +62,12 @@ const BUTTON_HEIGHT: f32 = 28.0;
 /// hamburger.
 const ICON_ONLY_WIDTH: f32 = 28.0;
 
-/// Width when the count label is shown alongside the icon. Tuned to fit
-/// `📚 N/M` at the small badge font without crowding the pip overlay.
-const FILTERED_WIDTH: f32 = 44.0;
+/// Width when the count label is shown alongside the icon. Sized so the
+/// `N/M` text band ends before the pip overlay's horizontal range —
+/// see [`draw`] where the text right-edge is clamped to
+/// `bounds.right - BADGE_INSET - BADGE_DIAMETER - 3` (gap) so the pip
+/// never sits on top of a digit.
+const FILTERED_WIDTH: f32 = 56.0;
 
 /// Icon glyph size — matches the hamburger menu's 18 px icon so the two
 /// SVGs read at the same visual weight.
@@ -89,6 +92,12 @@ const FILTERED_HPAD: f32 = 4.0;
 /// Returns `Space::new()` when `library_count <= 1` (suppressed
 /// state); otherwise returns the trigger widget.
 ///
+/// `compact` switches to a side-nav-friendly chassis: icon-only width
+/// (28 px) in every state, with a pip overlay in the filtered case (no
+/// count text — the 28-px sidebar can't fit `N/M` text alongside the
+/// icon, and the popover header already surfaces the exact "{active} /
+/// {total}" once open).
+///
 /// `on_open_change(open, trigger_bounds)`:
 /// - `(true, Some(bounds))` — user clicked to open. `bounds` is the
 ///   trigger's screen-space layout rectangle so the popover overlay
@@ -98,6 +107,7 @@ pub(crate) fn library_filter_trigger<'a, Message>(
     library_count: usize,
     active_count: usize,
     is_open: bool,
+    compact: bool,
     trigger_bounds: Option<iced::Rectangle>,
     on_open_change: impl Fn(bool, Option<iced::Rectangle>) -> Message + 'a,
 ) -> iced::Element<'a, Message>
@@ -129,6 +139,7 @@ where
     Element::new(LibraryFilterTrigger {
         mode,
         is_open,
+        compact,
         _trigger_bounds: trigger_bounds,
         icon_handle: Handle::from_memory(
             crate::embedded_svg::get_svg("assets/icons/library.svg").as_bytes(),
@@ -154,6 +165,11 @@ enum RenderMode {
 struct LibraryFilterTrigger<'a, Message> {
     mode: RenderMode,
     is_open: bool,
+    /// Side-nav variant: icon-only width even when filtered (no `N/M`
+    /// text), pip overlay still drawn in the filtered case so the
+    /// "something is on" signal carries through into the narrow
+    /// sidebar chassis.
+    compact: bool,
     /// Plumbed in for completeness with the controlled-component
     /// contract; the trigger itself doesn't need to read it (the parent
     /// derives open-state from `OpenMenu::LibrarySelector` and passes
@@ -167,6 +183,9 @@ struct LibraryFilterTrigger<'a, Message> {
 
 impl<Message> LibraryFilterTrigger<'_, Message> {
     fn button_width(&self) -> f32 {
+        if self.compact {
+            return ICON_ONLY_WIDTH;
+        }
         match self.mode {
             RenderMode::Neutral => ICON_ONLY_WIDTH,
             RenderMode::Filtered { .. } => FILTERED_WIDTH,
@@ -266,6 +285,33 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
             bg_color,
         );
 
+        // Compact (side-nav) variant: icon-only chassis in every mode,
+        // pip overlaid in the filtered case. The popover header carries
+        // the exact "{active} / {total}" once open, so no count text
+        // needs to ride the trigger.
+        if self.compact {
+            let icon_bounds = Rectangle {
+                x: bounds.center_x() - ICON_SIZE / 2.0,
+                y: bounds.center_y() - ICON_SIZE / 2.0,
+                width: ICON_SIZE,
+                height: ICON_SIZE,
+            };
+            renderer.draw_svg(
+                SvgData {
+                    handle: self.icon_handle.clone(),
+                    color: Some(fg_color),
+                    rotation: Radians(0.0),
+                    opacity: 1.0,
+                },
+                icon_bounds,
+                icon_bounds,
+            );
+            if matches!(self.mode, RenderMode::Filtered { .. }) {
+                super::badge_pip::draw_badge_pip(renderer, bounds);
+            }
+            return;
+        }
+
         match self.mode {
             RenderMode::Neutral => {
                 // Centered 18×18 icon, no text, no pip.
@@ -307,10 +353,17 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
 
                 let label = format!("{active}/{total}");
                 let text_x = icon_bounds.x + icon_bounds.width + 3.0;
+                // Pip occupies [bounds.right - BADGE_INSET - BADGE_DIAMETER,
+                // bounds.right - BADGE_INSET]. Reserve a 3 px gap before
+                // the pip so the rightmost digit can't kiss the dot.
+                let pip_left_edge = bounds.x + bounds.width
+                    - super::badge_pip::BADGE_INSET
+                    - super::badge_pip::BADGE_DIAMETER;
+                let text_right_max = (pip_left_edge - 3.0).max(text_x);
                 let text_bounds = Rectangle {
                     x: text_x,
                     y: bounds.y,
-                    width: (bounds.x + bounds.width - FILTERED_HPAD - text_x).max(0.0),
+                    width: (text_right_max - text_x).max(0.0),
                     height: bounds.height,
                 };
                 renderer.fill_text(
@@ -388,7 +441,7 @@ mod tests {
         // lands; this gate is what prevents a flicker of the trigger
         // before the count is known.
         let _el: Element<'_, TestMessage> =
-            library_filter_trigger(0, 0, false, None, dummy_callback());
+            library_filter_trigger(0, 0, false, false, None, dummy_callback());
     }
 
     #[test]
@@ -396,7 +449,7 @@ mod tests {
         // Single-library servers never show the filter — there's
         // nothing to toggle.
         let _el: Element<'_, TestMessage> =
-            library_filter_trigger(1, 1, false, None, dummy_callback());
+            library_filter_trigger(1, 1, false, false, None, dummy_callback());
     }
 
     #[test]
@@ -404,7 +457,7 @@ mod tests {
         // Sanity check that the multi-library case constructs without
         // panic.
         let _el: Element<'_, TestMessage> =
-            library_filter_trigger(5, 5, false, None, dummy_callback());
+            library_filter_trigger(5, 5, false, false, None, dummy_callback());
     }
 
     #[test]
@@ -412,14 +465,14 @@ mod tests {
         // Empty set means "all libraries on" (the empty-set-as-all
         // rule). Render the neutral chassis, not a "filtered" badge.
         let _el: Element<'_, TestMessage> =
-            library_filter_trigger(5, 0, false, None, dummy_callback());
+            library_filter_trigger(5, 0, false, false, None, dummy_callback());
     }
 
     #[test]
     fn five_libraries_two_active_is_filtered() {
         // Strict subset → filtered render: icon + "2/5" label + pip.
         let _el: Element<'_, TestMessage> =
-            library_filter_trigger(5, 2, false, None, dummy_callback());
+            library_filter_trigger(5, 2, false, false, None, dummy_callback());
     }
 
     #[test]
@@ -427,7 +480,7 @@ mod tests {
         // active == total is semantically "no filter" — same render as
         // active == 0.
         let _el: Element<'_, TestMessage> =
-            library_filter_trigger(5, 5, false, None, dummy_callback());
+            library_filter_trigger(5, 5, false, false, None, dummy_callback());
     }
 
     #[test]
@@ -442,9 +495,9 @@ mod tests {
             height: 28.0,
         };
         let _neutral: Element<'_, TestMessage> =
-            library_filter_trigger(5, 5, true, Some(bounds), dummy_callback());
+            library_filter_trigger(5, 5, true, false, Some(bounds), dummy_callback());
         let _filtered: Element<'_, TestMessage> =
-            library_filter_trigger(5, 3, true, Some(bounds), dummy_callback());
+            library_filter_trigger(5, 3, true, false, Some(bounds), dummy_callback());
     }
 
     #[test]
@@ -454,6 +507,17 @@ mod tests {
         // runs. Render as if `active == total` (neutral) instead of
         // producing nonsensical "7/5" output.
         let _el: Element<'_, TestMessage> =
-            library_filter_trigger(5, 7, false, None, dummy_callback());
+            library_filter_trigger(5, 7, false, false, None, dummy_callback());
+    }
+
+    #[test]
+    fn compact_mode_renders_for_side_nav() {
+        // Side-nav variant: icon-only width even when filtered, pip
+        // still drawn. Construct both neutral and filtered states to
+        // exercise the compact branch in `draw`.
+        let _neutral: Element<'_, TestMessage> =
+            library_filter_trigger(5, 5, false, true, None, dummy_callback());
+        let _filtered: Element<'_, TestMessage> =
+            library_filter_trigger(5, 2, false, true, None, dummy_callback());
     }
 }

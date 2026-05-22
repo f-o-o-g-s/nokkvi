@@ -58,6 +58,25 @@ pub(crate) use slot_list_page::{SlotListPageAction, SlotListPageMessage, SlotLis
 pub(crate) use slot_list_view::{HoveredSlot, SlotListView};
 pub(crate) use volume_slider::{SliderVariant, volume_slider};
 
+/// Format an integer with comma thousands separators ("13627" → "13,627").
+///
+/// Used by the library selector popover for the dim right-column song
+/// count. Manual implementation (vs `num-format` crate) keeps zero new
+/// dependencies and locks the format to en-US grouping; locales aren't a
+/// concern for nokkvi today.
+pub(crate) fn format_count_with_commas(n: u32) -> String {
+    let s = n.to_string();
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (i, b) in bytes.iter().enumerate() {
+        if i > 0 && (bytes.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(*b as char);
+    }
+    out
+}
+
 /// 1px light line for 3D inset effect (top of player bar/sections)
 pub(crate) fn border_light<'a, M: 'a>() -> iced::Element<'a, M> {
     use iced::{Length, widget::container};
@@ -135,4 +154,29 @@ pub(crate) fn base_slot_list_empty_state<'a, M: 'a>(
     // Passing None here would switch from Row→Column, destroying text_input focus.
     let artwork = base_slot_list_empty_artwork(layout_config);
     base_slot_list_layout(layout_config, header.into(), empty_content, artwork)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_count_with_commas_small_numbers() {
+        assert_eq!(format_count_with_commas(0), "0");
+        assert_eq!(format_count_with_commas(47), "47");
+        assert_eq!(format_count_with_commas(999), "999");
+    }
+
+    #[test]
+    fn format_count_with_commas_inserts_thousands_separator() {
+        assert_eq!(format_count_with_commas(1_000), "1,000");
+        assert_eq!(format_count_with_commas(13_627), "13,627");
+        assert_eq!(format_count_with_commas(8_221), "8,221");
+    }
+
+    #[test]
+    fn format_count_with_commas_handles_millions() {
+        assert_eq!(format_count_with_commas(1_234_567), "1,234,567");
+        assert_eq!(format_count_with_commas(u32::MAX), "4,294,967,295");
+    }
 }

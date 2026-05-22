@@ -1335,10 +1335,12 @@ mod tests {
                 Library {
                     id: 1,
                     name: "Music".to_string(),
+                    song_count: None,
                 },
                 Library {
                     id: 2,
                     name: "Audiobooks".to_string(),
+                    song_count: None,
                 },
             ]);
 
@@ -1386,14 +1388,17 @@ mod tests {
             Library {
                 id: 1,
                 name: "Music".to_string(),
+                song_count: None,
             },
             Library {
                 id: 2,
                 name: "Audiobooks".to_string(),
+                song_count: None,
             },
             Library {
                 id: 3,
                 name: "Podcasts".to_string(),
+                song_count: None,
             },
         ]);
 
@@ -1440,6 +1445,7 @@ mod tests {
         app.apply_library_refresh(vec![Library {
             id: 1,
             name: "Music".to_string(),
+            song_count: None,
         }]);
         assert_eq!(app.library_count(), 1);
 
@@ -1447,10 +1453,12 @@ mod tests {
             Library {
                 id: 1,
                 name: "Music".to_string(),
+                song_count: None,
             },
             Library {
                 id: 2,
                 name: "Audiobooks".to_string(),
+                song_count: None,
             },
         ]);
         assert_eq!(app.library_count(), 2);
