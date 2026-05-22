@@ -181,6 +181,52 @@ where
     }
 }
 
+/// Overlay-only variant of [`checkbox_dropdown_dynamic`] for popovers
+/// whose trigger lives outside this widget (e.g. the library-filter nav-bar
+/// trigger, which has its own icon + count + pip chrome that the standard
+/// `trigger_button()` cannot represent).
+///
+/// The widget itself renders a zero-size `Space` as its "trigger" — it
+/// takes no layout space and intercepts no clicks. The overlay still
+/// anchors to the externally-captured `trigger_bounds`, so the popover
+/// appears below the parent's visible trigger button.
+///
+/// The parent's trigger button is responsible for emitting the
+/// open / close `on_open_change` messages on left-click; this widget
+/// only handles row clicks, click-outside-to-close, and Escape.
+pub(crate) fn library_selector_popover<'a, Message>(
+    items: Vec<(i32, String, String, bool)>,
+    on_item_toggle: impl Fn(i32) -> Message + 'a,
+    on_open_change: impl Fn(Option<Rectangle>) -> Message + 'a,
+    is_open: bool,
+    trigger_bounds: Option<Rectangle>,
+) -> CheckboxDropdown<'a, i32, Message>
+where
+    Message: Clone + 'a,
+{
+    let items = items
+        .into_iter()
+        .map(
+            |(key, name, right_label, checked)| DropdownItemData::TwoColumn {
+                key,
+                name,
+                right_label,
+                checked,
+            },
+        )
+        .collect();
+
+    CheckboxDropdown {
+        trigger: iced::widget::Space::new().into(),
+        items,
+        on_item_toggle: Box::new(on_item_toggle),
+        on_open_change: Box::new(on_open_change),
+        is_open,
+        trigger_bounds,
+        menu: None,
+    }
+}
+
 /// Drop-in wrapper around [`checkbox_dropdown`] that pre-builds the
 /// `OpenMenu::CheckboxDropdown { view, trigger_bounds }` open-change message
 /// so each view only supplies its column items, toggle-message constructor,

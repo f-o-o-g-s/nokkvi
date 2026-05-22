@@ -102,8 +102,12 @@ pub(crate) struct NavBarViewData {
     /// state — mirrors `Nokkvi.open_menu == Some(OpenMenu::LibrarySelector { .. })`).
     pub library_selector_open: bool,
     /// Trigger bounds captured at open time — re-passed each render so
-    /// Lane D's popover overlay can anchor below the trigger.
+    /// the popover overlay can anchor below the trigger.
     pub library_selector_bounds: Option<iced::Rectangle>,
+    /// Library-filter popover rows: `(id, name, checked)`. Sorted by
+    /// name. `library_count == 0` while the cache is cold; the popover
+    /// renders an empty row list during that brief gap, which is fine.
+    pub library_rows: Vec<(i32, String, bool)>,
 }
 
 /// Messages emitted by nav bar interactions
@@ -125,6 +129,9 @@ pub enum NavBarMessage {
         open: bool,
         trigger_bounds: Option<iced::Rectangle>,
     },
+    /// A row in the library-filter popover was clicked — bubbled to root
+    /// as `Message::Library(LibraryMessage::Toggle(i32))`.
+    LibraryToggle(i32),
     About,
     Quit,
 }
@@ -680,26 +687,24 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         };
 
     // -------------------------------------------------------------------------
-    // Library-filter trigger (icon button, between format-info and hamburger)
+    // Library-filter trigger + popover (icon button + dropdown panel)
     // -------------------------------------------------------------------------
+    //
+    // The slot is a Row of two widgets:
+    //
+    //  1. The visible trigger (`library_filter_trigger`) — icon + N/M label
+    //     + filtered-state pip. Emits `LibraryOpenChange` on left-click with
+    //     the captured screen-space bounds.
+    //  2. A zero-size `library_selector_popover` whose only render output is
+    //     an iced overlay when `library_selector_open == true`. Anchors to
+    //     `library_selector_bounds` (the trigger bounds captured at click
+    //     time, stashed in `OpenMenu::LibrarySelector { trigger_bounds }`).
     //
     // Slot type stays `Element` in every branch so the surrounding row's
     // widget-tree shape never churns across renders (the iced re-render
     // trap that destroys `text_input` focus — see `.agent/rules/gotchas.md`
-    // "Widget Tree & Focus"). Side-nav v1 no-ops the trigger; the
+    // "Widget Tree & Focus"). Side-nav v1 no-ops the trigger entirely; the
     // side-nav footer placement is the v2 follow-up.
-    //
-    // TODO(library-filter Lane D): mount the `checkbox_dropdown_dynamic`
-    // popover anchored to `data.library_selector_bounds`. Natural slot is
-    // here, immediately after `library_trigger_slot`, conditioned on
-    // `data.library_selector_open`. The popover should call
-    // `app.all_libraries()` + `app.active_library_ids()` for rows, emit
-    // `NavBarMessage::LibraryOpenChange { open: false, trigger_bounds: None }`
-    // on close (or thread a fresh `LibraryToggle(i32)` variant for row
-    // clicks). Lane B's `checkbox_dropdown_dynamic` already returns a
-    // self-contained trigger + overlay widget — Lane D may want to extend
-    // it to accept an external trigger or factor out just the overlay
-    // builder so this trigger's icon+count+pip chrome isn't duplicated.
     let library_trigger_slot: Element<'static, NavBarMessage> = if is_side_nav {
         Space::new().into()
     } else {
@@ -707,7 +712,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         let active_library_count = data.active_library_count;
         let library_selector_open = data.library_selector_open;
         let library_selector_bounds = data.library_selector_bounds;
-        super::hover_overlay::HoverOverlay::new(
+        let trigger = super::hover_overlay::HoverOverlay::new(
             super::library_filter_trigger::library_filter_trigger(
                 library_count,
                 active_library_count,
@@ -719,8 +724,34 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                 },
             ),
         )
-        .border_radius(theme::ui_border_radius())
-        .into()
+        .border_radius(theme::ui_border_radius());
+
+        // Popover rows: `(id, name, "", checked)`. Library has only
+        // (id, name) today; the right_label slot is reserved for a
+        // future song-count column (deferred — Subsonic getMusicFolders
+        // doesn't carry counts, and admin-only /api/library can't be
+        // relied on for non-admin users).
+        let popover_items: Vec<(i32, String, String, bool)> = data
+            .library_rows
+            .clone()
+            .into_iter()
+            .map(|(id, name, checked)| (id, name, String::new(), checked))
+            .collect();
+
+        let popover = super::checkbox_dropdown::library_selector_popover(
+            popover_items,
+            NavBarMessage::LibraryToggle,
+            |bounds| NavBarMessage::LibraryOpenChange {
+                open: bounds.is_some(),
+                trigger_bounds: bounds,
+            },
+            library_selector_open,
+            library_selector_bounds,
+        );
+
+        iced::widget::row![trigger, popover]
+            .align_y(iced::Alignment::Center)
+            .into()
     };
 
     // -------------------------------------------------------------------------

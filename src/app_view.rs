@@ -133,6 +133,9 @@ fn map_nav_bar_message(msg: widgets::NavBarMessage) -> Message {
             open,
             trigger_bounds,
         }),
+        widgets::NavBarMessage::LibraryToggle(id) => {
+            Message::Library(crate::app_message::LibraryMessage::Toggle(id))
+        }
         widgets::NavBarMessage::About => {
             Message::AboutModal(crate::widgets::about_modal::AboutModalMessage::Open)
         }
@@ -808,9 +811,26 @@ impl Nokkvi {
         // Library-filter chrome state — `library_count == 0` (pre-login or
         // before `refresh_libraries` lands) suppresses the trigger so the user
         // never sees a chrome flicker before the count is known.
-        let (library_count, active_library_count) = match &self.app_service {
-            Some(svc) => (svc.library_count(), svc.active_library_ids().len()),
-            None => (0, 0),
+        let (library_count, active_library_count, library_rows) = match &self.app_service {
+            Some(svc) => {
+                let active = svc.active_library_ids();
+                // Empty active set = "all" semantically; render each row
+                // as checked so the popover reflects the user's mental
+                // model ("everything is on") instead of an unchecked
+                // wall of rows that toggle into a subset on click.
+                let all_checked = active.is_empty();
+                let mut rows: Vec<(i32, String, bool)> = svc
+                    .all_libraries()
+                    .into_iter()
+                    .map(|lib| {
+                        let checked = all_checked || active.contains(&lib.id);
+                        (lib.id, lib.name, checked)
+                    })
+                    .collect();
+                rows.sort_by(|a, b| a.1.cmp(&b.1));
+                (svc.library_count(), active.len(), rows)
+            }
+            None => (0, 0, Vec::new()),
         };
         let (library_selector_open, library_selector_bounds) =
             library_selector_state(&self.open_menu);
@@ -849,6 +869,7 @@ impl Nokkvi {
             active_library_count,
             library_selector_open,
             library_selector_bounds,
+            library_rows,
         };
 
         // Use the nav_bar component, mapping NavBarMessage to app Message
