@@ -10,6 +10,15 @@
 //!   toggles in one open.
 //! - Items render with a check-or-empty icon + label.
 //!
+//! Two flavors share the same widget chassis (overlay positioning, escape /
+//! click-outside, persisted hover state):
+//!
+//! 1. [`checkbox_dropdown`] — **single-column rows** with `&'static str` labels,
+//!    used by view-header column-visibility menus.
+//! 2. [`checkbox_dropdown_dynamic`] — **two-column rows** with owned `String`
+//!    name + right-aligned dim metadata label, used when the row contents come
+//!    from runtime data (e.g. the library-filter popover).
+//!
 //! ```ignore
 //! checkbox_dropdown(
 //!     "assets/icons/columns-3-cog.svg",
@@ -44,6 +53,39 @@ use crate::{
 const TRIGGER_SIZE: f32 = ICON_BUTTON_SIZE;
 const TRIGGER_ICON_SIZE: f32 = 20.0;
 
+/// Max width of the name column in two-column rows (px).
+///
+/// Derived from `MENU_MIN_WIDTH` (180) minus container padding (8 left +
+/// 16 right = 24), check icon (14), inter-element spacing (8 + 8 = 16),
+/// and ~30 reserved for the right-aligned metadata label. Names longer
+/// than this ellipsize so the right label stays anchored to the menu edge
+/// and the row never overflows the popover width.
+const MAX_NAME_WIDTH: f32 = 110.0;
+
+/// One row in the dropdown menu. Single-column rows carry a static label
+/// (used by view-header column dropdowns); two-column rows carry an owned
+/// name + dim right-aligned metadata label (used by runtime-data popovers
+/// like the library filter).
+///
+/// `TwoColumn` is constructed by [`checkbox_dropdown_dynamic`]; the
+/// `dead_code` allow is in place until Lane C wires up the library-filter
+/// popover at its call site, after which the production reachability check
+/// will satisfy itself.
+#[allow(dead_code)]
+enum DropdownItemData<Key> {
+    SingleColumn {
+        key: Key,
+        label: &'static str,
+        checked: bool,
+    },
+    TwoColumn {
+        key: Key,
+        name: String,
+        right_label: String,
+        checked: bool,
+    },
+}
+
 /// Build a checkbox dropdown anchored to a trigger icon button.
 ///
 /// `is_open` and `on_open_change` make this a controlled component — open
@@ -65,6 +107,69 @@ where
     Key: Copy + 'a,
     Message: Clone + 'a,
 {
+    let items = items
+        .into_iter()
+        .map(|(key, label, checked)| DropdownItemData::SingleColumn {
+            key,
+            label,
+            checked,
+        })
+        .collect();
+
+    CheckboxDropdown {
+        trigger: trigger_button(trigger_icon, tooltip),
+        items,
+        on_item_toggle: Box::new(on_item_toggle),
+        on_open_change: Box::new(on_open_change),
+        is_open,
+        trigger_bounds,
+        menu: None,
+    }
+}
+
+/// Runtime-data sibling of [`checkbox_dropdown`] for popovers whose row
+/// contents are owned `String`s (e.g. the library-filter popover, whose
+/// library names + song counts come from the Navidrome server).
+///
+/// Each item is `(id, name, right_label, checked)`:
+/// - `name` is the primary label (ellipsized at [`MAX_NAME_WIDTH`]).
+/// - `right_label` is the dim right-aligned metadata (e.g. a song count).
+/// - `checked` drives the leading check-or-empty glyph.
+///
+/// Shares overlay positioning, escape / click-outside handling, and the
+/// same `OpenMenu`-style controlled open state with [`checkbox_dropdown`].
+/// `items` is consumed by value (moved into the widget); `on_item_toggle`
+/// is invoked once per row press, never on every render.
+///
+/// `dead_code` allow is in place until Lane C wires this into the
+/// library-filter popover; the tests in this module exercise the
+/// constructor so it never genuinely rots.
+#[allow(dead_code)]
+pub(crate) fn checkbox_dropdown_dynamic<'a, Key, Message>(
+    trigger_icon: &'static str,
+    tooltip: &'static str,
+    items: Vec<(Key, String, String, bool)>,
+    on_item_toggle: impl Fn(Key) -> Message + 'a,
+    on_open_change: impl Fn(Option<Rectangle>) -> Message + 'a,
+    is_open: bool,
+    trigger_bounds: Option<Rectangle>,
+) -> CheckboxDropdown<'a, Key, Message>
+where
+    Key: Copy + Eq + std::hash::Hash + 'a,
+    Message: Clone + 'a,
+{
+    let items = items
+        .into_iter()
+        .map(
+            |(key, name, right_label, checked)| DropdownItemData::TwoColumn {
+                key,
+                name,
+                right_label,
+                checked,
+            },
+        )
+        .collect();
+
     CheckboxDropdown {
         trigger: trigger_button(trigger_icon, tooltip),
         items,
@@ -237,9 +342,88 @@ fn dropdown_item<'a, Message: Clone + 'a>(
     .into()
 }
 
-/// Build the menu element that floats below the trigger when open.
+/// Render a two-column dropdown item: check-or-empty icon + name (ellipsized
+/// at [`MAX_NAME_WIDTH`]) + flexible spacer + dim right-aligned metadata label.
+///
+/// Mirrors the chrome of [`dropdown_item`] (padding, hover behavior, border
+/// radius) so the two row variants look uniform inside a single menu.
+fn dropdown_item_two_column<'a, Message: Clone + 'a>(
+    name: &str,
+    right_label: &str,
+    checked: bool,
+    on_press: Message,
+) -> Element<'a, Message> {
+    let check_icon_path = if checked {
+        "assets/icons/check.svg"
+    } else {
+        // Render an empty 14×14 spacer so labels stay aligned.
+        ""
+    };
+
+    let check_element: Element<'a, Message> = if check_icon_path.is_empty() {
+        iced::widget::Space::new()
+            .width(Length::Fixed(MENU_ICON_SIZE))
+            .height(Length::Fixed(MENU_ICON_SIZE))
+            .into()
+    } else {
+        crate::embedded_svg::svg_widget(check_icon_path)
+            .width(Length::Fixed(MENU_ICON_SIZE))
+            .height(Length::Fixed(MENU_ICON_SIZE))
+            .style(|_theme, _status| svg::Style {
+                color: Some(theme::fg0()),
+            })
+            .into()
+    };
+
+    let name_text = text(name.to_string())
+        .size(MENU_TEXT_SIZE)
+        .font(theme::ui_font())
+        .color(theme::fg0())
+        .width(Length::Fixed(MAX_NAME_WIDTH))
+        .wrapping(iced::widget::text::Wrapping::None)
+        .ellipsis(iced::widget::text::Ellipsis::End);
+
+    let right_text = text(right_label.to_string())
+        .size(MENU_TEXT_SIZE)
+        .font(theme::ui_font())
+        .color(theme::fg2());
+
+    let row_content = row![
+        check_element,
+        name_text,
+        iced::widget::Space::new().width(Length::Fill),
+        right_text,
+    ]
+    .spacing(8)
+    .align_y(iced::Alignment::Center);
+
+    mouse_area(
+        container(row_content)
+            .width(Length::Fill)
+            .padding(iced::Padding {
+                left: 8.0,
+                right: 16.0,
+                top: 4.0,
+                bottom: 4.0,
+            })
+            .style(|_theme| container::Style {
+                background: None,
+                border: iced::Border {
+                    radius: theme::ui_border_radius(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+    )
+    .on_press(on_press)
+    .interaction(iced::mouse::Interaction::Pointer)
+    .into()
+}
+
+/// Build the menu element that floats below the trigger when open. Dispatches
+/// each item to the matching row renderer based on its variant.
 fn build_menu_element<'a, Key, Message>(
-    items: &[(Key, &'static str, bool)],
+    items: &[DropdownItemData<Key>],
     on_item_toggle: &dyn Fn(Key) -> Message,
 ) -> Element<'a, Message>
 where
@@ -248,7 +432,19 @@ where
 {
     let rows: Vec<Element<'a, Message>> = items
         .iter()
-        .map(|(key, label, checked)| dropdown_item(label, *checked, on_item_toggle(*key)))
+        .map(|item| match item {
+            DropdownItemData::SingleColumn {
+                key,
+                label,
+                checked,
+            } => dropdown_item(label, *checked, on_item_toggle(*key)),
+            DropdownItemData::TwoColumn {
+                key,
+                name,
+                right_label,
+                checked,
+            } => dropdown_item_two_column(name, right_label, *checked, on_item_toggle(*key)),
+        })
         .collect();
 
     container(column(rows).spacing(0))
@@ -272,7 +468,7 @@ where
 
 pub struct CheckboxDropdown<'a, Key, Message> {
     trigger: Element<'a, Message>,
-    items: Vec<(Key, &'static str, bool)>,
+    items: Vec<DropdownItemData<Key>>,
     on_item_toggle: Box<dyn Fn(Key) -> Message + 'a>,
     /// Emitted with `Some(trigger_bounds)` to request open at those bounds, or
     /// `None` to request close.
@@ -487,7 +683,7 @@ where
 fn build_overlay<'a, 'b, Key, Message>(
     state: &'b mut State,
     menu: &'b mut Option<Element<'a, Message>>,
-    items: &[(Key, &'static str, bool)],
+    items: &[DropdownItemData<Key>],
     on_item_toggle: &dyn Fn(Key) -> Message,
     on_open_change: &'b dyn Fn(Option<Rectangle>) -> Message,
     trigger_bounds: Option<Rectangle>,
@@ -662,6 +858,18 @@ impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'
 mod tests {
     use super::*;
 
+    /// Placeholder message used by the smoke tests below. Mirrors the shape a
+    /// real call site (e.g. the library-filter popover) would use: one Toggle
+    /// arm for item presses and one OpenChange arm for trigger / outside-click
+    /// / Escape events. The inner payloads are never read — these tests only
+    /// exercise constructor / `Into<Element>` plumbing.
+    #[derive(Debug, Clone)]
+    #[allow(dead_code)]
+    enum TestMessage {
+        Toggle(i32),
+        OpenChange(Option<iced::Rectangle>),
+    }
+
     #[test]
     fn checkbox_dropdown_compiles_with_typical_inputs() {
         // Smoke test: the public API accepts the expected shape and produces
@@ -698,6 +906,56 @@ mod tests {
             |_| "noop".to_string(),
             false,
             None,
+        )
+        .into();
+    }
+
+    #[test]
+    fn checkbox_dropdown_dynamic_compiles_with_zero_items() {
+        // Degenerate-but-valid input: empty popover. Must not panic during
+        // construction or conversion to Element; the overlay path will short-
+        // circuit at `items.is_empty()` if it ever opens.
+        let items: Vec<(i32, String, String, bool)> = Vec::new();
+        let _el: Element<'_, TestMessage> = checkbox_dropdown_dynamic(
+            "assets/icons/library.svg",
+            "Libraries",
+            items,
+            TestMessage::Toggle,
+            TestMessage::OpenChange,
+            false,
+            None,
+        )
+        .into();
+    }
+
+    #[test]
+    fn checkbox_dropdown_dynamic_compiles_with_three_items() {
+        // Typical input: three rows with owned name + right-label strings, the
+        // shape the library-filter popover (Lane C) will produce. Mixed
+        // checked / unchecked covers both row-icon code paths.
+        let items: Vec<(i32, String, String, bool)> = vec![
+            (1, "Music Library".to_string(), "13,627".to_string(), true),
+            (
+                2,
+                "Longmont Potion Castle".to_string(),
+                "412".to_string(),
+                false,
+            ),
+            (3, "Field Recordings".to_string(), "58".to_string(), true),
+        ];
+        let _el: Element<'_, TestMessage> = checkbox_dropdown_dynamic(
+            "assets/icons/library.svg",
+            "Libraries",
+            items,
+            TestMessage::Toggle,
+            TestMessage::OpenChange,
+            true,
+            Some(iced::Rectangle {
+                x: 0.0,
+                y: 0.0,
+                width: 40.0,
+                height: 40.0,
+            }),
         )
         .into();
     }
