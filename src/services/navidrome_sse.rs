@@ -39,6 +39,20 @@ pub(crate) fn register(info: SseConnectionInfo) {
     }
 }
 
+/// Drop registered connection info. Called from `reset_session_state` on
+/// logout / session-expired. Without this, the SSE event loop keeps reusing
+/// the stale `auth_gateway` + `server_url` and retries forever against the
+/// old server (401 against a re-pointed server, indefinite reconnect against
+/// an unreachable one) until the next successful `register()` overwrites
+/// the slot.
+pub(crate) fn clear() {
+    let slot = SSE_CONNECTION_INFO.get_or_init(|| Mutex::new(None));
+    if let Ok(mut guard) = slot.try_lock() {
+        *guard = None;
+        debug!(" [SSE] Connection info cleared");
+    }
+}
+
 /// Structured payload carrying the resource kinds Navidrome reports as changed.
 ///
 /// Built by the SSE consumer from `NavidromeEvent::RefreshResource`'s raw

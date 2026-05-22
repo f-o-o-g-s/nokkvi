@@ -1403,7 +1403,7 @@ impl Nokkvi {
     /// Reset fields fall into three buckets:
     /// - **Core session identity**: app_service, stored_session,
     ///   should_auto_login, screen.
-    /// - **Server-specific data pointing at gone IDs**: library,
+    /// - **Server-specific data pointing at gone IDs**: library, artwork,
     ///   similar_songs(+generation), active_playlist_info, playlist_edit,
     ///   server_version, last_queue_current_index, active_progress,
     ///   pending_expand(+center_only +top_pin), roulette.
@@ -1412,20 +1412,27 @@ impl Nokkvi {
     ///   +selection_count), pending_queue_insert_position,
     ///   start_view_applied, suppress_next_auto_center.
     ///
+    /// Side-effect calls (not field resets):
+    /// - `services::navidrome_sse::clear()` drops the static SSE
+    ///   connection registration so the event loop can't keep retrying
+    ///   with stale credentials against the prior server (would 401
+    ///   forever until next `register()`).
+    ///
     /// Fields explicitly NOT reset (retained across login transitions):
     /// - retained: cached_storage — explicit DB-lock workaround.
     /// - retained: login_page — credentials kept so user can re-enter.
     /// - retained: current_view, pre_settings_view — UI nav memory.
     /// - retained: modes, settings, hotkey_config — user preferences.
-    /// - retained: sfx_engine, sfx, engine, artwork, window,
-    ///   player_bar_layout, visualizer(+config), boat — local UI/audio
-    ///   infrastructure independent of the server.
+    /// - retained: sfx_engine, sfx, engine, window, player_bar_layout,
+    ///   visualizer(+config), boat — local UI/audio infrastructure
+    ///   independent of the server.
     /// - retained: toast, text_input_dialog, info_modal, about_modal,
     ///   eq_modal, default_playlist_picker — modal/overlay shells
     ///   (toast queue intentionally survives so the session-expired
     ///   message is visible after this returns).
     /// - retained: mpris_connection, tray_connection, tray_window_hidden,
-    ///   main_window_id — system integrations.
+    ///   main_window_id — system integrations bound to the app process,
+    ///   not the session.
     /// - retained: playback, active_playback, scrobble — track-display
     ///   fields. Engine-stop is async; resetting these here could race.
     ///   They are overwritten on next session's first queue load and the
@@ -1470,6 +1477,10 @@ impl Nokkvi {
 
         // Server-specific data pointing at gone IDs
         self.library = crate::state::LibraryData::default();
+        // Artwork caches are session-bound: server-A's cover bytes must not be
+        // served for server-B's album IDs if the IDs happen to overlap after
+        // re-login. Default rebuilds the LRUs at their declared capacities.
+        self.artwork = crate::state::ArtworkState::default();
         self.similar_songs = None;
         self.similar_songs_generation = 0;
         self.active_playlist_info = None;
@@ -1492,6 +1503,13 @@ impl Nokkvi {
         self.pending_queue_insert_position = None;
         self.start_view_applied = false;
         self.suppress_next_auto_center = false;
+
+        // Drop the static SSE connection registration so the event loop
+        // stops retrying against the prior server with stale credentials.
+        // Without this, post-logout SSE attempts 401 indefinitely (or hang
+        // against an unreachable host) until the next successful login
+        // overwrites the slot via `register()`.
+        crate::services::navidrome_sse::clear();
 
         tracing::debug!(" [SESSION-RESET] cleared session-bound state");
 
