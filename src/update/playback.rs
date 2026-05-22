@@ -110,18 +110,28 @@ impl Nokkvi {
                     };
                 drop(qm);
 
-                // Build artwork URL for MPRIS - use cover_art if available, otherwise fall back to album_id
-                // (Navidrome API songs don't include coverArt, but album art uses the album ID)
-                let art_id = cover_art.as_ref().or(album_id.as_ref());
-                let art_url = if let Some(cover_id) = art_id {
-                    let (server_url, subsonic_credential) = shell.queue().get_server_config().await;
-                    let url = nokkvi_data::utils::artwork_url::build_cover_art_url(
-                        cover_id,
+                // Build artwork URL for MPRIS. Historically this inlined the
+                // Subsonic credential triple (`u=...&s=...&t=...`) into the
+                // URL, which then went onto the public D-Bus session bus via
+                // `mpris:artUrl` — any same-user process could `dbus-monitor`
+                // and harvest the credential. Now we route through
+                // `mpris_art_writer`: fetch the bytes via the authenticated
+                // client once per song change, write them to a per-pid cache
+                // file, and emit `file://...` to MPRIS instead.
+                let art_url = if let Some(cover_id) = cover_art.as_ref().or(album_id.as_ref()) {
+                    let (server_url, _credential) = shell.queue().get_server_config().await;
+                    let albums = shell.albums().clone();
+                    let cover_id_owned = cover_id.clone();
+                    crate::services::mpris_art_writer::write_art_for_mpris(
                         &server_url,
-                        &subsonic_credential,
-                        None, // Use default high-res size
-                    );
-                    if url.is_empty() { None } else { Some(url) }
+                        cover_id,
+                        async move {
+                            albums
+                                .fetch_album_artwork_with_retry(&cover_id_owned, None, None)
+                                .await
+                        },
+                    )
+                    .await
                 } else if radio_station.is_some() {
                     icy_url
                 } else {
