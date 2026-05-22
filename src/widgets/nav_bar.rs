@@ -89,6 +89,21 @@ pub(crate) struct NavBarViewData {
     pub strip_context_open: bool,
     /// Anchor position for the strip context menu when open.
     pub strip_context_position: Option<iced::Point>,
+    /// Total libraries known to the client (the popover's row count).
+    /// `<= 1` suppresses the trigger entirely — see the design lock
+    /// "Hidden at N ≤ 1" in `libraries_imp_plan.md` §2.
+    pub library_count: usize,
+    /// Subset of `library_count` currently in the active selection.
+    /// `0` (the empty-set-as-all default) and `library_count` render
+    /// identically (neutral icon); strict subsets show the count badge
+    /// and pip.
+    pub active_library_count: usize,
+    /// Whether the library-filter popover is currently open (controlled
+    /// state — mirrors `Nokkvi.open_menu == Some(OpenMenu::LibrarySelector { .. })`).
+    pub library_selector_open: bool,
+    /// Trigger bounds captured at open time — re-passed each render so
+    /// Lane D's popover overlay can anchor below the trigger.
+    pub library_selector_bounds: Option<iced::Rectangle>,
 }
 
 /// Messages emitted by nav bar interactions
@@ -102,6 +117,14 @@ pub enum NavBarMessage {
     StripContextAction(super::context_menu::StripContextEntry),
     /// Hamburger menu open/close request — bubbled to root `Message::SetOpenMenu`.
     SetOpenMenu(Option<crate::app_message::OpenMenu>),
+    /// Library-filter trigger open/close request — bubbled to root as
+    /// `Message::Library(LibraryMessage::OpenChange { open, trigger_bounds })`.
+    /// Open requests carry the trigger's screen-space bounds so the popover
+    /// can anchor below the button; close requests carry `None`.
+    LibraryOpenChange {
+        open: bool,
+        trigger_bounds: Option<iced::Rectangle>,
+    },
     About,
     Quit,
 }
@@ -657,6 +680,50 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         };
 
     // -------------------------------------------------------------------------
+    // Library-filter trigger (icon button, between format-info and hamburger)
+    // -------------------------------------------------------------------------
+    //
+    // Slot type stays `Element` in every branch so the surrounding row's
+    // widget-tree shape never churns across renders (the iced re-render
+    // trap that destroys `text_input` focus — see `.agent/rules/gotchas.md`
+    // "Widget Tree & Focus"). Side-nav v1 no-ops the trigger; the
+    // side-nav footer placement is the v2 follow-up.
+    //
+    // TODO(library-filter Lane D): mount the `checkbox_dropdown_dynamic`
+    // popover anchored to `data.library_selector_bounds`. Natural slot is
+    // here, immediately after `library_trigger_slot`, conditioned on
+    // `data.library_selector_open`. The popover should call
+    // `app.all_libraries()` + `app.active_library_ids()` for rows, emit
+    // `NavBarMessage::LibraryOpenChange { open: false, trigger_bounds: None }`
+    // on close (or thread a fresh `LibraryToggle(i32)` variant for row
+    // clicks). Lane B's `checkbox_dropdown_dynamic` already returns a
+    // self-contained trigger + overlay widget — Lane D may want to extend
+    // it to accept an external trigger or factor out just the overlay
+    // builder so this trigger's icon+count+pip chrome isn't duplicated.
+    let library_trigger_slot: Element<'static, NavBarMessage> = if is_side_nav {
+        Space::new().into()
+    } else {
+        let library_count = data.library_count;
+        let active_library_count = data.active_library_count;
+        let library_selector_open = data.library_selector_open;
+        let library_selector_bounds = data.library_selector_bounds;
+        super::hover_overlay::HoverOverlay::new(
+            super::library_filter_trigger::library_filter_trigger(
+                library_count,
+                active_library_count,
+                library_selector_open,
+                library_selector_bounds,
+                |open, trigger_bounds| NavBarMessage::LibraryOpenChange {
+                    open,
+                    trigger_bounds,
+                },
+            ),
+        )
+        .border_radius(theme::ui_border_radius())
+        .into()
+    };
+
+    // -------------------------------------------------------------------------
     // Hamburger Menu (far right)
     // -------------------------------------------------------------------------
     let hamburger: Element<'static, NavBarMessage> =
@@ -677,7 +744,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         .into();
 
     // -------------------------------------------------------------------------
-    // Assemble Layout: Tabs | Track Info | Format Info | Hamburger
+    // Assemble Layout: Tabs | Track Info | Format Info | LibraryFilter | Hamburger
     // -------------------------------------------------------------------------
     let nav_content = container(
         row![
@@ -687,6 +754,8 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             center_section,
             // Format info (stays visible independently)
             format_section,
+            // Library-filter trigger (Space when N <= 1 or side-nav)
+            library_trigger_slot,
             // Hamburger menu
             tab_separator(false),
             hamburger,

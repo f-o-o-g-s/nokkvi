@@ -83,8 +83,8 @@ fn similar_column_dropdown_state(
 }
 
 /// Sibling of [`column_dropdown_state`] for the library selector popover.
-/// Wired into the nav-bar trigger; Wave 2 Lane D / Lane C consume this.
-#[allow(dead_code)]
+/// Called from `navigation_bar` to feed `(is_open, trigger_bounds)` into
+/// the nav-bar trigger; Lane D's popover overlay reads the same state.
 fn library_selector_state(
     open_menu: &Option<crate::app_message::OpenMenu>,
 ) -> (bool, Option<iced::Rectangle>) {
@@ -126,6 +126,13 @@ fn map_nav_bar_message(msg: widgets::NavBarMessage) -> Message {
         widgets::NavBarMessage::StripClicked => Message::StripClicked,
         widgets::NavBarMessage::StripContextAction(entry) => Message::StripContextAction(entry),
         widgets::NavBarMessage::SetOpenMenu(next) => Message::SetOpenMenu(next),
+        widgets::NavBarMessage::LibraryOpenChange {
+            open,
+            trigger_bounds,
+        } => Message::Library(crate::app_message::LibraryMessage::OpenChange {
+            open,
+            trigger_bounds,
+        }),
         widgets::NavBarMessage::About => {
             Message::AboutModal(crate::widgets::about_modal::AboutModalMessage::Open)
         }
@@ -798,6 +805,16 @@ impl Nokkvi {
             crate::state::ActivePlayback::Queue => (None, None, None, None),
         };
 
+        // Library-filter chrome state — `library_count == 0` (pre-login or
+        // before `refresh_libraries` lands) suppresses the trigger so the user
+        // never sees a chrome flicker before the count is known.
+        let (library_count, active_library_count) = match &self.app_service {
+            Some(svc) => (svc.library_count(), svc.active_library_ids().len()),
+            None => (0, 0),
+        };
+        let (library_selector_open, library_selector_bounds) =
+            library_selector_state(&self.open_menu);
+
         let nav_bar_data = widgets::NavBarViewData {
             current_view: current_nav_view,
             track_title,
@@ -828,6 +845,10 @@ impl Nokkvi {
                 let (_, pos) = strip_context_state(&self.open_menu);
                 pos
             },
+            library_count,
+            active_library_count,
+            library_selector_open,
+            library_selector_bounds,
         };
 
         // Use the nav_bar component, mapping NavBarMessage to app Message

@@ -6,6 +6,7 @@
 
 // Components
 pub(crate) mod artwork_split_handle;
+pub(crate) mod badge_pip;
 pub(crate) mod base_slot_list_layout;
 pub(crate) mod boat;
 pub(crate) mod drag_column;
@@ -13,6 +14,7 @@ pub(crate) mod eq_slider;
 pub(crate) mod format_info;
 pub(crate) mod hover_indicator;
 pub(crate) mod hover_overlay;
+pub(crate) mod library_filter_trigger;
 pub(crate) mod link_text;
 pub(crate) mod marquee_text;
 pub(crate) mod menu_constants;
