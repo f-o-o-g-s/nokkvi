@@ -110,18 +110,28 @@ impl Nokkvi {
                     };
                 drop(qm);
 
-                // Build artwork URL for MPRIS - use cover_art if available, otherwise fall back to album_id
-                // (Navidrome API songs don't include coverArt, but album art uses the album ID)
-                let art_id = cover_art.as_ref().or(album_id.as_ref());
-                let art_url = if let Some(cover_id) = art_id {
-                    let (server_url, subsonic_credential) = shell.queue().get_server_config().await;
-                    let url = nokkvi_data::utils::artwork_url::build_cover_art_url(
-                        cover_id,
+                // Build artwork URL for MPRIS. Historically this inlined the
+                // Subsonic credential triple (`u=...&s=...&t=...`) into the
+                // URL, which then went onto the public D-Bus session bus via
+                // `mpris:artUrl` — any same-user process could `dbus-monitor`
+                // and harvest the credential. Now we route through
+                // `mpris_art_writer`: fetch the bytes via the authenticated
+                // client once per song change, write them to a per-pid cache
+                // file, and emit `file://...` to MPRIS instead.
+                let art_url = if let Some(cover_id) = cover_art.as_ref().or(album_id.as_ref()) {
+                    let (server_url, _credential) = shell.queue().get_server_config().await;
+                    let albums = shell.albums().clone();
+                    let cover_id_owned = cover_id.clone();
+                    crate::services::mpris_art_writer::write_art_for_mpris(
                         &server_url,
-                        &subsonic_credential,
-                        None, // Use default high-res size
-                    );
-                    if url.is_empty() { None } else { Some(url) }
+                        cover_id,
+                        async move {
+                            albums
+                                .fetch_album_artwork_with_retry(&cover_id_owned, None, None)
+                                .await
+                        },
+                    )
+                    .await
                 } else if radio_station.is_some() {
                     icy_url
                 } else {
@@ -874,6 +884,45 @@ impl Nokkvi {
         )
     }
 
+    /// Set repeat mode to a specific target — dispatched by MPRIS
+    /// `SetLoopStatus`. Unlike `handle_toggle_repeat`, this does not cycle:
+    /// `playerctl loop Track` lands on `Track` regardless of the prior state.
+    /// The optimistic UI update mirrors the request so the button settles
+    /// before the shell round-trip completes; the follow-up `Tick` re-reads
+    /// modes from the backend as a reconciliation step.
+    pub(crate) fn handle_set_repeat_mode(
+        &mut self,
+        mode: nokkvi_data::types::queue::RepeatMode,
+    ) -> Task<Message> {
+        use nokkvi_data::types::queue::RepeatMode;
+
+        let new_repeat = mode == RepeatMode::Track;
+        let new_repeat_queue = mode == RepeatMode::Playlist;
+        self.modes.repeat = new_repeat;
+        self.modes.repeat_queue = new_repeat_queue;
+        let label = match mode {
+            RepeatMode::Track => "Repeat: One",
+            RepeatMode::Playlist => "Repeat: Queue",
+            RepeatMode::None => "Repeat: Off",
+        };
+        self.toast_info(label);
+
+        let set_task = self.shell_task(
+            move |shell| async move {
+                shell
+                    .playback()
+                    .set_repeat_mode(mode)
+                    .await
+                    .unwrap_or((false, false))
+            },
+            |(r, rq)| Message::Playback(PlaybackMessage::RepeatToggled(r, rq)),
+        );
+        Task::batch([
+            set_task,
+            Task::done(Message::Playback(PlaybackMessage::Tick)),
+        ])
+    }
+
     pub(crate) fn handle_repeat_toggled(
         &mut self,
         repeat: bool,
@@ -1552,6 +1601,7 @@ impl Nokkvi {
             PlaybackMessage::ToggleRandom => self.handle_toggle_random(),
             PlaybackMessage::RandomToggled(random) => self.handle_random_toggled(random),
             PlaybackMessage::ToggleRepeat => self.handle_toggle_repeat(),
+            PlaybackMessage::SetRepeatMode(mode) => self.handle_set_repeat_mode(mode),
             PlaybackMessage::RepeatToggled(repeat, repeat_queue) => {
                 self.handle_repeat_toggled(repeat, repeat_queue)
             }

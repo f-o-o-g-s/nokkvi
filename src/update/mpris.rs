@@ -4,9 +4,26 @@
 
 use iced::Task;
 use mpris_server::LoopStatus;
+use nokkvi_data::types::queue::RepeatMode;
 use tracing::debug;
 
 use crate::{Message, Nokkvi, app_message::PlaybackMessage, services::mpris::MprisEvent};
+
+/// Map MPRIS `LoopStatus` to the project's `RepeatMode`.
+///
+/// MPRIS clients (`playerctl`, KDE Plasma media controls, GNOME Shell
+/// extensions) emit `org.mpris.MediaPlayer2.Player.LoopStatus` as a
+/// *direct* request for a specific repeat mode. Routing those through
+/// the on-screen cycle handler would land on the wrong mode any time
+/// the current state isn't `None` — this pure fn keeps the mapping
+/// exhaustive and unit-testable.
+pub(crate) fn loop_status_to_repeat_mode(status: LoopStatus) -> RepeatMode {
+    match status {
+        LoopStatus::None => RepeatMode::None,
+        LoopStatus::Track => RepeatMode::Track,
+        LoopStatus::Playlist => RepeatMode::Playlist,
+    }
+}
 
 impl Nokkvi {
     /// Handle MPRIS events from D-Bus
@@ -78,22 +95,11 @@ impl Nokkvi {
 
             MprisEvent::SetLoopStatus(status) => {
                 debug!(" MPRIS: SetLoopStatus {:?}", status);
-                // Map MPRIS LoopStatus to our repeat toggle
-                // None = no repeat, Track = repeat current, Playlist = repeat queue
-                match status {
-                    LoopStatus::None => {
-                        // Turn off repeat modes if currently enabled
-                        if self.modes.repeat || self.modes.repeat_queue {
-                            Task::done(Message::Playback(PlaybackMessage::ToggleRepeat))
-                        } else {
-                            Task::none()
-                        }
-                    }
-                    LoopStatus::Track | LoopStatus::Playlist => {
-                        // Toggle repeat to cycle to requested mode
-                        Task::done(Message::Playback(PlaybackMessage::ToggleRepeat))
-                    }
-                }
+                // MPRIS LoopStatus is a *direct* request — map exhaustively
+                // to RepeatMode and dispatch the direct setter so we never
+                // cycle past the requested mode (the bug NF1 fixed).
+                let mode = loop_status_to_repeat_mode(status);
+                Task::done(Message::Playback(PlaybackMessage::SetRepeatMode(mode)))
             }
 
             MprisEvent::SetShuffle(shuffle) => {

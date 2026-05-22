@@ -17,6 +17,7 @@ mod ipc;
 mod library;
 mod library_refresh;
 mod menus;
+mod mpris;
 #[macro_use]
 mod navigation_macros;
 mod navigation;
@@ -24,7 +25,9 @@ mod page_loader;
 mod playback;
 mod queue;
 mod roulette;
+mod session;
 mod settings;
 mod slot_list;
 mod star_rating;
 mod state;
+mod window;

@@ -93,6 +93,11 @@ pub enum PlaybackMessage {
     ToggleRandom,
     RandomToggled(bool),
     ToggleRepeat,
+    /// Set repeat mode to a specific value — used by MPRIS `LoopStatus`
+    /// (`playerctl`, KDE Plasma media controls, GNOME Shell extensions),
+    /// which emits the target mode directly rather than a cycle request.
+    /// The on-screen repeat button still uses `ToggleRepeat`.
+    SetRepeatMode(nokkvi_data::types::queue::RepeatMode),
     RepeatToggled(bool, bool),
     ToggleConsume,
     ConsumeToggled(bool),
