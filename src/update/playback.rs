@@ -874,6 +874,45 @@ impl Nokkvi {
         )
     }
 
+    /// Set repeat mode to a specific target — dispatched by MPRIS
+    /// `SetLoopStatus`. Unlike `handle_toggle_repeat`, this does not cycle:
+    /// `playerctl loop Track` lands on `Track` regardless of the prior state.
+    /// The optimistic UI update mirrors the request so the button settles
+    /// before the shell round-trip completes; the follow-up `Tick` re-reads
+    /// modes from the backend as a reconciliation step.
+    pub(crate) fn handle_set_repeat_mode(
+        &mut self,
+        mode: nokkvi_data::types::queue::RepeatMode,
+    ) -> Task<Message> {
+        use nokkvi_data::types::queue::RepeatMode;
+
+        let new_repeat = mode == RepeatMode::Track;
+        let new_repeat_queue = mode == RepeatMode::Playlist;
+        self.modes.repeat = new_repeat;
+        self.modes.repeat_queue = new_repeat_queue;
+        let label = match mode {
+            RepeatMode::Track => "Repeat: One",
+            RepeatMode::Playlist => "Repeat: Queue",
+            RepeatMode::None => "Repeat: Off",
+        };
+        self.toast_info(label);
+
+        let set_task = self.shell_task(
+            move |shell| async move {
+                shell
+                    .playback()
+                    .set_repeat_mode(mode)
+                    .await
+                    .unwrap_or((false, false))
+            },
+            |(r, rq)| Message::Playback(PlaybackMessage::RepeatToggled(r, rq)),
+        );
+        Task::batch([
+            set_task,
+            Task::done(Message::Playback(PlaybackMessage::Tick)),
+        ])
+    }
+
     pub(crate) fn handle_repeat_toggled(
         &mut self,
         repeat: bool,
@@ -1552,6 +1591,7 @@ impl Nokkvi {
             PlaybackMessage::ToggleRandom => self.handle_toggle_random(),
             PlaybackMessage::RandomToggled(random) => self.handle_random_toggled(random),
             PlaybackMessage::ToggleRepeat => self.handle_toggle_repeat(),
+            PlaybackMessage::SetRepeatMode(mode) => self.handle_set_repeat_mode(mode),
             PlaybackMessage::RepeatToggled(repeat, repeat_queue) => {
                 self.handle_repeat_toggled(repeat, repeat_queue)
             }

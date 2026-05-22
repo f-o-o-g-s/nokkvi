@@ -455,6 +455,40 @@ impl PlaybackController {
         Ok((repeat, repeat_queue))
     }
 
+    /// Set repeat mode to a specific value (idempotent; used by MPRIS LoopStatus).
+    ///
+    /// Mirrors `cycle_repeat` but accepts an explicit target instead of
+    /// advancing through the cycle. MPRIS clients (`playerctl`, KDE Plasma
+    /// media controls, GNOME Shell extensions) emit
+    /// `org.mpris.MediaPlayer2.Player.LoopStatus = "Track" | "Playlist" | "None"`
+    /// as a *direct* request — routing those through `cycle_repeat` would
+    /// land on the wrong mode whenever the current state isn't `None`.
+    ///
+    /// A no-op set (current == target) still applies the engine effect, which
+    /// is harmless: gapless prep is invalidated and the next `peek_next_song`
+    /// re-resolves under the same mode.
+    pub async fn set_repeat_mode(
+        &self,
+        mode: crate::types::queue::RepeatMode,
+    ) -> Result<(bool, bool)> {
+        use crate::types::queue::RepeatMode;
+
+        let queue_manager_arc = self.queue_service.queue_manager();
+        let mut queue_manager = queue_manager_arc.lock().await;
+
+        // `set_repeat` commits via `QueueWriteGuard::commit_save_order`, which
+        // already calls `clear_queued()` + `save_order()` under the guard.
+        let effect = queue_manager.set_repeat(mode)?;
+        drop(queue_manager);
+
+        // Invalidate engine-level gapless prep (stale after mode change)
+        effect.apply_to(&self.audio_engine).await;
+
+        let repeat = mode == RepeatMode::Track;
+        let repeat_queue = mode == RepeatMode::Playlist;
+        Ok((repeat, repeat_queue))
+    }
+
     /// Toggle consume mode
     ///
     /// Clears the engine's prepared next-track decoder because consume mode

@@ -16,6 +16,7 @@ mod hotkeys;
 mod ipc;
 mod library_refresh;
 mod menus;
+mod mpris;
 #[macro_use]
 mod navigation_macros;
 mod navigation;
