@@ -23,6 +23,7 @@ mod page_loader;
 mod playback;
 mod queue;
 mod roulette;
+mod session;
 mod settings;
 mod slot_list;
 mod star_rating;
