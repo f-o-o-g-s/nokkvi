@@ -372,6 +372,87 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     let current = data.current_view;
     let is_side_nav = theme::is_side_nav();
 
+    // -------------------------------------------------------------------------
+    // Library-filter trigger + popover (icon button + dropdown panel)
+    // -------------------------------------------------------------------------
+    //
+    // Sits at the LEFT edge of the top nav, BEFORE the Queue tab —
+    // ensures it's always visible regardless of nav-bar contents on
+    // narrow windows and matches the side-nav placement above the
+    // Queue tab. Side-nav mode renders `Space::new()` here because the
+    // sidebar's own footer handles the trigger.
+    //
+    // Slot is a Row of two widgets:
+    //  1. The visible trigger (`library_filter_trigger`) — icon + N/M
+    //     label + filtered-state pip. Emits `LibraryOpenChange` on
+    //     left-click with the captured screen-space bounds.
+    //  2. A zero-size `library_selector_popover` whose only render
+    //     output is an iced overlay when `library_selector_open == true`.
+    //     Anchors to `library_selector_bounds` (the trigger bounds
+    //     captured at click time, stashed in
+    //     `OpenMenu::LibrarySelector { trigger_bounds }`).
+    //
+    // Slot type stays `Element` in every branch so the surrounding row's
+    // widget-tree shape never churns across renders (the iced re-render
+    // trap that destroys `text_input` focus — see
+    // `.agent/rules/gotchas.md` "Widget Tree & Focus").
+    let library_trigger_slot: Element<'static, NavBarMessage> = if is_side_nav {
+        Space::new().into()
+    } else {
+        let library_count = data.library_count;
+        let active_library_count = data.active_library_count;
+        let library_selector_open = data.library_selector_open;
+        let library_selector_bounds = data.library_selector_bounds;
+        let trigger = super::hover_overlay::HoverOverlay::new(
+            super::library_filter_trigger::library_filter_trigger(
+                library_count,
+                active_library_count,
+                library_selector_open,
+                false, // not compact — top nav has room for the N/M text
+                library_selector_bounds,
+                |open, trigger_bounds| NavBarMessage::LibraryOpenChange {
+                    open,
+                    trigger_bounds,
+                },
+            ),
+        )
+        .border_radius(theme::ui_border_radius());
+
+        // Popover rows: format song_count into a comma-grouped string
+        // for the dim right column; `None` → empty string (Subsonic
+        // fallback case for non-admin sessions).
+        let popover_items: Vec<(i32, String, String, bool)> = data
+            .library_rows
+            .clone()
+            .into_iter()
+            .map(|(id, name, song_count, checked)| {
+                let right_label = song_count
+                    .map(super::format_count_with_commas)
+                    .unwrap_or_default();
+                (id, name, right_label, checked)
+            })
+            .collect();
+
+        let total_count = data.library_count;
+        let active_count = data.active_library_count;
+        let popover = super::checkbox_dropdown::library_selector_popover(
+            popover_items,
+            active_count,
+            total_count,
+            NavBarMessage::LibraryToggle,
+            |bounds| NavBarMessage::LibraryOpenChange {
+                open: bounds.is_some(),
+                trigger_bounds: bounds,
+            },
+            library_selector_open,
+            library_selector_bounds,
+        );
+
+        iced::widget::row![trigger, popover]
+            .align_y(Alignment::Center)
+            .into()
+    };
+
     // In Side mode, nav tabs move to the vertical sidebar — hide them here
     let mut left_section: iced::widget::Row<'static, NavBarMessage> = if is_side_nav {
         row![]
@@ -379,7 +460,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             .height(Length::Fill)
             .align_y(Alignment::Center)
     } else {
-        let mut tabs = row![tab_separator(false)]
+        let mut tabs = row![library_trigger_slot, tab_separator(false)]
             .spacing(0)
             .height(Length::Fill)
             .align_y(Alignment::Center);
@@ -690,82 +771,6 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         };
 
     // -------------------------------------------------------------------------
-    // Library-filter trigger + popover (icon button + dropdown panel)
-    // -------------------------------------------------------------------------
-    //
-    // The slot is a Row of two widgets:
-    //
-    //  1. The visible trigger (`library_filter_trigger`) — icon + N/M label
-    //     + filtered-state pip. Emits `LibraryOpenChange` on left-click with
-    //     the captured screen-space bounds.
-    //  2. A zero-size `library_selector_popover` whose only render output is
-    //     an iced overlay when `library_selector_open == true`. Anchors to
-    //     `library_selector_bounds` (the trigger bounds captured at click
-    //     time, stashed in `OpenMenu::LibrarySelector { trigger_bounds }`).
-    //
-    // Slot type stays `Element` in every branch so the surrounding row's
-    // widget-tree shape never churns across renders (the iced re-render
-    // trap that destroys `text_input` focus — see `.agent/rules/gotchas.md`
-    // "Widget Tree & Focus"). Side-nav v1 no-ops the trigger entirely; the
-    // side-nav footer placement is the v2 follow-up.
-    let library_trigger_slot: Element<'static, NavBarMessage> = if is_side_nav {
-        Space::new().into()
-    } else {
-        let library_count = data.library_count;
-        let active_library_count = data.active_library_count;
-        let library_selector_open = data.library_selector_open;
-        let library_selector_bounds = data.library_selector_bounds;
-        let trigger = super::hover_overlay::HoverOverlay::new(
-            super::library_filter_trigger::library_filter_trigger(
-                library_count,
-                active_library_count,
-                library_selector_open,
-                false, // not compact — top nav has room for the N/M text
-                library_selector_bounds,
-                |open, trigger_bounds| NavBarMessage::LibraryOpenChange {
-                    open,
-                    trigger_bounds,
-                },
-            ),
-        )
-        .border_radius(theme::ui_border_radius());
-
-        // Popover rows: format song_count into a comma-grouped string
-        // for the dim right column; `None` → empty string (Subsonic
-        // fallback case for non-admin sessions).
-        let popover_items: Vec<(i32, String, String, bool)> = data
-            .library_rows
-            .clone()
-            .into_iter()
-            .map(|(id, name, song_count, checked)| {
-                let right_label = song_count
-                    .map(super::format_count_with_commas)
-                    .unwrap_or_default();
-                (id, name, right_label, checked)
-            })
-            .collect();
-
-        let total_count = data.library_count;
-        let active_count = data.active_library_count;
-        let popover = super::checkbox_dropdown::library_selector_popover(
-            popover_items,
-            active_count,
-            total_count,
-            NavBarMessage::LibraryToggle,
-            |bounds| NavBarMessage::LibraryOpenChange {
-                open: bounds.is_some(),
-                trigger_bounds: bounds,
-            },
-            library_selector_open,
-            library_selector_bounds,
-        );
-
-        iced::widget::row![trigger, popover]
-            .align_y(iced::Alignment::Center)
-            .into()
-    };
-
-    // -------------------------------------------------------------------------
     // Hamburger Menu (far right)
     // -------------------------------------------------------------------------
     let hamburger: Element<'static, NavBarMessage> =
@@ -786,18 +791,16 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         .into();
 
     // -------------------------------------------------------------------------
-    // Assemble Layout: Tabs | Track Info | Format Info | LibraryFilter | Hamburger
+    // Assemble Layout: LibraryFilter + Tabs | Track Info | Format Info | Hamburger
     // -------------------------------------------------------------------------
     let nav_content = container(
         row![
-            // Left: Navigation tabs
+            // Left: Library filter trigger then navigation tabs
             left_section,
             // Center: Track info (collapses at narrow widths)
             center_section,
             // Format info (stays visible independently)
             format_section,
-            // Library-filter trigger (Space when N <= 1 or side-nav)
-            library_trigger_slot,
             // Hamburger menu
             tab_separator(false),
             hamburger,

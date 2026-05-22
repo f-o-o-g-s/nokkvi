@@ -340,34 +340,27 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
         None
     };
 
-    // Build vertical column of tabs from shared NAV_TABS
-    let mut tabs = column![].spacing(0).width(Length::Fixed(SIDE_NAV_WIDTH));
-    for &(label, icon_path, view) in NAV_TABS {
-        tabs = tabs.push(nav_tab(label, icon_path, view)).push(separator());
-    }
-
-    if let Some(indicator) = settings_indicator {
-        tabs = tabs.push(indicator).push(separator());
-    }
-
-    // Fill remaining space
-    tabs = tabs.push(Space::new().height(Length::Fill));
-
     // -------------------------------------------------------------------------
-    // Library-filter footer (icon button + 0-size popover anchor)
+    // Library-filter trigger + popover (rendered ABOVE the Queue tab)
     // -------------------------------------------------------------------------
     //
-    // The trigger renders compact (28 × 28 icon-only, pip overlay in the
-    // filtered case — no `N/M` count text because the 28-px sidebar can't
-    // fit it). The popover is a zero-size `library_selector_popover`
-    // sibling whose only render output is the iced overlay anchored to
-    // `library_selector_bounds`; the overlay positioning fall-back
-    // automatically flips above-trigger when there's no room below
-    // (this sits at the sidebar's bottom edge so the popover lands above).
+    // The trigger renders compact: icon-only 28 × 28 in the neutral
+    // state, icon + pip + `N/M` text stacked vertically in 28 × 44
+    // when filtered. Mounting at the top of the column (rather than
+    // the footer) keeps the button visible on short windows and
+    // matches the top-nav layout that puts the trigger before the
+    // Queue tab.
     //
-    // Trigger widget self-suppresses to `Space::new()` when
-    // `library_count <= 1`, so the footer area collapses naturally on
-    // single-library servers (no flicker, no flex jitter).
+    // The popover is a zero-size `library_selector_popover` sibling
+    // whose only render output is the iced overlay anchored to
+    // `library_selector_bounds`. From the top of the sidebar the
+    // overlay opens downward; the overlay positioning logic falls
+    // back to anchoring above when there's no room below (cheap
+    // safety for very short windows).
+    //
+    // Trigger self-suppresses to `Space::new()` when
+    // `library_count <= 1`, so the slot collapses naturally on
+    // single-library servers.
     let library_count = data.library_count;
     let active_library_count = data.active_library_count;
     let library_selector_open = data.library_selector_open;
@@ -379,7 +372,7 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
             library_count,
             active_library_count,
             library_selector_open,
-            true, // compact — side-nav width can't fit count text
+            true, // compact — side-nav width drives the vertical stack
             library_selector_bounds,
             |open, trigger_bounds| NavBarMessage::LibraryOpenChange {
                 open,
@@ -387,8 +380,7 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
             },
         ))
         .width(Length::Fixed(SIDE_NAV_WIDTH))
-        .height(Length::Fixed(SIDE_NAV_WIDTH))
-        .center(Length::Fixed(SIDE_NAV_WIDTH)),
+        .align_x(iced::Alignment::Center),
     )
     .border_radius(theme::ui_border_radius());
 
@@ -414,7 +406,20 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
         library_selector_bounds,
     );
 
-    tabs = tabs.push(library_trigger).push(library_popover);
+    // Build vertical column: library trigger first, then NAV_TABS.
+    let mut tabs = column![library_trigger, library_popover, separator()]
+        .spacing(0)
+        .width(Length::Fixed(SIDE_NAV_WIDTH));
+    for &(label, icon_path, view) in NAV_TABS {
+        tabs = tabs.push(nav_tab(label, icon_path, view)).push(separator());
+    }
+
+    if let Some(indicator) = settings_indicator {
+        tabs = tabs.push(indicator).push(separator());
+    }
+
+    // Fill remaining space
+    tabs = tabs.push(Space::new().height(Length::Fill));
 
     // Right edge separator (vertical line)
     let right_edge: Element<'_, NavBarMessage> = container(Space::new())

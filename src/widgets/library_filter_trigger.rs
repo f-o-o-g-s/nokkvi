@@ -83,6 +83,16 @@ const COUNT_TEXT_SIZE: f32 = 10.0;
 /// Internal horizontal padding for the filtered state.
 const FILTERED_HPAD: f32 = 4.0;
 
+/// Height of the compact (side-nav) chassis when the filter is active.
+/// Stacks the 18 × 18 icon over a `N/M` count line so the sidebar
+/// reads the same information the top-nav strip does, just laid out
+/// vertically. Sized for the 28-px sidebar width.
+const COMPACT_FILTERED_HEIGHT: f32 = 44.0;
+
+/// Vertical gap (in pixels) between the icon and the stacked count
+/// line in the compact-filtered chassis.
+const COMPACT_STACK_GAP: f32 = 2.0;
+
 // ============================================================================
 // Public API
 // ============================================================================
@@ -191,6 +201,14 @@ impl<Message> LibraryFilterTrigger<'_, Message> {
             RenderMode::Filtered { .. } => FILTERED_WIDTH,
         }
     }
+
+    fn button_height(&self) -> f32 {
+        if self.compact && matches!(self.mode, RenderMode::Filtered { .. }) {
+            COMPACT_FILTERED_HEIGHT
+        } else {
+            BUTTON_HEIGHT
+        }
+    }
 }
 
 impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
@@ -199,7 +217,7 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
     fn size(&self) -> Size<Length> {
         Size {
             width: Length::Fixed(self.button_width()),
-            height: Length::Fixed(BUTTON_HEIGHT),
+            height: Length::Fixed(self.button_height()),
         }
     }
 
@@ -209,7 +227,7 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
         _renderer: &iced::Renderer,
         _limits: &layout::Limits,
     ) -> layout::Node {
-        layout::Node::new(Size::new(self.button_width(), BUTTON_HEIGHT))
+        layout::Node::new(Size::new(self.button_width(), self.button_height()))
     }
 
     fn update(
@@ -285,29 +303,101 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
             bg_color,
         );
 
-        // Compact (side-nav) variant: icon-only chassis in every mode,
-        // pip overlaid in the filtered case. The popover header carries
-        // the exact "{active} / {total}" once open, so no count text
-        // needs to ride the trigger.
+        // Compact (side-nav) variant. Two sub-modes:
+        // - Neutral: centered icon in a 28 × 28 chassis (matches the
+        //   sidebar tab cells).
+        // - Filtered: icon at top + pip in the icon's top-right corner
+        //   + `N/M` text centered below the icon in a 28 × 44 chassis.
+        //   Stacked vertically because the 28-px sidebar can't fit
+        //   text alongside the icon horizontally.
         if self.compact {
-            let icon_bounds = Rectangle {
-                x: bounds.center_x() - ICON_SIZE / 2.0,
-                y: bounds.center_y() - ICON_SIZE / 2.0,
-                width: ICON_SIZE,
-                height: ICON_SIZE,
-            };
-            renderer.draw_svg(
-                SvgData {
-                    handle: self.icon_handle.clone(),
-                    color: Some(fg_color),
-                    rotation: Radians(0.0),
-                    opacity: 1.0,
-                },
-                icon_bounds,
-                icon_bounds,
-            );
-            if matches!(self.mode, RenderMode::Filtered { .. }) {
-                super::badge_pip::draw_badge_pip(renderer, bounds);
+            match self.mode {
+                RenderMode::Neutral => {
+                    let icon_bounds = Rectangle {
+                        x: bounds.center_x() - ICON_SIZE / 2.0,
+                        y: bounds.center_y() - ICON_SIZE / 2.0,
+                        width: ICON_SIZE,
+                        height: ICON_SIZE,
+                    };
+                    renderer.draw_svg(
+                        SvgData {
+                            handle: self.icon_handle.clone(),
+                            color: Some(fg_color),
+                            rotation: Radians(0.0),
+                            opacity: 1.0,
+                        },
+                        icon_bounds,
+                        icon_bounds,
+                    );
+                }
+                RenderMode::Filtered { active, total } => {
+                    // Icon sits in the upper half so the pip can ride
+                    // its top-right corner without spilling above the
+                    // chassis.
+                    let icon_top = bounds.y + 5.0;
+                    let icon_bounds = Rectangle {
+                        x: bounds.center_x() - ICON_SIZE / 2.0,
+                        y: icon_top,
+                        width: ICON_SIZE,
+                        height: ICON_SIZE,
+                    };
+                    renderer.draw_svg(
+                        SvgData {
+                            handle: self.icon_handle.clone(),
+                            color: Some(fg_color),
+                            rotation: Radians(0.0),
+                            opacity: 1.0,
+                        },
+                        icon_bounds,
+                        icon_bounds,
+                    );
+
+                    // Count text centered horizontally, sitting under
+                    // the icon with `COMPACT_STACK_GAP` of breathing
+                    // space.
+                    let label = format!("{active}/{total}");
+                    let text_y = icon_bounds.y + icon_bounds.height + COMPACT_STACK_GAP;
+                    let text_bounds = Rectangle {
+                        x: bounds.x,
+                        y: text_y,
+                        width: bounds.width,
+                        height: (bounds.y + bounds.height - text_y).max(0.0),
+                    };
+                    renderer.fill_text(
+                        Text {
+                            content: label,
+                            bounds: Size::new(text_bounds.width, text_bounds.height),
+                            size: COUNT_TEXT_SIZE.into(),
+                            line_height: iced::advanced::text::LineHeight::default(),
+                            font: iced::font::Font {
+                                weight: iced::font::Weight::Bold,
+                                ..theme::ui_font()
+                            },
+                            align_x: alignment::Horizontal::Center.into(),
+                            align_y: alignment::Vertical::Top,
+                            shaping: iced::advanced::text::Shaping::default(),
+                            wrapping: iced::advanced::text::Wrapping::None,
+                            ellipsis: iced::advanced::text::Ellipsis::default(),
+                            hint_factor: Some(1.0),
+                        },
+                        Point::new(text_bounds.center_x(), text_bounds.y),
+                        fg_color,
+                        text_bounds,
+                    );
+
+                    // Pip in the icon's top-right corner. Anchor a
+                    // synthetic rect at the icon position so the pip
+                    // hugs the icon rather than the wider chassis.
+                    super::badge_pip::draw_badge_pip(
+                        renderer,
+                        Rectangle {
+                            x: icon_bounds.x,
+                            y: icon_bounds.y - 3.0,
+                            width: icon_bounds.width + 4.0,
+                            height: icon_bounds.height,
+                        },
+                    );
+                }
             }
             return;
         }
