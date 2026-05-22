@@ -24,12 +24,18 @@ impl AlbumsApiService {
     /// sort_mode: Sort mode (recentlyAdded, recentlyPlayed, mostPlayed, favorited, random, name, albumArtist, artist, year, songCount, duration, rating, genre)
     /// sort_order: Sort order (ASC or DESC)
     /// search_query: Optional search query
+    /// library_ids: When non-empty, restrict results to the given library
+    /// (music folder) IDs by appending repeatable `library_id` params. An
+    /// empty slice omits the param entirely — Navidrome's auto-scoping
+    /// already limits to libraries the user has access to.
+    #[allow(clippy::too_many_arguments)]
     pub async fn load_albums(
         &self,
         sort_mode: &str,
         sort_order: &str,
         search_query: Option<&str>,
         filter: Option<&crate::types::filter::LibraryFilter>,
+        library_ids: &[i32],
         offset: Option<usize>,
         limit: Option<usize>,
     ) -> Result<(Vec<Album>, u32)> {
@@ -54,6 +60,15 @@ impl AlbumsApiService {
         params.push(("_start", &range.start));
         params.push(("_end", &range.end));
 
+        // Owned `String`s for any `library_id` filter param values. Owned
+        // alongside `params` so the `&str` borrows pushed below outlive
+        // the call to `get_with_headers`. Combines the orthogonal
+        // `library_ids` argument with any `LibraryFilter::LibraryIds`
+        // routed through the filter slot (both express "scope by music
+        // folder", just from different navigation surfaces).
+        let mut library_id_strings: Vec<String> =
+            library_ids.iter().map(|id| id.to_string()).collect();
+
         // Apply ID filter if present
         if let Some(f) = filter {
             match f {
@@ -64,12 +79,21 @@ impl AlbumsApiService {
                     params.push(("genre_id", name));
                 }
                 crate::types::filter::LibraryFilter::AlbumId { id, .. } => params.push(("id", id)),
+                crate::types::filter::LibraryFilter::LibraryIds(ids) => {
+                    library_id_strings.extend(ids.iter().map(|id| id.to_string()));
+                }
             }
         } else if let Some(query) = search_query
             && !query.is_empty()
         {
             // Only fall back to text search if no ID filter is active
             params.push(("name", query));
+        }
+
+        // Push the accumulated `library_id` repeats last — borrows into
+        // `library_id_strings`, which is owned for the rest of the fn.
+        for s in &library_id_strings {
+            params.push(("library_id", s.as_str()));
         }
 
         // Make API request
