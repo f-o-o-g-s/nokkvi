@@ -1,6 +1,6 @@
 # Changelog — v0.3.x archive
 
-Releases v0.3.1 through v0.3.17, covering 2026-04-27 to 2026-05-14. The current changelog (v0.4.0 onward) lives in [CHANGELOG.md](./CHANGELOG.md).
+Releases v0.3.1 through v0.3.17, covering 2026-04-27 to 2026-05-14. The current changelog (v0.4.0 onward) lives in [CHANGELOG.md](../CHANGELOG.md).
 
 ## v0.3.17 — 2026-05-14
 

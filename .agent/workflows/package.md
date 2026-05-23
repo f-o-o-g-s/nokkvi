@@ -30,7 +30,7 @@ Promote the existing `## [Unreleased]` section in `CHANGELOG.md` to `## vX.Y.Z �
 
 The release workflow extracts the section matching the pushed tag verbatim into the GitHub Release body — write for someone deciding whether to upgrade.
 
-**Archive boundary**: only the current minor series (e.g. `0.4.x`) plus `## [Unreleased]` lives in `CHANGELOG.md`. Older minors are archived to `CHANGELOG-X.Y.md` siblings (e.g. `CHANGELOG-0.3.md`). When promoting `## [Unreleased]` to a release, you only ever touch `CHANGELOG.md`; do not edit archive files. When a new minor opens (e.g. `0.4.x` → `0.5.x`), close out the old minor by moving its block into a new `CHANGELOG-0.4.md` archive and refresh the "Older releases" footer link in `CHANGELOG.md`.
+**Archive boundary**: only the current minor series (e.g. `0.4.x`) plus `## [Unreleased]` lives in `CHANGELOG.md`. Older minors are archived under `changelog-archive/CHANGELOG-X.Y.md` (e.g. `changelog-archive/CHANGELOG-0.3.md`). When promoting `## [Unreleased]` to a release, you only ever touch `CHANGELOG.md`; do not edit archive files. When a new minor opens (e.g. `0.4.x` → `0.5.x`), close out the old minor by moving its block into a new `changelog-archive/CHANGELOG-0.4.md` and refresh the "Older releases" footer link in `CHANGELOG.md`.
 
 ## 2. Update README.md
 

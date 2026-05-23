@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - CHANGELOG.md
-      - 'CHANGELOG-*.md'
+      - 'changelog-archive/CHANGELOG-*.md'
   workflow_dispatch:
 
 jobs:
