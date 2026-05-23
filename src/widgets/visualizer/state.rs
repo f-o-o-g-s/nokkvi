@@ -484,6 +484,34 @@ const ONSET_ENVELOPE_ALPHA_FAST: f64 = 0.3;
 /// visibly different boat cruise speed within a few seconds.
 const ONSET_ENVELOPE_ALPHA_SLOW: f64 = 0.0056;
 
+/// Refcount-keyed kill switch for the background FFT worker.
+///
+/// `Visualizer` (`mod.rs`) holds an `Arc<FftShutdownGuard>`; per-frame
+/// `viz.clone()` calls just bump the Arc refcount, so the guard's
+/// `Drop` only fires when the LAST `Visualizer` clone is released —
+/// flipping `fft_thread_running` and joining the worker. Without this
+/// each re-login orphaned one `visualizer-fft` OS thread.
+///
+/// The guard is intentionally NOT reachable from the spawned FFT
+/// thread closure (which only captures a `VisualizerState` clone): if
+/// it were, the thread's clone would extend its own lifetime and the
+/// shutdown chain would deadlock.
+pub(crate) struct FftShutdownGuard {
+    running: Arc<AtomicBool>,
+    handle: Arc<Mutex<Option<JoinHandle<()>>>>,
+}
+
+impl Drop for FftShutdownGuard {
+    fn drop(&mut self) {
+        self.running.store(false, Ordering::Relaxed);
+        if let Some(handle) = self.handle.lock().take()
+            && let Err(panic) = handle.join()
+        {
+            tracing::warn!("FFT thread panicked during shutdown: {panic:?}");
+        }
+    }
+}
+
 impl VisualizerState {
     pub(crate) fn new(bar_count: usize, config: SharedVisualizerConfig) -> Self {
         // Generate unique instance ID for debugging
@@ -583,6 +611,26 @@ impl VisualizerState {
             Ok(h) => *self.fft_thread_handle.lock() = Some(h),
             Err(e) => tracing::error!("Failed to spawn FFT thread — visualizer disabled: {e}"),
         }
+    }
+
+    /// Build a `FftShutdownGuard` tied to this state's FFT worker.
+    ///
+    /// `Visualizer` stores the returned `Arc<FftShutdownGuard>` so each
+    /// per-frame `viz.clone()` (e.g. `app_view.rs`'s builder-pattern
+    /// usage) just bumps the Arc refcount. The guard's `Drop` only
+    /// fires when the LAST `Visualizer` clone is released — at which
+    /// point we flip `fft_thread_running` and join the worker so each
+    /// re-login reuses the OS thread slot instead of leaking one.
+    pub(super) fn make_fft_shutdown_guard(&self) -> Arc<FftShutdownGuard> {
+        Arc::new(FftShutdownGuard {
+            running: self.fft_thread_running.clone(),
+            handle: self.fft_thread_handle.clone(),
+        })
+    }
+
+    #[cfg(test)]
+    pub(super) fn fft_thread_running_handle(&self) -> Arc<AtomicBool> {
+        self.fft_thread_running.clone()
     }
 
     /// Get audio callback for connecting to audio engine.

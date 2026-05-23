@@ -137,6 +137,15 @@ fn calculate_bar_layout(
 }
 
 /// Audio visualizer widget
+///
+/// `Clone` is preserved for the per-frame builder pattern
+/// (`app_view.rs` calls `viz.clone().mode(...).window_height(...)…`).
+/// The FFT worker thread's kill switch lives on the
+/// `Arc<FftShutdownGuard>` field below: every clone bumps the Arc
+/// refcount, and the guard's `Drop` only fires when the LAST
+/// `Visualizer` clone is released. That makes per-frame builder
+/// clones safe (cheap Arc bump+drop) while still cleaning up the OS
+/// thread at session-end so re-login doesn't orphan workers.
 #[derive(Clone)]
 pub struct Visualizer {
     state: VisualizerState,
@@ -159,12 +168,16 @@ pub struct Visualizer {
     // Dynamic bars
     dynamic_bars: bool,
     max_bars: usize, // Maximum bar count to try when calculating
+    /// Refcount-keyed kill switch for the FFT worker.
+    /// See [`state::FftShutdownGuard`] for the lifecycle invariant.
+    _shutdown_guard: std::sync::Arc<state::FftShutdownGuard>,
 }
 
 impl Visualizer {
     /// Create a new visualizer with bars mode
     pub fn new(bar_count: usize, config: SharedVisualizerConfig) -> Self {
         let state = VisualizerState::new(bar_count, config.clone());
+        let shutdown_guard = state.make_fft_shutdown_guard();
 
         // Read initial settings from config
         let cfg = config.read();
@@ -198,6 +211,7 @@ impl Visualizer {
             line_thickness, // From config
             // Dynamic bars enabled
             dynamic_bars: true,
+            _shutdown_guard: shutdown_guard,
         }
     }
 
@@ -698,5 +712,76 @@ mod build_shader_params_tests {
 
         // Constant: lines_glow_intensity is pinned at 0.0 by design.
         assert!((params.lines_glow_intensity - 0.0).abs() < 1e-9);
+    }
+}
+
+#[cfg(test)]
+mod fft_shutdown_guard_tests {
+    //! Pins the FFT-thread lifecycle invariant established by audit
+    //! item #7: each `Visualizer` shares one `Arc<FftShutdownGuard>`,
+    //! and the guard's `Drop` is the kill switch. Per-frame clones
+    //! (e.g. `app_view.rs`'s builder pattern) bump the Arc refcount,
+    //! so shutdown only fires once the LAST `Visualizer` clone drops.
+    use std::sync::{Arc, atomic::Ordering};
+
+    use parking_lot::RwLock;
+
+    use super::*;
+    use crate::visualizer_config::VisualizerConfig;
+
+    fn build_visualizer() -> Visualizer {
+        let shared: SharedVisualizerConfig = Arc::new(RwLock::new(VisualizerConfig::default()));
+        Visualizer::new(192, shared)
+    }
+
+    #[test]
+    fn last_visualizer_drop_stops_fft_thread() {
+        let viz = build_visualizer();
+        let running = viz.state.fft_thread_running_handle();
+        assert!(running.load(Ordering::Relaxed));
+
+        drop(viz);
+
+        // Last (and only) clone dropped → guard's Drop fires
+        // synchronously: store(false) + join — flag observably false.
+        assert!(!running.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn intermediate_clone_drop_keeps_fft_thread_running() {
+        // Models `app_view.rs:448` per-frame `viz.clone().mode(...)…`:
+        // the builder clone drops at end of frame while `self.visualizer`
+        // still owns the original. Shutdown must wait until the original
+        // also drops.
+        let viz = build_visualizer();
+        let running = viz.state.fft_thread_running_handle();
+
+        let viz_builder_clone = viz.clone();
+        drop(viz_builder_clone);
+
+        assert!(
+            running.load(Ordering::Relaxed),
+            "Intermediate Visualizer clone drop must NOT flip the flag — \
+             Arc<FftShutdownGuard> refcount is still > 0",
+        );
+
+        drop(viz);
+        assert!(!running.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn dropping_visualizer_state_clone_does_not_stop_fft_thread() {
+        // Models per-frame `view()` cloning `state` into `ShaderVisualizer`.
+        // VisualizerState clones do NOT carry the shutdown guard, so their
+        // drop is always safe regardless of Visualizer's refcount.
+        let viz = build_visualizer();
+        let running = viz.state.fft_thread_running_handle();
+
+        let state_clone = viz.state.clone();
+        drop(state_clone);
+
+        assert!(running.load(Ordering::Relaxed));
+        drop(viz);
+        assert!(!running.load(Ordering::Relaxed));
     }
 }

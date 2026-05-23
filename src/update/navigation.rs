@@ -425,7 +425,7 @@ impl Nokkvi {
                     widgets::visualizer::visualizer(192, self.visualizer_config.clone());
                 // Connect audio callback to engine. The visualizer's audio_callback()
                 // now accepts &[f32] directly — no adapter or allocation needed.
-                let audio_callback = visualizer.clone().audio_callback();
+                let audio_callback = visualizer.audio_callback();
                 let viz_callback: nokkvi_data::audio::VisualizerCallback =
                     std::sync::Arc::new(move |samples: &[f32], sample_rate: u32| {
                         audio_callback(samples, sample_rate);

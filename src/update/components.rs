@@ -1507,6 +1507,13 @@ impl Nokkvi {
         self.start_view_applied = false;
         self.suppress_next_auto_center = false;
 
+        // Drop the visualizer so its background FFT thread joins now,
+        // not at next login's `self.visualizer = Some(new)` overwrite.
+        // Without explicit cleanup the worker keeps spinning between
+        // logout and re-login (or forever, if the user never re-logs).
+        // Drop joins the thread within one `TICK_INTERVAL` (~16.67 ms).
+        self.visualizer = None;
+
         // Drop the static SSE connection registration so the event loop
         // stops retrying against the prior server with stale credentials.
         // Without this, post-logout SSE attempts 401 indefinitely (or hang
