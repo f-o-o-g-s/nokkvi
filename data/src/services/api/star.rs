@@ -52,37 +52,3 @@ pub async fn unstar_item(
     )
     .await
 }
-
-/// Toggle star status for an item
-///
-/// Convenience method that calls star or unstar based on current status.
-pub async fn toggle_star(
-    http_client: &Arc<reqwest::Client>,
-    server_url: &str,
-    subsonic_credential: &str,
-    item_id: &str,
-    item_type: &str,
-    currently_starred: bool,
-) -> Result<bool> {
-    if currently_starred {
-        unstar_item(
-            http_client,
-            server_url,
-            subsonic_credential,
-            item_id,
-            item_type,
-        )
-        .await?;
-        Ok(false)
-    } else {
-        star_item(
-            http_client,
-            server_url,
-            subsonic_credential,
-            item_id,
-            item_type,
-        )
-        .await?;
-        Ok(true)
-    }
-}

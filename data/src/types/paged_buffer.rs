@@ -209,12 +209,6 @@ impl<T> PagedBuffer<T> {
         }
     }
 
-    /// Direct access to the underlying Vec (for compatibility with
-    /// code that needs `Vec<T>` specifically, like queue building).
-    pub fn as_vec(&self) -> &Vec<T> {
-        &self.items
-    }
-
     /// Assign directly from a Vec (backwards compatibility for tests).
     pub fn set_from_vec(&mut self, items: Vec<T>) {
         let count = items.len();
