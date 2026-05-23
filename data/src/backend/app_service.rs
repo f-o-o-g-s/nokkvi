@@ -295,24 +295,10 @@ impl AppService {
     pub async fn prepare_next_for_gapless(&self) -> bool {
         self.playback.prepare_next_for_gapless().await
     }
-    pub async fn play_song_from_queue(&self, song_id: &str, queue_index: usize) -> Result<()> {
-        self.playback
-            .play_song_from_queue(song_id, queue_index)
-            .await
-    }
-    /// Drift-immune sibling of [`Self::play_song_from_queue`]. See
+    /// Drift-immune row-handle play. See
     /// [`crate::backend::playback_controller::PlaybackController::play_entry_from_queue`].
     pub async fn play_entry_from_queue(&self, entry_id: u64) -> Result<()> {
         self.playback.play_entry_from_queue(entry_id).await
-    }
-
-    /// Snapshot the `entry_id` at a given backend queue position. `None`
-    /// if the position is out of bounds. Used by producers that need to
-    /// resolve a position-keyed event to a drift-immune row handle.
-    pub async fn entry_id_at(&self, queue_index: usize) -> Option<u64> {
-        let qm_arc = self.queue_service.queue_manager();
-        let qm = qm_arc.lock().await;
-        qm.entry_id_at(queue_index)
     }
 
     // =========================================================================
@@ -662,32 +648,6 @@ impl AppService {
         Ok(())
     }
 
-    /// Insert a single song (by ID, loaded from album) at a specific position in the queue.
-    pub async fn insert_song_by_id_at_position(
-        &self,
-        song_id: &str,
-        album_id: &str,
-        position: usize,
-    ) -> Result<()> {
-        let songs = self.albums_service.load_album_songs(album_id).await?;
-        if let Some(song) = songs.into_iter().find(|s| s.id == song_id) {
-            let effect = self
-                .queue_service
-                .insert_songs_at(position, vec![song])
-                .await?;
-            effect.apply_to(&self.audio_engine()).await;
-            debug!(
-                "📌 Inserted song {} at queue position {}",
-                song_id, position
-            );
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!(
-                "Song {song_id} not found in album {album_id}"
-            ))
-        }
-    }
-
     /// Insert all songs in a genre at a specific position in the queue.
     pub async fn insert_genre_at_position(&self, genre_name: &str, position: usize) -> Result<()> {
         let songs = self
@@ -791,18 +751,6 @@ impl AppService {
         self.queue_orchestrator().play_next(songs).await
     }
 
-    /// Play next: add a single song (by ID) right after currently playing track.
-    pub async fn play_next_song_by_id(&self, song_id: &str, album_id: &str) -> Result<()> {
-        let songs = self.albums_service.load_album_songs(album_id).await?;
-        if let Some(song) = songs.into_iter().find(|s| s.id == song_id) {
-            self.queue_orchestrator().play_next(vec![song]).await
-        } else {
-            Err(anyhow::anyhow!(
-                "Song {song_id} not found in album {album_id}"
-            ))
-        }
-    }
-
     /// Play next: add artist songs right after currently playing track.
     pub async fn play_next_artist(&self, artist_id: &str) -> Result<()> {
         let songs = self
@@ -827,11 +775,6 @@ impl AppService {
             .library_orchestrator()
             .resolve_playlist(playlist_id)
             .await?;
-        self.queue_orchestrator().play_next(songs).await
-    }
-
-    /// Play next: add pre-loaded songs right after currently playing track.
-    pub async fn play_next_preloaded(&self, songs: Vec<crate::types::song::Song>) -> Result<()> {
         self.queue_orchestrator().play_next(songs).await
     }
 
