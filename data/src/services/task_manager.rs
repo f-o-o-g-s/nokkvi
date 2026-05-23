@@ -104,11 +104,6 @@ impl TaskManager {
         }
     }
 
-    /// Get the cancellation token for checking shutdown status
-    pub fn cancellation_token(&self) -> CancellationToken {
-        self.cancellation_token.clone()
-    }
-
     /// Signal all tasks to shut down gracefully (non-blocking).
     ///
     /// Fires the shared cancellation token so that any `select!`-guarded task
@@ -311,6 +306,7 @@ impl TaskManager {
     /// polling `token.is_cancelled()` (or `token.cancelled().await`) at each
     /// blocking point. The token is also the shared app-wide token, so this
     /// task exits automatically when `shutdown()` / `shutdown_all()` fires.
+    #[cfg(test)]
     pub fn spawn_cancellable<F, Fut>(&self, name: &'static str, future: F) -> TaskHandle
     where
         F: FnOnce(CancellationToken) -> Fut + Send + 'static,
@@ -363,21 +359,6 @@ impl TaskManager {
         });
 
         handle
-    }
-
-    /// Get count of currently active tasks (for debugging/health checks)
-    pub async fn active_task_count(&self) -> usize {
-        self.active_tasks.lock().await.len()
-    }
-
-    /// Get names of currently active tasks (for debugging)
-    pub async fn active_task_names(&self) -> Vec<String> {
-        self.active_tasks
-            .lock()
-            .await
-            .iter()
-            .map(|h| h.name.clone())
-            .collect()
     }
 }
 
