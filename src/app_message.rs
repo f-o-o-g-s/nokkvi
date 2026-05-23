@@ -578,8 +578,6 @@ pub enum ContextMenuId {
     Strip,
     /// A row in the main library slot list.
     LibraryRow { view: View, item_index: usize },
-    /// A row in the browsing-panel slot list (split-view).
-    BrowsingRow { view: View, item_index: usize },
     /// A row in the queue view.
     QueueRow(usize),
     /// A row in the radios view.
