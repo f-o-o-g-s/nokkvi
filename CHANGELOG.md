@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Logging out and back in to Navidrome no longer leaks one OS thread per cycle — the visualizer's background FFT worker is now joined when the prior session's widget is released, so long-running sessions with repeated re-logins stop accumulating orphaned `visualizer-fft` threads.
+
 ### Removed
 
 ## v0.5.1 — 2026-05-22
