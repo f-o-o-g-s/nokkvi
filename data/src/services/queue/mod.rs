@@ -109,11 +109,6 @@ impl QueueManager {
         self.pool.get(id)
     }
 
-    /// Look up a song by ID from the pool (mutable, O(1)).
-    pub fn get_song_mut(&mut self, id: &str) -> Option<&mut Song> {
-        self.pool.get_mut(id)
-    }
-
     /// Reconstruct an ordered `Vec<Song>` from the current queue ordering.
     /// Used by `QueueService::refresh_from_queue()` to build UI data.
     pub fn songs_in_order(&self) -> Vec<&Song> {
@@ -126,7 +121,7 @@ impl QueueManager {
 
     /// O(n) scan to find the index of a song ID in the queue.
     /// Centralized here so all callers use the same lookup.
-    pub fn index_of(&self, song_id: &str) -> Option<usize> {
+    fn index_of(&self, song_id: &str) -> Option<usize> {
         self.queue.song_ids.iter().position(|id| id == song_id)
     }
 
@@ -284,12 +279,6 @@ impl QueueManager {
         }
 
         tx.commit_save_all()
-    }
-
-    /// Remove a song from the pool by ID (used by consume paths that manage
-    /// `song_ids` removal and `current_index` adjustment themselves).
-    pub fn remove_from_pool(&mut self, id: &str) {
-        self.pool.remove(id);
     }
 
     /// Remove every queue row matching a song_id.
