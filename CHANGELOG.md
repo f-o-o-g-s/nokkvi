@@ -6,16 +6,22 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- MPRIS album-art cache now self-cleans — orphan files from prior crashes are swept on launch, and clean exits clear the cache on shutdown.
-
 ### Changed
 
 ### Fixed
 
-- Logging out and back in to Navidrome no longer leaks one OS thread per cycle — the visualizer's background FFT worker is now joined when the prior session's widget is released, so long-running sessions with repeated re-logins stop accumulating orphaned `visualizer-fft` threads.
-- MPRIS album art shown by desktop shells now refreshes on every track change instead of pinning to the first track's cover for the whole session.
-
 ### Removed
+
+## v0.5.2 — 2026-05-23
+
+### Added
+
+- MPRIS album-art cache now self-cleans — orphan files from prior crashes are swept on launch, and clean exits clear the cache on shutdown.
+
+### Fixed
+
+- Logging out and back in to Navidrome no longer leaks one OS thread per cycle, so long-running sessions stay flat in thread count.
+- MPRIS album art shown by desktop shells now refreshes on every track change instead of pinning to the first track's cover for the whole session.
 
 ## v0.5.1 — 2026-05-22
 
