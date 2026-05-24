@@ -17,6 +17,15 @@ globs: src/widgets/**
 
 Hamburger, player-bar kebab, view-header `checkbox_dropdown`, right-click context menus, and the nav-bar library-filter popover are all **controlled** widgets — no local `is_open` state. Each widget bubbles `Message::SetOpenMenu(Option<OpenMenu>)` to root, which atomically replaces the current menu (so opening one closes any other). `OpenMenu` variants: `Hamburger`, `PlayerModes`, `CheckboxDropdown { view, trigger_bounds }`, `CheckboxDropdownSimilar { trigger_bounds }` (browsing-panel-only Similar columns dropdown — has no matching `View` variant), `Context { id, position }`, `LibrarySelector { trigger_bounds }` (multi-library filter popover anchored under the nav-bar trigger). Auto-closes on `SwitchView` and `WindowResized`.
 
+## Menu Shadow Halo (`menu_constants.rs`)
+
+Every custom `overlay::Overlay` impl that draws a `MENU_SHADOW`-bearing quad must inflate its `layout::Node` so the halo survives Iced's per-overlay `with_layer(layout.bounds(), …)` scissor (`core/src/overlay/nested.rs`). Use the helpers in `widgets::menu_constants`:
+
+- **Leaf overlays** (`hamburger_menu`, `player_modes_menu` — draw everything via `renderer.fill_quad`, host no child `Element`): produce the inflated node via `inflate_for_shadow(size, position)`; recover the visible rect via `visible_menu_bounds(layout.bounds())`.
+- **Child-forwarding overlays** (`checkbox_dropdown`, `context_menu` — host a real child `Element` that needs its own coordinate space): produce via `inflate_for_shadow_around_child(node, position)`; recover via `visible_menu_layout(layout)` (returns the inner child `Layout` to forward to the hosted widget).
+
+`MENU_SHADOW_PADDING` is module-private by design — new overlays use the helpers, not the raw constant. The four `const _: () = assert!(…)` invariants in `menu_constants.rs` pin the shadow geometry (padding covers worst-axis extent, offset stays vertical-only and non-negative); tuning `MENU_SHADOW` past those bounds yields a compile error pointing at the assertion to update.
+
 ## Player Bar (`player_bar.rs`)
 
 Adaptive layout via `PlayerBarLayout { kebab_mode_count, transports_collapsed }`. `compute_layout(width, prev)` applies per-mode hysteresis so modes fold into the kebab one at a time as the window narrows. `CULL_ORDER` (right-to-left): Visualizer, Crossfade, SFX, EQ, Consume, Shuffle, Repeat. `CULL_ENTER_WIDTHS` 1070→670 px, `CULL_HYSTERESIS_PX = 40`. Transport row collapses 5→3 buttons (prev / play-pause / next) at narrow widths.
