@@ -48,6 +48,40 @@ pub(crate) const MENU_ITEM_HEIGHT: f32 = 28.0;
 /// Vertical padding applied above and below the menu's outermost border (px).
 pub(crate) const MENU_PADDING: f32 = 4.0;
 
+/// Drop-shadow elevation applied to every dropdown / kebab / right-click /
+/// popover menu surface — `context_menu`, `checkbox_dropdown` (incl. the
+/// library-selector popover), `hamburger_menu`, and `player_modes_menu`.
+///
+/// Style is inspired by the scrub-handle shadow at `progress_bar.rs:563`
+/// (downward-only offset, semi-transparent black, soft blur), scaled up
+/// for a panel-sized surface rather than a 14 px round slider handle.
+/// Theme-agnostic black α reads correctly on both light and dark `bg1`
+/// menu backgrounds, so the constant is `const`-evaluated rather than
+/// theme-derived.
+pub(crate) const MENU_SHADOW: iced::Shadow = iced::Shadow {
+    color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.5),
+    offset: iced::Vector::new(0.0, 4.0),
+    blur_radius: 6.0,
+};
+
+/// Halo padding (px) added to every side of a menu overlay's `layout::Node`
+/// so the [`MENU_SHADOW`] tail isn't scissored by the per-overlay
+/// `with_layer(layout.bounds(), …)` clip Iced wraps around every
+/// `overlay::Overlay::draw` in `core/src/overlay/nested.rs`.
+///
+/// Each `MenuOverlay` reports `layout::Node` bounds inflated by this padding,
+/// then derives the visible menu rectangle by shrinking the bounds back —
+/// hit testing, background quads, items, and forwarded child layouts all use
+/// the visible rectangle, while only the outer scissor sees the inflated
+/// bounds. Mirrors the `shadow_overflow = 6.0` trick used for the scrub-handle
+/// shadow at `progress_bar.rs:537`.
+///
+/// Sized as `ceil(blur_radius + |offset.y|)` so the worst-case axis (the
+/// downward offset + blur) fits cleanly; the same value is applied uniformly
+/// to all sides for code simplicity — the over-inflated top / sides cost
+/// only invisible scissor area, not extra drawing.
+pub(crate) const MENU_SHADOW_PADDING: f32 = 10.0;
+
 // Compile-time invariants — these are pure constants so they live in
 // `const { ... }` rather than runtime assertions (clippy enforces this via
 // `assertions_on_constants = "deny"`).
@@ -60,6 +94,50 @@ const _: () = assert!(
     MENU_PLAYER_MODES_WIDTH > MENU_HAMBURGER_WIDTH,
     "MENU_PLAYER_MODES_WIDTH must stay larger than MENU_HAMBURGER_WIDTH",
 );
+
+/// `MENU_SHADOW_PADDING` must accommodate the shadow's full extent (offset
+/// magnitude + blur radius) on the worst-case axis, otherwise the per-overlay
+/// scissor will clip the shadow halo and the elevation effect disappears.
+/// Pinned here so a future agent tuning the shadow values gets a compile-time
+/// nudge to update the padding to match.
+const _: () = assert!(
+    MENU_SHADOW_PADDING >= MENU_SHADOW.blur_radius + MENU_SHADOW.offset.y,
+    "MENU_SHADOW_PADDING must cover MENU_SHADOW.blur_radius + offset.y",
+);
+
+/// `MENU_SHADOW_PADDING`'s simple uniform-shrink derivation assumes the
+/// shadow displaces along the +Y axis only. A non-zero horizontal offset
+/// or a negative vertical offset would flip the worst-case axis and
+/// require rederiving the padding (currently `blur_radius + offset.y`).
+const _: () = assert!(
+    MENU_SHADOW.offset.x == 0.0,
+    "MENU_SHADOW offset is vertical-only by convention",
+);
+const _: () = assert!(
+    MENU_SHADOW.offset.y >= 0.0,
+    "MENU_SHADOW must displace downward — MENU_SHADOW_PADDING math assumes a non-negative offset.y",
+);
+
+/// Recover the visible menu rectangle from an inflated overlay layout
+/// rectangle by shrinking by [`MENU_SHADOW_PADDING`] on every side.
+///
+/// Use this in the two manual-draw menu overlays (`hamburger_menu`,
+/// `player_modes_menu`) wherever the existing code reads `layout.bounds()`
+/// — the inflated rect is for the scissor only; everything visible (the
+/// background quad, item positions, hit testing) belongs inside the
+/// visible rect.
+///
+/// The two child-forwarding menu overlays (`context_menu`,
+/// `checkbox_dropdown`) get the visible rect for free from
+/// `layout.children().next()` and don't need this helper.
+pub(crate) fn visible_menu_bounds(inflated: iced::Rectangle) -> iced::Rectangle {
+    iced::Rectangle {
+        x: inflated.x + MENU_SHADOW_PADDING,
+        y: inflated.y + MENU_SHADOW_PADDING,
+        width: inflated.width - 2.0 * MENU_SHADOW_PADDING,
+        height: inflated.height - 2.0 * MENU_SHADOW_PADDING,
+    }
+}
 
 #[cfg(test)]
 mod tests {

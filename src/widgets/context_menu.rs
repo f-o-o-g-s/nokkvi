@@ -26,7 +26,9 @@ use iced::{
 
 use crate::{
     theme,
-    widgets::menu_constants::{MENU_ICON_SIZE, MENU_MIN_WIDTH, MENU_TEXT_SIZE},
+    widgets::menu_constants::{
+        MENU_ICON_SIZE, MENU_MIN_WIDTH, MENU_SHADOW, MENU_SHADOW_PADDING, MENU_TEXT_SIZE,
+    },
 };
 
 // ============================================================================
@@ -693,6 +695,7 @@ where
             color: theme::accent_bright(),
             radius: theme::ui_border_radius(),
         },
+        shadow: MENU_SHADOW,
         ..Default::default()
     })
     .into()
@@ -752,17 +755,17 @@ impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'
             .width(Length::Shrink)
             .height(Length::Shrink);
 
-        let node = self
-            .menu
-            .as_widget_mut()
-            .layout(&mut self.state.menu_tree, renderer, &limits);
+        let menu_node =
+            self.menu
+                .as_widget_mut()
+                .layout(&mut self.state.menu_tree, renderer, &limits);
 
         let padding = 5.0;
         let viewport = Rectangle::new(
             Point::new(padding, padding),
             Size::new(bounds.width - 2.0 * padding, bounds.height - 2.0 * padding),
         );
-        let mut menu_bounds = Rectangle::new(self.position, node.size());
+        let mut menu_bounds = Rectangle::new(self.position, menu_node.size());
 
         // Clamp to viewport
         if menu_bounds.x < viewport.x {
@@ -777,7 +780,20 @@ impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'
             menu_bounds.y = viewport.y + viewport.height - menu_bounds.height;
         }
 
-        node.move_to(menu_bounds.position())
+        // Inflate the layout node by MENU_SHADOW_PADDING on each side so
+        // Iced's per-overlay `with_layer(layout.bounds(), …)` scissor in
+        // `core/src/overlay/nested.rs` doesn't clip the MENU_SHADOW halo.
+        // The visible menu sits at `(pad, pad)` inside the inflated parent;
+        // every other overlay method recovers the visible rect via
+        // `layout.children().next()`.
+        let pad = MENU_SHADOW_PADDING;
+        let inflated_size = Size::new(
+            menu_bounds.width + 2.0 * pad,
+            menu_bounds.height + 2.0 * pad,
+        );
+        let menu_node = menu_node.move_to(Point::new(pad, pad));
+        layout::Node::with_children(inflated_size, vec![menu_node])
+            .move_to(Point::new(menu_bounds.x - pad, menu_bounds.y - pad))
     }
 
     fn update(
@@ -788,7 +804,11 @@ impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'
         renderer: &iced::Renderer,
         shell: &mut Shell<'_, Message>,
     ) {
-        let cursor_over = cursor.position_over(layout.bounds());
+        let menu_layout = layout
+            .children()
+            .next()
+            .expect("inflated layout always has exactly one menu child");
+        let cursor_over = cursor.position_over(menu_layout.bounds());
 
         // Escape key → close
         if matches!(
@@ -825,11 +845,11 @@ impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'
         self.menu.as_widget_mut().update(
             &mut self.state.menu_tree,
             event,
-            layout,
+            menu_layout,
             cursor,
             renderer,
             shell,
-            &layout.bounds(),
+            &menu_layout.bounds(),
         );
 
         // Close menu after a button click inside it.
@@ -855,14 +875,18 @@ impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'
         layout: Layout<'_>,
         cursor: mouse::Cursor,
     ) {
+        let menu_layout = layout
+            .children()
+            .next()
+            .expect("inflated layout always has exactly one menu child");
         self.menu.as_widget().draw(
             &self.state.menu_tree,
             renderer,
             theme,
             style,
-            layout,
+            menu_layout,
             cursor,
-            &layout.bounds(),
+            &menu_layout.bounds(),
         );
     }
 
@@ -872,11 +896,15 @@ impl<Message> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOverlay<'
         cursor: mouse::Cursor,
         renderer: &iced::Renderer,
     ) -> mouse::Interaction {
+        let menu_layout = layout
+            .children()
+            .next()
+            .expect("inflated layout always has exactly one menu child");
         self.menu.as_widget().mouse_interaction(
             &self.state.menu_tree,
-            layout,
+            menu_layout,
             cursor,
-            &layout.bounds(),
+            &menu_layout.bounds(),
             renderer,
         )
     }

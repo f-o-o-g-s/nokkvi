@@ -33,7 +33,8 @@ use crate::{
     theme,
     widgets::{
         menu_constants::{
-            MENU_ITEM_HEIGHT, MENU_PADDING, MENU_PLAYER_MODES_WIDTH as MENU_WIDTH, MENU_TEXT_SIZE,
+            MENU_ITEM_HEIGHT, MENU_PADDING, MENU_PLAYER_MODES_WIDTH as MENU_WIDTH, MENU_SHADOW,
+            MENU_SHADOW_PADDING, MENU_TEXT_SIZE, visible_menu_bounds,
         },
         sizes::TOOLBAR_BUTTON_SIZE as TRIGGER_BUTTON_SIZE,
     },
@@ -369,7 +370,14 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
                 .max(padding);
         }
 
-        layout::Node::new(Size::new(MENU_WIDTH, menu_height)).move_to(Point::new(x, y))
+        // Inflate by MENU_SHADOW_PADDING on every side so Iced's per-overlay
+        // `with_layer(layout.bounds(), …)` scissor doesn't clip the
+        // MENU_SHADOW halo (cf. `core/src/overlay/nested.rs` and the
+        // scrub-handle `shadow_overflow` trick at `progress_bar.rs:537`).
+        // The visible menu sits at `(pad, pad)` inside the inflated bounds.
+        let pad = MENU_SHADOW_PADDING;
+        let inflated_size = Size::new(MENU_WIDTH + 2.0 * pad, menu_height + 2.0 * pad);
+        layout::Node::new(inflated_size).move_to(Point::new(x - pad, y - pad))
     }
 
     fn update(
@@ -380,7 +388,7 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
         _renderer: &iced::Renderer,
         shell: &mut Shell<'_, Message>,
     ) {
-        let bounds = layout.bounds();
+        let bounds = visible_menu_bounds(layout.bounds());
 
         match event {
             Event::Keyboard(keyboard::Event::KeyPressed {
@@ -462,9 +470,11 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
             alignment,
         };
 
-        let bounds = layout.bounds();
+        let bounds = visible_menu_bounds(layout.bounds());
 
-        // Menu background (matches HamburgerMenu chrome).
+        // Menu background (matches HamburgerMenu chrome) — shadow elevation
+        // comes from MENU_SHADOW; the outer `layout.bounds()` is inflated by
+        // `MENU_SHADOW_PADDING` so the shadow halo isn't scissored.
         renderer.fill_quad(
             renderer::Quad {
                 bounds,
@@ -473,6 +483,7 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
                     color: theme::accent_bright(),
                     radius: theme::ui_border_radius(),
                 },
+                shadow: MENU_SHADOW,
                 ..Default::default()
             },
             theme::bg1(),
@@ -624,7 +635,7 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
         cursor: mouse::Cursor,
         _renderer: &iced::Renderer,
     ) -> mouse::Interaction {
-        if cursor.is_over(layout.bounds()) {
+        if cursor.is_over(visible_menu_bounds(layout.bounds())) {
             mouse::Interaction::Pointer
         } else {
             mouse::Interaction::default()
