@@ -10,18 +10,23 @@
 //! user rotates their password, so leaking it on D-Bus was an account-takeover
 //! primitive any sandboxed process could harvest.
 //!
-//! Borrowed the approach from rmpc (`reference-rmpc/rmpcd/src/mpris/metadata.rs`):
+//! Approach borrowed from rmpc (`reference-rmpc/rmpcd/src/mpris/metadata.rs`):
 //! fetch the artwork bytes through the authenticated client, write them to a
-//! local cache file, then advertise the `file://` URI on D-Bus. Same-key
-//! short-circuit avoids re-fetching every 100ms tick.
+//! local cache file, then advertise the `file://` URI on D-Bus. The
+//! `(server_url, cover_id)` short-circuit avoids re-fetching every 100ms tick.
 //!
 //! ## Path shape
 //!
-//! `$XDG_CACHE_HOME/nokkvi/mpris-art-<pid>.jpg` (falling back to
-//! `$HOME/.cache/nokkvi/mpris-art-<pid>.jpg`). The `<pid>` suffix matches
-//! nokkvi's existing MPRIS bus-name pattern (see `.agent/rules/gotchas.md`
-//! — "MPRIS multi-instance bus name") so two simultaneously-running instances
-//! don't fight over the same file.
+//! `$XDG_CACHE_HOME/nokkvi/mpris-art-<pid>-<cover_id>.jpg` (falling back to
+//! `$HOME/.cache/nokkvi/...`). The `<pid>` suffix matches nokkvi's existing
+//! MPRIS bus-name pattern (see `.agent/rules/gotchas.md` — "MPRIS multi-instance
+//! bus name") so two simultaneously-running instances don't fight over the same
+//! file. The `<cover_id>` suffix makes the URI unique per track — desktop
+//! shells (Plasma, GNOME, dunst, waybar) key their `mpris:artUrl` image cache
+//! off the URL string, so reusing one filename across tracks pins them on the
+//! first track's art for the whole session. After each successor write the
+//! previous file is removed best-effort to keep the per-PID footprint at ~1
+//! file in steady state.
 //!
 //! ## State management
 //!
@@ -40,10 +45,17 @@ use std::{
 use tokio::sync::Mutex;
 use tracing::warn;
 
+/// Filename-safe truncation cap for the sanitized cover-id suffix. Subsonic
+/// cover ids are typically <40 chars; the cap guards against pathological
+/// inputs blowing past `NAME_MAX` (255 on ext4/btrfs) once the
+/// `mpris-art-<pid>-` prefix and `.jpg` extension are factored in.
+const SANITIZED_COVER_ID_MAX_LEN: usize = 80;
+
 /// Tracks the most recently-written cache entry so repeat ticks for the
 /// same `(server_url, cover_id)` skip the fetch + write.
 ///
-/// The path is included so [`clear`] can remove the file without re-deriving it.
+/// The path is included so the next write can remove the file it superseded
+/// without re-deriving the previous filename.
 #[derive(Debug, Default)]
 pub(crate) struct ArtCacheState {
     last_written: Option<(String, String, PathBuf)>,
@@ -57,21 +69,14 @@ impl ArtCacheState {
 
 static STATE: Mutex<ArtCacheState> = Mutex::const_new(ArtCacheState::new());
 
-/// Resolve the per-process MPRIS art cache path:
-/// `$XDG_CACHE_HOME/nokkvi/mpris-art-<pid>.jpg` (falls back to
-/// `$HOME/.cache/nokkvi/mpris-art-<pid>.jpg`).
+/// Resolve the MPRIS art cache directory: `$XDG_CACHE_HOME/nokkvi/` (falls
+/// back to `$HOME/.cache/nokkvi/`).
 ///
 /// Returns `None` only if neither `$XDG_CACHE_HOME` nor `$HOME` resolves to
-/// an absolute path — typically only happens in stripped container/test envs
-/// without `HOME` set.
-pub(crate) fn cache_file_path() -> Option<PathBuf> {
-    let cache_root = resolve_cache_root()?;
-    let pid = std::process::id();
-    Some(
-        cache_root
-            .join("nokkvi")
-            .join(format!("mpris-art-{pid}.jpg")),
-    )
+/// an absolute path — typically only in stripped container/test envs without
+/// `HOME` set.
+fn cache_dir_path() -> Option<PathBuf> {
+    Some(resolve_cache_root()?.join("nokkvi"))
 }
 
 /// Resolve the XDG cache root: `$XDG_CACHE_HOME` (if absolute) else
@@ -92,6 +97,37 @@ fn resolve_cache_root() -> Option<PathBuf> {
     Some(p.join(".cache"))
 }
 
+/// Per-track cache path: `<dir>/mpris-art-<pid>-<sanitized_cover_id>.jpg`.
+fn cache_file_path_for(cache_dir: &Path, cover_id: &str) -> PathBuf {
+    let pid = std::process::id();
+    let safe = sanitize_cover_id(cover_id);
+    cache_dir.join(format!("mpris-art-{pid}-{safe}.jpg"))
+}
+
+/// Replace anything that isn't `[A-Za-z0-9._-]` with `_`, cap to
+/// [`SANITIZED_COVER_ID_MAX_LEN`], and emit `_` for an empty input. Subsonic
+/// cover ids are already filename-safe in practice; this is a defensive
+/// belt against future server quirks or non-Navidrome backends.
+fn sanitize_cover_id(cover_id: &str) -> String {
+    let mut out: String = cover_id
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if out.len() > SANITIZED_COVER_ID_MAX_LEN {
+        out.truncate(SANITIZED_COVER_ID_MAX_LEN);
+    }
+    if out.is_empty() {
+        out.push('_');
+    }
+    out
+}
+
 /// Cache the album art bytes for `(server_url, cover_id)` to a local file and
 /// return a `file://` URI suitable for `mpris:artUrl`. The fetcher is only
 /// awaited on a cache miss.
@@ -107,26 +143,28 @@ pub(crate) async fn write_art_for_mpris<F>(
 where
     F: Future<Output = anyhow::Result<Vec<u8>>>,
 {
-    let cache_path = cache_file_path()?;
+    let cache_dir = cache_dir_path()?;
     let mut state = STATE.lock().await;
-    write_art_inner(&mut state, &cache_path, server_url, cover_id, fetcher).await
+    write_art_inner(&mut state, &cache_dir, server_url, cover_id, fetcher).await
 }
 
-/// Reset the cache state and best-effort remove the cache file. Safe to call
-/// from teardown paths (logout, server switch) — missing files are not an error.
+/// Reset the cache state and best-effort remove every per-PID cache file for
+/// this process. Safe to call from teardown paths (logout, server switch) —
+/// missing files are not an error.
 ///
 /// Called from `reset_session_state` on logout / session-expired so server-B's
-/// MPRIS metadata doesn't reuse the file written by server-A.
+/// MPRIS metadata doesn't reuse the bytes server-A wrote, and so the cache
+/// dir doesn't accumulate every album the user played pre-logout.
 pub(crate) async fn clear() {
     let mut state = STATE.lock().await;
-    clear_inner(&mut state, cache_file_path().as_deref());
+    clear_inner(&mut state, cache_dir_path().as_deref()).await;
 }
 
-/// Pure-ish core: tests pass their own `ArtCacheState`. Keeps `cargo test`
-/// parallel-safe without a `#[serial]` lock around the global.
+/// Pure-ish core: tests pass their own `ArtCacheState` and `cache_dir`. Keeps
+/// `cargo test` parallel-safe without a `#[serial]` lock around the global.
 async fn write_art_inner<F>(
     state: &mut ArtCacheState,
-    cache_path: &Path,
+    cache_dir: &Path,
     server_url: &str,
     cover_id: &str,
     fetcher: F,
@@ -134,7 +172,12 @@ async fn write_art_inner<F>(
 where
     F: Future<Output = anyhow::Result<Vec<u8>>>,
 {
-    // Fast path: same key as the most recent write — return the cached URI.
+    let new_path = cache_file_path_for(cache_dir, cover_id);
+
+    // Fast path: same key as the most recent write — return the cached URI
+    // without re-fetching or re-writing. We trust `prev_path` still exists
+    // on disk; if it was externally deleted MPRIS shows no art for one tick
+    // and the next track change rewrites.
     if let Some((prev_server, prev_cover, prev_path)) = &state.last_written
         && prev_server == server_url
         && prev_cover == cover_id
@@ -142,7 +185,6 @@ where
         return Some(path_to_file_uri(prev_path));
     }
 
-    // Cache miss: fetch + write.
     let bytes = match fetcher.await {
         Ok(b) if b.is_empty() => {
             warn!(
@@ -161,7 +203,7 @@ where
         }
     };
 
-    if let Some(parent) = cache_path.parent()
+    if let Some(parent) = new_path.parent()
         && let Err(err) = tokio::fs::create_dir_all(parent).await
     {
         warn!(
@@ -171,33 +213,96 @@ where
         return None;
     }
 
-    if let Err(err) = tokio::fs::write(cache_path, &bytes).await {
+    if let Err(err) = tokio::fs::write(&new_path, &bytes).await {
         warn!(
             target: "nokkvi::mpris::art",
-            path = %cache_path.display(), %err, "failed to write mpris art cache file"
+            path = %new_path.display(), %err, "failed to write mpris art cache file"
         );
         return None;
     }
 
+    // Capture the path being superseded BEFORE updating state. Updating state
+    // first ensures any concurrent reader (after we drop the lock) sees the
+    // new entry — but since callers serialize on `STATE`, this is just defensive.
+    let prev_to_delete = state.last_written.take().map(|(_, _, p)| p);
     state.last_written = Some((
         server_url.to_string(),
         cover_id.to_string(),
-        cache_path.to_path_buf(),
+        new_path.clone(),
     ));
-    Some(path_to_file_uri(cache_path))
+
+    if let Some(prev) = prev_to_delete
+        && prev != new_path
+    {
+        // Best-effort: by the time we get here the new file is already on
+        // disk, so MPRIS clients responding to the next PropertiesChanged
+        // signal will load `new_path`. The shell has already cached `prev`'s
+        // bytes in memory from the previous track change, so removing the
+        // disk file doesn't affect what they display. Errors are ignored —
+        // the file is at most ~1 MB and orphans are swept on `clear()` /
+        // process exit will leave them for the OS tmp cleaner.
+        if let Err(err) = tokio::fs::remove_file(&prev).await
+            && err.kind() != std::io::ErrorKind::NotFound
+        {
+            warn!(
+                target: "nokkvi::mpris::art",
+                path = %prev.display(), %err, "failed to remove superseded mpris art cache file"
+            );
+        }
+    }
+
+    Some(path_to_file_uri(&new_path))
 }
 
-/// Pure helper for `clear` — tests can drive it without touching the global.
-fn clear_inner(state: &mut ArtCacheState, cache_path: Option<&Path>) {
+/// Reset state and best-effort sweep every `mpris-art-<pid>-*.jpg` file in
+/// `cache_dir` for the current process. Tests can drive this with a scratch
+/// dir without touching the module-level static.
+async fn clear_inner(state: &mut ArtCacheState, cache_dir: Option<&Path>) {
     state.last_written = None;
-    if let Some(p) = cache_path
-        && let Err(err) = std::fs::remove_file(p)
-        && err.kind() != std::io::ErrorKind::NotFound
-    {
-        warn!(
-            target: "nokkvi::mpris::art",
-            path = %p.display(), %err, "failed to remove mpris art cache file"
-        );
+    let Some(dir) = cache_dir else { return };
+    let pid = std::process::id();
+    let prefix = format!("mpris-art-{pid}-");
+
+    let mut entries = match tokio::fs::read_dir(dir).await {
+        Ok(e) => e,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return,
+        Err(err) => {
+            warn!(
+                target: "nokkvi::mpris::art",
+                path = %dir.display(), %err, "failed to enumerate mpris art cache dir"
+            );
+            return;
+        }
+    };
+
+    loop {
+        match entries.next_entry().await {
+            Ok(Some(entry)) => {
+                let name = entry.file_name();
+                let Some(name_str) = name.to_str() else {
+                    continue;
+                };
+                if !name_str.starts_with(&prefix) || !name_str.ends_with(".jpg") {
+                    continue;
+                }
+                if let Err(err) = tokio::fs::remove_file(entry.path()).await
+                    && err.kind() != std::io::ErrorKind::NotFound
+                {
+                    warn!(
+                        target: "nokkvi::mpris::art",
+                        path = %entry.path().display(), %err, "failed to remove mpris art cache file"
+                    );
+                }
+            }
+            Ok(None) => break,
+            Err(err) => {
+                warn!(
+                    target: "nokkvi::mpris::art",
+                    path = %dir.display(), %err, "error iterating mpris art cache dir"
+                );
+                break;
+            }
+        }
     }
 }
 
@@ -250,33 +355,64 @@ mod tests {
     }
 
     #[test]
-    fn cache_file_path_contains_nokkvi_and_pid() {
-        // Tests run with the user's real env, so HOME (or XDG_CACHE_HOME) is
-        // always present in practice — just assert the shape if it resolves.
-        let path = cache_file_path().expect("cache path resolves in test env");
+    fn cache_file_path_for_contains_nokkvi_pid_and_cover_id() {
+        let dir = std::path::PathBuf::from("/tmp/scratch/nokkvi");
+        let path = cache_file_path_for(&dir, "al-abc123");
         let s = path.to_string_lossy();
-        assert!(
-            s.contains("nokkvi/mpris-art-"),
-            "path should contain 'nokkvi/mpris-art-', got: {s}"
-        );
         let pid = std::process::id();
         assert!(
-            s.contains(&format!("mpris-art-{pid}.jpg")),
-            "path should embed the current pid {pid}, got: {s}"
+            s.ends_with(&format!("mpris-art-{pid}-al-abc123.jpg")),
+            "path should end with 'mpris-art-<pid>-<cover>.jpg', got: {s}"
         );
+        assert!(
+            s.starts_with("/tmp/scratch/nokkvi/"),
+            "path should sit in the provided dir, got: {s}"
+        );
+    }
+
+    #[test]
+    fn sanitize_cover_id_keeps_safe_chars() {
+        assert_eq!(sanitize_cover_id("al-abc_123.foo"), "al-abc_123.foo");
+        assert_eq!(sanitize_cover_id("ABCxyz09"), "ABCxyz09");
+    }
+
+    #[test]
+    fn sanitize_cover_id_replaces_path_separators_and_whitespace() {
+        // Defensive: Subsonic ids are typically `[A-Za-z0-9-]`, but if a
+        // backend ever returns slashes / spaces / colons the sanitizer must
+        // collapse them so we don't escape the cache dir or break the format.
+        assert_eq!(sanitize_cover_id("al/abc:def"), "al_abc_def");
+        assert_eq!(sanitize_cover_id("a b\tc\nd"), "a_b_c_d");
+        assert_eq!(sanitize_cover_id("../etc/passwd"), ".._etc_passwd");
+    }
+
+    #[test]
+    fn sanitize_cover_id_truncates_overlong_input() {
+        let long = "a".repeat(500);
+        let out = sanitize_cover_id(&long);
+        assert!(
+            out.len() <= SANITIZED_COVER_ID_MAX_LEN,
+            "sanitize must cap output to {} chars, got {}",
+            SANITIZED_COVER_ID_MAX_LEN,
+            out.len()
+        );
+    }
+
+    #[test]
+    fn sanitize_cover_id_handles_empty_input() {
+        assert_eq!(sanitize_cover_id(""), "_");
     }
 
     #[tokio::test]
     async fn write_then_read_cycle_persists_bytes() {
         let dir = ScratchDir::new();
-        let cache_path = dir.path().join("mpris-art-test.jpg");
         let payload: Vec<u8> = vec![0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3, 4];
 
         let mut state = ArtCacheState::new();
         let payload_clone = payload.clone();
         let uri = write_art_inner(
             &mut state,
-            &cache_path,
+            dir.path(),
             "https://server.example",
             "al-abc",
             async move { Ok(payload_clone) },
@@ -288,12 +424,14 @@ mod tests {
             uri.starts_with("file://"),
             "expected file:// uri, got: {uri}"
         );
+        let expected_path = cache_file_path_for(dir.path(), "al-abc");
         assert!(
-            uri.contains(&cache_path.display().to_string()),
-            "uri should reference the cache path"
+            uri.contains(&expected_path.display().to_string()),
+            "uri {uri} should reference {}",
+            expected_path.display()
         );
 
-        let on_disk = tokio::fs::read(&cache_path).await.unwrap();
+        let on_disk = tokio::fs::read(&expected_path).await.unwrap();
         assert_eq!(on_disk, payload, "written bytes must match payload");
     }
 
@@ -314,15 +452,13 @@ mod tests {
     #[tokio::test]
     async fn skip_on_same_key_does_not_refetch() {
         let dir = ScratchDir::new();
-        let cache_path = dir.path().join("mpris-art-test.jpg");
         let payload: Vec<u8> = vec![1, 2, 3];
-
         let counter = Arc::new(AtomicU32::new(0));
 
         let mut state = ArtCacheState::new();
         let first = write_art_inner(
             &mut state,
-            &cache_path,
+            dir.path(),
             "https://server.example",
             "al-abc",
             counting_fetcher(&counter, payload.clone()),
@@ -337,7 +473,7 @@ mod tests {
 
         let second = write_art_inner(
             &mut state,
-            &cache_path,
+            dir.path(),
             "https://server.example",
             "al-abc",
             counting_fetcher(&counter, payload.clone()),
@@ -355,25 +491,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn distinct_key_triggers_refetch() {
-        // Guards against a regression where the equality check is dropped.
+    async fn distinct_server_url_triggers_refetch_even_with_same_cover_id() {
         let dir = ScratchDir::new();
-        let cache_path = dir.path().join("mpris-art-test.jpg");
         let counter = Arc::new(AtomicU32::new(0));
 
         let mut state = ArtCacheState::new();
         let _ = write_art_inner(
             &mut state,
-            &cache_path,
+            dir.path(),
             "https://server-a.example",
             "al-abc",
             counting_fetcher(&counter, vec![9, 9, 9]),
         )
         .await;
-        // Different server_url — same cover_id collision shouldn't replay the cache.
         let _ = write_art_inner(
             &mut state,
-            &cache_path,
+            dir.path(),
             "https://server-b.example",
             "al-abc",
             counting_fetcher(&counter, vec![9, 9, 9]),
@@ -387,15 +520,174 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn clear_resets_state_and_next_call_rewrites() {
+    async fn distinct_cover_ids_produce_distinct_uris() {
+        // Regression test for the "MPRIS shows stale album art across track
+        // changes" bug. Desktop shells (Plasma, GNOME Shell, dunst, waybar,
+        // playerctl consumers) key their `mpris:artUrl` image cache off the
+        // URL string. If two consecutive writes for different cover_ids
+        // collapse to the same `file://` URI, every subsequent track keeps
+        // showing the first track's artwork until the player is restarted.
         let dir = ScratchDir::new();
-        let cache_path = dir.path().join("mpris-art-test.jpg");
+        let mut state = ArtCacheState::new();
+
+        let uri_a = write_art_inner(
+            &mut state,
+            dir.path(),
+            "https://server.example",
+            "al-aaa",
+            async { Ok(vec![1, 2, 3]) },
+        )
+        .await
+        .expect("first write returns a uri");
+
+        let uri_b = write_art_inner(
+            &mut state,
+            dir.path(),
+            "https://server.example",
+            "al-bbb",
+            async { Ok(vec![4, 5, 6]) },
+        )
+        .await
+        .expect("second write returns a uri");
+
+        assert_ne!(
+            uri_a, uri_b,
+            "distinct cover_ids must produce distinct file:// URIs so MPRIS \
+             clients invalidate their per-URL image cache"
+        );
+    }
+
+    #[tokio::test]
+    async fn successor_write_removes_previous_cache_file() {
+        // Steady-state per-PID footprint should be a single cache file. After
+        // a track change the previous file is best-effort removed; tests
+        // assert the eviction so we don't silently regress to "1 file per
+        // distinct album the user ever played in this session".
+        let dir = ScratchDir::new();
+        let mut state = ArtCacheState::new();
+
+        let _ = write_art_inner(
+            &mut state,
+            dir.path(),
+            "https://server.example",
+            "al-aaa",
+            async { Ok(vec![1, 2, 3]) },
+        )
+        .await
+        .expect("first write");
+        let path_a = cache_file_path_for(dir.path(), "al-aaa");
+        assert!(path_a.exists(), "first write should create file A");
+
+        let _ = write_art_inner(
+            &mut state,
+            dir.path(),
+            "https://server.example",
+            "al-bbb",
+            async { Ok(vec![4, 5, 6]) },
+        )
+        .await
+        .expect("second write");
+        let path_b = cache_file_path_for(dir.path(), "al-bbb");
+        assert!(path_b.exists(), "second write should create file B");
+        assert!(
+            !path_a.exists(),
+            "successor write should remove the previous cache file"
+        );
+    }
+
+    #[tokio::test]
+    async fn same_key_repeated_keeps_one_file_and_no_extra_writes() {
+        // Repeated 100ms ticks for the same track must not churn the file.
+        let dir = ScratchDir::new();
+        let mut state = ArtCacheState::new();
+        let counter = Arc::new(AtomicU32::new(0));
+
+        for _ in 0..5 {
+            let _ = write_art_inner(
+                &mut state,
+                dir.path(),
+                "https://server.example",
+                "al-abc",
+                counting_fetcher(&counter, vec![7, 7, 7]),
+            )
+            .await
+            .expect("write");
+        }
+
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            1,
+            "same-key repeated calls must only fetch once"
+        );
+        // Only the single cache file for `al-abc` should exist.
+        let mut count = 0;
+        let mut entries = tokio::fs::read_dir(dir.path()).await.unwrap();
+        while let Some(entry) = entries.next_entry().await.unwrap() {
+            if let Some(name) = entry.file_name().to_str()
+                && name.starts_with("mpris-art-")
+                && name.ends_with(".jpg")
+            {
+                count += 1;
+            }
+        }
+        assert_eq!(
+            count, 1,
+            "steady state for one track must leave exactly one cache file"
+        );
+    }
+
+    #[tokio::test]
+    async fn clear_inner_resets_state_and_sweeps_only_current_pid_files() {
+        let dir = ScratchDir::new();
+        let pid = std::process::id();
+
+        let mine = [
+            format!("mpris-art-{pid}-al-aaa.jpg"),
+            format!("mpris-art-{pid}-al-bbb.jpg"),
+        ];
+        let other = [
+            format!("mpris-art-{}-al-xxx.jpg", pid.wrapping_add(1)),
+            "mpris-art-other-pid-al-yyy.jpg".to_string(),
+            "unrelated.txt".to_string(),
+        ];
+        for f in mine.iter().chain(other.iter()) {
+            std::fs::write(dir.path().join(f), b"x").unwrap();
+        }
+
+        let mut state = ArtCacheState::new();
+        state.last_written = Some((
+            "https://server.example".to_string(),
+            "al-aaa".to_string(),
+            dir.path().join(&mine[0]),
+        ));
+
+        clear_inner(&mut state, Some(dir.path())).await;
+
+        assert!(state.last_written.is_none(), "clear must reset state");
+        for f in &mine {
+            assert!(
+                !dir.path().join(f).exists(),
+                "clear should sweep current-PID file {f}"
+            );
+        }
+        for f in &other {
+            assert!(
+                dir.path().join(f).exists(),
+                "clear must not touch unrelated file {f}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn clear_inner_after_write_then_reuse_refetches() {
+        // After a session reset the next call with the same key must rewrite.
+        let dir = ScratchDir::new();
         let counter = Arc::new(AtomicU32::new(0));
 
         let mut state = ArtCacheState::new();
         let _ = write_art_inner(
             &mut state,
-            &cache_path,
+            dir.path(),
             "https://server.example",
             "al-abc",
             counting_fetcher(&counter, vec![7, 7, 7]),
@@ -403,17 +695,16 @@ mod tests {
         .await;
         assert_eq!(counter.load(Ordering::SeqCst), 1);
 
-        clear_inner(&mut state, Some(&cache_path));
-        assert!(state.last_written.is_none(), "clear must reset state");
+        clear_inner(&mut state, Some(dir.path())).await;
+        assert!(state.last_written.is_none());
         assert!(
-            !cache_path.exists(),
-            "clear should remove the cache file when present"
+            !cache_file_path_for(dir.path(), "al-abc").exists(),
+            "clear should remove the cache file"
         );
 
-        // Same key after clear: must re-invoke the fetcher.
         let _ = write_art_inner(
             &mut state,
-            &cache_path,
+            dir.path(),
             "https://server.example",
             "al-abc",
             counting_fetcher(&counter, vec![7, 7, 7]),
@@ -426,25 +717,26 @@ mod tests {
         );
     }
 
-    #[test]
-    fn clear_inner_tolerates_missing_file() {
-        let dir = ScratchDir::new();
-        let cache_path = dir.path().join("not-here.jpg");
+    #[tokio::test]
+    async fn clear_inner_tolerates_missing_directory() {
         let mut state = ArtCacheState::new();
-        // Should not panic / log anything user-actionable when the file isn't there.
-        clear_inner(&mut state, Some(&cache_path));
+        let nonexistent = std::env::temp_dir().join(format!(
+            "nokkvi-mpris-art-clear-missing-{}-{}",
+            std::process::id(),
+            42_u64
+        ));
+        clear_inner(&mut state, Some(&nonexistent)).await;
         assert!(state.last_written.is_none());
     }
 
     #[tokio::test]
     async fn fetch_error_returns_none_and_leaves_state_clean() {
         let dir = ScratchDir::new();
-        let cache_path = dir.path().join("mpris-art-test.jpg");
         let mut state = ArtCacheState::new();
 
         let result = write_art_inner(
             &mut state,
-            &cache_path,
+            dir.path(),
             "https://server.example",
             "al-fail",
             async { Err(anyhow::anyhow!("simulated fetch failure")) },
@@ -457,7 +749,7 @@ mod tests {
             "failed fetch must not poison the cache state"
         );
         assert!(
-            !cache_path.exists(),
+            !cache_file_path_for(dir.path(), "al-fail").exists(),
             "failed fetch must not leave a cache file behind"
         );
     }
@@ -465,12 +757,11 @@ mod tests {
     #[tokio::test]
     async fn empty_fetch_body_returns_none() {
         let dir = ScratchDir::new();
-        let cache_path = dir.path().join("mpris-art-test.jpg");
         let mut state = ArtCacheState::new();
 
         let result = write_art_inner(
             &mut state,
-            &cache_path,
+            dir.path(),
             "https://server.example",
             "al-empty",
             async { Ok(Vec::new()) },
@@ -479,6 +770,6 @@ mod tests {
 
         assert!(result.is_none(), "empty body must not be cached");
         assert!(state.last_written.is_none());
-        assert!(!cache_path.exists());
+        assert!(!cache_file_path_for(dir.path(), "al-empty").exists());
     }
 }
