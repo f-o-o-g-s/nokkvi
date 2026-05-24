@@ -275,6 +275,10 @@ impl super::ViewPage for QueuePage {
     fn slot_list_message(&self, msg: SlotListPageMessage) -> Message {
         Message::Queue(QueueMessage::SlotList(msg))
     }
+
+    fn uses_horizontal_artwork_column(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

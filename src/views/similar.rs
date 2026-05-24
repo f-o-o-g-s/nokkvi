@@ -633,6 +633,10 @@ impl super::ViewPage for SimilarPage {
     fn slot_list_message(&self, msg: SlotListPageMessage) -> Message {
         Message::Similar(SimilarMessage::SlotList(msg))
     }
+
+    fn uses_horizontal_artwork_column(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

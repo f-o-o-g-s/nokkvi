@@ -251,6 +251,10 @@ impl super::ViewPage for GenresPage {
     fn slot_list_message(&self, msg: crate::widgets::SlotListPageMessage) -> Message {
         Message::Genres(GenresMessage::SlotList(msg))
     }
+
+    fn uses_horizontal_artwork_column(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

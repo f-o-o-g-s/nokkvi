@@ -230,6 +230,10 @@ impl super::ViewPage for SongsPage {
     fn slot_list_message(&self, msg: crate::widgets::SlotListPageMessage) -> Message {
         Message::Songs(SongsMessage::SlotList(msg))
     }
+
+    fn uses_horizontal_artwork_column(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

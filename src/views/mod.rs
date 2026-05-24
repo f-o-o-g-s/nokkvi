@@ -118,6 +118,19 @@ pub(crate) trait ViewPage {
     /// per-handler special case wraps directly in `SettingsMessage::SlotList*`
     /// variants instead.
     fn slot_list_message(&self, msg: SlotListPageMessage) -> Message;
+
+    /// Whether this view renders artwork via `base_slot_list_layout`'s
+    /// horizontal layout (i.e. passes `show_artwork_column: true` and
+    /// resolves to `ArtworkOrientation::Horizontal`).
+    ///
+    /// `Nokkvi::elevated_artwork_extent` consults this to gate the
+    /// artwork-elevation feature without a hand-maintained match on
+    /// `View`. Default `false` means a new `ViewPage` impl opts out
+    /// safely; override to `true` only when the view does in fact
+    /// participate in the horizontal-artwork layout.
+    fn uses_horizontal_artwork_column(&self) -> bool {
+        false
+    }
 }
 
 // ============================================================================

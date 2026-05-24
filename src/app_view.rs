@@ -180,9 +180,9 @@ impl Nokkvi {
     ///   right portion is otherwise reserved for the metadata strip.
     /// - The browsing panel is not open — split-view has its own dual-pane
     ///   shape and skips elevation.
-    /// - The current view renders horizontal artwork via
-    ///   `base_slot_list_layout`'s `horizontal_layout` (Albums, Artists,
-    ///   Songs, Genres, Queue, Playlists). Settings and Radios opt out.
+    /// - The current view's `ViewPage` reports `uses_horizontal_artwork_column()`
+    ///   true (Albums, Artists, Songs, Genres, Queue, Playlists today).
+    ///   Settings has no `ViewPage`; Radios overrides to false.
     /// - The active `ArtworkColumnMode` resolves to a Horizontal layout for
     ///   the current window using **the same config the view passes**
     ///   (raw `window.height`, not the player-bar-adjusted variant).
@@ -215,30 +215,33 @@ impl Nokkvi {
         {
             return None;
         }
-        if !matches!(
-            self.current_view,
-            View::Albums
-                | View::Artists
-                | View::Songs
-                | View::Genres
-                | View::Queue
-                | View::Playlists
-        ) {
+        // View eligibility — `ViewPage::uses_horizontal_artwork_column` is
+        // the single source of truth (overridden `true` on each view whose
+        // `show_artwork_column: true` config flows into `horizontal_layout`).
+        // A new horizontal-artwork view becomes elevation-eligible by
+        // overriding that method, with no second list to maintain here.
+        let view_eligible = self
+            .view_page(self.current_view)
+            .is_some_and(|p| p.uses_horizontal_artwork_column());
+        if !view_eligible {
             return None;
         }
         use crate::widgets::base_slot_list_layout::{
             ArtworkOrientation, BaseSlotListLayoutConfig, resolve_artwork_layout,
         };
-        // Step 1 — does the view actually render Horizontal artwork?
-        //          The view's call uses raw `window.height`, so we must too.
-        let view_config = BaseSlotListLayoutConfig {
+        // Probe config shared by both resolver passes — only `window_height`
+        // differs between Step 1 (raw, matches the view's own call) and
+        // Step 2 (player-bar-adjusted, matches the responsive's bbox).
+        let probe_config = |window_height: f32| BaseSlotListLayoutConfig {
             window_width: self.content_pane_width(),
-            window_height: self.window.height,
+            window_height,
             show_artwork_column: true,
             slot_list_chrome: 0.0,
             elevated: false,
         };
-        let view_layout = resolve_artwork_layout(&view_config)?;
+        // Step 1 — does the view actually render Horizontal artwork?
+        //          The view's call uses raw `window.height`, so we must too.
+        let view_layout = resolve_artwork_layout(&probe_config(self.window.height))?;
         match view_layout.orientation {
             ArtworkOrientation::Horizontal => {}
             ArtworkOrientation::Vertical => return None,
@@ -249,15 +252,9 @@ impl Nokkvi {
         //          row, so mirror that here. Auto-mode square shrinks
         //          accordingly; Always-mode `window_width * pct` extent
         //          is height-independent (same value either way).
-        let adjusted_config = BaseSlotListLayoutConfig {
-            window_width: self.content_pane_width(),
-            window_height: (self.window.height - crate::widgets::player_bar::player_bar_height())
-                .max(0.0),
-            show_artwork_column: true,
-            slot_list_chrome: 0.0,
-            elevated: false,
-        };
-        let adjusted_layout = resolve_artwork_layout(&adjusted_config)?;
+        let adjusted_height =
+            (self.window.height - crate::widgets::player_bar::player_bar_height()).max(0.0);
+        let adjusted_layout = resolve_artwork_layout(&probe_config(adjusted_height))?;
         match adjusted_layout.orientation {
             ArtworkOrientation::Horizontal => Some(adjusted_layout.extent),
             ArtworkOrientation::Vertical => None,

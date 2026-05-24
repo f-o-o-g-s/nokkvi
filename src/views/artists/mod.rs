@@ -275,6 +275,10 @@ impl super::ViewPage for ArtistsPage {
     fn slot_list_message(&self, msg: crate::widgets::SlotListPageMessage) -> Message {
         Message::Artists(ArtistsMessage::SlotList(msg))
     }
+
+    fn uses_horizontal_artwork_column(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]
