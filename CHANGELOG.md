@@ -12,6 +12,8 @@ All notable changes to this project will be documented in this file.
 
 - The label naming the centered slot-list item is now an opaque bar pinned to the bottom of the artwork panel, replacing the centered floating pill.
 - The queue's read-only playlist context bar no longer shows a small icon next to the playlist title.
+- Overlay menus (hamburger, player-modes kebab, context menus, library-selector popover) now cast a drop shadow.
+- Toggles in the player-modes kebab now render with the same filled checkbox glyph as the library-selector popover.
 
 ### Fixed
 
