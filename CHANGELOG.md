@@ -6,9 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- In Top nav layout, the artwork panel now reaches up over the nav bar, except when the metadata strip itself occupies the top bar.
+
 ### Changed
 
+- The label naming the centered slot-list item is now an opaque bar pinned to the bottom of the artwork panel, replacing the centered floating pill.
+- The queue's read-only playlist context bar no longer shows a small icon next to the playlist title.
+
 ### Fixed
+
+- Playlists side-nav tab now uses a music-note sheet icon to avoid the 'iii' visual collision with rotated tab text.
 
 ### Removed
 
