@@ -80,6 +80,10 @@ pub struct QueueViewData<'a> {
     pub is_playing: bool, // True if playback is active (not stopped/paused)
     pub total_queue_count: usize, // Total count before filtering (for empty state detection)
     pub stable_viewport: bool,
+    /// Whether artwork-elevation is in effect for this frame. Forwarded into
+    /// BaseSlotListLayoutConfig.elevated. Always false in split-view /
+    /// side-nav / none-nav.
+    pub elevated: bool,
     /// When in edit mode: (playlist_name, is_dirty)
     pub edit_mode_info: Option<(String, bool)>,
     /// Playlist comment when in edit mode

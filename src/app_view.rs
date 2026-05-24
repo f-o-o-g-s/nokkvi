@@ -226,6 +226,7 @@ impl Nokkvi {
             window_height: self.window.height,
             show_artwork_column: true,
             slot_list_chrome: 0.0,
+            elevated: false,
         };
         let view_layout = resolve_artwork_layout(&view_config)?;
         match view_layout.orientation {
@@ -244,6 +245,7 @@ impl Nokkvi {
                 .max(0.0),
             show_artwork_column: true,
             slot_list_chrome: 0.0,
+            elevated: false,
         };
         let adjusted_layout = resolve_artwork_layout(&adjusted_config)?;
         match adjusted_layout.orientation {
@@ -279,7 +281,6 @@ impl Nokkvi {
         // `base_slot_list_layout::horizontal_layout` matches the branch we
         // actually take below. Settled before any view rendering kicks off.
         let elevated_extent = self.elevated_artwork_extent();
-        crate::theme::set_artwork_elevation_active(elevated_extent.is_some());
 
         // Optional radio metadata mapping
         let (radio_name, radio_url, icy_artist, icy_title) = match &self.active_playback {
@@ -498,11 +499,11 @@ impl Nokkvi {
                 };
                 outer = outer.push(iced::widget::row![
                     widgets::side_nav_bar(side_data).map(map_nav_bar_message),
-                    self.main_content(),
+                    self.main_content(false),
                 ]);
             } else {
                 // None mode: content fills the full width — no sidebar
-                outer = outer.push(self.main_content());
+                outer = outer.push(self.main_content(false));
             }
 
             // Player bar
@@ -529,7 +530,7 @@ impl Nokkvi {
             .height(Length::Fill);
 
             let base = column![
-                self.main_content(),
+                self.main_content(true),
                 widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar),
             ];
 
@@ -537,7 +538,7 @@ impl Nokkvi {
         } else {
             iced::widget::column![
                 self.navigation_bar(self.window.width),
-                self.main_content(),
+                self.main_content(false),
                 widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar),
             ]
             .into()
@@ -808,6 +809,7 @@ impl Nokkvi {
         window_height: f32,
         in_browsing_panel: bool,
         stable_viewport: bool,
+        elevated: bool,
     ) -> views::AlbumsViewData<'_> {
         let (column_dropdown_open, column_dropdown_trigger_bounds) =
             column_dropdown_state(&self.open_menu, View::Albums);
@@ -824,6 +826,7 @@ impl Nokkvi {
             loading: self.library.albums.is_loading(),
             stable_viewport,
             in_browsing_panel,
+            elevated,
             overlay: views::OverlayMenuViewData {
                 column_dropdown_open,
                 column_dropdown_trigger_bounds,
@@ -840,6 +843,7 @@ impl Nokkvi {
         window_height: f32,
         in_browsing_panel: bool,
         stable_viewport: bool,
+        elevated: bool,
     ) -> views::ArtistsViewData<'_> {
         let (column_dropdown_open, column_dropdown_trigger_bounds) =
             column_dropdown_state(&self.open_menu, View::Artists);
@@ -858,6 +862,7 @@ impl Nokkvi {
             loading: self.library.artists.is_loading(),
             stable_viewport,
             in_browsing_panel,
+            elevated,
             overlay: views::OverlayMenuViewData {
                 column_dropdown_open,
                 column_dropdown_trigger_bounds,
@@ -874,6 +879,7 @@ impl Nokkvi {
         window_height: f32,
         in_browsing_panel: bool,
         stable_viewport: bool,
+        elevated: bool,
     ) -> views::SongsViewData<'_> {
         let (column_dropdown_open, column_dropdown_trigger_bounds) =
             column_dropdown_state(&self.open_menu, View::Songs);
@@ -890,6 +896,7 @@ impl Nokkvi {
             loading: self.library.songs.is_loading(),
             stable_viewport,
             in_browsing_panel,
+            elevated,
             overlay: views::OverlayMenuViewData {
                 column_dropdown_open,
                 column_dropdown_trigger_bounds,
@@ -906,6 +913,7 @@ impl Nokkvi {
         window_height: f32,
         in_browsing_panel: bool,
         stable_viewport: bool,
+        elevated: bool,
     ) -> views::GenresViewData<'_> {
         let (column_dropdown_open, column_dropdown_trigger_bounds) =
             column_dropdown_state(&self.open_menu, View::Genres);
@@ -922,6 +930,7 @@ impl Nokkvi {
             loading: self.library.genres.is_loading(),
             stable_viewport,
             in_browsing_panel,
+            elevated,
             overlay: views::OverlayMenuViewData {
                 column_dropdown_open,
                 column_dropdown_trigger_bounds,
@@ -1042,7 +1051,7 @@ impl Nokkvi {
     }
 
     /// Main content area - dispatches to current view's page
-    fn main_content(&self) -> Element<'_, Message> {
+    fn main_content(&self, elevated: bool) -> Element<'_, Message> {
         // Borrow the pre-computed large_artwork snapshot (refreshed after each LRU mutation).
         // This avoids re-creating the HashMap on every render frame.
         let large_artwork = &self.artwork.large_artwork.snapshot;
@@ -1095,6 +1104,7 @@ impl Nokkvi {
                     .queue_loading_target
                     .unwrap_or(self.library.queue_songs.len()),
                 stable_viewport: self.settings.stable_viewport,
+                elevated: false,
                 edit_mode_info,
                 edit_mode_comment,
                 edit_mode_public,
@@ -1178,6 +1188,7 @@ impl Nokkvi {
                             browser_height,
                             true,
                             true,
+                            false,
                         );
                         self.albums_page.view(view_data).map(Message::Albums)
                     }
@@ -1187,6 +1198,7 @@ impl Nokkvi {
                             browser_height,
                             true,
                             true,
+                            false,
                         );
                         self.songs_page.view(view_data).map(Message::Songs)
                     }
@@ -1196,6 +1208,7 @@ impl Nokkvi {
                             browser_height,
                             true,
                             true,
+                            false,
                         );
                         self.artists_page.view(view_data).map(Message::Artists)
                     }
@@ -1205,6 +1218,7 @@ impl Nokkvi {
                             browser_height,
                             true,
                             true,
+                            false,
                         );
                         self.genres_page.view(view_data).map(Message::Genres)
                     }
@@ -1225,6 +1239,7 @@ impl Nokkvi {
                             modifiers: self.window.keyboard_modifiers,
                             label,
                             loading,
+                            elevated: false,
                             overlay: views::OverlayMenuViewData {
                                 column_dropdown_open,
                                 column_dropdown_trigger_bounds,
@@ -1262,6 +1277,7 @@ impl Nokkvi {
                     self.window.height,
                     false,
                     self.settings.stable_viewport,
+                    elevated,
                 );
                 self.albums_page.view(view_data).map(Message::Albums)
             }
@@ -1286,6 +1302,7 @@ impl Nokkvi {
                         .queue_loading_target
                         .unwrap_or(self.library.queue_songs.len()),
                     stable_viewport: self.settings.stable_viewport,
+                    elevated,
                     edit_mode_info: None,
                     edit_mode_comment: None,
                     edit_mode_public: None,
@@ -1307,6 +1324,7 @@ impl Nokkvi {
                     self.window.height,
                     false,
                     self.settings.stable_viewport,
+                    elevated,
                 );
                 self.artists_page.view(view_data).map(Message::Artists)
             }
@@ -1316,6 +1334,7 @@ impl Nokkvi {
                     self.window.height,
                     false,
                     self.settings.stable_viewport,
+                    elevated,
                 );
                 self.songs_page.view(view_data).map(Message::Songs)
             }
@@ -1325,6 +1344,7 @@ impl Nokkvi {
                     self.window.height,
                     false,
                     self.settings.stable_viewport,
+                    elevated,
                 );
                 self.genres_page.view(view_data).map(Message::Genres)
             }
@@ -1342,6 +1362,7 @@ impl Nokkvi {
                     total_playlist_count: self.library.counts.playlists,
                     loading: self.library.playlists.is_loading(),
                     stable_viewport: self.settings.stable_viewport,
+                    elevated,
                     default_playlist_name: &self.settings.default_playlist_name,
                     overlay: views::OverlayMenuViewData {
                         column_dropdown_open,
@@ -1368,6 +1389,7 @@ impl Nokkvi {
                     loading: false, // TODO: add loading state for radio stations
                     total_station_count: self.library.radio_stations.len(),
                     stable_viewport: self.settings.stable_viewport,
+                    elevated,
                     modifiers: self.window.keyboard_modifiers,
                     open_menu: self.open_menu.as_ref(),
                 };

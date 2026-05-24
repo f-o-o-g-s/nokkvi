@@ -89,6 +89,15 @@ pub(crate) struct BaseSlotListLayoutConfig {
     /// expected, producing a partial slot at the bottom. Horizontal /
     /// Always-mode layouts ignore this field.
     pub slot_list_chrome: f32,
+    /// Whether artwork-elevation is in effect for this frame. Set by
+    /// `home_view` (the only caller that resolves elevation) and threaded
+    /// through every `*ViewData` so each view forwards it into the config it
+    /// builds. `horizontal_layout` reads this to push the slot-list column
+    /// down by `NAV_BAR_HEIGHT` so the overlaid nav bar lands on an empty
+    /// band. Always `false` in side-nav / none-nav layouts and in the
+    /// internal probe configs that `Nokkvi::elevated_artwork_extent` uses
+    /// before elevation is decided.
+    pub elevated: bool,
 }
 
 /// How the image renders inside the artwork column.
@@ -794,36 +803,33 @@ where
     // top of the view header. The artwork column intentionally has no top
     // padding so it fills the row all the way to the top of the window.
     //
-    // Gate on the per-frame `is_artwork_elevation_active` signal (set by
-    // `home_view`) rather than the theme-only `is_artwork_elevated` — the
-    // latter would also fire in split-view, where home_view does *not*
-    // elevate, leaving the slot list with a stranded top gap.
+    // `config.elevated` is plumbed by `home_view` through each view's
+    // `*ViewData` — the only frame-level signal authoritative enough to
+    // gate this branch. Reading a theme-only predicate would also fire in
+    // split-view, where home_view does *not* elevate, leaving the slot
+    // list with a stranded top gap.
     //
     // The spacer is intentionally a sibling `Space` rather than a wrapping
     // container with `padding(top: …)` — a wrapping container ends up
     // painting the row's residual right-side allocation with an unintended
     // grey rect when the artwork column sits next to it. A plain `Space`
     // sibling has no draw surface at all, so the band stays transparent.
-    let elevated = theme::is_artwork_elevation_active();
-    let slot_list_column: Element<'a, Message> = if elevated {
-        column![
-            iced::widget::Space::new()
-                .width(Length::Fill)
-                .height(Length::Fixed(crate::widgets::slot_list::NAV_BAR_HEIGHT)),
-            header,
-            slot_list_content,
-        ]
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .spacing(0)
-        .into()
+    let spacer_height = if config.elevated {
+        crate::widgets::slot_list::NAV_BAR_HEIGHT
     } else {
-        column![header, slot_list_content]
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .spacing(0)
-            .into()
+        0.0
     };
+    let slot_list_column: Element<'a, Message> = column![
+        iced::widget::Space::new()
+            .width(Length::Fill)
+            .height(Length::Fixed(spacer_height)),
+        header,
+        slot_list_content,
+    ]
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .spacing(0)
+    .into();
 
     // Wrap the inner row in an outer column so every base_slot_list_layout
     // branch (horizontal, vertical, no-artwork) returns the same root widget
@@ -984,6 +990,7 @@ mod tests {
             // don't care about the slot-list rect — they exercise the
             // artwork-resolution math only.
             slot_list_chrome: 0.0,
+            elevated: false,
         }
     }
 

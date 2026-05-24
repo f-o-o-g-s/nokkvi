@@ -124,12 +124,6 @@ struct UiModeFlags {
     /// (f32 bits, 0.10..=0.80). Read by the Always-Vertical resolver branch
     /// in base_slot_list_layout.rs to size the stacked artwork.
     artwork_vertical_height_pct: AtomicU32,
-    /// Per-frame flag set by `home_view` indicating whether artwork
-    /// elevation is actively reshaping the current frame. Distinct from the
-    /// theme-only `track_info_display` signal so split-view / Settings /
-    /// Radios / portrait-fallback frames don't accidentally trigger the
-    /// nav-bar-overlay top padding in `horizontal_layout`.
-    artwork_elevation_active: AtomicBool,
 }
 
 static UI_MODE: UiModeFlags = UiModeFlags {
@@ -168,7 +162,6 @@ static UI_MODE: UiModeFlags = UiModeFlags {
     artwork_vertical_height_pct: AtomicU32::new(
         nokkvi_data::types::player_settings::ARTWORK_VERTICAL_HEIGHT_PCT_DEFAULT.to_bits(),
     ),
-    artwork_elevation_active: AtomicBool::new(false),
 };
 
 /// Reload theme from theme file (hot-reload support).
@@ -395,37 +388,14 @@ pub(crate) fn show_top_bar_strip() -> bool {
 /// `TopBar` keeps the regular column-stacked layout because the metadata
 /// strip still needs the full nav width.
 ///
-/// This is the *theme* signal — the actual per-render decision (which also
-/// excludes split-view, ineligible views, and Auto-mode portrait fallback)
-/// is published by `home_view` via [`set_artwork_elevation_active`] and
-/// queried by `base_slot_list_layout::horizontal_layout` through
-/// [`is_artwork_elevation_active`].
+/// This is only the *theme* gate — `Nokkvi::elevated_artwork_extent`
+/// additionally excludes split-view, ineligible views, and the Auto-mode
+/// portrait fallback before publishing the result through each `*ViewData`
+/// as `BaseSlotListLayoutConfig::elevated`, which `horizontal_layout`
+/// finally reads.
 #[inline]
 pub(crate) fn is_artwork_elevated() -> bool {
     is_top_nav() && track_info_display() != TrackInfoDisplay::TopBar
-}
-
-/// Per-render flag set by `home_view` indicating whether artwork elevation
-/// is actually in effect *for this frame* (theme-enabled AND eligible view
-/// AND not in split-view AND artwork resolves to horizontal).
-///
-/// `horizontal_layout` reads this to decide whether to push the slot-list
-/// column down by `NAV_BAR_HEIGHT` so the overlaid nav bar lands on an
-/// empty band. Reading `is_artwork_elevated` alone would also fire in
-/// split-view (where home_view does *not* elevate), leaving a gap at the
-/// top of each pane.
-#[inline]
-pub(crate) fn is_artwork_elevation_active() -> bool {
-    UI_MODE.artwork_elevation_active.load(Ordering::Relaxed)
-}
-
-/// Publish the current-frame elevation state. Called by `home_view` before
-/// constructing its base layer.
-#[inline]
-pub(crate) fn set_artwork_elevation_active(active: bool) {
-    UI_MODE
-        .artwork_elevation_active
-        .store(active, Ordering::Relaxed);
 }
 
 // ============================================================================

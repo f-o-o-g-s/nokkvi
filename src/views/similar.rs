@@ -51,6 +51,10 @@ pub struct SimilarViewData<'a> {
     pub label: &'a str,
     /// Whether an API call is in flight
     pub loading: bool,
+    /// Whether artwork-elevation is in effect for this frame. Forwarded into
+    /// BaseSlotListLayoutConfig.elevated. Always false in split-view /
+    /// side-nav / none-nav.
+    pub elevated: bool,
     /// Shared overlay-menu plumbing (column-dropdown open/bounds + borrowed
     /// `open_menu` reference). See `super::OverlayMenuViewData`.
     pub overlay: super::OverlayMenuViewData<'a>,
@@ -349,6 +353,7 @@ impl SimilarPage {
             window_height: data.window_height,
             show_artwork_column: true,
             slot_list_chrome,
+            elevated: data.elevated,
         };
 
         // Loading state

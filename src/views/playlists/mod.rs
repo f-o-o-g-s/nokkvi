@@ -61,6 +61,10 @@ pub struct PlaylistsViewData<'a> {
     pub total_playlist_count: usize,
     pub loading: bool,
     pub stable_viewport: bool,
+    /// Whether artwork-elevation is in effect for this frame. Forwarded into
+    /// BaseSlotListLayoutConfig.elevated. Always false in split-view /
+    /// side-nav / none-nav.
+    pub elevated: bool,
     /// Current default playlist's display name (empty when no default set).
     /// Surfaced in the view-header chip.
     pub default_playlist_name: &'a str,

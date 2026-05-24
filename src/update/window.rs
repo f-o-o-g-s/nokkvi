@@ -56,6 +56,7 @@ impl Nokkvi {
             window_height: self.window.height,
             show_artwork_column: true,
             slot_list_chrome: standard_chrome,
+            elevated: false,
         };
         let vertical = vertical_artwork_chrome(&layout);
         let sc = SlotListConfig::with_dynamic_slots(self.window.height, standard_chrome + vertical)

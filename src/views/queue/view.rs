@@ -468,6 +468,7 @@ impl QueuePage {
                 window_height: data.window_height,
                 show_artwork_column: true,
                 slot_list_chrome: 0.0,
+                elevated: false,
             }) > 0.0;
             if in_vertical_artwork_mode
                 && (data.edit_mode_info.is_some() || data.playlist_context_info.is_some())
@@ -543,6 +544,7 @@ impl QueuePage {
             window_height: data.window_height,
             show_artwork_column: true,
             slot_list_chrome: chrome_height,
+            elevated: data.elevated,
         };
 
         // If no songs in filtered results, show appropriate message (like albums view)

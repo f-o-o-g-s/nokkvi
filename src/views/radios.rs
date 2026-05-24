@@ -37,6 +37,10 @@ pub struct RadiosViewData<'a> {
     pub loading: bool,
     pub total_station_count: usize,
     pub stable_viewport: bool,
+    /// Whether artwork-elevation is in effect for this frame. Forwarded into
+    /// BaseSlotListLayoutConfig.elevated. Always false in split-view /
+    /// side-nav / none-nav.
+    pub elevated: bool,
     pub modifiers: iced::keyboard::Modifiers,
     /// Borrowed reference to the root open-menu state, so per-row context
     /// menus can resolve their own open/closed status.
@@ -247,6 +251,7 @@ impl RadiosPage {
             window_height: data.window_height,
             show_artwork_column: false, // No artwork for radio stations
             slot_list_chrome,
+            elevated: data.elevated,
         };
 
         if data.loading {

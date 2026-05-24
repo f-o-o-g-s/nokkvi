@@ -69,6 +69,10 @@ pub struct GenresViewData<'a> {
     /// (split-view, right pane). Used to suppress chrome that doesn't fit
     /// the narrower pane — e.g. the "Center on Playing" header button.
     pub in_browsing_panel: bool,
+    /// Whether artwork-elevation is in effect for this frame. Forwarded into
+    /// BaseSlotListLayoutConfig.elevated. Always false in split-view /
+    /// side-nav / none-nav.
+    pub elevated: bool,
     /// Shared overlay-menu plumbing (column-dropdown open/bounds + borrowed
     /// `open_menu` reference). See `super::OverlayMenuViewData`.
     pub overlay: super::OverlayMenuViewData<'a>,
