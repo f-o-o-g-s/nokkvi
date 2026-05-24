@@ -197,7 +197,17 @@ impl Nokkvi {
     /// natural-size math for the in-tree panel (Auto-mode square sized
     /// against the actual row height, not the raw window height). Without
     /// the second call the nav-bar overlay under-reaches the artwork's
-    /// real left edge and the `bg1` stripe peeks through.
+    /// real left edge and the `bg1` stripe peeks through above the nav.
+    ///
+    /// The returned extent is the artwork's **inner column width** —
+    /// excluding the 2 px `bg1` stripe (Auto/Always) and the 6 px drag
+    /// handle (Always only). `home_view` computes
+    /// `nav_visual_width = content_pane_width - extent`, which makes the
+    /// nav-overlay's right edge align with the inner artwork's LEFT edge:
+    /// the stripe/handle sit *underneath* the nav-bar band in the top
+    /// `NAV_BAR_HEIGHT` strip, then become visible as designed below it.
+    /// Subtracting the stripe/handle from `nav_visual_width` would invert
+    /// that — the stripe would peek through above the nav.
     pub(crate) fn elevated_artwork_extent(&self) -> Option<f32> {
         if !crate::theme::is_artwork_elevated()
             || !crate::theme::is_top_nav()
@@ -277,9 +287,12 @@ impl Nokkvi {
 
     /// Home screen layout (nav bar + content + player bar)
     fn home_view(&self) -> Element<'_, Message> {
-        // Resolve elevation once per frame so the per-frame flag read by
-        // `base_slot_list_layout::horizontal_layout` matches the branch we
-        // actually take below. Settled before any view rendering kicks off.
+        // Resolve elevation once per frame; the result threads through
+        // `main_content` into each view's `*ViewData.elevated` which
+        // `BaseSlotListLayoutConfig.elevated` then carries into
+        // `horizontal_layout`. Both the elevated and non-elevated top-nav
+        // branches below produce the same `Stack[base, nav_overlay]`
+        // shape — see the branch comment for why.
         let elevated_extent = self.elevated_artwork_extent();
 
         // Optional radio metadata mapping
@@ -511,17 +524,50 @@ impl Nokkvi {
                 .push(widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar));
 
             outer.into()
-        } else if let Some(artwork_extent) = elevated_extent {
-            // Elevated layout — the artwork pane fills main_content all the
-            // way up to the top of the window, and the nav bar is overlaid
-            // back over the slot-list area only. The slot-list column inside
-            // `horizontal_layout` adds its own `NAV_BAR_HEIGHT` top padding
-            // so the overlaid nav bar lands on an empty band.
-            let nav_visual_width = (self.content_pane_width() - artwork_extent).max(0.0);
-            let nav_bar = self.navigation_bar(nav_visual_width);
+        } else {
+            // Top-nav layout — always wrap in `Stack` with the same column
+            // shape underneath, even when elevation is off. Switching the
+            // root widget type between Column (non-elevated) and Stack
+            // (elevated) would tear down `text_input` focus and any other
+            // stateful widgets every time elevation flipped — Ctrl+E to
+            // open the browsing panel, navigating to an ineligible view,
+            // a window resize crossing the Auto-mode threshold. See
+            // CLAUDE.md "Render output" gotcha and gotchas.md:38.
+            //
+            // The outer `Space` reserves the nav-bar's vertical band:
+            //   - non-elevated → `NAV_BAR_HEIGHT` so `main_content` is
+            //     pushed below the nav band (same layout as before)
+            //   - elevated → `0.0` so `main_content` extends to the top
+            //     of the window, letting the artwork pane reach y=0
+            //
+            // `nav_visual_width` is the horizontal extent the nav-bar
+            // occupies — full window width when not elevated, only the
+            // slot-list area when elevated (the artwork pane underneath
+            // shows through to the right of the nav).
+            let (outer_space_height, nav_visual_width) =
+                if let Some(artwork_extent) = elevated_extent {
+                    (
+                        0.0,
+                        (self.content_pane_width() - artwork_extent).max(0.0),
+                    )
+                } else {
+                    (
+                        crate::widgets::slot_list::NAV_BAR_HEIGHT,
+                        self.window.width,
+                    )
+                };
+            let is_elevated = elevated_extent.is_some();
+
+            let base = column![
+                iced::widget::Space::new()
+                    .width(Length::Fill)
+                    .height(Length::Fixed(outer_space_height)),
+                self.main_content(is_elevated),
+                widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar),
+            ];
 
             let nav_overlay = column![
-                container(nav_bar)
+                container(self.navigation_bar(nav_visual_width))
                     .width(Length::Fixed(nav_visual_width))
                     .height(Length::Shrink),
                 iced::widget::Space::new().height(Length::Fill),
@@ -529,19 +575,7 @@ impl Nokkvi {
             .width(Length::Fill)
             .height(Length::Fill);
 
-            let base = column![
-                self.main_content(true),
-                widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar),
-            ];
-
             Stack::new().push(base).push(nav_overlay).into()
-        } else {
-            iced::widget::column![
-                self.navigation_bar(self.window.width),
-                self.main_content(false),
-                widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar),
-            ]
-            .into()
         };
 
         // Create stack with base layer
