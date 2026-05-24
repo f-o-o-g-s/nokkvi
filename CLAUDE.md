@@ -28,12 +28,13 @@ Per-user data follows the XDG Base Directory Specification, split across two roo
 
 ## Workspace layout
 
-Two crates:
+Three crates:
 
 | Crate | Path | Role |
 |-------|------|------|
-| `nokkvi` | `src/` | Iced UI: views, widgets, update handlers, subscriptions, theme. Depends on `nokkvi-data`. |
+| `nokkvi` | `src/` | Iced UI: views, widgets, update handlers, subscriptions, theme. Depends on `nokkvi-data` + `nokkvi-ipc`. |
 | `nokkvi-data` | `data/` | **Iced-free** backend: domain types, audio engine, Subsonic/Navidrome API client, persistence, services. |
+| `nokkvi-ipc` | `nokkvi-ipc/` | **Iced-free** wire layer for the `nokkvi <verb>` CLI control path (unix socket, per-PID paths). Linked by the fork-before-iced client and the UI's iced subscription. |
 
 Entry points: `src/main.rs` (Iced app + `Nokkvi` root state), `src/app_message.rs` (root `Message` enum), `src/update/mod.rs` (central dispatcher), `data/src/backend/app_service.rs` (`AppService` backend orchestrator).
 
@@ -70,8 +71,9 @@ AppService (orchestrator)
 │                              (random/repeat/consume) + reset_next_track()
 ├── Domain Services          — Albums, Artists, Songs, Queue, Settings, Auth
 │                              (each lazy-inits its API client via tokio OnceCell)
-├── API factory methods      — songs_api(), genres_api(), playlists_api(), radios_api(), similar_api()
-│                              (construct *ApiService instances on demand; not stored on AppService)
+├── API factory methods      — songs_api(), genres_api(), libraries_api(), playlists_api(),
+│                              radios_api(), similar_api() (construct *ApiService instances on
+│                              demand; not stored on AppService)
 └── TaskManager              — centralized spawn tracking + status channel for UI notifications
 ```
 
@@ -100,8 +102,8 @@ CustomAudioEngine
 Critical invariants:
 - **Track changes**: create fresh decoders **before** locking the engine; release the engine lock during decoder operations. Never hold the lock across decoder creation.
 - **Visualizer FFT thread uses `try_lock()` only**; only the main render thread may use `lock()`.
-- **`source_generation: AtomicU64`** — engine increments on `set_source()`, renderer snapshots and discards stale callbacks. This prevents consume+shuffle from replaying the just-consumed track.
-- **Crossfade trigger must be synchronous**: set `crossfade_active = true` in the same tick as the position check, then signal the engine async. Otherwise EOF fires first → hard cut.
+- **`SourceGeneration`** (typed newtype around `AtomicU64`, `audio/generation.rs`) — engine bumps via `bump_for_user_action()` on user-driven source changes (and `bump_for_gapless()` on gapless prep / `accept_internal_swap()` on completion-driven swaps). Renderer snapshots `current()` before releasing the engine lock and discards stale callbacks. Prevents consume+shuffle from replaying the just-consumed track.
+- **Crossfade trigger must be synchronous**: `render_tick` swaps `crossfade_state` from `Armed` to `Active` via `mem::replace` in the same tick as the position check, then signals the engine async. Otherwise EOF fires first → hard cut.
 - **Mode toggles** (shuffle/repeat/consume) must call `reset_next_track()` to clear the prepared decoder and disarm crossfade.
 - **Visualizer samples are pre-volume**, scaled to S16 range — FFT is volume-independent.
 

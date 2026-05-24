@@ -15,7 +15,7 @@ globs: src/widgets/**
 
 ## Single-Active Overlay Menu (`Nokkvi.open_menu`)
 
-Hamburger, player-bar kebab, view-header `checkbox_dropdown`, and right-click context menus are all **controlled** widgets — no local `is_open` state. Each widget bubbles `Message::SetOpenMenu(Option<OpenMenu>)` to root, which atomically replaces the current menu (so opening one closes any other). `OpenMenu` variants: `Hamburger`, `PlayerModes`, `CheckboxDropdown { view, trigger_bounds }`, `CheckboxDropdownSimilar { trigger_bounds }` (browsing-panel-only Similar columns dropdown — has no matching `View` variant), `Context { id, position }`. Auto-closes on `SwitchView` and `WindowResized`.
+Hamburger, player-bar kebab, view-header `checkbox_dropdown`, right-click context menus, and the nav-bar library-filter popover are all **controlled** widgets — no local `is_open` state. Each widget bubbles `Message::SetOpenMenu(Option<OpenMenu>)` to root, which atomically replaces the current menu (so opening one closes any other). `OpenMenu` variants: `Hamburger`, `PlayerModes`, `CheckboxDropdown { view, trigger_bounds }`, `CheckboxDropdownSimilar { trigger_bounds }` (browsing-panel-only Similar columns dropdown — has no matching `View` variant), `Context { id, position }`, `LibrarySelector { trigger_bounds }` (multi-library filter popover anchored under the nav-bar trigger). Auto-closes on `SwitchView` and `WindowResized`.
 
 ## Player Bar (`player_bar.rs`)
 
@@ -59,6 +59,8 @@ Custom `iced::advanced` seekable widget. `Vec<OverlaySegment>` for scrolling col
 | Artwork Split Handle | `artwork_split_handle.rs` | Draggable separator for artwork-column width |
 | Default Playlist Chip | `default_playlist_chip.rs` | Pin-icon button in the Playlists/Queue header — opens the picker |
 | Default Playlist Picker | `default_playlist_picker.rs` | Modal overlay (font-picker pattern) to pick the default playlist; state lives on `Nokkvi.default_playlist_picker` |
+| Library Filter Trigger | `library_filter_trigger.rs` | Nav-bar button anchoring the multi-library selector popover. Renders a count badge via `badge_pip::draw_badge_pip` when a subset is active. Auto-hidden on single-library servers |
+| Badge Pip | `badge_pip.rs` | Tiny "active-state" pip drawn in the top-right of an icon button. Shared between the kebab `player_modes_menu` and `library_filter_trigger` |
 | Boat | `boat.rs` (+ `boat_physics.rs` / `boat_tests.rs`) | Surfing-boat overlay for lines-mode visualizer. CPU-only — reads the shared bar buffer the shader already consumes |
 
 ## 3D Buttons

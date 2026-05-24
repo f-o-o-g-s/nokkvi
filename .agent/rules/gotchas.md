@@ -44,7 +44,7 @@ description: Common pitfalls and subtle bugs. Reference when debugging unexpecte
 ## Audio Engine
 
 - **Decoder operations**: create fresh decoders and release the engine lock beforehand on track changes.
-- **Crossfade trigger must be synchronous**: `render_tick`'s crossfade trigger sets `crossfade_active = true` synchronously before signaling the engine async — otherwise EOF fires first → hard cut.
+- **Crossfade trigger must be synchronous**: `render_tick`'s crossfade trigger swaps `crossfade_state` from `Armed` to `Active` via `mem::replace` synchronously before signaling the engine async — otherwise EOF fires first → hard cut.
 - **Crossfade duration clamping**: `arm_crossfade()` clamps to `min(xfade, shorter / 2)` and skips for songs < 10 s.
 - **Stale gapless prep on mode toggles**: mode toggle handlers call `reset_next_track()` to clear the prepared decoder and disarm the crossfade trigger.
 - **Pre-volume visualizer samples**: visualizer receives raw samples before volume multiplication, scaled to S16 range. FFT input is volume-independent.

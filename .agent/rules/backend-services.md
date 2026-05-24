@@ -31,7 +31,14 @@ AppService (orchestrator)
 │   `native_api_factory!` + `subsonic_api_factory!` macros at the bottom
 │   of `app_service.rs`. Native: `songs_api()`. Subsonic (factory adds
 │   `server_url` + `subsonic_credential` from `AuthGateway::server_config()`):
-│   `genres_api()`, `playlists_api()`, `radios_api()`, `similar_api()`
+│   `genres_api()`, `libraries_api()`, `playlists_api()`, `radios_api()`,
+│   `similar_api()`
+├── Multi-library selection — `active_library_ids: Arc<RwLock<HashSet<i32>>>`
+│   + `all_libraries: Arc<RwLock<Vec<Library>>>`. Empty selection = "no
+│   filter" (all libraries). Read-mostly hot path on every `load_*`. Persisted
+│   to redb under `ACTIVE_LIBRARY_IDS_KEY`; mutators: `toggle_library`,
+│   `set_active_library_ids`, `refresh_libraries` (server fetch + prune).
+│   Browse loaders consume the snapshot through `_with_libraries` variants
 ├── Artwork — server-only, no client-side persistent cache
 │   ├── `AlbumsService::artwork_client: Arc<reqwest::Client>` (bare reqwest)
 │   ├── Concurrent in-flight fetches capped at 16 via a `Semaphore`
@@ -43,11 +50,14 @@ AppService (orchestrator)
 │   │   so retries can recover instead of caching a blank handle
 │   └── Session-scoped Handle reuse via UI's `album_art` (LRU 512) +
 │       `large_artwork` (LRU 200) maps
-├── SSE — `data/src/services/navidrome_events.rs` parses events; the
-│   subscription itself runs in the UI crate (`src/services/navidrome_sse.rs`)
-│   and dispatches `RefreshResource { resources, is_wildcard }` → ID-anchored
-│   slot-list reload. Non-wildcard events trigger silent re-fetch for any
-│   affected album in `album_art` / `large_artwork`.
+├── SSE — `data/src/services/navidrome_events.rs::parse_sse_event` parses
+│   events; the subscription itself runs in the UI crate
+│   (`src/services/navidrome_sse.rs`) and dispatches
+│   `Message::LibraryChanged(LibraryChange { album_ids, artist_ids, song_ids,
+│   playlist_ids, genre_ids, is_wildcard })` → ID-anchored slot-list reload
+│   handled by `update/library_refresh.rs`. Non-wildcard events trigger silent
+│   re-fetch for any affected album in `album_art` / `large_artwork`; wildcard
+│   payloads still reload slot lists but skip per-album artwork eviction.
 └── TaskManager — real supervisor: `shutdown_all(budget)` fires the shared
     cancellation token and awaits every tracked `JoinHandle` (`JoinSet`)
     within the budget, then aborts stragglers. `request_shutdown()` on
@@ -65,7 +75,7 @@ AppService (orchestrator)
 - Cross-entity helpers in `mod.rs`: `Starable` / `Ratable` / `PlayCountable` traits with shared list-mutation helpers (`update_starred_in_list`, `update_rating_in_list`, `increment_play_count_in_list`) and `flatten_participants()`.
 - `AuthGateway::server_config() -> (String, String)` returns the `(server_url, subsonic_credential)` pair under a single lock acquisition. Use this everywhere both halves are needed; never call `get_server_url()` + `get_subsonic_credential()` back-to-back.
 
-`services/api/` per-domain modules: `albums.rs`, `artists.rs`, `songs.rs`, `genres.rs`, `playlists.rs`, `radios.rs`, `similar.rs`, `rating.rs`, `star.rs`, `subsonic.rs`, `client.rs`.
+`services/api/` per-domain modules: `albums.rs`, `artists.rs`, `songs.rs`, `genres.rs`, `libraries.rs`, `playlists.rs`, `radios.rs`, `similar.rs`, `rating.rs`, `star.rs`, `subsonic.rs`, `client.rs`, plus shared helpers `pagination.rs`, `parse.rs`, `sort.rs`.
 
 ## Queue System
 

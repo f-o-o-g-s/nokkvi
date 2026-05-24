@@ -46,8 +46,9 @@ trigger: always_on
 ## Dependencies
 
 Discuss before adding new crates. Existing workspace runtime deps:
-- **UI crate** (`Cargo.toml`): `iced` (forked), `nokkvi-data`, `tokio`, `tracing` (+ `tracing-subscriber`), `parking_lot`, `arc-swap`, `futures`, `anyhow`, `image`, `notify`, `mpris-server`, `ksni`, `reqwest`, `serde`, `toml` (+ `toml_edit`), `lru`, `bytemuck`
-- **Data crate** (`data/Cargo.toml`): `tokio` (+ `tokio-util`), `parking_lot`, `futures`, `anyhow`, `thiserror`, `image`, `color-thief`, `reqwest`, `serde` (+ `serde_json`), `toml` (+ `toml_edit`), `bincode-next`, `redb`, `chrono`, `directories`, `url`, `rand`, `font-kit`, `rodio`, `ringbuf`, `rustfft`, `num-complex`, `biquad`, `bytemuck`, `symphonia`, `icy-metadata`, `pipewire` (linux-only)
+- **UI crate** (`Cargo.toml`): `iced` (forked), `nokkvi-data`, `nokkvi-ipc`, `tokio`, `tracing` (+ `tracing-subscriber`), `parking_lot`, `arc-swap`, `futures`, `anyhow`, `image`, `notify`, `mpris-server`, `ksni`, `reqwest`, `serde` (+ `serde_json`), `toml` (+ `toml_edit`), `lru`, `bytemuck`, `libc`
+- **Data crate** (`data/Cargo.toml`): `tokio` (+ `tokio-util`), `parking_lot`, `futures`, `anyhow`, `thiserror`, `tracing`, `image`, `color-thief`, `reqwest`, `serde` (+ `serde_json`), `toml` (+ `toml_edit`), `bincode-next`, `redb`, `chrono`, `directories`, `url`, `rand`, `font-kit`, `rodio`, `ringbuf`, `rustfft`, `num-complex`, `biquad`, `bytemuck`, `symphonia` (+ `symphonia-adapter-libopus`), `icy-metadata`, `pipewire` (linux-only)
+- **IPC crate** (`nokkvi-ipc/Cargo.toml`): `tokio` (net/io-util/macros/rt/sync/fs only), `interprocess`, `serde` (+ `serde_json`), `futures`, `thiserror`, `tracing`. Iced-free invariant — the client path links this before iced exists. Tests: `serial_test`, `tempfile`
 - **Test-only `[dev-dependencies]`**: `proptest`, `tempfile`
 
 ## Formatting
@@ -60,13 +61,13 @@ Discuss before adding new crates. Existing workspace runtime deps:
 
 For bug fixes and new update handlers:
 
-1. **Red**: write tests in `src/update/tests.rs` (or `tests_queue_filter.rs` / `tests_star_rating.rs` — group by area) using the `test_app()` helper. Assert against **observable state mutations** (`modes.random`, `modes.consume`, `search_query`) — never side effects requiring `app_service`. Run, confirm fail.
+1. **Red**: write tests in `src/update/tests/` (per-area files: `queue.rs`, `playback.rs`, `navigation.rs`, etc.) or the per-area `tests_player_settings.rs` / `tests_queue_filter.rs` / `tests_star_rating.rs` siblings, using the `test_app()` helper from `src/test_helpers.rs`. Assert against **observable state mutations** (`modes.random`, `modes.consume`, `search_query`) — never side effects requiring `app_service`. Run, confirm fail.
 2. **Green**: minimal implementation to pass.
 3. **Verify**: `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo +nightly fmt --all`.
 
 If structural plumbing (new fields, message variants) is needed, complete it first so the tests compile, but make no behavioral changes until the tests are red.
 
-**Test placement**: `update/tests*.rs` for handler tests; inline `#[cfg(test)] mod tests` for self-contained logic (data types, widgets, pure functions).
+**Test placement**: `update/tests/` directory or `update/tests_*.rs` siblings for handler tests; inline `#[cfg(test)] mod tests` for self-contained logic (data types, widgets, pure functions).
 
 ### CI Commands
 
