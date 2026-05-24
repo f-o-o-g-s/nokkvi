@@ -171,6 +171,87 @@ impl Nokkvi {
         (self.window.width - nav_chrome).max(0.0)
     }
 
+    /// Width of the artwork *column* (the `bg0_soft` image container) when
+    /// elevation is active, or `None` when it does not apply.
+    ///
+    /// Returns `Some(extent)` when all of these hold:
+    /// - Top-nav layout is active (the only layout this elevation reshapes).
+    /// - `track_info_display` is anything other than `TopBar` — the nav bar's
+    ///   right portion is otherwise reserved for the metadata strip.
+    /// - The browsing panel is not open — split-view has its own dual-pane
+    ///   shape and skips elevation.
+    /// - The current view renders horizontal artwork via
+    ///   `base_slot_list_layout`'s `horizontal_layout` (Albums, Artists,
+    ///   Songs, Genres, Queue, Playlists). Settings and Radios opt out.
+    /// - The active `ArtworkColumnMode` resolves to a Horizontal layout for
+    ///   the current window using **the same config the view passes**
+    ///   (raw `window.height`, not the player-bar-adjusted variant).
+    ///   Otherwise the view's `base_slot_list_layout` falls into the
+    ///   no-artwork branch (no top spacer added to the slot-list column),
+    ///   and elevating anyway would hide the view header behind the nav
+    ///   bar overlay.
+    ///
+    /// Once we've confirmed the view will render Horizontal artwork, the
+    /// returned *value* uses a second `resolve_artwork_layout` call with
+    /// `window.height - player_bar_height` to match iced's `responsive`
+    /// natural-size math for the in-tree panel (Auto-mode square sized
+    /// against the actual row height, not the raw window height). Without
+    /// the second call the nav-bar overlay under-reaches the artwork's
+    /// real left edge and the `bg1` stripe peeks through.
+    pub(crate) fn elevated_artwork_extent(&self) -> Option<f32> {
+        if !crate::theme::is_artwork_elevated()
+            || !crate::theme::is_top_nav()
+            || self.browsing_panel.is_some()
+        {
+            return None;
+        }
+        if !matches!(
+            self.current_view,
+            View::Albums
+                | View::Artists
+                | View::Songs
+                | View::Genres
+                | View::Queue
+                | View::Playlists
+        ) {
+            return None;
+        }
+        use crate::widgets::base_slot_list_layout::{
+            ArtworkOrientation, BaseSlotListLayoutConfig, resolve_artwork_layout,
+        };
+        // Step 1 — does the view actually render Horizontal artwork?
+        //          The view's call uses raw `window.height`, so we must too.
+        let view_config = BaseSlotListLayoutConfig {
+            window_width: self.content_pane_width(),
+            window_height: self.window.height,
+            show_artwork_column: true,
+            slot_list_chrome: 0.0,
+        };
+        let view_layout = resolve_artwork_layout(&view_config)?;
+        match view_layout.orientation {
+            ArtworkOrientation::Horizontal => {}
+            ArtworkOrientation::Vertical => return None,
+        }
+        // Step 2 — size the overlay against the responsive's actual square.
+        //          The in-tree responsive widget receives a height of
+        //          `window.height - player_bar_height` from main_content's
+        //          row, so mirror that here. Auto-mode square shrinks
+        //          accordingly; Always-mode `window_width * pct` extent
+        //          is height-independent (same value either way).
+        let adjusted_config = BaseSlotListLayoutConfig {
+            window_width: self.content_pane_width(),
+            window_height: (self.window.height - crate::widgets::player_bar::player_bar_height())
+                .max(0.0),
+            show_artwork_column: true,
+            slot_list_chrome: 0.0,
+        };
+        let adjusted_layout = resolve_artwork_layout(&adjusted_config)?;
+        match adjusted_layout.orientation {
+            ArtworkOrientation::Horizontal => Some(adjusted_layout.extent),
+            ArtworkOrientation::Vertical => None,
+        }
+    }
+
     /// Root view dispatcher.
     ///
     /// Daemon-mode signature: `_window` is unused (single window only).
@@ -194,6 +275,12 @@ impl Nokkvi {
 
     /// Home screen layout (nav bar + content + player bar)
     fn home_view(&self) -> Element<'_, Message> {
+        // Resolve elevation once per frame so the per-frame flag read by
+        // `base_slot_list_layout::horizontal_layout` matches the branch we
+        // actually take below. Settled before any view rendering kicks off.
+        let elevated_extent = self.elevated_artwork_extent();
+        crate::theme::set_artwork_elevation_active(elevated_extent.is_some());
+
         // Optional radio metadata mapping
         let (radio_name, radio_url, icy_artist, icy_title) = match &self.active_playback {
             crate::state::ActivePlayback::Radio(state) => (
@@ -423,9 +510,33 @@ impl Nokkvi {
                 .push(widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar));
 
             outer.into()
+        } else if let Some(artwork_extent) = elevated_extent {
+            // Elevated layout — the artwork pane fills main_content all the
+            // way up to the top of the window, and the nav bar is overlaid
+            // back over the slot-list area only. The slot-list column inside
+            // `horizontal_layout` adds its own `NAV_BAR_HEIGHT` top padding
+            // so the overlaid nav bar lands on an empty band.
+            let nav_visual_width = (self.content_pane_width() - artwork_extent).max(0.0);
+            let nav_bar = self.navigation_bar(nav_visual_width);
+
+            let nav_overlay = column![
+                container(nav_bar)
+                    .width(Length::Fixed(nav_visual_width))
+                    .height(Length::Shrink),
+                iced::widget::Space::new().height(Length::Fill),
+            ]
+            .width(Length::Fill)
+            .height(Length::Fill);
+
+            let base = column![
+                self.main_content(),
+                widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar),
+            ];
+
+            Stack::new().push(base).push(nav_overlay).into()
         } else {
             iced::widget::column![
-                self.navigation_bar(),
+                self.navigation_bar(self.window.width),
                 self.main_content(),
                 widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar),
             ]
@@ -823,8 +934,15 @@ impl Nokkvi {
     // Navigation Bar: Delegate to nav_bar component
     // -------------------------------------------------------------------------
 
-    /// Navigation bar - delegates to nav_bar component with playback data
-    fn navigation_bar(&self) -> Element<'_, Message> {
+    /// Navigation bar - delegates to nav_bar component with playback data.
+    ///
+    /// `effective_width` is the horizontal extent the nav-bar actually
+    /// occupies. In the regular column-stacked layout this matches the
+    /// window width; in the artwork-elevated layout the nav bar only spans
+    /// the slot-list area to the left of the artwork pane, so callers pass
+    /// `content_pane_width - artwork_extent` instead. The nav bar uses this
+    /// width to drive its responsive collapse breakpoints.
+    fn navigation_bar(&self, effective_width: f32) -> Element<'_, Message> {
         // Convert app::View to widgets::NavView for the component. Settings
         // is not a nav-bar column — fall back to Queue (ignored when
         // `settings_open` is set, which highlights the settings icon instead).
@@ -891,7 +1009,7 @@ impl Nokkvi {
             format_suffix: self.playback.format_suffix.clone(),
             sample_rate_khz: self.playback.sample_rate as f32 / 1000.0,
             bitrate_kbps: self.playback.bitrate,
-            window_width: self.window.width,
+            window_width: effective_width,
             is_light_mode: crate::theme::is_light_mode(),
             settings_open,
             local_music_path: self.settings.local_music_path.clone(),

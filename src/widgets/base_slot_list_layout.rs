@@ -787,21 +787,53 @@ where
         with_left_stripe(artwork_side_inner)
     };
 
+    // In elevated mode the home view stretches main_content up over the
+    // top-nav row and overlays the nav-bar back on top of the slot-list
+    // column. Stack a transparent `NAV_BAR_HEIGHT` spacer above the header
+    // so the overlaid nav-bar lands on an unoccupied band rather than on
+    // top of the view header. The artwork column intentionally has no top
+    // padding so it fills the row all the way to the top of the window.
+    //
+    // Gate on the per-frame `is_artwork_elevation_active` signal (set by
+    // `home_view`) rather than the theme-only `is_artwork_elevated` — the
+    // latter would also fire in split-view, where home_view does *not*
+    // elevate, leaving the slot list with a stranded top gap.
+    //
+    // The spacer is intentionally a sibling `Space` rather than a wrapping
+    // container with `padding(top: …)` — a wrapping container ends up
+    // painting the row's residual right-side allocation with an unintended
+    // grey rect when the artwork column sits next to it. A plain `Space`
+    // sibling has no draw surface at all, so the band stays transparent.
+    let elevated = theme::is_artwork_elevation_active();
+    let slot_list_column: Element<'a, Message> = if elevated {
+        column![
+            iced::widget::Space::new()
+                .width(Length::Fill)
+                .height(Length::Fixed(crate::widgets::slot_list::NAV_BAR_HEIGHT)),
+            header,
+            slot_list_content,
+        ]
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .spacing(0)
+        .into()
+    } else {
+        column![header, slot_list_content]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .spacing(0)
+            .into()
+    };
+
     // Wrap the inner row in an outer column so every base_slot_list_layout
     // branch (horizontal, vertical, no-artwork) returns the same root widget
     // type — switching artwork-mode mid-session keeps text_input focus alive.
     // See CLAUDE.md "Render output" gotcha.
-    let inner = row![
-        column![header, slot_list_content]
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .spacing(0),
-        artwork_side
-    ]
-    .align_y(Alignment::Start)
-    .spacing(0)
-    .width(Length::Fill)
-    .height(Length::Fill);
+    let inner = row![slot_list_column, artwork_side]
+        .align_y(Alignment::Start)
+        .spacing(0)
+        .width(Length::Fill)
+        .height(Length::Fill);
 
     column![inner]
         .width(Length::Fill)
