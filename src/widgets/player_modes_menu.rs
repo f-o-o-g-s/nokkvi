@@ -34,7 +34,7 @@ use crate::{
     widgets::{
         menu_constants::{
             MENU_ITEM_HEIGHT, MENU_PADDING, MENU_PLAYER_MODES_WIDTH as MENU_WIDTH, MENU_SHADOW,
-            MENU_SHADOW_PADDING, MENU_TEXT_SIZE, visible_menu_bounds,
+            MENU_TEXT_SIZE, inflate_for_shadow, visible_menu_bounds,
         },
         sizes::TOOLBAR_BUTTON_SIZE as TRIGGER_BUTTON_SIZE,
     },
@@ -370,14 +370,7 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
                 .max(padding);
         }
 
-        // Inflate by MENU_SHADOW_PADDING on every side so Iced's per-overlay
-        // `with_layer(layout.bounds(), …)` scissor doesn't clip the
-        // MENU_SHADOW halo (cf. `core/src/overlay/nested.rs` and the
-        // scrub-handle `shadow_overflow` trick at `progress_bar.rs:537`).
-        // The visible menu sits at `(pad, pad)` inside the inflated bounds.
-        let pad = MENU_SHADOW_PADDING;
-        let inflated_size = Size::new(MENU_WIDTH + 2.0 * pad, menu_height + 2.0 * pad);
-        layout::Node::new(inflated_size).move_to(Point::new(x - pad, y - pad))
+        inflate_for_shadow(Size::new(MENU_WIDTH, menu_height), Point::new(x, y))
     }
 
     fn update(
@@ -472,9 +465,7 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
 
         let bounds = visible_menu_bounds(layout.bounds());
 
-        // Menu background (matches HamburgerMenu chrome) — shadow elevation
-        // comes from MENU_SHADOW; the outer `layout.bounds()` is inflated by
-        // `MENU_SHADOW_PADDING` so the shadow halo isn't scissored.
+        // Matches HamburgerMenu chrome.
         renderer.fill_quad(
             renderer::Quad {
                 bounds,

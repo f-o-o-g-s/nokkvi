@@ -23,7 +23,7 @@ use crate::{
     theme,
     widgets::menu_constants::{
         MENU_HAMBURGER_WIDTH as MENU_WIDTH, MENU_ITEM_HEIGHT, MENU_PADDING, MENU_SHADOW,
-        MENU_SHADOW_PADDING, MENU_TEXT_SIZE, visible_menu_bounds,
+        MENU_TEXT_SIZE, inflate_for_shadow, visible_menu_bounds,
     },
 };
 
@@ -336,14 +336,7 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
             y
         };
 
-        // Inflate by MENU_SHADOW_PADDING on every side so Iced's per-overlay
-        // `with_layer(layout.bounds(), …)` scissor in `core/src/overlay/
-        // nested.rs` doesn't clip the MENU_SHADOW halo. The visible menu
-        // sits at `(pad, pad)` inside the inflated bounds — `update` / `draw`
-        // / `mouse_interaction` recover it via `visible_menu_bounds(...)`.
-        let pad = MENU_SHADOW_PADDING;
-        let inflated_size = Size::new(MENU_WIDTH + 2.0 * pad, menu_height + 2.0 * pad);
-        layout::Node::new(inflated_size).move_to(Point::new(x - pad, clamped_y - pad))
+        inflate_for_shadow(Size::new(MENU_WIDTH, menu_height), Point::new(x, clamped_y))
     }
 
     fn update(
@@ -436,9 +429,6 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
         let bounds = visible_menu_bounds(layout.bounds());
         let _ = theme; // We use our own theme functions
 
-        // Menu background — shadow elevation comes from MENU_SHADOW; the
-        // outer `layout.bounds()` is inflated by `MENU_SHADOW_PADDING` so
-        // the shadow halo isn't scissored.
         renderer.fill_quad(
             renderer::Quad {
                 bounds,
