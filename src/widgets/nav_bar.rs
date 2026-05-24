@@ -153,7 +153,7 @@ pub(crate) const NAV_TABS: &[(&str, &str, NavView)] = &[
     ("Artists", "assets/icons/mic.svg", NavView::Artists),
     ("Songs", "assets/icons/music.svg", NavView::Songs),
     ("Genres", "assets/icons/tags.svg", NavView::Genres),
-    ("Playlists", "assets/icons/list-tree.svg", NavView::Playlists),
+    ("Playlists", "assets/icons/list.svg", NavView::Playlists),
     (
         "Radio",
         super::track_info_strip::RADIO_TOWER_ICON_PATH,
