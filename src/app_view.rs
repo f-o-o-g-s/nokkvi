@@ -543,15 +543,9 @@ impl Nokkvi {
             // shows through to the right of the nav).
             let (outer_space_height, nav_visual_width) =
                 if let Some(artwork_extent) = elevated_extent {
-                    (
-                        0.0,
-                        (self.content_pane_width() - artwork_extent).max(0.0),
-                    )
+                    (0.0, (self.content_pane_width() - artwork_extent).max(0.0))
                 } else {
-                    (
-                        crate::widgets::slot_list::NAV_BAR_HEIGHT,
-                        self.window.width,
-                    )
+                    (crate::widgets::slot_list::NAV_BAR_HEIGHT, self.window.width)
                 };
             let is_elevated = elevated_extent.is_some();
 
