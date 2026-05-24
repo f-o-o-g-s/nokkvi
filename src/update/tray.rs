@@ -78,12 +78,15 @@ impl Nokkvi {
     /// [`Message::ShutdownComplete`].
     ///
     /// If `app_service` is not yet initialised (e.g. window closed during
-    /// login), the task completes immediately with no engine work to do.
+    /// login), the engine teardown is skipped but the MPRIS art cache is
+    /// still cleared so any in-flight `write_art_for_mpris` calls don't
+    /// leave a file behind for the dead-pid sweep to mop up later.
     fn begin_shutdown(&self) -> Task<Message> {
-        if let Some(service) = self.app_service.clone() {
-            Task::perform(
-                async move {
-                    match tokio::time::timeout(SHUTDOWN_BUDGET, service.request_shutdown()).await {
+        let service = self.app_service.clone();
+        Task::perform(
+            async move {
+                if let Some(svc) = service {
+                    match tokio::time::timeout(SHUTDOWN_BUDGET, svc.request_shutdown()).await {
                         Ok(()) => {
                             debug!(" [SHUTDOWN] Completed within budget");
                         }
@@ -94,14 +97,17 @@ impl Nokkvi {
                             );
                         }
                     }
-                },
-                |()| Message::ShutdownComplete,
-            )
-        } else {
-            // No active session — nothing to clean up.
-            debug!(" [SHUTDOWN] No active app_service — exiting immediately");
-            Task::done(Message::ShutdownComplete)
-        }
+                } else {
+                    debug!(" [SHUTDOWN] No active app_service");
+                }
+                // Sweep this PID's MPRIS art cache file(s) so a clean exit
+                // doesn't leave the last-played track's art behind for the
+                // next launch's dead-pid sweep to find. Cheap no-op if state
+                // is empty.
+                crate::services::mpris_art_writer::clear().await;
+            },
+            |()| Message::ShutdownComplete,
+        )
     }
 
     pub fn handle_window_opened(&mut self, id: window::Id) -> Task<Message> {

@@ -160,6 +160,96 @@ pub(crate) async fn clear() {
     clear_inner(&mut state, cache_dir_path().as_deref()).await;
 }
 
+/// Boot-time best-effort sweep of `mpris-art-<pid>[-...].jpg` files whose
+/// `<pid>` is no longer alive on this system. Covers two leak vectors that
+/// per-write cleanup misses:
+///   1. The previous nokkvi run was killed / crashed mid-track and never
+///      went through `clear()`, leaving its current-track file behind.
+///   2. Pre-NF2 sessions wrote `mpris-art-<pid>.jpg` (no cover suffix); this
+///      sweep parses that legacy shape too so the dir collapses to "current
+///      process + any other live nokkvi instance" on the next launch.
+///
+/// Live PIDs (current process, other running nokkvi instances) are preserved.
+/// Files for unrelated processes that happen to be alive at the same PID are
+/// also preserved — PID reuse is rare enough on Linux (32-bit PID space) that
+/// the false-negative is acceptable; the alternative would require parsing
+/// `/proc/<pid>/comm` and risks tearing down a sibling nokkvi instance's
+/// cache if the comm check ever misclassifies.
+pub(crate) async fn sweep_dead_pid_files() {
+    let Some(dir) = cache_dir_path() else { return };
+    sweep_dead_pid_files_in(&dir).await;
+}
+
+/// Pure-ish core: tests pass a scratch dir so the suite stays parallel-safe
+/// without touching the real `$XDG_CACHE_HOME`.
+async fn sweep_dead_pid_files_in(dir: &Path) {
+    let mut entries = match tokio::fs::read_dir(dir).await {
+        Ok(e) => e,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return,
+        Err(err) => {
+            warn!(
+                target: "nokkvi::mpris::art",
+                path = %dir.display(), %err, "failed to enumerate mpris art cache dir for sweep"
+            );
+            return;
+        }
+    };
+
+    loop {
+        match entries.next_entry().await {
+            Ok(Some(entry)) => {
+                let name = entry.file_name();
+                let Some(name_str) = name.to_str() else {
+                    continue;
+                };
+                let Some(pid) = parse_pid_from_filename(name_str) else {
+                    continue;
+                };
+                if pid_is_alive(pid) {
+                    continue;
+                }
+                if let Err(err) = tokio::fs::remove_file(entry.path()).await
+                    && err.kind() != std::io::ErrorKind::NotFound
+                {
+                    warn!(
+                        target: "nokkvi::mpris::art",
+                        path = %entry.path().display(), %err, "failed to sweep dead-pid mpris art cache file"
+                    );
+                }
+            }
+            Ok(None) => break,
+            Err(err) => {
+                warn!(
+                    target: "nokkvi::mpris::art",
+                    path = %dir.display(), %err, "error iterating mpris art cache dir during sweep"
+                );
+                break;
+            }
+        }
+    }
+}
+
+/// Extract the `<pid>` portion from either filename shape:
+///   - `mpris-art-<pid>.jpg`             (pre-NF2 legacy)
+///   - `mpris-art-<pid>-<cover_id>.jpg`  (post-fix)
+///
+/// Returns `None` if the prefix / extension don't match or the pid segment
+/// doesn't parse as a `u32`.
+fn parse_pid_from_filename(name: &str) -> Option<u32> {
+    let stripped = name.strip_prefix("mpris-art-")?.strip_suffix(".jpg")?;
+    let pid_str = stripped
+        .split_once('-')
+        .map_or(stripped, |(pid, _rest)| pid);
+    pid_str.parse::<u32>().ok()
+}
+
+/// Linux-only liveness probe: `/proc/<pid>` exists iff the kernel knows the
+/// pid. nokkvi is Linux-only (PipeWire / ksni / CLAUDE.md), so we lean on
+/// procfs directly rather than pulling `nix` or `libc` into the UI crate.
+fn pid_is_alive(pid: u32) -> bool {
+    std::path::Path::new(&format!("/proc/{pid}")).exists()
+}
+
 /// Pure-ish core: tests pass their own `ArtCacheState` and `cache_dir`. Keeps
 /// `cargo test` parallel-safe without a `#[serial]` lock around the global.
 async fn write_art_inner<F>(
@@ -752,6 +842,110 @@ mod tests {
             !cache_file_path_for(dir.path(), "al-fail").exists(),
             "failed fetch must not leave a cache file behind"
         );
+    }
+
+    #[test]
+    fn parse_pid_from_filename_extracts_pid_for_legacy_format() {
+        // Pre-NF2 shape: `mpris-art-<pid>.jpg`. Boot sweep must still
+        // recognise these so the 17-orphan pile users carry forward gets
+        // collapsed on first launch of the fixed binary.
+        assert_eq!(parse_pid_from_filename("mpris-art-12345.jpg"), Some(12345));
+    }
+
+    #[test]
+    fn parse_pid_from_filename_extracts_pid_for_per_cover_format() {
+        assert_eq!(
+            parse_pid_from_filename("mpris-art-3785659-3utkWH4Dfq9cvWQ2EIcQ1e.jpg"),
+            Some(3_785_659)
+        );
+        assert_eq!(parse_pid_from_filename("mpris-art-1-al-abc.jpg"), Some(1));
+    }
+
+    #[test]
+    fn parse_pid_from_filename_rejects_non_matching() {
+        assert_eq!(parse_pid_from_filename("unrelated.jpg"), None);
+        assert_eq!(parse_pid_from_filename("mpris-art-.jpg"), None);
+        assert_eq!(parse_pid_from_filename("mpris-art-notanumber.jpg"), None);
+        assert_eq!(parse_pid_from_filename("mpris-art-12345.png"), None);
+        assert_eq!(parse_pid_from_filename("mpris-art-12345"), None);
+    }
+
+    #[test]
+    fn pid_is_alive_true_for_self_and_pid_1() {
+        // The test binary is alive by definition; init (pid 1) always exists
+        // on Linux. nokkvi is Linux-only so both invariants hold in CI.
+        assert!(pid_is_alive(std::process::id()));
+        assert!(pid_is_alive(1));
+    }
+
+    #[test]
+    fn pid_is_alive_false_for_definitely_dead_pid() {
+        // Linux kernel.pid_max is at most 2^22 (4_194_304); u32::MAX is far
+        // above any reachable PID, so /proc/4294967295 can never exist.
+        assert!(!pid_is_alive(u32::MAX));
+    }
+
+    #[tokio::test]
+    async fn sweep_removes_only_dead_pid_art_files() {
+        let dir = ScratchDir::new();
+        let my_pid = std::process::id();
+        let dead_pid = u32::MAX;
+
+        let dead_legacy = format!("mpris-art-{dead_pid}.jpg");
+        let dead_per_cover = format!("mpris-art-{dead_pid}-al-zzz.jpg");
+        let alive_other = "mpris-art-1-al-xyz.jpg".to_string();
+        let current_self = format!("mpris-art-{my_pid}-al-mine.jpg");
+        let wrong_ext = format!("mpris-art-{dead_pid}.png");
+        let unrelated = "something-else.jpg".to_string();
+
+        for f in [
+            &dead_legacy,
+            &dead_per_cover,
+            &alive_other,
+            &current_self,
+            &wrong_ext,
+            &unrelated,
+        ] {
+            std::fs::write(dir.path().join(f), b"x").unwrap();
+        }
+
+        sweep_dead_pid_files_in(dir.path()).await;
+
+        assert!(
+            !dir.path().join(&dead_legacy).exists(),
+            "dead-pid legacy file should be swept"
+        );
+        assert!(
+            !dir.path().join(&dead_per_cover).exists(),
+            "dead-pid per-cover file should be swept"
+        );
+        assert!(
+            dir.path().join(&alive_other).exists(),
+            "alive other-pid file (pid 1 = init) must be preserved"
+        );
+        assert!(
+            dir.path().join(&current_self).exists(),
+            "current-process file must be preserved"
+        );
+        assert!(
+            dir.path().join(&wrong_ext).exists(),
+            "wrong-extension file must be preserved"
+        );
+        assert!(
+            dir.path().join(&unrelated).exists(),
+            "unrelated file must be preserved"
+        );
+    }
+
+    #[tokio::test]
+    async fn sweep_tolerates_missing_directory() {
+        let nonexistent = std::env::temp_dir().join(format!(
+            "nokkvi-mpris-art-sweep-missing-{}-{}",
+            std::process::id(),
+            17_u64
+        ));
+        // Should return cleanly without panicking or logging an error path.
+        sweep_dead_pid_files_in(&nonexistent).await;
     }
 
     #[tokio::test]

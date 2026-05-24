@@ -1239,10 +1239,20 @@ fn boot() -> (Nokkvi, Task<Message>) {
     let state = Nokkvi::default();
     let auto_login = state.should_auto_login;
     let (_id, open_task) = iced::window::open(main_window_settings());
+    // Fire-and-forget cleanup of MPRIS art cache files for dead nokkvi PIDs.
+    // Covers the crash / SIGKILL path where `begin_shutdown`'s `clear()`
+    // never ran, and the pre-NF2 `mpris-art-<pid>.jpg` legacy shape that
+    // the per-cover-id naming doesn't supersede on its own.
+    let sweep_task =
+        Task::future(crate::services::mpris_art_writer::sweep_dead_pid_files()).discard();
     let task = if auto_login {
-        Task::batch([open_task.discard(), Task::done(Message::ResumeSession)])
+        Task::batch([
+            open_task.discard(),
+            sweep_task,
+            Task::done(Message::ResumeSession),
+        ])
     } else {
-        open_task.discard()
+        Task::batch([open_task.discard(), sweep_task])
     };
     (state, task)
 }
