@@ -33,8 +33,7 @@ use crate::{
     theme,
     widgets::{
         menu_constants::{
-            MENU_ICON_SIZE as MENU_CHECK_ICON_SIZE, MENU_ITEM_HEIGHT, MENU_PADDING,
-            MENU_PLAYER_MODES_WIDTH as MENU_WIDTH, MENU_TEXT_SIZE,
+            MENU_ITEM_HEIGHT, MENU_PADDING, MENU_PLAYER_MODES_WIDTH as MENU_WIDTH, MENU_TEXT_SIZE,
         },
         sizes::TOOLBAR_BUTTON_SIZE as TRIGGER_BUTTON_SIZE,
     },
@@ -54,6 +53,18 @@ const TRIGGER_BORDER_WIDTH: f32 = 2.0;
 
 const MENU_ROW_INSET: f32 = 6.0;
 const MENU_CHECK_GAP: f32 = 8.0;
+
+// Styled checkbox glyph dimensions — mirror `checkbox_dropdown.rs`'s
+// `styled_checkbox_glyph` (filled `accent_bright()` rounded square + centered
+// `check.svg` in `bg0()` when checked; outlined `fg2()` rounded square when
+// unchecked). Kept as local constants because the kebab menu is a custom
+// widget that draws via low-level `renderer.fill_quad` + `draw_svg` calls,
+// not via composed iced widgets, so it can't share the library-popover's
+// `Element`-returning helper.
+const MENU_CHECKBOX_SIZE: f32 = 16.0;
+const MENU_CHECKBOX_CORNER_RADIUS: f32 = 3.0;
+const MENU_CHECKBOX_INNER_CHECK_SIZE: f32 = 12.0;
+const MENU_CHECKBOX_BORDER_WIDTH: f32 = 1.5;
 
 /// Total vertical space taken by a separator row (1px line + padding above/below).
 const SEPARATOR_HEIGHT: f32 = 1.0;
@@ -512,30 +523,66 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
                         );
                     }
 
-                    // Leading check icon (or invisible spacer if inactive) so
-                    // labels stay aligned across the column.
+                    // Leading styled checkbox glyph — visual match for the
+                    // library popover's `styled_checkbox_glyph`. Always
+                    // rendered (filled when active, outlined when inactive)
+                    // so labels stay aligned and the checkbox state reads at
+                    // a glance.
                     let check_x = item_bounds.x + 6.0;
-                    let check_y = item_bounds.y + (MENU_ITEM_HEIGHT - MENU_CHECK_ICON_SIZE) / 2.0;
+                    let check_y = item_bounds.y + (MENU_ITEM_HEIGHT - MENU_CHECKBOX_SIZE) / 2.0;
                     let check_bounds = Rectangle {
                         x: check_x,
                         y: check_y,
-                        width: MENU_CHECK_ICON_SIZE,
-                        height: MENU_CHECK_ICON_SIZE,
+                        width: MENU_CHECKBOX_SIZE,
+                        height: MENU_CHECKBOX_SIZE,
                     };
                     if item.is_active {
+                        renderer.fill_quad(
+                            renderer::Quad {
+                                bounds: check_bounds,
+                                border: iced::Border {
+                                    radius: MENU_CHECKBOX_CORNER_RADIUS.into(),
+                                    width: 0.0,
+                                    color: theme::accent_bright(),
+                                },
+                                ..Default::default()
+                            },
+                            theme::accent_bright(),
+                        );
+                        let inner_bounds = Rectangle {
+                            x: check_bounds.x
+                                + (MENU_CHECKBOX_SIZE - MENU_CHECKBOX_INNER_CHECK_SIZE) / 2.0,
+                            y: check_bounds.y
+                                + (MENU_CHECKBOX_SIZE - MENU_CHECKBOX_INNER_CHECK_SIZE) / 2.0,
+                            width: MENU_CHECKBOX_INNER_CHECK_SIZE,
+                            height: MENU_CHECKBOX_INNER_CHECK_SIZE,
+                        };
                         renderer.draw_svg(
                             SvgData {
                                 handle: self.check_handle.clone(),
-                                color: Some(theme::fg0()),
+                                color: Some(theme::bg0()),
                                 rotation: Radians(0.0),
                                 opacity: 1.0,
                             },
-                            check_bounds,
-                            check_bounds,
+                            inner_bounds,
+                            inner_bounds,
+                        );
+                    } else {
+                        renderer.fill_quad(
+                            renderer::Quad {
+                                bounds: check_bounds,
+                                border: iced::Border {
+                                    radius: MENU_CHECKBOX_CORNER_RADIUS.into(),
+                                    width: MENU_CHECKBOX_BORDER_WIDTH,
+                                    color: theme::fg2(),
+                                },
+                                ..Default::default()
+                            },
+                            iced::Color::TRANSPARENT,
                         );
                     }
 
-                    let text_x = check_bounds.x + MENU_CHECK_ICON_SIZE + MENU_CHECK_GAP;
+                    let text_x = check_bounds.x + MENU_CHECKBOX_SIZE + MENU_CHECK_GAP;
                     let text_color = if is_hovered {
                         theme::fg0()
                     } else {
