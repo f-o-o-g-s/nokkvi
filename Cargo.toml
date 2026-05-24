@@ -46,6 +46,13 @@ or_fun_call = "deny"
 # needing to). Every async fn must justify itself with at least one .await.
 unused_async = "deny"
 
+# Compile-time invariants — `assert!(<const expr>)` at runtime is a no-op the
+# optimizer eats; if the assertion is load-bearing, it belongs in a
+# `const _: () = assert!(…)` block so it fires at compile time. Several of
+# our widget-geometry modules (`menu_constants.rs`, `sizes.rs`) document this
+# convention in their headers; the lint backs the convention.
+assertions_on_constants = "deny"
+
 [package]
 name = "nokkvi"
 version = "0.5.2"
