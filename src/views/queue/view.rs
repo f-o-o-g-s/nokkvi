@@ -348,13 +348,6 @@ impl QueuePage {
             // Read-only playlist context bar (playing a playlist, not editing)
             use iced::widget::svg;
 
-            let playlist_icon = crate::embedded_svg::svg_widget("assets/icons/list-music.svg")
-                .width(Length::Fixed(14.0))
-                .height(Length::Fixed(14.0))
-                .style(|_theme, _status| svg::Style {
-                    color: Some(crate::theme::accent()),
-                });
-
             let name_label = iced::widget::text(ctx.name.clone())
                 .font(iced::font::Font {
                     weight: iced::font::Weight::Medium,
@@ -439,7 +432,7 @@ impl QueuePage {
             .into();
 
             let playlist_bar = container(
-                row![playlist_icon, name_area, save_btn, edit_btn]
+                row![name_area, save_btn, edit_btn]
                     .spacing(6)
                     .align_y(Alignment::Center)
                     .padding([0, 8])
