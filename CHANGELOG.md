@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## v0.5.3 — 2026-05-24
+
+### Added
+
 - In Top nav layout, the artwork panel now reaches up over the nav bar, except when the metadata strip itself occupies the top bar.
 
 ### Changed
@@ -18,8 +28,6 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - Playlists side-nav tab now uses a music-note sheet icon to avoid the 'iii' visual collision with rotated tab text.
-
-### Removed
 
 ## v0.5.2 — 2026-05-23
 
