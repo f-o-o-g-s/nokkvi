@@ -456,11 +456,14 @@ pub(crate) fn single_artwork_panel_with_menu<'a, Message: Clone + 'a>(
     }
 }
 
-/// Wrap an existing artwork panel element with a centered pill overlay.
+/// Wrap an existing artwork panel element with a bottom-anchored, full-width
+/// bar overlay.
 ///
 /// Shared implementation backing `single_artwork_panel_with_pill` and
 /// `collage_artwork_panel_with_pill`. Computes the background color, builds the
-/// styled pill container, and stacks it on top of `base_panel`.
+/// styled bar container, and stacks it on top of `base_panel`. In rounded mode
+/// only the top corners are rounded — the bottom corners are flush with the
+/// artwork edge so no `bg0_soft` shows through where the bar meets the panel.
 fn wrap_with_pill_overlay<'a, Message: 'a>(
     base_panel: Element<'a, Message>,
     content: Element<'a, Message>,
@@ -468,32 +471,36 @@ fn wrap_with_pill_overlay<'a, Message: 'a>(
 ) -> Element<'a, Message> {
     use iced::widget::{container, stack};
 
-    let pill = container(content)
+    let bar = container(content)
+        .width(Length::Fill)
         .padding(16)
+        .align_x(iced::Alignment::Center)
         .style(move |_theme| container::Style {
             background: Some(iced::Background::Color(bg_color)),
             border: iced::Border {
-                radius: if crate::theme::is_rounded_mode() {
-                    12.0.into()
-                } else {
-                    0.0.into()
+                radius: {
+                    let r = crate::theme::ui_border_radius();
+                    iced::border::Radius {
+                        top_left: r.top_left,
+                        top_right: r.top_right,
+                        bottom_left: 0.0,
+                        bottom_right: 0.0,
+                    }
                 },
                 ..Default::default()
             },
             ..Default::default()
         });
 
-    let overlay = container(pill)
+    let overlay = container(bar)
         .width(Length::Fill)
         .height(Length::Fill)
-        .padding(16) // Padding pushes pill off edge
-        .align_x(iced::Alignment::Center)
-        .align_y(iced::Alignment::Center);
+        .align_y(iced::Alignment::End);
 
     stack![base_panel, overlay].into()
 }
 
-/// Create a single-image artwork panel with a bottom-anchored, pill-shaped overlay
+/// Create a single-image artwork panel with a bottom-anchored, full-width bar overlay
 pub(crate) fn single_artwork_panel_with_pill<'a, Message: Clone + 'a>(
     artwork_handle: Option<&'a iced::widget::image::Handle>,
     pill_content: Option<Element<'a, Message>>,
@@ -512,7 +519,7 @@ pub(crate) fn single_artwork_panel_with_pill<'a, Message: Clone + 'a>(
         bg_color.r = theme_bg.r * 0.85 + bg_color.r * 0.15;
         bg_color.g = theme_bg.g * 0.85 + bg_color.g * 0.15;
         bg_color.b = theme_bg.b * 0.85 + bg_color.b * 0.15;
-        bg_color.a = 0.85;
+        bg_color.a = 1.0;
 
         wrap_with_pill_overlay(base_panel, content, bg_color)
     } else {
@@ -541,7 +548,7 @@ pub(crate) fn single_artwork_panel_with_pill<'a, Message: Clone + 'a>(
     }
 }
 
-/// Create a 3x3 collage artwork panel with a bottom-anchored, pill-shaped overlay
+/// Create a 3x3 collage artwork panel with a bottom-anchored, full-width bar overlay
 pub(crate) fn collage_artwork_panel_with_pill<'a, Message: Clone + 'a>(
     collage_handles: &'a [iced::widget::image::Handle],
     pill_content: Option<Element<'a, Message>>,
@@ -550,8 +557,7 @@ pub(crate) fn collage_artwork_panel_with_pill<'a, Message: Clone + 'a>(
 
     if let Some(content) = pill_content {
         // Static dark backdrop for collages
-        let mut bg_color = crate::theme::bg0_hard();
-        bg_color.a = 0.85;
+        let bg_color = crate::theme::bg0_hard();
 
         wrap_with_pill_overlay(base_panel, content, bg_color)
     } else {
