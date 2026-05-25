@@ -181,8 +181,10 @@ impl<Message> canvas::Program<Message> for RotatedLabel {
 
 /// Build side nav tab content based on display mode.
 ///
-/// Returns `(content_element, tab_height)` — shared between `nav_tab` and the settings indicator
-/// to avoid duplicating the display mode layout logic.
+/// Returns the natural-size content element. The caller wraps it in an outer
+/// cell whose height is `Length::FillPortion(1)` so every tab in the column
+/// shares the leftover vertical space equally; this function only needs to
+/// produce the centered glyph(s) — the outer cell handles vertical centering.
 fn side_nav_tab_content(
     label: &'static str,
     icon_path: &'static str,
@@ -190,21 +192,18 @@ fn side_nav_tab_content(
     text_color: Color,
     indicator_color: Option<Color>,
     hover_indicator_color: Option<Color>,
-) -> (Element<'static, NavBarMessage>, f32) {
+) -> Element<'static, NavBarMessage> {
     let card_width = side_nav_tab_width();
     match display_mode {
-        NavDisplayMode::TextOnly => {
-            let content = canvas(RotatedLabel {
-                label,
-                color: text_color,
-                indicator_color,
-                hover_indicator_color,
-            })
-            .width(Length::Fixed(card_width))
-            .height(Length::Fixed(TAB_HEIGHT))
-            .into();
-            (content, TAB_HEIGHT)
-        }
+        NavDisplayMode::TextOnly => canvas(RotatedLabel {
+            label,
+            color: text_color,
+            indicator_color,
+            hover_indicator_color,
+        })
+        .width(Length::Fixed(card_width))
+        .height(Length::Fixed(TAB_HEIGHT))
+        .into(),
         NavDisplayMode::IconsOnly => {
             // Flat redesign uses a full-cell `accent_bright()` fill for
             // the active state, so the right-edge indicator strip is
@@ -214,13 +213,12 @@ fn side_nav_tab_content(
             // `nav_tab`, so suppressing the indicator here is the
             // visual companion to that suppression.
             let _ = (indicator_color, hover_indicator_color);
-            let content = container(colored_icon(icon_path, ICON_SIZE, text_color))
+            container(colored_icon(icon_path, ICON_SIZE, text_color))
                 .width(Length::Fixed(card_width))
                 .height(Length::Fixed(ICON_TAB_HEIGHT))
                 .align_x(iced::Alignment::Center)
                 .align_y(iced::Alignment::Center)
-                .into();
-            (content, ICON_TAB_HEIGHT)
+                .into()
         }
         NavDisplayMode::TextAndIcons => {
             let icon_widget = container(colored_icon(icon_path, ICON_SIZE, text_color))
@@ -238,12 +236,11 @@ fn side_nav_tab_content(
             .width(Length::Fixed(card_width))
             .height(Length::Fixed(TEXT_ICON_TAB_HEIGHT - ICON_SLOT_HEIGHT));
 
-            let content = column![icon_widget, label_canvas]
+            column![icon_widget, label_canvas]
                 .spacing(0)
                 .width(Length::Fixed(card_width))
                 .height(Length::Fixed(TEXT_ICON_TAB_HEIGHT))
-                .into();
-            (content, TEXT_ICON_TAB_HEIGHT)
+                .into()
         }
     }
 }
@@ -275,7 +272,7 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
         let indicator_color: Option<Color> = None;
         let hover_indicator_color: Option<Color> = None;
 
-        let (content, tab_height) = side_nav_tab_content(
+        let content = side_nav_tab_content(
             label,
             icon_path,
             display_mode,
@@ -291,12 +288,18 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
             0.0.into()
         };
 
+        // Each tab claims `FillPortion(1)` of the column's remaining vertical
+        // space so the stack distributes evenly down the full sidebar instead
+        // of leaving a trailing dead zone below the last cell. `align_y` keeps
+        // the centered glyph (icon / rotated label / stacked pair) anchored in
+        // the middle of the now-taller cell.
         mouse_area(
             super::hover_overlay::HoverOverlay::new(
                 container(content)
                     .padding(0)
                     .width(Length::Fixed(card_width))
-                    .height(Length::Fixed(tab_height))
+                    .height(Length::FillPortion(1))
+                    .align_y(iced::Alignment::Center)
                     .style(move |_: &iced::Theme| container::Style {
                         background: if is_active {
                             Some(Background::Color(theme::accent_bright()))
@@ -364,7 +367,7 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
             0.0.into()
         };
 
-        let (settings_content, tab_height) = side_nav_tab_content(
+        let settings_content = side_nav_tab_content(
             "Settings",
             "assets/icons/settings.svg",
             display_mode,
@@ -376,7 +379,8 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
         Some(
             container(settings_content)
                 .width(Length::Fixed(side_nav_tab_width()))
-                .height(Length::Fixed(tab_height))
+                .height(Length::FillPortion(1))
+                .align_y(iced::Alignment::Center)
                 .style(move |_: &iced::Theme| container::Style {
                     background: Some(Background::Color(theme::accent_bright())),
                     border: Border {
@@ -505,6 +509,10 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
     // Wrap each tab card in a 4-px-gutter row in rounded mode so the
     // cards float inside the 64-px sidebar with even left/right
     // margins; flat mode renders the card edge-to-edge (no wrap).
+    // `height(Length::Fill)` is required so the wrapping container
+    // doesn't compress its `FillPortion(1)` child to its content's
+    // intrinsic height — the wrap inherits the column's leftover
+    // vertical space and forwards it intact to the tab cell inside.
     fn wrap_in_gutter<'a>(
         elem: Element<'a, NavBarMessage>,
         is_rounded: bool,
@@ -513,6 +521,7 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
         if is_rounded {
             container(elem)
                 .width(Length::Fixed(nav_width))
+                .height(Length::Fill)
                 .center_x(Length::Fixed(nav_width))
                 .into()
         } else {
@@ -531,9 +540,17 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
     // Build vertical column: hamburger + library cluster on top, then
     // a divider, then the NAV_TABS. Mirrors the top-nav layout but
     // rotated 90°.
+    //
+    // `height(Length::Fill)` is required so the column's `FillPortion(1)`
+    // tab children get pass-3 layout (split remaining space) instead of
+    // being compressed to their intrinsic height. The parent
+    // `container(tabs).height(Length::Fill)` already gives `main_compress
+    // = false`; the column must declare Fill height itself for that to
+    // propagate to its own children.
     let mut tabs = column![hamburger, library_trigger, library_popover, separator()]
         .spacing(stack_spacing)
-        .width(Length::Fixed(nav_width));
+        .width(Length::Fixed(nav_width))
+        .height(Length::Fill);
     for &(label, icon_path, view) in NAV_TABS {
         tabs = tabs
             .push(wrap_in_gutter(
@@ -563,8 +580,11 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
         iced::Padding::ZERO
     };
 
-    // Fill remaining space below the tabs.
-    tabs = tabs.push(Space::new().height(Length::Fill));
+    // No trailing Fill spacer — each tab cell already declares
+    // `FillPortion(1)` height, so the tab stack itself consumes any
+    // leftover vertical space. A trailing `Space::Fill` here would
+    // claim a 1/(N+1) share of the lane and shave a slice off every
+    // tab cell.
 
     // Right edge separator (1 px `theme::border()` vertical rule).
     let right_edge: Element<'_, NavBarMessage> = container(Space::new())
