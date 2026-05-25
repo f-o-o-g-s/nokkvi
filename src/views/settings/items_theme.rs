@@ -291,14 +291,7 @@ pub(crate) fn build_theme_items(
         "Accent Colors",
         SentinelKind::RestoreAccent,
         "Accent",
-        [
-            primary,
-            bright,
-            border_dark,
-            border_light,
-            now_playing,
-            selected
-        ]
+        [primary, bright, border_light, now_playing, selected]
     );
 
     // ── Semantic Colors ──────────────────────────────────────────────
@@ -443,7 +436,6 @@ mod tests {
         let expected_accent: Vec<String> = [
             "accent.primary",
             "accent.bright",
-            "accent.border_dark",
             "accent.border_light",
             "accent.now_playing",
             "accent.selected",

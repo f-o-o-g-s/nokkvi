@@ -21,7 +21,6 @@ level3 = "#a8a29e"
 level4 = "#78716c"
 
 [dark.accent]
-border_dark = "#1c1917"
 border_light = "#292524"
 bright = "#f59e0b"
 primary = "#b45309"
@@ -70,7 +69,6 @@ level3 = "#57534e"
 level4 = "#78716c"
 
 [light.accent]
-border_dark = "#d6d3d1"
 border_light = "#a8a29e"
 bright = "#b45309"
 primary = "#92400e"

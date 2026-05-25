@@ -143,7 +143,6 @@ impl ThemePalette {
             accent: AccentConfig {
                 primary: "#3584e4".to_string(),
                 bright: "#62a0ea".to_string(),
-                border_dark: "#1a5fb4".to_string(),
                 border_light: "#99c1f1".to_string(),
                 now_playing: "#1c71d8".to_string(),
                 selected: "#3584e4".to_string(),
@@ -240,6 +239,11 @@ impl Default for ForegroundConfig {
 }
 
 /// Accent colors (primary UI accent, borders, highlights).
+///
+/// `accent.border_dark` was removed during the redesign cleanup — its
+/// only consumer was the pre-redesign 3D bevel. Legacy TOMLs that still
+/// carry the line keep deserializing (serde's default behavior ignores
+/// unknown fields); the line is simply dropped on re-save.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct AccentConfig {
@@ -247,8 +251,6 @@ pub struct AccentConfig {
     pub primary: String,
     /// Bright accent
     pub bright: String,
-    /// Dark border accent
-    pub border_dark: String,
     /// Light border accent
     pub border_light: String,
     /// Now-playing slot highlight (defaults to primary if empty)
@@ -264,7 +266,6 @@ impl Default for AccentConfig {
         Self {
             primary: "#3584e4".to_string(),
             bright: "#62a0ea".to_string(),
-            border_dark: "#000000".to_string(),
             border_light: "#1c71d8".to_string(),
             now_playing: "#3584e4".to_string(),
             selected: "#3584e4".to_string(),
