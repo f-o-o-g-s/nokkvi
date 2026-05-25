@@ -455,15 +455,26 @@ pub(crate) fn single_artwork_panel_with_menu<'a, Message: Clone + 'a>(
 ///
 /// Shared implementation backing `single_artwork_panel_with_pill` and
 /// `collage_artwork_panel_with_pill`. Builds the styled bar container with a
-/// fixed `bg0_hard()` backdrop and stacks it on top of `base_panel`. In
-/// rounded mode only the top corners are rounded — the bottom corners are
-/// flush with the artwork edge so no `bg0_soft` shows through where the bar
-/// meets the panel.
+/// fixed `bg0_hard()` backdrop, sandwiches it between 1 px `theme::border()`
+/// sibling rules (matching the view-header separator), and stacks the result
+/// on top of `base_panel`. Corners are always flat — rounded mode is
+/// intentionally ignored here so the overlay reads as a banded strip rather
+/// than a floating pill.
 fn wrap_with_pill_overlay<'a, Message: 'a>(
     base_panel: Element<'a, Message>,
     content: Element<'a, Message>,
 ) -> Element<'a, Message> {
     use iced::widget::{container, stack};
+
+    let separator = || {
+        container(iced::widget::Space::new())
+            .width(Length::Fill)
+            .height(Length::Fixed(1.0))
+            .style(|_| container::Style {
+                background: Some(theme::border().into()),
+                ..Default::default()
+            })
+    };
 
     let bar = container(content)
         .width(Length::Fill)
@@ -471,22 +482,12 @@ fn wrap_with_pill_overlay<'a, Message: 'a>(
         .align_x(iced::Alignment::Center)
         .style(|_theme| container::Style {
             background: Some(iced::Background::Color(crate::theme::bg0_hard())),
-            border: iced::Border {
-                radius: {
-                    let r = crate::theme::ui_border_radius();
-                    iced::border::Radius {
-                        top_left: r.top_left,
-                        top_right: r.top_right,
-                        bottom_left: 0.0,
-                        bottom_right: 0.0,
-                    }
-                },
-                ..Default::default()
-            },
             ..Default::default()
         });
 
-    let overlay = container(bar)
+    let banded = column![separator(), bar, separator()];
+
+    let overlay = container(banded)
         .width(Length::Fill)
         .height(Length::Fill)
         .align_y(iced::Alignment::End);
