@@ -129,7 +129,8 @@ pub(crate) fn view_header<
         on_roulette,
     } = config;
 
-    let cell_height = HEADER_HEIGHT;
+    // All header cells size to `HEADER_HEIGHT`; the previous `cell_height`
+    // local was just a rename for the same value (see audit #M-P2-3).
 
     let view_selector: Element<'a, Message> = if view_options.is_empty() {
         // Static label cell — rendered when the view supplies no sort
@@ -148,7 +149,7 @@ pub(crate) fn view_header<
         .padding([0, 14])
         .max_width(300.0)
         .align_y(Alignment::Center)
-        .height(Length::Fixed(cell_height))
+        .height(Length::Fixed(HEADER_HEIGHT))
         .into()
     } else {
         // Wrap V into SortPickerEntry so we can splice a trailing
@@ -219,7 +220,7 @@ pub(crate) fn view_header<
                 shadow: iced::Shadow::default(),
             }),
         )
-        .height(Length::Fixed(cell_height))
+        .height(Length::Fixed(HEADER_HEIGHT))
         .align_y(Alignment::Center)
         .padding([0, 6])
         .into()
@@ -243,19 +244,13 @@ pub(crate) fn view_header<
                 } else {
                     "Sort: Descending"
                 };
-                button_cells.push(header_icon_cell(
-                    sort_icon_path,
-                    tooltip_text,
-                    sort_msg,
-                    cell_height,
-                ));
+                button_cells.push(header_icon_cell(sort_icon_path, tooltip_text, sort_msg));
             }
             HeaderButton::Refresh(refresh_msg) => {
                 button_cells.push(header_icon_cell(
                     "assets/icons/refresh-cw.svg",
                     "Refresh Data",
                     refresh_msg,
-                    cell_height,
                 ));
             }
             HeaderButton::CenterOnPlaying(center_msg) => {
@@ -263,16 +258,10 @@ pub(crate) fn view_header<
                     "assets/icons/locate.svg",
                     "Center on Playing",
                     center_msg,
-                    cell_height,
                 ));
             }
             HeaderButton::Add(tooltip, add_msg) => {
-                button_cells.push(header_icon_cell(
-                    "assets/icons/plus.svg",
-                    tooltip,
-                    add_msg,
-                    cell_height,
-                ));
+                button_cells.push(header_icon_cell("assets/icons/plus.svg", tooltip, add_msg));
             }
             HeaderButton::Trailing(element) => {
                 // External elements (columns dropdown, shuffle button) come
@@ -280,7 +269,7 @@ pub(crate) fn view_header<
                 // container so they line up with the row's cell rhythm.
                 button_cells.push(
                     container(element)
-                        .height(Length::Fixed(cell_height))
+                        .height(Length::Fixed(HEADER_HEIGHT))
                         .align_y(Alignment::Center)
                         .into(),
                 );
@@ -299,7 +288,7 @@ pub(crate) fn view_header<
         Some(
             container(bar)
                 .width(Length::Fill)
-                .height(Length::Fixed(cell_height))
+                .height(Length::Fixed(HEADER_HEIGHT))
                 .align_y(Alignment::Center)
                 .padding(iced::Padding {
                     top: 0.0,
@@ -330,7 +319,7 @@ pub(crate) fn view_header<
             .width(Length::Shrink),
     )
     .padding([0, 14])
-    .height(Length::Fixed(cell_height))
+    .height(Length::Fixed(HEADER_HEIGHT))
     .align_y(Alignment::Center)
     .into();
 
@@ -362,7 +351,7 @@ pub(crate) fn view_header<
         header_row = header_row.push(wrap_header_cell(
             iced::widget::Space::new()
                 .width(Length::Fill)
-                .height(Length::Fixed(cell_height))
+                .height(Length::Fixed(HEADER_HEIGHT))
                 .into(),
             true,
         ));
@@ -378,7 +367,7 @@ pub(crate) fn view_header<
         container(
             header_row
                 .width(Length::Fill)
-                .height(Length::Fixed(cell_height)),
+                .height(Length::Fixed(HEADER_HEIGHT)),
         )
         .width(Length::Fill)
         .height(Length::Fixed(HEADER_HEIGHT))
@@ -429,14 +418,19 @@ fn wrap_header_cell<'a, Message: 'a>(
     .into()
 }
 
-/// Reusable header icon button — fixed cell width + transparent
-/// background. Hover overlay handles the press feedback; the surrounding
-/// `wrap_header_cell` supplies the divider chrome.
-fn header_icon_cell<'a, Message: Clone + 'a>(
+/// Reusable header icon button — `ICON_CELL_WIDTH × HEADER_HEIGHT` cell,
+/// transparent background, square hover. Hover overlay handles the press
+/// feedback; surrounding chrome (`wrap_header_cell` or a sibling stripe)
+/// supplies the dividers.
+///
+/// Exposed `pub(crate)` so peer surfaces that need to drop a header-style
+/// icon button alongside `view_header`'s own (e.g. `default_playlist_chip`)
+/// share the exact same chassis — sizing, hover radius, tooltip vocabulary
+/// — without re-deriving the constants.
+pub(crate) fn header_icon_cell<'a, Message: Clone + 'a>(
     icon_path: &str,
     tooltip_text: &str,
     on_press: Message,
-    cell_height: f32,
 ) -> Element<'a, Message> {
     use iced::widget::{svg, tooltip};
 
@@ -452,7 +446,7 @@ fn header_icon_cell<'a, Message: Clone + 'a>(
             HoverOverlay::new(
                 container(icon_svg)
                     .width(Length::Fixed(ICON_CELL_WIDTH))
-                    .height(Length::Fixed(cell_height))
+                    .height(Length::Fixed(HEADER_HEIGHT))
                     .align_x(Alignment::Center)
                     .align_y(Alignment::Center),
             )
@@ -484,7 +478,6 @@ mod tests {
             "assets/icons/locate.svg",
             "Center on Playing",
             "test_press".to_string(),
-            44.0,
         );
     }
 
