@@ -420,6 +420,7 @@ pub(crate) fn view_header<
                 bottom: ROUNDED_OUTER_MARGIN_Y,
                 left: ROUNDED_OUTER_MARGIN_X,
             })
+            .style(theme::container_bg0_hard)
             .into()
     } else {
         // Flat mode: a bg0_hard() strip plus a 1 px theme::border()
