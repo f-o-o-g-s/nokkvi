@@ -419,7 +419,6 @@ pub(crate) fn ui_radius_sm() -> iced::border::Radius {
 /// Scale step `md` — 12 px in rounded mode, 0 in flat. Use for cards,
 /// popovers, album art, category tiles.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn ui_radius_md() -> iced::border::Radius {
     if is_rounded_mode() {
         R_MD.into()
@@ -443,7 +442,6 @@ pub(crate) fn ui_radius_lg() -> iced::border::Radius {
 /// Scale step `pill` — 999 px in rounded mode, 0 in flat. Use for tabs,
 /// transport buttons, search field, slider handles.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn ui_radius_pill() -> iced::border::Radius {
     if is_rounded_mode() {
         R_PILL.into()
@@ -463,7 +461,6 @@ pub(crate) fn ui_radius_pill() -> iced::border::Radius {
 /// stays at 32.0 for back-compat. Lanes that need the dynamic value migrate
 /// to this function (L2 nav-chrome, L3 slot-list-view-header).
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn nav_bar_height() -> f32 {
     if is_rounded_mode() { 44.0 } else { 32.0 }
 }
@@ -1179,7 +1176,6 @@ pub(crate) fn star_bright() -> Color {
 /// rows, capsules). Per-theme in TOML, falls back to a darkened
 /// `bg0_hard()` when unset. Replaces hard-coded `#1a2024`-style dividers.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn border() -> Color {
     read_color(|t| t.border)
 }

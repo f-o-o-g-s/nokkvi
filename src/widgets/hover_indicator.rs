@@ -33,6 +33,14 @@ impl HoverExpand {
         }
     }
 
+    /// The flat-redesign nav tabs handle their active visual via a
+    /// full-block `accent_bright()` fill (rounded + flat both), so the
+    /// up-expanding underline indicator the old top-nav rounded tabs
+    /// used is no longer constructed. Kept for future tabbed surfaces
+    /// (e.g. a settings sub-tab strip that wants a 1-px underline) —
+    /// marked `dead_code` to keep the workspace `-D warnings` gate
+    /// green.
+    #[allow(dead_code)]
     pub(crate) const fn up(value: f32) -> Self {
         Self {
             up: value,
