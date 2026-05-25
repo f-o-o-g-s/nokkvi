@@ -368,11 +368,10 @@ pub(crate) fn view_header<
     // Build the row of cells. Flat mode has no inter-cell spacing (cells'
     // sided borders touch). Rounded mode uses a 2 px gap between cells
     // inside the pill capsule.
-    let mut header_row = row![].align_y(Alignment::Center).spacing(if is_rounded {
-        2.0
-    } else {
-        0.0
-    });
+    let mut header_row =
+        row![]
+            .align_y(Alignment::Center)
+            .spacing(if is_rounded { 2.0 } else { 0.0 });
 
     header_row = header_row.push(view_selector_cell);
     for cell in button_cells {
@@ -426,19 +425,23 @@ pub(crate) fn view_header<
         // Flat mode: 50 px tall bg0_hard() strip with a bottom 1 px
         // theme::border() separator. The separator is drawn by using
         // the container's border-bottom via uniform Border + matching bg.
-        container(header_row.width(Length::Fill).height(Length::Fixed(cell_height)))
-            .width(Length::Fill)
-            .height(Length::Fixed(FLAT_HEADER_HEIGHT))
-            .style(|_| container::Style {
-                background: Some(theme::bg0_hard().into()),
-                border: iced::Border {
-                    color: theme::border(),
-                    width: 1.0,
-                    radius: iced::border::Radius::default(),
-                },
-                ..Default::default()
-            })
-            .into()
+        container(
+            header_row
+                .width(Length::Fill)
+                .height(Length::Fixed(cell_height)),
+        )
+        .width(Length::Fill)
+        .height(Length::Fixed(FLAT_HEADER_HEIGHT))
+        .style(|_| container::Style {
+            background: Some(theme::bg0_hard().into()),
+            border: iced::Border {
+                color: theme::border(),
+                width: 1.0,
+                radius: iced::border::Radius::default(),
+            },
+            ..Default::default()
+        })
+        .into()
     }
 }
 
