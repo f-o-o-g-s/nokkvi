@@ -590,86 +590,19 @@ fn render_value_display<'a>(
         SettingValue::Bool(v) => render_bool_pills(*v, font_size, is_center, opacity),
 
         SettingValue::HexColor(hex) => {
-            let parsed_color = crate::theme_config::parse_hex_color(hex).unwrap_or_else(theme::fg4);
-            let eff_opacity = if is_center { 1.0 } else { opacity };
-            let swatch_size = (font_size * 1.2).clamp(12.0, 20.0);
-
             if is_editing {
-                // Inline text input for hex editing in the main slot list
+                // Inline text input for hex editing in the main slot list. The
+                // editor still uses its own (square) preview swatch; design
+                // parity for the editor surface is handled in `render_hex_editor`.
                 let swatch_size = (font_size * 1.2).clamp(12.0, 20.0);
                 render_hex_editor(hex_input, font_size, swatch_size)
             } else {
-                row![
-                    // Color swatch
-                    container(Space::new())
-                        .width(Length::Fixed(swatch_size))
-                        .height(Length::Fixed(swatch_size))
-                        .style(move |_theme| container::Style {
-                            background: Some(
-                                Color {
-                                    a: eff_opacity,
-                                    ..parsed_color
-                                }
-                                .into()
-                            ),
-                            border: Border {
-                                color: Color {
-                                    a: eff_opacity * 0.5,
-                                    ..theme::fg4()
-                                },
-                                width: 1.0,
-                                radius: theme::ui_border_radius(),
-                            },
-                            ..Default::default()
-                        }),
-                    slot_list::slot_list_text(hex.clone(), font_size * 0.9, style.subtext_color),
-                ]
-                .spacing(6)
-                .align_y(Alignment::Center)
-                .into()
+                render_hex_value_chip(hex, font_size, is_center, opacity, style.subtext_color)
             }
         }
 
         SettingValue::ColorArray(colors) => {
-            let eff_opacity = if is_center { 1.0 } else { opacity };
-            let swatch_size = (font_size * 0.9).clamp(8.0, 14.0);
-
-            // Show mini color swatches for each color in the gradient
-            let mut r = row![].spacing(2).align_y(Alignment::Center);
-            for hex in colors.iter().take(8) {
-                let parsed = crate::theme_config::parse_hex_color(hex).unwrap_or_else(theme::fg4);
-                r = r.push(
-                    container(Space::new())
-                        .width(Length::Fixed(swatch_size))
-                        .height(Length::Fixed(swatch_size))
-                        .style(move |_theme| container::Style {
-                            background: Some(
-                                Color {
-                                    a: eff_opacity,
-                                    ..parsed
-                                }
-                                .into(),
-                            ),
-                            border: Border {
-                                color: Color {
-                                    a: eff_opacity * 0.3,
-                                    ..theme::fg4()
-                                },
-                                width: 0.5,
-                                radius: theme::ui_border_radius(),
-                            },
-                            ..Default::default()
-                        }),
-                );
-            }
-            // Append count label
-            let count = container(slot_list::slot_list_text(
-                format!("{}", colors.len()),
-                font_size * 0.8,
-                style.subtext_color,
-            ));
-            r = r.push(count);
-            r.into()
+            render_color_array_swatches(colors, font_size, is_center, opacity, style.subtext_color)
         }
 
         SettingValue::Enum { val, options } => {
@@ -694,87 +627,210 @@ fn render_value_display<'a>(
         }
     };
 
-    // Show chevron arrows for numeric values only — Bool/Enum use SM-style clickable options instead
+    // Show chevron arrows + mini-slider for numeric values only.
+    // Bool / Enum / ToggleSet use chip widgets instead.
     if value.is_incrementable() {
-        let arrow_icon_size = (font_size * 0.85).clamp(10.0, 18.0);
-        // Arrow color: bright accent when centered (interactive hint), dimmed otherwise
-        let arrow_color = if is_center {
-            theme::accent_bright()
-        } else {
-            Color {
-                a: opacity * 0.4,
-                ..theme::fg4()
-            }
-        };
-
-        // Pressed background: subtle accent pill behind the chevron
-        let pressed_bg = Color {
-            a: 0.2,
-            ..theme::accent_bright()
-        };
-        let arrow_btn_style = move |_theme: &iced::Theme, status: button::Status| {
-            let bg = if matches!(status, button::Status::Pressed) {
-                Some(pressed_bg.into())
-            } else {
-                None
-            };
-            button::Style {
-                background: bg,
-                border: Border {
-                    radius: 99.0.into(),
-                    ..Border::default()
-                },
-                ..Default::default()
-            }
-        };
-
-        let mut left_arrow = button(
-            embedded_svg::svg_widget("assets/icons/chevron-left.svg")
-                .width(Length::Fixed(arrow_icon_size))
-                .height(Length::Fixed(arrow_icon_size))
-                .style(move |_theme, _status| svg::Style {
-                    color: Some(arrow_color),
-                }),
-        )
-        .style(arrow_btn_style)
-        .padding(0);
-
-        let mut right_arrow = button(
-            embedded_svg::svg_widget("assets/icons/chevron-right.svg")
-                .width(Length::Fixed(arrow_icon_size))
-                .height(Length::Fixed(arrow_icon_size))
-                .style(move |_theme, _status| svg::Style {
-                    color: Some(arrow_color),
-                }),
-        )
-        .style(arrow_btn_style)
-        .padding(0);
-
-        // Only make arrows interactive on the center (selected) row.
-        // EditLeft/EditRight always act on the center item, so firing
-        // them from a non-center row would modify the wrong setting.
-        if is_center {
-            left_arrow = left_arrow.on_press(SettingsMessage::EditLeft);
-            right_arrow = right_arrow.on_press(SettingsMessage::EditRight);
-        }
-
-        row![
-            left_arrow,
-            Space::new().width(Length::Fixed(4.0)),
-            value_widget,
-            Space::new().width(Length::Fixed(4.0)),
-            right_arrow,
-        ]
-        .align_y(Alignment::Center)
-        .into()
+        render_numeric_row(value, value_widget, font_size, is_center, opacity)
     } else {
         value_widget
     }
 }
 
-// ============================================================================
-// StepMania-Style Value Display
-// ============================================================================
+/// Compose the numeric row chrome around a pre-rendered value badge:
+/// `[ ‹ ] [ value ] [ slider track ] [ › ]` matching the design's `.nk-w-num`
+/// layout. Slider is purely visual (non-draggable) so wheel + arrows remain
+/// the sole input paths — a 4 px draggable track inside a slot row would
+/// fight the slot-list scroll listeners.
+fn render_numeric_row<'a>(
+    value: &SettingValue,
+    value_badge: Element<'a, SettingsMessage>,
+    font_size: f32,
+    is_center: bool,
+    opacity: f32,
+) -> Element<'a, SettingsMessage> {
+    let eff_opacity = if is_center { 1.0 } else { opacity };
+
+    let left_arrow = arrow_button(
+        "assets/icons/chevron-left.svg",
+        font_size,
+        is_center,
+        eff_opacity,
+        SettingsMessage::EditLeft,
+    );
+    let right_arrow = arrow_button(
+        "assets/icons/chevron-right.svg",
+        font_size,
+        is_center,
+        eff_opacity,
+        SettingsMessage::EditRight,
+    );
+
+    // Optional mini-slider track between value + right arrow.
+    let track: Option<Element<'a, SettingsMessage>> =
+        numeric_normalized_fraction(value).map(|frac| numeric_mini_track(frac, eff_opacity));
+
+    let mut layout = row![left_arrow, Space::new().width(Length::Fixed(8.0)), value_badge,]
+        .align_y(Alignment::Center);
+    if let Some(track_el) = track {
+        layout = layout
+            .push(Space::new().width(Length::Fixed(10.0)))
+            .push(track_el);
+    }
+    layout = layout
+        .push(Space::new().width(Length::Fixed(8.0)))
+        .push(right_arrow);
+
+    layout.into()
+}
+
+/// 22×22 flat arrow button — 1 px [`theme::border()`] outline, [`theme::bg0()`]
+/// fill, [`theme::fg2()`] chevron. Clickable only on the center row (same rule
+/// as the legacy chevrons — `EditLeft` / `EditRight` act on the center item).
+fn arrow_button<'a>(
+    icon_path: &'static str,
+    font_size: f32,
+    is_center: bool,
+    eff_opacity: f32,
+    on_press: SettingsMessage,
+) -> Element<'a, SettingsMessage> {
+    let arrow_icon_size = (font_size * 0.85).clamp(10.0, 16.0);
+    let icon_color = scale_alpha_local(theme::fg2(), eff_opacity);
+    let border = scale_alpha_local(theme::border(), eff_opacity);
+    let fill = scale_alpha_local(theme::bg0(), eff_opacity);
+
+    let icon = embedded_svg::svg_widget(icon_path)
+        .width(Length::Fixed(arrow_icon_size))
+        .height(Length::Fixed(arrow_icon_size))
+        .style(move |_, _| svg::Style {
+            color: Some(icon_color),
+        });
+
+    let body = container(icon)
+        .width(Length::Fixed(22.0))
+        .height(Length::Fixed(22.0))
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(fill.into()),
+            border: Border {
+                color: border,
+                width: 1.0,
+                radius: theme::ui_radius_pill(),
+            },
+            ..Default::default()
+        });
+
+    let mut btn = button(body).style(transparent_button_style).padding(0);
+    if is_center {
+        btn = btn.on_press(on_press);
+    }
+    btn.into()
+}
+
+/// 120×4 mini-slider track + 10 px handle showing the value's position within
+/// its `min..max` range. Read-only by design — the surrounding arrow buttons
+/// (and wheel events handled at the slot list level) drive the value.
+fn numeric_mini_track<'a>(fraction: f32, eff_opacity: f32) -> Element<'a, SettingsMessage> {
+    const TRACK_WIDTH: f32 = 120.0;
+    const TRACK_HEIGHT: f32 = 4.0;
+    const HANDLE_SIZE: f32 = 10.0;
+
+    let track_bg = scale_alpha_local(theme::bg0(), eff_opacity);
+    let track_border = scale_alpha_local(theme::border(), eff_opacity);
+    let fill_color = scale_alpha_local(theme::accent_bright(), eff_opacity);
+    let handle_color = fill_color;
+
+    let frac = fraction.clamp(0.0, 1.0);
+    let fill_width = (TRACK_WIDTH * frac).max(0.0);
+    // Center the handle on the fill edge — subtract half its width.
+    let handle_offset = (TRACK_WIDTH * frac - HANDLE_SIZE / 2.0).max(0.0);
+    let right_spacer = (TRACK_WIDTH - handle_offset - HANDLE_SIZE).max(0.0);
+
+    // Track + colored fill (two stacked rectangles in a row sized to the
+    // fraction). The handle sits on top in its own row aligned via Space-padded
+    // anchors so we don't need an absolute-position overlay.
+    let fill = container(Space::new())
+        .width(Length::Fixed(fill_width))
+        .height(Length::Fixed(TRACK_HEIGHT))
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(fill_color.into()),
+            border: Border {
+                radius: theme::ui_radius_pill(),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+    let track_body = container(fill)
+        .width(Length::Fixed(TRACK_WIDTH))
+        .height(Length::Fixed(TRACK_HEIGHT))
+        .align_y(Alignment::Center)
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(track_bg.into()),
+            border: Border {
+                color: track_border,
+                width: 1.0,
+                radius: theme::ui_radius_pill(),
+            },
+            ..Default::default()
+        });
+
+    let handle = container(Space::new())
+        .width(Length::Fixed(HANDLE_SIZE))
+        .height(Length::Fixed(HANDLE_SIZE))
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(handle_color.into()),
+            border: Border {
+                radius: theme::ui_radius_pill(),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+
+    // Stack track + handle. The handle row uses Space padding instead of an
+    // overlay so positioning happens entirely through layout and respects the
+    // ambient alpha scale.
+    let handle_row = row![
+        Space::new().width(Length::Fixed(handle_offset)),
+        handle,
+        Space::new().width(Length::Fixed(right_spacer)),
+    ]
+    .align_y(Alignment::Center);
+
+    iced::widget::stack![
+        container(track_body)
+            .width(Length::Fixed(TRACK_WIDTH))
+            .height(Length::Fixed(HANDLE_SIZE))
+            .align_y(Alignment::Center),
+        container(handle_row)
+            .width(Length::Fixed(TRACK_WIDTH))
+            .height(Length::Fixed(HANDLE_SIZE))
+            .align_y(Alignment::Center),
+    ]
+    .width(Length::Fixed(TRACK_WIDTH))
+    .height(Length::Fixed(HANDLE_SIZE))
+    .into()
+}
+
+/// Compute the value's normalized 0..1 fraction within its `min..max` range,
+/// or `None` if the range is degenerate (max == min) or the variant isn't
+/// numeric. Used by the mini-slider track to position its handle.
+fn numeric_normalized_fraction(value: &SettingValue) -> Option<f32> {
+    match value {
+        SettingValue::Float { val, min, max, .. } => {
+            if (max - min).abs() < f64::EPSILON {
+                return None;
+            }
+            Some(((val - min) / (max - min)) as f32)
+        }
+        SettingValue::Int { val, min, max, .. } => {
+            if *max == *min {
+                return None;
+            }
+            Some(((val - min) as f32) / ((max - min) as f32))
+        }
+        _ => None,
+    }
+}
 
 // ============================================================================
 // Pill-Segmented Widget Adapters (Bool / Enum / ToggleSet)
@@ -882,6 +938,102 @@ fn render_toggle_set_pills<'a>(
 #[inline]
 fn chip_label_size(font_size: f32) -> f32 {
     font_size * 0.80
+}
+
+// ============================================================================
+// HexColor + ColorArray rendering
+// ============================================================================
+//
+// Per the design (`.nk-w-hex`): mono hex on the left, then a 28×24 swatch on
+// the right with a 1 px `theme::border()` outline in flat mode and
+// `theme::ui_radius_xs()` corners in rounded mode. The CSS layout is `gap:
+// 10px; min-width: 76px; text-align: right` on the hex label; we keep the
+// 76 px min so the swatch column lines up across stacked color rows.
+
+const HEX_VALUE_MIN_WIDTH: f32 = 76.0;
+const HEX_SWATCH_WIDTH: f32 = 28.0;
+const HEX_SWATCH_HEIGHT: f32 = 24.0;
+
+/// Static (non-editing) hex value badge — uppercase mono hex + swatch chip.
+fn render_hex_value_chip<'a>(
+    hex: &str,
+    font_size: f32,
+    is_center: bool,
+    opacity: f32,
+    hex_label_color: Color,
+) -> Element<'a, SettingsMessage> {
+    let parsed_color = crate::theme_config::parse_hex_color(hex).unwrap_or_else(theme::fg4);
+    let eff_opacity = if is_center { 1.0 } else { opacity };
+    let fill = scale_alpha_local(parsed_color, eff_opacity);
+    let border = scale_alpha_local(theme::border(), eff_opacity);
+
+    let hex_label = container(slot_list::slot_list_text(
+        hex.to_uppercase(),
+        font_size * 0.95,
+        hex_label_color,
+    ))
+    .width(Length::Fixed(HEX_VALUE_MIN_WIDTH))
+    .align_x(Alignment::End);
+
+    let swatch = container(Space::new())
+        .width(Length::Fixed(HEX_SWATCH_WIDTH))
+        .height(Length::Fixed(HEX_SWATCH_HEIGHT))
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(fill.into()),
+            border: Border {
+                color: border,
+                width: 1.0,
+                radius: theme::ui_radius_xs(),
+            },
+            ..Default::default()
+        });
+
+    row![hex_label, swatch]
+        .spacing(10)
+        .align_y(Alignment::Center)
+        .into()
+}
+
+/// Small swatch strip for ColorArray rows — N tiny `theme::border()`-outlined
+/// `theme::ui_radius_xs()` swatches followed by the count label. Capped at 8
+/// previews to keep the row width bounded.
+fn render_color_array_swatches<'a>(
+    colors: &[String],
+    font_size: f32,
+    is_center: bool,
+    opacity: f32,
+    count_label_color: Color,
+) -> Element<'a, SettingsMessage> {
+    let eff_opacity = if is_center { 1.0 } else { opacity };
+    let swatch_size = (font_size * 0.95).clamp(10.0, 16.0);
+    let border = scale_alpha_local(theme::border(), eff_opacity);
+
+    let mut r = row![].spacing(2).align_y(Alignment::Center);
+    for hex in colors.iter().take(8) {
+        let parsed = crate::theme_config::parse_hex_color(hex).unwrap_or_else(theme::fg4);
+        let fill = scale_alpha_local(parsed, eff_opacity);
+        r = r.push(
+            container(Space::new())
+                .width(Length::Fixed(swatch_size))
+                .height(Length::Fixed(swatch_size))
+                .style(move |_: &iced::Theme| container::Style {
+                    background: Some(fill.into()),
+                    border: Border {
+                        color: border,
+                        width: 1.0,
+                        radius: theme::ui_radius_xs(),
+                    },
+                    ..Default::default()
+                }),
+        );
+    }
+    r = r.push(Space::new().width(Length::Fixed(8.0)));
+    r = r.push(slot_list::slot_list_text(
+        format!("{}", colors.len()),
+        font_size * 0.85,
+        count_label_color,
+    ));
+    r.into()
 }
 
 // ============================================================================
