@@ -276,7 +276,6 @@ static TITLE_FONT_CACHE: LazyLock<RwLock<(String, Font)>> =
 /// Get the title font — used for hero titles, view headers, modal headings.
 /// Falls back to `ui_font()` when no title font is configured (default).
 #[inline]
-#[allow(dead_code)] // Wired up by Wave-1 widget lanes; kept exported here.
 pub(crate) fn title_font() -> Font {
     let current_family = { TITLE_FONT_FAMILY.read().clone() };
 
@@ -395,7 +394,6 @@ pub(crate) fn ui_border_radius() -> iced::border::Radius {
 /// Scale step `xs` — 4 px in rounded mode, 0 in flat. Use for checkboxes,
 /// swatches, tiny chips.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn ui_radius_xs() -> iced::border::Radius {
     if is_rounded_mode() {
         R_XS.into()
@@ -407,7 +405,6 @@ pub(crate) fn ui_radius_xs() -> iced::border::Radius {
 /// Scale step `sm` — 8 px in rounded mode, 0 in flat. Use for mode buttons,
 /// badges, format pills.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn ui_radius_sm() -> iced::border::Radius {
     if is_rounded_mode() {
         R_SM.into()
@@ -443,7 +440,6 @@ pub(crate) fn ui_radius_lg() -> iced::border::Radius {
 /// Scale step `pill` — 999 px in rounded mode, 0 in flat. Use for tabs,
 /// transport buttons, search field, slider handles.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn ui_radius_pill() -> iced::border::Radius {
     if is_rounded_mode() {
         R_PILL.into()
@@ -1179,7 +1175,6 @@ pub(crate) fn star_bright() -> Color {
 /// rows, capsules). Per-theme in TOML, falls back to a darkened
 /// `bg0_hard()` when unset. Replaces hard-coded `#1a2024`-style dividers.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn border() -> Color {
     read_color(|t| t.border)
 }
