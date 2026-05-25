@@ -438,7 +438,9 @@ fn player_control_button(
         .padding(0)
         .style(transport_button_style(active))
         .on_press(message);
-    HoverOverlay::new(btn).into()
+    HoverOverlay::new(btn)
+        .border_radius(theme::ui_radius_pill())
+        .into()
 }
 
 /// Build a flat text-labeled mode toggle (used by EQ / SFX inline buttons).
@@ -471,6 +473,7 @@ fn mode_text_toggle(
         .gap(4)
         .style(theme::container_tooltip),
     )
+    .border_radius(theme::ui_radius_sm())
     .into()
 }
 
@@ -502,6 +505,7 @@ fn mode_toggle_button<'a>(
         .gap(4)
         .style(theme::container_tooltip),
     )
+    .border_radius(theme::ui_radius_sm())
     .into()
 }
 
@@ -908,8 +912,8 @@ pub(crate) fn player_bar<'a>(
             ));
         }
 
-        mode_toggles_row =
-            mode_toggles_row.push(Element::from(HoverOverlay::new(PlayerModesMenu::new(
+        mode_toggles_row = mode_toggles_row.push(Element::from(
+            HoverOverlay::new(PlayerModesMenu::new(
                 kebab_rows,
                 |open| {
                     PlayerBarMessage::SetOpenMenu(
@@ -917,7 +921,9 @@ pub(crate) fn player_bar<'a>(
                     )
                 },
                 data.player_modes_open,
-            ))));
+            ))
+            .border_radius(theme::ui_radius_sm()),
+        ));
     }
 
     // Application menu — only visible in NavLayout::None (no nav chrome of
@@ -927,24 +933,27 @@ pub(crate) fn player_bar<'a>(
         use crate::widgets::hamburger_menu::{HamburgerMenu, MenuAction};
         let is_light = data.is_light_mode;
         let hamburger_open = data.hamburger_open;
-        mode_toggles_row = mode_toggles_row.push(Element::from(HoverOverlay::new(
-            HamburgerMenu::new(
-                |action| match action {
-                    MenuAction::ToggleLightMode => PlayerBarMessage::ToggleLightMode,
-                    MenuAction::OpenSettings => PlayerBarMessage::OpenSettings,
-                    MenuAction::About => PlayerBarMessage::About,
-                    MenuAction::Quit => PlayerBarMessage::Quit,
-                },
-                |open| {
-                    PlayerBarMessage::SetOpenMenu(
-                        open.then_some(crate::app_message::OpenMenu::Hamburger),
-                    )
-                },
-                hamburger_open,
-                is_light,
+        mode_toggles_row = mode_toggles_row.push(Element::from(
+            HoverOverlay::new(
+                HamburgerMenu::new(
+                    |action| match action {
+                        MenuAction::ToggleLightMode => PlayerBarMessage::ToggleLightMode,
+                        MenuAction::OpenSettings => PlayerBarMessage::OpenSettings,
+                        MenuAction::About => PlayerBarMessage::About,
+                        MenuAction::Quit => PlayerBarMessage::Quit,
+                    },
+                    |open| {
+                        PlayerBarMessage::SetOpenMenu(
+                            open.then_some(crate::app_message::OpenMenu::Hamburger),
+                        )
+                    },
+                    hamburger_open,
+                    is_light,
+                )
+                .player_bar_style(),
             )
-            .player_bar_style(),
-        )));
+            .border_radius(theme::ui_radius_sm()),
+        ));
     }
 
     let mode_toggles = mode_toggles_row;
