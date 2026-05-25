@@ -417,8 +417,16 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // -------------------------------------------------------------------------
     // Hamburger Menu (head of left_section, beside library filter)
     // -------------------------------------------------------------------------
-    // Chassis matches the adjacent nav-tab pill height (32 px) so the
-    // hamburger, library trigger, and tab cells all share the row band.
+    // Pill chassis matches the nav-tab band: rounded mode uses the 32 px
+    // pill (overshoot lands in the tray padding and is invisible against
+    // the matching tray bg), flat mode shrinks to the bar's actual
+    // content height so the open-state accent_bright pill doesn't escape
+    // past the bar's top/bottom edges (flat mode has zero tray padding).
+    let cluster_pill_h = if theme::is_rounded_mode() {
+        NAV_PILL_HEIGHT
+    } else {
+        theme::nav_bar_height() - 1.0
+    };
     let hamburger: Element<'static, NavBarMessage> = super::hover_overlay::HoverOverlay::new(
         HamburgerMenu::new(
             |action| match action {
@@ -433,7 +441,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             data.hamburger_open,
             data.is_light_mode,
         )
-        .chassis(NAV_PILL_HEIGHT, NAV_PILL_HEIGHT),
+        .chassis(NAV_PILL_HEIGHT, cluster_pill_h),
     )
     .border_radius(theme::ui_radius_pill())
     .into();
@@ -470,14 +478,16 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         let library_selector_open = data.library_selector_open;
         let library_selector_bounds = data.library_selector_bounds;
         // Match the adjacent nav-tab pill height; widen the filtered
-        // chassis so the `N/M` count fits beside the icon.
+        // chassis so the `N/M` count fits beside the icon. Height tracks
+        // `cluster_pill_h` so the open-state accent fill stays inside
+        // the bar in flat mode (see hamburger comment above).
         let trigger = super::hover_overlay::HoverOverlay::new(
             super::library_filter_trigger::library_filter_trigger(
                 library_count,
                 active_library_count,
                 library_selector_open,
-                iced::Size::new(NAV_PILL_HEIGHT, NAV_PILL_HEIGHT),
-                iced::Size::new(56.0, NAV_PILL_HEIGHT),
+                iced::Size::new(NAV_PILL_HEIGHT, cluster_pill_h),
+                iced::Size::new(56.0, cluster_pill_h),
                 library_selector_bounds,
                 |open, trigger_bounds| NavBarMessage::LibraryOpenChange {
                     open,
