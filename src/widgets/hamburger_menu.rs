@@ -60,8 +60,10 @@ pub struct HamburgerMenu<Message> {
     is_open: bool,
     /// Current light mode state (for label text)
     is_light_mode: bool,
-    /// Icon button size
-    button_size: f32,
+    /// Icon button chassis width
+    button_width: f32,
+    /// Icon button chassis height
+    button_height: f32,
     /// Icon size within the button
     icon_size: f32,
     /// When true, use 3D player bar button styling
@@ -84,10 +86,20 @@ impl<Message: Clone> HamburgerMenu<Message> {
             on_open_change: Box::new(on_open_change),
             is_open,
             is_light_mode,
-            button_size: 28.0,
+            button_width: 28.0,
+            button_height: 28.0,
             icon_size: 18.0,
             player_bar_style: false,
         }
+    }
+
+    /// Override the chassis dimensions (default 28 × 28). Nav-bar use cases
+    /// size to match the adjacent nav-tab cell so hamburger, library
+    /// trigger, and tabs share the same row/column band.
+    pub fn chassis(mut self, width: f32, height: f32) -> Self {
+        self.button_width = width;
+        self.button_height = height;
+        self
     }
 
     /// Use player-bar button chassis (44 × 44 button, 20 px icon, `ui_radius_sm()`
@@ -95,7 +107,8 @@ impl<Message: Clone> HamburgerMenu<Message> {
     /// size and corner radius differ.
     pub fn player_bar_style(mut self) -> Self {
         self.player_bar_style = true;
-        self.button_size = 44.0;
+        self.button_width = 44.0;
+        self.button_height = 44.0;
         self.icon_size = 20.0;
         self
     }
@@ -104,8 +117,8 @@ impl<Message: Clone> HamburgerMenu<Message> {
 impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for HamburgerMenu<Message> {
     fn size(&self) -> Size<Length> {
         Size {
-            width: Length::Fixed(self.button_size),
-            height: Length::Fixed(self.button_size),
+            width: Length::Fixed(self.button_width),
+            height: Length::Fixed(self.button_height),
         }
     }
 
@@ -115,7 +128,7 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Hambur
         _renderer: &iced::Renderer,
         _limits: &layout::Limits,
     ) -> layout::Node {
-        layout::Node::new(Size::new(self.button_size, self.button_size))
+        layout::Node::new(Size::new(self.button_width, self.button_height))
     }
 
     fn update(

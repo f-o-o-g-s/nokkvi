@@ -22,7 +22,7 @@ use iced::{
 };
 use nokkvi_data::types::player_settings::NavDisplayMode;
 
-use super::nav_bar::{NAV_TABS, NavBarMessage, NavView, colored_icon, flat_tab_container_style};
+use super::nav_bar::{NAV_TABS, NavBarMessage, NavView, colored_icon};
 use crate::theme;
 
 /// Side-nav width (px) by chrome mode.
@@ -261,25 +261,17 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
         let is_active = !settings_open && current == view;
         let display_mode = theme::nav_display_mode();
 
-        // Container style — both modes use the same `flat_tab_container_style`
-        // shape (active = filled `accent_bright()` + dark text, idle =
-        // `bg0_hard()` + `fg0()`). Rounded mode adds the `ui_radius_md()`
-        // outer radius via `border_radius` on the wrapping `HoverOverlay`
-        // so the cards read as 12-px-rounded buttons.
-        let tab_style = flat_tab_container_style(is_active);
-
-        // Text color follows the cell fill: dark on the accent fill,
-        // `fg0()` on the chrome bg. Matches the top-nav `nav_tab`.
+        // Active = filled `accent_bright()` + dark text, idle = `bg0_hard()`
+        // (matches the chrome) + `fg0()`. Rounded mode rounds to a pill so
+        // the active fill reads as a capsule (matches the top-nav tab
+        // treatment); flat mode keeps square corners since cells are
+        // 1-px-`border()`-separated.
         let text_color = if is_active {
             theme::bg0_hard()
         } else {
             theme::fg0()
         };
 
-        // The flat-redesign drops the right-edge indicator strip — the
-        // full-cell accent fill is the active affordance. Suppress both
-        // indicator colors so `RotatedLabel` / `HoverIndicator` don't
-        // draw a stray vertical bar.
         let indicator_color: Option<Color> = None;
         let hover_indicator_color: Option<Color> = None;
 
@@ -294,7 +286,7 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
 
         let card_width = side_nav_tab_width();
         let card_radius = if is_rounded {
-            theme::ui_radius_md()
+            theme::ui_radius_pill()
         } else {
             0.0.into()
         };
@@ -305,7 +297,23 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
                     .padding(0)
                     .width(Length::Fixed(card_width))
                     .height(Length::Fixed(tab_height))
-                    .style(tab_style),
+                    .style(move |_: &iced::Theme| container::Style {
+                        background: if is_active {
+                            Some(Background::Color(theme::accent_bright()))
+                        } else {
+                            Some(Background::Color(theme::bg0_hard()))
+                        },
+                        text_color: Some(if is_active {
+                            theme::bg0_hard()
+                        } else {
+                            theme::fg0()
+                        }),
+                        border: Border {
+                            radius: card_radius,
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }),
             )
             .border_radius(card_radius),
         )
@@ -344,14 +352,14 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
 
     // Settings indicator when settings are open (non-interactive).
     // Renders with the same active-state visuals the other tabs use
-    // (filled `accent_bright()` card, `bg0_hard()` text) so the user
-    // sees "Settings" highlighted in the same vocabulary regardless of
-    // chrome mode. Rounded mode keeps the `ui_radius_md()` card outline.
+    // (filled `accent_bright()` card, `bg0_hard()` text, pill outline in
+    // rounded mode) so the user sees "Settings" highlighted in the same
+    // vocabulary regardless of chrome mode.
     let settings_indicator: Option<Element<'_, NavBarMessage>> = if settings_open {
         let display_mode = theme::nav_display_mode();
         let text_color = theme::bg0_hard();
         let card_radius = if is_rounded {
-            theme::ui_radius_md()
+            theme::ui_radius_pill()
         } else {
             0.0.into()
         };
@@ -410,12 +418,15 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
     let library_selector_bounds = data.library_selector_bounds;
     let library_rows = data.library_rows.clone();
 
-    // Hamburger / library wrap in `Center`-aligned containers so they
-    // sit centered inside the sidebar (the icons themselves are
-    // narrower than the sidebar width).
+    // Chassis matches the icon-only side-nav tab cell (56 wide × 36
+    // tall) so the hamburger, library trigger, and nav tabs share the
+    // same column band — uniform width with the tab cards above them,
+    // pill-shaped in rounded mode to match the tabs' active-state pill.
     let nav_width = side_nav_width();
-    let hamburger_card_radius = if is_rounded {
-        theme::ui_radius_md()
+    let cluster_cell_width = side_nav_tab_width();
+    let cluster_cell_height = ICON_TAB_HEIGHT;
+    let cluster_radius = if is_rounded {
+        theme::ui_radius_pill()
     } else {
         0.0.into()
     };
@@ -437,21 +448,24 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
             },
             data.hamburger_open,
             data.is_light_mode,
-        ),
+        )
+        .chassis(cluster_cell_width, cluster_cell_height),
     )
-    .border_radius(hamburger_card_radius)
+    .border_radius(cluster_radius)
     .into();
     let hamburger: Element<'static, NavBarMessage> = container(hamburger_inner)
         .width(Length::Fixed(nav_width))
         .center_x(Length::Fixed(nav_width))
         .into();
 
+    let library_chassis = iced::Size::new(cluster_cell_width, cluster_cell_height);
     let library_trigger_inner = super::hover_overlay::HoverOverlay::new(
         container(super::library_filter_trigger::library_filter_trigger(
             library_count,
             active_library_count,
             library_selector_open,
-            true, // compact — side-nav width drives the vertical stack
+            library_chassis,
+            library_chassis,
             library_selector_bounds,
             |open, trigger_bounds| NavBarMessage::LibraryOpenChange {
                 open,
@@ -460,7 +474,7 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
         ))
         .align_x(iced::Alignment::Center),
     )
-    .border_radius(hamburger_card_radius);
+    .border_radius(cluster_radius);
     let library_trigger: Element<'_, NavBarMessage> = container(library_trigger_inner)
         .width(Length::Fixed(nav_width))
         .center_x(Length::Fixed(nav_width))

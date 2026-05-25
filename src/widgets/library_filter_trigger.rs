@@ -54,27 +54,12 @@ use crate::theme;
 // Constants
 // ============================================================================
 
-/// Chassis height — mirrors the hamburger menu so the two triggers
-/// line up vertically on the nav bar.
-const BUTTON_HEIGHT: f32 = 28.0;
-
-/// Width when only the icon is shown — square chassis matching the
-/// hamburger.
-const ICON_ONLY_WIDTH: f32 = 28.0;
-
-/// Width when the count label is shown alongside the icon. Sized so the
-/// `N/M` text band ends before the pip overlay's horizontal range —
-/// see [`draw`] where the text right-edge is clamped to
-/// `bounds.right - BADGE_INSET - BADGE_DIAMETER - 3` (gap) so the pip
-/// never sits on top of a digit.
-const FILTERED_WIDTH: f32 = 56.0;
-
 /// Icon glyph size — matches the hamburger menu's 18 px icon so the two
 /// SVGs read at the same visual weight.
 const ICON_SIZE: f32 = 18.0;
 
 /// Icon glyph size in filtered mode — slightly smaller to leave room
-/// for the count label without overflowing the 28 px chassis height.
+/// for the count label.
 const ICON_SIZE_FILTERED: f32 = 14.0;
 
 /// Font size for the `N/M` count badge text.
@@ -83,30 +68,19 @@ const COUNT_TEXT_SIZE: f32 = 10.0;
 /// Internal horizontal padding for the filtered state.
 const FILTERED_HPAD: f32 = 4.0;
 
-/// Height of the compact (side-nav) chassis when the filter is active.
-/// Stacks the 18 × 18 icon over a `N/M` count line so the sidebar
-/// reads the same information the top-nav strip does, just laid out
-/// vertically. Sized for the 28-px sidebar width.
-const COMPACT_FILTERED_HEIGHT: f32 = 44.0;
-
-/// Vertical gap (in pixels) between the icon and the stacked count
-/// line in the compact-filtered chassis.
-const COMPACT_STACK_GAP: f32 = 2.0;
-
 // ============================================================================
 // Public API
 // ============================================================================
 
 /// Build the library-filter nav-bar trigger.
 ///
-/// Returns `Space::new()` when `library_count <= 1` (suppressed
-/// state); otherwise returns the trigger widget.
+/// Returns `Space::new()` when `library_count <= 1` (suppressed state);
+/// otherwise returns the trigger widget.
 ///
-/// `compact` switches to a side-nav-friendly chassis: icon-only width
-/// (28 px) in every state, with a pip overlay in the filtered case (no
-/// count text — the 28-px sidebar can't fit `N/M` text alongside the
-/// icon, and the popover header already surfaces the exact "{active} /
-/// {total}" once open).
+/// `neutral_size` / `filtered_size` set the chassis dimensions in each
+/// render state. The trigger sizes itself to match the adjacent nav-tab
+/// cell so hamburger, library trigger, and tabs share a uniform row/
+/// column band — the caller (top-nav or side-nav) decides those numbers.
 ///
 /// `on_open_change(open, trigger_bounds)`:
 /// - `(true, Some(bounds))` — user clicked to open. `bounds` is the
@@ -117,7 +91,8 @@ pub(crate) fn library_filter_trigger<'a, Message>(
     library_count: usize,
     active_count: usize,
     is_open: bool,
-    compact: bool,
+    neutral_size: iced::Size,
+    filtered_size: iced::Size,
     trigger_bounds: Option<iced::Rectangle>,
     on_open_change: impl Fn(bool, Option<iced::Rectangle>) -> Message + 'a,
 ) -> iced::Element<'a, Message>
@@ -149,7 +124,8 @@ where
     Element::new(LibraryFilterTrigger {
         mode,
         is_open,
-        compact,
+        neutral_size,
+        filtered_size,
         _trigger_bounds: trigger_bounds,
         icon_handle: Handle::from_memory(
             crate::embedded_svg::get_svg("assets/icons/library.svg").as_bytes(),
@@ -175,11 +151,14 @@ enum RenderMode {
 struct LibraryFilterTrigger<'a, Message> {
     mode: RenderMode,
     is_open: bool,
-    /// Side-nav variant: icon-only width even when filtered (no `N/M`
-    /// text), pip overlay still drawn in the filtered case so the
-    /// "something is on" signal carries through into the narrow
-    /// sidebar chassis.
-    compact: bool,
+    /// Chassis size used when no filter is active. Caller decides per
+    /// layout — top-nav passes a square pill-height cell, side-nav
+    /// passes the full tab-width cell.
+    neutral_size: iced::Size,
+    /// Chassis size used when a strict subset is active. May be wider
+    /// than `neutral_size` to leave room for the `N/M` count label
+    /// (top-nav case); side-nav reuses tab-width in both states.
+    filtered_size: iced::Size,
     /// Plumbed in for completeness with the controlled-component
     /// contract; the trigger itself doesn't need to read it (the parent
     /// derives open-state from `OpenMenu::LibrarySelector` and passes
@@ -192,21 +171,10 @@ struct LibraryFilterTrigger<'a, Message> {
 }
 
 impl<Message> LibraryFilterTrigger<'_, Message> {
-    fn button_width(&self) -> f32 {
-        if self.compact {
-            return ICON_ONLY_WIDTH;
-        }
+    fn chassis(&self) -> iced::Size {
         match self.mode {
-            RenderMode::Neutral => ICON_ONLY_WIDTH,
-            RenderMode::Filtered { .. } => FILTERED_WIDTH,
-        }
-    }
-
-    fn button_height(&self) -> f32 {
-        if self.compact && matches!(self.mode, RenderMode::Filtered { .. }) {
-            COMPACT_FILTERED_HEIGHT
-        } else {
-            BUTTON_HEIGHT
+            RenderMode::Neutral => self.neutral_size,
+            RenderMode::Filtered { .. } => self.filtered_size,
         }
     }
 }
@@ -215,9 +183,10 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
     for LibraryFilterTrigger<'a, Message>
 {
     fn size(&self) -> Size<Length> {
+        let c = self.chassis();
         Size {
-            width: Length::Fixed(self.button_width()),
-            height: Length::Fixed(self.button_height()),
+            width: Length::Fixed(c.width),
+            height: Length::Fixed(c.height),
         }
     }
 
@@ -227,7 +196,8 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
         _renderer: &iced::Renderer,
         _limits: &layout::Limits,
     ) -> layout::Node {
-        layout::Node::new(Size::new(self.button_width(), self.button_height()))
+        let c = self.chassis();
+        layout::Node::new(Size::new(c.width, c.height))
     }
 
     fn update(
@@ -305,105 +275,6 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
             },
             bg_color,
         );
-
-        // Compact (side-nav) variant. Two sub-modes:
-        // - Neutral: centered icon in a 28 × 28 chassis (matches the
-        //   sidebar tab cells).
-        // - Filtered: icon at top + pip in the icon's top-right corner
-        //   + `N/M` text centered below the icon in a 28 × 44 chassis.
-        //   Stacked vertically because the 28-px sidebar can't fit
-        //   text alongside the icon horizontally.
-        if self.compact {
-            match self.mode {
-                RenderMode::Neutral => {
-                    let icon_bounds = Rectangle {
-                        x: bounds.center_x() - ICON_SIZE / 2.0,
-                        y: bounds.center_y() - ICON_SIZE / 2.0,
-                        width: ICON_SIZE,
-                        height: ICON_SIZE,
-                    };
-                    renderer.draw_svg(
-                        SvgData {
-                            handle: self.icon_handle.clone(),
-                            color: Some(fg_color),
-                            rotation: Radians(0.0),
-                            opacity: 1.0,
-                        },
-                        icon_bounds,
-                        icon_bounds,
-                    );
-                }
-                RenderMode::Filtered { active, total } => {
-                    // Icon sits in the upper half so the pip can ride
-                    // its top-right corner without spilling above the
-                    // chassis.
-                    let icon_top = bounds.y + 5.0;
-                    let icon_bounds = Rectangle {
-                        x: bounds.center_x() - ICON_SIZE / 2.0,
-                        y: icon_top,
-                        width: ICON_SIZE,
-                        height: ICON_SIZE,
-                    };
-                    renderer.draw_svg(
-                        SvgData {
-                            handle: self.icon_handle.clone(),
-                            color: Some(fg_color),
-                            rotation: Radians(0.0),
-                            opacity: 1.0,
-                        },
-                        icon_bounds,
-                        icon_bounds,
-                    );
-
-                    // Count text centered horizontally, sitting under
-                    // the icon with `COMPACT_STACK_GAP` of breathing
-                    // space.
-                    let label = format!("{active}/{total}");
-                    let text_y = icon_bounds.y + icon_bounds.height + COMPACT_STACK_GAP;
-                    let text_bounds = Rectangle {
-                        x: bounds.x,
-                        y: text_y,
-                        width: bounds.width,
-                        height: (bounds.y + bounds.height - text_y).max(0.0),
-                    };
-                    renderer.fill_text(
-                        Text {
-                            content: label,
-                            bounds: Size::new(text_bounds.width, text_bounds.height),
-                            size: COUNT_TEXT_SIZE.into(),
-                            line_height: iced::advanced::text::LineHeight::default(),
-                            font: iced::font::Font {
-                                weight: iced::font::Weight::Bold,
-                                ..theme::ui_font()
-                            },
-                            align_x: alignment::Horizontal::Center.into(),
-                            align_y: alignment::Vertical::Top,
-                            shaping: iced::advanced::text::Shaping::default(),
-                            wrapping: iced::advanced::text::Wrapping::None,
-                            ellipsis: iced::advanced::text::Ellipsis::default(),
-                            hint_factor: Some(1.0),
-                        },
-                        Point::new(text_bounds.center_x(), text_bounds.y),
-                        fg_color,
-                        text_bounds,
-                    );
-
-                    // Pip in the icon's top-right corner. Anchor a
-                    // synthetic rect at the icon position so the pip
-                    // hugs the icon rather than the wider chassis.
-                    super::badge_pip::draw_badge_pip(
-                        renderer,
-                        Rectangle {
-                            x: icon_bounds.x,
-                            y: icon_bounds.y - 3.0,
-                            width: icon_bounds.width + 4.0,
-                            height: icon_bounds.height,
-                        },
-                    );
-                }
-            }
-            return;
-        }
 
         match self.mode {
             RenderMode::Neutral => {
@@ -528,52 +399,69 @@ mod tests {
         |_open, _bounds| ()
     }
 
+    /// Top-nav chassis sizes used in the production call site. Tests reuse
+    /// them so the construction smoke checks exercise the real path.
+    fn top_nav_sizes() -> (iced::Size, iced::Size) {
+        (iced::Size::new(32.0, 32.0), iced::Size::new(56.0, 32.0))
+    }
+
+    /// Side-nav chassis (uniform width, icon-tab height).
+    fn side_nav_sizes() -> (iced::Size, iced::Size) {
+        (iced::Size::new(56.0, 36.0), iced::Size::new(56.0, 36.0))
+    }
+
     #[test]
     fn library_count_zero_returns_space_element() {
         // AppService starts at 0 libraries until `refresh_libraries`
         // lands; this gate is what prevents a flicker of the trigger
         // before the count is known.
+        let (n, f) = top_nav_sizes();
         let _el: Element<'_, TestMessage> =
-            library_filter_trigger(0, 0, false, false, None, dummy_callback());
+            library_filter_trigger(0, 0, false, n, f, None, dummy_callback());
     }
 
     #[test]
     fn library_count_one_is_suppressed() {
         // Single-library servers never show the filter — there's
         // nothing to toggle.
+        let (n, f) = top_nav_sizes();
         let _el: Element<'_, TestMessage> =
-            library_filter_trigger(1, 1, false, false, None, dummy_callback());
+            library_filter_trigger(1, 1, false, n, f, None, dummy_callback());
     }
 
     #[test]
     fn library_count_five_renders_trigger() {
         // Sanity check that the multi-library case constructs without
         // panic.
+        let (n, f) = top_nav_sizes();
         let _el: Element<'_, TestMessage> =
-            library_filter_trigger(5, 5, false, false, None, dummy_callback());
+            library_filter_trigger(5, 5, false, n, f, None, dummy_callback());
     }
 
     #[test]
     fn five_libraries_zero_active_is_neutral() {
         // Empty set means "all libraries on" (the empty-set-as-all
         // rule). Render the neutral chassis, not a "filtered" badge.
+        let (n, f) = top_nav_sizes();
         let _el: Element<'_, TestMessage> =
-            library_filter_trigger(5, 0, false, false, None, dummy_callback());
+            library_filter_trigger(5, 0, false, n, f, None, dummy_callback());
     }
 
     #[test]
     fn five_libraries_two_active_is_filtered() {
         // Strict subset → filtered render: icon + "2/5" label + pip.
+        let (n, f) = top_nav_sizes();
         let _el: Element<'_, TestMessage> =
-            library_filter_trigger(5, 2, false, false, None, dummy_callback());
+            library_filter_trigger(5, 2, false, n, f, None, dummy_callback());
     }
 
     #[test]
     fn five_libraries_all_active_is_neutral() {
         // active == total is semantically "no filter" — same render as
         // active == 0.
+        let (n, f) = top_nav_sizes();
         let _el: Element<'_, TestMessage> =
-            library_filter_trigger(5, 5, false, false, None, dummy_callback());
+            library_filter_trigger(5, 5, false, n, f, None, dummy_callback());
     }
 
     #[test]
@@ -584,13 +472,14 @@ mod tests {
         let bounds = iced::Rectangle {
             x: 10.0,
             y: 20.0,
-            width: 28.0,
-            height: 28.0,
+            width: 32.0,
+            height: 32.0,
         };
+        let (n, f) = top_nav_sizes();
         let _neutral: Element<'_, TestMessage> =
-            library_filter_trigger(5, 5, true, false, Some(bounds), dummy_callback());
+            library_filter_trigger(5, 5, true, n, f, Some(bounds), dummy_callback());
         let _filtered: Element<'_, TestMessage> =
-            library_filter_trigger(5, 3, true, false, Some(bounds), dummy_callback());
+            library_filter_trigger(5, 3, true, n, f, Some(bounds), dummy_callback());
     }
 
     #[test]
@@ -599,18 +488,20 @@ mod tests {
         // deleted server-side — `active > total` until the prune pass
         // runs. Render as if `active == total` (neutral) instead of
         // producing nonsensical "7/5" output.
+        let (n, f) = top_nav_sizes();
         let _el: Element<'_, TestMessage> =
-            library_filter_trigger(5, 7, false, false, None, dummy_callback());
+            library_filter_trigger(5, 7, false, n, f, None, dummy_callback());
     }
 
     #[test]
-    fn compact_mode_renders_for_side_nav() {
-        // Side-nav variant: icon-only width even when filtered, pip
-        // still drawn. Construct both neutral and filtered states to
-        // exercise the compact branch in `draw`.
+    fn side_nav_chassis_constructs() {
+        // Side-nav uses a tab-width chassis (56 wide) at icon-tab
+        // height (36) in both render states — uniform with the
+        // adjacent nav tab cells.
+        let (n, f) = side_nav_sizes();
         let _neutral: Element<'_, TestMessage> =
-            library_filter_trigger(5, 5, false, true, None, dummy_callback());
+            library_filter_trigger(5, 5, false, n, f, None, dummy_callback());
         let _filtered: Element<'_, TestMessage> =
-            library_filter_trigger(5, 2, false, true, None, dummy_callback());
+            library_filter_trigger(5, 2, false, n, f, None, dummy_callback());
     }
 }

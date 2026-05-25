@@ -417,8 +417,10 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // -------------------------------------------------------------------------
     // Hamburger Menu (head of left_section, beside library filter)
     // -------------------------------------------------------------------------
-    let hamburger: Element<'static, NavBarMessage> =
-        super::hover_overlay::HoverOverlay::new(HamburgerMenu::new(
+    // Chassis matches the adjacent nav-tab pill height (32 px) so the
+    // hamburger, library trigger, and tab cells all share the row band.
+    let hamburger: Element<'static, NavBarMessage> = super::hover_overlay::HoverOverlay::new(
+        HamburgerMenu::new(
             |action| match action {
                 MenuAction::ToggleLightMode => NavBarMessage::ToggleLightMode,
                 MenuAction::OpenSettings => NavBarMessage::OpenSettings,
@@ -430,9 +432,11 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             },
             data.hamburger_open,
             data.is_light_mode,
-        ))
-        .border_radius(theme::ui_radius_pill())
-        .into();
+        )
+        .chassis(NAV_PILL_HEIGHT, NAV_PILL_HEIGHT),
+    )
+    .border_radius(theme::ui_radius_pill())
+    .into();
 
     // -------------------------------------------------------------------------
     // Library-filter trigger + popover (icon button + dropdown panel)
@@ -465,12 +469,15 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         let active_library_count = data.active_library_count;
         let library_selector_open = data.library_selector_open;
         let library_selector_bounds = data.library_selector_bounds;
+        // Match the adjacent nav-tab pill height; widen the filtered
+        // chassis so the `N/M` count fits beside the icon.
         let trigger = super::hover_overlay::HoverOverlay::new(
             super::library_filter_trigger::library_filter_trigger(
                 library_count,
                 active_library_count,
                 library_selector_open,
-                false, // not compact — top nav has room for the N/M text
+                iced::Size::new(NAV_PILL_HEIGHT, NAV_PILL_HEIGHT),
+                iced::Size::new(56.0, NAV_PILL_HEIGHT),
                 library_selector_bounds,
                 |open, trigger_bounds| NavBarMessage::LibraryOpenChange {
                     open,
