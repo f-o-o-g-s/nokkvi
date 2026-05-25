@@ -232,17 +232,15 @@ impl SlotListSlotStyle {
 /// Standard padding for slot list slot content
 pub(crate) const SLOT_LIST_SLOT_PADDING: f32 = 8.0;
 
-/// Border radius for slot list slots — reads the current rounded mode setting.
+/// Border radius for slot list slots — always zero.
 ///
-/// Per the L3 brief, the slot rows themselves keep using the legacy
-/// alias (so selected / highlighted fills can render with the
-/// `ui_border_radius()` corner shape). The outer rounded-mode list shell
-/// (`slot_list_background_container`) owns the `ui_radius_lg()` corners
-/// and clips the touching row hairlines at its rounded edges via
-/// `clip(true)` — so even though the regular-state per-row corners are
-/// 6 px, the visible perimeter still reads as a sealed list shell.
+/// Slot rows stay square in both flat and rounded modes. The rounded-mode
+/// list shell (`slot_list_background_container`) keeps its `ui_radius_lg()`
+/// corners and clips the touching row hairlines at its rounded edges via
+/// `clip(true)`, so the outer perimeter still reads as a sealed shell even
+/// though every individual row inside it has 0 px corners.
 pub(crate) fn slot_list_border_radius() -> iced::border::Radius {
-    crate::theme::ui_border_radius()
+    iced::border::Radius::default()
 }
 
 /// Standard vertical spacing between slot list slot elements
