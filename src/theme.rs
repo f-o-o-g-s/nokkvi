@@ -1270,7 +1270,13 @@ pub(crate) fn border_3d_accent_raised() -> (Color, Color) {
 /// Returns (highlight_color, shadow_color) for 3D raised accent elements using darker accent
 ///
 /// Same approach but uses the darker accent as the base color.
+//
+// The volume slider's SFX variant was the last live caller; after the flat
+// redesign it derives the accent color directly. Kept available for any other
+// lane (L4 EQ slider, etc.) that still uses the darker-accent bevel pair
+// until the full 3D removal final pass.
 #[inline]
+#[allow(dead_code)]
 pub(crate) fn border_3d_accent_darker_raised() -> (Color, Color) {
     border_3d_accent_from_base(accent())
 }
