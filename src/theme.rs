@@ -499,7 +499,7 @@ atomic_u8_enum! {
         0 => Off,
         1 => PlayerBar,
         2 => TopBar,
-        3 => ProgressTrack,
+        3 => MiniPlayer,
     } default Off
 }
 
@@ -543,9 +543,11 @@ pub(crate) fn show_top_bar_strip() -> bool {
 ///
 /// True when the top-nav layout is active AND the metadata strip lives
 /// somewhere other than the top bar (i.e. `Off`, `PlayerBar`, or
-/// `ProgressTrack`) — in those modes the top nav doesn't carry any
-/// now-playing metadata, so its right portion is free real estate that the
-/// artwork can take over.
+/// `MiniPlayer`) — in those modes the top nav doesn't carry any
+/// now-playing metadata, so its right portion is free real estate that
+/// the artwork can take over. `MiniPlayer` keeps its own artwork inside
+/// the player bar; that doesn't conflict with the top-nav elevation
+/// because they live on different rows.
 ///
 /// `TopBar` keeps the regular column-stacked layout because the metadata
 /// strip still needs the full nav width.

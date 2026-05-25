@@ -1336,18 +1336,7 @@ impl Nokkvi {
         crate::theme::set_nav_display_mode(settings.nav_display_mode);
 
         // Apply track info display mode from persisted settings.
-        //
-        // `ProgressTrack` rendered metadata as a scrolling overlay on the
-        // progress-bar track — removed in the flat redesign. Migrate stored
-        // `ProgressTrack` values to `PlayerBar` on load so users who had it
-        // selected don't see an inert mode.
-        let resolved_track_info_display = match settings.track_info_display {
-            nokkvi_data::types::player_settings::TrackInfoDisplay::ProgressTrack => {
-                nokkvi_data::types::player_settings::TrackInfoDisplay::PlayerBar
-            }
-            other => other,
-        };
-        crate::theme::set_track_info_display(resolved_track_info_display);
+        crate::theme::set_track_info_display(settings.track_info_display);
 
         // Apply slot row height from persisted settings
         crate::theme::set_slot_row_height(settings.slot_row_height);

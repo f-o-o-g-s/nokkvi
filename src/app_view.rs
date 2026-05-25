@@ -305,6 +305,30 @@ impl Nokkvi {
         };
 
         let has_queue = !self.library.queue_songs.is_empty();
+
+        // Artwork handle for the `MiniPlayer` track-info display mode —
+        // looks up the current song's album_id in the LRU caches (large
+        // preferred, mini fallback so the thumbnail stays warm even when
+        // the full-size art hasn't loaded yet). `None` when radio mode is
+        // active, no song is loaded, or no cached art exists.
+        let mini_player_artwork: Option<iced::widget::image::Handle> =
+            if self.active_playback.is_radio() {
+                None
+            } else {
+                self.scrobble
+                    .current_song_id
+                    .as_deref()
+                    .and_then(|sid| self.library.queue_songs.iter().find(|s| s.id == sid))
+                    .and_then(|song| {
+                        self.artwork
+                            .large_artwork
+                            .snapshot
+                            .get(&song.album_id)
+                            .or_else(|| self.artwork.album_art.snapshot.get(&song.album_id))
+                            .cloned()
+                    })
+            };
+
         let player_bar_data = widgets::PlayerBarViewData {
             playback_position: self.playback.position,
             playback_duration: self.playback.duration,
@@ -325,14 +349,27 @@ impl Nokkvi {
             window_width: self.window.width,
             layout: self.player_bar_layout,
             is_light_mode: crate::theme::is_light_mode(),
-            track_title: icy_title.unwrap_or(&self.playback.title).to_string(),
-            track_artist: icy_artist.unwrap_or(&self.playback.artist).to_string(),
+            // For radio playback the station name lives on `radio_name` and
+            // ICY values fill the title/artist slots — empty when no ICY has
+            // arrived yet (vs. echoing the station name into slot 2). For
+            // queue playback the fields carry the song metadata directly.
+            track_title: if self.active_playback.is_radio() {
+                icy_title.unwrap_or_default().to_string()
+            } else {
+                self.playback.title.clone()
+            },
+            track_artist: if self.active_playback.is_radio() {
+                icy_artist.unwrap_or_default().to_string()
+            } else {
+                self.playback.artist.clone()
+            },
             track_album: if self.active_playback.is_radio() {
                 String::new()
             } else {
                 self.playback.album.clone()
             },
             radio_name: radio_name.map(|s| s.to_string()),
+            artwork_handle: mini_player_artwork,
             hamburger_open: matches!(
                 self.open_menu,
                 Some(crate::app_message::OpenMenu::Hamburger)

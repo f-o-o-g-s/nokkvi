@@ -34,7 +34,7 @@
 //!         0 => Off,
 //!         1 => PlayerBar,
 //!         2 => TopBar,
-//!         3 => ProgressTrack,
+//!         3 => MiniPlayer,
 //!     } default Off
 //! }
 //! ```

@@ -96,6 +96,34 @@ pub(crate) fn volume_section_width(show_sfx_slider: bool) -> f32 {
     }
 }
 
+/// Side length of the artwork thumbnail rendered to the left of the
+/// transport controls in `TrackInfoDisplay::MiniPlayer` mode.
+pub(crate) const MINI_PLAYER_ARTWORK_SIZE: f32 = 56.0;
+/// Width of the title/artist/album text column next to that artwork.
+const MINI_PLAYER_TEXT_WIDTH: f32 = 180.0;
+/// Gap between the artwork and the text column inside the section.
+const MINI_PLAYER_INNER_GAP: f32 = 8.0;
+/// Total horizontal extent of the mini-player section. Fed to the
+/// `Length::Fixed` wrapper in `main_row` so the progress bar flexes
+/// into the remainder.
+pub(crate) const MINI_PLAYER_SECTION_WIDTH: f32 =
+    MINI_PLAYER_ARTWORK_SIZE + MINI_PLAYER_INNER_GAP + MINI_PLAYER_TEXT_WIDTH;
+
+/// Window-width threshold below which the mini-player section hides
+/// so the transport / progress / mode / volume sections retain
+/// breathing room on narrow windows. Chosen so the progress bar keeps
+/// ≳200 px even when transports are uncollapsed and a few modes are
+/// still inline.
+pub(crate) const MINI_PLAYER_HIDE_BELOW: f32 = 760.0;
+
+/// Whether the mini-player left-of-transport section should render
+/// for the given window width AND the active `TrackInfoDisplay`.
+#[inline]
+pub(crate) fn show_mini_player_section(width: f32) -> bool {
+    use nokkvi_data::types::player_settings::TrackInfoDisplay;
+    theme::track_info_display() == TrackInfoDisplay::MiniPlayer && width >= MINI_PLAYER_HIDE_BELOW
+}
+
 /// Volume change per scroll line (e.g. mouse wheel notch)
 const SCROLL_VOLUME_STEP_LINES: f32 = 0.01;
 /// Volume change per scroll pixel (e.g. trackpad smooth scrolling)
@@ -269,18 +297,19 @@ pub(crate) struct PlayerBarViewData {
     pub window_width: f32,
     pub layout: PlayerBarLayout,
     pub is_light_mode: bool,
-    // Track metadata — populated by callers and historically consumed by the
-    // ProgressTrack overlay (removed in the flat redesign). L6 may rewire
-    // these into the new 24 px status strip; until then they remain on the
-    // struct so callers don't churn.
-    #[allow(dead_code)]
+    // Track metadata — consumed by the `MiniPlayer` left-of-transport
+    // column. `track_title` / `track_artist` / `track_album` carry the
+    // current queue song; `radio_name` is `Some` when a radio stream is
+    // active (artist/title then carry the ICY values).
     pub track_title: String,
-    #[allow(dead_code)]
     pub track_artist: String,
-    #[allow(dead_code)]
     pub track_album: String,
-    #[allow(dead_code)]
     pub radio_name: Option<String>,
+    /// Album artwork for the currently playing song. Populated by
+    /// `app_view.rs` from the artwork LRU (large preferred, falls back
+    /// to mini). Rendered as the leading thumbnail in `MiniPlayer`
+    /// mode; ignored in other modes.
+    pub artwork_handle: Option<iced::widget::image::Handle>,
     /// Whether the player-bar hamburger menu is currently open (controlled state).
     pub hamburger_open: bool,
     /// Whether the player-bar kebab "modes" menu is currently open
@@ -507,6 +536,129 @@ fn mode_toggle_button<'a>(
     )
     .border_radius(theme::ui_radius_sm())
     .into()
+}
+
+/// Build the left-of-transport artwork + 3-line metadata column rendered
+/// in `TrackInfoDisplay::MiniPlayer` mode.
+///
+/// Layout: [56 px artwork] [8 px gap] [180 px text column with
+/// `title` / `artist` / `album` stacked vertically]. Each text line is a
+/// marquee that scrolls when its content overflows the column width.
+///
+/// In radio mode the three slots carry `station name` / `ICY title` / `ICY artist`
+/// (mapped by `app_view.rs`); the artwork slot falls back to a tinted
+/// `radio-tower` glyph on `theme::bg1()` when no per-station artwork is
+/// available.
+///
+/// The whole section is wrapped in a `mouse_area` that emits
+/// `StripClicked` so the user's configured `strip_click_action` (go to
+/// queue / album / artist / copy info) routes the same as a click on the
+/// regular player-bar strip.
+fn mini_player_section(data: &PlayerBarViewData) -> Element<'static, PlayerBarMessage> {
+    let radius = theme::ui_border_radius();
+
+    let artwork: Element<'static, PlayerBarMessage> =
+        if let Some(handle) = data.artwork_handle.clone() {
+            container(
+                iced::widget::image(handle)
+                    .content_fit(iced::ContentFit::Cover)
+                    .width(Length::Fill)
+                    .height(Length::Fill),
+            )
+            .width(Length::Fixed(MINI_PLAYER_ARTWORK_SIZE))
+            .height(Length::Fixed(MINI_PLAYER_ARTWORK_SIZE))
+            .clip(true)
+            .style(move |_| container::Style {
+                background: Some(theme::bg2().into()),
+                border: iced::Border {
+                    radius,
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .into()
+        } else if data.is_radio {
+            container(svg_icon(
+                super::track_info_strip::RADIO_TOWER_ICON_PATH,
+                MINI_PLAYER_ARTWORK_SIZE * 0.55,
+                theme::fg2(),
+            ))
+            .width(Length::Fixed(MINI_PLAYER_ARTWORK_SIZE))
+            .height(Length::Fixed(MINI_PLAYER_ARTWORK_SIZE))
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center)
+            .style(move |_| container::Style {
+                background: Some(theme::bg1().into()),
+                border: iced::Border {
+                    radius,
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .into()
+        } else {
+            container(iced::widget::Space::new())
+                .width(Length::Fixed(MINI_PLAYER_ARTWORK_SIZE))
+                .height(Length::Fixed(MINI_PLAYER_ARTWORK_SIZE))
+                .style(move |_| container::Style {
+                    background: Some(theme::bg1().into()),
+                    border: iced::Border {
+                        radius,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+                .into()
+        };
+
+    let make_line =
+        |value: String, color: Color, bold: bool| -> Element<'static, PlayerBarMessage> {
+            let weight = if bold { Weight::Bold } else { Weight::Medium };
+            super::marquee_text::marquee_text(value)
+                .size(12.0)
+                .font(Font {
+                    weight,
+                    ..theme::ui_font()
+                })
+                .color(color)
+                .into()
+        };
+
+    // Slot mapping
+    //   queue:  title / artist / album
+    //   radio:  station / ICY title / ICY artist
+    // app_view already routes ICY values through track_title / track_artist
+    // for radio playback, so the only swap here is the leading station name
+    // taking the title slot.
+    let (line1, line2, line3) = if let Some(station) = data.radio_name.clone() {
+        (station, data.track_title.clone(), data.track_artist.clone())
+    } else {
+        (
+            data.track_title.clone(),
+            data.track_artist.clone(),
+            data.track_album.clone(),
+        )
+    };
+
+    let title_line = make_line(line1, theme::now_playing_color(), true);
+    let artist_line = make_line(line2, theme::selected_color(), false);
+    let album_line = make_line(line3, theme::fg2(), false);
+
+    let text_column = container(
+        column![title_line, artist_line, album_line]
+            .spacing(2)
+            .width(Length::Fixed(MINI_PLAYER_TEXT_WIDTH)),
+    )
+    .height(Length::Fixed(MINI_PLAYER_ARTWORK_SIZE))
+    .align_y(Alignment::Center);
+
+    let inner = row![artwork, text_column]
+        .spacing(MINI_PLAYER_INNER_GAP)
+        .align_y(Alignment::Center);
+
+    mouse_area(inner)
+        .on_press(PlayerBarMessage::StripClicked)
+        .into()
 }
 
 /// Build the player bar view.
@@ -1058,10 +1210,31 @@ pub(crate) fn player_bar<'a>(
         .align_x(Alignment::End)
         .center_y(Length::Fill);
 
-    let main_row = row![player_controls, progress_row, mode_toggles, volume_control,]
+    // Progress-track section (artwork + 3-line metadata column) — only
+    // present when the user has picked `TrackInfoDisplay::MiniPlayer`
+    // AND the window is wide enough that adding the section doesn't crush
+    // the progress bar.
+    let mini_player_visible = show_mini_player_section(data.window_width);
+    let mini_player_element = mini_player_visible.then(|| {
+        container(mini_player_section(data))
+            .width(Length::Fixed(MINI_PLAYER_SECTION_WIDTH))
+            .height(Length::Fill)
+            .align_x(Alignment::Start)
+            .center_y(Length::Fill)
+    });
+
+    let mut main_row = iced::widget::Row::new()
         .spacing(MAIN_ROW_INNER_GAP)
         .padding(outer_padding)
         .align_y(Alignment::Center);
+    if let Some(section) = mini_player_element {
+        main_row = main_row.push(section);
+    }
+    let main_row = main_row
+        .push(player_controls)
+        .push(progress_row)
+        .push(mode_toggles)
+        .push(volume_control);
 
     let main_content: Element<'_, PlayerBarMessage> = if let Some(strip) = info_strip {
         // --- TRACK DISPLAY MODE ---

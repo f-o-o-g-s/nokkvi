@@ -584,7 +584,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     }
 
     // Only show nav bar metadata when the display mode targets the top/nav bar.
-    // Off, PlayerBar, and ProgressTrack modes shouldn't show metadata here.
+    // Off, PlayerBar, and MiniPlayer modes shouldn't show metadata here.
     let show_nav_metadata = {
         use nokkvi_data::types::player_settings::TrackInfoDisplay;
         let mode = theme::track_info_display();
