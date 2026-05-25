@@ -311,17 +311,28 @@ use super::player_bar::player_bar_height;
 
 /// Total height of chrome elements for views with headers.
 ///
-/// In top nav mode: nav_bar + player_bar + view_header_chrome().
+/// In top nav mode: nav_bar + player_bar + view_header_chrome(), plus the
+/// `TopBarUnder` strip when that mode is active (sits in its own row beneath
+/// the nav bar — see `show_top_bar_under_strip`).
 /// In side and none nav modes: player_bar + view_header_chrome() (no top bar),
-/// plus the TopBar strip when TrackInfoDisplay::TopBar is active.
+/// plus the strip when `TopBar` or `TopBarUnder` is active (both render as a
+/// row above the content in those layouts — see `show_top_bar_strip`).
 ///
 /// The slot list runs flush to the player bar, so no bottom pad is subtracted
 /// from the slot-count math in `with_dynamic_slots`.
 pub(crate) fn chrome_height_with_header() -> f32 {
     if crate::theme::is_top_nav() {
-        crate::theme::nav_bar_height() + player_bar_height() + view_header_chrome()
+        let top_bar_under_strip = if crate::theme::show_top_bar_under_strip() {
+            super::track_info_strip::STRIP_HEIGHT_WITH_SEPARATOR
+        } else {
+            0.0
+        };
+        crate::theme::nav_bar_height()
+            + player_bar_height()
+            + view_header_chrome()
+            + top_bar_under_strip
     } else {
-        // Side or None mode: no top nav bar, but TopBar track info strip may add height
+        // Side or None mode: no top nav bar, but TopBar / TopBarUnder add height
         let top_bar_strip = if crate::theme::show_top_bar_strip() {
             super::track_info_strip::STRIP_HEIGHT_WITH_SEPARATOR
         } else {

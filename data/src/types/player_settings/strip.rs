@@ -19,6 +19,13 @@ define_labeled_enum! {
         PlayerBar { label: "Player Bar", wire: "player_bar" },
         /// Track info strip at the top of the window (side nav only)
         TopBar { label: "Top Bar", wire: "top_bar" },
+        /// Track info strip rendered in its own row directly beneath the
+        /// nav bar (top-nav layout) — uses the same separator-above
+        /// styling as the player-bar strip instead of being merged into
+        /// the nav row. In side-nav and none-nav layouts (where there
+        /// is no horizontal nav row), behaves the same as `TopBar`:
+        /// the strip sits above the main content.
+        TopBarUnder { label: "Top Bar Under", wire: "top_bar_under" },
         /// Artwork + title/artist/album stacked to the left of the
         /// transport controls in the player bar (an inline track-info
         /// column instead of a separate strip).

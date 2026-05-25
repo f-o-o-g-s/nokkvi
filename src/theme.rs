@@ -500,6 +500,7 @@ atomic_u8_enum! {
         1 => PlayerBar,
         2 => TopBar,
         3 => MiniPlayer,
+        4 => TopBarUnder,
     } default Off
 }
 
@@ -530,12 +531,29 @@ pub(crate) fn show_player_bar_strip() -> bool {
 
 /// Whether the top bar track info strip should be rendered above content.
 ///
-/// True when `TrackInfoDisplay::TopBar` AND side-nav layout are both active.
+/// True when the active strip mode renders a strip above the main content in
+/// side-nav or none-nav layouts. Both `TopBar` and `TopBarUnder` map to the
+/// same above-content position there — they only diverge in top-nav layout
+/// (where `TopBar` lives inline in the nav row and `TopBarUnder` becomes its
+/// own row below the nav — see [`show_top_bar_under_strip`]).
 ///
 /// **Single source of truth** — use this instead of ad-hoc compound checks.
 #[inline]
 pub(crate) fn show_top_bar_strip() -> bool {
-    track_info_display() == TrackInfoDisplay::TopBar && !is_top_nav()
+    matches!(
+        track_info_display(),
+        TrackInfoDisplay::TopBar | TrackInfoDisplay::TopBarUnder,
+    ) && !is_top_nav()
+}
+
+/// Whether the player-bar-styled metadata strip should be rendered directly
+/// beneath the top nav bar.
+///
+/// True when `TrackInfoDisplay::TopBarUnder` AND top-nav layout are both
+/// active. The other layouts route through [`show_top_bar_strip`] instead.
+#[inline]
+pub(crate) fn show_top_bar_under_strip() -> bool {
+    track_info_display() == TrackInfoDisplay::TopBarUnder && is_top_nav()
 }
 
 /// Whether the artwork-elevation feature is *enabled* by the user's theme
@@ -550,7 +568,11 @@ pub(crate) fn show_top_bar_strip() -> bool {
 /// because they live on different rows.
 ///
 /// `TopBar` keeps the regular column-stacked layout because the metadata
-/// strip still needs the full nav width.
+/// strip still needs the full nav width. `TopBarUnder` likewise opts out:
+/// its strip sits as its own full-width row directly beneath the nav, so
+/// elevating the artwork into that band would either cover the strip or
+/// require the strip to span only the slot-list column. Easier to just
+/// disable elevation whenever a top-area strip is visible.
 ///
 /// This is only the *theme* gate — `Nokkvi::elevated_artwork_extent`
 /// additionally excludes split-view, ineligible views, and the Auto-mode
@@ -559,7 +581,11 @@ pub(crate) fn show_top_bar_strip() -> bool {
 /// finally reads.
 #[inline]
 pub(crate) fn is_artwork_elevated() -> bool {
-    is_top_nav() && track_info_display() != TrackInfoDisplay::TopBar
+    is_top_nav()
+        && !matches!(
+            track_info_display(),
+            TrackInfoDisplay::TopBar | TrackInfoDisplay::TopBarUnder,
+        )
 }
 
 // ============================================================================
@@ -1654,8 +1680,8 @@ mod tests {
         // TrackInfoDisplay default = Off.
         assert_eq!(TrackInfoDisplay::from_u8(255), TrackInfoDisplay::Off);
         assert_eq!(TrackInfoDisplay::from_u8(99), TrackInfoDisplay::Off);
-        // Also verify a byte just past the highest known variant (3) falls back.
-        assert_eq!(TrackInfoDisplay::from_u8(4), TrackInfoDisplay::Off);
+        // Also verify a byte just past the highest known variant (4) falls back.
+        assert_eq!(TrackInfoDisplay::from_u8(5), TrackInfoDisplay::Off);
     }
 
     /// `ArtworkColumnMode`'s integer encoding has `Never` sitting at byte 3,

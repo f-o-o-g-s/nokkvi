@@ -177,8 +177,11 @@ impl Nokkvi {
     ///
     /// Returns `Some(extent)` when all of these hold:
     /// - Top-nav layout is active (the only layout this elevation reshapes).
-    /// - `track_info_display` is anything other than `TopBar` — the nav bar's
-    ///   right portion is otherwise reserved for the metadata strip.
+    /// - `track_info_display` is neither `TopBar` nor `TopBarUnder` — the nav
+    ///   bar's right portion is otherwise reserved for the metadata strip
+    ///   (TopBar) or the strip occupies its own row beneath the nav
+    ///   (TopBarUnder), and either case keeps the artwork in its regular
+    ///   column-stacked spot beneath the chrome.
     /// - The browsing panel is not open — split-view has its own dual-pane
     ///   shape and skips elevation.
     /// - The current view's `ViewPage` reports `uses_horizontal_artwork_column()`
@@ -449,18 +452,37 @@ impl Nokkvi {
         //              redesign mockups)
         //   None mode: [strip?] + content + player_bar  (no sidebar)
 
-        // Helper: build the optional TopBar strip (with separator) as a
-        // single Element. Returns `None` when the strip is hidden. Used by
-        // both side-nav (placed inside the right column) and none-nav
-        // (placed at the top of the outer column).
-        let build_top_bar_strip = || -> Option<Element<'_, Message>> {
-            if !crate::theme::show_top_bar_strip() {
+        // Helper: build the optional top-area metadata strip as a single
+        // Element. Returns `None` when the strip is hidden.
+        //
+        // `with_separator_above = false` → `TopBar` styling: bare strip with a
+        // 1 px separator BELOW (visually divides strip from the content under
+        // it). Used by side-nav (inside the right column) and none-nav (top of
+        // the outer column).
+        //
+        // `with_separator_above = true` → `TopBarUnder` styling: 1 px separator
+        // ABOVE the strip (matches the player-bar variant). Used by top-nav,
+        // where the separator divides the nav row from the strip beneath it.
+        let build_top_strip = |with_separator_above: bool| -> Option<Element<'_, Message>> {
+            let visible = if with_separator_above {
+                crate::theme::show_top_bar_under_strip()
+            } else {
+                crate::theme::show_top_bar_strip()
+            };
+            if !visible {
                 return None;
             }
-            let strip = widgets::track_info_strip::track_info_strip(
-                &strip_data,
-                Some(Message::StripClicked),
-            );
+            let strip = if with_separator_above {
+                widgets::track_info_strip::track_info_strip_with_separator(
+                    &strip_data,
+                    Some(Message::StripClicked),
+                )
+            } else {
+                widgets::track_info_strip::track_info_strip(
+                    &strip_data,
+                    Some(Message::StripClicked),
+                )
+            };
             let wrapped: Element<'_, Message> = if radio_name.is_some() {
                 strip
             } else {
@@ -492,145 +514,163 @@ impl Nokkvi {
                 )
                 .into()
             };
-            Some(column![wrapped, crate::theme::horizontal_separator::<Message>(1.0),].into())
+            if with_separator_above {
+                Some(wrapped)
+            } else {
+                Some(column![wrapped, crate::theme::horizontal_separator::<Message>(1.0),].into())
+            }
         };
 
-        let base_layer: Element<'_, Message> =
-            if crate::theme::is_side_nav() || crate::theme::is_none_nav() {
-                let mut outer = iced::widget::Column::new();
+        let base_layer: Element<'_, Message> = if crate::theme::is_side_nav()
+            || crate::theme::is_none_nav()
+        {
+            let mut outer = iced::widget::Column::new();
 
-                if crate::theme::is_side_nav() {
-                    // Settings has no NavView counterpart; the sidebar treats it
-                    // as Queue (`settings_open` flag below highlights it instead).
-                    let side_nav_view: widgets::NavView =
-                        Option::<widgets::NavView>::from(self.current_view)
-                            .unwrap_or(widgets::NavView::Queue);
-                    // Mirror the top-nav library state into the side-nav so
-                    // the footer trigger + popover see the same source of
-                    // truth.
-                    let (sn_library_count, sn_active_library_count, sn_library_rows) =
-                        match &self.app_service {
-                            Some(svc) => {
-                                let active = svc.active_library_ids();
-                                let all_checked = active.is_empty();
-                                let mut rows: Vec<(i32, String, Option<u32>, bool)> = svc
-                                    .all_libraries()
-                                    .into_iter()
-                                    .map(|lib| {
-                                        let checked = all_checked || active.contains(&lib.id);
-                                        (lib.id, lib.name, lib.song_count, checked)
-                                    })
-                                    .collect();
-                                rows.sort_by(|a, b| a.1.cmp(&b.1));
-                                let active_for_display = if all_checked {
-                                    rows.len()
-                                } else {
-                                    active.len()
-                                };
-                                (svc.library_count(), active_for_display, rows)
-                            }
-                            None => (0, 0, Vec::new()),
-                        };
-                    let (sn_library_selector_open, sn_library_selector_bounds) =
-                        library_selector_state(&self.open_menu);
-                    let side_data = widgets::SideNavBarData {
-                        current_view: side_nav_view,
-                        settings_open: self.current_view == View::Settings,
-                        library_count: sn_library_count,
-                        active_library_count: sn_active_library_count,
-                        library_selector_open: sn_library_selector_open,
-                        library_selector_bounds: sn_library_selector_bounds,
-                        library_rows: sn_library_rows,
-                        hamburger_open: matches!(
-                            self.open_menu,
-                            Some(crate::app_message::OpenMenu::Hamburger)
-                        ),
-                        is_light_mode: crate::theme::is_light_mode(),
+            if crate::theme::is_side_nav() {
+                // Settings has no NavView counterpart; the sidebar treats it
+                // as Queue (`settings_open` flag below highlights it instead).
+                let side_nav_view: widgets::NavView =
+                    Option::<widgets::NavView>::from(self.current_view)
+                        .unwrap_or(widgets::NavView::Queue);
+                // Mirror the top-nav library state into the side-nav so
+                // the footer trigger + popover see the same source of
+                // truth.
+                let (sn_library_count, sn_active_library_count, sn_library_rows) =
+                    match &self.app_service {
+                        Some(svc) => {
+                            let active = svc.active_library_ids();
+                            let all_checked = active.is_empty();
+                            let mut rows: Vec<(i32, String, Option<u32>, bool)> = svc
+                                .all_libraries()
+                                .into_iter()
+                                .map(|lib| {
+                                    let checked = all_checked || active.contains(&lib.id);
+                                    (lib.id, lib.name, lib.song_count, checked)
+                                })
+                                .collect();
+                            rows.sort_by(|a, b| a.1.cmp(&b.1));
+                            let active_for_display = if all_checked {
+                                rows.len()
+                            } else {
+                                active.len()
+                            };
+                            (svc.library_count(), active_for_display, rows)
+                        }
+                        None => (0, 0, Vec::new()),
                     };
-                    // Side-nav mode: sidebar runs the FULL window height; the
-                    // top-bar strip, content, and player bar all live in the
-                    // right column so the sidebar is the visual leftmost band
-                    // across every row of chrome (matches the flat-redesign
-                    // side-nav mockups).
-                    let mut right_col = iced::widget::Column::new();
-                    if let Some(strip_el) = build_top_bar_strip() {
-                        right_col = right_col.push(strip_el);
-                    }
-                    right_col = right_col.push(self.main_content(false));
-                    right_col = right_col.push(
-                        widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar),
-                    );
-
-                    outer = outer.push(iced::widget::row![
-                        widgets::side_nav_bar(side_data).map(map_nav_bar_message),
-                        right_col,
-                    ]);
-                } else {
-                    // None mode: no sidebar — strip (if any), content, player
-                    // bar all span the full window width.
-                    if let Some(strip_el) = build_top_bar_strip() {
-                        outer = outer.push(strip_el);
-                    }
-                    outer = outer.push(self.main_content(false));
-                    outer = outer.push(
-                        widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar),
-                    );
+                let (sn_library_selector_open, sn_library_selector_bounds) =
+                    library_selector_state(&self.open_menu);
+                let side_data = widgets::SideNavBarData {
+                    current_view: side_nav_view,
+                    settings_open: self.current_view == View::Settings,
+                    library_count: sn_library_count,
+                    active_library_count: sn_active_library_count,
+                    library_selector_open: sn_library_selector_open,
+                    library_selector_bounds: sn_library_selector_bounds,
+                    library_rows: sn_library_rows,
+                    hamburger_open: matches!(
+                        self.open_menu,
+                        Some(crate::app_message::OpenMenu::Hamburger)
+                    ),
+                    is_light_mode: crate::theme::is_light_mode(),
+                };
+                // Side-nav mode: sidebar runs the FULL window height; the
+                // top-bar strip, content, and player bar all live in the
+                // right column so the sidebar is the visual leftmost band
+                // across every row of chrome (matches the flat-redesign
+                // side-nav mockups).
+                let mut right_col = iced::widget::Column::new();
+                if let Some(strip_el) = build_top_strip(false) {
+                    right_col = right_col.push(strip_el);
                 }
-
-                outer.into()
-            } else {
-                // Top-nav layout — always wrap in `Stack` with the same column
-                // shape underneath, even when elevation is off. Switching the
-                // root widget type between Column (non-elevated) and Stack
-                // (elevated) would tear down `text_input` focus and any other
-                // stateful widgets every time elevation flipped — Ctrl+E to
-                // open the browsing panel, navigating to an ineligible view,
-                // a window resize crossing the Auto-mode threshold. See
-                // CLAUDE.md "Render output" gotcha and gotchas.md:38.
-                //
-                // The outer `Space` reserves the nav-bar's vertical band:
-                //   - non-elevated → `NAV_BAR_HEIGHT` so `main_content` is
-                //     pushed below the nav band (same layout as before)
-                //   - elevated → `0.0` so `main_content` extends to the top
-                //     of the window, letting the artwork pane reach y=0
-                //
-                // `nav_visual_width` is the horizontal extent the nav-bar
-                // occupies — full window width when not elevated, only the
-                // slot-list area when elevated (the artwork pane underneath
-                // shows through to the right of the nav).
-                let (outer_space_height, nav_visual_width) =
-                    if let Some(artwork_extent) = elevated_extent {
-                        (0.0, (self.content_pane_width() - artwork_extent).max(0.0))
-                    } else {
-                        // Use the live nav-bar height (32 flat / 44 rounded)
-                        // — the legacy `slot_list::NAV_BAR_HEIGHT` const is
-                        // pinned at 32 and lets the rounded-mode nav overlay
-                        // into the view header by 12 px, eating its top
-                        // margin and pushing the header pill flush against
-                        // the bottom of the nav bar.
-                        (crate::theme::nav_bar_height(), self.window.width)
-                    };
-                let is_elevated = elevated_extent.is_some();
-
-                let base = column![
-                    iced::widget::Space::new()
-                        .width(Length::Fill)
-                        .height(Length::Fixed(outer_space_height)),
-                    self.main_content(is_elevated),
+                right_col = right_col.push(self.main_content(false));
+                right_col = right_col.push(
                     widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar),
-                ];
+                );
 
-                let nav_overlay = column![
-                    container(self.navigation_bar(nav_visual_width))
-                        .width(Length::Fixed(nav_visual_width))
-                        .height(Length::Shrink),
-                    iced::widget::Space::new().height(Length::Fill),
-                ]
-                .width(Length::Fill)
-                .height(Length::Fill);
+                outer = outer.push(iced::widget::row![
+                    widgets::side_nav_bar(side_data).map(map_nav_bar_message),
+                    right_col,
+                ]);
+            } else {
+                // None mode: no sidebar — strip (if any), content, player
+                // bar all span the full window width.
+                if let Some(strip_el) = build_top_strip(false) {
+                    outer = outer.push(strip_el);
+                }
+                outer = outer.push(self.main_content(false));
+                outer = outer.push(
+                    widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar),
+                );
+            }
 
-                Stack::new().push(base).push(nav_overlay).into()
-            };
+            outer.into()
+        } else {
+            // Top-nav layout — always wrap in `Stack` with the same column
+            // shape underneath, even when elevation is off. Switching the
+            // root widget type between Column (non-elevated) and Stack
+            // (elevated) would tear down `text_input` focus and any other
+            // stateful widgets every time elevation flipped — Ctrl+E to
+            // open the browsing panel, navigating to an ineligible view,
+            // a window resize crossing the Auto-mode threshold. See
+            // CLAUDE.md "Render output" gotcha and gotchas.md:38.
+            //
+            // The outer `Space` reserves the nav-bar's vertical band:
+            //   - non-elevated → `NAV_BAR_HEIGHT` so `main_content` is
+            //     pushed below the nav band (same layout as before)
+            //   - elevated → `0.0` so `main_content` extends to the top
+            //     of the window, letting the artwork pane reach y=0
+            //
+            // `nav_visual_width` is the horizontal extent the nav-bar
+            // occupies — full window width when not elevated, only the
+            // slot-list area when elevated (the artwork pane underneath
+            // shows through to the right of the nav).
+            let (outer_space_height, nav_visual_width) =
+                if let Some(artwork_extent) = elevated_extent {
+                    (0.0, (self.content_pane_width() - artwork_extent).max(0.0))
+                } else {
+                    // Use the live nav-bar height (32 flat / 44 rounded)
+                    // — the legacy `slot_list::NAV_BAR_HEIGHT` const is
+                    // pinned at 32 and lets the rounded-mode nav overlay
+                    // into the view header by 12 px, eating its top
+                    // margin and pushing the header pill flush against
+                    // the bottom of the nav bar.
+                    (crate::theme::nav_bar_height(), self.window.width)
+                };
+            let is_elevated = elevated_extent.is_some();
+
+            // `TopBarUnder` mode in top-nav: insert the player-bar-styled
+            // strip between the nav-band Space and `main_content` so it
+            // renders directly beneath the nav row and pushes the main
+            // content down by the strip's height. The nav overlay sits
+            // ABOVE the Space; the strip occupies the next column slot,
+            // so nav → strip → content stacks naturally.
+            let top_under_strip = build_top_strip(true);
+
+            let mut base_col = iced::widget::Column::new().push(
+                iced::widget::Space::new()
+                    .width(Length::Fill)
+                    .height(Length::Fixed(outer_space_height)),
+            );
+            if let Some(strip_el) = top_under_strip {
+                base_col = base_col.push(strip_el);
+            }
+            base_col = base_col.push(self.main_content(is_elevated));
+            base_col = base_col
+                .push(widgets::player_bar(&player_bar_data, player_strip).map(Message::PlayerBar));
+            let base = base_col;
+
+            let nav_overlay = column![
+                container(self.navigation_bar(nav_visual_width))
+                    .width(Length::Fixed(nav_visual_width))
+                    .height(Length::Shrink),
+                iced::widget::Space::new().height(Length::Fill),
+            ]
+            .width(Length::Fill)
+            .height(Length::Fill);
+
+            Stack::new().push(base).push(nav_overlay).into()
+        };
 
         // Create stack with base layer
         let mut stack = Stack::new().push(base_layer);

@@ -80,7 +80,7 @@ define_settings! {
                 category: "Layout",
                 subtitle: Some("Where to show the now-playing metadata strip"),
                 default: "Off",
-                options: &["Off", "Player Bar", "Top Bar", "Mini Player"],
+                options: &["Off", "Player Bar", "Top Bar", "Top Bar Under", "Mini Player"],
                 read_field: |d| d.track_info_display.as_ref(),
             },
         },
