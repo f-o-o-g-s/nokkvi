@@ -71,6 +71,38 @@ pub(crate) struct AboutViewData<'a> {
     pub server_version: Option<&'a str>,
 }
 
+/// Build the `(label, value)` rows shown in the About modal's info table.
+///
+/// Shared by the visual renderer (`about_modal_overlay`) and the Copy All
+/// clipboard handler so the two paths can't drift — every row visible
+/// on-screen lands in the clipboard, and vice versa. Previously the copy
+/// handler open-coded a 6-line subset that dropped Captain + Shipwrights
+/// and ordered User/Navidrome opposite to the on-screen layout.
+pub(crate) fn build_about_rows(data: &AboutViewData<'_>) -> Vec<(&'static str, String)> {
+    let version = env!("CARGO_PKG_VERSION");
+    let git_hash = option_env!("GIT_HASH").unwrap_or_default();
+
+    let mut rows: Vec<(&'static str, String)> = vec![
+        ("Captain", "foogs".to_string()),
+        ("Shipwrights", "Claude Opus 4.7".to_string()),
+        ("Version", version.to_string()),
+    ];
+    if !git_hash.is_empty() {
+        rows.push(("Commit", git_hash.to_string()));
+    }
+    if !data.server_url.is_empty() {
+        rows.push(("Server", data.server_url.to_string()));
+    }
+    if !data.username.is_empty() {
+        rows.push(("User", data.username.to_string()));
+    }
+    if let Some(sv) = data.server_version {
+        rows.push(("Navidrome", sv.to_string()));
+    }
+    rows.push(("Toolkit", "Iced (wgpu)".to_string()));
+    rows
+}
+
 // =============================================================================
 // View
 // =============================================================================
@@ -89,9 +121,6 @@ pub(crate) fn about_modal_overlay<'a>(
     if !state.visible {
         return None;
     }
-
-    let version = env!("CARGO_PKG_VERSION");
-    let git_hash = option_env!("GIT_HASH").unwrap_or_default();
 
     // ── Header: [Nokkvi  ·····  📋  X] ──────────────────────────
     let title_text = text("Nokkvi")
@@ -155,38 +184,16 @@ pub(crate) fn about_modal_overlay<'a>(
         .color(theme::fg3());
 
     // ── Info rows ────────────────────────────────────────────────
-    let mut rows: Vec<Element<'_, AboutModalMessage>> = vec![
-        info_row("Captain", "foogs"),
-        theme::modal_row_separator(),
-        info_row("Shipwrights", "Claude Opus 4.7"),
-        theme::modal_row_separator(),
-        info_row("Version", version),
-        theme::modal_row_separator(),
-    ];
-
-    if !git_hash.is_empty() {
-        rows.push(info_row("Commit", git_hash));
-        rows.push(theme::modal_row_separator());
+    // Built from `build_about_rows` so the on-screen rows and the
+    // clipboard-copy lines stay in lockstep.
+    let entries = build_about_rows(&data);
+    let mut rows: Vec<Element<'_, AboutModalMessage>> = Vec::with_capacity(entries.len() * 2);
+    for (i, (label, value)) in entries.iter().enumerate() {
+        rows.push(info_row(label, value));
+        if i + 1 < entries.len() {
+            rows.push(theme::modal_row_separator());
+        }
     }
-
-    if !data.server_url.is_empty() {
-        rows.push(info_row("Server", data.server_url));
-        rows.push(theme::modal_row_separator());
-    }
-
-    if !data.username.is_empty() {
-        rows.push(info_row("User", data.username));
-        rows.push(theme::modal_row_separator());
-    }
-
-    if let Some(sv) = data.server_version {
-        rows.push(info_row("Navidrome", sv));
-        rows.push(theme::modal_row_separator());
-    }
-
-    // GPU backend info (via iced's renderer)
-    rows.push(info_row("Toolkit", "Iced (wgpu)"));
-
     let info_table = column(rows).width(Length::Fill);
 
     // ── Ko-fi support link ──────────────────────────────────────
@@ -278,10 +285,14 @@ const LABEL_SIZE: f32 = 12.0;
 const VALUE_SIZE: f32 = 13.0;
 
 /// A single label: value row.
-fn info_row<'a>(label: &'a str, value: &'a str) -> Element<'a, AboutModalMessage> {
+fn info_row<'a>(label: &str, value: &str) -> Element<'a, AboutModalMessage> {
+    // Take owned `String`s into the `text` widgets so the returned
+    // `Element` doesn't borrow back into a temporary `Vec` built by
+    // `build_about_rows` — the helper's rows live only as long as the
+    // surrounding `view()` call, so borrowing would dangle.
     row![
         container(
-            text(label)
+            text(label.to_string())
                 .size(LABEL_SIZE)
                 .font(theme::ui_font())
                 .color(theme::fg4()),
@@ -293,7 +304,7 @@ fn info_row<'a>(label: &'a str, value: &'a str) -> Element<'a, AboutModalMessage
             left: 0.0,
             right: 8.0,
         }),
-        text(value)
+        text(value.to_string())
             .size(VALUE_SIZE)
             .font(theme::ui_font())
             .color(theme::fg1())
@@ -341,4 +352,58 @@ fn modal_icon_button<'a>(
     .on_press(on_press)
     .interaction(iced::mouse::Interaction::Pointer)
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn anon_data() -> AboutViewData<'static> {
+        AboutViewData {
+            server_url: "",
+            username: "",
+            server_version: None,
+        }
+    }
+
+    #[test]
+    fn build_rows_preserves_attribution_when_disconnected() {
+        // Captain + Shipwrights must remain in the rows even when the
+        // user isn't logged in. They're the regression sentinel for the
+        // Copy All attribution bug.
+        let rows = build_about_rows(&anon_data());
+        let labels: Vec<&str> = rows.iter().map(|(l, _)| *l).collect();
+        assert!(
+            labels.contains(&"Captain"),
+            "Captain row missing: {labels:?}",
+        );
+        assert!(
+            labels.contains(&"Shipwrights"),
+            "Shipwrights row missing: {labels:?}",
+        );
+        // Toolkit is the final row regardless of connection state.
+        assert_eq!(labels.last(), Some(&"Toolkit"));
+    }
+
+    #[test]
+    fn build_rows_includes_connection_metadata_when_present() {
+        let data = AboutViewData {
+            server_url: "https://example.test",
+            username: "alice",
+            server_version: Some("0.55.2"),
+        };
+        let labels: Vec<&str> = build_about_rows(&data).iter().map(|(l, _)| *l).collect();
+        // Ordering on-screen: Captain, Shipwrights, Version, [Commit,]
+        // Server, User, Navidrome, Toolkit — User must come before
+        // Navidrome (previously the copy handler swapped them).
+        let user_pos = labels.iter().position(|l| *l == "User").expect("User row");
+        let nav_pos = labels
+            .iter()
+            .position(|l| *l == "Navidrome")
+            .expect("Navidrome row");
+        assert!(
+            user_pos < nav_pos,
+            "User row must appear before Navidrome in the on-screen order; got {labels:?}",
+        );
+    }
 }
