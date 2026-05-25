@@ -192,13 +192,20 @@ pub(crate) struct PlayerBarViewData {
     pub window_width: f32,
     pub layout: PlayerBarLayout,
     pub is_light_mode: bool,
-    // Track metadata for progress bar overlay
+    // Track metadata — populated by callers and historically consumed by the
+    // ProgressTrack overlay (removed in the flat redesign). L6 may rewire
+    // these into the new 24 px status strip; until then they remain on the
+    // struct so callers don't churn.
+    #[allow(dead_code)]
     pub track_title: String,
+    #[allow(dead_code)]
     pub track_artist: String,
+    #[allow(dead_code)]
     pub track_album: String,
     pub format_suffix: String,
     pub sample_rate: u32,
     pub bitrate: u32,
+    #[allow(dead_code)]
     pub radio_name: Option<String>,
     /// Whether the player-bar hamburger menu is currently open (controlled state).
     pub hamburger_open: bool,
@@ -480,69 +487,38 @@ pub(crate) fn player_bar<'a>(
         )
     };
 
-    // Build metadata for scrolling overlay on the progress bar track
-    // Colored segments matching the track info strip: title/artist/album each get their own color
-    use super::progress_bar::OverlaySegment;
-    let mut meta_segments: Vec<OverlaySegment> = Vec::new();
+    // The ProgressTrack overlay (scrolling colored metadata segments rendered
+    // inside the progress bar's track) was removed as part of the flat
+    // redesign — its renderer is gone from `progress_bar.rs`. The 24 px
+    // status strip that L6 will add below the player bar covers the same
+    // visibility use case. The `TrackInfoDisplay::ProgressTrack` enum variant
+    // is preserved for persistence compatibility; the player bar simply
+    // ignores it now.
+    //
+    // The format badge below still renders codec/bitrate; its 3D border
+    // styling is restyled flat in the follow-up player-bar refactor commit
+    // alongside the rest of the 3D-to-flat conversion.
     let mut format_info_left = String::new();
     let mut format_info_right = String::new();
-
-    if !data.track_title.is_empty()
-        && crate::theme::track_info_display()
-            == nokkvi_data::types::player_settings::TrackInfoDisplay::ProgressTrack
+    if crate::theme::strip_show_format_info()
+        && let Some((left, right)) = super::format_info::format_audio_info_split(
+            &data.format_suffix,
+            data.sample_rate as f32 / 1000.0,
+            data.bitrate,
+        )
     {
-        let separator = crate::theme::strip_separator().as_join_str();
-        let segments = super::track_info_strip::build_now_playing_segments(
-            &data.track_title,
-            &data.track_artist,
-            &data.track_album,
-            crate::theme::strip_show_title(),
-            crate::theme::strip_show_artist(),
-            crate::theme::strip_show_album(),
-            crate::theme::strip_show_labels(),
-            separator,
-        );
-        meta_segments.extend(segments.into_iter().map(|s| OverlaySegment {
-            text: s.text,
-            color: s.color,
-        }));
-
-        if let Some(rname) = &data.radio_name {
-            if !meta_segments.is_empty() {
-                meta_segments.push(OverlaySegment {
-                    text: separator.to_string(),
-                    color: theme::fg4(),
-                });
-            }
-            meta_segments.push(OverlaySegment {
-                text: format!("{rname} (LIVE)"),
-                color: theme::accent_bright(),
-            });
-        }
-
-        if crate::theme::strip_show_format_info()
-            && let Some((left, right)) = super::format_info::format_audio_info_split(
-                &data.format_suffix,
-                data.sample_rate as f32 / 1000.0,
-                data.bitrate,
-            )
-        {
-            format_info_left = left;
-            if let Some(r) = right {
-                format_info_right = r;
-            }
+        format_info_left = left;
+        if let Some(r) = right {
+            format_info_right = r;
         }
     }
 
-    let mut custom_progress_bar =
+    let custom_progress_bar =
         widgets::progress_bar::progress_bar(position, duration, PlayerBarMessage::Seek)
             .is_playing(data.playback_playing && !data.playback_paused)
             .hide_handle(data.is_radio)
             .width(Length::Fill)
             .height(24.0);
-    if !meta_segments.is_empty() {
-        custom_progress_bar = custom_progress_bar.overlay_segments(meta_segments);
-    }
 
     let mut progress_items: Vec<Element<'_, PlayerBarMessage>> = vec![
         text(pos_str.clone())

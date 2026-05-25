@@ -489,6 +489,10 @@ pub(crate) struct MetadataSegment {
     #[allow(dead_code)]
     pub kind: MetadataSegmentKind,
     pub text: String,
+    // `color` was consumed by the ProgressTrack overlay (removed in the flat
+    // redesign). Kept on the struct so any future per-segment renderer (e.g.
+    // the L6 status strip) can adopt it without changing the data shape.
+    #[allow(dead_code)]
     pub color: iced::Color,
 }
 
