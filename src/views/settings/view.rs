@@ -170,8 +170,6 @@ impl SettingsPage {
             None,
             move |entry, ctx| {
                 let is_editing = editing_index == Some(ctx.item_index);
-                // All headers are always expanded (no drill-down at Level 2)
-                let is_collapsed = false;
                 let ctx = SlotRenderContext {
                     item_index: ctx.item_index,
                     is_center: ctx.is_center,
@@ -188,7 +186,7 @@ impl SettingsPage {
                     toggle_cursor: if ctx.is_center { toggle_cursor } else { None },
                 };
                 let hi = if is_editing { &hex_input_owned } else { "" };
-                render_settings_slot(&ctx, entry, is_editing, is_collapsed, hi)
+                render_settings_slot(&ctx, entry, is_editing, hi)
             },
         );
 

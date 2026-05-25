@@ -161,11 +161,10 @@ pub(crate) fn render_settings_slot<'a>(
     ctx: &SlotRenderContext<'_>,
     entry: &SettingsEntry,
     is_editing: bool,
-    is_collapsed: bool,
     hex_input: &str,
 ) -> Element<'a, SettingsMessage> {
     match entry {
-        SettingsEntry::Header { label, icon } => render_header_slot(ctx, label, icon, is_collapsed),
+        SettingsEntry::Header { label, icon } => render_header_slot(ctx, label, icon),
         SettingsEntry::Item(item) => render_item_slot(ctx, item, is_editing, hex_input),
     }
 }
@@ -182,12 +181,11 @@ fn render_header_slot<'a>(
     ctx: &SlotRenderContext<'_>,
     label: &'static str,
     icon_path: &'static str,
-    is_collapsed: bool,
 ) -> Element<'a, SettingsMessage> {
     if ctx.is_level1 {
         render_l1_category_row(ctx, label, icon_path)
     } else {
-        render_l2_section_header(ctx, label, icon_path, is_collapsed)
+        render_l2_section_header(ctx, label, icon_path)
     }
 }
 
@@ -197,7 +195,6 @@ fn render_l2_section_header<'a>(
     ctx: &SlotRenderContext<'_>,
     label: &'static str,
     icon_path: &'static str,
-    is_collapsed: bool,
 ) -> Element<'a, SettingsMessage> {
     let font_size =
         nokkvi_data::utils::scale::calculate_font_size(11.0, ctx.row_height, ctx.scale_factor)
@@ -217,12 +214,10 @@ fn render_l2_section_header<'a>(
             color: Some(icon_color),
         });
 
-    let chevron_path = if is_collapsed {
-        "assets/icons/chevron-right.svg"
-    } else {
-        "assets/icons/chevron-down.svg"
-    };
-    let chevron = embedded_svg::svg_widget(chevron_path)
+    // L2 section headers always render expanded — there's no
+    // drill-down at Level 2 in the settings shell. The chevron
+    // hard-codes the expanded glyph; the toggle plumbing was dropped.
+    let chevron = embedded_svg::svg_widget("assets/icons/chevron-down.svg")
         .width(Length::Fixed(icon_size))
         .height(Length::Fixed(icon_size))
         .style(move |_, _| svg::Style {
