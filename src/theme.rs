@@ -440,7 +440,6 @@ pub(crate) fn ui_radius_lg() -> iced::border::Radius {
 /// Scale step `pill` — 999 px in rounded mode, 0 in flat. Use for tabs,
 /// transport buttons, search field, slider handles.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn ui_radius_pill() -> iced::border::Radius {
     if is_rounded_mode() {
         R_PILL.into()
