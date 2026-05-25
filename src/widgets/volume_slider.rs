@@ -1,14 +1,16 @@
-//! Unified Volume Slider Widget with 3D styling and drag-to-adjust
+//! Unified Volume Slider Widget with flat styling and drag-to-adjust
 //!
 //! A single parameterized widget for both main volume and SFX volume controls.
-//! This is a custom Iced widget that provides:
-//! - 3D styled track with inset borders
-//! - 3D styled handle with grip lines
-//! - Click-to-set and drag-to-adjust functionality
-//! - Themeable colors via `SliderVariant` (Music = aqua, SFX = yellow)
+//! Flat-design rendering:
+//! - Vertical: stereo 2-channel bars (each 8×44, 2 px gap = 18 px total).
+//!   1 px `theme::border()` outline, `theme::bg0()` track, accent-bright fill
+//!   from the bottom up to the current volume level. Channels are decorative
+//!   (both render the same value) — the widget remains a single-volume control.
+//! - Horizontal: 6 px thin track with a 14 px handle (matches progress bar).
+//! - Variant determines accent color (Music = bright accent, SFX = base accent).
 
 use iced::{
-    Color, Element, Event, Length, Rectangle, Shadow, Size, Theme, Vector,
+    Color, Element, Event, Length, Rectangle, Size, Theme,
     advanced::{
         Shell,
         layout::{self, Layout},
@@ -18,13 +20,19 @@ use iced::{
     mouse, touch,
 };
 
-// Volume slider dimensions - height matches player bar button size
-const SLIDER_WIDTH: f32 = 14.0;
-const SLIDER_HEIGHT: f32 = 44.0;
-/// Horizontal slider length (1.25× the vertical height for more drag range)
-const SLIDER_HORIZONTAL_LENGTH: f32 = 55.0;
-/// Handle size in pixels (used for both width in horizontal and height in vertical)
-const HANDLE_SIZE: f32 = 12.0;
+// ───────────────────────── dimensions ─────────────────────────
+// Vertical (stereo bars): 8 px channel + 2 px gap + 8 px channel = 18 px wide,
+// 44 px tall (matches mode-button height).
+const VERTICAL_WIDTH: f32 = 18.0;
+const VERTICAL_HEIGHT: f32 = 44.0;
+const STEREO_CHANNEL_WIDTH: f32 = 8.0;
+const STEREO_CHANNEL_GAP: f32 = 2.0;
+
+// Horizontal: 6 px thin track, 55 px long (1.25× vertical for drag range),
+// 14 px handle (matches progress bar).
+const HORIZONTAL_LENGTH: f32 = 55.0;
+const HORIZONTAL_TRACK_THICKNESS: f32 = 6.0;
+const HORIZONTAL_HANDLE_SIZE: f32 = 14.0;
 
 /// Minimum volume change to trigger an update during dragging.
 /// This prevents flooding the audio system with redundant volume commands.
@@ -33,10 +41,10 @@ const VOLUME_THROTTLE_THRESHOLD: f32 = 0.02; // 2% change required
 /// Visual theme variant for the volume slider
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SliderVariant {
-    /// Aqua/bright accent for main music volume
+    /// Bright accent for main music volume
     #[default]
     Music,
-    /// Yellow/darker accent for sound effects volume
+    /// Darker accent for sound effects volume
     Sfx,
 }
 
@@ -46,14 +54,6 @@ impl SliderVariant {
         match self {
             SliderVariant::Music => crate::theme::accent_bright(),
             SliderVariant::Sfx => crate::theme::accent(),
-        }
-    }
-
-    /// Get the 3D border colors for the handle (top-left, bottom-right)
-    fn handle_borders(&self) -> (Color, Color) {
-        match self {
-            SliderVariant::Music => crate::theme::border_3d_accent_raised(),
-            SliderVariant::Sfx => crate::theme::border_3d_accent_darker_raised(),
         }
     }
 }
@@ -66,7 +66,7 @@ pub(crate) struct State {
     last_published_volume: f32, // Last volume value actually sent to audio system
 }
 
-/// Custom volume slider with 3D styling (vertical or horizontal)
+/// Custom volume slider with flat styling (vertical stereo bars or horizontal track)
 pub struct VolumeSlider<'a, Message> {
     volume: f32, // 0.0-1.0
     on_change: Box<dyn Fn(f32) -> Message + 'a>,
@@ -88,8 +88,8 @@ impl<'a, Message> VolumeSlider<'a, Message> {
             on_change: Box::new(on_change),
             on_release: None,
             on_scroll: None,
-            width: SLIDER_WIDTH,
-            height: SLIDER_HEIGHT,
+            width: VERTICAL_WIDTH,
+            height: VERTICAL_HEIGHT,
             variant: SliderVariant::default(),
             horizontal: false,
         }
@@ -135,8 +135,8 @@ impl<'a, Message> VolumeSlider<'a, Message> {
     pub fn horizontal(mut self, horizontal: bool) -> Self {
         if horizontal {
             self.horizontal = true;
-            self.width = SLIDER_HORIZONTAL_LENGTH;
-            self.height = SLIDER_WIDTH;
+            self.width = HORIZONTAL_LENGTH;
+            self.height = VERTICAL_WIDTH;
         }
         self
     }
@@ -157,20 +157,21 @@ impl<'a, Message> VolumeSlider<'a, Message> {
     /// Horizontal: left = 0.0, right = 1.0
     fn locate(&self, cursor_pos: f32, bounds: Rectangle) -> f32 {
         if self.horizontal {
-            let effective_width = bounds.width - HANDLE_SIZE;
+            let effective_width = bounds.width - HORIZONTAL_HANDLE_SIZE;
             if effective_width <= 0.0 {
                 return self.volume;
             }
-            let relative_x = cursor_pos - bounds.x - HANDLE_SIZE / 2.0;
+            let relative_x = cursor_pos - bounds.x - HORIZONTAL_HANDLE_SIZE / 2.0;
             (relative_x / effective_width).clamp(0.0, 1.0)
         } else {
-            let effective_height = bounds.height - HANDLE_SIZE;
-            if effective_height <= 0.0 {
+            // Vertical: full bar height maps 0..1 (no handle inset — the fill
+            // is a level meter, not a draggable handle).
+            if bounds.height <= 0.0 {
                 return self.volume;
             }
-            let relative_y = cursor_pos - bounds.y - HANDLE_SIZE / 2.0;
-            // Invert: top=0 becomes volume=1.0, bottom=effective_height becomes volume=0.0
-            1.0 - (relative_y / effective_height).clamp(0.0, 1.0)
+            let relative_y = cursor_pos - bounds.y;
+            // Invert: top=0 becomes volume=1.0, bottom=height becomes volume=0.0
+            1.0 - (relative_y / bounds.height).clamp(0.0, 1.0)
         }
     }
 }
@@ -316,27 +317,23 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for VolumeSlider<'_,
     ) {
         let state = tree.state.downcast_ref::<State>();
         let bounds = layout.bounds();
-        let border_width = 1.0;
 
-        // Calculate handle position - use drag_volume when dragging for smooth visual feedback
+        // Calculate level - use drag_volume when dragging for smooth visual feedback
         let volume = if state.is_dragging {
             state.drag_volume
         } else {
             self.volume
         };
 
-        // Bundle all theme colors into a struct to avoid threading 8+ params
-        let colors = DrawColors {
-            bg1: crate::theme::bg1(),
-            track_3d: crate::theme::border_3d_inset(),
-            accent: self.variant.accent_color(),
-            handle_3d: self.variant.handle_borders(),
-            radius: crate::theme::ui_border_radius(),
-            is_rounded: crate::theme::is_rounded_mode(),
-            shadow: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
-        };
+        let accent = self.variant.accent_color();
+        let border = crate::theme::border();
+        let track_bg = crate::theme::bg0();
 
-        self.draw_oriented(renderer, bounds, volume, border_width, &colors);
+        if self.horizontal {
+            self.draw_horizontal(renderer, bounds, volume, accent, border, track_bg);
+        } else {
+            self.draw_stereo_vertical(renderer, bounds, volume, accent, border, track_bg);
+        }
     }
 
     fn mouse_interaction(
@@ -360,268 +357,115 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for VolumeSlider<'_,
 }
 
 // =============================================================================
-// Draw helpers (extracted to keep Widget::draw short)
+// Draw helpers (flat redesign)
 // =============================================================================
 
-/// Bundles all theme-derived colors and style flags for drawing.
-/// Avoids threading 8+ individual color parameters through the draw call chain.
-struct DrawColors {
-    bg1: Color,
-    track_3d: (Color, Color),
-    accent: Color,
-    handle_3d: (Color, Color),
-    radius: iced::border::Radius,
-    is_rounded: bool,
-    shadow: Color,
-}
-
 impl<Message> VolumeSlider<'_, Message> {
-    /// Unified draw for both orientations.
-    ///
-    /// Vertical: handle moves up/down, grip lines are horizontal.
-    /// Horizontal: handle moves left/right, grip lines are vertical.
-    fn draw_oriented(
+    /// Vertical stereo meter: two narrow channel bars side-by-side, each with
+    /// a 1 px border on the bg0 track and an accent fill rising from the bottom
+    /// to the current volume level. In rounded mode the channels become pills.
+    fn draw_stereo_vertical(
         &self,
         renderer: &mut iced::Renderer,
         bounds: Rectangle,
         volume: f32,
-        border_width: f32,
-        c: &DrawColors,
+        accent: Color,
+        border: Color,
+        track_bg: Color,
     ) {
-        // Grip reuses handle 3D colors (track/handle colors read from `c` by sub-helpers)
-        let (grip_tl, grip_br) = c.handle_3d;
+        use iced::advanced::Renderer;
 
-        // 1. Track background
-        self.draw_track(renderer, bounds, border_width, c);
+        let radius = if crate::theme::is_rounded_mode() {
+            crate::theme::ui_radius_pill()
+        } else {
+            iced::border::Radius::from(0.0)
+        };
 
-        // 2. Handle position + bounds (only difference between orientations)
-        let handle_bounds = if self.horizontal {
-            let effective = bounds.width - HANDLE_SIZE;
-            Rectangle {
-                x: bounds.x + volume * effective,
+        // Both channels render identical levels — the stereo split is purely
+        // cosmetic per the design spec; the slider remains a single-volume
+        // control.
+        // Compute the total stereo cluster width once and center it inside the
+        // widget bounds so external `thickness()` overrides don't squash the
+        // bars off-center.
+        let cluster_width = STEREO_CHANNEL_WIDTH * 2.0 + STEREO_CHANNEL_GAP;
+        let cluster_x = bounds.x + (bounds.width - cluster_width) / 2.0;
+
+        for ch in 0..2 {
+            let ch_x = cluster_x + (STEREO_CHANNEL_WIDTH + STEREO_CHANNEL_GAP) * ch as f32;
+            let ch_bounds = Rectangle {
+                x: ch_x,
                 y: bounds.y,
-                width: HANDLE_SIZE,
+                width: STEREO_CHANNEL_WIDTH,
                 height: bounds.height,
-            }
-        } else {
-            let effective = bounds.height - HANDLE_SIZE;
-            Rectangle {
-                x: bounds.x,
-                y: bounds.y + (1.0 - volume) * effective,
-                width: bounds.width,
-                height: HANDLE_SIZE,
-            }
-        };
-        self.draw_handle(renderer, handle_bounds, border_width, c);
-
-        // 3. Grip — dimensions swap between orientations
-        //    Vertical handle gets a wide, short grip; horizontal gets a narrow, tall grip.
-        let (gw, gh, gx, gy) = if self.horizontal {
-            let gw = 4.0;
-            let gh = if c.is_rounded {
-                8.0
-            } else {
-                bounds.height - 6.0
             };
-            let gx = handle_bounds.x + (HANDLE_SIZE - gw) / 2.0;
-            let gy = bounds.y + (bounds.height - gh) / 2.0;
-            (gw, gh, gx, gy)
-        } else {
-            let gh = 4.0;
-            let gw = if c.is_rounded {
-                8.0
-            } else {
-                bounds.width - 6.0
-            };
-            let gx = bounds.x + (bounds.width - gw) / 2.0;
-            let gy = handle_bounds.y + (HANDLE_SIZE - gh) / 2.0;
-            (gw, gh, gx, gy)
-        };
 
-        if c.is_rounded {
-            self.draw_grip_rounded(renderer, gx, gy, gw, gh, c.radius, grip_tl);
-        } else {
-            self.draw_grip_square(renderer, gx, gy, gw, gh, c.accent, grip_tl, grip_br);
+            // Track (outlined, bg0 fill).
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds: ch_bounds,
+                    border: iced::Border {
+                        color: border,
+                        width: 1.0,
+                        radius,
+                    },
+                    ..Default::default()
+                },
+                track_bg,
+            );
+
+            // Fill from bottom up to the current level. Inset by 1 px on each
+            // side so the fill sits inside the border.
+            let inner_height = (bounds.height - 2.0).max(0.0);
+            let fill_height = (inner_height * volume).clamp(0.0, inner_height);
+            if fill_height > 0.0 {
+                let fill_y = ch_bounds.y + 1.0 + (inner_height - fill_height);
+                renderer.fill_quad(
+                    renderer::Quad {
+                        bounds: Rectangle {
+                            x: ch_bounds.x + 1.0,
+                            y: fill_y,
+                            width: STEREO_CHANNEL_WIDTH - 2.0,
+                            height: fill_height,
+                        },
+                        border: iced::Border {
+                            radius,
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    },
+                    accent,
+                );
+            }
         }
     }
 
-    // ── Shared sub-draw helpers ─────────────────────────────────────────
-
-    fn draw_track(
+    /// Horizontal track + handle, matching the progress bar's flat style.
+    fn draw_horizontal(
         &self,
         renderer: &mut iced::Renderer,
         bounds: Rectangle,
-        bw: f32,
-        c: &DrawColors,
+        volume: f32,
+        accent: Color,
+        border: Color,
+        track_bg: Color,
     ) {
         use iced::advanced::Renderer;
-        let (tl, br) = c.track_3d;
-        if c.is_rounded {
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds,
-                    border: iced::Border {
-                        color: tl,
-                        width: bw,
-                        radius: c.radius,
-                    },
-                    ..Default::default()
-                },
-                c.bg1,
-            );
+
+        let radius = if crate::theme::is_rounded_mode() {
+            crate::theme::ui_radius_pill()
         } else {
-            // Background fill
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rectangle {
-                        x: bounds.x + bw,
-                        y: bounds.y + bw,
-                        width: bounds.width - bw * 2.0,
-                        height: bounds.height - bw * 2.0,
-                    },
-                    ..Default::default()
-                },
-                c.bg1,
-            );
-            self.draw_3d_border(renderer, bounds, bw, tl, br);
-        }
-    }
+            iced::border::Radius::from(0.0)
+        };
 
-    fn draw_handle(&self, renderer: &mut iced::Renderer, hb: Rectangle, bw: f32, c: &DrawColors) {
-        use iced::advanced::Renderer;
-        let (tl, br) = c.handle_3d;
-        if c.is_rounded {
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: hb,
-                    border: iced::Border {
-                        color: tl,
-                        width: bw,
-                        radius: c.radius,
-                    },
-                    shadow: Shadow {
-                        color: c.shadow,
-                        offset: Vector::new(0.0, 1.0),
-                        blur_radius: 3.0,
-                    },
-                    ..Default::default()
-                },
-                c.accent,
-            );
-        } else {
-            // Shadow
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: hb,
-                    shadow: Shadow {
-                        color: c.shadow,
-                        offset: Vector::new(0.0, 1.0),
-                        blur_radius: 3.0,
-                    },
-                    ..Default::default()
-                },
-                Color::TRANSPARENT,
-            );
-            // Fill
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rectangle {
-                        x: hb.x + bw,
-                        y: hb.y + bw,
-                        width: hb.width - bw * 2.0,
-                        height: hb.height - bw * 2.0,
-                    },
-                    ..Default::default()
-                },
-                c.accent,
-            );
-            self.draw_3d_border(renderer, hb, bw, tl, br);
-        }
-    }
-
-    /// Draw a 3D raised/inset border (4 edges: top+left = tl color, bottom+right = br color)
-    fn draw_3d_border(
-        &self,
-        renderer: &mut iced::Renderer,
-        r: Rectangle,
-        bw: f32,
-        tl: Color,
-        br: Color,
-    ) {
-        use iced::advanced::Renderer;
-        // Top
+        // Track centered vertically within widget bounds.
+        let track_y = bounds.y + (bounds.height - HORIZONTAL_TRACK_THICKNESS) / 2.0;
         renderer.fill_quad(
             renderer::Quad {
                 bounds: Rectangle {
-                    x: r.x,
-                    y: r.y,
-                    width: r.width,
-                    height: bw,
-                },
-                ..Default::default()
-            },
-            tl,
-        );
-        // Left
-        renderer.fill_quad(
-            renderer::Quad {
-                bounds: Rectangle {
-                    x: r.x,
-                    y: r.y,
-                    width: bw,
-                    height: r.height,
-                },
-                ..Default::default()
-            },
-            tl,
-        );
-        // Bottom
-        renderer.fill_quad(
-            renderer::Quad {
-                bounds: Rectangle {
-                    x: r.x,
-                    y: r.y + r.height - bw,
-                    width: r.width,
-                    height: bw,
-                },
-                ..Default::default()
-            },
-            br,
-        );
-        // Right
-        renderer.fill_quad(
-            renderer::Quad {
-                bounds: Rectangle {
-                    x: r.x + r.width - bw,
-                    y: r.y,
-                    width: bw,
-                    height: r.height,
-                },
-                ..Default::default()
-            },
-            br,
-        );
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn draw_grip_rounded(
-        &self,
-        renderer: &mut iced::Renderer,
-        x: f32,
-        y: f32,
-        w: f32,
-        h: f32,
-        radius: iced::border::Radius,
-        color: Color,
-    ) {
-        use iced::advanced::Renderer;
-        renderer.fill_quad(
-            renderer::Quad {
-                bounds: Rectangle {
-                    x,
-                    y,
-                    width: w,
-                    height: h,
+                    x: bounds.x,
+                    y: track_y,
+                    width: bounds.width,
+                    height: HORIZONTAL_TRACK_THICKNESS,
                 },
                 border: iced::Border {
                     radius,
@@ -629,47 +473,53 @@ impl<Message> VolumeSlider<'_, Message> {
                 },
                 ..Default::default()
             },
-            color,
+            track_bg,
         );
-    }
 
-    #[allow(clippy::too_many_arguments)]
-    fn draw_grip_square(
-        &self,
-        renderer: &mut iced::Renderer,
-        x: f32,
-        y: f32,
-        w: f32,
-        h: f32,
-        accent: Color,
-        tl: Color,
-        br: Color,
-    ) {
-        use iced::advanced::Renderer;
-        // Center fill
+        // Handle (square in flat / pill in rounded).
+        let effective = bounds.width - HORIZONTAL_HANDLE_SIZE;
+        let handle_x = bounds.x + volume * effective.max(0.0);
+        let handle_y = bounds.y + (bounds.height - HORIZONTAL_HANDLE_SIZE) / 2.0;
+        let handle_bounds = Rectangle {
+            x: handle_x,
+            y: handle_y,
+            width: HORIZONTAL_HANDLE_SIZE,
+            height: HORIZONTAL_HANDLE_SIZE,
+        };
+
+        // Fill from left edge up to the handle's center.
+        let fill_width =
+            (handle_x - bounds.x + HORIZONTAL_HANDLE_SIZE / 2.0).clamp(0.0, bounds.width);
+        if fill_width > 0.0 {
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds: Rectangle {
+                        x: bounds.x,
+                        y: track_y,
+                        width: fill_width,
+                        height: HORIZONTAL_TRACK_THICKNESS,
+                    },
+                    border: iced::Border {
+                        radius,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                accent,
+            );
+        }
+
         renderer.fill_quad(
             renderer::Quad {
-                bounds: Rectangle {
-                    x: x + 1.0,
-                    y: y + 1.0,
-                    width: w - 2.0,
-                    height: h - 2.0,
+                bounds: handle_bounds,
+                border: iced::Border {
+                    color: border,
+                    width: 1.0,
+                    radius,
                 },
                 ..Default::default()
             },
             accent,
-        );
-        self.draw_3d_border(
-            renderer,
-            Rectangle {
-                x,
-                y,
-                width: w,
-                height: h,
-            },
-            1.0,
-            tl,
-            br,
         );
     }
 }
