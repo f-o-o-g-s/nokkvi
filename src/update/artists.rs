@@ -175,13 +175,12 @@ impl Nokkvi {
                     _ => (id, None),
                 }
             },
-            |(id, handle)| {
-                if handle.is_none() {
-                    Message::NoOp
-                } else {
-                    Message::Artwork(ArtworkMessage::LargeArtistLoaded(id, handle))
-                }
-            },
+            // Always dispatch `LargeArtistLoaded`, with `handle = None` on
+            // failure / undersized payload. The handler clears the
+            // `loading_large_artwork` marker by id, so a no-handle result
+            // still releases the lock and lets the user retry. Returning
+            // `NoOp` here used to leave the marker stuck forever.
+            |(id, handle)| Message::Artwork(ArtworkMessage::LargeArtistLoaded(id, handle)),
         )
     }
 

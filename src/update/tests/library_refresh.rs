@@ -838,3 +838,87 @@ fn tray_activate_without_window_id_is_noop() {
 }
 
 // ============================================================================
+// LargeArtistLoaded — id-gated marker clear (negative-path coverage for the
+// stuck-marker regression).
+//
+// Setup:
+// 1. Artists view sets `loading_large_artwork = Some("X")` before kicking
+//    off `fetch_album_artwork`.
+// 2. The completion mapper now ALWAYS dispatches
+//    `Message::Artwork(ArtworkMessage::LargeArtistLoaded(id, handle))`,
+//    even on failure (`handle = None`) — previously it returned `NoOp`,
+//    leaving the marker stuck and blocking retries.
+// 3. The handler clears the marker iff it still matches the completing
+//    id (the user may have scrolled to another artist mid-flight; B is
+//    in flight now, A's late completion must NOT clear B's marker).
+
+use crate::app_message::{ArtworkMessage, Message};
+
+#[test]
+fn large_artist_loaded_with_none_clears_matching_marker() {
+    let mut app = test_app();
+    app.artwork.loading_large_artwork = Some("artist_a".to_string());
+
+    let _ = app.update(Message::Artwork(ArtworkMessage::LargeArtistLoaded(
+        "artist_a".to_string(),
+        None,
+    )));
+
+    assert_eq!(
+        app.artwork.loading_large_artwork, None,
+        "completion for the in-flight id must clear the marker even when handle is None",
+    );
+    assert!(
+        !app.artwork.large_artwork.snapshot.contains_key("artist_a"),
+        "None handle must not write into the artwork cache",
+    );
+}
+
+#[test]
+fn large_artist_loaded_for_stale_id_preserves_active_marker() {
+    use iced::widget::image;
+
+    let mut app = test_app();
+    app.artwork.loading_large_artwork = Some("artist_b".to_string());
+
+    // Simulate A's late completion arriving after the user moved on to B.
+    // A's handle is fine to cache; the marker must stay pointed at B.
+    let _ = app.update(Message::Artwork(ArtworkMessage::LargeArtistLoaded(
+        "artist_a".to_string(),
+        Some(image::Handle::from_bytes(vec![0u8; 64])),
+    )));
+
+    assert_eq!(
+        app.artwork.loading_large_artwork.as_deref(),
+        Some("artist_b"),
+        "stale A completion must not clear B's in-flight marker",
+    );
+    assert!(
+        app.artwork.large_artwork.snapshot.contains_key("artist_a"),
+        "A's handle should still cache so the user sees it when they return",
+    );
+}
+
+#[test]
+fn large_artist_loaded_with_handle_clears_matching_marker_and_caches() {
+    use iced::widget::image;
+
+    let mut app = test_app();
+    app.artwork.loading_large_artwork = Some("artist_a".to_string());
+
+    let _ = app.update(Message::Artwork(ArtworkMessage::LargeArtistLoaded(
+        "artist_a".to_string(),
+        Some(image::Handle::from_bytes(vec![0u8; 64])),
+    )));
+
+    assert_eq!(
+        app.artwork.loading_large_artwork, None,
+        "happy-path completion clears the in-flight marker",
+    );
+    assert!(
+        app.artwork.large_artwork.snapshot.contains_key("artist_a"),
+        "happy-path completion populates the artwork cache",
+    );
+}
+
+// ============================================================================
