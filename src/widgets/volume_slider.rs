@@ -24,13 +24,13 @@ use iced::{
 // Vertical: single 8 px bar, 44 px tall (matches mode-button height). The
 // player bar renders music + sfx volume as two side-by-side sliders, each
 // using one bar — two bars total at the right edge.
-const BAR_WIDTH: f32 = 8.0;
+pub(crate) const BAR_WIDTH: f32 = 8.0;
 const VERTICAL_WIDTH: f32 = BAR_WIDTH;
 const VERTICAL_HEIGHT: f32 = 44.0;
 
 // Horizontal: 6 px thin track, 55 px long (1.25× vertical for drag range),
 // 14 px handle (matches progress bar).
-const HORIZONTAL_LENGTH: f32 = 55.0;
+pub(crate) const HORIZONTAL_LENGTH: f32 = 55.0;
 const HORIZONTAL_TRACK_THICKNESS: f32 = 6.0;
 const HORIZONTAL_HANDLE_SIZE: f32 = 14.0;
 

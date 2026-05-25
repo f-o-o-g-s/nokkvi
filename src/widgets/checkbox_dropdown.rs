@@ -292,8 +292,8 @@ fn trigger_button<'a, Message: 'a>(
         .align_x(iced::Alignment::Center)
         .align_y(iced::Alignment::Center);
 
-    let with_hover = super::hover_overlay::HoverOverlay::new(chassis)
-        .border_radius(theme::ui_radius_pill());
+    let with_hover =
+        super::hover_overlay::HoverOverlay::new(chassis).border_radius(theme::ui_radius_pill());
 
     tooltip(
         with_hover,
