@@ -13,7 +13,7 @@
 use std::collections::HashMap;
 
 use iced::{
-    Alignment, Border, Color, Element, Length, Padding,
+    Alignment, Border, Element, Length, Padding,
     font::{Font, Weight},
     widget::{Space, button, column, container, image, mouse_area, row, svg, text},
 };
@@ -259,6 +259,14 @@ pub(crate) fn default_playlist_picker_overlay<'a>(
         ..Default::default()
     });
 
+    // Wrap the panel in a FillPortion row so it occupies the middle 5/7
+    // of the backdrop's width. Reads as the dialog content for
+    // `theme::modal_scaffold`, which adds the `opaque(...)` press-capture
+    // shield (so a click on padding inside the panel no longer bubbles to
+    // the backdrop and dismisses the modal) and applies
+    // `MODAL_BACKDROP_ALPHA` over `bg0_hard()` for the dim. Scroll-to-nav
+    // is wired on an outer `mouse_area` — `opaque` captures presses but
+    // not scrolls, so the layers compose cleanly.
     let modal_row = row![
         Space::new().width(Length::FillPortion(1)),
         modal_panel,
@@ -267,35 +275,25 @@ pub(crate) fn default_playlist_picker_overlay<'a>(
     .width(Length::Fill)
     .align_y(Alignment::Center);
 
-    // ── Backdrop ──
-    let backdrop_color = Color {
-        a: 0.55,
-        ..Color::BLACK
-    };
+    let scaffold = theme::modal_scaffold(
+        modal_row.into(),
+        DefaultPlaylistPickerMessage::Close,
+        theme::MODAL_BACKDROP_ALPHA,
+    );
 
-    mouse_area(
-        container(modal_row)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center(Length::Fill)
-            .style(move |_: &iced::Theme| container::Style {
-                background: Some(backdrop_color.into()),
-                ..Default::default()
-            }),
-    )
-    .on_press(DefaultPlaylistPickerMessage::Close)
-    .on_scroll(|delta| {
-        let y = match delta {
-            iced::mouse::ScrollDelta::Lines { y, .. } => y,
-            iced::mouse::ScrollDelta::Pixels { y, .. } => y,
-        };
-        if y > 0.0 {
-            DefaultPlaylistPickerMessage::SlotListUp
-        } else {
-            DefaultPlaylistPickerMessage::SlotListDown
-        }
-    })
-    .into()
+    mouse_area(scaffold)
+        .on_scroll(|delta| {
+            let y = match delta {
+                iced::mouse::ScrollDelta::Lines { y, .. } => y,
+                iced::mouse::ScrollDelta::Pixels { y, .. } => y,
+            };
+            if y > 0.0 {
+                DefaultPlaylistPickerMessage::SlotListUp
+            } else {
+                DefaultPlaylistPickerMessage::SlotListDown
+            }
+        })
+        .into()
 }
 
 fn render_picker_slot<'a>(
