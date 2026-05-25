@@ -1272,7 +1272,12 @@ fn scale_alpha_local(c: Color, factor: f32) -> Color {
 // Color Sub-List Slot Rendering
 // ============================================================================
 
-/// Render a single slot in the color sub-list (gradient editing)
+/// Render a single slot in the color sub-list (gradient editing). Uses the
+/// same flat row chrome as the main settings slot list — theme::bg1() cursor
+/// fill + 3 px theme::accent_bright() left stripe + theme::border() bottom
+/// separator. The swatch picks up theme::border() outline and
+/// theme::ui_radius_xs() corners in rounded mode for parity with the inline
+/// HexColor row.
 pub(crate) fn render_color_slot<'a>(
     ctx: &SlotRenderContext<'_>,
     hex_color: &str,
@@ -1281,8 +1286,6 @@ pub(crate) fn render_color_slot<'a>(
     is_editing: bool,
     hex_input: &str,
 ) -> Element<'a, SettingsMessage> {
-    let style =
-        slot_list::SlotListSlotStyle::for_slot(ctx.is_center, false, false, false, ctx.opacity, 0);
     let label_size =
         nokkvi_data::utils::scale::calculate_font_size(14.0, ctx.row_height, ctx.scale_factor)
             * ctx.scale_factor;
@@ -1293,30 +1296,31 @@ pub(crate) fn render_color_slot<'a>(
         nokkvi_data::utils::scale::calculate_font_size(10.0, ctx.row_height, ctx.scale_factor)
             * ctx.scale_factor;
 
+    let label_color = if ctx.is_center {
+        theme::accent_bright()
+    } else {
+        scale_alpha_local(theme::fg0(), ctx.opacity)
+    };
+    let subtext_color = scale_alpha_local(theme::fg3(), ctx.opacity * 0.7);
+
     let eff_opacity = if ctx.is_center { 1.0 } else { ctx.opacity };
 
-    // Color swatch (larger than the mini swatches in the main slot list)
+    // Color swatch — larger than the inline mini swatches (matches the design
+    // intent of giving the gradient editor a more prominent preview chip).
     let parsed_color = crate::theme_config::parse_hex_color(hex_color).unwrap_or_else(theme::fg4);
     let swatch_size = (label_size * 2.0).clamp(20.0, 36.0);
+    let swatch_fill = scale_alpha_local(parsed_color, eff_opacity);
+    let swatch_border = scale_alpha_local(theme::border(), eff_opacity);
 
     let swatch = container(Space::new())
         .width(Length::Fixed(swatch_size))
         .height(Length::Fixed(swatch_size))
-        .style(move |_theme| container::Style {
-            background: Some(
-                Color {
-                    a: eff_opacity,
-                    ..parsed_color
-                }
-                .into(),
-            ),
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(swatch_fill.into()),
             border: Border {
-                color: Color {
-                    a: eff_opacity * 0.6,
-                    ..theme::fg4()
-                },
+                color: swatch_border,
                 width: 1.0,
-                radius: theme::ui_border_radius(),
+                radius: theme::ui_radius_xs(),
             },
             ..Default::default()
         });
@@ -1325,11 +1329,11 @@ pub(crate) fn render_color_slot<'a>(
     let position_label = format!("Color {} of {}", ctx.item_index + 1, total_colors);
     let label_col = container(
         column![
-            slot_list::slot_list_text(position_label, label_size, style.text_color).font(Font {
+            slot_list::slot_list_text(position_label, label_size, label_color).font(Font {
                 weight: Weight::Bold,
                 ..theme::ui_font()
             }),
-            slot_list::slot_list_text(parent_label.to_string(), position_size, style.subtext_color),
+            slot_list::slot_list_text(parent_label.to_string(), position_size, subtext_color),
         ]
         .spacing(2),
     )
@@ -1337,11 +1341,11 @@ pub(crate) fn render_color_slot<'a>(
     .clip(true)
     .align_y(Alignment::Center);
 
-    // Value column — hex text input when editing, otherwise hex text display
+    // Value column — hex text input when editing, otherwise mono hex label.
     let value_display: Element<'a, SettingsMessage> = if is_editing {
         render_hex_editor(hex_input, value_size, 16.0)
     } else {
-        slot_list::slot_list_text(hex_color.to_owned(), value_size, style.subtext_color).into()
+        slot_list::slot_list_text(hex_color.to_uppercase(), value_size, subtext_color).into()
     };
 
     let value_col = container(value_display)
@@ -1363,27 +1367,10 @@ pub(crate) fn render_color_slot<'a>(
     .align_y(Alignment::Center)
     .height(Length::Fill);
 
-    // Edit mode: accent border
-    let (border_color, border_width) = if is_editing {
-        (theme::accent_bright(), 2.0)
-    } else {
-        (style.border_color, style.border_width)
-    };
+    let body = with_cursor_stripe(content.into(), ctx.is_center);
+    let with_separator = row_with_bottom_separator(body, ctx.is_center);
 
-    let styled = container(content)
-        .style(move |_theme| container::Style {
-            background: Some(style.bg_color.into()),
-            border: Border {
-                color: border_color,
-                width: border_width,
-                radius: style.border_radius,
-            },
-            ..Default::default()
-        })
-        .width(Length::Fill);
-
-    // Make clickable — center click enters edit mode, other slots navigate
-    button(styled)
+    button(with_separator)
         .on_press(if ctx.is_center {
             SettingsMessage::EditActivate
         } else {
@@ -1421,13 +1408,14 @@ fn preview_font(name: &str) -> Font {
     font
 }
 
-/// Render a single slot in the font picker sub-list
+/// Render a single slot in the font picker sub-list. Same flat row chrome as
+/// the main slot list (cursor stripe + bottom border separator) so the font
+/// modal feels like an extension of the settings panel rather than a separate
+/// surface.
 pub(crate) fn render_font_slot<'a>(
     ctx: &SlotRenderContext<'_>,
     font_name: &str,
 ) -> Element<'a, SettingsMessage> {
-    let style =
-        slot_list::SlotListSlotStyle::for_slot(ctx.is_center, false, false, false, ctx.opacity, 0);
     let label_size =
         nokkvi_data::utils::scale::calculate_font_size(14.0, ctx.row_height, ctx.scale_factor)
             * ctx.scale_factor;
@@ -1435,31 +1423,36 @@ pub(crate) fn render_font_slot<'a>(
         nokkvi_data::utils::scale::calculate_font_size(10.0, ctx.row_height, ctx.scale_factor)
             * ctx.scale_factor;
 
+    let label_color = if ctx.is_center {
+        theme::accent_bright()
+    } else {
+        scale_alpha_local(theme::fg0(), ctx.opacity)
+    };
+    let subtext_color = scale_alpha_local(theme::fg3(), ctx.opacity * 0.7);
+
     let is_default = font_name.starts_with("Iced Default");
 
-    // Font name rendered in its own typeface for preview
+    // Font name rendered in its own typeface for preview.
     let preview = if is_default {
         Font::DEFAULT
     } else {
         preview_font(font_name)
     };
-    let name_widget =
-        slot_list::slot_list_text(font_name.to_string(), label_size, style.text_color).font(Font {
+    let name_widget = slot_list::slot_list_text(font_name.to_string(), label_size, label_color)
+        .font(Font {
             weight: Weight::Bold,
             ..preview
         });
 
-    // Right-side hint for center item
     let hint_text = if ctx.is_center { "Enter ↵" } else { "" };
-    let hint_widget = slot_list::slot_list_text(hint_text, hint_size, style.subtext_color);
+    let hint_widget = slot_list::slot_list_text(hint_text, hint_size, subtext_color);
 
-    // If it's the default entry, show a small subtitle
     let subtitle = if is_default {
         "No custom font — uses iced::Font::DEFAULT"
     } else {
         ""
     };
-    let subtitle_widget = slot_list::slot_list_text(subtitle, hint_size, style.subtext_color);
+    let subtitle_widget = slot_list::slot_list_text(subtitle, hint_size, subtext_color);
 
     let label_col = container(column![name_widget, subtitle_widget].spacing(2))
         .width(Length::FillPortion(70))
@@ -1480,11 +1473,10 @@ pub(crate) fn render_font_slot<'a>(
         .align_y(Alignment::Center)
         .height(Length::Fill);
 
-    let styled = container(content)
-        .style(move |_theme| style.to_container_style())
-        .width(Length::Fill);
+    let body = with_cursor_stripe(content.into(), ctx.is_center);
+    let with_separator = row_with_bottom_separator(body, ctx.is_center);
 
-    button(styled)
+    button(with_separator)
         .on_press(if ctx.is_center {
             SettingsMessage::EditActivate
         } else {
