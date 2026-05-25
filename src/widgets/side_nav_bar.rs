@@ -22,10 +22,7 @@ use iced::{
 };
 use nokkvi_data::types::player_settings::NavDisplayMode;
 
-use super::{
-    hover_indicator::{HoverExpand, HoverIndicator},
-    nav_bar::{NAV_TABS, NavBarMessage, NavView, colored_icon, flat_tab_container_style},
-};
+use super::nav_bar::{NAV_TABS, NavBarMessage, NavView, colored_icon, flat_tab_container_style};
 use crate::theme;
 
 /// Side-nav width (px) by chrome mode.
@@ -216,24 +213,19 @@ fn side_nav_tab_content(
             (content, TAB_HEIGHT)
         }
         NavDisplayMode::IconsOnly => {
-            let icon_container = container(colored_icon(icon_path, ICON_SIZE, text_color))
-                .width(Length::Fill)
-                .height(Length::Fixed(ICON_TAB_HEIGHT))
-                .align_x(iced::Alignment::Center)
-                .align_y(iced::Alignment::Center);
-
-            // Right-edge indicator bar — shared canvas-based hover indicator
-            let indicator = canvas(HoverIndicator {
-                indicator_color,
-                hover_indicator_color,
-                expand: HoverExpand::left(card_width - INDICATOR_WIDTH),
-            })
-            .width(Length::Fixed(INDICATOR_WIDTH))
-            .height(Length::Fill);
-
-            let content = row![icon_container, indicator]
+            // Flat redesign uses a full-cell `accent_bright()` fill for
+            // the active state, so the right-edge indicator strip is
+            // dropped — the icon centers in the card without a 2.5 px
+            // offset. The `indicator_color` / `hover_indicator_color`
+            // params arrive as `None` from `side_nav_bar`'s new
+            // `nav_tab`, so suppressing the indicator here is the
+            // visual companion to that suppression.
+            let _ = (indicator_color, hover_indicator_color);
+            let content = container(colored_icon(icon_path, ICON_SIZE, text_color))
                 .width(Length::Fixed(card_width))
                 .height(Length::Fixed(ICON_TAB_HEIGHT))
+                .align_x(iced::Alignment::Center)
+                .align_y(iced::Alignment::Center)
                 .into();
             (content, ICON_TAB_HEIGHT)
         }
