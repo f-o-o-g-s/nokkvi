@@ -399,11 +399,8 @@ fn transport_button_style(
     active: bool,
 ) -> impl Fn(&Theme, button::Status) -> button::Style + 'static {
     move |_theme, status| {
-        let radius = if theme::is_rounded_mode() {
-            theme::ui_radius_pill()
-        } else {
-            iced::border::Radius::from(0.0)
-        };
+        // `ui_radius_pill()` returns `0.0.into()` in flat mode.
+        let radius = theme::ui_radius_pill();
         let background = if active {
             Some(theme::accent_bright().into())
         } else {
@@ -433,11 +430,8 @@ fn transport_button_style(
 /// to `bg1()`). Rounded mode applies `ui_radius_sm()`.
 fn mode_toggle_style(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style + 'static {
     move |_theme, status| {
-        let radius = if theme::is_rounded_mode() {
-            theme::ui_radius_sm()
-        } else {
-            iced::border::Radius::from(0.0)
-        };
+        // `ui_radius_sm()` returns `0.0.into()` in flat mode.
+        let radius = theme::ui_radius_sm();
         let (bg, fg, border_color) = if active {
             (
                 theme::accent_bright(),

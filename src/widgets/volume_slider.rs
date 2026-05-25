@@ -371,11 +371,9 @@ impl<Message> VolumeSlider<'_, Message> {
     ) {
         use iced::advanced::Renderer;
 
-        let radius = if crate::theme::is_rounded_mode() {
-            crate::theme::ui_radius_pill()
-        } else {
-            iced::border::Radius::from(0.0)
-        };
+        // `ui_radius_pill()` already returns `0.0.into()` in flat mode;
+        // the helper handles the mode-switch internally.
+        let radius = crate::theme::ui_radius_pill();
 
         // Center the single bar inside the widget bounds so external
         // `thickness()` overrides don't shift it off-center.
@@ -438,11 +436,9 @@ impl<Message> VolumeSlider<'_, Message> {
     ) {
         use iced::advanced::Renderer;
 
-        let radius = if crate::theme::is_rounded_mode() {
-            crate::theme::ui_radius_pill()
-        } else {
-            iced::border::Radius::from(0.0)
-        };
+        // `ui_radius_pill()` already returns `0.0.into()` in flat mode;
+        // the helper handles the mode-switch internally.
+        let radius = crate::theme::ui_radius_pill();
 
         // Track centered vertically within widget bounds.
         let track_y = bounds.y + (bounds.height - HORIZONTAL_TRACK_THICKNESS) / 2.0;

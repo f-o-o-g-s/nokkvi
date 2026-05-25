@@ -250,11 +250,8 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
         let content = side_nav_tab_content(label, icon_path, display_mode, text_color);
 
         let card_width = side_nav_tab_width();
-        let card_radius = if is_rounded {
-            theme::ui_radius_pill()
-        } else {
-            0.0.into()
-        };
+        // `ui_radius_pill()` returns `0.0.into()` in flat mode.
+        let card_radius = theme::ui_radius_pill();
 
         // Each tab claims `FillPortion(1)` of the column's remaining vertical
         // space so the stack distributes evenly down the full sidebar instead
@@ -329,11 +326,8 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
     let settings_indicator: Option<Element<'_, NavBarMessage>> = if settings_open {
         let display_mode = theme::nav_display_mode();
         let text_color = theme::bg0_hard();
-        let card_radius = if is_rounded {
-            theme::ui_radius_pill()
-        } else {
-            0.0.into()
-        };
+        // `ui_radius_pill()` returns `0.0.into()` in flat mode.
+        let card_radius = theme::ui_radius_pill();
 
         let settings_content = side_nav_tab_content(
             "Settings",
@@ -395,11 +389,8 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
     let nav_width = side_nav_width();
     let cluster_cell_width = side_nav_tab_width();
     let cluster_cell_height = ICON_TAB_HEIGHT;
-    let cluster_radius = if is_rounded {
-        theme::ui_radius_pill()
-    } else {
-        0.0.into()
-    };
+    // `ui_radius_pill()` returns `0.0.into()` in flat mode.
+    let cluster_radius = theme::ui_radius_pill();
 
     let hamburger_inner: Element<'static, NavBarMessage> = super::hover_overlay::HoverOverlay::new(
         crate::widgets::hamburger_menu::HamburgerMenu::new(

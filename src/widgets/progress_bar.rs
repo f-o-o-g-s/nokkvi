@@ -264,13 +264,10 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
         let handle_x = bounds.x + progress * effective_width;
 
         // Flat track: 6px thin, centered vertically in widget bounds.
-        // In rounded mode the corners become pill-rounded.
+        // `ui_radius_pill()` returns `0.0.into()` in flat mode and the
+        // pill radius in rounded mode — no separate ladder needed.
         let track_y = bounds.y + (bounds.height - TRACK_THICKNESS) / 2.0;
-        let track_radius = if crate::theme::is_rounded_mode() {
-            crate::theme::ui_radius_pill()
-        } else {
-            iced::border::Radius::from(0.0)
-        };
+        let track_radius = crate::theme::ui_radius_pill();
 
         // Track background — bg2 fill, no border.
         renderer.fill_quad(
@@ -326,11 +323,8 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ProgressBar<'_, 
                     width: HANDLE_SIZE,
                     height: HANDLE_SIZE,
                 };
-                let handle_radius = if crate::theme::is_rounded_mode() {
-                    crate::theme::ui_radius_pill()
-                } else {
-                    iced::border::Radius::from(0.0)
-                };
+                // `ui_radius_pill()` returns `0.0.into()` in flat mode.
+                let handle_radius = crate::theme::ui_radius_pill();
                 renderer.fill_quad(
                     renderer::Quad {
                         bounds: handle_bounds,
@@ -476,11 +470,8 @@ impl<Message> iced::advanced::overlay::Overlay<Message, Theme, iced::Renderer> f
         let tooltip_bg = theme::bg0_hard();
         let tooltip_border = theme::border();
         let tooltip_text_color = theme::fg1();
-        let radius = if crate::theme::is_rounded_mode() {
-            crate::theme::ui_radius_sm()
-        } else {
-            iced::border::Radius::from(0.0)
-        };
+        // `ui_radius_sm()` returns `0.0.into()` in flat mode.
+        let radius = crate::theme::ui_radius_sm();
 
         // Arrow pointing down toward the handle. Drawn as a small filled square
         // tucked below the tooltip body — keeps the visual link without needing
