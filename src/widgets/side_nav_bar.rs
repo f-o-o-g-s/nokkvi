@@ -69,9 +69,6 @@ const ICON_SLOT_HEIGHT: f32 = 22.0;
 /// Icon size in the side nav bar
 const ICON_SIZE: f32 = 14.0;
 
-/// Width of the active-tab indicator bar (right edge, rounded mode)
-const INDICATOR_WIDTH: f32 = 2.5;
-
 /// Inner gutter (px) around rounded-mode tab cards. Matches the design
 /// CSS `margin: 0 4px` on `.nk-side-tab` (rounded).
 const SIDE_NAV_CARD_GUTTER: f32 = 4.0;
@@ -115,14 +112,16 @@ pub(crate) struct SideNavBarData {
     pub is_light_mode: bool,
 }
 
-/// Canvas program that draws rotated text with optional active/hover indicator.
+/// Canvas program that draws the side-nav tab's rotated label.
+///
+/// The redesign moved active-tab signaling onto the card's full-cell
+/// `accent_bright()` fill, so this program no longer draws the
+/// right-edge accent indicator bar (or its hover variant) — both were
+/// dormant before the cleanup. Recover from `git show` if a future
+/// design wants an inline indicator strip.
 struct RotatedLabel {
     label: &'static str,
     color: Color,
-    /// If set, draw a right-edge accent indicator bar (active state)
-    indicator_color: Option<Color>,
-    /// If set, draw indicator on hover when no active indicator is shown
-    hover_indicator_color: Option<Color>,
 }
 
 impl<Message> canvas::Program<Message> for RotatedLabel {
@@ -134,25 +133,9 @@ impl<Message> canvas::Program<Message> for RotatedLabel {
         renderer: &iced::Renderer,
         _theme: &iced::Theme,
         bounds: Rectangle,
-        cursor: iced::mouse::Cursor,
+        _cursor: iced::mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-
-        // Draw right-edge indicator: active state always, hover state on mouse-over
-        let show_indicator = self.indicator_color.or_else(|| {
-            if cursor.is_over(bounds) {
-                self.hover_indicator_color
-            } else {
-                None
-            }
-        });
-        if let Some(accent) = show_indicator {
-            frame.fill_rectangle(
-                Point::new(bounds.width - INDICATOR_WIDTH, 0.0),
-                iced::Size::new(INDICATOR_WIDTH, bounds.height),
-                canvas::Fill::from(accent),
-            );
-        }
 
         // Translate to center, rotate -90°, draw text (reads bottom-to-top)
         let center = frame.center();
@@ -190,29 +173,20 @@ fn side_nav_tab_content(
     icon_path: &'static str,
     display_mode: NavDisplayMode,
     text_color: Color,
-    indicator_color: Option<Color>,
-    hover_indicator_color: Option<Color>,
 ) -> Element<'static, NavBarMessage> {
     let card_width = side_nav_tab_width();
     match display_mode {
         NavDisplayMode::TextOnly => canvas(RotatedLabel {
             label,
             color: text_color,
-            indicator_color,
-            hover_indicator_color,
         })
         .width(Length::Fixed(card_width))
         .height(Length::Fill)
         .into(),
         NavDisplayMode::IconsOnly => {
             // Flat redesign uses a full-cell `accent_bright()` fill for
-            // the active state, so the right-edge indicator strip is
-            // dropped — the icon centers in the card without a 2.5 px
-            // offset. The `indicator_color` / `hover_indicator_color`
-            // params arrive as `None` from `side_nav_bar`'s new
-            // `nav_tab`, so suppressing the indicator here is the
-            // visual companion to that suppression.
-            let _ = (indicator_color, hover_indicator_color);
+            // the active state, so the icon centers in the card without
+            // an inline indicator strip.
             container(colored_icon(icon_path, ICON_SIZE, text_color))
                 .width(Length::Fixed(card_width))
                 .height(Length::Fill)
@@ -236,8 +210,6 @@ fn side_nav_tab_content(
             let label_canvas = canvas(RotatedLabel {
                 label,
                 color: text_color,
-                indicator_color,
-                hover_indicator_color,
             })
             .width(Length::Fixed(card_width))
             .height(Length::Fill);
@@ -275,17 +247,7 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
             theme::fg0()
         };
 
-        let indicator_color: Option<Color> = None;
-        let hover_indicator_color: Option<Color> = None;
-
-        let content = side_nav_tab_content(
-            label,
-            icon_path,
-            display_mode,
-            text_color,
-            indicator_color,
-            hover_indicator_color,
-        );
+        let content = side_nav_tab_content(label, icon_path, display_mode, text_color);
 
         let card_width = side_nav_tab_width();
         let card_radius = if is_rounded {
@@ -378,8 +340,6 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
             "assets/icons/settings.svg",
             display_mode,
             text_color,
-            None,
-            None,
         );
 
         Some(

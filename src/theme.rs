@@ -430,28 +430,13 @@ pub(crate) fn status_strip_bg() -> Color {
     darken(bg0_hard(), 0.17)
 }
 
-// ============================================================================
-// Active Accent Helper
-// ============================================================================
-
-/// Active-tab accent color — uses `accent()` in rounded+light mode for contrast
-/// on light backgrounds, `accent_bright()` everywhere else.
-///
-/// Shared by both the horizontal nav bar and the vertical side nav bar.
-///
-/// L2 (nav-chrome) replaced the per-mode underline/text-only active
-/// state with a full-cell `accent_bright()` fill, so this helper has
-/// no callers in the redesign. Kept as the canonical accent-resolver
-/// for any future surface that wants the rounded-light contrast bump.
-#[inline]
-#[allow(dead_code)]
-pub(crate) fn active_accent() -> Color {
-    if is_rounded_mode() && is_light_mode() {
-        accent()
-    } else {
-        accent_bright()
-    }
-}
+// `active_accent()` was retained as the canonical accent-resolver for any
+// future surface that wanted the rounded-light contrast bump (returning
+// `accent()` only in `rounded && light` mode, `accent_bright()` otherwise),
+// but every redesign tab/cell already calls `accent_bright()` directly and
+// nothing surfaced a real need for the mode-conditional shape. Removed
+// during the cleanup; a future agent reintroducing the pattern can pull it
+// from `git show`.
 
 use nokkvi_data::types::player_settings::TrackInfoDisplay;
 
@@ -1156,11 +1141,11 @@ pub(crate) fn warning() -> Color {
 pub(crate) fn warning_bright() -> Color {
     read_color(|t| t.warning_bright)
 }
-#[inline]
-#[allow(dead_code)] // Base variant available for future use (bright variant used by star ratings)
-pub(crate) fn star() -> Color {
-    read_color(|t| t.star)
-}
+// Base `star()` accessor was retained alongside `star_bright()` for any
+// future surface that wanted both ends of the star ratings palette, but
+// only `star_bright()` is consumed (slot-list star renders + metadata
+// pills). Removed during the cleanup; `palette.star.base` still lives in
+// the TOML schema so existing themes round-trip without a migration.
 #[inline]
 pub(crate) fn star_bright() -> Color {
     read_color(|t| t.star_bright)
@@ -1321,63 +1306,12 @@ pub(crate) fn modal_header_separator<'a, M: 'a>() -> iced::Element<'a, M> {
         .into()
 }
 
-/// Variant flag chosen by `nav_separator` callers — selects between the
-/// horizontal nav bar's tab separator (vertical 2-px rule, can hide in
-/// rounded mode) and the horizontal cross-bar separator drawn inside the
-/// side nav bar (between vertical tabs).
-///
-/// L2 (nav-chrome) replaced the shared 2-px `bg1()` separator with a
-/// 1-px `border()`-colored rule local to each nav bar (different inset
-/// rules in rounded mode), so this helper has no callers in the
-/// redesign. Kept as the canonical "thick separator" recipe for any
-/// future surface that wants the old visual.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NavSeparatorAxis {
-    /// 2-px wide vertical line, `Length::Fill` tall — used between
-    /// horizontal nav-bar tabs.
-    Vertical,
-    /// `Length::Fill` wide, 2-px tall — used between side-nav vertical tabs.
-    Horizontal,
-}
-
-/// 2-px nav-bar separator (vertical between top-nav tabs, horizontal between
-/// side-nav tabs). When `force_visible` is `false`, the separator is hidden
-/// in rounded mode to match the unbordered Material-style chrome; passing
-/// `true` keeps it visible (used for trailing/leading separators that
-/// bracket the tab strip).
-///
-/// Replaces `tab_separator` / `info_separator` / the inline `separator()`
-/// lambda formerly duplicated across `nav_bar` and `side_nav_bar`.
-///
-/// L2 (nav-chrome) replaced the shared 2-px `bg1()` separator with a
-/// 1-px `theme::border()`-colored rule local to each nav bar.
-#[allow(dead_code)]
-pub(crate) fn nav_separator<'a, M: 'a>(
-    axis: NavSeparatorAxis,
-    force_visible: bool,
-) -> iced::Element<'a, M> {
-    use iced::{
-        Length,
-        widget::{Space, container},
-    };
-    let (w, h) = match axis {
-        NavSeparatorAxis::Vertical => (Length::Fixed(2.0), Length::Fill),
-        NavSeparatorAxis::Horizontal => (Length::Fill, Length::Fixed(2.0)),
-    };
-    container(Space::new())
-        .width(w)
-        .height(h)
-        .style(move |_| container::Style {
-            background: if is_rounded_mode() && !force_visible {
-                None
-            } else {
-                Some(bg1().into())
-            },
-            ..Default::default()
-        })
-        .into()
-}
+// `NavSeparatorAxis` + `nav_separator` were the canonical "2-px nav-bar
+// separator" recipe — both axes, optional `force_visible` to defeat the
+// rounded-mode hide. L2 (nav-chrome) replaced them with a 1-px
+// `theme::border()`-colored rule local to each nav bar, so the helpers had
+// no callers in the redesign. Removed during the cleanup; recover from
+// `git show` if a future surface wants the old thick visual.
 
 // ----------------------------------------------------------------------------
 // Modal scaffolding
@@ -1453,32 +1387,12 @@ pub(crate) fn transparent_button_style(
     }
 }
 
-/// Themed search/filter text input style matching the Gruvbox palette.
-///
-/// Previously the default for the view-header search bar; the L3 flat
-/// redesign owns that default now (see `search_bar::flat_search_input_style`).
-/// Kept around for the L5 settings widgets lane and any future caller that
-/// wants the legacy 2 px-bordered look — clippy's `dead_code` allow is
-/// intentional until a Wave-1 lane wires it back up.
-#[allow(dead_code)]
-pub(crate) fn search_input_style(_theme: &Theme, status: text_input::Status) -> text_input::Style {
-    text_input::Style {
-        background: (bg0_soft()).into(),
-        border: iced::Border {
-            color: if matches!(status, text_input::Status::Focused { .. }) {
-                accent_bright()
-            } else {
-                iced::Color::TRANSPARENT
-            },
-            width: 2.0,
-            radius: ui_border_radius(),
-        },
-        icon: fg4(),
-        placeholder: fg4(),
-        value: fg0(),
-        selection: selection_color(),
-    }
-}
+// `theme::search_input_style` was the legacy 2 px-bordered Gruvbox view-header
+// style. The L3 flat redesign moved view-header callers to
+// `search_bar::flat_search_input_style` and the L5 settings UI runs through
+// `settings_search_input_style` below; the original helper had no remaining
+// callers and was removed during the cleanup. Recover from `git show` if a
+// future caller wants the old visual.
 
 /// Specialized search style for settings panels so it doesn't blend into bg0_soft.
 pub(crate) fn settings_search_input_style(
@@ -1800,17 +1714,6 @@ mod tests {
     fn modal_separators_produce_elements() {
         let _row: iced::Element<'_, ()> = modal_row_separator();
         let _header: iced::Element<'_, ()> = modal_header_separator();
-    }
-
-    /// `nav_separator` must compile for both axis variants and produce real
-    /// `Element`s ready to be pushed onto a row/column. The exact pixel
-    /// dimensions stay verified by the integration-level nav-bar layout
-    /// tests; here we just pin the type-level contract so a future
-    /// refactor cannot silently change the return type.
-    #[test]
-    fn nav_separator_compiles_for_both_axes() {
-        let _v: iced::Element<'_, ()> = nav_separator(NavSeparatorAxis::Vertical, false);
-        let _h: iced::Element<'_, ()> = nav_separator(NavSeparatorAxis::Horizontal, true);
     }
 
     /// `modal_scaffold` must accept any `M: Clone` and return an Element of

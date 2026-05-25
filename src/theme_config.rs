@@ -69,8 +69,10 @@ pub(crate) struct ResolvedTheme {
     pub success: Color,
     pub warning: Color,
     pub warning_bright: Color,
-    #[allow(dead_code)] // Base variant available for future use
-    pub star: Color,
+    // Base `star` color was dropped during the redesign cleanup — only
+    // `star_bright` is consumed (slot-list ratings + metadata pill). The
+    // TOML `palette.star.base` field stays so existing themes deserialize
+    // cleanly; it's just not pulled into `ResolvedTheme` anymore.
     pub star_bright: Color,
 
     // Chrome separator (1px hairline border between bars, rows, capsules).
@@ -143,10 +145,6 @@ impl ResolvedTheme {
             warning_bright: parse_hex_or_default(
                 &palette.warning.bright,
                 parse_hex_color("#fabd2f").expect("valid hardcoded hex"),
-            ),
-            star: parse_hex_or_default(
-                &palette.star.base,
-                parse_hex_color("#d79921").expect("valid hardcoded hex"),
             ),
             star_bright: parse_hex_or_default(
                 &palette.star.bright,
