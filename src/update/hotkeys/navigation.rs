@@ -40,6 +40,18 @@ impl Nokkvi {
             return self.handle_cross_pane_drag_cancel();
         }
 
+        // Text-input dialog Escape takes precedence over the Settings
+        // view's own Escape handler. The dialog can be opened from inside
+        // Settings (Save-Playlist-style flows, the local-music-path
+        // editor), so routing ESC to Settings first would close the
+        // settings drill-down instead of cancelling the prompt the user
+        // is actively typing into.
+        if self.text_input_dialog.visible {
+            return Task::done(Message::TextInputDialog(
+                crate::widgets::text_input_dialog::TextInputDialogMessage::Cancel,
+            ));
+        }
+
         // Settings has its own Escape handling — must be checked before the
         // browsing panel block, because current_view_page() returns None for
         // Settings, making all is_none_or() guards pass true and silently
@@ -62,13 +74,6 @@ impl Nokkvi {
                 }
                 return Task::done(Message::SplitView(SplitViewMessage::ToggleBrowsingPanel));
             }
-        }
-
-        // If the text input dialog is open, Escape always closes it first
-        if self.text_input_dialog.visible {
-            return Task::done(Message::TextInputDialog(
-                crate::widgets::text_input_dialog::TextInputDialogMessage::Cancel,
-            ));
         }
 
         if let Some(page) = self.current_view_page_mut() {

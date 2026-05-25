@@ -1496,7 +1496,18 @@ impl Nokkvi {
         self.pending_top_pin = None;
         self.roulette = None;
 
-        // Transient UI work tied to the prior session
+        // Transient UI work tied to the prior session — including any
+        // modals the user might have had open at logout. Without this
+        // reset, logging in to a different server briefly shows the
+        // prior server's About / Info / EQ / text-input / playlist-picker
+        // overlay before the user dismisses it (the visible field bytes
+        // are still wired to the previous session's data shapes).
+        self.about_modal = crate::widgets::about_modal::AboutModalState::default();
+        self.info_modal = crate::widgets::info_modal::InfoModalState::default();
+        self.eq_modal = crate::widgets::eq_modal::EqModalState::default();
+        self.text_input_dialog = crate::widgets::text_input_dialog::TextInputDialogState::default();
+        self.default_playlist_picker = None;
+
         self.open_menu = None;
         self.browsing_panel = None;
         self.cross_pane_drag = None;
