@@ -375,6 +375,10 @@ pub enum PlayerBarMessage {
     CycleVisualization,
     ToggleCrossfade,
     ScrollVolume(f32),
+    /// Wheel-scroll delta over the SFX slider — handler reads the
+    /// current SFX volume from app state and clamps, avoiding the
+    /// stale-base bug that drove the wheel-scroll fallback deletion.
+    ScrollSfxVolume(f32),
     OpenSettings,
     ToggleLightMode,
     GoToQueue,
@@ -1205,6 +1209,7 @@ pub(crate) fn player_bar<'a>(
 
     let mut sfx = widgets::volume_slider(sfx_volume, PlayerBarMessage::SfxVolumeChanged)
         .variant(widgets::SliderVariant::Sfx)
+        .on_scroll(PlayerBarMessage::ScrollSfxVolume)
         .horizontal(is_horizontal);
     if stacked {
         sfx = sfx.thickness(stacked_thickness);

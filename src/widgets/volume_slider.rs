@@ -275,31 +275,25 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for VolumeSlider<'_,
                 }
             }
             Event::Mouse(mouse::Event::WheelScrolled { delta }) if cursor.is_over(bounds) => {
-                // Calculate scroll delta (positive = up = increase volume)
-                let scroll_delta = match delta {
-                    mouse::ScrollDelta::Lines { y, .. } => y * 0.01, // 1% per line
-                    mouse::ScrollDelta::Pixels { y, .. } => y * 0.001, // Finer control for pixels
-                };
-                // Prefer the delta-based on_scroll callback when wired — it lets
-                // the parent add to fresh app state at handler time. Computing
-                // `self.volume + delta` here would use the constructor-captured
-                // value, which two rapid wheel events between renders would both
-                // see as the same stale base.
+                // Wheel scroll publishes a delta to `on_scroll` only. The
+                // delta-based callback lets the parent add to fresh app
+                // state at handler time — computing `self.volume + delta`
+                // inside the widget would use the constructor-captured
+                // value, and two rapid wheel events between renders would
+                // both see the same stale base (silently overwriting an
+                // adjacent notch). Callers that want wheel support MUST
+                // wire `on_scroll`; without it, wheel events are dropped
+                // (no `on_change` / `on_release` fallback that could
+                // reintroduce the stale-base bug).
                 if let Some(ref on_scroll) = self.on_scroll {
+                    let scroll_delta = match delta {
+                        mouse::ScrollDelta::Lines { y, .. } => y * 0.01, // 1% per line
+                        mouse::ScrollDelta::Pixels { y, .. } => y * 0.001, // Finer control for pixels
+                    };
                     shell.publish(on_scroll(scroll_delta));
-                } else {
-                    // Fallback for consumers that haven't wired on_scroll: each
-                    // wheel notch is a discrete gesture, so still prefer
-                    // on_release (force-persist) over on_change (throttled).
-                    let new_volume = (self.volume + scroll_delta).clamp(0.0, 1.0);
-                    if let Some(ref on_release) = self.on_release {
-                        shell.publish(on_release(new_volume));
-                    } else {
-                        shell.publish((self.on_change)(new_volume));
-                    }
+                    shell.capture_event();
+                    shell.request_redraw();
                 }
-                shell.capture_event();
-                shell.request_redraw();
             }
             _ => {}
         }
