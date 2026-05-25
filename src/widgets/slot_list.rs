@@ -293,15 +293,15 @@ pub(crate) const SLOT_SPACING: f32 = 0.0;
 
 /// Total chrome consumed by the view-header row.
 ///
-/// 50 px strip (matches `view_header::HEADER_HEIGHT`). The header keeps its
-/// flat treatment in both flat and rounded modes — the surrounding pill
-/// capsule was removed because it looked out of place stacked above the
-/// slot-list shell. Keeping this in lockstep with
-/// `view_header::view_header()` is load-bearing — drifting drops a partial
-/// slot at the bottom of every list.
+/// `HEADER_HEIGHT` strip + 1 px `theme::border()` sibling separator below it.
+/// Derives from `view_header::HEADER_HEIGHT` + `HEADER_BOTTOM_SEPARATOR` so
+/// the slot-count math stays welded to the actual rendered widget. The
+/// header keeps its flat treatment in both flat and rounded modes — the
+/// surrounding pill capsule was removed because it looked out of place
+/// stacked above the slot-list shell.
 #[inline]
 pub(crate) fn view_header_chrome() -> f32 {
-    50.0
+    super::view_header::HEADER_HEIGHT + super::view_header::HEADER_BOTTOM_SEPARATOR
 }
 
 /// Height of the browsing panel tab bar.
@@ -1801,6 +1801,22 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn view_header_chrome_matches_rendered_widget_height() {
+        // Pins `view_header_chrome()` to the actual widget tree built by
+        // `view_header::view_header()` (a 50 px strip stacked with a 1 px
+        // sibling separator). If `view_header` adds/removes a row, this
+        // assertion fires before the slot-count math silently under-counts.
+        use crate::widgets::view_header::{HEADER_BOTTOM_SEPARATOR, HEADER_HEIGHT};
+        let expected = HEADER_HEIGHT + HEADER_BOTTOM_SEPARATOR;
+        assert!(
+            (view_header_chrome() - expected).abs() < f32::EPSILON,
+            "view_header_chrome() drifted from HEADER_HEIGHT + separator: got {}, expected {}",
+            view_header_chrome(),
+            expected,
+        );
     }
 
     #[test]

@@ -82,7 +82,17 @@ pub(crate) struct ViewHeaderConfig<'a, V, Message> {
 /// flat and rounded modes: the surrounding pill chrome looked out of place
 /// stacked above the slot-list shell, so the header keeps its flat
 /// treatment regardless of the global rounded-mode toggle.
-const HEADER_HEIGHT: f32 = 50.0;
+///
+/// Exposed to `slot_list::view_header_chrome()` so the slot-count math
+/// derives from this single source of truth.
+pub(crate) const HEADER_HEIGHT: f32 = 50.0;
+
+/// Height of the 1 px `theme::border()` sibling separator rendered below the
+/// header strip. Counted as part of the header's chrome footprint so callers
+/// that stack additional bars below (queue edit-mode, playlist-context) can
+/// add their own bars onto a chrome total that already accounts for the
+/// separator under the view-header itself.
+pub(crate) const HEADER_BOTTOM_SEPARATOR: f32 = 1.0;
 
 /// Pixel-perfect cell width for header icon buttons. Mirrors
 /// `.nk-ctrl-btn { width: 44px }` from the design CSS — narrower than
