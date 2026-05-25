@@ -6,11 +6,30 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `theme::border()` chrome separator color token (per-theme TOML entry; auto-derives `darken(bg.hard, 30%)` when empty).
+- Radius scale: `theme::ui_radius_xs/sm/md/lg/pill()` helpers (4 / 8 / 12 / 18 / 999 px in rounded mode; 0 in flat mode).
+- Chrome size helpers: `theme::nav_bar_height()` (32 flat / 44 rounded), `theme::STATUS_STRIP_HEIGHT`, `theme::status_strip_bg()`, `theme::title_font()`.
+- New `widgets::pill_segmented_button` widget for settings Bool / Enum / ToggleSet chips.
+
 ### Changed
+
+- **Flat redesign across all chrome.** Every surface (nav, transport, slot rows, modals, settings widgets) now uses a 1 px sided-border vocabulary in flat mode and a coherent pill / radius scale in rounded mode.
+- Hamburger menu and library-filter trigger now sit on the LEFT of both top-nav and side-nav layouts (previously top-nav had them on the right).
+- Player bar: 40×40 borderless transport buttons, 38 / 40 px mode toggles with 1 px `theme::border()` outline, stereo 8×44 vertical-bar volume meter, 6 px thin progress bar + 14 px handle. Base height 64 px (flat) / 72 px (rounded).
+- Status strip below the player bar bumped to 24 px on a dedicated `theme::status_strip_bg()` (a touch darker than `bg0_hard`).
+- Side-nav widened to 56 px (flat) / 64 px (rounded) to fit the new pill-card tab visuals.
+- View header: flat sided-border row (50 px) in flat mode / pill segmented capsule (44 px) with inset search in rounded mode.
+- Slot rows now touch (zero gap) with a bottom-only 1 px `theme::border()` separator; rounded mode wraps the whole list in an outer `ui_radius_lg()` shell.
+- Modal chrome unified on `bg0_hard()` background + 1 px `accent_bright()` outline + `ui_radius_lg()` corners.
+- Hover overlay tint is now theme-aware (`fg0()` on dark themes / `bg0_hard()` on light) for cross-theme legibility.
+- Settings widgets (Bool / Enum / ToggleSet / Hotkey / HexColor / Number) restyled to the design's chip vocabulary; settings rows get the 3 px accent left stripe cursor treatment.
 
 ### Fixed
 
 ### Removed
+
+- 3D bevel rendering: deleted `widgets::three_d_button`, `widgets::three_d_icon_button`, `widgets::three_d_helpers`, and the `theme::border_3d_*` / `lighten` helpers. Net ~1054 lines.
+- Scrolling metadata overlay on the progress bar (the `TrackInfoDisplay::ProgressTrack` mode renderer). The variant stays in the enum so existing TOML files still parse, but stored values now silently migrate to `PlayerBar` on settings load.
 
 ## v0.5.3 — 2026-05-24
 
