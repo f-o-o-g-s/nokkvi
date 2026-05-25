@@ -1,10 +1,15 @@
 //! Side Navigation Bar — vertical nav tabs for Side layout mode
 //!
-//! Renders view tab buttons in a vertical column on the left edge of the app.
-//! Each button uses a canvas widget with rotated text (-90°, reading bottom-to-top).
-//! Styling matches the horizontal nav_bar exactly:
-//!   - Rounded mode: accent text for active, accent right-edge indicator, fg1 on hover
-//!   - Flat mode: filled accent_bright background for active, HoverOverlay on hover
+//! Renders view tab buttons in a vertical column on the left edge of the
+//! app. Each button uses a canvas widget with rotated text (-90°, reading
+//! bottom-to-top). Styling mirrors the horizontal nav bar's flat redesign:
+//!
+//!   - Flat mode: 56 px wide chrome, edge-to-edge tab cells with full-cell
+//!     `accent_bright()` fill when active and 1 px `theme::border()`
+//!     horizontal rules between cells.
+//!   - Rounded mode: 64 px wide chrome with 4 px outer gutters around 56 px
+//!     `ui_radius_md()` tab cards; rules inset 14 px on each side so they
+//!     float between the rounded cards.
 //!
 //! Emits the same `NavBarMessage` variants as the horizontal nav bar.
 
@@ -23,15 +28,43 @@ use super::{
 };
 use crate::theme;
 
-/// Width of the side nav bar (px)
-pub(crate) const SIDE_NAV_WIDTH: f32 = 28.0;
+/// Side-nav width (px) by chrome mode.
+/// - Flat mode: 56 px (matches the design CSS `.nk-sidenav { width: 56px }`).
+/// - Rounded mode: 64 px (4 px outer gutters around the 56-px tab cards
+///   so the rounded corners breathe).
+///
+/// Exposed as a function so callers always see the current mode's value.
+const SIDE_NAV_WIDTH_FLAT: f32 = 56.0;
+const SIDE_NAV_WIDTH_ROUNDED: f32 = 64.0;
 
-/// Width of the side-nav border (`bg0_hard` rule on the right edge).
-pub(crate) const SIDE_NAV_BORDER: f32 = 2.0;
+#[inline]
+pub(crate) fn side_nav_width() -> f32 {
+    if theme::is_rounded_mode() {
+        SIDE_NAV_WIDTH_ROUNDED
+    } else {
+        SIDE_NAV_WIDTH_FLAT
+    }
+}
 
-/// Total horizontal footprint of the side-nav bar (icons + border).
-/// Must match the outer container width at line ~365.
-pub(crate) const SIDE_NAV_TOTAL_WIDTH: f32 = SIDE_NAV_WIDTH + SIDE_NAV_BORDER;
+/// Width of the side-nav right-edge separator (1 px `theme::border()`).
+pub(crate) const SIDE_NAV_BORDER: f32 = 1.0;
+
+/// Worst-case total horizontal footprint of the side-nav bar (rounded
+/// mode value + border). Kept as a `const` so the L6-owned `app_view.rs`
+/// keeps a stable symbol; the live `side_nav_total_width()` function
+/// returns the current mode's exact value, which `app_view` will migrate
+/// to in its lane.
+pub(crate) const SIDE_NAV_TOTAL_WIDTH: f32 = SIDE_NAV_WIDTH_ROUNDED + SIDE_NAV_BORDER;
+
+/// Current side-nav total footprint (sidebar + right-edge border) for
+/// the active chrome mode. Use this in new code instead of the
+/// `SIDE_NAV_TOTAL_WIDTH` constant; the constant stays as a stable
+/// (worst-case) symbol for `app_view.rs` until L6 migrates that file.
+#[allow(dead_code)]
+#[inline]
+pub(crate) fn side_nav_total_width() -> f32 {
+    side_nav_width() + SIDE_NAV_BORDER
+}
 
 /// Height allocated for each tab button (enough for rotated text)
 const TAB_HEIGHT: f32 = 72.0;
@@ -50,6 +83,27 @@ const ICON_SIZE: f32 = 14.0;
 
 /// Width of the active-tab indicator bar (right edge, rounded mode)
 const INDICATOR_WIDTH: f32 = 2.5;
+
+/// Inner gutter (px) around rounded-mode tab cards. Matches the design
+/// CSS `margin: 0 4px` on `.nk-side-tab` (rounded).
+const SIDE_NAV_CARD_GUTTER: f32 = 4.0;
+
+/// Vertical padding (px) at the top/bottom of the rounded-mode side
+/// nav stack. Matches `padding: 8px 4px` on the rounded `.nk-sidenav`.
+const SIDE_NAV_TRAY_PAD_V: f32 = 8.0;
+
+/// Width (px) of an individual tab card inside the sidebar. Flat mode
+/// fills the whole sidebar; rounded mode leaves a 4 px gutter on each
+/// side so the rounded corners aren't clipped against the chrome edge.
+/// Happens to be 56 px in both modes today (`64 - 2*4 = 56 = 56`).
+#[inline]
+fn side_nav_tab_width() -> f32 {
+    if theme::is_rounded_mode() {
+        side_nav_width() - 2.0 * SIDE_NAV_CARD_GUTTER
+    } else {
+        side_nav_width()
+    }
+}
 
 /// Data passed to the side nav bar for rendering
 pub(crate) struct SideNavBarData {
@@ -147,6 +201,7 @@ fn side_nav_tab_content(
     indicator_color: Option<Color>,
     hover_indicator_color: Option<Color>,
 ) -> (Element<'static, NavBarMessage>, f32) {
+    let card_width = side_nav_tab_width();
     match display_mode {
         NavDisplayMode::TextOnly => {
             let content = canvas(RotatedLabel {
@@ -155,7 +210,7 @@ fn side_nav_tab_content(
                 indicator_color,
                 hover_indicator_color,
             })
-            .width(Length::Fixed(SIDE_NAV_WIDTH))
+            .width(Length::Fixed(card_width))
             .height(Length::Fixed(TAB_HEIGHT))
             .into();
             (content, TAB_HEIGHT)
@@ -171,20 +226,20 @@ fn side_nav_tab_content(
             let indicator = canvas(HoverIndicator {
                 indicator_color,
                 hover_indicator_color,
-                expand: HoverExpand::left(SIDE_NAV_WIDTH - INDICATOR_WIDTH),
+                expand: HoverExpand::left(card_width - INDICATOR_WIDTH),
             })
             .width(Length::Fixed(INDICATOR_WIDTH))
             .height(Length::Fill);
 
             let content = row![icon_container, indicator]
-                .width(Length::Fixed(SIDE_NAV_WIDTH))
+                .width(Length::Fixed(card_width))
                 .height(Length::Fixed(ICON_TAB_HEIGHT))
                 .into();
             (content, ICON_TAB_HEIGHT)
         }
         NavDisplayMode::TextAndIcons => {
             let icon_widget = container(colored_icon(icon_path, ICON_SIZE, text_color))
-                .width(Length::Fixed(SIDE_NAV_WIDTH))
+                .width(Length::Fixed(card_width))
                 .height(Length::Fixed(ICON_SLOT_HEIGHT))
                 .align_x(iced::Alignment::Center)
                 .align_y(iced::Alignment::End);
@@ -195,12 +250,12 @@ fn side_nav_tab_content(
                 indicator_color,
                 hover_indicator_color,
             })
-            .width(Length::Fixed(SIDE_NAV_WIDTH))
+            .width(Length::Fixed(card_width))
             .height(Length::Fixed(TEXT_ICON_TAB_HEIGHT - ICON_SLOT_HEIGHT));
 
             let content = column![icon_widget, label_canvas]
                 .spacing(0)
-                .width(Length::Fixed(SIDE_NAV_WIDTH))
+                .width(Length::Fixed(card_width))
                 .height(Length::Fixed(TEXT_ICON_TAB_HEIGHT))
                 .into();
             (content, TEXT_ICON_TAB_HEIGHT)
@@ -214,8 +269,6 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
     let current = data.current_view;
     let is_rounded = theme::is_rounded_mode();
 
-    let active_accent = theme::active_accent();
-
     let nav_tab = |label: &'static str,
                    icon_path: &'static str,
                    view: NavView|
@@ -223,47 +276,27 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
         let is_active = !settings_open && current == view;
         let display_mode = theme::nav_display_mode();
 
-        // Container style — flat mode uses shared flat_tab_container_style, rounded uses plain bg.
-        // mouse_area + HoverOverlay(container) so the press-scale fires (native button captures
-        // ButtonPressed first).
-        let tab_style = move |_theme: &iced::Theme| {
-            if is_rounded {
-                container::Style {
-                    background: Some(Background::Color(theme::bg0_hard())),
-                    text_color: Some(theme::fg2()),
-                    ..Default::default()
-                }
-            } else {
-                flat_tab_container_style(is_active)(_theme)
-            }
+        // Container style — both modes use the same `flat_tab_container_style`
+        // shape (active = filled `accent_bright()` + dark text, idle =
+        // `bg0_hard()` + `fg0()`). Rounded mode adds the `ui_radius_md()`
+        // outer radius via `border_radius` on the wrapping `HoverOverlay`
+        // so the cards read as 12-px-rounded buttons.
+        let tab_style = flat_tab_container_style(is_active);
+
+        // Text color follows the cell fill: dark on the accent fill,
+        // `fg0()` on the chrome bg. Matches the top-nav `nav_tab`.
+        let text_color = if is_active {
+            theme::bg0_hard()
+        } else {
+            theme::fg0()
         };
 
-        // Determine text color based on active state
-        let text_color = if is_rounded {
-            if is_active {
-                active_accent
-            } else {
-                theme::fg2()
-            }
-        } else if is_active {
-            theme::bg0()
-        } else {
-            theme::fg2()
-        };
-
-        // Indicator drawn inside canvas for active rounded tabs
-        let indicator_color = if is_rounded && is_active {
-            Some(active_accent)
-        } else {
-            None
-        };
-
-        // Hover indicator: show accent bar on hover in rounded mode
-        let hover_indicator_color = if is_rounded && !is_active {
-            Some(active_accent)
-        } else {
-            None
-        };
+        // The flat-redesign drops the right-edge indicator strip — the
+        // full-cell accent fill is the active affordance. Suppress both
+        // indicator colors so `RotatedLabel` / `HoverIndicator` don't
+        // draw a stray vertical bar.
+        let indicator_color: Option<Color> = None;
+        let hover_indicator_color: Option<Color> = None;
 
         let (content, tab_height) = side_nav_tab_content(
             label,
@@ -274,45 +307,68 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
             hover_indicator_color,
         );
 
+        let card_width = side_nav_tab_width();
+        let card_radius = if is_rounded {
+            theme::ui_radius_md()
+        } else {
+            0.0.into()
+        };
+
         mouse_area(
             super::hover_overlay::HoverOverlay::new(
                 container(content)
                     .padding(0)
-                    .width(Length::Fixed(SIDE_NAV_WIDTH))
+                    .width(Length::Fixed(card_width))
                     .height(Length::Fixed(tab_height))
                     .style(tab_style),
             )
-            .border_radius(theme::ui_border_radius()),
+            .border_radius(card_radius),
         )
         .on_press(NavBarMessage::SwitchView(view))
         .interaction(iced::mouse::Interaction::Pointer)
         .into()
     };
 
-    // Separator line between tabs (horizontal line in vertical layout).
-    // `force_visible = !is_rounded` mirrors the original lambda: rounded mode
-    // hides the inter-tab rules, flat mode keeps them.
-    let separator = || -> Element<'_, NavBarMessage> {
-        theme::nav_separator(theme::NavSeparatorAxis::Horizontal, !is_rounded)
+    // Separator line between tabs (horizontal rule in the vertical layout).
+    // Flat mode: 1 px `theme::border()` rule running the full sidebar
+    // width, mirroring the design's `border-bottom: 1px solid #1a2024`
+    // on `.nk-side-tab`. Rounded mode: same rule but inset 14 px on
+    // each side so it floats inside the gap between the rounded cards
+    // (matches the design's `margin: 6px 14px` on `.nk-side-divider`).
+    let side_inset = if is_rounded { 14.0_f32 } else { 0.0 };
+    let separator = move || -> Element<'_, NavBarMessage> {
+        let rule = container(iced::widget::Space::new())
+            .width(Length::Fill)
+            .height(Length::Fixed(1.0))
+            .style(|_| container::Style {
+                background: Some(theme::border().into()),
+                ..Default::default()
+            });
+        if side_inset > 0.0 {
+            row![
+                iced::widget::Space::new().width(Length::Fixed(side_inset)),
+                rule,
+                iced::widget::Space::new().width(Length::Fixed(side_inset)),
+            ]
+            .height(Length::Fixed(1.0))
+            .into()
+        } else {
+            rule.into()
+        }
     };
 
-    // Settings indicator when settings are open (non-interactive)
+    // Settings indicator when settings are open (non-interactive).
+    // Renders with the same active-state visuals the other tabs use
+    // (filled `accent_bright()` card, `bg0_hard()` text) so the user
+    // sees "Settings" highlighted in the same vocabulary regardless of
+    // chrome mode. Rounded mode keeps the `ui_radius_md()` card outline.
     let settings_indicator: Option<Element<'_, NavBarMessage>> = if settings_open {
         let display_mode = theme::nav_display_mode();
-        let text_color = if is_rounded {
-            active_accent
+        let text_color = theme::bg0_hard();
+        let card_radius = if is_rounded {
+            theme::ui_radius_md()
         } else {
-            theme::bg0()
-        };
-        let bg = if is_rounded {
-            theme::bg0_hard()
-        } else {
-            theme::accent_bright()
-        };
-        let indicator_color = if is_rounded {
-            Some(active_accent)
-        } else {
-            None
+            0.0.into()
         };
 
         let (settings_content, tab_height) = side_nav_tab_content(
@@ -320,18 +376,18 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
             "assets/icons/settings.svg",
             display_mode,
             text_color,
-            indicator_color,
-            None, // No hover indicator — settings tab is always active
+            None,
+            None,
         );
 
         Some(
             container(settings_content)
-                .width(Length::Fixed(SIDE_NAV_WIDTH))
+                .width(Length::Fixed(side_nav_tab_width()))
                 .height(Length::Fixed(tab_height))
                 .style(move |_: &iced::Theme| container::Style {
-                    background: Some(Background::Color(bg)),
+                    background: Some(Background::Color(theme::accent_bright())),
                     border: Border {
-                        radius: theme::ui_border_radius(),
+                        radius: card_radius,
                         ..Default::default()
                     },
                     ..Default::default()
@@ -369,7 +425,17 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
     let library_selector_bounds = data.library_selector_bounds;
     let library_rows = data.library_rows.clone();
 
-    let hamburger: Element<'static, NavBarMessage> = super::hover_overlay::HoverOverlay::new(
+    // Hamburger / library wrap in `Center`-aligned containers so they
+    // sit centered inside the sidebar (the icons themselves are
+    // narrower than the sidebar width).
+    let nav_width = side_nav_width();
+    let hamburger_card_radius = if is_rounded {
+        theme::ui_radius_md()
+    } else {
+        0.0.into()
+    };
+
+    let hamburger_inner: Element<'static, NavBarMessage> = super::hover_overlay::HoverOverlay::new(
         crate::widgets::hamburger_menu::HamburgerMenu::new(
             |action| match action {
                 crate::widgets::hamburger_menu::MenuAction::ToggleLightMode => {
@@ -388,10 +454,14 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
             data.is_light_mode,
         ),
     )
-    .border_radius(theme::ui_border_radius())
+    .border_radius(hamburger_card_radius)
     .into();
+    let hamburger: Element<'static, NavBarMessage> = container(hamburger_inner)
+        .width(Length::Fixed(nav_width))
+        .center_x(Length::Fixed(nav_width))
+        .into();
 
-    let library_trigger = super::hover_overlay::HoverOverlay::new(
+    let library_trigger_inner = super::hover_overlay::HoverOverlay::new(
         container(super::library_filter_trigger::library_filter_trigger(
             library_count,
             active_library_count,
@@ -403,10 +473,13 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
                 trigger_bounds,
             },
         ))
-        .width(Length::Fixed(SIDE_NAV_WIDTH))
         .align_x(iced::Alignment::Center),
     )
-    .border_radius(theme::ui_border_radius());
+    .border_radius(hamburger_card_radius);
+    let library_trigger: Element<'_, NavBarMessage> = container(library_trigger_inner)
+        .width(Length::Fixed(nav_width))
+        .center_x(Length::Fixed(nav_width))
+        .into();
 
     let popover_items: Vec<(i32, String, String, bool)> = library_rows
         .into_iter()
@@ -430,33 +503,76 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
         library_selector_bounds,
     );
 
-    // Build vertical column: library trigger first, then NAV_TABS.
-    let mut tabs = column![
-        hamburger,
-        separator(),
-        library_trigger,
-        library_popover,
-        separator()
-    ]
-    .spacing(0)
-    .width(Length::Fixed(SIDE_NAV_WIDTH));
+    // Wrap each tab card in a 4-px-gutter row in rounded mode so the
+    // cards float inside the 64-px sidebar with even left/right
+    // margins; flat mode renders the card edge-to-edge (no wrap).
+    fn wrap_in_gutter<'a>(
+        elem: Element<'a, NavBarMessage>,
+        is_rounded: bool,
+        nav_width: f32,
+    ) -> Element<'a, NavBarMessage> {
+        if is_rounded {
+            container(elem)
+                .width(Length::Fixed(nav_width))
+                .center_x(Length::Fixed(nav_width))
+                .into()
+        } else {
+            elem
+        }
+    }
+
+    // Inter-tab spacing in rounded mode (so the cards don't touch top
+    // to bottom).
+    let stack_spacing: f32 = if is_rounded {
+        SIDE_NAV_CARD_GUTTER
+    } else {
+        0.0
+    };
+
+    // Build vertical column: hamburger + library cluster on top, then
+    // a divider, then the NAV_TABS. Mirrors the top-nav layout but
+    // rotated 90°.
+    let mut tabs = column![hamburger, library_trigger, library_popover, separator()]
+        .spacing(stack_spacing)
+        .width(Length::Fixed(nav_width));
     for &(label, icon_path, view) in NAV_TABS {
-        tabs = tabs.push(nav_tab(label, icon_path, view)).push(separator());
+        tabs = tabs
+            .push(wrap_in_gutter(
+                nav_tab(label, icon_path, view),
+                is_rounded,
+                nav_width,
+            ))
+            .push(separator());
     }
 
     if let Some(indicator) = settings_indicator {
-        tabs = tabs.push(indicator).push(separator());
+        tabs = tabs
+            .push(wrap_in_gutter(indicator, is_rounded, nav_width))
+            .push(separator());
     }
 
-    // Fill remaining space
+    // Apply top/bottom tray padding in rounded mode (matches the design's
+    // `padding: 8px 4px` on the rounded `.nk-sidenav`).
+    let tray_padding = if is_rounded {
+        iced::Padding {
+            top: SIDE_NAV_TRAY_PAD_V,
+            bottom: SIDE_NAV_TRAY_PAD_V,
+            left: 0.0,
+            right: 0.0,
+        }
+    } else {
+        iced::Padding::ZERO
+    };
+
+    // Fill remaining space below the tabs.
     tabs = tabs.push(Space::new().height(Length::Fill));
 
-    // Right edge separator (vertical line)
+    // Right edge separator (1 px `theme::border()` vertical rule).
     let right_edge: Element<'_, NavBarMessage> = container(Space::new())
-        .width(Length::Fixed(2.0))
+        .width(Length::Fixed(SIDE_NAV_BORDER))
         .height(Length::Fill)
         .style(move |_| container::Style {
-            background: Some(theme::bg1().into()),
+            background: Some(theme::border().into()),
             ..Default::default()
         })
         .into();
@@ -464,15 +580,16 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
     container(
         row![
             container(tabs)
-                .width(Length::Fixed(SIDE_NAV_WIDTH))
+                .width(Length::Fixed(nav_width))
                 .height(Length::Fill)
+                .padding(tray_padding)
                 .style(theme::container_bg0_hard),
             right_edge,
         ]
         .spacing(0)
         .height(Length::Fill),
     )
-    .width(Length::Fixed(SIDE_NAV_TOTAL_WIDTH))
+    .width(Length::Fixed(side_nav_total_width()))
     .height(Length::Fill)
     .into()
 }

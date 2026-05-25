@@ -487,7 +487,13 @@ pub(crate) fn status_strip_bg() -> Color {
 /// on light backgrounds, `accent_bright()` everywhere else.
 ///
 /// Shared by both the horizontal nav bar and the vertical side nav bar.
+///
+/// L2 (nav-chrome) replaced the per-mode underline/text-only active
+/// state with a full-cell `accent_bright()` fill, so this helper has
+/// no callers in the redesign. Kept as the canonical accent-resolver
+/// for any future surface that wants the rounded-light contrast bump.
 #[inline]
+#[allow(dead_code)]
 pub(crate) fn active_accent() -> Color {
     if is_rounded_mode() && is_light_mode() {
         accent()
@@ -1411,6 +1417,13 @@ pub(crate) fn modal_header_separator<'a, M: 'a>() -> iced::Element<'a, M> {
 /// horizontal nav bar's tab separator (vertical 2-px rule, can hide in
 /// rounded mode) and the horizontal cross-bar separator drawn inside the
 /// side nav bar (between vertical tabs).
+///
+/// L2 (nav-chrome) replaced the shared 2-px `bg1()` separator with a
+/// 1-px `border()`-colored rule local to each nav bar (different inset
+/// rules in rounded mode), so this helper has no callers in the
+/// redesign. Kept as the canonical "thick separator" recipe for any
+/// future surface that wants the old visual.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NavSeparatorAxis {
     /// 2-px wide vertical line, `Length::Fill` tall — used between
@@ -1428,6 +1441,10 @@ pub(crate) enum NavSeparatorAxis {
 ///
 /// Replaces `tab_separator` / `info_separator` / the inline `separator()`
 /// lambda formerly duplicated across `nav_bar` and `side_nav_bar`.
+///
+/// L2 (nav-chrome) replaced the shared 2-px `bg1()` separator with a
+/// 1-px `theme::border()`-colored rule local to each nav bar.
+#[allow(dead_code)]
 pub(crate) fn nav_separator<'a, M: 'a>(
     axis: NavSeparatorAxis,
     force_visible: bool,
