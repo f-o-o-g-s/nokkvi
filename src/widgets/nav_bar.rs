@@ -431,7 +431,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             data.hamburger_open,
             data.is_light_mode,
         ))
-        .border_radius(theme::ui_border_radius())
+        .border_radius(theme::ui_radius_pill())
         .into();
 
     // -------------------------------------------------------------------------
@@ -478,7 +478,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                 },
             ),
         )
-        .border_radius(theme::ui_border_radius());
+        .border_radius(theme::ui_radius_pill());
 
         // Popover rows: format song_count into a comma-grouped string
         // for the dim right column; `None` → empty string (Subsonic
