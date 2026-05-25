@@ -15,7 +15,9 @@
 //! - When the trigger is closed, an accent dot is drawn in the icon's
 //!   top-right when any item in `rows` is active. This is the at-a-glance
 //!   "something is on" affordance for hidden mode state.
-//! - 3D bevel trigger chrome (matching the rest of the player bar buttons).
+//! - Flat trigger chrome (1 px `theme::border()` outline, `theme::bg0_hard()`
+//!   fill, inverted to `accent_bright` fill / `bg0_hard` glyph when open) —
+//!   matches the post-redesign player bar buttons.
 
 use iced::{
     Element, Event, Length, Point, Radians, Rectangle, Size, Theme, Vector,
@@ -45,7 +47,7 @@ use crate::{
 // ============================================================================
 
 const TRIGGER_ICON_SIZE: f32 = 20.0;
-const TRIGGER_BORDER_WIDTH: f32 = 2.0;
+const TRIGGER_BORDER_WIDTH: f32 = 1.0;
 
 // Badge pip geometry lives in `super::badge_pip` so the kebab trigger and the
 // library-filter trigger render identical "something is on" dots. Use
@@ -214,25 +216,34 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Player
         _cursor: mouse::Cursor,
         _viewport: &Rectangle,
     ) {
-        use iced::advanced::svg::Renderer as SvgRenderer;
+        use iced::advanced::{Renderer, svg::Renderer as SvgRenderer};
 
         let bounds = layout.bounds();
 
-        // 3D bevel chrome — pressed appearance when open, raised when closed.
-        let colors = super::three_d_helpers::BevelStateColors::compute(
-            self.is_open,
-            theme::bg1(),
-            theme::fg1(),
-            theme::bg0_hard(),
-        );
+        // Flat trigger chrome — inverted accent fill / dark glyph when open,
+        // dark fill / light glyph when closed. The 1 px `border()` outline
+        // matches the surrounding player bar buttons after the flat redesign.
+        let (bg_color, glyph_color, outline) = if self.is_open {
+            (
+                theme::accent_bright(),
+                theme::bg0_hard(),
+                theme::accent_bright(),
+            )
+        } else {
+            (theme::bg0_hard(), theme::fg1(), theme::border())
+        };
 
-        super::three_d_helpers::draw_3d_bevel(
-            renderer,
-            bounds,
-            TRIGGER_BORDER_WIDTH,
-            colors.bg,
-            colors.top_left,
-            colors.bottom_right,
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds,
+                border: iced::Border {
+                    color: outline,
+                    width: TRIGGER_BORDER_WIDTH,
+                    radius: theme::ui_radius_sm(),
+                },
+                ..Default::default()
+            },
+            bg_color,
         );
 
         // Centered kebab icon.
@@ -247,7 +258,7 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Player
         renderer.draw_svg(
             SvgData {
                 handle: self.icon_handle.clone(),
-                color: Some(colors.fg),
+                color: Some(glyph_color),
                 rotation: Radians(0.0),
                 opacity: 1.0,
             },
@@ -465,14 +476,16 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
 
         let bounds = visible_menu_bounds(layout.bounds());
 
-        // Matches HamburgerMenu chrome.
+        // Flat menu chrome — `bg1()` fill with a 1 px `border()` outline.
+        // `md` radius keeps the popover reading as a major surface in rounded
+        // mode without competing with the modal-frame scale.
         renderer.fill_quad(
             renderer::Quad {
                 bounds,
                 border: iced::Border {
                     width: 1.0,
-                    color: theme::accent_bright(),
-                    radius: theme::ui_border_radius(),
+                    color: theme::border(),
+                    radius: theme::ui_radius_md(),
                 },
                 shadow: MENU_SHADOW,
                 ..Default::default()
@@ -498,7 +511,7 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
                             },
                             ..Default::default()
                         },
-                        theme::bg3(),
+                        theme::border(),
                     );
                 }
                 ModeMenuRow::Item(item) => {
@@ -516,7 +529,7 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
                             renderer::Quad {
                                 bounds: item_bounds,
                                 border: iced::Border {
-                                    radius: theme::ui_border_radius(),
+                                    radius: theme::ui_radius_sm(),
                                     ..Default::default()
                                 },
                                 ..Default::default()

@@ -431,13 +431,15 @@ pub(crate) fn eq_modal_overlay<'a>(
     .width(Length::Fixed(MODAL_WIDTH));
 
     // ── Dialog Box ───────────────────────────────────────────────
+    // Flat redesign: bg0_hard() (matches design's --bg-dim), 1px accent
+    // outline, larger `lg` radius in rounded mode.
     let dialog_box = container(content)
         .style(|_theme| container::Style {
-            background: Some(theme::bg1().into()),
+            background: Some(theme::bg0_hard().into()),
             border: iced::Border {
                 color: theme::accent_bright(),
                 width: 1.0,
-                radius: theme::ui_border_radius(),
+                radius: theme::ui_radius_lg(),
             },
             ..Default::default()
         })
