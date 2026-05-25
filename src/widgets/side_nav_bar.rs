@@ -46,17 +46,11 @@ pub(crate) fn side_nav_width() -> f32 {
 /// Width of the side-nav right-edge separator (1 px `theme::border()`).
 pub(crate) const SIDE_NAV_BORDER: f32 = 1.0;
 
-/// Worst-case total horizontal footprint of the side-nav bar (rounded
-/// mode value + border). Kept as a `const` so the L6-owned `app_view.rs`
-/// keeps a stable symbol; the live `side_nav_total_width()` function
-/// returns the current mode's exact value, which `app_view` will migrate
-/// to in its lane.
-pub(crate) const SIDE_NAV_TOTAL_WIDTH: f32 = SIDE_NAV_WIDTH_ROUNDED + SIDE_NAV_BORDER;
-
-/// Current side-nav total footprint (sidebar + right-edge border) for
-/// the active chrome mode. Use this in new code instead of the
-/// `SIDE_NAV_TOTAL_WIDTH` constant; the constant stays as a stable
-/// (worst-case) symbol for `app_view.rs` until L6 migrates that file.
+/// Current side-nav total horizontal footprint (icons + right-edge
+/// border) for the active chrome mode. After L6 migration this is the
+/// only public symbol — the old `SIDE_NAV_TOTAL_WIDTH` worst-case const
+/// was removed once `app_view::content_pane_width()` moved to the live
+/// function.
 #[inline]
 pub(crate) fn side_nav_total_width() -> f32 {
     side_nav_width() + SIDE_NAV_BORDER

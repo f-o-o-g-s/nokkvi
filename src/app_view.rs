@@ -151,11 +151,12 @@ impl Nokkvi {
     /// Horizontal extent of the content pane — everything inside the outer
     /// chrome that the per-view widgets render into.
     ///
-    /// In `NavLayout::Side` the vertical sidebar consumes
-    /// `SIDE_NAV_TOTAL_WIDTH` px on the left (icons + border) and the views
-    /// must size their artwork-resolver math, drag handles, and slot-list
-    /// rects against the REMAINING width. Top / None nav layouts subtract
-    /// nothing and this returns the raw window width.
+    /// In `NavLayout::Side` the vertical sidebar consumes the live width
+    /// reported by `side_nav_total_width()` (icons + border, mode-sensitive
+    /// after the flat redesign: 30 px flat / 65 px rounded). The views must
+    /// size their artwork-resolver math, drag handles, and slot-list rects
+    /// against the REMAINING width. Top / None nav layouts subtract nothing
+    /// and this returns the raw window width.
     ///
     /// Use this in place of `self.window.width` whenever a value flows
     /// into `BaseSlotListLayoutConfig.window_width` or a view-data
@@ -164,7 +165,7 @@ impl Nokkvi {
     /// over-counts the leftover slot-list width by the side-nav footprint.
     pub(crate) fn content_pane_width(&self) -> f32 {
         let nav_chrome = if crate::theme::is_side_nav() {
-            crate::widgets::side_nav_bar::SIDE_NAV_TOTAL_WIDTH
+            crate::widgets::side_nav_bar::side_nav_total_width()
         } else {
             0.0
         };
