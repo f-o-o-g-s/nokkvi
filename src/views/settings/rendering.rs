@@ -58,53 +58,36 @@ pub(crate) fn transparent_button_style(
     }
 }
 
-/// Render a badge-style value container with bg0_hard background.
-/// Used for Hotkey combos, Float/Int/Text values — anything that should
-/// appear in a pill-shaped container.
+/// Flat value badge — mono uppercase label inside a 1 px theme::border()
+/// outlined chip with theme::bg0() fill and theme::ui_radius_sm() corners in
+/// rounded mode. Used for Text rows and the numeric value display inside
+/// `render_numeric_row` (which then layers arrow buttons + mini-slider
+/// around it).
 fn render_badge<'a>(
     display_text: String,
     font_size: f32,
     is_center: bool,
     opacity: f32,
 ) -> Element<'a, SettingsMessage> {
-    let text_color = if is_center {
-        theme::fg0()
-    } else {
-        Color {
-            a: opacity,
-            ..theme::fg0()
-        }
-    };
-    let badge_bg = if is_center {
-        theme::bg0_hard()
-    } else {
-        Color {
-            a: opacity * 0.3,
-            ..theme::bg0_hard()
-        }
-    };
-    let badge_border = if is_center {
-        theme::fg4()
-    } else {
-        Color {
-            a: opacity * 0.4,
-            ..theme::fg4()
-        }
-    };
+    let eff_opacity = if is_center { 1.0 } else { opacity };
+    let text_color = scale_alpha_local(theme::fg0(), eff_opacity);
+    let badge_bg = scale_alpha_local(theme::bg0(), eff_opacity);
+    let badge_border = scale_alpha_local(theme::border(), eff_opacity);
     let badge_size = font_size * 0.95;
 
-    container(slot_list::slot_list_text(
-        display_text,
-        badge_size,
-        text_color,
-    ))
-    .padding(Padding::new(2.0).left(8.0).right(8.0))
+    container(
+        slot_list::slot_list_text(display_text, badge_size, text_color).font(Font {
+            weight: Weight::Medium,
+            ..theme::ui_font()
+        }),
+    )
+    .padding(Padding::new(4.0).left(10.0).right(10.0))
     .style(move |_theme| container::Style {
         background: Some(badge_bg.into()),
         border: Border {
             color: badge_border,
             width: 1.0,
-            radius: theme::ui_border_radius(),
+            radius: theme::ui_radius_sm(),
         },
         ..Default::default()
     })
