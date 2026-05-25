@@ -293,22 +293,15 @@ pub(crate) const SLOT_SPACING: f32 = 0.0;
 
 /// Total chrome consumed by the view-header row.
 ///
-/// Flat mode: 50 px strip (matches `view_header::FLAT_HEADER_HEIGHT`).
-///
-/// Rounded mode: 44 px capsule + 12 px top margin + 12 px bottom margin =
-/// 68 px (the capsule sits inset from the slot-list shell, and the gap
-/// below the capsule visually substitutes for the flat mode's bottom
-/// hairline). Keeping this in lockstep with `view_header::view_header()`
-/// is load-bearing — drifting drops a partial slot at the bottom of every
-/// list. The view_header tests pin the related constants.
+/// 50 px strip (matches `view_header::HEADER_HEIGHT`). The header keeps its
+/// flat treatment in both flat and rounded modes — the surrounding pill
+/// capsule was removed because it looked out of place stacked above the
+/// slot-list shell. Keeping this in lockstep with
+/// `view_header::view_header()` is load-bearing — drifting drops a partial
+/// slot at the bottom of every list.
 #[inline]
 pub(crate) fn view_header_chrome() -> f32 {
-    if crate::theme::is_rounded_mode() {
-        // 44 (capsule) + 12 (top margin) + 12 (bottom margin)
-        68.0
-    } else {
-        50.0
-    }
+    50.0
 }
 
 /// Height of the browsing panel tab bar.

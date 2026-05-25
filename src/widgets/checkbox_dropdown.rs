@@ -264,21 +264,16 @@ where
     )
 }
 
-/// Build the trigger element — a transparent icon cell sized to match the
-/// surrounding `view_header` icon buttons (44×50 flat / 36×36 rounded), with
-/// a `HoverOverlay` for the hover/press feedback. No `on_press` here —
+/// Build the trigger element — a transparent 44×50 icon cell matching the
+/// surrounding `view_header` icon buttons, with a `HoverOverlay` for the
+/// hover/press feedback. Square hover corners regardless of the global
+/// rounded-mode toggle: the view header itself stays flat in both modes,
+/// so its embedded trigger must too. No `on_press` here —
 /// `CheckboxDropdown`'s widget impl intercepts the left-click itself.
 fn trigger_button<'a, Message: 'a>(
     icon_path: &'static str,
     tooltip_text: &'static str,
 ) -> Element<'a, Message> {
-    let is_rounded = theme::is_rounded_mode();
-    let (cell_width, cell_height) = if is_rounded {
-        (36.0_f32, 36.0_f32)
-    } else {
-        (44.0_f32, 50.0_f32)
-    };
-
     let icon = crate::embedded_svg::svg_widget(icon_path)
         .width(Length::Fixed(TRIGGER_ICON_SIZE))
         .height(Length::Fixed(TRIGGER_ICON_SIZE))
@@ -287,13 +282,12 @@ fn trigger_button<'a, Message: 'a>(
         });
 
     let chassis = container(icon)
-        .width(Length::Fixed(cell_width))
-        .height(Length::Fixed(cell_height))
+        .width(Length::Fixed(44.0))
+        .height(Length::Fixed(50.0))
         .align_x(iced::Alignment::Center)
         .align_y(iced::Alignment::Center);
 
-    let with_hover =
-        super::hover_overlay::HoverOverlay::new(chassis).border_radius(theme::ui_radius_pill());
+    let with_hover = super::hover_overlay::HoverOverlay::new(chassis).border_radius(0.0.into());
 
     tooltip(
         with_hover,

@@ -77,34 +77,20 @@ pub(crate) struct ViewHeaderConfig<'a, V, Message> {
     pub on_roulette: Option<Message>,
 }
 
-/// Flat-mode header height — `bg0_hard()` strip with sided-border cells
-/// (50 px matches the design's `.nk-controls` row).
-const FLAT_HEADER_HEIGHT: f32 = 50.0;
+/// View-header height — `bg0_hard()` strip with sided-border cells
+/// (50 px matches the design's `.nk-controls` row). Rendered identically in
+/// flat and rounded modes: the surrounding pill chrome looked out of place
+/// stacked above the slot-list shell, so the header keeps its flat
+/// treatment regardless of the global rounded-mode toggle.
+const HEADER_HEIGHT: f32 = 50.0;
 
-/// Rounded-mode header height — pill capsule inside a 12 px outer margin,
-/// 4 px inner padding (44 px tall capsule + 8 px vertical margins = 52 px
-/// total chrome, matching the design's `--r-pill` capsule treatment).
-const ROUNDED_CAPSULE_HEIGHT: f32 = 44.0;
-
-/// Outer horizontal/vertical margin around the rounded-mode pill capsule.
-const ROUNDED_OUTER_MARGIN_X: f32 = 16.0;
-const ROUNDED_OUTER_MARGIN_Y: f32 = 12.0;
-
-/// Inner padding inside the rounded-mode pill capsule.
-const ROUNDED_INNER_PADDING: f32 = 4.0;
-
-/// Pixel-perfect cell width for header icon buttons in flat mode. Mirrors
+/// Pixel-perfect cell width for header icon buttons. Mirrors
 /// `.nk-ctrl-btn { width: 44px }` from the design CSS — narrower than
 /// `ICON_BUTTON_SIZE` (40 px) gets, because the divider hairlines on
 /// either side of the cell already separate it from its neighbors.
-const FLAT_ICON_CELL_WIDTH: f32 = 44.0;
+const ICON_CELL_WIDTH: f32 = 44.0;
 
-/// Rounded-mode header icon-button cell width (`.nk-ctrl-btn` rounded
-/// override). Slightly narrower because the pill chrome around the row
-/// adds visual breathing room.
-const ROUNDED_ICON_CELL_WIDTH: f32 = 36.0;
-
-/// Min-width of the sort-dropdown cell in both modes. Matches
+/// Min-width of the sort-dropdown cell. Matches
 /// `.nk-ctrl-sort { min-width: 130px }`.
 const SORT_CELL_MIN_WIDTH: f32 = 130.0;
 
@@ -133,12 +119,7 @@ pub(crate) fn view_header<
         on_roulette,
     } = config;
 
-    let is_rounded = theme::is_rounded_mode();
-    let cell_height = if is_rounded {
-        ROUNDED_CAPSULE_HEIGHT - 2.0 * ROUNDED_INNER_PADDING
-    } else {
-        FLAT_HEADER_HEIGHT
-    };
+    let cell_height = HEADER_HEIGHT;
 
     let view_selector: Element<'a, Message> = if view_options.is_empty() {
         // Static label cell — rendered when the view supplies no sort
@@ -212,7 +193,7 @@ pub(crate) fn view_header<
                         }
                     },
                     width: 1.0,
-                    radius: theme::ui_radius_pill(),
+                    radius: 0.0.into(),
                 },
             })
             .menu_style(move |_theme| iced::widget::overlay::menu::Style {
@@ -221,7 +202,7 @@ pub(crate) fn view_header<
                 border: iced::Border {
                     color: theme::border(),
                     width: 1.0,
-                    radius: theme::ui_radius_sm(),
+                    radius: 0.0.into(),
                 },
                 selected_text_color: theme::bg0_hard(),
                 selected_background: theme::accent_bright().into(),
@@ -310,20 +291,11 @@ pub(crate) fn view_header<
                 .width(Length::Fill)
                 .height(Length::Fixed(cell_height))
                 .align_y(Alignment::Center)
-                .padding(if is_rounded {
-                    iced::Padding {
-                        top: 0.0,
-                        right: 4.0,
-                        bottom: 0.0,
-                        left: 4.0,
-                    }
-                } else {
-                    iced::Padding {
-                        top: 0.0,
-                        right: 8.0,
-                        bottom: 0.0,
-                        left: 8.0,
-                    }
+                .padding(iced::Padding {
+                    top: 0.0,
+                    right: 8.0,
+                    bottom: 0.0,
+                    left: 8.0,
                 })
                 .into(),
         )
@@ -352,126 +324,79 @@ pub(crate) fn view_header<
     .align_y(Alignment::Center)
     .into();
 
-    // Wrap the sort-dropdown cell with a sided-border divider (flat) or
-    // a no-op pad (rounded). Pinning to a fixed `SORT_CELL_MIN_WIDTH`
-    // matches the design's `.nk-ctrl-sort { min-width: 130px }` and
-    // keeps the rest of the row aligned across views with different
-    // sort-mode labels.
+    // Wrap the sort-dropdown cell with a sided-border divider. Pinning to
+    // a fixed `SORT_CELL_MIN_WIDTH` matches the design's
+    // `.nk-ctrl-sort { min-width: 130px }` and keeps the rest of the row
+    // aligned across views with different sort-mode labels.
     let view_selector_cell: Element<'a, Message> = wrap_header_cell(
         container(view_selector)
             .width(Length::Fixed(SORT_CELL_MIN_WIDTH))
             .into(),
-        is_rounded,
         true,
     );
 
-    // Build the row of cells. Flat mode has no inter-cell spacing (cells'
-    // sided borders touch). Rounded mode uses a 2 px gap between cells
-    // inside the pill capsule.
-    let mut header_row =
-        row![]
-            .align_y(Alignment::Center)
-            .spacing(if is_rounded { 2.0 } else { 0.0 });
+    // Build the row of cells. No inter-cell spacing — adjacent sided
+    // borders touch to form the sided-divider rhythm.
+    let mut header_row = row![].align_y(Alignment::Center).spacing(0.0);
 
     header_row = header_row.push(view_selector_cell);
     for cell in button_cells {
-        header_row = header_row.push(wrap_header_cell(cell, is_rounded, true));
+        header_row = header_row.push(wrap_header_cell(cell, true));
     }
     if let Some(search_element) = search_field {
-        header_row = header_row.push(wrap_header_cell(search_element, is_rounded, true));
+        header_row = header_row.push(wrap_header_cell(search_element, true));
     } else {
         // No search bar — push a flex spacer so the count cell still ends
         // up flush-right. The spacer is wrapped to provide the divider
-        // before the count in flat mode.
+        // before the count.
         header_row = header_row.push(wrap_header_cell(
             iced::widget::Space::new()
                 .width(Length::Fill)
                 .height(Length::Fixed(cell_height))
                 .into(),
-            is_rounded,
             true,
         ));
     }
     // Count cell is the row terminator — no trailing divider after it.
-    header_row = header_row.push(wrap_header_cell(count_cell, is_rounded, false));
+    header_row = header_row.push(wrap_header_cell(count_cell, false));
 
-    if is_rounded {
-        // Rounded mode: wrap the row in a pill capsule inside a 12 px outer
-        // margin. The capsule itself has 1 px theme::border() outline,
-        // bg0_hard() fill, and pill corners.
-        let capsule = container(header_row.width(Length::Fill))
+    // A bg0_hard() strip plus a 1 px theme::border() sibling separator
+    // below it. Using a sibling line instead of the container's `border`
+    // field avoids ringing the header with a 4-sided dark frame (Iced's
+    // `Border` width applies uniformly to all sides).
+    iced::widget::column![
+        container(
+            header_row
+                .width(Length::Fill)
+                .height(Length::Fixed(cell_height)),
+        )
+        .width(Length::Fill)
+        .height(Length::Fixed(HEADER_HEIGHT))
+        .style(|_| container::Style {
+            background: Some(theme::bg0_hard().into()),
+            ..Default::default()
+        }),
+        container(iced::widget::Space::new())
             .width(Length::Fill)
-            .height(Length::Fixed(ROUNDED_CAPSULE_HEIGHT))
-            .padding(ROUNDED_INNER_PADDING)
+            .height(Length::Fixed(1.0))
             .style(|_| container::Style {
-                background: Some(theme::bg0_hard().into()),
-                border: iced::Border {
-                    color: theme::border(),
-                    width: 1.0,
-                    radius: theme::ui_radius_pill(),
-                },
-                ..Default::default()
-            });
-        container(capsule)
-            .width(Length::Fill)
-            .padding(iced::Padding {
-                top: ROUNDED_OUTER_MARGIN_Y,
-                right: ROUNDED_OUTER_MARGIN_X,
-                bottom: ROUNDED_OUTER_MARGIN_Y,
-                left: ROUNDED_OUTER_MARGIN_X,
-            })
-            .style(|_| container::Style {
-                background: Some(theme::bg0().into()),
-                ..Default::default()
-            })
-            .into()
-    } else {
-        // Flat mode: a bg0_hard() strip plus a 1 px theme::border()
-        // sibling separator below it. Using a sibling line instead of the
-        // container's `border` field avoids ringing the header with a
-        // 4-sided dark frame (Iced's `Border` width applies uniformly to
-        // all sides).
-        iced::widget::column![
-            container(
-                header_row
-                    .width(Length::Fill)
-                    .height(Length::Fixed(cell_height)),
-            )
-            .width(Length::Fill)
-            .height(Length::Fixed(FLAT_HEADER_HEIGHT))
-            .style(|_| container::Style {
-                background: Some(theme::bg0_hard().into()),
+                background: Some(theme::border().into()),
                 ..Default::default()
             }),
-            container(iced::widget::Space::new())
-                .width(Length::Fill)
-                .height(Length::Fixed(1.0))
-                .style(|_| container::Style {
-                    background: Some(theme::border().into()),
-                    ..Default::default()
-                }),
-        ]
-        .into()
-    }
+    ]
+    .into()
 }
 
 /// Wrap a header cell with the redesign's sided-border divider treatment.
 ///
-/// Flat mode: appends a 1 px right border (`theme::border()`) so adjacent
-/// cells form a sided-divider rhythm matching the design's
+/// Appends a 1 px right border (`theme::border()`) so adjacent cells form
+/// a sided-divider rhythm matching the design's
 /// `border-right: 1px solid #1a2024` cells. Setting `trailing_divider` to
 /// `false` suppresses the right border on the row's final cell.
-///
-/// Rounded mode: no per-cell border at all — the surrounding pill capsule
-/// owns the chrome.
 fn wrap_header_cell<'a, Message: 'a>(
     inner: Element<'a, Message>,
-    is_rounded: bool,
     trailing_divider: bool,
 ) -> Element<'a, Message> {
-    if is_rounded {
-        return inner;
-    }
     if !trailing_divider {
         return inner;
     }
@@ -494,7 +419,7 @@ fn wrap_header_cell<'a, Message: 'a>(
     .into()
 }
 
-/// Reusable header icon button — mode-aware cell width + transparent
+/// Reusable header icon button — fixed cell width + transparent
 /// background. Hover overlay handles the press feedback; the surrounding
 /// `wrap_header_cell` supplies the divider chrome.
 fn header_icon_cell<'a, Message: Clone + 'a>(
@@ -504,13 +429,6 @@ fn header_icon_cell<'a, Message: Clone + 'a>(
     cell_height: f32,
 ) -> Element<'a, Message> {
     use iced::widget::{svg, tooltip};
-
-    let is_rounded = theme::is_rounded_mode();
-    let cell_width = if is_rounded {
-        ROUNDED_ICON_CELL_WIDTH
-    } else {
-        FLAT_ICON_CELL_WIDTH
-    };
 
     let icon_svg = crate::embedded_svg::svg_widget(icon_path)
         .width(Length::Fixed(18.0))
@@ -523,12 +441,12 @@ fn header_icon_cell<'a, Message: Clone + 'a>(
         mouse_area(
             HoverOverlay::new(
                 container(icon_svg)
-                    .width(Length::Fixed(cell_width))
+                    .width(Length::Fixed(ICON_CELL_WIDTH))
                     .height(Length::Fixed(cell_height))
                     .align_x(Alignment::Center)
                     .align_y(Alignment::Center),
             )
-            .border_radius(theme::ui_radius_pill()),
+            .border_radius(0.0.into()),
         )
         .on_press(on_press)
         .interaction(iced::mouse::Interaction::Pointer),
@@ -561,22 +479,15 @@ mod tests {
     }
 
     #[test]
-    fn wrap_header_cell_no_divider_returns_inner_in_flat() {
-        // Trailing cell (count) in flat mode must NOT add a right border.
+    fn wrap_header_cell_no_divider_returns_inner() {
+        // Trailing cell (count) must NOT add a right border.
         let inner: Element<'_, String> = iced::widget::text("count").into();
-        let _ = wrap_header_cell(inner, false, false);
+        let _ = wrap_header_cell(inner, false);
     }
 
     #[test]
-    fn wrap_header_cell_with_divider_in_flat_wraps_in_row() {
+    fn wrap_header_cell_with_divider_wraps_in_row() {
         let inner: Element<'_, String> = iced::widget::text("cell").into();
-        let _ = wrap_header_cell(inner, false, true);
-    }
-
-    #[test]
-    fn wrap_header_cell_passes_through_in_rounded() {
-        let inner: Element<'_, String> = iced::widget::text("cell").into();
-        // Rounded mode never adds dividers — pass-through.
-        let _ = wrap_header_cell(inner, true, true);
+        let _ = wrap_header_cell(inner, true);
     }
 }
