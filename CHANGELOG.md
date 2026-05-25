@@ -6,16 +6,17 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- `theme::border()` chrome separator color token (per-theme TOML entry; auto-derives `darken(bg.hard, 30%)` when empty).
+- `theme::border()` chrome separator color token (per-theme TOML entry; auto-derives `darken(bg.hard, 30%)` when empty). Surfaced as a "Chrome Border" row in the Settings → Theme tab.
 - Radius scale: `theme::ui_radius_xs/sm/md/lg/pill()` helpers (4 / 8 / 12 / 18 / 999 px in rounded mode; 0 in flat mode).
-- Chrome size helpers: `theme::nav_bar_height()` (32 flat / 44 rounded), `theme::STATUS_STRIP_HEIGHT`, `theme::status_strip_bg()`, `theme::title_font()`.
+- Chrome size helpers: `theme::nav_bar_height()` (32 flat / 44 rounded), `theme::STATUS_STRIP_HEIGHT`, `theme::status_strip_bg()`.
 - New `widgets::pill_segmented_button` widget for settings Bool / Enum / ToggleSet chips.
+- New `widgets::menu_chrome` and `widgets::modal_button` modules consolidating overlay-menu / modal-icon styling; `theme::modal_frame_style()` helper shared by all five overlay modals.
 
 ### Changed
 
 - **Flat redesign across all chrome.** Every surface (nav, transport, slot rows, modals, settings widgets) now uses a 1 px sided-border vocabulary in flat mode and a coherent pill / radius scale in rounded mode.
 - Hamburger menu and library-filter trigger now sit on the LEFT of both top-nav and side-nav layouts (previously top-nav had them on the right).
-- Player bar: 40×40 borderless transport buttons, 38 / 40 px mode toggles with 1 px `theme::border()` outline, stereo 8×44 vertical-bar volume meter, 6 px thin progress bar + 14 px handle. Base height 64 px (flat) / 72 px (rounded).
+- Player bar: 40×40 borderless transport buttons, 38 / 40 px mode toggles with 1 px `theme::border()` outline, single 8×44 vertical-bar volume meter per channel (music + SFX render side-by-side as two bars), 6 px thin progress bar + 14 px handle. Base height 72 px in both modes.
 - Status strip below the player bar bumped to 24 px on a dedicated `theme::status_strip_bg()` (a touch darker than `bg0_hard`).
 - Side-nav widened to 56 px (flat) / 64 px (rounded) to fit the new pill-card tab visuals.
 - View header: flat sided-border row (50 px) in flat mode / pill segmented capsule (44 px) with inset search in rounded mode.
@@ -29,7 +30,8 @@ All notable changes to this project will be documented in this file.
 ### Removed
 
 - 3D bevel rendering: deleted `widgets::three_d_button`, `widgets::three_d_icon_button`, `widgets::three_d_helpers`, and the `theme::border_3d_*` / `lighten` helpers. Net ~1054 lines.
-- Scrolling metadata overlay on the progress bar (the `TrackInfoDisplay::ProgressTrack` mode renderer). The variant stays in the enum so existing TOML files still parse, but stored values now silently migrate to `PlayerBar` on settings load.
+- Scrolling metadata overlay on the progress bar. The variant was renamed `ProgressTrack` → `MiniPlayer` (a dedicated artwork + metadata column to the left of the transport controls); `#[serde(alias = "progress_track")]` keeps legacy TOML files deserializing into the new variant.
+- Dormant theme/widget helpers retained as "canonical recipes" with no consumers: `theme::active_accent`, `theme::nav_separator` + `NavSeparatorAxis`, `theme::search_input_style`, `theme::star()` + `ResolvedTheme.star`, the `widgets/hover_indicator.rs` module, `MetadataSegment`/`MetadataSegmentKind`, `RotatedLabel.indicator_color`/`hover_indicator_color`, `accent.border_dark`, and the entire unwired `theme::title_font()` machinery. Recover from `git show` if a future surface needs the pattern.
 
 ## v0.5.3 — 2026-05-24
 
