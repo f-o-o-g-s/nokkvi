@@ -293,12 +293,6 @@ const MAX_SLOT_COUNT: usize = 29;
 /// of separating individual rows.
 pub(crate) const SLOT_SPACING: f32 = 0.0;
 
-/// Height of the navigation bar at the top of the window. Back-compat
-/// alias for [`theme::nav_bar_height`] — kept as a `const` because other
-/// lanes still reference the symbol directly. New call sites prefer the
-/// function so rounded mode picks up the 44 px height automatically.
-pub(crate) const NAV_BAR_HEIGHT: f32 = 32.0;
-
 /// Total chrome consumed by the view-header row.
 ///
 /// Flat mode: 50 px strip (matches `view_header::FLAT_HEADER_HEIGHT`).

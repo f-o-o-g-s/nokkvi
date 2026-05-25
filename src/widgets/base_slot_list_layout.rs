@@ -81,10 +81,10 @@ pub(crate) struct BaseSlotListLayoutConfig {
     /// `home_view` (the only caller that resolves elevation) and threaded
     /// through every `*ViewData` so each view forwards it into the config it
     /// builds. `horizontal_layout` reads this to push the slot-list column
-    /// down by `NAV_BAR_HEIGHT` so the overlaid nav bar lands on an empty
-    /// band. Always `false` in side-nav / none-nav layouts and in the
-    /// internal probe configs that `Nokkvi::elevated_artwork_extent` uses
-    /// before elevation is decided.
+    /// down by `theme::nav_bar_height()` so the overlaid nav bar lands on
+    /// an empty band. Always `false` in side-nav / none-nav layouts and in
+    /// the internal probe configs that `Nokkvi::elevated_artwork_extent`
+    /// uses before elevation is decided.
     pub elevated: bool,
 }
 
@@ -770,10 +770,18 @@ where
 
     // In elevated mode the home view stretches main_content up over the
     // top-nav row and overlays the nav-bar back on top of the slot-list
-    // column. Stack a transparent `NAV_BAR_HEIGHT` spacer above the header
-    // so the overlaid nav-bar lands on an unoccupied band rather than on
-    // top of the view header. The artwork column intentionally has no top
-    // padding so it fills the row all the way to the top of the window.
+    // column. Stack a transparent spacer matching the live nav-bar height
+    // above the header so the overlaid nav-bar lands on an unoccupied
+    // band rather than on top of the view header. The artwork column
+    // intentionally has no top padding so it fills the row all the way to
+    // the top of the window.
+    //
+    // Use `theme::nav_bar_height()` (32 flat / 44 rounded), not the
+    // legacy `slot_list::NAV_BAR_HEIGHT` const (pinned at 32) — in
+    // rounded mode the live nav is 44 px, so a 32 px spacer lets the
+    // overlay eat the view-header pill's 12 px top margin and pushes the
+    // pill flush against the bottom of the nav bar. Mirrors the
+    // non-elevated fix in `app_view.rs::home_view`.
     //
     // `config.elevated` is plumbed by `home_view` through each view's
     // `*ViewData` — the only frame-level signal authoritative enough to
@@ -787,7 +795,7 @@ where
     // grey rect when the artwork column sits next to it. A plain `Space`
     // sibling has no draw surface at all, so the band stays transparent.
     let spacer_height = if config.elevated {
-        crate::widgets::slot_list::NAV_BAR_HEIGHT
+        crate::theme::nav_bar_height()
     } else {
         0.0
     };

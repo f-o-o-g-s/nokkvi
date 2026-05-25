@@ -448,12 +448,6 @@ pub(crate) fn ui_radius_pill() -> iced::border::Radius {
 
 /// Top nav-bar content height — 32 px in flat mode, 44 px in rounded mode
 /// (rounded mode adds 6 px padding above and below the pill capsules).
-///
-/// Additive helper; the legacy `widgets::slot_list::NAV_BAR_HEIGHT` constant
-/// stays at 32.0 for back-compat (still referenced from `app_view.rs` and
-/// `base_slot_list_layout.rs`). Lanes that need the dynamic value migrate
-/// to this function — `slot_list::chrome_height_with_header` (L3) is the
-/// first consumer.
 #[inline]
 pub(crate) fn nav_bar_height() -> f32 {
     if is_rounded_mode() { 44.0 } else { 32.0 }
