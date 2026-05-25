@@ -90,7 +90,9 @@ impl<Message: Clone> HamburgerMenu<Message> {
         }
     }
 
-    /// Use 3D player bar button styling (44x44, bevel borders)
+    /// Use player-bar button chassis (44 × 44 button, 20 px icon, `ui_radius_sm()`
+    /// in rounded mode). Same flat chrome as the nav-bar use; only the
+    /// size and corner radius differ.
     pub fn player_bar_style(mut self) -> Self {
         self.player_bar_style = true;
         self.button_size = 44.0;
@@ -155,60 +157,45 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Hambur
 
         let bounds = layout.bounds();
 
-        let icon_color = if self.player_bar_style {
-            // 3D player bar button styling (matches ThreeDIconButton)
-            let border_width = 2.0;
-            let colors = super::three_d_helpers::BevelStateColors::compute(
-                self.is_open,
-                theme::bg1(),
-                theme::fg1(),
-                theme::bg0_hard(),
-            );
-
-            // Draw 3D beveled background (shared helper)
-            super::three_d_helpers::draw_3d_bevel(
-                renderer,
-                bounds,
-                border_width,
-                colors.bg,
-                colors.top_left,
-                colors.bottom_right,
-            );
-
-            colors.fg
+        // Open = `accent_bright()` filled chrome with `bg0_hard()` icon
+        // (matches the active-nav-tab visual); idle = `bg0_hard()` chrome
+        // with `fg0()` icon. Hover comes from `HoverOverlay` at the call
+        // site so this widget only renders open-vs-idle.
+        let bg_color = if self.is_open {
+            theme::accent_bright()
         } else {
-            // Original flat nav bar styling
-            // Hover feedback is handled by HoverOverlay at the call site —
-            // this widget only needs to distinguish open (accent) vs idle (bg0_hard).
-            let bg_color = if self.is_open {
-                theme::accent_bright()
-            } else {
-                theme::bg0_hard()
-            };
-
-            let icon_color = if self.is_open {
-                theme::bg0()
-            } else {
-                theme::fg1()
-            };
-
-            // Background quad
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds,
-                    border: iced::Border {
-                        radius: theme::ui_border_radius(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-                bg_color,
-            );
-
-            icon_color
+            theme::bg0_hard()
+        };
+        let icon_color = if self.is_open {
+            theme::bg0_hard()
+        } else {
+            theme::fg0()
         };
 
-        // Draw centered SVG icon (shared across both styles)
+        // Corner radius: pill in nav-bar use (matches `.nk-nav-btn`
+        // pill), `ui_radius_sm()` in the player-bar use so the larger
+        // chrome doesn't look like a stretched circle. Both modes
+        // resolve to 0 in flat mode.
+        let radius = if self.player_bar_style {
+            theme::ui_radius_sm()
+        } else {
+            theme::ui_radius_pill()
+        };
+
+        // Background quad — flat in both modes (no 3D bevel).
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds,
+                border: iced::Border {
+                    radius,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            bg_color,
+        );
+
+        // Draw centered SVG icon (shared across nav-bar and player-bar use)
         let icon_x = bounds.center_x() - self.icon_size / 2.0;
         let icon_y = bounds.center_y() - self.icon_size / 2.0;
         let icon_bounds = Rectangle {
@@ -429,13 +416,18 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
         let bounds = visible_menu_bounds(layout.bounds());
         let _ = theme; // We use our own theme functions
 
+        // Menu chrome: `bg1()` fill with a 1 px `theme::border()` outline
+        // and a `ui_radius_md()` corner in rounded mode (flat = 0). The
+        // accent-bright outline of the old design read as "selected"; the
+        // new flat language reserves accent for active-state surfaces
+        // (tabs, buttons), not panel borders.
         renderer.fill_quad(
             renderer::Quad {
                 bounds,
                 border: iced::Border {
                     width: 1.0,
-                    color: theme::accent_bright(),
-                    radius: theme::ui_border_radius(),
+                    color: theme::border(),
+                    radius: theme::ui_radius_md(),
                 },
                 shadow: MENU_SHADOW,
                 ..Default::default()
@@ -469,7 +461,9 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
         let mut separator_offset = 0.0;
 
         for (i, (label, enabled)) in items.iter().enumerate() {
-            // Draw separator line before Quit item
+            // Draw separator line before Quit item — 1 px `theme::border()`
+            // rule matching the panel outline color so the row band reads
+            // as a continuation of the chrome.
             if i == SEPARATOR_INDEX {
                 let sep_y =
                     bounds.y + MENU_PADDING + MENU_ITEM_HEIGHT * i as f32 + separator_offset;
@@ -483,7 +477,7 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
                         },
                         ..Default::default()
                     },
-                    theme::bg3(),
+                    theme::border(),
                 );
                 separator_offset += 1.0;
             }
@@ -500,12 +494,15 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
             // Hover highlight
             let is_hovered = cursor_pos.is_some_and(|p| item_bounds.contains(p));
 
+            // Hover highlight — `bg2()` fill with `ui_radius_xs()` corners
+            // so the highlight nests neatly inside a `ui_radius_md()`
+            // panel without sharing the larger outer curve.
             if is_hovered && *enabled {
                 renderer.fill_quad(
                     renderer::Quad {
                         bounds: item_bounds,
                         border: iced::Border {
-                            radius: theme::ui_border_radius(),
+                            radius: theme::ui_radius_xs(),
                             ..Default::default()
                         },
                         ..Default::default()

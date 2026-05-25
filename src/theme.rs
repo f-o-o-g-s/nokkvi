@@ -395,7 +395,6 @@ pub(crate) fn ui_border_radius() -> iced::border::Radius {
 /// Scale step `xs` — 4 px in rounded mode, 0 in flat. Use for checkboxes,
 /// swatches, tiny chips.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn ui_radius_xs() -> iced::border::Radius {
     if is_rounded_mode() {
         R_XS.into()
