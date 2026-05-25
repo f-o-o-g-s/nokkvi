@@ -332,9 +332,6 @@ impl Nokkvi {
             } else {
                 self.playback.album.clone()
             },
-            format_suffix: self.playback.format_suffix.clone(),
-            sample_rate: self.playback.sample_rate,
-            bitrate: self.playback.bitrate,
             radio_name: radio_name.map(|s| s.to_string()),
             hamburger_open: matches!(
                 self.open_menu,

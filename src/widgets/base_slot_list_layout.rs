@@ -47,14 +47,9 @@ pub(crate) const ARTWORK_SQUARE_WINDOW_PERCENT: f32 = 0.60;
 pub(crate) const ARTWORK_MAX_SIZE: f32 = 1000.0;
 
 /// Thickness of the `bg1` divider on the left edge of the artwork column in
-/// Horizontal orientation. Vertical orientation uses padding-based separation
-/// instead (see `VERTICAL_ARTWORK_TOP_PAD`).
+/// Horizontal orientation. Vertical orientation runs flush to whatever chrome
+/// sits above it, with no extra inset.
 pub(crate) const HORIZONTAL_ARTWORK_STRIPE: f32 = 2.0;
-/// Top inset for the Vertical-orientation artwork — gives the artwork
-/// breathing room below whatever chrome sits above it. Bottom inset is 0:
-/// the view header that follows has its own internal padding, so no extra
-/// gap is added between the artwork and the header.
-pub(crate) const VERTICAL_ARTWORK_TOP_PAD: f32 = 10.0;
 
 /// Configuration for base slot list layout
 #[derive(Debug, Clone)]
@@ -176,9 +171,7 @@ pub(crate) fn resolve_artwork_layout(config: &BaseSlotListLayoutConfig) -> Optio
                 if v_square_uncapped >= inset_width {
                     let v_square = inset_width.min(ARTWORK_MAX_SIZE);
 
-                    if config.window_height - v_square - VERTICAL_ARTWORK_TOP_PAD
-                        >= MIN_SLOT_LIST_HEIGHT
-                    {
+                    if config.window_height - v_square >= MIN_SLOT_LIST_HEIGHT {
                         return Some(ArtworkLayout {
                             extent: v_square,
                             panel_kind: PanelKind::Square,
@@ -237,8 +230,7 @@ pub(crate) fn resolve_artwork_layout(config: &BaseSlotListLayoutConfig) -> Optio
 /// exchange for a fixed-height artwork.
 fn always_vertical_extent(window_height: f32) -> f32 {
     let raw = window_height * theme::artwork_vertical_height_pct();
-    let upper = ARTWORK_MAX_SIZE
-        .min((window_height - VERTICAL_ARTWORK_TOP_PAD - MIN_SLOT_LIST_HEIGHT).max(1.0));
+    let upper = ARTWORK_MAX_SIZE.min((window_height - MIN_SLOT_LIST_HEIGHT).max(1.0));
     raw.clamp(1.0, upper)
 }
 
@@ -250,7 +242,7 @@ fn always_vertical_extent(window_height: f32) -> f32 {
 ///
 /// In `AlwaysVerticalNative` / `AlwaysVerticalStretched` modes the vertical
 /// drag handle sits between the artwork and the slot list, so its 6 px
-/// thickness is added on top of `extent + bottom_pad`.
+/// thickness is added on top of `extent`.
 pub(crate) fn vertical_artwork_chrome(config: &BaseSlotListLayoutConfig) -> f32 {
     // Spell every arm out so a future `ArtworkOrientation` variant forces a
     // compile error here — matches the workspace's
@@ -272,7 +264,7 @@ pub(crate) fn vertical_artwork_chrome(config: &BaseSlotListLayoutConfig) -> f32 
             } else {
                 0.0
             };
-            layout.extent + VERTICAL_ARTWORK_TOP_PAD + handle
+            layout.extent + handle
         }
     }
 }
@@ -461,14 +453,14 @@ pub(crate) fn single_artwork_panel_with_menu<'a, Message: Clone + 'a>(
 /// bar overlay.
 ///
 /// Shared implementation backing `single_artwork_panel_with_pill` and
-/// `collage_artwork_panel_with_pill`. Computes the background color, builds the
-/// styled bar container, and stacks it on top of `base_panel`. In rounded mode
-/// only the top corners are rounded — the bottom corners are flush with the
-/// artwork edge so no `bg0_soft` shows through where the bar meets the panel.
+/// `collage_artwork_panel_with_pill`. Builds the styled bar container with a
+/// fixed `bg0_hard()` backdrop and stacks it on top of `base_panel`. In
+/// rounded mode only the top corners are rounded — the bottom corners are
+/// flush with the artwork edge so no `bg0_soft` shows through where the bar
+/// meets the panel.
 fn wrap_with_pill_overlay<'a, Message: 'a>(
     base_panel: Element<'a, Message>,
     content: Element<'a, Message>,
-    bg_color: iced::Color,
 ) -> Element<'a, Message> {
     use iced::widget::{container, stack};
 
@@ -476,8 +468,8 @@ fn wrap_with_pill_overlay<'a, Message: 'a>(
         .width(Length::Fill)
         .padding(16)
         .align_x(iced::Alignment::Center)
-        .style(move |_theme| container::Style {
-            background: Some(iced::Background::Color(bg_color)),
+        .style(|_theme| container::Style {
+            background: Some(iced::Background::Color(crate::theme::bg0_hard())),
             border: iced::Border {
                 radius: {
                     let r = crate::theme::ui_border_radius();
@@ -841,12 +833,10 @@ where
 }
 
 /// Vertical layout — artwork stacked above the slot list, edge-to-edge L/R
-/// (matching the slot rows' zero-inset geometry) with `VERTICAL_ARTWORK_TOP_PAD`
-/// on top so the artwork has breathing room from whatever chrome sits above it.
-/// Bottom inset is 0; the view header that follows provides its own internal top
-/// padding so no extra gap is added between the artwork and the header. The view
-/// header lives between the artwork and the slot list so it stays adjacent to
-/// the list it controls.
+/// (matching the slot rows' zero-inset geometry) and flush against whatever
+/// chrome sits above it. The view header lives between the artwork and the
+/// slot list so it stays adjacent to the list it controls; its own internal
+/// top padding provides any gap below the artwork.
 ///
 /// Used by both the Auto-mode portrait fallback (no drag handle) and the
 /// `AlwaysVerticalNative` / `AlwaysVerticalStretched` modes (with a
@@ -898,11 +888,10 @@ where
         0.0
     };
 
-    // Artwork + optional drag handle. Both run edge-to-edge horizontally
-    // (matches the slot rows' zero-pad geometry); only the top inset is
-    // applied so the artwork still has breathing room below whatever
-    // chrome sits above it.
-    let inset_inner: Element<'a, Message> = if let Some(h) = handle {
+    // Artwork + optional drag handle, both running edge-to-edge horizontally
+    // (matches the slot rows' zero-pad geometry) and flush against the chrome
+    // above.
+    let artwork_side: Element<'a, Message> = if let Some(h) = handle {
         column![artwork_panel, h]
             .width(Length::Fill)
             .spacing(0)
@@ -911,32 +900,15 @@ where
         artwork_panel.into()
     };
 
-    // Outer wrapper that paints the slot-list `bg0_hard` background in the
-    // top inset.
-    let artwork_side = container(inset_inner)
-        .width(Length::Fill)
-        .padding(iced::Padding {
-            top: VERTICAL_ARTWORK_TOP_PAD,
-            right: 0.0,
-            bottom: 0.0,
-            left: 0.0,
-        })
-        .style(theme::container_bg0_hard);
-
     // Pin the slot-list rect to a Fixed height that matches what
     // `SlotListConfig::with_dynamic_slots` budgeted for. The view passes
     // its slot-list chrome via `config.slot_list_chrome`; subtracting that
-    // plus the artwork side (`extent + top_pad + optional handle`) from
-    // `window_height` yields the exact slot-list rect the slot-count math
-    // expects. Using `Fill` here lets iced's flex layout drift by a few
-    // pixels and produce a partial slot at the bottom — Fixed locks the
-    // rect to the slot math.
-    let slot_list_height = (config.window_height
-        - config.slot_list_chrome
-        - layout.extent
-        - VERTICAL_ARTWORK_TOP_PAD
-        - handle_height)
-        .max(0.0);
+    // plus the artwork side (`extent + optional handle`) from `window_height`
+    // yields the exact slot-list rect the slot-count math expects. Using
+    // `Fill` here lets iced's flex layout drift by a few pixels and produce
+    // a partial slot at the bottom — Fixed locks the rect to the slot math.
+    let slot_list_height =
+        (config.window_height - config.slot_list_chrome - layout.extent - handle_height).max(0.0);
 
     let slot_list_pinned = container(slot_list_content)
         .width(Length::Fill)
@@ -1153,14 +1125,14 @@ mod tests {
     }
 
     #[test]
-    fn vertical_artwork_chrome_returns_extent_plus_top_pad_on_tall_skinny() {
+    fn vertical_artwork_chrome_returns_extent_on_tall_skinny() {
         let _g = lock_atomics();
         reset_atomics();
         // Tall-skinny Auto resolves to Vertical with extent = inset width.
         // Edge-to-edge L/R, so inset width = window width = 530. Chrome =
-        // extent + VERTICAL_ARTWORK_TOP_PAD.
+        // extent (no top pad — the artwork sits flush against chrome above).
         let chrome = vertical_artwork_chrome(&cfg(530.0, 1430.0, true));
-        assert!((chrome - (530.0 + VERTICAL_ARTWORK_TOP_PAD)).abs() < 1e-3);
+        assert!((chrome - 530.0).abs() < 1e-3);
     }
 
     #[test]
@@ -1213,7 +1185,7 @@ mod tests {
         let l = resolve_artwork_layout(&cfg(1920.0, 1080.0, true)).expect("should show");
         assert_eq!(l.orientation, ArtworkOrientation::Vertical);
         assert!(matches!(l.panel_kind, PanelKind::Square));
-        // 1080 × 0.40 = 432; upper = min(MAX_SIZE, 1080 - 10 - 400) = min(1000, 670) = 670.
+        // 1080 × 0.40 = 432; upper = min(MAX_SIZE, 1080 - 400) = min(1000, 680) = 680.
         assert!((l.extent - 432.0).abs() < 1e-3);
         reset_atomics();
     }
@@ -1227,7 +1199,7 @@ mod tests {
         theme::set_artwork_column_mode(ArtworkColumnMode::AlwaysVerticalNative);
         let l = resolve_artwork_layout(&cfg(766.0, 1370.0, true)).expect("should show");
         assert_eq!(l.orientation, ArtworkOrientation::Vertical);
-        // 1370 × 0.40 = 548; upper = min(1000, 1370 - 10 - 400) = min(1000, 960) = 960.
+        // 1370 × 0.40 = 548; upper = min(1000, 1370 - 400) = min(1000, 970) = 970.
         assert!((l.extent - 548.0).abs() < 1e-3);
         reset_atomics();
     }
@@ -1269,10 +1241,10 @@ mod tests {
         reset_atomics();
         theme::set_artwork_column_mode(ArtworkColumnMode::AlwaysVerticalNative);
         theme::set_artwork_vertical_height_pct(0.80);
-        // 1000 × 0.80 = 800. Upper = min(1000, 1000 - 10 - 400) = 590.
-        // Result clamps to 590 so the slot list keeps 400 px.
+        // 1000 × 0.80 = 800. Upper = min(1000, 1000 - 400) = 600.
+        // Result clamps to 600 so the slot list keeps 400 px.
         let l = resolve_artwork_layout(&cfg(800.0, 1000.0, true)).expect("should show");
-        assert!((l.extent - 590.0).abs() < 1e-3);
+        assert!((l.extent - 600.0).abs() < 1e-3);
         reset_atomics();
     }
 
@@ -1282,11 +1254,9 @@ mod tests {
         reset_atomics();
         theme::set_artwork_column_mode(ArtworkColumnMode::AlwaysVerticalNative);
         theme::set_artwork_vertical_height_pct(0.40);
-        // 1500 × 0.40 = 600; chrome = 600 + top_pad + handle_height.
+        // 1500 × 0.40 = 600; chrome = 600 + handle_height.
         let chrome = vertical_artwork_chrome(&cfg(1920.0, 1500.0, true));
-        let expected = 600.0
-            + VERTICAL_ARTWORK_TOP_PAD
-            + crate::widgets::artwork_split_handle::HANDLE_THICKNESS;
+        let expected = 600.0 + crate::widgets::artwork_split_handle::HANDLE_THICKNESS;
         assert!((chrome - expected).abs() < 1e-3);
         reset_atomics();
     }

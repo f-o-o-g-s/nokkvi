@@ -35,6 +35,67 @@ fn mode_button_width() -> f32 {
     if theme::is_rounded_mode() { 40.0 } else { 38.0 }
 }
 
+/// Intra-section button gap (between transport buttons, between mode buttons,
+/// between the two vertical volume bars).
+const SECTION_BUTTON_GAP: f32 = 4.0;
+
+/// Inter-section gap inside the player bar's main row (between transport and
+/// progress, progress and modes, modes and volume).
+const MAIN_ROW_INNER_GAP: f32 = 6.0;
+
+/// Width of the transport-controls section for the currently-rendered count
+/// of buttons. 5-button uncollapsed (prev/play/pause/stop/next) or 3-button
+/// collapsed (prev / play-or-pause / next) — the section sizes to fit only
+/// what's on screen, so the progress track can claim the rest of the row.
+#[inline]
+pub(crate) fn transport_section_width(transports_collapsed: bool) -> f32 {
+    let n = if transports_collapsed { 3.0 } else { 5.0 };
+    n * TRANSPORT_SIZE + (n - 1.0) * SECTION_BUTTON_GAP
+}
+
+/// Width of the mode-toggles section for the currently-rendered layout —
+/// `inline_count` mode buttons (7 minus `kebab_mode_count`) plus a kebab
+/// when any modes are culled, plus the hamburger button in `NavLayout::None`.
+/// Returns 0 when no modes are inline and no kebab/hamburger renders.
+#[inline]
+pub(crate) fn mode_section_width(layout: PlayerBarLayout, has_hamburger: bool) -> f32 {
+    let mode_btn_w = mode_button_width();
+    let chrome_btn_w = super::sizes::TOOLBAR_BUTTON_SIZE;
+
+    let inline_count = (CULL_ORDER.len() as u8).saturating_sub(layout.kebab_mode_count);
+    let has_kebab = layout.kebab_mode_count > 0;
+
+    let mut widgets = inline_count as f32 * mode_btn_w;
+    let mut count = inline_count as u32;
+    if has_kebab {
+        widgets += chrome_btn_w;
+        count += 1;
+    }
+    if has_hamburger {
+        widgets += chrome_btn_w;
+        count += 1;
+    }
+    if count == 0 {
+        return 0.0;
+    }
+    widgets + (count - 1) as f32 * SECTION_BUTTON_GAP
+}
+
+/// Width of the volume-control section for the currently-rendered widgets.
+/// Vertical layout sizes for one bar (music only) or two bars (music + SFX
+/// when `show_sfx_slider` is true); horizontal layout always uses the
+/// horizontal track length since stacking SFX above music doesn't widen it.
+#[inline]
+pub(crate) fn volume_section_width(show_sfx_slider: bool) -> f32 {
+    if crate::theme::is_horizontal_volume() {
+        super::volume_slider::HORIZONTAL_LENGTH
+    } else if show_sfx_slider {
+        2.0 * super::volume_slider::BAR_WIDTH + SECTION_BUTTON_GAP
+    } else {
+        super::volume_slider::BAR_WIDTH
+    }
+}
+
 /// Volume change per scroll line (e.g. mouse wheel notch)
 const SCROLL_VOLUME_STEP_LINES: f32 = 0.01;
 /// Volume change per scroll pixel (e.g. trackpad smooth scrolling)
@@ -60,9 +121,6 @@ pub(crate) fn player_bar_height() -> f32 {
     }
 }
 
-// Format-info container is text-only; hide it as a single threshold without
-// hysteresis since collapsing text doesn't shift button hit targets.
-const BREAKPOINT_HIDE_FORMAT_INFO: f32 = 1000.0;
 // SFX volume slider has its own breakpoint (independent of mode-toggle tier
 // because the slider is wider than a button).
 const BREAKPOINT_HIDE_SFX_SLIDER: f32 = 840.0;
@@ -221,9 +279,6 @@ pub(crate) struct PlayerBarViewData {
     pub track_artist: String,
     #[allow(dead_code)]
     pub track_album: String,
-    pub format_suffix: String,
-    pub sample_rate: u32,
-    pub bitrate: u32,
     #[allow(dead_code)]
     pub radio_name: Option<String>,
     /// Whether the player-bar hamburger menu is currently open (controlled state).
@@ -353,12 +408,19 @@ fn svg_icon(icon_path: &'static str, size: f32, color: Color) -> Svg<'static, Th
 }
 
 /// Centers a child element inside a fixed-size container with no padding/border.
+///
+/// Uses `align_x`/`align_y` rather than `center_x`/`center_y` because the
+/// latter pair set the container's width/height to the passed `Length`,
+/// silently overriding the `Length::Fixed(width)`/`Length::Fixed(height)` set
+/// just above. We want a truly fixed-size container so the wrapping button
+/// reports `Shrink` and doesn't stretch when placed inside a non-Shrink
+/// (e.g. fixed-width section) parent.
 fn fixed_centered<'a, M: 'a>(child: Element<'a, M>, width: f32, height: f32) -> Element<'a, M> {
     container(child)
         .width(Length::Fixed(width))
         .height(Length::Fixed(height))
-        .center_x(Length::Fill)
-        .center_y(Length::Fill)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
         .into()
 }
 
@@ -569,30 +631,6 @@ pub(crate) fn player_bar<'a>(
         )
     };
 
-    // ProgressTrack overlay rendering was removed as part of the flat redesign
-    // (`L6` adds a dedicated 24 px status strip below the player bar that
-    // covers the same visibility use case). The `ProgressTrack` enum variant
-    // is preserved for persistence compatibility but silently falls back to
-    // the PlayerBar rendering — no overlay segments are produced here.
-    //
-    // The format badge below renders codec/bitrate independently of the strip
-    // mode whenever there's room, since it's always useful regardless of where
-    // metadata is displayed.
-    let mut format_info_left = String::new();
-    let mut format_info_right = String::new();
-    if crate::theme::strip_show_format_info()
-        && let Some((left, right)) = super::format_info::format_audio_info_split(
-            &data.format_suffix,
-            data.sample_rate as f32 / 1000.0,
-            data.bitrate,
-        )
-    {
-        format_info_left = left;
-        if let Some(r) = right {
-            format_info_right = r;
-        }
-    }
-
     let custom_progress_bar =
         widgets::progress_bar::progress_bar(position, duration, PlayerBarMessage::Seek)
             .is_playing(data.playback_playing && !data.playback_paused)
@@ -600,76 +638,26 @@ pub(crate) fn player_bar<'a>(
             .width(Length::Fill)
             .height(24.0);
 
-    let mut progress_items: Vec<Element<'_, PlayerBarMessage>> = vec![
+    let progress_row = row![
         text(pos_str.clone())
             .size(11.0)
             .font(theme::ui_font())
             .color(theme::fg4())
             .width(Length::Fixed(40.0))
             .align_x(Alignment::End)
-            .align_y(Alignment::Center)
-            .into(),
-        custom_progress_bar.into(),
+            .align_y(Alignment::Center),
+        custom_progress_bar,
         text(dur_str.clone())
             .size(11.0)
             .font(theme::ui_font())
             .color(theme::fg4())
             .width(Length::Fixed(40.0))
-            .align_y(Alignment::Center)
-            .into(),
-    ];
-    if !format_info_left.is_empty() && data.window_width >= BREAKPOINT_HIDE_FORMAT_INFO {
-        let mut col_items: Vec<Element<'_, PlayerBarMessage>> = vec![
-            text(format_info_left)
-                .size(10.0)
-                .font(Font {
-                    weight: Weight::Medium,
-                    ..theme::ui_font()
-                })
-                .color(theme::fg2())
-                .wrapping(text::Wrapping::None)
-                .align_x(Alignment::Center)
-                .into(),
-        ];
-        if !format_info_right.is_empty() {
-            col_items.push(
-                text(format_info_right)
-                    .size(10.0)
-                    .font(Font {
-                        weight: Weight::Medium,
-                        ..theme::ui_font()
-                    })
-                    .color(theme::fg2())
-                    .wrapping(text::Wrapping::None)
-                    .align_x(Alignment::Center)
-                    .into(),
-            );
-        }
-        let format_col = container(column(col_items).align_x(Alignment::Center).spacing(0))
-            .style(|_: &Theme| container::Style {
-                background: Some(theme::bg0().into()),
-                border: iced::Border {
-                    color: theme::border(),
-                    width: 1.0,
-                    radius: if theme::is_rounded_mode() {
-                        theme::ui_radius_sm()
-                    } else {
-                        iced::border::Radius::from(0.0)
-                    },
-                },
-                ..Default::default()
-            })
-            .padding([5, 10])
-            .center_y(MODE_BUTTON_HEIGHT)
-            .align_x(Alignment::Center);
-        progress_items.push(format_col.into());
-    }
-
-    let progress_row = row(progress_items)
-        .spacing(8)
-        .align_y(Alignment::Center)
-        .height(Length::Fixed(CONTROL_ROW_HEIGHT))
-        .width(Length::Fill);
+            .align_y(Alignment::Center),
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center)
+    .height(Length::Fixed(CONTROL_ROW_HEIGHT))
+    .width(Length::Fill);
 
     // Mode toggle buttons with SVG icons
     let is_random_mode = data.is_random_mode;
@@ -1030,19 +1018,45 @@ pub(crate) fn player_bar<'a>(
     } else {
         [0, 6]
     };
-    let inner_gap = 6;
+
+    // Wrap each non-progress section in a Length::Fixed container sized for
+    // its *currently-visible* widgets, so the progress track flexes into the
+    // rest of the row. Sections still shift at cull / SFX-gate boundaries —
+    // those breakpoints already carry hysteresis, so the shift is a single
+    // user-visible event tied to a window-size change. Transport content
+    // sits flush-left (anchors `prev` to the bar's left edge); modes and
+    // volume content sit flush-right (anchors the kebab/hamburger and music
+    // slider to the bar's right edge).
+    let has_hamburger = crate::theme::is_none_nav();
+    let player_controls = container(player_controls)
+        .width(Length::Fixed(transport_section_width(
+            data.layout.transports_collapsed,
+        )))
+        .height(Length::Fill)
+        .align_x(Alignment::Start)
+        .center_y(Length::Fill);
+    let mode_toggles = container(mode_toggles)
+        .width(Length::Fixed(mode_section_width(
+            data.layout,
+            has_hamburger,
+        )))
+        .height(Length::Fill)
+        .align_x(Alignment::End)
+        .center_y(Length::Fill);
+    let volume_control = container(volume_control)
+        .width(Length::Fixed(volume_section_width(show_sfx_slider)))
+        .height(Length::Fill)
+        .align_x(Alignment::End)
+        .center_y(Length::Fill);
+
+    let main_row = row![player_controls, progress_row, mode_toggles, volume_control,]
+        .spacing(MAIN_ROW_INNER_GAP)
+        .padding(outer_padding)
+        .align_y(Alignment::Center);
 
     let main_content: Element<'_, PlayerBarMessage> = if let Some(strip) = info_strip {
         // --- TRACK DISPLAY MODE ---
-        // Main row: controls + progress bar (same layout as normal mode)
-        // Info strip below: pre-built by the caller
-
-        // Main row: controls + progress + toggles + volume
-        let main_row = row![player_controls, progress_row, mode_toggles, volume_control,]
-            .spacing(inner_gap)
-            .padding(outer_padding)
-            .align_y(Alignment::Center);
-
+        // Main row on top, info strip below (separator built into the strip).
         column![
             container(main_row)
                 .width(Length::Fill)
@@ -1053,11 +1067,7 @@ pub(crate) fn player_bar<'a>(
         .into()
     } else {
         // --- NORMAL MODE ---
-        row![player_controls, progress_row, mode_toggles, volume_control,]
-            .spacing(inner_gap)
-            .padding(outer_padding)
-            .align_y(Alignment::Center)
-            .into()
+        main_row.into()
     };
 
     // Top separator: flat 1 px `theme::border()` line. Acts as the chrome
@@ -1093,6 +1103,86 @@ pub(crate) fn player_bar<'a>(
             PlayerBarMessage::ScrollVolume(y)
         })
         .into()
+}
+
+#[cfg(test)]
+mod section_width_tests {
+    use super::{
+        CULL_ORDER, PlayerBarLayout, SECTION_BUTTON_GAP, TRANSPORT_SIZE, mode_button_width,
+        mode_section_width, transport_section_width, volume_section_width,
+    };
+
+    fn layout(kebab: u8, transports_collapsed: bool) -> PlayerBarLayout {
+        PlayerBarLayout {
+            kebab_mode_count: kebab,
+            transports_collapsed,
+        }
+    }
+
+    #[test]
+    fn transport_width_tracks_collapsed_state() {
+        // 5 buttons × 40 + 4 gaps × 4 = 216 (uncollapsed)
+        assert_eq!(
+            transport_section_width(false),
+            5.0 * TRANSPORT_SIZE + 4.0 * SECTION_BUTTON_GAP
+        );
+        assert_eq!(transport_section_width(false), 216.0);
+        // 3 buttons × 40 + 2 gaps × 4 = 128 (collapsed)
+        assert_eq!(
+            transport_section_width(true),
+            3.0 * TRANSPORT_SIZE + 2.0 * SECTION_BUTTON_GAP
+        );
+        assert_eq!(transport_section_width(true), 128.0);
+    }
+
+    #[test]
+    fn mode_width_tracks_inline_count_and_kebab() {
+        let mode_btn_w = mode_button_width();
+        let chrome_w = crate::widgets::sizes::TOOLBAR_BUTTON_SIZE;
+        let total_modes = CULL_ORDER.len() as f32;
+
+        // All inline (kebab_count=0): 7 buttons + 6 gaps, no kebab.
+        let all_inline = mode_section_width(layout(0, false), false);
+        assert_eq!(
+            all_inline,
+            total_modes * mode_btn_w + (total_modes - 1.0) * SECTION_BUTTON_GAP
+        );
+
+        // Some culled (kebab_count=5): 2 inline + kebab + 2 gaps.
+        let some_culled = mode_section_width(layout(5, false), false);
+        assert_eq!(
+            some_culled,
+            2.0 * mode_btn_w + chrome_w + 2.0 * SECTION_BUTTON_GAP
+        );
+
+        // Hamburger adds one more button + gap.
+        let with_hamburger = mode_section_width(layout(5, false), true);
+        assert_eq!(with_hamburger, some_culled + chrome_w + SECTION_BUTTON_GAP);
+    }
+
+    #[test]
+    fn volume_width_tracks_sfx_visibility() {
+        if crate::theme::is_horizontal_volume() {
+            // Horizontal: same width regardless of SFX (SFX stacks vertically).
+            assert_eq!(
+                volume_section_width(false),
+                crate::widgets::volume_slider::HORIZONTAL_LENGTH
+            );
+            assert_eq!(
+                volume_section_width(true),
+                crate::widgets::volume_slider::HORIZONTAL_LENGTH
+            );
+        } else {
+            assert_eq!(
+                volume_section_width(false),
+                crate::widgets::volume_slider::BAR_WIDTH
+            );
+            assert_eq!(
+                volume_section_width(true),
+                2.0 * crate::widgets::volume_slider::BAR_WIDTH + SECTION_BUTTON_GAP
+            );
+        }
+    }
 }
 
 #[cfg(test)]

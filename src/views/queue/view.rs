@@ -452,45 +452,6 @@ impl QueuePage {
                 .height(Length::Fixed(0.0))
                 .into()
         };
-        // Vertical-artwork mode places the artwork directly above this header
-        // column. The extra bar (playlist context / edit) has a fixed height
-        // with no top padding of its own, so it would sit flush against the
-        // artwork's bottom edge. Wrap it with a `VERTICAL_ARTWORK_TOP_PAD` top
-        // inset (bg0_hard, to continue the artwork's outer-inset color) so the
-        // gap below the artwork visually matches the existing top/left/right
-        // insets around it.
-        let extra_top_pad: f32 = {
-            use crate::widgets::base_slot_list_layout::{
-                BaseSlotListLayoutConfig, VERTICAL_ARTWORK_TOP_PAD, vertical_artwork_chrome,
-            };
-            let in_vertical_artwork_mode = vertical_artwork_chrome(&BaseSlotListLayoutConfig {
-                window_width: data.window_width,
-                window_height: data.window_height,
-                show_artwork_column: true,
-                slot_list_chrome: 0.0,
-                elevated: false,
-            }) > 0.0;
-            if in_vertical_artwork_mode
-                && (data.edit_mode_info.is_some() || data.playlist_context_info.is_some())
-            {
-                VERTICAL_ARTWORK_TOP_PAD
-            } else {
-                0.0
-            }
-        };
-        let extra: Element<'a, QueueMessage> = if extra_top_pad > 0.0 {
-            container(extra)
-                .padding(iced::Padding {
-                    top: extra_top_pad,
-                    right: 0.0,
-                    bottom: 0.0,
-                    left: 0.0,
-                })
-                .style(crate::theme::container_bg0_hard)
-                .into()
-        } else {
-            extra
-        };
         let sep: Element<'a, QueueMessage> =
             if data.edit_mode_info.is_some() || data.playlist_context_info.is_some() {
                 crate::theme::horizontal_separator(1.0)
@@ -520,11 +481,11 @@ impl QueuePage {
         };
         let select_header_visible = self.column_visibility.select;
         let chrome_height = if data.edit_mode_info.is_some() {
-            // 44px edit bar + 1px separator + optional vertical-mode top inset
-            chrome_height_with_header() + 45.0 + extra_top_pad
+            // 44px edit bar + 1px separator
+            chrome_height_with_header() + 45.0
         } else if data.playlist_context_info.is_some() {
-            // 32px context bar + 1px separator + optional vertical-mode top inset
-            chrome_height_with_header() + 33.0 + extra_top_pad
+            // 32px context bar + 1px separator
+            chrome_height_with_header() + 33.0
         } else {
             chrome_height_with_select_header(select_header_visible)
         };
