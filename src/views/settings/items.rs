@@ -318,18 +318,20 @@ mod tests {
         let theme = nokkvi_data::types::theme_file::ThemeFile::default();
         let entries = build_theme_items(&theme, "everforest", false, true, false);
 
-        // Verify section headers
+        // Verify section headers (Chrome Border is its own section so the
+        // 1 px hairline gets a Restore Defaults sentinel like every other
+        // color group).
         assert_eq!(
             count_headers(&entries),
-            6,
-            "Expected 6 theme sections: Select Theme, Appearance, Background Colors, Foreground Colors, Accent Colors, Semantic Colors"
+            7,
+            "Expected 7 theme sections: Select Theme, Appearance, Background Colors, Foreground Colors, Accent Colors, Semantic Colors, Chrome Border",
         );
 
         // Verify we have a reasonable number of items
         let item_count = count_items(&entries);
         assert!(
-            item_count >= 23,
-            "Expected at least 23 theme items (7 bg + 6 fg + 6 accent + 8 semantic + themes/rounded), got {item_count}"
+            item_count >= 24,
+            "Expected at least 24 theme items (6 bg + 6 fg + 5 accent + 8 semantic + 1 border + themes/rounded), got {item_count}",
         );
     }
 

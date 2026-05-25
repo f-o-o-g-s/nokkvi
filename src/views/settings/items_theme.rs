@@ -312,6 +312,40 @@ pub(crate) fn build_theme_items(
         ]
     );
 
+    // ── Chrome Border ────────────────────────────────────────────────
+    // Single-field section: the 1 px `theme::border()` hairline used between
+    // nav bars, list rows, capsules, etc. Authored per-theme; when left
+    // empty the runtime derives a value from `bg0_hard` (see
+    // `ResolvedTheme::from_theme_palette`).
+    e.push(SettingsEntry::Header {
+        label: "Chrome Border",
+        icon: P,
+    });
+    e.push(
+        SettingItem::text(
+            SettingMeta::new(
+                SentinelKind::RestoreBorder.to_key(),
+                "⟲ Restore Defaults",
+                "Chrome Border",
+            ),
+            "Press Enter",
+            "Press Enter",
+        )
+        .with_theme_key(),
+    );
+    {
+        let key = format!("{palette_prefix}.border");
+        let label = format!("Chrome border ({palette_label})");
+        e.push(
+            SettingItem::hex_color(
+                SettingMeta::new(key, &label, "Chrome Border"),
+                &palette.border,
+                &default_palette.border,
+            )
+            .with_theme_key(),
+        );
+    }
+
     e
 }
 

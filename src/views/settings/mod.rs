@@ -878,6 +878,7 @@ impl SettingsPage {
                                     | sentinel::SentinelKind::RestoreFg
                                     | sentinel::SentinelKind::RestoreAccent
                                     | sentinel::SentinelKind::RestoreSemantic
+                                    | sentinel::SentinelKind::RestoreBorder
                                     | sentinel::SentinelKind::RestoreVisualizer
                                     | sentinel::SentinelKind::RestoreAllHotkeys,
                                 ) => {
@@ -1189,7 +1190,8 @@ impl SettingsPage {
                 sentinel::SentinelKind::RestoreBg
                 | sentinel::SentinelKind::RestoreFg
                 | sentinel::SentinelKind::RestoreAccent
-                | sentinel::SentinelKind::RestoreSemantic => {}
+                | sentinel::SentinelKind::RestoreSemantic
+                | sentinel::SentinelKind::RestoreBorder => {}
                 // Non-restore sentinels reach this function only via the
                 // public API; ignore them defensively.
                 sentinel::SentinelKind::Logout | sentinel::SentinelKind::PresetTheme(_) => {
