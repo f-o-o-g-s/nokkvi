@@ -352,7 +352,6 @@ const ROUNDED_RADIUS: f32 = 6.0;
 /// xs (4 px) — checkboxes, hex swatches, small pips.
 const R_XS: f32 = 4.0;
 /// sm (8 px) — mode buttons, badges, hover pills.
-#[allow(dead_code)]
 const R_SM: f32 = 8.0;
 /// md (12 px) — cards, popovers, album art, category tiles.
 #[allow(dead_code)]
@@ -404,7 +403,6 @@ pub(crate) fn ui_radius_xs() -> iced::border::Radius {
 /// Scale step `sm` — 8 px in rounded mode, 0 in flat. Use for mode buttons,
 /// badges, format pills.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn ui_radius_sm() -> iced::border::Radius {
     if is_rounded_mode() {
         R_SM.into()
