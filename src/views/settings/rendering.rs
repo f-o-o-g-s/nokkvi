@@ -685,61 +685,7 @@ fn render_value_display<'a>(
         ),
 
         SettingValue::Hotkey(combo) => {
-            // Capture mode: show "Press a key..." or conflict warning
-            if ctx.is_capturing && ctx.is_center {
-                if let Some(conflict) = ctx.conflict_text {
-                    // Conflict warning: inverted red badge (red bg, dark text)
-                    let text_color = theme::bg0_hard();
-                    let badge_bg = theme::danger_bright();
-                    let badge_border = theme::danger();
-                    let badge_size = font_size * 0.9;
-                    return container(slot_list::slot_list_text(conflict, badge_size, text_color))
-                        .padding(Padding::new(2.0).left(8.0).right(8.0))
-                        .style(move |_theme| container::Style {
-                            background: Some(badge_bg.into()),
-                            border: Border {
-                                color: badge_border,
-                                width: 1.0,
-                                radius: theme::ui_border_radius(),
-                            },
-                            ..Default::default()
-                        })
-                        .into();
-                }
-                // Capture mode prompt: inverted yellow badge (yellow bg, dark text)
-                let text_color = theme::bg0_hard();
-                let hint_color = Color {
-                    a: 0.7,
-                    ..theme::bg0_hard()
-                };
-                let badge_bg = theme::warning();
-                let badge_border = theme::warning_bright();
-                let badge_size = font_size * 0.9;
-                let hint_size = font_size * 0.7;
-                return container(
-                    row![
-                        slot_list::slot_list_text("Press a key...", badge_size, text_color),
-                        Space::new().width(Length::Fixed(8.0)),
-                        slot_list::slot_list_text("Esc cancel · Del reset", hint_size, hint_color),
-                    ]
-                    .align_y(Alignment::Center),
-                )
-                .padding(Padding::new(2.0).left(8.0).right(8.0))
-                .style(move |_theme| container::Style {
-                    background: Some(badge_bg.into()),
-                    border: Border {
-                        color: badge_border,
-                        width: 1.0,
-                        radius: theme::ui_border_radius(),
-                    },
-                    ..Default::default()
-                })
-                .into();
-            }
-
-            // Normal display: key combo in a badge-style container
-            // Use fg0 for text (always contrasts with bg) and bg0_hard for badge bg (maximum separation)
-            render_badge(combo.clone(), font_size, is_center, opacity)
+            return render_hotkey_badge(combo, font_size, ctx);
         }
 
         _ => {
@@ -936,6 +882,150 @@ fn render_toggle_set_pills<'a>(
 #[inline]
 fn chip_label_size(font_size: f32) -> f32 {
     font_size * 0.80
+}
+
+// ============================================================================
+// Hotkey Badge States
+// ============================================================================
+//
+// Per the design (nokkvi-settings.css `.nk-w-key`):
+// - Idle:     `accent_bright()` fill + `bg0_hard()` text, 96 px wide key-cap.
+// - Capture:  transparent fill + `warning_bright()` border + `warning_bright()`
+//             text, with the "Esc cancel · Del reset" hint inline. (Pulse
+//             animation noted in the design is omitted — iced has no
+//             keyframes; would require a per-frame Tick subscription that
+//             isn't worth wiring just for visual flourish.)
+// - Conflict: transparent fill + `danger()` border + `danger()` text, showing
+//             the conflict label that the capture handler emitted (which
+//             names the colliding action).
+//
+// The design also lists a "disabled" state (`bg2()` border, `fg3()` text).
+// That state has no data-level producer today — `HotkeyConfig::get_binding()`
+// always returns a `KeyCombo`, never `None` — so it's intentionally not
+// rendered. Add it here when an "unbound" representation lands in the data
+// layer.
+
+/// Render the hotkey value badge in its current state.
+fn render_hotkey_badge<'a>(
+    combo: &str,
+    font_size: f32,
+    ctx: &SlotRenderContext<'_>,
+) -> Element<'a, SettingsMessage> {
+    let opacity = if ctx.is_center { 1.0 } else { ctx.opacity };
+
+    // Capture mode (center-row only by construction in view.rs) — either a
+    // "press a key" prompt or a conflict warning, both rendered as inverted
+    // badges with the design's gold/red palette.
+    if ctx.is_capturing && ctx.is_center {
+        if let Some(conflict) = ctx.conflict_text {
+            return hotkey_capture_badge(
+                conflict,
+                None,
+                font_size,
+                theme::danger(),
+                theme::danger(),
+            );
+        }
+        return hotkey_capture_badge(
+            "Press a key...",
+            Some("Esc cancel · Del reset"),
+            font_size,
+            theme::warning_bright(),
+            theme::warning_bright(),
+        );
+    }
+
+    // Idle / non-center: green key-cap badge.
+    hotkey_idle_badge(combo, font_size, opacity)
+}
+
+/// Idle key-cap badge — full accent fill, dark text, 96 px wide minimum
+/// matching `nk-w-key` in the flat CSS.
+fn hotkey_idle_badge<'a>(
+    combo: &str,
+    font_size: f32,
+    opacity: f32,
+) -> Element<'a, SettingsMessage> {
+    let badge_size = font_size * 0.92;
+    let bg = scale_alpha_local(theme::accent_bright(), opacity);
+    let border = bg;
+    let text_color = scale_alpha_local(theme::bg0_hard(), opacity);
+
+    container(
+        slot_list::slot_list_text(combo.to_string(), badge_size, text_color).font(Font {
+            weight: Weight::Medium,
+            ..theme::ui_font()
+        }),
+    )
+    .width(Length::Fixed(96.0))
+    .align_x(Alignment::Center)
+    .align_y(Alignment::Center)
+    .padding(Padding::new(5.0).left(14.0).right(14.0))
+    .style(move |_: &iced::Theme| container::Style {
+        background: Some(bg.into()),
+        border: Border {
+            color: border,
+            width: 1.0,
+            radius: theme::ui_radius_pill(),
+        },
+        ..Default::default()
+    })
+    .into()
+}
+
+/// Capture / conflict badge — transparent fill, colored border + text, with
+/// an optional inline hint suffix. Used for both the "Press a key..." prompt
+/// (gold) and the conflict warning (red).
+fn hotkey_capture_badge<'a>(
+    label: &str,
+    hint: Option<&str>,
+    font_size: f32,
+    border_color: Color,
+    text_color: Color,
+) -> Element<'a, SettingsMessage> {
+    let badge_size = font_size * 0.92;
+    let hint_size = font_size * 0.72;
+    let hint_color = Color {
+        a: 0.7,
+        ..text_color
+    };
+
+    let mut body = row![
+        slot_list::slot_list_text(label.to_string(), badge_size, text_color).font(Font {
+            weight: Weight::Medium,
+            ..theme::ui_font()
+        }),
+    ]
+    .align_y(Alignment::Center);
+
+    if let Some(h) = hint {
+        body = body.push(Space::new().width(Length::Fixed(8.0))).push(
+            slot_list::slot_list_text(h.to_string(), hint_size, hint_color),
+        );
+    }
+
+    container(body)
+        .padding(Padding::new(5.0).left(14.0).right(14.0))
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(Color::TRANSPARENT.into()),
+            border: Border {
+                color: border_color,
+                width: 1.0,
+                radius: theme::ui_radius_pill(),
+            },
+            ..Default::default()
+        })
+        .into()
+}
+
+/// Local copy of the pill widget's alpha scaler (kept private to avoid
+/// promoting a trivial helper to a shared API).
+#[inline]
+fn scale_alpha_local(c: Color, factor: f32) -> Color {
+    Color {
+        a: c.a * factor,
+        ..c
+    }
 }
 
 // ============================================================================
