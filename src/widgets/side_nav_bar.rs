@@ -4,10 +4,10 @@
 //! app. Each button uses a canvas widget with rotated text (-90°, reading
 //! bottom-to-top). Styling mirrors the horizontal nav bar's flat redesign:
 //!
-//!   - Flat mode: 56 px wide chrome, edge-to-edge tab cells with full-cell
+//!   - Flat mode: 32 px wide chrome, edge-to-edge tab cells with full-cell
 //!     `accent_bright()` fill when active and 1 px `theme::border()`
 //!     horizontal rules between cells.
-//!   - Rounded mode: 64 px wide chrome with 4 px outer gutters around 56 px
+//!   - Rounded mode: 40 px wide chrome with 4 px outer gutters around 32 px
 //!     `ui_radius_md()` tab cards; rules inset 14 px on each side so they
 //!     float between the rounded cards.
 //!
@@ -26,13 +26,13 @@ use super::nav_bar::{NAV_TABS, NavBarMessage, NavView, colored_icon};
 use crate::theme;
 
 /// Side-nav width (px) by chrome mode.
-/// - Flat mode: 56 px (matches the design CSS `.nk-sidenav { width: 56px }`).
-/// - Rounded mode: 64 px (4 px outer gutters around the 56-px tab cards
-///   so the rounded corners breathe).
+/// - Flat mode: 32 px — edge-to-edge tab cells.
+/// - Rounded mode: 40 px — 4 px outer gutters on each side of 32 px
+///   `ui_radius_md()` tab cards so the rounded corners breathe.
 ///
 /// Exposed as a function so callers always see the current mode's value.
-const SIDE_NAV_WIDTH_FLAT: f32 = 56.0;
-const SIDE_NAV_WIDTH_ROUNDED: f32 = 64.0;
+const SIDE_NAV_WIDTH_FLAT: f32 = 32.0;
+const SIDE_NAV_WIDTH_ROUNDED: f32 = 40.0;
 
 #[inline]
 pub(crate) fn side_nav_width() -> f32 {
@@ -83,7 +83,7 @@ const SIDE_NAV_TRAY_PAD_V: f32 = 8.0;
 /// Width (px) of an individual tab card inside the sidebar. Flat mode
 /// fills the whole sidebar; rounded mode leaves a 4 px gutter on each
 /// side so the rounded corners aren't clipped against the chrome edge.
-/// Happens to be 56 px in both modes today (`64 - 2*4 = 56 = 56`).
+/// Happens to be 32 px in both modes today (`40 - 2*4 = 32 = 32`).
 #[inline]
 fn side_nav_tab_width() -> f32 {
     if theme::is_rounded_mode() {

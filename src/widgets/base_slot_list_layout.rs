@@ -56,8 +56,9 @@ pub(crate) const HORIZONTAL_ARTWORK_STRIPE: f32 = 2.0;
 pub(crate) struct BaseSlotListLayoutConfig {
     /// Content-pane width — the horizontal extent the view's widgets
     /// actually get to fill. In Top / None nav layouts this equals the
-    /// window width; in Side nav it's already had the 30 px sidebar
-    /// subtracted upstream (`Nokkvi::content_pane_width` in `app_view.rs`).
+    /// window width; in Side nav it's already had the sidebar footprint
+    /// (33 px flat / 41 px rounded) subtracted upstream
+    /// (`Nokkvi::content_pane_width` in `app_view.rs`).
     /// Split-view callers multiply the pane width by their split fraction
     /// before passing it in. The resolver, `always_column_width`, and the
     /// drag handle all treat this as the available horizontal budget — if

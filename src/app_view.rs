@@ -152,8 +152,8 @@ impl Nokkvi {
     /// chrome that the per-view widgets render into.
     ///
     /// In `NavLayout::Side` the vertical sidebar consumes the live width
-    /// reported by `side_nav_total_width()` (icons + border, mode-sensitive
-    /// after the flat redesign: 30 px flat / 65 px rounded). The views must
+    /// reported by `side_nav_total_width()` (icons + border, mode-sensitive:
+    /// 33 px flat / 41 px rounded). The views must
     /// size their artwork-resolver math, drag handles, and slot-list rects
     /// against the REMAINING width. Top / None nav layouts subtract nothing
     /// and this returns the raw window width.
