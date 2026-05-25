@@ -174,42 +174,78 @@ where
         Padding::new(5.0).left(12.0).right(12.0)
     };
 
-    let chip_body = container(label)
-        .padding(chip_padding)
-        .align_y(Alignment::Center)
-        .align_x(Alignment::Center)
-        .style(move |_: &iced::Theme| container::Style {
-            background: Some(bg_color.into()),
-            border: Border {
-                color: border_color,
-                width: 1.0,
-                radius: theme::ui_radius_pill(),
-            },
-            ..Default::default()
-        });
-
     // Interactive only on the center row; non-center rows render the same chip
     // shape but ignore clicks (the surrounding slot list row handles
     // up/down/select navigation when a non-center chip's row is clicked).
     if params.is_center {
+        // Center row: paint the chip via the wrapping button's `Style` so
+        // `button::Status::Hovered` / `::Pressed` can adjust the fill +
+        // border in lockstep. The label is the only child; the body's
+        // bg/border come from the button. Active variant (`is_on`) keeps
+        // dimming its own bright fill on press so the user sees feedback;
+        // idle variant brightens its bg toward `bg1` on hover so the chip
+        // reads as targetable.
+        let chip_body = container(label)
+            .padding(chip_padding)
+            .align_y(Alignment::Center)
+            .align_x(Alignment::Center);
+        let radius = theme::ui_radius_pill();
         let click_key = option.key.clone();
         button(chip_body)
             .on_press(on_click(click_key))
-            .style(transparent_chip_style)
             .padding(0)
+            .style(move |_theme: &iced::Theme, status| {
+                let (fill, outline) = match status {
+                    button::Status::Hovered => {
+                        if is_on {
+                            (
+                                scale_alpha(theme::accent(), effective_opacity),
+                                border_color,
+                            )
+                        } else {
+                            (
+                                scale_alpha(theme::bg1(), effective_opacity),
+                                theme::accent(),
+                            )
+                        }
+                    }
+                    button::Status::Pressed => {
+                        let press_bg = if is_on { theme::accent() } else { theme::bg2() };
+                        (
+                            scale_alpha(press_bg, effective_opacity),
+                            scale_alpha(theme::accent_bright(), effective_opacity),
+                        )
+                    }
+                    button::Status::Active | button::Status::Disabled => (bg_color, border_color),
+                };
+                button::Style {
+                    background: Some(fill.into()),
+                    border: Border {
+                        color: outline,
+                        width: 1.0,
+                        radius,
+                    },
+                    ..Default::default()
+                }
+            })
             .into()
     } else {
-        chip_body.into()
-    }
-}
-
-/// Borderless button style — the chip's container already paints background +
-/// border, so the wrapping `button` must not double-paint.
-fn transparent_chip_style(_theme: &iced::Theme, _status: button::Status) -> button::Style {
-    button::Style {
-        background: None,
-        border: Border::default(),
-        ..Default::default()
+        // Non-center rows: static chip painted by a styled container —
+        // no hover/press feedback (clicks bubble to the slot-list row).
+        container(label)
+            .padding(chip_padding)
+            .align_y(Alignment::Center)
+            .align_x(Alignment::Center)
+            .style(move |_: &iced::Theme| container::Style {
+                background: Some(bg_color.into()),
+                border: Border {
+                    color: border_color,
+                    width: 1.0,
+                    radius: theme::ui_radius_pill(),
+                },
+                ..Default::default()
+            })
+            .into()
     }
 }
 
