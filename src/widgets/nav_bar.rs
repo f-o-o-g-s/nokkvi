@@ -340,6 +340,21 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // Left Section: Hamburger + Library Filter + Navigation Tabs
     // -------------------------------------------------------------------------
     let settings_open = data.settings_open;
+
+    // When the metadata strip lives elsewhere (Off / Player Bar / Mini Player)
+    // AND the tabs are icon-only, let the icon tabs grow to consume the
+    // otherwise-empty center lane instead of huddling at the left edge. Other
+    // display modes keep their natural width — text labels are read-as-strip
+    // and shouldn't stretch.
+    let is_side_nav = theme::is_side_nav();
+    let show_nav_metadata = {
+        use nokkvi_data::types::player_settings::TrackInfoDisplay;
+        theme::track_info_display() == TrackInfoDisplay::TopBar
+    };
+    let tabs_expand = !is_side_nav
+        && !show_nav_metadata
+        && matches!(theme::nav_display_mode(), NavDisplayMode::IconsOnly);
+
     // Shared tab builder — used for both regular nav tabs AND the settings indicator.
     // `force_active` overrides the active state (used for settings tab, always active).
     let nav_tab = |label: &'static str,
@@ -355,6 +370,11 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             [2, 6]
         } else {
             [2, 14]
+        };
+        let tab_width = if tabs_expand {
+            Length::FillPortion(1)
+        } else {
+            Length::Shrink
         };
 
         if is_rounded {
@@ -376,6 +396,8 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                         .padding(tab_padding)
                         .height(Length::Fixed(NAV_PILL_HEIGHT))
                         .center_y(Length::Fixed(NAV_PILL_HEIGHT))
+                        .width(tab_width)
+                        .align_x(Alignment::Center)
                         .style(tab_style),
                 )
                 .border_radius(theme::ui_radius_pill()),
@@ -400,6 +422,8 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                     container(tab_content(label, icon_path, display_mode, text_color))
                         .padding(tab_padding)
                         .height(Length::Fill)
+                        .width(tab_width)
+                        .align_x(Alignment::Center)
                         .style(tab_style),
                 )
                 .border_radius(0.0.into()),
@@ -412,7 +436,6 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     };
 
     let current = data.current_view;
-    let is_side_nav = theme::is_side_nav();
 
     // -------------------------------------------------------------------------
     // Hamburger Menu (head of left_section, beside library filter)
@@ -542,6 +565,15 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     //   come from `row::spacing(NAV_TRAY_GAP)`.
     let is_rounded = theme::is_rounded_mode();
     let tab_spacing: f32 = if is_rounded { NAV_TRAY_GAP } else { 0.0 };
+    // When `tabs_expand`, the row claims the entire outer lane so its
+    // `FillPortion(1)` tab children have remaining-width to split. Otherwise
+    // the row stays Shrink and the center_section absorbs the leftover lane
+    // (the original behavior, preserved for every non-expanding combination).
+    let left_row_width = if tabs_expand {
+        Length::Fill
+    } else {
+        Length::Shrink
+    };
     let mut left_section: iced::widget::Row<'static, NavBarMessage> = if is_side_nav {
         row![]
             .spacing(0)
@@ -551,6 +583,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         let mut tabs = row![hamburger, library_trigger_slot, tab_separator(true)]
             .spacing(tab_spacing)
             .height(Length::Fill)
+            .width(left_row_width)
             .align_y(Alignment::Center);
         let tab_count = NAV_TABS.len();
         for (i, &(label, icon_path, view)) in NAV_TABS.iter().enumerate() {
@@ -583,14 +616,9 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
         left_section = left_section.push(tab_separator(true));
     }
 
-    // Only show nav bar metadata when the display mode targets the top/nav bar.
-    // Off, PlayerBar, and MiniPlayer modes shouldn't show metadata here.
-    let show_nav_metadata = {
-        use nokkvi_data::types::player_settings::TrackInfoDisplay;
-        let mode = theme::track_info_display();
-        mode == TrackInfoDisplay::TopBar
-    };
-
+    // `show_nav_metadata` is computed up front (alongside `tabs_expand`) so
+    // both the closure and the layout assembly see the same flag.
+    //
     // In merged mode the marquee scrolls any-length text, so breakpoints are
     // irrelevant — all user-enabled fields stay visible regardless of window
     // width.  In non-merged mode fields are separate labeled elements that each
@@ -627,8 +655,17 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
 
     let center_section: Element<'static, NavBarMessage> =
         if !show_title && !show_artist && !show_album {
-            // All metadata hidden (narrow window OR all user toggles off)
-            Space::new().width(Length::Fill).into()
+            // All metadata hidden (narrow window OR all user toggles off).
+            // When the tabs have already claimed the lane (`tabs_expand`),
+            // collapse the center to a zero-width spacer so it doesn't
+            // compete with the Fill `left_section` for the row's remaining
+            // space. Otherwise keep the historical Fill spacer that absorbs
+            // the lane.
+            if tabs_expand {
+                Space::new().into()
+            } else {
+                Space::new().width(Length::Fill).into()
+            }
         } else if !is_playing {
             // Stopped state - no track loaded
             container(
