@@ -30,6 +30,29 @@ const MODE_BUTTON_HEIGHT: f32 = 44.0;
 /// Re-uses the canonical constant from `track_info_strip.rs` to avoid drift.
 use super::track_info_strip::STRIP_HEIGHT as INFO_STRIP_HEIGHT;
 
+/// Compact transport-button size used while in `MiniPlayer` display mode.
+/// 28 px (with a 14 px glyph) lets the buttons stack above the progress
+/// scrub inside the existing 72 px bar instead of bumping bar height. The
+/// icon scales 1:2 with the button so the proportions match the standard
+/// 40/20 buttons.
+const MINI_PLAYER_TRANSPORT_SIZE: f32 = 28.0;
+const MINI_PLAYER_TRANSPORT_ICON_SIZE: f32 = 14.0;
+
+/// Compact progress-row height in MiniPlayer stacked mode: matches the
+/// progress widget's intrinsic 24 px so the row introduces no extra
+/// vertical padding around the scrub.
+const MINI_PLAYER_PROGRESS_ROW_HEIGHT: f32 = 24.0;
+
+/// Vertical gap between the centered transports row and the progress row
+/// inside the MiniPlayer stacked column.
+const MINI_PLAYER_STACK_SPACING: f32 = 4.0;
+
+/// Vertical padding applied to the main row in `MiniPlayer` rounded mode.
+/// Slimmer than the default [10, 12] so 28 (transports) + 4 (gap) + 24
+/// (progress) = 56 px of stacked content fits inside the 72 px bar with a
+/// few px of slack. Flat mode already runs at zero vertical padding.
+const MINI_PLAYER_ROUNDED_PADDING: [u16; 2] = [6, 12];
+
 #[inline]
 fn mode_button_width() -> f32 {
     if theme::is_rounded_mode() { 40.0 } else { 38.0 }
@@ -109,12 +132,15 @@ const MINI_PLAYER_INNER_GAP: f32 = 8.0;
 pub(crate) const MINI_PLAYER_SECTION_WIDTH: f32 =
     MINI_PLAYER_ARTWORK_SIZE + MINI_PLAYER_INNER_GAP + MINI_PLAYER_TEXT_WIDTH;
 
-/// Window-width threshold below which the mini-player section hides
-/// so the transport / progress / mode / volume sections retain
-/// breathing room on narrow windows. Chosen so the progress bar keeps
-/// ≳200 px even when transports are uncollapsed and a few modes are
-/// still inline.
-pub(crate) const MINI_PLAYER_HIDE_BELOW: f32 = 760.0;
+/// Window-width threshold below which the mini-player section hides so
+/// the rest of the bar retains breathing room. Set well below the pre-stack
+/// 760 px figure because MiniPlayer mode now lifts the transports out of the
+/// main row and stacks them on top of the progress scrub at the smaller
+/// 28 px scale — that 156 px no longer competes with the mini-player section
+/// for horizontal space. Tuned to leave the progress widget itself ≳100 px
+/// wide at the boundary (244 mini + ~160 stacked column min + ~80 modes/vol
+/// + gaps + padding ≈ 540).
+pub(crate) const MINI_PLAYER_HIDE_BELOW: f32 = 540.0;
 
 /// Whether the mini-player left-of-transport section should render
 /// for the given window width AND the active `TrackInfoDisplay`.
@@ -139,7 +165,9 @@ fn base_player_bar_height() -> f32 {
 
 /// Dynamic player bar height: base 64/72 px, plus info strip when track display
 /// is PlayerBar and nav layout is Side (in Top mode the nav bar already shows
-/// track/format info).
+/// track/format info). MiniPlayer mode keeps the base height — the stacked
+/// transports + progress column is sized to fit by shrinking transport
+/// buttons and trimming the row's vertical padding.
 pub(crate) fn player_bar_height() -> f32 {
     let base = base_player_bar_height();
     if crate::theme::show_player_bar_strip() {
@@ -453,6 +481,30 @@ fn fixed_centered<'a, M: 'a>(child: Element<'a, M>, width: f32, height: f32) -> 
         .into()
 }
 
+/// Active transport-button side length. Shrinks to
+/// [`MINI_PLAYER_TRANSPORT_SIZE`] while the MiniPlayer track-info display
+/// is selected so the stacked transports + progress column fits the
+/// existing 72 px bar without bumping bar height.
+#[inline]
+pub(crate) fn transport_button_size() -> f32 {
+    use nokkvi_data::types::player_settings::TrackInfoDisplay;
+    if theme::track_info_display() == TrackInfoDisplay::MiniPlayer {
+        MINI_PLAYER_TRANSPORT_SIZE
+    } else {
+        TRANSPORT_SIZE
+    }
+}
+
+#[inline]
+fn transport_icon_size() -> f32 {
+    use nokkvi_data::types::player_settings::TrackInfoDisplay;
+    if theme::track_info_display() == TrackInfoDisplay::MiniPlayer {
+        MINI_PLAYER_TRANSPORT_ICON_SIZE
+    } else {
+        20.0
+    }
+}
+
 /// Helper function to create a flat transport icon button (prev / play / pause
 /// / stop / next), wrapped in `HoverOverlay` for the press scale feedback.
 fn player_control_button(
@@ -461,8 +513,9 @@ fn player_control_button(
     icon_color: Color,
     active: bool,
 ) -> Element<'static, PlayerBarMessage> {
-    let icon = svg_icon(icon_path, 20.0, icon_color);
-    let inner = fixed_centered(icon.into(), TRANSPORT_SIZE, TRANSPORT_SIZE);
+    let size = transport_button_size();
+    let icon = svg_icon(icon_path, transport_icon_size(), icon_color);
+    let inner = fixed_centered(icon.into(), size, size);
     let btn = button(inner)
         .padding(0)
         .style(transport_button_style(active))
@@ -700,8 +753,9 @@ pub(crate) fn player_bar<'a>(
 
     let player_controls: Element<'_, PlayerBarMessage> = if data.layout.transports_collapsed {
         // Collapsed transports: prev / play-or-pause toggle / next.
-        // TRANSPORT_SIZE is fixed (40px) so the middle button's hit target
-        // stays in place when the glyph swaps between play and pause.
+        // The button side length is fixed for the current mode (40 px standard,
+        // 28 px MiniPlayer) so the middle button's hit target stays in place
+        // when the glyph swaps between play and pause.
         let middle_active = playback_playing || playback_paused;
         let (middle_icon, middle_message) = if playback_playing {
             ("assets/icons/pause.svg", PlayerBarMessage::Pause)
@@ -794,6 +848,18 @@ pub(crate) fn player_bar<'a>(
             .width(Length::Fill)
             .height(24.0);
 
+    // MiniPlayer mode stacks the transports above the progress scrub inside a
+    // single Length::Fill column. The progress row trims to a compact 24 px
+    // height there so 28 (transports) + 4 (gap) + 24 (progress) sits inside
+    // the existing 72 px bar with the slimmer rounded-mode padding.
+    use nokkvi_data::types::player_settings::TrackInfoDisplay;
+    let is_mini_player_mode = theme::track_info_display() == TrackInfoDisplay::MiniPlayer;
+    let progress_row_height = if is_mini_player_mode {
+        MINI_PLAYER_PROGRESS_ROW_HEIGHT
+    } else {
+        CONTROL_ROW_HEIGHT
+    };
+
     let progress_row = row![
         text(pos_str.clone())
             .size(11.0)
@@ -812,7 +878,7 @@ pub(crate) fn player_bar<'a>(
     ]
     .spacing(8)
     .align_y(Alignment::Center)
-    .height(Length::Fixed(CONTROL_ROW_HEIGHT))
+    .height(Length::Fixed(progress_row_height))
     .width(Length::Fill);
 
     // Mode toggle buttons with SVG icons
@@ -1175,7 +1241,11 @@ pub(crate) fn player_bar<'a>(
 
     let base_height = base_player_bar_height();
     let outer_padding = if theme::is_rounded_mode() {
-        [10, 12]
+        if is_mini_player_mode {
+            MINI_PLAYER_ROUNDED_PADDING
+        } else {
+            [10, 12]
+        }
     } else {
         [0, 6]
     };
@@ -1189,13 +1259,6 @@ pub(crate) fn player_bar<'a>(
     // volume content sit flush-right (anchors the kebab/hamburger and music
     // slider to the bar's right edge).
     let has_hamburger = crate::theme::is_none_nav();
-    let player_controls = container(player_controls)
-        .width(Length::Fixed(transport_section_width(
-            data.layout.transports_collapsed,
-        )))
-        .height(Length::Fill)
-        .align_x(Alignment::Start)
-        .center_y(Length::Fill);
     let mode_toggles = container(mode_toggles)
         .width(Length::Fixed(mode_section_width(
             data.layout,
@@ -1230,11 +1293,33 @@ pub(crate) fn player_bar<'a>(
     if let Some(section) = mini_player_element {
         main_row = main_row.push(section);
     }
-    let main_row = main_row
-        .push(player_controls)
-        .push(progress_row)
-        .push(mode_toggles)
-        .push(volume_control);
+    if is_mini_player_mode {
+        // MiniPlayer mode: transports sit centered above the scrub inside a
+        // single Length::Fill column, so the transports no longer claim
+        // their own fixed-width section of the main row. Combined with the
+        // smaller 28 px transport buttons that fit the existing bar height,
+        // that lets MINI_PLAYER_HIDE_BELOW drop well under the previous
+        // 760 px threshold.
+        let transports_centered = container(player_controls)
+            .width(Length::Fill)
+            .align_x(Alignment::Center);
+        let stacked = iced::widget::Column::new()
+            .push(transports_centered)
+            .push(progress_row)
+            .spacing(MINI_PLAYER_STACK_SPACING)
+            .width(Length::Fill);
+        main_row = main_row.push(stacked);
+    } else {
+        let transports_section = container(player_controls)
+            .width(Length::Fixed(transport_section_width(
+                data.layout.transports_collapsed,
+            )))
+            .height(Length::Fill)
+            .align_x(Alignment::Start)
+            .center_y(Length::Fill);
+        main_row = main_row.push(transports_section).push(progress_row);
+    }
+    let main_row = main_row.push(mode_toggles).push(volume_control);
 
     let main_content: Element<'_, PlayerBarMessage> = if let Some(strip) = info_strip {
         // --- TRACK DISPLAY MODE ---
