@@ -291,8 +291,38 @@ pub(crate) const SLOT_SPACING: f32 = 0.0;
 /// function so rounded mode picks up the 44 px height automatically.
 pub(crate) const NAV_BAR_HEIGHT: f32 = 32.0;
 
-/// Height of the view header row (sort controls, search, etc.).
-pub(crate) const VIEW_HEADER_HEIGHT: f32 = 48.0;
+/// Total chrome consumed by the view-header row.
+///
+/// Flat mode: 50 px strip (matches `view_header::FLAT_HEADER_HEIGHT`).
+///
+/// Rounded mode: 44 px capsule + 12 px top margin + 12 px bottom margin =
+/// 68 px (the capsule sits inset from the slot-list shell, and the gap
+/// below the capsule visually substitutes for the flat mode's bottom
+/// hairline). Keeping this in lockstep with `view_header::view_header()`
+/// is load-bearing — drifting drops a partial slot at the bottom of every
+/// list. The view_header tests pin the related constants.
+#[inline]
+pub(crate) fn view_header_chrome() -> f32 {
+    if crate::theme::is_rounded_mode() {
+        // 44 (capsule) + 12 (top margin) + 12 (bottom margin)
+        68.0
+    } else {
+        50.0
+    }
+}
+
+/// Outer vertical margins owed to the rounded-mode list shell — added on
+/// top of `SLOT_LIST_CONTAINER_PADDING` so the slot-count math reserves
+/// the 14 px gap between the shell and the bottom of the window. Always
+/// `0.0` in flat mode (rows reach the bottom edge directly).
+#[inline]
+fn slot_list_shell_extra_chrome() -> f32 {
+    if crate::theme::is_rounded_mode() {
+        14.0
+    } else {
+        0.0
+    }
+}
 
 /// Height of the browsing panel tab bar.
 pub(crate) const TAB_BAR_HEIGHT: f32 = 32.0;
@@ -309,8 +339,8 @@ use super::player_bar::player_bar_height;
 /// In side and none nav modes: player_bar(56+) + view_header(48) (no top bar),
 /// plus the TopBar strip (21+1) when TrackInfoDisplay::TopBar is active.
 pub(crate) fn chrome_height_with_header() -> f32 {
-    if crate::theme::is_top_nav() {
-        crate::theme::nav_bar_height() + player_bar_height() + VIEW_HEADER_HEIGHT
+    let base = if crate::theme::is_top_nav() {
+        crate::theme::nav_bar_height() + player_bar_height() + view_header_chrome()
     } else {
         // Side or None mode: no top nav bar, but TopBar track info strip may add height
         let top_bar_strip = if crate::theme::show_top_bar_strip() {
@@ -318,8 +348,9 @@ pub(crate) fn chrome_height_with_header() -> f32 {
         } else {
             0.0
         };
-        player_bar_height() + VIEW_HEADER_HEIGHT + top_bar_strip
-    }
+        player_bar_height() + view_header_chrome() + top_bar_strip
+    };
+    base + slot_list_shell_extra_chrome()
 }
 
 /// Configuration for slot list rendering
@@ -1456,20 +1487,61 @@ fn empty_slot<'a, Message: 'a>(opacity: f32) -> Element<'a, Message> {
 ///
 /// This prevents lighter background colors from bleeding through transparent slot list slots.
 /// Should be used by all slot-list-based views (albums, queue, etc.) for visual consistency.
+///
+/// Flat mode: edge-to-edge `bg0_hard()` fill with 10 px L/R padding and
+/// 10 px bottom padding (mirrors the historical chrome). Rounded mode:
+/// wraps the rows in a list shell with `ui_radius_lg()` corners + 1 px
+/// `theme::border()` outline, then insets the whole shell by 16 px
+/// horizontally and 14 px on the bottom (matches the design's `.nk-list`
+/// `margin: 0 16px 14px` rule).
 pub(crate) fn slot_list_background_container<'a, Message: 'a>(
     slot_list_content: Element<'a, Message>,
 ) -> Element<'a, Message> {
-    container(slot_list_content)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .padding(
-            Padding::new(0.0)
-                .right(10.0)
-                .bottom(SLOT_LIST_CONTAINER_PADDING)
-                .left(10.0),
-        )
-        .style(theme::container_bg0_hard)
-        .into()
+    if crate::theme::is_rounded_mode() {
+        // Inner shell — paints `bg0_hard()` + the rounded outline that
+        // visually clips the touching row hairlines into a single sealed
+        // perimeter.
+        let shell = container(slot_list_content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(|_| container::Style {
+                background: Some(theme::bg0_hard().into()),
+                border: iced::Border {
+                    color: theme::border(),
+                    width: 1.0,
+                    radius: theme::ui_radius_lg(),
+                },
+                ..Default::default()
+            })
+            .clip(true);
+
+        // Outer wrapper — pure `bg0_hard()` background under the shell so
+        // the inset margins blend with the surrounding chrome (the same
+        // pattern the flat path uses for its 10 px L/R pad).
+        container(shell)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(iced::Padding {
+                top: 0.0,
+                right: 16.0,
+                bottom: 14.0,
+                left: 16.0,
+            })
+            .style(theme::container_bg0_hard)
+            .into()
+    } else {
+        container(slot_list_content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(
+                Padding::new(0.0)
+                    .right(10.0)
+                    .bottom(SLOT_LIST_CONTAINER_PADDING)
+                    .left(10.0),
+            )
+            .style(theme::container_bg0_hard)
+            .into()
+    }
 }
 
 /// Resolve the `SlotListPageMessage` a primary slot-row click should

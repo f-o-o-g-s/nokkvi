@@ -357,7 +357,6 @@ const R_SM: f32 = 8.0;
 #[allow(dead_code)]
 const R_MD: f32 = 12.0;
 /// lg (18 px) — list shells, modal frames, hero panels.
-#[allow(dead_code)]
 const R_LG: f32 = 18.0;
 /// pill (999 px) — tabs, transport buttons, search, sliders.
 const R_PILL: f32 = 999.0;
@@ -426,7 +425,6 @@ pub(crate) fn ui_radius_md() -> iced::border::Radius {
 /// Scale step `lg` — 18 px in rounded mode, 0 in flat. Use for list shells,
 /// modal frames, stats strips.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn ui_radius_lg() -> iced::border::Radius {
     if is_rounded_mode() {
         R_LG.into()
