@@ -1145,7 +1145,8 @@ mod layout_invariants {
         );
         for (i, (_, _, nav_view)) in NAV_TABS.iter().enumerate() {
             assert_eq!(
-                *nav_view, NavView::ALL[i],
+                *nav_view,
+                NavView::ALL[i],
                 "NAV_TABS[{i}] = {nav_view:?}, expected NavView::ALL[{i}] = {:?}",
                 NavView::ALL[i],
             );
