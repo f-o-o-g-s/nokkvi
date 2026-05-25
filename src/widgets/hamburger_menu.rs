@@ -434,18 +434,15 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
         // accent-bright outline of the old design read as "selected"; the
         // new flat language reserves accent for active-state surfaces
         // (tabs, buttons), not panel borders.
+        // Shared menu-panel chrome — see `widgets::menu_chrome`.
         renderer.fill_quad(
             renderer::Quad {
                 bounds,
-                border: iced::Border {
-                    width: 1.0,
-                    color: theme::border(),
-                    radius: theme::ui_radius_md(),
-                },
+                border: super::menu_chrome::border(),
                 shadow: MENU_SHADOW,
                 ..Default::default()
             },
-            theme::bg1(),
+            super::menu_chrome::fill(),
         );
 
         // Menu items

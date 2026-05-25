@@ -27,8 +27,8 @@ use iced::{
 use crate::{
     theme,
     widgets::menu_constants::{
-        MENU_ICON_SIZE, MENU_MIN_WIDTH, MENU_SHADOW, MENU_TEXT_SIZE,
-        inflate_for_shadow_around_child, visible_menu_layout,
+        MENU_ICON_SIZE, MENU_MIN_WIDTH, MENU_TEXT_SIZE, inflate_for_shadow_around_child,
+        visible_menu_layout,
     },
 };
 
@@ -685,25 +685,12 @@ where
     T: Copy + 'a,
     Message: 'a,
 {
-    // Menu chrome: `bg1()` fill with a 1 px `theme::border()` outline
-    // and a `ui_radius_md()` corner in rounded mode (flat = 0). The
-    // accent-bright outline of the old design read as "selected"; the
-    // flat redesign reserves accent for active-state surfaces, not
-    // panel borders — matches `hamburger_menu` / `checkbox_dropdown`.
+    // Shared menu-panel chrome — see `widgets::menu_chrome`.
     container(column(
         entries.iter().copied().map(|e| entry_view(e, Length::Fill)),
     ))
     .padding(4)
-    .style(|_theme| container::Style {
-        background: Some(theme::bg1().into()),
-        border: iced::Border {
-            width: 1.0,
-            color: theme::border(),
-            radius: theme::ui_radius_md(),
-        },
-        shadow: MENU_SHADOW,
-        ..Default::default()
-    })
+    .style(super::menu_chrome::container_style)
     .into()
 }
 

@@ -479,18 +479,15 @@ impl<Message: Clone> overlay::Overlay<Message, Theme, iced::Renderer> for MenuOv
         // Flat menu chrome — `bg1()` fill with a 1 px `border()` outline.
         // `md` radius keeps the popover reading as a major surface in rounded
         // mode without competing with the modal-frame scale.
+        // Shared menu-panel chrome — see `widgets::menu_chrome`.
         renderer.fill_quad(
             renderer::Quad {
                 bounds,
-                border: iced::Border {
-                    width: 1.0,
-                    color: theme::border(),
-                    radius: theme::ui_radius_md(),
-                },
+                border: super::menu_chrome::border(),
                 shadow: MENU_SHADOW,
                 ..Default::default()
             },
-            theme::bg1(),
+            super::menu_chrome::fill(),
         );
 
         let cursor_pos = cursor.position();

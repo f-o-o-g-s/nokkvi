@@ -16,6 +16,7 @@ pub(crate) mod hover_overlay;
 pub(crate) mod library_filter_trigger;
 pub(crate) mod link_text;
 pub(crate) mod marquee_text;
+pub(crate) mod menu_chrome;
 pub(crate) mod menu_constants;
 pub(crate) mod metadata_pill;
 pub(crate) mod nav_bar;

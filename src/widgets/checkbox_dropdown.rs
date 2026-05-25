@@ -47,8 +47,8 @@ use iced::{
 use crate::{
     theme,
     widgets::menu_constants::{
-        MENU_ICON_SIZE, MENU_MIN_WIDTH, MENU_SHADOW, MENU_TEXT_SIZE,
-        inflate_for_shadow_around_child, visible_menu_layout,
+        MENU_ICON_SIZE, MENU_MIN_WIDTH, MENU_TEXT_SIZE, inflate_for_shadow_around_child,
+        visible_menu_layout,
     },
 };
 
@@ -483,23 +483,11 @@ where
         rows.push(row);
     }
 
-    // Menu chrome: `bg1()` fill with a 1 px `theme::border()` outline
-    // and a `ui_radius_md()` corner in rounded mode (flat = 0). Matches
-    // `hamburger_menu` / `context_menu` so every overlay panel reads as
-    // the same flat surface family.
+    // Shared menu-panel chrome — see `widgets::menu_chrome`.
     container(column(rows).spacing(0))
         .width(Length::Fixed(menu_width))
         .padding(4)
-        .style(|_theme| container::Style {
-            background: Some(theme::bg1().into()),
-            border: iced::Border {
-                width: 1.0,
-                color: theme::border(),
-                radius: theme::ui_radius_md(),
-            },
-            shadow: MENU_SHADOW,
-            ..Default::default()
-        })
+        .style(super::menu_chrome::container_style)
         .into()
 }
 
