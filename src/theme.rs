@@ -353,7 +353,6 @@ const ROUNDED_RADIUS: f32 = 6.0;
 #[allow(dead_code)]
 const R_XS: f32 = 4.0;
 /// sm (8 px) — mode buttons, badges, hover pills.
-#[allow(dead_code)]
 const R_SM: f32 = 8.0;
 /// md (12 px) — cards, popovers, album art, category tiles.
 #[allow(dead_code)]
@@ -362,7 +361,6 @@ const R_MD: f32 = 12.0;
 #[allow(dead_code)]
 const R_LG: f32 = 18.0;
 /// pill (999 px) — tabs, transport buttons, search, sliders.
-#[allow(dead_code)]
 const R_PILL: f32 = 999.0;
 
 /// Returns true if rounded corners mode is enabled
@@ -407,7 +405,6 @@ pub(crate) fn ui_radius_xs() -> iced::border::Radius {
 /// Scale step `sm` — 8 px in rounded mode, 0 in flat. Use for mode buttons,
 /// badges, format pills.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn ui_radius_sm() -> iced::border::Radius {
     if is_rounded_mode() {
         R_SM.into()
@@ -443,7 +440,6 @@ pub(crate) fn ui_radius_lg() -> iced::border::Radius {
 /// Scale step `pill` — 999 px in rounded mode, 0 in flat. Use for tabs,
 /// transport buttons, search field, slider handles.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn ui_radius_pill() -> iced::border::Radius {
     if is_rounded_mode() {
         R_PILL.into()
@@ -1179,7 +1175,6 @@ pub(crate) fn star_bright() -> Color {
 /// rows, capsules). Per-theme in TOML, falls back to a darkened
 /// `bg0_hard()` when unset. Replaces hard-coded `#1a2024`-style dividers.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn border() -> Color {
     read_color(|t| t.border)
 }
