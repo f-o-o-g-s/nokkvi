@@ -13,8 +13,10 @@ use iced::{
 
 use crate::theme;
 
-/// Height of the track info strip (including 1px separator).
-pub(crate) const STRIP_HEIGHT: f32 = 21.0;
+/// Height of the track info strip — single source of truth lives in
+/// `theme::STATUS_STRIP_HEIGHT` so the flat-redesign 24 px status strip
+/// stays in sync between the theme module and the strip widget.
+pub(crate) const STRIP_HEIGHT: f32 = theme::STATUS_STRIP_HEIGHT;
 
 /// Strip height plus its 1px separator — used by chrome height calculations.
 pub(crate) const STRIP_HEIGHT_WITH_SEPARATOR: f32 = STRIP_HEIGHT + 1.0;
@@ -377,7 +379,7 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
         .height(Length::Fixed(STRIP_HEIGHT))
         .center_y(STRIP_HEIGHT)
         .style(move |_| container::Style {
-            background: Some(theme::bg0_hard().into()),
+            background: Some(theme::status_strip_bg().into()),
             ..Default::default()
         })
         .into()
@@ -450,7 +452,7 @@ fn build_merged_centered_strip<'a, M: Clone + 'static>(
         .height(Length::Fixed(STRIP_HEIGHT))
         .center_y(STRIP_HEIGHT)
         .style(move |_| container::Style {
-            background: Some(theme::bg0_hard().into()),
+            background: Some(theme::status_strip_bg().into()),
             ..Default::default()
         })
         .into()

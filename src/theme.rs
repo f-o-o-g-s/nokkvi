@@ -459,16 +459,14 @@ pub(crate) fn nav_bar_height() -> f32 {
     if is_rounded_mode() { 44.0 } else { 32.0 }
 }
 
-/// Fixed height of the 24 px status strip rendered below the player bar
-/// (added by L6 integration). Holds the mono `MP3 | title: … | artist: …`
-/// summary line in both flat and rounded modes.
-#[allow(dead_code)]
+/// Fixed height of the 24 px status strip rendered below the player bar.
+/// Consumed by `widgets::track_info_strip::STRIP_HEIGHT` to keep the strip
+/// widget's height aligned with the theme's source of truth.
 pub(crate) const STATUS_STRIP_HEIGHT: f32 = 24.0;
 
 /// Background color for the 24 px status strip — a touch darker than
 /// `bg0_hard()` for visual separation from the player bar above it.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn status_strip_bg() -> Color {
     darken(bg0_hard(), 0.05)
 }
