@@ -29,7 +29,6 @@ pub(crate) mod side_nav_bar;
 pub(crate) mod sizes;
 pub(crate) mod slot_list;
 pub(crate) mod slot_list_page;
-pub(crate) mod three_d_helpers;
 pub(crate) mod track_info_strip;
 pub(crate) mod visualizer;
 
@@ -74,58 +73,6 @@ pub(crate) fn format_count_with_commas(n: u32) -> String {
         out.push(*b as char);
     }
     out
-}
-
-/// 1px light line for 3D inset effect (top of player bar/sections).
-///
-/// L1 (transport-flat) is removing the 3D bevel chrome; once that lane
-/// lands, this helper has no callers. Marked `dead_code` here so the
-/// nav-chrome lane can land first without breaking the workspace
-/// `-D warnings` gate.
-#[allow(dead_code)]
-pub(crate) fn border_light<'a, M: 'a>() -> iced::Element<'a, M> {
-    use iced::{Length, widget::container};
-
-    use crate::theme;
-
-    container(iced::widget::Space::new())
-        .width(Length::Fill)
-        .height(Length::Fixed(1.0))
-        .style(move |_| container::Style {
-            background: if theme::is_rounded_mode() {
-                Some((theme::bg0_hard()).into())
-            } else {
-                Some((theme::bg2()).into())
-            },
-            ..Default::default()
-        })
-        .into()
-}
-
-/// 1px dark line for 3D inset effect (below light border).
-///
-/// L1 (transport-flat) is removing the 3D bevel chrome; once that lane
-/// lands, this helper has no callers. Marked `dead_code` here so the
-/// nav-chrome lane can land first without breaking the workspace
-/// `-D warnings` gate.
-#[allow(dead_code)]
-pub(crate) fn border_dark<'a, M: 'a>() -> iced::Element<'a, M> {
-    use iced::{Length, widget::container};
-
-    use crate::theme;
-
-    container(iced::widget::Space::new())
-        .width(Length::Fill)
-        .height(Length::Fixed(1.0))
-        .style(move |_| container::Style {
-            background: if theme::is_rounded_mode() {
-                Some((theme::bg0_hard()).into())
-            } else {
-                Some((theme::bg0()).into())
-            },
-            ..Default::default()
-        })
-        .into()
 }
 
 /// Empty state that routes through base_slot_list_layout to preserve widget tree
