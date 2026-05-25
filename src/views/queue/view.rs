@@ -116,23 +116,6 @@ impl QueuePage {
             )
             .into();
 
-        // When the user has enabled the default-playlist chip, render it
-        // alongside the column-visibility dropdown in the trailing slot.
-        // Order: chip first, then column dropdown — chip claims the more
-        // prominent left-of-trailing position.
-        let trailing: Element<'a, QueueMessage> = if data.show_default_playlist_chip {
-            let chip = crate::widgets::default_playlist_chip::default_playlist_chip(
-                data.default_playlist_name,
-                QueueMessage::OpenDefaultPlaylistPicker,
-            );
-            iced::widget::row![chip, column_dropdown]
-                .spacing(8)
-                .align_y(iced::Alignment::Center)
-                .into()
-        } else {
-            column_dropdown
-        };
-
         let header = widgets::view_header::view_header(ViewHeaderConfig {
             current_view: self.queue_sort_mode,
             view_options: QUEUE_VIEW_OPTIONS,
@@ -158,7 +141,16 @@ impl QueuePage {
                         QueueMessage::FocusCurrentPlaying(entry_id, true),
                     ));
                 }
-                btns.push(HeaderButton::Trailing(trailing));
+                // Default-playlist chip is gated by a user setting; when on,
+                // it sits left of the columns dropdown in the trailing region.
+                if data.show_default_playlist_chip {
+                    let chip = crate::widgets::default_playlist_chip::default_playlist_chip(
+                        data.default_playlist_name,
+                        QueueMessage::OpenDefaultPlaylistPicker,
+                    );
+                    btns.push(HeaderButton::Trailing(chip));
+                }
+                btns.push(HeaderButton::Trailing(column_dropdown));
                 btns
             },
             on_roulette: Some(QueueMessage::Roulette),

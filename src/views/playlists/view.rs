@@ -148,14 +148,6 @@ impl PlaylistsPage {
             )
             .into();
 
-        // Header's trailing slot only takes one element — bundle the
-        // existing default-playlist chip with the new columns-cog into a
-        // small Row so both render side-by-side.
-        let trailing: Element<'a, PlaylistsMessage> = iced::widget::row![chip, column_dropdown]
-            .spacing(6)
-            .align_y(Alignment::Center)
-            .into();
-
         let header = widgets::view_header::view_header(ViewHeaderConfig {
             current_view: self.common.current_sort_mode,
             view_options: crate::views::sort_api::sort_modes_for_view(crate::View::Playlists),
@@ -175,7 +167,8 @@ impl PlaylistsPage {
                     crate::widgets::SlotListPageMessage::RefreshViewData,
                 )),
                 HeaderButton::Add("New Playlist", PlaylistsMessage::OpenCreatePlaylistDialog),
-                HeaderButton::Trailing(trailing), // chip + columns-cog dropdown
+                HeaderButton::Trailing(chip),
+                HeaderButton::Trailing(column_dropdown),
             ],
             on_roulette: Some(PlaylistsMessage::Roulette),
         });
