@@ -252,6 +252,11 @@ pub(crate) const SLOT_LIST_SELECT_WIDTH: f32 = 40.0;
 /// slot list available height so slot count math stays correct.
 pub(crate) const SELECT_HEADER_HEIGHT: f32 = 24.0;
 
+/// Side length (px) of the per-row multi-select checkbox visual. Tuned for
+/// the flat redesign — 18 px gives the click target a comfortable 9 px
+/// gutter inside the 40 px column without crowding the row text.
+const CHECKBOX_SIZE: f32 = 18.0;
+
 /// Minimum row height before we try to reduce slot count (pixels)
 const MIN_COMFORTABLE_ROW_HEIGHT: f32 = 55.0;
 
@@ -837,23 +842,31 @@ pub(crate) fn slot_list_select_checkbox<'a, Message: 'a + Clone>(
         widget::{Space, mouse_area, svg},
     };
 
+    // Flat redesign: unchecked sits transparent inside the row with a
+    // hairline `theme::border()` outline; checked fills with
+    // `theme::accent_bright()` and matches the row's selected-state colors.
     let bg_color = if is_checked {
-        theme::accent()
+        theme::accent_bright()
     } else {
-        theme::bg0_soft()
+        iced::Color::TRANSPARENT
     };
     let border_color = if is_checked {
         theme::accent_bright()
     } else {
-        theme::bg3()
+        theme::border()
+    };
+    let glyph_color = if is_checked {
+        theme::bg0_hard()
+    } else {
+        theme::fg0()
     };
 
     let glyph: Element<'a, Message> = if is_checked {
         crate::embedded_svg::svg_widget("assets/icons/check.svg")
-            .width(Length::Fixed(12.0))
-            .height(Length::Fixed(12.0))
-            .style(|_, _| svg::Style {
-                color: Some(theme::fg0()),
+            .width(Length::Fixed(14.0))
+            .height(Length::Fixed(14.0))
+            .style(move |_, _| svg::Style {
+                color: Some(glyph_color),
             })
             .into()
     } else {
@@ -864,8 +877,8 @@ pub(crate) fn slot_list_select_checkbox<'a, Message: 'a + Clone>(
     };
 
     let box_visual = container(glyph)
-        .width(Length::Fixed(16.0))
-        .height(Length::Fixed(16.0))
+        .width(Length::Fixed(CHECKBOX_SIZE))
+        .height(Length::Fixed(CHECKBOX_SIZE))
         .align_x(Alignment::Center)
         .align_y(Alignment::Center)
         .style(move |_| container::Style {
@@ -873,7 +886,7 @@ pub(crate) fn slot_list_select_checkbox<'a, Message: 'a + Clone>(
             border: iced::Border {
                 color: border_color,
                 width: 1.0,
-                radius: theme::ui_border_radius(),
+                radius: theme::ui_radius_xs(),
             },
             ..Default::default()
         });
@@ -937,30 +950,37 @@ pub(crate) fn slot_list_select_header<'a, Message: Clone + 'a>(
     use crate::widgets::slot_list_page::SelectAllState;
 
     let visually_checked = state.is_checked_visual();
+    // Mirrors `slot_list_select_checkbox` flat treatment so the header
+    // checkbox reads as the same family as the per-row boxes.
     let bg_color = if visually_checked {
-        theme::accent()
+        theme::accent_bright()
     } else {
-        theme::bg0_soft()
+        iced::Color::TRANSPARENT
     };
     let border_color = if visually_checked {
         theme::accent_bright()
     } else {
-        theme::bg3()
+        theme::border()
+    };
+    let glyph_color = if visually_checked {
+        theme::bg0_hard()
+    } else {
+        theme::fg0()
     };
 
     let inner: Element<'a, Message> = match state {
         SelectAllState::All => crate::embedded_svg::svg_widget("assets/icons/check.svg")
-            .width(Length::Fixed(12.0))
-            .height(Length::Fixed(12.0))
-            .style(|_, _| svg::Style {
-                color: Some(theme::fg0()),
+            .width(Length::Fixed(14.0))
+            .height(Length::Fixed(14.0))
+            .style(move |_, _| svg::Style {
+                color: Some(glyph_color),
             })
             .into(),
         SelectAllState::Some => container(Space::new())
             .width(Length::Fixed(10.0))
             .height(Length::Fixed(2.0))
-            .style(|_| container::Style {
-                background: Some(theme::fg0().into()),
+            .style(move |_| container::Style {
+                background: Some(glyph_color.into()),
                 ..Default::default()
             })
             .into(),
@@ -971,8 +991,8 @@ pub(crate) fn slot_list_select_header<'a, Message: Clone + 'a>(
     };
 
     let box_visual = container(inner)
-        .width(Length::Fixed(16.0))
-        .height(Length::Fixed(16.0))
+        .width(Length::Fixed(CHECKBOX_SIZE))
+        .height(Length::Fixed(CHECKBOX_SIZE))
         .align_x(Alignment::Center)
         .align_y(Alignment::Center)
         .style(move |_| container::Style {
@@ -980,7 +1000,7 @@ pub(crate) fn slot_list_select_header<'a, Message: Clone + 'a>(
             border: iced::Border {
                 color: border_color,
                 width: 1.0,
-                radius: theme::ui_border_radius(),
+                radius: theme::ui_radius_xs(),
             },
             ..Default::default()
         });
