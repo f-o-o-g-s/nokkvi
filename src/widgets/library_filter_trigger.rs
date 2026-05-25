@@ -68,6 +68,12 @@ const COUNT_TEXT_SIZE: f32 = 10.0;
 /// Internal horizontal padding for the filtered state.
 const FILTERED_HPAD: f32 = 4.0;
 
+/// Chassis width (px) for the filtered render state in the top-nav.
+/// Wider than `neutral_size`'s square pill so the `N/M` count label fits
+/// beside the icon. Side-nav reuses its uniform tab-width chassis for
+/// both modes so callers pass a different value.
+pub(crate) const FILTERED_CHASSIS_WIDTH: f32 = 56.0;
+
 // ============================================================================
 // Public API
 // ============================================================================
@@ -390,12 +396,18 @@ mod tests {
     /// Top-nav chassis sizes used in the production call site. Tests reuse
     /// them so the construction smoke checks exercise the real path.
     fn top_nav_sizes() -> (iced::Size, iced::Size) {
-        (iced::Size::new(32.0, 32.0), iced::Size::new(56.0, 32.0))
+        (
+            iced::Size::new(32.0, 32.0),
+            iced::Size::new(FILTERED_CHASSIS_WIDTH, 32.0),
+        )
     }
 
-    /// Side-nav chassis (uniform width, icon-tab height).
+    /// Side-nav chassis (uniform width, icon-tab height). The side-nav
+    /// keeps both states at one width — its filter trigger reads as a
+    /// peer of the surrounding tab cells, not as a top-nav-style label.
     fn side_nav_sizes() -> (iced::Size, iced::Size) {
-        (iced::Size::new(56.0, 36.0), iced::Size::new(56.0, 36.0))
+        let chassis = iced::Size::new(FILTERED_CHASSIS_WIDTH, 36.0);
+        (chassis, chassis)
     }
 
     #[test]

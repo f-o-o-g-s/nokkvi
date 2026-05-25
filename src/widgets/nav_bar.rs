@@ -573,7 +573,10 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                 active_library_count,
                 library_selector_open,
                 iced::Size::new(NAV_PILL_HEIGHT, cluster_pill_h),
-                iced::Size::new(56.0, cluster_pill_h),
+                iced::Size::new(
+                    super::library_filter_trigger::FILTERED_CHASSIS_WIDTH,
+                    cluster_pill_h,
+                ),
                 |open, trigger_bounds| NavBarMessage::LibraryOpenChange {
                     open,
                     trigger_bounds,
