@@ -233,6 +233,14 @@ impl SlotListSlotStyle {
 pub(crate) const SLOT_LIST_SLOT_PADDING: f32 = 8.0;
 
 /// Border radius for slot list slots — reads the current rounded mode setting.
+///
+/// Per the L3 brief, the slot rows themselves keep using the legacy
+/// alias (so selected / highlighted fills can render with the
+/// `ui_border_radius()` corner shape). The outer rounded-mode list shell
+/// (`slot_list_background_container`) owns the `ui_radius_lg()` corners
+/// and clips the touching row hairlines at its rounded edges via
+/// `clip(true)` — so even though the regular-state per-row corners are
+/// 6 px, the visible perimeter still reads as a sealed list shell.
 pub(crate) fn slot_list_border_radius() -> iced::border::Radius {
     crate::theme::ui_border_radius()
 }
@@ -311,35 +319,42 @@ pub(crate) fn view_header_chrome() -> f32 {
     }
 }
 
-/// Outer vertical margins owed to the rounded-mode list shell — added on
-/// top of `SLOT_LIST_CONTAINER_PADDING` so the slot-count math reserves
-/// the 14 px gap between the shell and the bottom of the window. Always
-/// `0.0` in flat mode (rows reach the bottom edge directly).
-#[inline]
-fn slot_list_shell_extra_chrome() -> f32 {
-    if crate::theme::is_rounded_mode() {
-        14.0
-    } else {
-        0.0
-    }
-}
-
 /// Height of the browsing panel tab bar.
 pub(crate) const TAB_BAR_HEIGHT: f32 = 32.0;
 
-/// Bottom padding for slot_list_background_container — also subtracted in row_height()
-/// to keep slot heights in sync with actual available space. Single source of truth.
-const SLOT_LIST_CONTAINER_PADDING: f32 = 10.0;
+/// Bottom padding for `slot_list_background_container`. Each mode returns
+/// the same pixel count that `slot_list_background_container` applies as
+/// bottom padding (flat: 10 px, rounded: 14 px to match the design's
+/// `.nk-list { margin-bottom: 14px }` rule), so the slot-count math in
+/// `with_dynamic_slots` stays in lockstep with the actual rendered
+/// rect — no empty `bg0_hard` strip at the bottom of the shell.
+#[inline]
+fn slot_list_bottom_pad() -> f32 {
+    if crate::theme::is_rounded_mode() {
+        14.0
+    } else {
+        SLOT_LIST_CONTAINER_PADDING_FLAT
+    }
+}
+
+/// Flat-mode bottom padding for `slot_list_background_container`. Picked
+/// once because the historic `SLOT_LIST_CONTAINER_PADDING = 10.0` const
+/// was the single source of truth for the flat-mode bottom inset.
+const SLOT_LIST_CONTAINER_PADDING_FLAT: f32 = 10.0;
 
 use super::player_bar::player_bar_height;
 
 /// Total height of chrome elements for views with headers.
 ///
-/// In top nav mode: nav_bar(32) + player_bar(56+) + view_header(48).
-/// In side and none nav modes: player_bar(56+) + view_header(48) (no top bar),
-/// plus the TopBar strip (21+1) when TrackInfoDisplay::TopBar is active.
+/// In top nav mode: nav_bar + player_bar + view_header_chrome().
+/// In side and none nav modes: player_bar + view_header_chrome() (no top bar),
+/// plus the TopBar strip when TrackInfoDisplay::TopBar is active.
+///
+/// Does NOT include the slot-list bottom pad — that lives in
+/// `slot_list_bottom_pad()` and is subtracted separately by
+/// `with_dynamic_slots`.
 pub(crate) fn chrome_height_with_header() -> f32 {
-    let base = if crate::theme::is_top_nav() {
+    if crate::theme::is_top_nav() {
         crate::theme::nav_bar_height() + player_bar_height() + view_header_chrome()
     } else {
         // Side or None mode: no top nav bar, but TopBar track info strip may add height
@@ -349,8 +364,7 @@ pub(crate) fn chrome_height_with_header() -> f32 {
             0.0
         };
         player_bar_height() + view_header_chrome() + top_bar_strip
-    };
-    base + slot_list_shell_extra_chrome()
+    }
 }
 
 /// Configuration for slot list rendering
@@ -388,8 +402,7 @@ impl SlotListConfig {
     /// short windows get fewer slots (7, 5, 3, 1) as before.
     /// Slot count is always odd so the center slot works correctly.
     pub(crate) fn with_dynamic_slots(window_height: f32, chrome_height: f32) -> Self {
-        let available_height =
-            (window_height - chrome_height - SLOT_LIST_CONTAINER_PADDING).max(0.0);
+        let available_height = (window_height - chrome_height - slot_list_bottom_pad()).max(0.0);
 
         // Estimate content height with a mid-range spacing guess for initial calc
         let estimated_spacing = 8.0 * SLOT_SPACING; // ~9 slots worth
@@ -449,7 +462,7 @@ impl SlotListConfig {
     /// All slots have uniform height.
     pub(crate) fn row_height(&self) -> f32 {
         let available_height =
-            (self.window_height - self.chrome_height - SLOT_LIST_CONTAINER_PADDING).max(0.0);
+            (self.window_height - self.chrome_height - slot_list_bottom_pad()).max(0.0);
         let spacing_height = (self.slot_count.saturating_sub(1)) as f32 * SLOT_SPACING;
         let content_height = (available_height - spacing_height).max(0.0);
 
@@ -1536,7 +1549,7 @@ pub(crate) fn slot_list_background_container<'a, Message: 'a>(
             .padding(
                 Padding::new(0.0)
                     .right(10.0)
-                    .bottom(SLOT_LIST_CONTAINER_PADDING)
+                    .bottom(SLOT_LIST_CONTAINER_PADDING_FLAT)
                     .left(10.0),
             )
             .style(theme::container_bg0_hard)
@@ -1821,13 +1834,16 @@ mod tests {
     fn slots_never_exceed_available_space() {
         // The core invariant: rendered slots + spacing must fit in the
         // available area. If this fails, the last slot clips.
+        //
+        // Uses `slot_list_bottom_pad()` so the math tracks the active
+        // theme mode (10 px flat, 14 px rounded).
         for height in (300..=2160).step_by(50) {
             for chrome in [100.0, 134.0, 170.0, 200.0] {
                 let config = SlotListConfig::with_dynamic_slots(height as f32, chrome);
                 let row_height = config.row_height();
                 let spacing = config.slot_count.saturating_sub(1) as f32 * SLOT_SPACING;
                 let used = config.slot_count as f32 * row_height + spacing;
-                let available = (height as f32 - chrome - SLOT_LIST_CONTAINER_PADDING).max(0.0);
+                let available = (height as f32 - chrome - slot_list_bottom_pad()).max(0.0);
                 assert!(
                     used <= available + 0.01, // f32 tolerance
                     "clipped at height={height}, chrome={chrome}: used={used:.1} > available={available:.1}"

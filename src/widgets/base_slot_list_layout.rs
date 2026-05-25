@@ -56,11 +56,11 @@ pub(crate) const HORIZONTAL_ARTWORK_STRIPE: f32 = 2.0;
 /// list, so the artwork's edges line up vertically with the slot rows.
 pub(crate) const VERTICAL_ARTWORK_SIDE_PAD: f32 = 10.0;
 
-/// Top inset for the Vertical-orientation artwork — matches
-/// `SLOT_LIST_CONTAINER_PADDING` (10 px) so the gap above the artwork mirrors
-/// the side insets. Bottom inset is 0: the view header that follows has its
-/// own internal padding, so no extra gap is added between the artwork and
-/// the header.
+/// Top inset for the Vertical-orientation artwork — matches the historic
+/// flat-mode `slot_list_background_container` bottom padding (10 px), so the
+/// gap above the artwork mirrors the side insets. Bottom inset is 0: the
+/// view header that follows has its own internal padding, so no extra gap
+/// is added between the artwork and the header.
 pub(crate) const VERTICAL_ARTWORK_TOP_PAD: f32 = 10.0;
 
 /// Configuration for base slot list layout
