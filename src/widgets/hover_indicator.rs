@@ -5,8 +5,12 @@
 //!   - The cursor is within an optionally expanded detection area and
 //!     `hover_indicator_color` is set.
 //!
-//! Used by both the horizontal nav bar (underline indicator) and the
-//! vertical side nav bar (right-edge indicator / rotated label indicator).
+//! The flat redesign moved both the top nav and the side nav to a
+//! full-cell `accent_bright()` fill for the active state, so the
+//! underline / right-edge indicator strips are no longer drawn —
+//! call sites that still wrap a canvas pass `None` for both colors
+//! and the program becomes a no-op. The widget is kept available
+//! for future tabbed surfaces that want a thin indicator bar.
 
 use iced::{Color, Point, Rectangle, widget::canvas};
 
@@ -15,6 +19,13 @@ use iced::{Color, Point, Rectangle, widget::canvas};
 /// Each field expands the cursor detection rectangle *beyond* the canvas bounds
 /// in the corresponding direction, allowing hover effects to trigger even when
 /// the cursor is over adjacent elements (e.g., the button above an underline).
+///
+/// Dormant in the flat redesign — kept as the canonical recipe for
+/// future tabbed surfaces that want a thin indicator strip. The whole
+/// `HoverExpand` / `HoverIndicator` pair gets `allow(dead_code)` so
+/// the workspace `-D warnings` gate stays green; remove the attributes
+/// the moment a caller wires the indicator back in.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct HoverExpand {
     pub up: f32,
@@ -23,6 +34,7 @@ pub(crate) struct HoverExpand {
     pub right: f32,
 }
 
+#[allow(dead_code)]
 impl HoverExpand {
     pub(crate) const fn left(value: f32) -> Self {
         Self {
@@ -48,6 +60,7 @@ impl HoverExpand {
 /// Draws a solid filled rectangle when active or hovered.
 /// The hover detection area can be expanded in any direction to cover
 /// adjacent elements that don't directly contain the indicator.
+#[allow(dead_code)]
 pub(crate) struct HoverIndicator {
     /// Active indicator color (always shown when `Some`)
     pub indicator_color: Option<Color>,

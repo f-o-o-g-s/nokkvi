@@ -685,6 +685,11 @@ where
     T: Copy + 'a,
     Message: 'a,
 {
+    // Menu chrome: `bg1()` fill with a 1 px `theme::border()` outline
+    // and a `ui_radius_md()` corner in rounded mode (flat = 0). The
+    // accent-bright outline of the old design read as "selected"; the
+    // flat redesign reserves accent for active-state surfaces, not
+    // panel borders — matches `hamburger_menu` / `checkbox_dropdown`.
     container(column(
         entries.iter().copied().map(|e| entry_view(e, Length::Fill)),
     ))
@@ -693,8 +698,8 @@ where
         background: Some(theme::bg1().into()),
         border: iced::Border {
             width: 1.0,
-            color: theme::accent_bright(),
-            radius: theme::ui_border_radius(),
+            color: theme::border(),
+            radius: theme::ui_radius_md(),
         },
         shadow: MENU_SHADOW,
         ..Default::default()
@@ -946,6 +951,9 @@ pub(crate) fn menu_button<'a, Message: Clone + 'a>(
     })
     .width(Length::Fixed(MENU_MIN_WIDTH))
     .style(move |_theme, status| {
+        // Hover/press fill = `bg2()` with `ui_radius_xs()` corners so the
+        // highlight nests neatly inside the `ui_radius_md()` panel
+        // outline in rounded mode (4 px vs 12 px concentric).
         let bg = match status {
             button::Status::Hovered | button::Status::Pressed => Some(theme::bg2().into()),
             _ => None,
@@ -954,7 +962,7 @@ pub(crate) fn menu_button<'a, Message: Clone + 'a>(
             background: bg,
             text_color: theme::fg0(),
             border: iced::Border {
-                radius: theme::ui_border_radius(),
+                radius: theme::ui_radius_xs(),
                 ..Default::default()
             },
             ..Default::default()
@@ -964,12 +972,16 @@ pub(crate) fn menu_button<'a, Message: Clone + 'a>(
 }
 
 /// Render a separator line for grouping menu items.
+///
+/// Color matches `theme::border()` (the panel outline) so the
+/// inter-section divider reads as a continuation of the chrome line —
+/// matches the `hamburger_menu` separator vocabulary.
 pub(crate) fn menu_separator<'a, Message: 'a>() -> Element<'a, Message> {
     container(iced::widget::Space::new())
         .width(Length::Fill)
         .height(Length::Fixed(1.0))
         .style(|_theme| container::Style {
-            background: Some(theme::bg3().into()),
+            background: Some(theme::border().into()),
             ..Default::default()
         })
         .padding(iced::Padding {

@@ -279,23 +279,26 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer>
 
         // Background quad — accent-bright when open (matches hamburger
         // "open" affordance), bg0_hard idle. Hover feedback is supplied
-        // by the `HoverOverlay` wrapper at the call site.
+        // by the `HoverOverlay` wrapper at the call site. Pill radius
+        // (`ui_radius_pill()`) in rounded mode mirrors the `.nk-nav-btn`
+        // pill chrome from the design CSS; 0 in flat mode keeps the
+        // trigger flush with the surrounding nav cells.
         let bg_color = if self.is_open {
             theme::accent_bright()
         } else {
             theme::bg0_hard()
         };
         let fg_color = if self.is_open {
-            theme::bg0()
+            theme::bg0_hard()
         } else {
-            theme::fg1()
+            theme::fg0()
         };
 
         renderer.fill_quad(
             renderer::Quad {
                 bounds,
                 border: iced::Border {
-                    radius: theme::ui_border_radius(),
+                    radius: theme::ui_radius_pill(),
                     ..Default::default()
                 },
                 ..Default::default()

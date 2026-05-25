@@ -342,23 +342,30 @@ fn dropdown_item<'a, Message: Clone + 'a>(
     .spacing(8)
     .align_y(iced::Alignment::Center);
 
+    // `HoverOverlay(container)` so the hover tint resolves cleanly
+    // across themes (see `.agent/rules/gotchas.md` "HoverOverlay wraps
+    // containers, not native buttons"). `ui_radius_xs()` matches the
+    // panel's `ui_radius_md()` outline at concentric scale.
     mouse_area(
-        container(row_content)
-            .width(Length::Fill)
-            .padding(iced::Padding {
-                left: 8.0,
-                right: 16.0,
-                top: 4.0,
-                bottom: 4.0,
-            })
-            .style(|_theme| container::Style {
-                background: None,
-                border: iced::Border {
-                    radius: theme::ui_border_radius(),
+        super::hover_overlay::HoverOverlay::new(
+            container(row_content)
+                .width(Length::Fill)
+                .padding(iced::Padding {
+                    left: 8.0,
+                    right: 16.0,
+                    top: 4.0,
+                    bottom: 4.0,
+                })
+                .style(|_theme| container::Style {
+                    background: None,
+                    border: iced::Border {
+                        radius: theme::ui_radius_xs(),
+                        ..Default::default()
+                    },
                     ..Default::default()
-                },
-                ..Default::default()
-            }),
+                }),
+        )
+        .border_radius(theme::ui_radius_xs()),
     )
     .on_press(on_press)
     .interaction(iced::mouse::Interaction::Pointer)
@@ -405,23 +412,29 @@ fn dropdown_item_two_column<'a, Message: Clone + 'a>(
     .spacing(10)
     .align_y(iced::Alignment::Center);
 
+    // Same hover-overlay pattern as `dropdown_item` — see comment there.
+    // Padding is roomier here (12 / 8 vs 8 / 4) because library names
+    // need more breathing space than column-toggle labels.
     mouse_area(
-        container(row_content)
-            .width(Length::Fill)
-            .padding(iced::Padding {
-                left: 12.0,
-                right: 16.0,
-                top: 8.0,
-                bottom: 8.0,
-            })
-            .style(|_theme| container::Style {
-                background: None,
-                border: iced::Border {
-                    radius: theme::ui_border_radius(),
+        super::hover_overlay::HoverOverlay::new(
+            container(row_content)
+                .width(Length::Fill)
+                .padding(iced::Padding {
+                    left: 12.0,
+                    right: 16.0,
+                    top: 8.0,
+                    bottom: 8.0,
+                })
+                .style(|_theme| container::Style {
+                    background: None,
+                    border: iced::Border {
+                        radius: theme::ui_radius_xs(),
+                        ..Default::default()
+                    },
                     ..Default::default()
-                },
-                ..Default::default()
-            }),
+                }),
+        )
+        .border_radius(theme::ui_radius_xs()),
     )
     .on_press(on_press)
     .interaction(iced::mouse::Interaction::Pointer)
@@ -444,13 +457,15 @@ where
     let mut rows: Vec<Element<'a, Message>> = Vec::with_capacity(items.len() + 2);
     if let Some(h) = header {
         rows.push(dropdown_header_row(&h.label, &h.counter));
-        // 1 px separator under the header so the title row reads as its own band.
+        // 1 px separator under the header so the title row reads as
+        // its own band. Color matches `theme::border()` (the panel
+        // outline) for visual coherence with the new chrome.
         rows.push(
             container(iced::widget::Space::new())
                 .width(Length::Fill)
                 .height(Length::Fixed(1.0))
                 .style(|_| container::Style {
-                    background: Some(theme::bg0_hard().into()),
+                    background: Some(theme::border().into()),
                     ..Default::default()
                 })
                 .into(),
@@ -473,6 +488,10 @@ where
         rows.push(row);
     }
 
+    // Menu chrome: `bg1()` fill with a 1 px `theme::border()` outline
+    // and a `ui_radius_md()` corner in rounded mode (flat = 0). Matches
+    // `hamburger_menu` / `context_menu` so every overlay panel reads as
+    // the same flat surface family.
     container(column(rows).spacing(0))
         .width(Length::Fixed(menu_width))
         .padding(4)
@@ -480,8 +499,8 @@ where
             background: Some(theme::bg1().into()),
             border: iced::Border {
                 width: 1.0,
-                color: theme::accent_bright(),
-                radius: theme::ui_border_radius(),
+                color: theme::border(),
+                radius: theme::ui_radius_md(),
             },
             shadow: MENU_SHADOW,
             ..Default::default()

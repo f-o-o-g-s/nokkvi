@@ -76,7 +76,13 @@ pub(crate) fn format_count_with_commas(n: u32) -> String {
     out
 }
 
-/// 1px light line for 3D inset effect (top of player bar/sections)
+/// 1px light line for 3D inset effect (top of player bar/sections).
+///
+/// L1 (transport-flat) is removing the 3D bevel chrome; once that lane
+/// lands, this helper has no callers. Marked `dead_code` here so the
+/// nav-chrome lane can land first without breaking the workspace
+/// `-D warnings` gate.
+#[allow(dead_code)]
 pub(crate) fn border_light<'a, M: 'a>() -> iced::Element<'a, M> {
     use iced::{Length, widget::container};
 
@@ -96,7 +102,13 @@ pub(crate) fn border_light<'a, M: 'a>() -> iced::Element<'a, M> {
         .into()
 }
 
-/// 1px dark line for 3D inset effect (below light border)
+/// 1px dark line for 3D inset effect (below light border).
+///
+/// L1 (transport-flat) is removing the 3D bevel chrome; once that lane
+/// lands, this helper has no callers. Marked `dead_code` here so the
+/// nav-chrome lane can land first without breaking the workspace
+/// `-D warnings` gate.
+#[allow(dead_code)]
 pub(crate) fn border_dark<'a, M: 'a>() -> iced::Element<'a, M> {
     use iced::{Length, widget::container};
 
