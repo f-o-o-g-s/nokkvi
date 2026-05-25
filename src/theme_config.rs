@@ -72,6 +72,12 @@ pub(crate) struct ResolvedTheme {
     #[allow(dead_code)] // Base variant available for future use
     pub star: Color,
     pub star_bright: Color,
+
+    // Chrome separator (1px hairline border between bars, rows, capsules).
+    // Wired up by Wave-1 widget lanes (e.g. nav_bar borders); silenced here
+    // because L0 lands the field/accessor ahead of those consumers.
+    #[allow(dead_code)]
+    pub border: Color,
 }
 
 impl Default for ResolvedTheme {
@@ -146,6 +152,21 @@ impl ResolvedTheme {
                 &palette.star.bright,
                 parse_hex_color("#fabd2f").expect("valid hardcoded hex"),
             ),
+
+            // Chrome border: explicit hex from TOML, or derive by darkening
+            // `background.hard` by 30 % (matches `theme::darken` algorithm,
+            // duplicated here to avoid a circular `theme -> theme_config` use).
+            border: if palette.border.is_empty() {
+                let bg = parse_hex_or_default(&palette.background.hard, fallback_bg);
+                Color {
+                    r: bg.r * 0.70,
+                    g: bg.g * 0.70,
+                    b: bg.b * 0.70,
+                    a: bg.a,
+                }
+            } else {
+                parse_hex_or_default(&palette.border, fallback_bg)
+            },
         }
     }
 }

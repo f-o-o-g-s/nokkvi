@@ -1,5 +1,8 @@
 name = "Ferra"
 
+[dark]
+border = "#161517"
+
 [dark.background]
 default = "#2b292d"
 hard = "#201f22"
@@ -46,6 +49,9 @@ border_color = "#201f22"
 border_opacity = 1.0
 led_border_opacity = 1.0
 peak_gradient_colors = ["#f5d76e", "#f5d76e", "#c5ad5b", "#c5ad5b", "#d4b74c", "#d4b74c"]
+
+[light]
+border = "#1b1a1c"
 
 [light.background]
 default = "#2b292d"

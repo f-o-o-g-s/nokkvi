@@ -1,5 +1,8 @@
 name = "Moonfly"
 
+[dark]
+border = "#040404"
+
 [dark.background]
 default = "#080808"
 hard = "#060606"
@@ -46,6 +49,9 @@ border_color = "#060606"
 border_opacity = 1.0
 led_border_opacity = 1.0
 peak_gradient_colors = ["#e3c78a", "#e3c78a", "#b59e6d", "#b59e6d", "#c2a76b", "#c2a76b"]
+
+[light]
+border = "#050505"
 
 [light.background]
 default = "#080808"

@@ -1,5 +1,8 @@
 name = "Gruvbox"
 
+[dark]
+border = "#151515"
+
 [dark.background]
 default = "#282828"
 hard = "#1e1e1e"
@@ -46,6 +49,9 @@ border_color = "#1e1e1e"
 border_opacity = 1.0
 led_border_opacity = 1.0
 peak_gradient_colors = ["#83a598", "#83a598", "#b8bb26", "#b8bb26", "#fb4934", "#fb4934"]
+
+[light]
+border = "#c4bc9b"
 
 [light.background]
 default = "#fbf1c7"

@@ -1,5 +1,8 @@
 name = "Cryo"
 
+[dark]
+border = "#070a0e"
+
 [dark.background]
 default = "#0e141b"
 hard = "#0a0f14"
@@ -45,6 +48,9 @@ border_color = "#0a0f14"
 border_opacity = 1.0
 led_border_opacity = 1
 peak_gradient_colors = ["#ff6b81", "#bfa6ff", "#ffd866", "#ff9f6e"]
+
+[light]
+border = "#c6ccd5"
 
 [light.background]
 default = "#f4f9ff"

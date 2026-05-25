@@ -1,5 +1,8 @@
 name = "Tokyo Night"
 
+[dark]
+border = "#0e0e14"
+
 [dark.background]
 default = "#1a1b26"
 hard = "#14141d"
@@ -46,6 +49,9 @@ border_color = "#14141d"
 border_opacity = 1.0
 led_border_opacity = 1.0
 peak_gradient_colors = ["#e0af68", "#e0af68", "#b38c55", "#b38c55", "#c68d30", "#c68d30"]
+
+[light]
+border = "#a6a7aa"
 
 [light.background]
 default = "#d5d6db"

@@ -1,5 +1,8 @@
 name = "Bio-Luminal Swamplab"
 
+[dark]
+border = "#020504"
+
 [dark.background]
 default = "#070d0b"
 hard = "#040807"
@@ -45,6 +48,9 @@ border_color = "#040807"
 border_opacity = 1.0
 led_border_opacity = 0.6
 peak_gradient_colors = ["#f6ff4d", "#ffb347", "#ff6f61"]
+
+[light]
+border = "#c3d8cf"
 
 [light.background]
 default = "#f2fff9"

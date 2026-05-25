@@ -87,6 +87,11 @@ pub struct ThemePalette {
     pub star: SemanticColorConfig,
     /// Visualizer bar/peak/border colors
     pub visualizer: VisualizerColors,
+    /// Hairline border color for chrome separators (1px lines between nav
+    /// bars, list rows, capsules). When empty, the runtime derives a value
+    /// by darkening `background.hard` by 30 %.
+    #[serde(default)]
+    pub border: String,
 }
 
 impl Default for ThemePalette {
@@ -109,6 +114,7 @@ impl Default for ThemePalette {
                 bright: "#f9f06b".to_string(),
             },
             visualizer: VisualizerColors::default(),
+            border: String::new(),
         }
     }
 }
@@ -159,6 +165,7 @@ impl ThemePalette {
                 bright: "#f6d32d".to_string(),
             },
             visualizer: VisualizerColors::light_default(),
+            border: String::new(),
         }
     }
 }
