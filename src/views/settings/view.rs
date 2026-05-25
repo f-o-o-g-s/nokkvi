@@ -275,7 +275,7 @@ impl SettingsPage {
                         .size(label_size)
                         .font(Font {
                             weight: Weight::Bold,
-                            ..theme::title_font()
+                            ..theme::ui_font()
                         })
                         .color(active_color),
                 );

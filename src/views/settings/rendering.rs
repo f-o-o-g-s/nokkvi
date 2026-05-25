@@ -173,7 +173,7 @@ pub(crate) fn render_settings_slot<'a>(
 /// Render a section header slot.
 ///
 /// - **Level 1** (category picker): hero row — title rendered with
-///   [`theme::title_font()`] italic at 24 px equivalent + small-caps mono
+///   [`theme::ui_font()`] italic at 24 px equivalent + small-caps mono
 ///   description below + 56×56 icon chip on the left. Clickable. The cursor
 ///   gets a 3 px [`theme::accent_bright()`] left stripe + [`theme::bg1()`] fill.
 /// - **Level 2** (section separator within a category): small-caps mono label,
@@ -260,7 +260,7 @@ fn render_l2_section_header<'a>(
 }
 
 /// L1 category landing row — hero treatment matching `.nk-cat-row` in the
-/// flat CSS. 56×56 icon chip on the left, title in [`theme::title_font()`]
+/// flat CSS. 56×56 icon chip on the left, title in [`theme::ui_font()`]
 /// italic at scaled 24 px equivalent, small-caps mono description below.
 /// Cursor row gets the [`theme::bg1()`] fill + 3 px accent left stripe.
 fn render_l1_category_row<'a>(
@@ -317,7 +317,7 @@ fn render_l1_category_row<'a>(
         .size(title_size)
         .font(Font {
             weight: Weight::Bold,
-            ..theme::title_font()
+            ..theme::ui_font()
         })
         .color(title_color)
         .wrapping(Wrapping::None);

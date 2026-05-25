@@ -265,53 +265,16 @@ pub(crate) fn font_family() -> String {
 // typefaces like IBM Plex Sans without affecting JetBrains-Mono-style body text)
 // ----------------------------------------------------------------------------
 
-/// Title-font family. When empty, `title_font()` falls back to `ui_font()`
-/// so unconfigured themes behave like the body font.
-static TITLE_FONT_FAMILY: LazyLock<RwLock<String>> = LazyLock::new(|| RwLock::new(String::new()));
-
-/// Cached title-font storage to avoid leaking memory on every reload.
-static TITLE_FONT_CACHE: LazyLock<RwLock<(String, Font)>> =
-    LazyLock::new(|| RwLock::new((String::new(), Font::DEFAULT)));
-
-/// Get the title font — used for hero titles, view headers, modal headings.
-/// Falls back to `ui_font()` when no title font is configured (default).
-#[inline]
-pub(crate) fn title_font() -> Font {
-    let current_family = { TITLE_FONT_FAMILY.read().clone() };
-
-    if current_family.is_empty() {
-        // No title font configured — delegate to body font (which has its own cache).
-        return ui_font();
-    }
-
-    {
-        let cache = TITLE_FONT_CACHE.read();
-        if cache.0 == current_family {
-            return cache.1;
-        }
-    }
-
-    // Slow path: title font changed, update cache.
-    let new_font = Font::with_family(iced::font::Family::name(&current_family));
-    let mut cache = TITLE_FONT_CACHE.write();
-    *cache = (current_family, new_font);
-
-    new_font
-}
-
-/// Set the title-font family (called from settings / config loading once
-/// the title-font setting is wired up).
-#[allow(dead_code)] // Wired up by L5 settings lane.
-pub(crate) fn set_title_font_family(family: String) {
-    let mut guard = TITLE_FONT_FAMILY.write();
-    *guard = family;
-}
-
-/// Get the current title-font family name (for settings UI display).
-#[allow(dead_code)] // Wired up by L5 settings lane.
-pub(crate) fn title_font_family() -> String {
-    TITLE_FONT_FAMILY.read().clone()
-}
+// Title-font family was intended to give L1 hero titles + active-breadcrumb
+// segments a typographic distinction from the body font, but the
+// `set_title_font_family` setter never landed (the L5 settings lane it was
+// dead-coded for was descoped). Every `theme::title_font()` call therefore
+// returned the body font, shipping the design's distinction disabled. The
+// machinery (`TITLE_FONT_FAMILY` static + `TITLE_FONT_CACHE` + the public
+// readers) was removed — callers now use `ui_font()` directly. If a future
+// design re-introduces the distinction, the simpler shape is a config-side
+// `theme.title_font_family` field threaded through `ResolvedTheme` rather
+// than a global mutable static.
 
 // ============================================================================
 // Light Mode Control
