@@ -75,10 +75,9 @@ pub(crate) struct ResolvedTheme {
     // cleanly; it's just not pulled into `ResolvedTheme` anymore.
     pub star_bright: Color,
 
-    // Chrome separator (1px hairline border between bars, rows, capsules).
-    // Wired up by Wave-1 widget lanes (e.g. nav_bar borders); silenced here
-    // because L0 lands the field/accessor ahead of those consumers.
-    #[allow(dead_code)]
+    /// Chrome separator (1 px hairline border between bars, rows, capsules).
+    /// Read via `theme::border()`; per-theme TOML value or auto-derived
+    /// `darken(bg.hard, 30%)` when empty.
     pub border: Color,
 }
 

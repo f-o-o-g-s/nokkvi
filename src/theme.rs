@@ -308,15 +308,13 @@ const ROUNDED_RADIUS: f32 = 6.0;
 // Each helper returns the corresponding radius in rounded mode, `0.0` in flat
 // mode, so call sites stay mode-agnostic.
 
-// Scale constants are wired up by the Wave-1 widget lanes — silence the
-// dead-code warnings until those callers land on `redesign`.
+// Scale constants — every helper below consumes one, so they're all live.
 
 /// xs (4 px) — checkboxes, hex swatches, small pips.
 const R_XS: f32 = 4.0;
 /// sm (8 px) — mode buttons, badges, hover pills.
 const R_SM: f32 = 8.0;
 /// md (12 px) — cards, popovers, album art, category tiles.
-#[allow(dead_code)]
 const R_MD: f32 = 12.0;
 /// lg (18 px) — list shells, modal frames, hero panels.
 const R_LG: f32 = 18.0;
