@@ -427,7 +427,6 @@ pub(crate) fn side_nav_bar(data: SideNavBarData) -> Element<'static, NavBarMessa
             library_selector_open,
             library_chassis,
             library_chassis,
-            library_selector_bounds,
             |open, trigger_bounds| NavBarMessage::LibraryOpenChange {
                 open,
                 trigger_bounds,

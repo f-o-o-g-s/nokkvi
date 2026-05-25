@@ -392,14 +392,17 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // Whenever the metadata strip lives elsewhere (Off / Player Bar / Mini
     // Player), the tabs grow to consume the otherwise-empty center lane
     // instead of huddling at the left edge — irrespective of display mode.
-    // Side-nav handles its own column-fill in `side_nav_bar`; here we just
-    // gate on "is this nav bar even rendering its own tab strip".
-    let is_side_nav = theme::is_side_nav();
+    // `nav_bar` is only called from the top-nav layout (`app_view.rs`
+    // dispatches to `widgets::side_nav_bar` for side mode and emits no
+    // nav widget at all in none mode), so historical `is_side_nav`
+    // branches in here were dead. The merged-mode marquee gate stays:
+    // when `TrackInfoDisplay::TopBar` is active the tabs surrender lane
+    // width so the metadata strip can take it.
     let show_nav_metadata = {
         use nokkvi_data::types::player_settings::TrackInfoDisplay;
         theme::track_info_display() == TrackInfoDisplay::TopBar
     };
-    let tabs_expand = !is_side_nav && !show_nav_metadata;
+    let tabs_expand = !show_nav_metadata;
     // Resolved once per render and forwarded into every tab; pinning a
     // single size per pass keeps every cell's label in lockstep so they
     // shrink together (no jagged staircase across the strip).
@@ -555,9 +558,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // widget-tree shape never churns across renders (the iced re-render
     // trap that destroys `text_input` focus — see
     // `.agent/rules/gotchas.md` "Widget Tree & Focus").
-    let library_trigger_slot: Element<'static, NavBarMessage> = if is_side_nav {
-        Space::new().into()
-    } else {
+    let library_trigger_slot: Element<'static, NavBarMessage> = {
         let library_count = data.library_count;
         let active_library_count = data.active_library_count;
         let library_selector_open = data.library_selector_open;
@@ -573,7 +574,6 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                 library_selector_open,
                 iced::Size::new(NAV_PILL_HEIGHT, cluster_pill_h),
                 iced::Size::new(56.0, cluster_pill_h),
-                library_selector_bounds,
                 |open, trigger_bounds| NavBarMessage::LibraryOpenChange {
                     open,
                     trigger_bounds,
@@ -617,8 +617,6 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             .into()
     };
 
-    // In Side mode, nav tabs move to the vertical sidebar — hide them here.
-    //
     // Layout: `[hamburger] [library] [divider] [tab] [tab] ... [tab]`.
     // Flat mode → separators are 1 px `border()` rules at every joint
     //   (matches the design's `border-right` on each cell).
@@ -636,12 +634,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     } else {
         Length::Shrink
     };
-    let mut left_section: iced::widget::Row<'static, NavBarMessage> = if is_side_nav {
-        row![]
-            .spacing(0)
-            .height(Length::Fill)
-            .align_y(Alignment::Center)
-    } else {
+    let mut left_section: iced::widget::Row<'static, NavBarMessage> = {
         let mut tabs = row![hamburger, library_trigger_slot, tab_separator(true)]
             .spacing(tab_spacing)
             .height(Length::Fill)
@@ -665,7 +658,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     };
 
     // Settings indicator: reuses the same nav_tab builder with force_active=true
-    if settings_open && !is_side_nav {
+    if settings_open {
         // Use Queue as a dummy NavView — the on_press emits CloseSettings
         // which restores the pre-settings view instead of navigating to Queue.
         left_section = left_section.push(nav_tab(

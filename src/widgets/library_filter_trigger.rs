@@ -93,7 +93,6 @@ pub(crate) fn library_filter_trigger<'a, Message>(
     is_open: bool,
     neutral_size: iced::Size,
     filtered_size: iced::Size,
-    trigger_bounds: Option<iced::Rectangle>,
     on_open_change: impl Fn(bool, Option<iced::Rectangle>) -> Message + 'a,
 ) -> iced::Element<'a, Message>
 where
@@ -126,7 +125,6 @@ where
         is_open,
         neutral_size,
         filtered_size,
-        _trigger_bounds: trigger_bounds,
         icon_handle: Handle::from_memory(
             crate::embedded_svg::get_svg("assets/icons/library.svg").as_bytes(),
         ),
@@ -159,13 +157,6 @@ struct LibraryFilterTrigger<'a, Message> {
     /// than `neutral_size` to leave room for the `N/M` count label
     /// (top-nav case); side-nav reuses tab-width in both states.
     filtered_size: iced::Size,
-    /// Plumbed in for completeness with the controlled-component
-    /// contract; the trigger itself doesn't need to read it (the parent
-    /// derives open-state from `OpenMenu::LibrarySelector` and passes
-    /// `is_open`). Held with a leading underscore — the bounds are
-    /// consumed by the popover overlay sibling in the nav-bar row layout
-    /// rather than by this widget.
-    _trigger_bounds: Option<Rectangle>,
     icon_handle: Handle,
     on_open_change: Box<dyn Fn(bool, Option<Rectangle>) -> Message + 'a>,
 }
@@ -414,7 +405,7 @@ mod tests {
         // before the count is known.
         let (n, f) = top_nav_sizes();
         let _el: Element<'_, TestMessage> =
-            library_filter_trigger(0, 0, false, n, f, None, dummy_callback());
+            library_filter_trigger(0, 0, false, n, f, dummy_callback());
     }
 
     #[test]
@@ -423,7 +414,7 @@ mod tests {
         // nothing to toggle.
         let (n, f) = top_nav_sizes();
         let _el: Element<'_, TestMessage> =
-            library_filter_trigger(1, 1, false, n, f, None, dummy_callback());
+            library_filter_trigger(1, 1, false, n, f, dummy_callback());
     }
 
     #[test]
@@ -432,7 +423,7 @@ mod tests {
         // panic.
         let (n, f) = top_nav_sizes();
         let _el: Element<'_, TestMessage> =
-            library_filter_trigger(5, 5, false, n, f, None, dummy_callback());
+            library_filter_trigger(5, 5, false, n, f, dummy_callback());
     }
 
     #[test]
@@ -441,7 +432,7 @@ mod tests {
         // rule). Render the neutral chassis, not a "filtered" badge.
         let (n, f) = top_nav_sizes();
         let _el: Element<'_, TestMessage> =
-            library_filter_trigger(5, 0, false, n, f, None, dummy_callback());
+            library_filter_trigger(5, 0, false, n, f, dummy_callback());
     }
 
     #[test]
@@ -449,7 +440,7 @@ mod tests {
         // Strict subset → filtered render: icon + "2/5" label + pip.
         let (n, f) = top_nav_sizes();
         let _el: Element<'_, TestMessage> =
-            library_filter_trigger(5, 2, false, n, f, None, dummy_callback());
+            library_filter_trigger(5, 2, false, n, f, dummy_callback());
     }
 
     #[test]
@@ -458,25 +449,18 @@ mod tests {
         // active == 0.
         let (n, f) = top_nav_sizes();
         let _el: Element<'_, TestMessage> =
-            library_filter_trigger(5, 5, false, n, f, None, dummy_callback());
+            library_filter_trigger(5, 5, false, n, f, dummy_callback());
     }
 
     #[test]
     fn open_state_constructs() {
-        // When the popover is open, the parent passes `is_open=true`
-        // plus the bounds it stashed on first click. Both render paths
-        // must accept that state without panic.
-        let bounds = iced::Rectangle {
-            x: 10.0,
-            y: 20.0,
-            width: 32.0,
-            height: 32.0,
-        };
+        // When the popover is open, the parent passes `is_open=true`.
+        // Both render paths must accept that state without panic.
         let (n, f) = top_nav_sizes();
         let _neutral: Element<'_, TestMessage> =
-            library_filter_trigger(5, 5, true, n, f, Some(bounds), dummy_callback());
+            library_filter_trigger(5, 5, true, n, f, dummy_callback());
         let _filtered: Element<'_, TestMessage> =
-            library_filter_trigger(5, 3, true, n, f, Some(bounds), dummy_callback());
+            library_filter_trigger(5, 3, true, n, f, dummy_callback());
     }
 
     #[test]
@@ -487,7 +471,7 @@ mod tests {
         // producing nonsensical "7/5" output.
         let (n, f) = top_nav_sizes();
         let _el: Element<'_, TestMessage> =
-            library_filter_trigger(5, 7, false, n, f, None, dummy_callback());
+            library_filter_trigger(5, 7, false, n, f, dummy_callback());
     }
 
     #[test]
@@ -497,8 +481,8 @@ mod tests {
         // adjacent nav tab cells.
         let (n, f) = side_nav_sizes();
         let _neutral: Element<'_, TestMessage> =
-            library_filter_trigger(5, 5, false, n, f, None, dummy_callback());
+            library_filter_trigger(5, 5, false, n, f, dummy_callback());
         let _filtered: Element<'_, TestMessage> =
-            library_filter_trigger(5, 2, false, n, f, None, dummy_callback());
+            library_filter_trigger(5, 2, false, n, f, dummy_callback());
     }
 }
