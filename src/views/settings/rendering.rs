@@ -14,7 +14,15 @@ use super::{
     SettingsMessage,
     items::{SettingItem, SettingValue, SettingsEntry},
 };
-use crate::{embedded_svg, theme, widgets::slot_list};
+use crate::{
+    embedded_svg, theme,
+    widgets::{
+        pill_segmented_button::{
+            PillOption, PillRowParams, PillVariant, pill_segmented_button,
+        },
+        slot_list,
+    },
+};
 
 // ============================================================================
 // Shared Helpers
@@ -579,16 +587,7 @@ fn render_value_display<'a>(
     let opacity = ctx.opacity;
 
     let value_widget: Element<'a, SettingsMessage> = match value {
-        SettingValue::Bool(v) => {
-            // SM-style: show all options as plain text, selected gets underline
-            render_sm_options(
-                &["On", "Off"],
-                if *v { "On" } else { "Off" },
-                font_size,
-                is_center,
-                opacity,
-            )
-        }
+        SettingValue::Bool(v) => render_bool_pills(*v, font_size, is_center, opacity),
 
         SettingValue::HexColor(hex) => {
             let parsed_color = crate::theme_config::parse_hex_color(hex).unwrap_or_else(theme::fg4);
@@ -674,20 +673,16 @@ fn render_value_display<'a>(
         }
 
         SettingValue::Enum { val, options } => {
-            // SM-style: show all options as plain text, selected gets underline
-            render_sm_options(options, val, font_size, is_center, opacity)
+            render_enum_pills(options, val, font_size, is_center, opacity)
         }
 
-        SettingValue::ToggleSet(items) => {
-            // Multi-select: each badge independently toggleable
-            render_toggle_set(
-                items,
-                font_size,
-                is_center,
-                opacity,
-                if is_center { ctx.toggle_cursor } else { None },
-            )
-        }
+        SettingValue::ToggleSet(items) => render_toggle_set_pills(
+            items,
+            font_size,
+            is_center,
+            opacity,
+            if is_center { ctx.toggle_cursor } else { None },
+        ),
 
         SettingValue::Hotkey(combo) => {
             // Capture mode: show "Press a key..." or conflict warning
@@ -835,190 +830,112 @@ fn render_value_display<'a>(
 // StepMania-Style Value Display
 // ============================================================================
 
-/// Render all possible values as plain text with underline cursor on the selected value.
-///
-/// Three visual states:
-/// - **Not selected, any row**: dimmed text, no underline
-/// - **Selected, non-center row**: medium text + subtle underline bar
-/// - **Selected, center row**: bright accent text + accent underline bar
-///
-/// Each option is a clickable button sending `EditSetValue`.
-fn render_sm_options<'a>(
+// ============================================================================
+// Pill-Segmented Widget Adapters (Bool / Enum / ToggleSet)
+// ============================================================================
+//
+// These thin wrappers translate the legacy `SettingValue` shape into the
+// shared `pill_segmented_button` widget. They produce 1px-bordered chips in
+// flat mode and pill-rounded chips in rounded mode, with selected chips
+// filling in `theme::accent_bright()`. Non-center rows render the chips
+// non-interactively (the parent slot list row handles up/down/click
+// navigation).
+
+/// Render a Bool setting as a two-chip On/Off group.
+fn render_bool_pills<'a>(
+    val: bool,
+    font_size: f32,
+    is_center: bool,
+    opacity: f32,
+) -> Element<'a, SettingsMessage> {
+    let options = [
+        PillOption {
+            display: "On".to_string(),
+            key: "On".to_string(),
+            on: val,
+        },
+        PillOption {
+            display: "Off".to_string(),
+            key: "Off".to_string(),
+            on: !val,
+        },
+    ];
+    pill_segmented_button(
+        &options,
+        PillVariant::Single,
+        PillRowParams {
+            font_size: chip_label_size(font_size),
+            is_center,
+            opacity,
+        },
+        SettingsMessage::EditSetValue,
+    )
+}
+
+/// Render an Enum setting as a single-select chip group, one chip per option.
+fn render_enum_pills<'a>(
     options: &[&'a str],
     selected: &str,
     font_size: f32,
     is_center: bool,
     opacity: f32,
 ) -> Element<'a, SettingsMessage> {
-    let opt_size = font_size * 0.75;
-    let underline_height = 2.0;
-
-    let mut r = row![].spacing(22).align_y(Alignment::Center);
-
-    for &option in options {
-        let is_selected = option == selected;
-
-        // Mockup style: ALL option text same color, only underlines get accent
-        let text_color = if is_center {
-            Color {
-                a: if is_selected { 1.0 } else { 0.5 },
-                ..theme::fg0()
-            }
-        } else {
-            Color {
-                a: opacity * if is_selected { 0.8 } else { 0.35 },
-                ..theme::fg0()
-            }
-        };
-
-        // Underline color (only for selected)
-        let underline_color = if is_selected {
-            if is_center {
-                theme::accent_bright()
-            } else {
-                Color {
-                    a: opacity * 0.6,
-                    ..theme::accent_bright()
-                }
-            }
-        } else {
-            Color::TRANSPARENT
-        };
-
-        let font_weight = if is_selected {
-            Weight::Bold
-        } else {
-            Weight::Normal
-        };
-
-        let label = text(option)
-            .size(opt_size)
-            .font(Font {
-                weight: font_weight,
-                ..theme::ui_font()
-            })
-            .color(text_color)
-            .wrapping(Wrapping::None);
-
-        // Underline hugs the text width: Shrink-width column makes Fill
-        // expand only to the text's natural width, not the full container.
-        let underline = container(Space::new())
-            .width(Length::Fill)
-            .height(Length::Fixed(underline_height))
-            .style(move |_: &iced::Theme| container::Style {
-                background: Some(underline_color.into()),
-                ..Default::default()
-            });
-
-        let option_col = column![label, underline]
-            .spacing(1)
-            .width(Length::Shrink)
-            .align_x(Alignment::Center);
-
-        let option_str = option.to_string();
-        let mut option_btn = button(option_col)
-            .style(transparent_button_style)
-            .padding(Padding::new(2.0).left(4.0).right(4.0));
-
-        // Only make option buttons interactive on the center (selected) row.
-        // EditSetValue always acts on the center item, so firing it from a
-        // non-center row would modify the wrong setting.
-        if is_center {
-            option_btn = option_btn.on_press(SettingsMessage::EditSetValue(option_str));
-        }
-
-        r = r.push(option_btn);
-    }
-
-    container(r).width(Length::Fill).clip(true).into()
+    let chip_options: Vec<PillOption> = options
+        .iter()
+        .map(|&option| PillOption {
+            display: option.to_string(),
+            key: option.to_string(),
+            on: option == selected,
+        })
+        .collect();
+    pill_segmented_button(
+        &chip_options,
+        PillVariant::Single,
+        PillRowParams {
+            font_size: chip_label_size(font_size),
+            is_center,
+            opacity,
+        },
+        SettingsMessage::EditSetValue,
+    )
 }
 
-/// Render a multi-select toggle set as independently clickable badges.
-///
-/// Mirrors `render_sm_options` visually but each badge toggles independently.
-/// - **Enabled**: bold text + accent underline
-/// - **Disabled**: dimmed text, no underline
-fn render_toggle_set<'a>(
+/// Render a ToggleSet as a multi-select chip group. The cursored chip (set by
+/// keyboard arrow navigation within the toggle set) gets the accent outline
+/// even when it isn't on, signaling which chip Enter will toggle.
+fn render_toggle_set_pills<'a>(
     items: &[(String, String, bool)],
     font_size: f32,
     is_center: bool,
     opacity: f32,
     cursor_index: Option<usize>,
 ) -> Element<'a, SettingsMessage> {
-    let opt_size = font_size * 0.75;
-    let underline_height = 2.0;
+    let chip_options: Vec<PillOption> = items
+        .iter()
+        .map(|(label, key, enabled)| PillOption {
+            display: label.clone(),
+            key: key.clone(),
+            on: *enabled,
+        })
+        .collect();
+    pill_segmented_button(
+        &chip_options,
+        PillVariant::Multi { cursor_index },
+        PillRowParams {
+            font_size: chip_label_size(font_size),
+            is_center,
+            opacity,
+        },
+        SettingsMessage::ToggleSetToggle,
+    )
+}
 
-    let mut r = row![].spacing(22).align_y(Alignment::Center);
-
-    for (i, (label, key, enabled)) in items.iter().enumerate() {
-        let is_on = *enabled;
-        let is_cursored = cursor_index == Some(i);
-
-        let text_color = if is_cursored {
-            // Cursored badge: accent color regardless of on/off
-            theme::accent_bright()
-        } else if is_center {
-            Color {
-                a: if is_on { 1.0 } else { 0.5 },
-                ..theme::fg0()
-            }
-        } else {
-            Color {
-                a: opacity * if is_on { 0.8 } else { 0.35 },
-                ..theme::fg0()
-            }
-        };
-
-        let underline_color = if is_on {
-            if is_center {
-                theme::accent_bright()
-            } else {
-                Color {
-                    a: opacity * 0.6,
-                    ..theme::accent_bright()
-                }
-            }
-        } else {
-            Color::TRANSPARENT
-        };
-
-        let font_weight = if is_on { Weight::Bold } else { Weight::Normal };
-
-        let label_widget = text(label.clone())
-            .size(opt_size)
-            .font(Font {
-                weight: font_weight,
-                ..theme::ui_font()
-            })
-            .color(text_color)
-            .wrapping(Wrapping::None);
-
-        let underline = container(Space::new())
-            .width(Length::Fill)
-            .height(Length::Fixed(underline_height))
-            .style(move |_: &iced::Theme| container::Style {
-                background: Some(underline_color.into()),
-                ..Default::default()
-            });
-
-        let option_col = column![label_widget, underline]
-            .spacing(1)
-            .width(Length::Shrink)
-            .align_x(Alignment::Center);
-
-        let key_owned = key.clone();
-        let mut option_btn = button(option_col)
-            .style(transparent_button_style)
-            .padding(Padding::new(2.0).left(4.0).right(4.0));
-
-        if is_center {
-            option_btn = option_btn.on_press(SettingsMessage::ToggleSetToggle(key_owned));
-        }
-
-        r = r.push(option_btn);
-    }
-
-    container(r).width(Length::Fill).clip(true).into()
+/// Chip label is rendered at ~80 % of the row's value font size so chips don't
+/// dominate the row visually. Mirrors the CSS designs' `11 px` chip label vs
+/// `13 px` row label ratio.
+#[inline]
+fn chip_label_size(font_size: f32) -> f32 {
+    font_size * 0.80
 }
 
 // ============================================================================
