@@ -232,14 +232,9 @@ pub(crate) fn default_playlist_picker_overlay<'a>(
         )
     };
 
-    // ── Modal panel ──
-    // Flat redesign: bg0_hard() (design's --bg-dim), 1 px accent_bright
-    // outline, `lg` corner so the picker reads at the same scale as
-    // about/info/eq/text-input modals.
-    let modal_bg = theme::bg0_hard();
-    let modal_border = theme::accent_bright();
-    let modal_radius = theme::ui_radius_lg();
-
+    // Shared modal frame: bg0_hard fill + 1 px accent_bright outline +
+    // ui_radius_lg corners. Five overlay modals route through this helper
+    // so a future per-theme tweak to the modal vocabulary lands at one site.
     let modal_panel = container(
         column![title_bar, search_bar, main_area]
             .width(Length::Fill)
@@ -249,15 +244,7 @@ pub(crate) fn default_playlist_picker_overlay<'a>(
     .height(Length::Fixed(modal_height))
     .clip(true)
     .padding(Padding::new(4.0))
-    .style(move |_: &iced::Theme| container::Style {
-        background: Some(modal_bg.into()),
-        border: Border {
-            color: modal_border,
-            width: 1.0,
-            radius: modal_radius,
-        },
-        ..Default::default()
-    });
+    .style(theme::modal_frame_style);
 
     // Wrap the panel in a FillPortion row so it occupies the middle 5/7
     // of the backdrop's width. Reads as the dialog content for

@@ -1368,6 +1368,27 @@ pub(crate) fn modal_scaffold<'a, M: Clone + 'a>(
 /// Conventional backdrop alpha used by every overlay modal.
 pub(crate) const MODAL_BACKDROP_ALPHA: f32 = 0.6;
 
+/// Shared `container::Style` for overlay modal panels — flat `bg0_hard()`
+/// fill, 1 px `accent_bright()` outline, `ui_radius_lg()` corners.
+///
+/// Five overlay modals (`about`, `info`, `eq`, `text_input_dialog`,
+/// `default_playlist_picker`) open-coded this exact block. Routing them
+/// through one function means a future per-theme tweak to the modal frame
+/// (e.g. swapping the outline onto `border()` for the chrome-quiet variant)
+/// only touches this body — and the radius / fill / border are all
+/// guaranteed to stay in lockstep across the modal family.
+pub(crate) fn modal_frame_style(_theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(bg0_hard().into()),
+        border: iced::Border {
+            color: accent_bright(),
+            width: 1.0,
+            radius: ui_radius_lg(),
+        },
+        ..Default::default()
+    }
+}
+
 // ----------------------------------------------------------------------------
 // Transparent button style
 // ----------------------------------------------------------------------------
