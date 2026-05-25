@@ -422,25 +422,31 @@ pub(crate) fn view_header<
             })
             .into()
     } else {
-        // Flat mode: 50 px tall bg0_hard() strip with a bottom 1 px
-        // theme::border() separator. The separator is drawn by using
-        // the container's border-bottom via uniform Border + matching bg.
-        container(
-            header_row
+        // Flat mode: a bg0_hard() strip plus a 1 px theme::border()
+        // sibling separator below it. Using a sibling line instead of the
+        // container's `border` field avoids ringing the header with a
+        // 4-sided dark frame (Iced's `Border` width applies uniformly to
+        // all sides).
+        iced::widget::column![
+            container(
+                header_row
+                    .width(Length::Fill)
+                    .height(Length::Fixed(cell_height)),
+            )
+            .width(Length::Fill)
+            .height(Length::Fixed(FLAT_HEADER_HEIGHT))
+            .style(|_| container::Style {
+                background: Some(theme::bg0_hard().into()),
+                ..Default::default()
+            }),
+            container(iced::widget::Space::new())
                 .width(Length::Fill)
-                .height(Length::Fixed(cell_height)),
-        )
-        .width(Length::Fill)
-        .height(Length::Fixed(FLAT_HEADER_HEIGHT))
-        .style(|_| container::Style {
-            background: Some(theme::bg0_hard().into()),
-            border: iced::Border {
-                color: theme::border(),
-                width: 1.0,
-                radius: iced::border::Radius::default(),
-            },
-            ..Default::default()
-        })
+                .height(Length::Fixed(1.0))
+                .style(|_| container::Style {
+                    background: Some(theme::border().into()),
+                    ..Default::default()
+                }),
+        ]
         .into()
     }
 }

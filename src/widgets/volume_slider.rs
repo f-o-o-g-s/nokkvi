@@ -2,10 +2,10 @@
 //!
 //! A single parameterized widget for both main volume and SFX volume controls.
 //! Flat-design rendering:
-//! - Vertical: stereo 2-channel bars (each 8×44, 2 px gap = 18 px total).
-//!   1 px `theme::border()` outline, `theme::bg0()` track, accent-bright fill
-//!   from the bottom up to the current volume level. Channels are decorative
-//!   (both render the same value) — the widget remains a single-volume control.
+//! - Vertical: single 8×44 bar with 1 px `theme::border()` outline,
+//!   `theme::bg0()` track, accent-bright fill from the bottom up to the
+//!   current volume level. Each volume slider is one bar — main + sfx in
+//!   the player bar render side-by-side as two bars total.
 //! - Horizontal: 6 px thin track with a 14 px handle (matches progress bar).
 //! - Variant determines accent color (Music = bright accent, SFX = base accent).
 
@@ -21,12 +21,12 @@ use iced::{
 };
 
 // ───────────────────────── dimensions ─────────────────────────
-// Vertical (stereo bars): 8 px channel + 2 px gap + 8 px channel = 18 px wide,
-// 44 px tall (matches mode-button height).
-const VERTICAL_WIDTH: f32 = 18.0;
+// Vertical: single 8 px bar, 44 px tall (matches mode-button height). The
+// player bar renders music + sfx volume as two side-by-side sliders, each
+// using one bar — two bars total at the right edge.
+const BAR_WIDTH: f32 = 8.0;
+const VERTICAL_WIDTH: f32 = BAR_WIDTH;
 const VERTICAL_HEIGHT: f32 = 44.0;
-const STEREO_CHANNEL_WIDTH: f32 = 8.0;
-const STEREO_CHANNEL_GAP: f32 = 2.0;
 
 // Horizontal: 6 px thin track, 55 px long (1.25× vertical for drag range),
 // 14 px handle (matches progress bar).
@@ -332,7 +332,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for VolumeSlider<'_,
         if self.horizontal {
             self.draw_horizontal(renderer, bounds, volume, accent, border, track_bg);
         } else {
-            self.draw_stereo_vertical(renderer, bounds, volume, accent, border, track_bg);
+            self.draw_vertical_bar(renderer, bounds, volume, accent, border, track_bg);
         }
     }
 
@@ -361,10 +361,12 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for VolumeSlider<'_,
 // =============================================================================
 
 impl<Message> VolumeSlider<'_, Message> {
-    /// Vertical stereo meter: two narrow channel bars side-by-side, each with
-    /// a 1 px border on the bg0 track and an accent fill rising from the bottom
-    /// to the current volume level. In rounded mode the channels become pills.
-    fn draw_stereo_vertical(
+    /// Vertical mono meter: a single bar with a 1 px border on the bg0
+    /// track and an accent fill rising from the bottom to the current
+    /// volume level. In rounded mode the bar becomes a pill. Player bar
+    /// places music + sfx sliders side-by-side, giving two bars at the
+    /// right edge — one per volume control, no L/R duplication.
+    fn draw_vertical_bar(
         &self,
         renderer: &mut iced::Renderer,
         bounds: Rectangle,
@@ -381,61 +383,52 @@ impl<Message> VolumeSlider<'_, Message> {
             iced::border::Radius::from(0.0)
         };
 
-        // Both channels render identical levels — the stereo split is purely
-        // cosmetic per the design spec; the slider remains a single-volume
-        // control.
-        // Compute the total stereo cluster width once and center it inside the
-        // widget bounds so external `thickness()` overrides don't squash the
-        // bars off-center.
-        let cluster_width = STEREO_CHANNEL_WIDTH * 2.0 + STEREO_CHANNEL_GAP;
-        let cluster_x = bounds.x + (bounds.width - cluster_width) / 2.0;
+        // Center the single bar inside the widget bounds so external
+        // `thickness()` overrides don't shift it off-center.
+        let bar_x = bounds.x + (bounds.width - BAR_WIDTH) / 2.0;
+        let bar_bounds = Rectangle {
+            x: bar_x,
+            y: bounds.y,
+            width: BAR_WIDTH,
+            height: bounds.height,
+        };
 
-        for ch in 0..2 {
-            let ch_x = cluster_x + (STEREO_CHANNEL_WIDTH + STEREO_CHANNEL_GAP) * ch as f32;
-            let ch_bounds = Rectangle {
-                x: ch_x,
-                y: bounds.y,
-                width: STEREO_CHANNEL_WIDTH,
-                height: bounds.height,
-            };
+        // Track (outlined, bg0 fill).
+        renderer.fill_quad(
+            renderer::Quad {
+                bounds: bar_bounds,
+                border: iced::Border {
+                    color: border,
+                    width: 1.0,
+                    radius,
+                },
+                ..Default::default()
+            },
+            track_bg,
+        );
 
-            // Track (outlined, bg0 fill).
+        // Fill from bottom up to the current level. Inset by 1 px on each
+        // side so the fill sits inside the border.
+        let inner_height = (bounds.height - 2.0).max(0.0);
+        let fill_height = (inner_height * volume).clamp(0.0, inner_height);
+        if fill_height > 0.0 {
+            let fill_y = bar_bounds.y + 1.0 + (inner_height - fill_height);
             renderer.fill_quad(
                 renderer::Quad {
-                    bounds: ch_bounds,
+                    bounds: Rectangle {
+                        x: bar_bounds.x + 1.0,
+                        y: fill_y,
+                        width: BAR_WIDTH - 2.0,
+                        height: fill_height,
+                    },
                     border: iced::Border {
-                        color: border,
-                        width: 1.0,
                         radius,
+                        ..Default::default()
                     },
                     ..Default::default()
                 },
-                track_bg,
+                accent,
             );
-
-            // Fill from bottom up to the current level. Inset by 1 px on each
-            // side so the fill sits inside the border.
-            let inner_height = (bounds.height - 2.0).max(0.0);
-            let fill_height = (inner_height * volume).clamp(0.0, inner_height);
-            if fill_height > 0.0 {
-                let fill_y = ch_bounds.y + 1.0 + (inner_height - fill_height);
-                renderer.fill_quad(
-                    renderer::Quad {
-                        bounds: Rectangle {
-                            x: ch_bounds.x + 1.0,
-                            y: fill_y,
-                            width: STEREO_CHANNEL_WIDTH - 2.0,
-                            height: fill_height,
-                        },
-                        border: iced::Border {
-                            radius,
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    },
-                    accent,
-                );
-            }
         }
     }
 

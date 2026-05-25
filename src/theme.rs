@@ -464,11 +464,13 @@ pub(crate) fn nav_bar_height() -> f32 {
 /// widget's height aligned with the theme's source of truth.
 pub(crate) const STATUS_STRIP_HEIGHT: f32 = 24.0;
 
-/// Background color for the 24 px status strip — a touch darker than
-/// `bg0_hard()` for visual separation from the player bar above it.
+/// Background color for the 24 px status strip — meaningfully darker
+/// than `bg0_hard()` so the strip reads as its own band below the player
+/// bar. Calibrated to match the design CSS delta (Everforest target:
+/// `bg0_hard=#232A2E` → `status_strip=#1d2326`, a ~17 % darken).
 #[inline]
 pub(crate) fn status_strip_bg() -> Color {
-    darken(bg0_hard(), 0.05)
+    darken(bg0_hard(), 0.17)
 }
 
 // ============================================================================
