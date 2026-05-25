@@ -284,26 +284,52 @@ fn info_separator<'a, M: 'a>() -> Element<'a, M> {
         .into()
 }
 
+/// Tab label font size — scales down at narrow window widths so adjacent
+/// `FillPortion(1)` tab cells don't overrun each other when the metadata
+/// strip lives elsewhere (`tabs_expand`). Bands are picked so the longest
+/// label (`PLAYLISTS`) stays inside its per-tab share, accounting for the
+/// hamburger + library + divider cluster (~120 px) and 7-tab division.
+/// At very narrow widths (<500 px) some overflow is unavoidable for text
+/// modes — the floor of 9 px keeps the labels legible without dipping
+/// into illegibility.
+fn tab_text_size(window_width: f32) -> f32 {
+    if window_width >= 800.0 {
+        14.0
+    } else if window_width >= 650.0 {
+        12.0
+    } else if window_width >= 500.0 {
+        10.0
+    } else {
+        9.0
+    }
+}
+
 /// Build tab content based on display mode (text, icon+text, icon-only).
 ///
 /// Shared between nav tab rendering and the settings indicator.
+/// `text_size` is the active label size from [`tab_text_size`] — callers
+/// resolve it from `window_width` so labels shrink in lockstep with the
+/// shrinking tab cells.
 fn tab_content<'a>(
     label: &'static str,
     icon_path: &'static str,
     display_mode: NavDisplayMode,
     text_color: iced::Color,
+    text_size: f32,
 ) -> Element<'a, NavBarMessage> {
     let icon_size = 14.0;
     match display_mode {
-        NavDisplayMode::TextOnly => container(text(label.to_uppercase()).size(14.0).font(Font {
-            weight: Weight::Bold,
-            ..theme::ui_font()
-        }))
-        .width(Length::Shrink)
-        .height(Length::Fill)
-        .align_x(Alignment::Center)
-        .align_y(Alignment::Center)
-        .into(),
+        NavDisplayMode::TextOnly => {
+            container(text(label.to_uppercase()).size(text_size).font(Font {
+                weight: Weight::Bold,
+                ..theme::ui_font()
+            }))
+            .width(Length::Shrink)
+            .height(Length::Fill)
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center)
+            .into()
+        }
         NavDisplayMode::IconsOnly => container(colored_icon(icon_path, icon_size, text_color))
             .width(Length::Shrink)
             .height(Length::Fill)
@@ -313,7 +339,7 @@ fn tab_content<'a>(
         NavDisplayMode::TextAndIcons => container(
             row![
                 colored_icon(icon_path, icon_size, text_color),
-                text(label.to_uppercase()).size(14.0).font(Font {
+                text(label.to_uppercase()).size(text_size).font(Font {
                     weight: Weight::Bold,
                     ..theme::ui_font()
                 }),
@@ -340,20 +366,23 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
     // Left Section: Hamburger + Library Filter + Navigation Tabs
     // -------------------------------------------------------------------------
     let settings_open = data.settings_open;
+    let window_width = data.window_width;
 
-    // When the metadata strip lives elsewhere (Off / Player Bar / Mini Player)
-    // AND the tabs are icon-only, let the icon tabs grow to consume the
-    // otherwise-empty center lane instead of huddling at the left edge. Other
-    // display modes keep their natural width — text labels are read-as-strip
-    // and shouldn't stretch.
+    // Whenever the metadata strip lives elsewhere (Off / Player Bar / Mini
+    // Player), the tabs grow to consume the otherwise-empty center lane
+    // instead of huddling at the left edge — irrespective of display mode.
+    // Side-nav handles its own column-fill in `side_nav_bar`; here we just
+    // gate on "is this nav bar even rendering its own tab strip".
     let is_side_nav = theme::is_side_nav();
     let show_nav_metadata = {
         use nokkvi_data::types::player_settings::TrackInfoDisplay;
         theme::track_info_display() == TrackInfoDisplay::TopBar
     };
-    let tabs_expand = !is_side_nav
-        && !show_nav_metadata
-        && matches!(theme::nav_display_mode(), NavDisplayMode::IconsOnly);
+    let tabs_expand = !is_side_nav && !show_nav_metadata;
+    // Resolved once per render and forwarded into every tab; pinning a
+    // single size per pass keeps every cell's label in lockstep so they
+    // shrink together (no jagged staircase across the strip).
+    let text_size = tab_text_size(window_width);
 
     // Shared tab builder — used for both regular nav tabs AND the settings indicator.
     // `force_active` overrides the active state (used for settings tab, always active).
@@ -392,13 +421,19 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
 
             let elem: Element<'_, NavBarMessage> = mouse_area(
                 super::hover_overlay::HoverOverlay::new(
-                    container(tab_content(label, icon_path, display_mode, text_color))
-                        .padding(tab_padding)
-                        .height(Length::Fixed(NAV_PILL_HEIGHT))
-                        .center_y(Length::Fixed(NAV_PILL_HEIGHT))
-                        .width(tab_width)
-                        .align_x(Alignment::Center)
-                        .style(tab_style),
+                    container(tab_content(
+                        label,
+                        icon_path,
+                        display_mode,
+                        text_color,
+                        text_size,
+                    ))
+                    .padding(tab_padding)
+                    .height(Length::Fixed(NAV_PILL_HEIGHT))
+                    .center_y(Length::Fixed(NAV_PILL_HEIGHT))
+                    .width(tab_width)
+                    .align_x(Alignment::Center)
+                    .style(tab_style),
                 )
                 .border_radius(theme::ui_radius_pill()),
             )
@@ -419,12 +454,18 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
 
             let elem: Element<'_, NavBarMessage> = mouse_area(
                 super::hover_overlay::HoverOverlay::new(
-                    container(tab_content(label, icon_path, display_mode, text_color))
-                        .padding(tab_padding)
-                        .height(Length::Fill)
-                        .width(tab_width)
-                        .align_x(Alignment::Center)
-                        .style(tab_style),
+                    container(tab_content(
+                        label,
+                        icon_path,
+                        display_mode,
+                        text_color,
+                        text_size,
+                    ))
+                    .padding(tab_padding)
+                    .height(Length::Fill)
+                    .width(tab_width)
+                    .align_x(Alignment::Center)
+                    .style(tab_style),
                 )
                 .border_radius(0.0.into()),
             )
