@@ -56,16 +56,14 @@ pub(crate) fn side_nav_total_width() -> f32 {
     side_nav_width() + SIDE_NAV_BORDER
 }
 
-/// Height allocated for each tab button (enough for rotated text)
-const TAB_HEIGHT: f32 = 72.0;
-
-/// Height for icon-only tab buttons (smaller, no text rotation needed)
+/// Height of the cluster cells (hamburger and library trigger at the top of
+/// the column). Sized to match the icon-only tab profile so the cluster
+/// reads as a uniform band with the tabs below, regardless of display mode.
 const ICON_TAB_HEIGHT: f32 = 36.0;
 
-/// Height for text+icon tab buttons (icon above rotated text)
-const TEXT_ICON_TAB_HEIGHT: f32 = 88.0;
-
-/// Height of the icon slot within text+icon tabs
+/// Height of the icon slot within text+icon tabs (the only Fixed-height
+/// component left in `side_nav_tab_content`; the rotated label below it
+/// takes `Length::Fill` so the pair tracks the cell's `FillPortion(1)` lane).
 const ICON_SLOT_HEIGHT: f32 = 22.0;
 
 /// Icon size in the side nav bar
@@ -181,10 +179,12 @@ impl<Message> canvas::Program<Message> for RotatedLabel {
 
 /// Build side nav tab content based on display mode.
 ///
-/// Returns the natural-size content element. The caller wraps it in an outer
-/// cell whose height is `Length::FillPortion(1)` so every tab in the column
-/// shares the leftover vertical space equally; this function only needs to
-/// produce the centered glyph(s) — the outer cell handles vertical centering.
+/// Returns content whose height is `Length::Fill` so the inner glyph adapts
+/// to the outer cell's `FillPortion(1)` lane. Mirrors the top-bar centering
+/// fix: a Fixed-height inner overruns the cell at short window heights and
+/// bleeds into neighbouring tabs, whereas a Fill inner inherits the cell's
+/// vertical extent so the canvas always centers its rotated text against
+/// the cell's actual bounds and clips cleanly at the cell boundary.
 fn side_nav_tab_content(
     label: &'static str,
     icon_path: &'static str,
@@ -202,7 +202,7 @@ fn side_nav_tab_content(
             hover_indicator_color,
         })
         .width(Length::Fixed(card_width))
-        .height(Length::Fixed(TAB_HEIGHT))
+        .height(Length::Fill)
         .into(),
         NavDisplayMode::IconsOnly => {
             // Flat redesign uses a full-cell `accent_bright()` fill for
@@ -215,12 +215,18 @@ fn side_nav_tab_content(
             let _ = (indicator_color, hover_indicator_color);
             container(colored_icon(icon_path, ICON_SIZE, text_color))
                 .width(Length::Fixed(card_width))
-                .height(Length::Fixed(ICON_TAB_HEIGHT))
+                .height(Length::Fill)
                 .align_x(iced::Alignment::Center)
                 .align_y(iced::Alignment::Center)
                 .into()
         }
         NavDisplayMode::TextAndIcons => {
+            // Icon header stays at its `ICON_SLOT_HEIGHT` slot anchored to
+            // the bottom of the slot (the design's `align_y(End)` rule
+            // tucks the icon flush against the rotated label below). The
+            // label canvas takes the remaining cell height via `Fill`, so
+            // the pair tracks the cell's `FillPortion(1)` lane instead of
+            // overflowing the cell at short windows.
             let icon_widget = container(colored_icon(icon_path, ICON_SIZE, text_color))
                 .width(Length::Fixed(card_width))
                 .height(Length::Fixed(ICON_SLOT_HEIGHT))
@@ -234,12 +240,12 @@ fn side_nav_tab_content(
                 hover_indicator_color,
             })
             .width(Length::Fixed(card_width))
-            .height(Length::Fixed(TEXT_ICON_TAB_HEIGHT - ICON_SLOT_HEIGHT));
+            .height(Length::Fill);
 
             column![icon_widget, label_canvas]
                 .spacing(0)
                 .width(Length::Fixed(card_width))
-                .height(Length::Fixed(TEXT_ICON_TAB_HEIGHT))
+                .height(Length::Fill)
                 .into()
         }
     }
