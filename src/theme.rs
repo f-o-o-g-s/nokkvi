@@ -405,6 +405,7 @@ pub(crate) fn ui_radius_xs() -> iced::border::Radius {
 /// Scale step `sm` — 8 px in rounded mode, 0 in flat. Use for mode buttons,
 /// badges, format pills.
 #[inline]
+#[allow(dead_code)]
 pub(crate) fn ui_radius_sm() -> iced::border::Radius {
     if is_rounded_mode() {
         R_SM.into()
@@ -416,7 +417,6 @@ pub(crate) fn ui_radius_sm() -> iced::border::Radius {
 /// Scale step `md` — 12 px in rounded mode, 0 in flat. Use for cards,
 /// popovers, album art, category tiles.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn ui_radius_md() -> iced::border::Radius {
     if is_rounded_mode() {
         R_MD.into()
@@ -428,7 +428,6 @@ pub(crate) fn ui_radius_md() -> iced::border::Radius {
 /// Scale step `lg` — 18 px in rounded mode, 0 in flat. Use for list shells,
 /// modal frames, stats strips.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn ui_radius_lg() -> iced::border::Radius {
     if is_rounded_mode() {
         R_LG.into()

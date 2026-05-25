@@ -189,168 +189,209 @@ pub(crate) fn render_settings_slot<'a>(
     }
 }
 
-/// Render a section header slot — flat on the panel, text-color-only highlighting.
+/// Render a section header slot.
 ///
-/// - **Center slot**: Bright text (accent_bright) to indicate focus
-/// - **Non-center slots**: Dimmed text (opacity-scaled)
-///
-/// No per-row background or border — the panel provides the visual container.
+/// - **Level 1** (category picker): hero row — title rendered with
+///   [`theme::title_font()`] italic at 24 px equivalent + small-caps mono
+///   description below + 56×56 icon chip on the left. Clickable. The cursor
+///   gets a 3 px [`theme::accent_bright()`] left stripe + [`theme::bg1()`] fill.
+/// - **Level 2** (section separator within a category): small-caps mono label,
+///   theme::fg3() text, with a 1 px theme::border() bottom separator. Inert.
 fn render_header_slot<'a>(
     ctx: &SlotRenderContext<'_>,
     label: &'static str,
     icon_path: &'static str,
     is_collapsed: bool,
 ) -> Element<'a, SettingsMessage> {
-    let font_size =
-        nokkvi_data::utils::scale::calculate_font_size(16.0, ctx.row_height, ctx.scale_factor)
-            * ctx.scale_factor;
-    let icon_size = (font_size * 1.2).clamp(10.0, 20.0);
-    let chevron_size = (font_size * 1.0).clamp(8.0, 16.0);
-
-    // Text-color-only highlighting: bright for center, dimmed for others
-    let text_color = if ctx.is_center {
-        theme::accent_bright()
+    if ctx.is_level1 {
+        render_l1_category_row(ctx, label, icon_path)
     } else {
-        Color {
-            a: ctx.opacity,
-            ..theme::fg2()
-        }
-    };
+        render_l2_section_header(ctx, label, icon_path, is_collapsed)
+    }
+}
+
+/// L2 section header — small-caps mono label, dim fg3 color, 1 px border()
+/// bottom separator (matches the design's `.nk-set-section-head`).
+fn render_l2_section_header<'a>(
+    ctx: &SlotRenderContext<'_>,
+    label: &'static str,
+    icon_path: &'static str,
+    is_collapsed: bool,
+) -> Element<'a, SettingsMessage> {
+    let font_size =
+        nokkvi_data::utils::scale::calculate_font_size(11.0, ctx.row_height, ctx.scale_factor)
+            * ctx.scale_factor;
+    let icon_size = (font_size * 1.25).clamp(10.0, 16.0);
+
+    // Section heads always render dim (no center accent) so they read as
+    // structural dividers, not focused items. Opacity tracks the slot-list
+    // fade for off-center rows.
+    let text_color = scale_alpha_local(theme::fg3(), ctx.opacity);
+    let icon_color = scale_alpha_local(theme::fg2(), ctx.opacity);
 
     let section_icon = embedded_svg::svg_widget(icon_path)
         .width(Length::Fixed(icon_size))
         .height(Length::Fixed(icon_size))
-        .style(move |_theme, _status| svg::Style {
-            color: Some(text_color),
+        .style(move |_, _| svg::Style {
+            color: Some(icon_color),
         });
 
-    // Collapse/expand chevron indicator
     let chevron_path = if is_collapsed {
         "assets/icons/chevron-right.svg"
     } else {
         "assets/icons/chevron-down.svg"
     };
     let chevron = embedded_svg::svg_widget(chevron_path)
-        .width(Length::Fixed(chevron_size))
-        .height(Length::Fixed(chevron_size))
-        .style(move |_theme, _status| svg::Style {
+        .width(Length::Fixed(icon_size))
+        .height(Length::Fixed(icon_size))
+        .style(move |_, _| svg::Style {
             color: Some(text_color),
         });
 
-    // Layout varies by level:
-    // - Level 1: centered text, no chevron (category picker items)
-    // - Level 2: left-aligned with chevron (section separators)
-    let content: Element<'a, SettingsMessage> = if ctx.is_level1 {
-        row![
-            section_icon,
-            text(label)
-                .size(font_size)
-                .font(Font {
-                    weight: Weight::Bold,
-                    ..theme::ui_font()
-                })
-                .color(text_color)
-                .wrapping(Wrapping::None),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center)
-        .into()
-    } else {
-        row![
-            Space::new().width(Length::Fixed(8.0)),
-            chevron,
-            section_icon,
-            text(label)
-                .size(font_size)
-                .font(Font {
-                    weight: Weight::Bold,
-                    ..theme::ui_font()
-                })
-                .color(text_color)
-                .wrapping(Wrapping::None),
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center)
-        .into()
-    };
+    let label_widget = text(label.to_uppercase())
+        .size(font_size)
+        .font(Font {
+            weight: Weight::Medium,
+            ..theme::ui_font()
+        })
+        .color(text_color)
+        .wrapping(Wrapping::None);
 
-    // Level 2 headers get a darker background + lighter border to stand out from the panel
-    let (header_bg, header_border) = if ctx.is_level1 {
-        (Color::TRANSPARENT, Color::TRANSPARENT)
-    } else if ctx.is_center {
-        (theme::bg0_hard(), theme::bg2())
-    } else {
-        (
-            Color {
-                a: ctx.opacity,
-                ..theme::bg0_hard()
-            },
-            Color {
-                a: ctx.opacity * 0.5,
-                ..theme::bg2()
-            },
-        )
-    };
-    let align_x = if ctx.is_level1 {
-        Alignment::Center
-    } else {
-        Alignment::Start
-    };
-    let styled = container(content)
+    let content = row![
+        Space::new().width(Length::Fixed(20.0)),
+        chevron,
+        section_icon,
+        label_widget,
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center);
+
+    let header_body = container(content)
         .width(Length::Fill)
         .height(Length::Fill)
         .clip(true)
         .align_y(Alignment::Center)
-        .align_x(align_x)
-        .padding(Padding::new(4.0).left(8.0))
-        .style(move |_: &iced::Theme| container::Style {
-            background: Some(header_bg.into()),
-            border: Border {
-                color: header_border,
-                width: 1.0,
-                radius: theme::ui_border_radius(),
-            },
-            ..Default::default()
-        });
+        .padding(Padding::new(0.0).top(8.0).left(8.0));
 
-    // Level 2 headers get a bottom separator line (visual only, not a slot list entry)
-    let with_separator: Element<'a, SettingsMessage> = if !ctx.is_level1 {
-        let sep_color = theme::bg2();
-        column![
-            container(styled).width(Length::Fill).height(Length::Fill),
-            container(Space::new())
-                .width(Length::Fill)
-                .height(Length::Fixed(1.0))
-                .style(move |_: &iced::Theme| container::Style {
-                    background: Some(sep_color.into()),
-                    ..Default::default()
-                }),
-        ]
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+    // Bottom border() separator pinning the small-caps text to the panel
+    // surface.
+    row_with_bottom_separator(header_body.into(), false).into()
+}
+
+/// L1 category landing row — hero treatment matching `.nk-cat-row` in the
+/// flat CSS. 56×56 icon chip on the left, title in [`theme::title_font()`]
+/// italic at scaled 24 px equivalent, small-caps mono description below.
+/// Cursor row gets the [`theme::bg1()`] fill + 3 px accent left stripe.
+fn render_l1_category_row<'a>(
+    ctx: &SlotRenderContext<'_>,
+    label: &'static str,
+    icon_path: &'static str,
+) -> Element<'a, SettingsMessage> {
+    let title_size =
+        nokkvi_data::utils::scale::calculate_font_size(20.0, ctx.row_height, ctx.scale_factor)
+            * ctx.scale_factor;
+    let desc_size =
+        nokkvi_data::utils::scale::calculate_font_size(11.0, ctx.row_height, ctx.scale_factor)
+            * ctx.scale_factor;
+
+    let title_color = if ctx.is_center {
+        theme::fg0()
     } else {
-        styled.into()
+        scale_alpha_local(theme::fg0(), ctx.opacity * 0.85)
     };
+    let desc_color = scale_alpha_local(theme::fg2(), ctx.opacity * 0.85);
 
-    // At Level 1, headers are interactive drill-down targets (clickable).
-    // At Level 2, headers are non-interactive section separators (inert).
-    let header_btn = button(with_separator)
-        .style(transparent_button_style)
-        .padding(0)
+    // Tile-style icon chip: 56×56, theme::bg0_hard() body, 1px theme::border()
+    // outline, accent icon. Sized down at narrow row heights so the chip
+    // doesn't dominate.
+    let chip_size = (title_size * 2.4).clamp(40.0, 56.0);
+    let icon_inner_size = (chip_size * 0.5).clamp(20.0, 28.0);
+    let icon_color = scale_alpha_local(theme::accent_bright(), ctx.opacity);
+    let chip_bg = scale_alpha_local(theme::bg0_hard(), ctx.opacity);
+    let chip_border = scale_alpha_local(theme::border(), ctx.opacity);
+
+    let icon_chip = container(
+        embedded_svg::svg_widget(icon_path)
+            .width(Length::Fixed(icon_inner_size))
+            .height(Length::Fixed(icon_inner_size))
+            .style(move |_, _| svg::Style {
+                color: Some(icon_color),
+            }),
+    )
+    .width(Length::Fixed(chip_size))
+    .height(Length::Fixed(chip_size))
+    .align_x(Alignment::Center)
+    .align_y(Alignment::Center)
+    .style(move |_: &iced::Theme| container::Style {
+        background: Some(chip_bg.into()),
+        border: Border {
+            color: chip_border,
+            width: 1.0,
+            radius: theme::ui_radius_md(),
+        },
+        ..Default::default()
+    });
+
+    let title = text(label)
+        .size(title_size)
+        .font(Font {
+            weight: Weight::Bold,
+            ..theme::title_font()
+        })
+        .color(title_color)
+        .wrapping(Wrapping::None);
+
+    let description = category_description(label);
+    let desc_widget = text(description)
+        .size(desc_size)
+        .font(theme::ui_font())
+        .color(desc_color)
+        .wrapping(Wrapping::None);
+
+    let text_col = column![title, desc_widget]
+        .spacing(4)
         .width(Length::Fill);
 
-    if ctx.is_level1 {
-        header_btn
-            .on_press(if ctx.is_center {
-                SettingsMessage::EditActivate
-            } else {
-                SettingsMessage::SlotListClickItem(ctx.item_index)
-            })
-            .into()
-    } else {
-        // Level 2: no on_press — headers are non-interactive
-        header_btn.into()
+    let content = row![
+        Space::new().width(Length::Fixed(16.0)),
+        icon_chip,
+        Space::new().width(Length::Fixed(16.0)),
+        container(text_col)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .clip(true)
+            .align_y(Alignment::Center),
+    ]
+    .spacing(0)
+    .align_y(Alignment::Center)
+    .height(Length::Fill);
+
+    // Cursor row: light bg fill + 3 px accent left stripe.
+    let body = with_cursor_stripe(content.into(), ctx.is_center);
+
+    button(body)
+        .style(transparent_button_style)
+        .padding(0)
+        .width(Length::Fill)
+        .on_press(if ctx.is_center {
+            SettingsMessage::EditActivate
+        } else {
+            SettingsMessage::SlotListClickItem(ctx.item_index)
+        })
+        .into()
+}
+
+/// Per-category description shown below the L1 hero title. Kept compact so
+/// the L1 hero rows don't blow past the slot height at small window sizes.
+fn category_description(label: &str) -> &'static str {
+    match label {
+        "General" => "Account, mouse behavior, tray, library defaults",
+        "Interface" => "Layout, fonts, artwork column, metadata strip",
+        "Playback" => "Crossfade, scrobbling, playlists, gapless behavior",
+        "Hotkeys" => "Rebind keyboard shortcuts and resolve conflicts",
+        "Theme" => "Switch themes and tune color tokens",
+        "Visualizer" => "Bars, lines, peak modes, palette tuning",
+        _ => "Configure this section",
     }
 }
 
@@ -529,37 +570,10 @@ fn render_item_slot<'a>(
         .into()
     };
 
-    // Subtle row highlight for center (selected) row
-    let row_bg = if ctx.is_center {
-        Color {
-            a: 0.4,
-            ..theme::bg1()
-        }
-    } else {
-        Color::TRANSPARENT
-    };
-    let styled = container(content)
-        .width(Length::Fill)
-        .clip(true)
-        .style(move |_: &iced::Theme| container::Style {
-            background: Some(row_bg.into()),
-            ..Default::default()
-        });
-
-    // Bottom separator line — visual only, not a slot list entry
-    let sep_color = theme::bg2();
-    let with_separator = column![
-        container(styled).width(Length::Fill).height(Length::Fill),
-        container(Space::new())
-            .width(Length::Fill)
-            .height(Length::Fixed(1.0))
-            .style(move |_: &iced::Theme| container::Style {
-                background: Some(sep_color.into()),
-                ..Default::default()
-            }),
-    ]
-    .width(Length::Fill)
-    .height(Length::Fill);
+    // Cursor stripe + bg fill for the center row, then the design's
+    // theme::border() bottom separator pinning rows to the panel surface.
+    let row_body = with_cursor_stripe(content, ctx.is_center);
+    let with_separator = row_with_bottom_separator(row_body, ctx.is_center);
 
     // Make clickable — center click enters edit mode, other slots navigate
     button(with_separator)
@@ -572,6 +586,76 @@ fn render_item_slot<'a>(
         .padding(0)
         .width(Length::Fill)
         .into()
+}
+
+// ============================================================================
+// Row chrome helpers (cursor stripe + bottom separator)
+// ============================================================================
+
+/// Wrap a row's content in the cursor stripe + bg fill chrome. The cursor
+/// row gets a 3 px [`theme::accent_bright()`] left stripe + [`theme::bg1()`]
+/// fill matching the design's `.nk-set-row.cursor::before` + `.nk-set-row.cursor`
+/// styling. Non-cursor rows render with transparent bg + transparent stripe.
+fn with_cursor_stripe<'a>(
+    content: Element<'a, SettingsMessage>,
+    is_center: bool,
+) -> Element<'a, SettingsMessage> {
+    let row_bg = if is_center {
+        theme::bg1()
+    } else {
+        Color::TRANSPARENT
+    };
+    let stripe_color = if is_center {
+        theme::accent_bright()
+    } else {
+        Color::TRANSPARENT
+    };
+
+    let stripe = container(Space::new())
+        .width(Length::Fixed(3.0))
+        .height(Length::Fill)
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(stripe_color.into()),
+            ..Default::default()
+        });
+
+    let row_body = row![stripe, container(content).width(Length::Fill)]
+        .height(Length::Fill)
+        .width(Length::Fill);
+
+    container(row_body)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .clip(true)
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(row_bg.into()),
+            ..Default::default()
+        })
+        .into()
+}
+
+/// Pin a 1 px [`theme::border()`] separator under a row. `is_center` controls
+/// whether the separator dims slightly to avoid clashing with the cursor
+/// stripe (design keeps it crisp regardless, so this just routes color).
+fn row_with_bottom_separator<'a>(
+    content: Element<'a, SettingsMessage>,
+    _is_center: bool,
+) -> Element<'a, SettingsMessage> {
+    let sep_color = theme::border();
+
+    column![
+        container(content).width(Length::Fill).height(Length::Fill),
+        container(Space::new())
+            .width(Length::Fill)
+            .height(Length::Fixed(1.0))
+            .style(move |_: &iced::Theme| container::Style {
+                background: Some(sep_color.into()),
+                ..Default::default()
+            }),
+    ]
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
 }
 
 /// Render the value display based on SettingValue type
