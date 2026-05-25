@@ -319,19 +319,37 @@ fn tab_content<'a>(
 ) -> Element<'a, NavBarMessage> {
     let icon_size = 14.0;
     match display_mode {
-        NavDisplayMode::TextOnly => {
-            container(text(label.to_uppercase()).size(text_size).font(Font {
-                weight: Weight::Bold,
-                ..theme::ui_font()
-            }))
-            .width(Length::Shrink)
-            .height(Length::Fill)
-            .align_x(Alignment::Center)
-            .align_y(Alignment::Center)
-            .into()
-        }
+        // Both inner wrappers use `Length::Fill` so the inner cell has a
+        // defined width that matches the outer's padded content area. With a
+        // `Length::Shrink` inner the centering broke when the label was wider
+        // than the available space — iced anchored the Shrink child at the
+        // content area's left edge instead of centering its overflow. Fill
+        // gives the inner a real lane, and the text/row inside it stays
+        // visually centered (with symmetric overflow at very narrow widths)
+        // via the inner's `align_x(Center)`.
+        //
+        // The text widget itself also gets `align_x(Horizontal::Center)` and
+        // `wrapping(None)` so iced's text layout draws the glyphs centered
+        // within its bounds rather than left-anchored when the bounds clip
+        // the natural width.
+        NavDisplayMode::TextOnly => container(
+            text(label.to_uppercase())
+                .size(text_size)
+                .font(Font {
+                    weight: Weight::Bold,
+                    ..theme::ui_font()
+                })
+                .align_x(iced::alignment::Horizontal::Center)
+                .wrapping(iced::widget::text::Wrapping::None)
+                .width(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .into(),
         NavDisplayMode::IconsOnly => container(colored_icon(icon_path, icon_size, text_color))
-            .width(Length::Shrink)
+            .width(Length::Fill)
             .height(Length::Fill)
             .align_x(Alignment::Center)
             .align_y(Alignment::Center)
@@ -339,15 +357,18 @@ fn tab_content<'a>(
         NavDisplayMode::TextAndIcons => container(
             row![
                 colored_icon(icon_path, icon_size, text_color),
-                text(label.to_uppercase()).size(text_size).font(Font {
-                    weight: Weight::Bold,
-                    ..theme::ui_font()
-                }),
+                text(label.to_uppercase())
+                    .size(text_size)
+                    .font(Font {
+                        weight: Weight::Bold,
+                        ..theme::ui_font()
+                    })
+                    .wrapping(iced::widget::text::Wrapping::None),
             ]
             .spacing(4)
             .align_y(Alignment::Center),
         )
-        .width(Length::Shrink)
+        .width(Length::Fill)
         .height(Length::Fill)
         .align_x(Alignment::Center)
         .align_y(Alignment::Center)
