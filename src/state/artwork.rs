@@ -62,8 +62,6 @@ pub struct ArtworkState {
     pub album_art: SnapshottedLru<String, image::Handle>,
     /// Large artwork cache for detail views (LRU-bounded).
     pub large_artwork: SnapshottedLru<String, image::Handle>,
-    /// Cache for album dominant colors (extracted from large artwork bytes).
-    pub album_dominant_colors: SnapshottedLru<String, iced::Color>,
     /// Genre artwork cache.
     pub genre: CollageArtworkCache,
     /// Playlist artwork cache.
@@ -81,9 +79,6 @@ impl Default for ArtworkState {
             large_artwork: SnapshottedLru::new(
                 NonZeroUsize::new(LARGE_ARTWORK_CACHE_CAPACITY).expect("capacity must be > 0"),
             ),
-            album_dominant_colors: SnapshottedLru::new(
-                NonZeroUsize::new(LARGE_ARTWORK_CACHE_CAPACITY).expect("capacity must be > 0"),
-            ),
             genre: CollageArtworkCache::new(),
             playlist: CollageArtworkCache::new(),
             loading_large_artwork: None,
@@ -96,7 +91,6 @@ impl std::fmt::Debug for ArtworkState {
         f.debug_struct("ArtworkState")
             .field("album_art", &self.album_art)
             .field("large_artwork", &self.large_artwork)
-            .field("album_dominant_colors", &self.album_dominant_colors)
             .field("genre", &self.genre)
             .field("playlist", &self.playlist)
             .field("loading_large_artwork", &self.loading_large_artwork)

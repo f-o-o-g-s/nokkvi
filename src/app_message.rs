@@ -212,9 +212,8 @@ pub enum ArtworkMessage {
     // --- Shared Album Artwork ---
     Loaded(String, Option<image::Handle>),
     LargeLoaded(String, Option<image::Handle>),
-    LargeArtistLoaded(String, Option<image::Handle>, Option<iced::Color>),
+    LargeArtistLoaded(String, Option<image::Handle>),
     LoadLarge(String),
-    DominantColorCalculated(String, iced::Color),
     /// Force-refresh a specific album's artwork (evict all cached sizes, re-fetch).
     /// User-initiated: shows "Refreshing artwork…" / "Artwork refreshed" toasts.
     RefreshAlbumArtwork(String),

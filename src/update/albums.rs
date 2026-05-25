@@ -134,11 +134,6 @@ impl Nokkvi {
     pub(crate) fn handle_load_large_artwork(&mut self, album_id: String) -> Task<Message> {
         // Skip fetching if already cached - makes back-navigation instant
         if self.artwork.large_artwork.peek(&album_id).is_some() {
-            if let Some(&color) = self.artwork.album_dominant_colors.peek(&album_id) {
-                return Task::done(Message::Artwork(ArtworkMessage::DominantColorCalculated(
-                    album_id, color,
-                )));
-            }
             let handle = self.artwork.large_artwork.peek(&album_id).cloned();
             return Task::done(Message::Artwork(ArtworkMessage::LargeLoaded(
                 album_id, handle,
@@ -287,55 +282,16 @@ impl Nokkvi {
         id: String,
         handle: Option<image::Handle>,
     ) -> Task<Message> {
-        let mut fetch_color_task = Task::none();
-
         // Always cache artwork that arrives (even if user navigated away)
         // This fixes the bug where rapid navigation discarded completed loads
         if let Some(h) = handle {
             self.artwork.large_artwork.put(id.clone(), h);
-
-            if let Some(shell) = &self.app_service {
-                let albums_vm = shell.albums().clone();
-                let art_id = id.clone();
-                let artwork_size = self.settings.artwork_resolution.to_size();
-
-                fetch_color_task = Task::perform(
-                    async move {
-                        // Re-fetch through the cached client (warm cache hit, no network)
-                        // and run dominant-color extraction on the bytes. Cheaper than
-                        // the previous path-read because cacache holds the bytes already.
-                        match albums_vm
-                            .fetch_album_artwork(&art_id, artwork_size, None)
-                            .await
-                        {
-                            Ok(bytes) => {
-                                let dominant = tokio::task::spawn_blocking(move || {
-                                    nokkvi_data::utils::dominant_color::extract_dominant_color(
-                                        &bytes,
-                                    )
-                                })
-                                .await
-                                .unwrap_or(None);
-                                dominant.map(|(r, g, b)| (art_id, iced::Color::from_rgb8(r, g, b)))
-                            }
-                            Err(_) => None,
-                        }
-                    },
-                    |result| {
-                        if let Some((id, c)) = result {
-                            Message::Artwork(ArtworkMessage::DominantColorCalculated(id, c))
-                        } else {
-                            Message::NoOp
-                        }
-                    },
-                );
-            }
         }
         // Clear loading_large_artwork if this was the most recent request
         if self.artwork.loading_large_artwork.as_ref() == Some(&id) {
             self.artwork.loading_large_artwork = None;
         }
-        fetch_color_task
+        Task::none()
     }
 
     pub(crate) fn handle_albums(&mut self, msg: views::AlbumsMessage) -> Task<Message> {

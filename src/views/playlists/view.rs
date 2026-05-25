@@ -390,7 +390,6 @@ impl PlaylistsPage {
             Some(single_artwork_panel_with_pill::<PlaylistsMessage>(
                 handle,
                 pill_content,
-                None, // Use standard dark backdrop
                 None,
                 false,
                 None,
@@ -411,7 +410,6 @@ impl PlaylistsPage {
             Some(single_artwork_panel_with_pill::<PlaylistsMessage>(
                 playlist_artwork.get(&playlist_id),
                 pill_content,
-                None,
                 None,
                 false,
                 None,

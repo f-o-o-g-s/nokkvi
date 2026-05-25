@@ -134,10 +134,10 @@ impl Nokkvi {
         )
     }
 
-    /// Fetch the 500 px artist artwork plus its dominant color and stash both
-    /// in `large_artwork` / `album_dominant_colors`. Skipped when already
-    /// cached; the artist must be present in `library.artists` so we can
-    /// resolve `image_url` (Navidrome may return an external poster URL).
+    /// Fetch the 500 px artist artwork and stash it in `large_artwork`.
+    /// Skipped when already cached; the artist must be present in
+    /// `library.artists` so we can resolve `image_url` (Navidrome may return
+    /// an external poster URL).
     ///
     /// Shared by `LoadLargeArtwork` (settled-scroll / hotkey navigation) and
     /// the `ExpandArtist` action — `FocusAndExpand` from a queue/songs link
@@ -171,27 +171,15 @@ impl Nokkvi {
             async move {
                 let art_id = external_url.unwrap_or_else(|| format!("ar-{id}"));
                 match vm.fetch_album_artwork(&art_id, Some(500), None).await {
-                    Ok(bytes) if bytes.len() > 100 => {
-                        let dominant = tokio::task::spawn_blocking({
-                            let b = bytes.clone();
-                            move || nokkvi_data::utils::dominant_color::extract_dominant_color(&b)
-                        })
-                        .await
-                        .unwrap_or(None);
-                        (id, Some(image::Handle::from_bytes(bytes)), dominant)
-                    }
-                    _ => (id, None, None),
+                    Ok(bytes) if bytes.len() > 100 => (id, Some(image::Handle::from_bytes(bytes))),
+                    _ => (id, None),
                 }
             },
-            |(id, handle, color)| {
-                if handle.is_none() && color.is_none() {
+            |(id, handle)| {
+                if handle.is_none() {
                     Message::NoOp
                 } else {
-                    Message::Artwork(ArtworkMessage::LargeArtistLoaded(
-                        id,
-                        handle,
-                        color.map(|(r, g, b)| iced::Color::from_rgb8(r, g, b)),
-                    ))
+                    Message::Artwork(ArtworkMessage::LargeArtistLoaded(id, handle))
                 }
             },
         )

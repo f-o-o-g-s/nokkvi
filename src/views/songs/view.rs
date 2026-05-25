@@ -485,9 +485,6 @@ impl SongsPage {
                     .get(album_id)
                     .or_else(|| data.album_art.get(album_id))
             });
-        let active_dominant_color = centered_song
-            .and_then(|song| song.album_id.as_ref())
-            .and_then(|album_id| data.dominant_colors.get(album_id).copied());
 
         let on_refresh = centered_song
             .and_then(|song| song.album_id.clone())
@@ -570,7 +567,6 @@ impl SongsPage {
         let artwork_content = Some(single_artwork_panel_with_pill(
             artwork_handle,
             pill_content,
-            active_dominant_color,
             on_refresh,
             artwork_menu_open,
             artwork_menu_position,

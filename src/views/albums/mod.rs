@@ -68,7 +68,6 @@ pub struct AlbumsViewData<'a> {
     pub albums: &'a [AlbumUIViewData],
     pub album_art: &'a HashMap<String, image::Handle>,
     pub large_artwork: &'a HashMap<String, image::Handle>,
-    pub dominant_colors: &'a HashMap<String, iced::Color>,
     pub window_width: f32,
     pub window_height: f32,
     pub scale_factor: f32,

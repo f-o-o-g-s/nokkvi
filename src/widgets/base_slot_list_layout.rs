@@ -497,7 +497,6 @@ fn wrap_with_pill_overlay<'a, Message: 'a>(
 pub(crate) fn single_artwork_panel_with_pill<'a, Message: Clone + 'a>(
     artwork_handle: Option<&'a iced::widget::image::Handle>,
     pill_content: Option<Element<'a, Message>>,
-    dominant_color: Option<iced::Color>,
     on_refresh: Option<Message>,
     is_open: bool,
     open_position: Option<iced::Point>,
@@ -506,15 +505,7 @@ pub(crate) fn single_artwork_panel_with_pill<'a, Message: Clone + 'a>(
     let base_panel = single_artwork_panel(artwork_handle);
 
     let panel = if let Some(content) = pill_content {
-        // Determine background color. Use theme background blended with a hint of dominant color.
-        let theme_bg = crate::theme::bg0_hard();
-        let mut bg_color = dominant_color.unwrap_or(theme_bg);
-        bg_color.r = theme_bg.r * 0.85 + bg_color.r * 0.15;
-        bg_color.g = theme_bg.g * 0.85 + bg_color.g * 0.15;
-        bg_color.b = theme_bg.b * 0.85 + bg_color.b * 0.15;
-        bg_color.a = 1.0;
-
-        wrap_with_pill_overlay(base_panel, content, bg_color)
+        wrap_with_pill_overlay(base_panel, content)
     } else {
         base_panel
     };
@@ -549,10 +540,7 @@ pub(crate) fn collage_artwork_panel_with_pill<'a, Message: Clone + 'a>(
     let base_panel = collage_artwork_panel(collage_handles);
 
     if let Some(content) = pill_content {
-        // Static dark backdrop for collages
-        let bg_color = crate::theme::bg0_hard();
-
-        wrap_with_pill_overlay(base_panel, content, bg_color)
+        wrap_with_pill_overlay(base_panel, content)
     } else {
         base_panel
     }

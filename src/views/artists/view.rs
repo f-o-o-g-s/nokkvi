@@ -240,8 +240,6 @@ impl ArtistsPage {
                 .get(&artist.id)
                 .or_else(|| data.album_art.get(&artist.id))
         });
-        let active_dominant_color =
-            centered_artist.and_then(|artist| data.dominant_colors.get(&artist.id).copied());
 
         let pill_content = centered_artist
             .filter(|_| crate::theme::artists_artwork_overlay())
@@ -367,7 +365,6 @@ impl ArtistsPage {
         let artwork_content = Some(single_artwork_panel_with_pill::<ArtistsMessage>(
             artwork_handle,
             pill_content,
-            active_dominant_color,
             None,
             false,
             None,
