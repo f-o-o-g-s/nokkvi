@@ -511,12 +511,14 @@ where
                                         height: pill_h,
                                     };
 
-                                    // Draw pill background
+                                    // Draw pill background — `pill` scale so
+                                    // the drag-count badge rounds into a
+                                    // proper capsule in rounded mode.
                                     renderer.fill_quad(
                                         renderer::Quad {
                                             bounds: pill_rect,
                                             border: iced::Border {
-                                                radius: crate::theme::ui_border_radius(),
+                                                radius: crate::theme::ui_radius_pill(),
                                                 ..Default::default()
                                             },
                                             ..Default::default()

@@ -254,11 +254,7 @@ where
         // overlay reads consistently across the 21 themes.
         if is_hovered || is_pressed {
             let base = tint_base();
-            let alpha = if is_pressed {
-                PRESS_ALPHA
-            } else {
-                HOVER_ALPHA
-            };
+            let alpha = if is_pressed { PRESS_ALPHA } else { HOVER_ALPHA };
             let color = Color { a: alpha, ..base };
 
             renderer.fill_quad(

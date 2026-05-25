@@ -233,9 +233,12 @@ pub(crate) fn default_playlist_picker_overlay<'a>(
     };
 
     // ── Modal panel ──
+    // Flat redesign: bg0_hard() (design's --bg-dim), 1 px accent_bright
+    // outline, `lg` corner so the picker reads at the same scale as
+    // about/info/eq/text-input modals.
     let modal_bg = theme::bg0_hard();
-    let modal_border = theme::accent();
-    let modal_radius = theme::ui_border_radius();
+    let modal_border = theme::accent_bright();
+    let modal_radius = theme::ui_radius_lg();
 
     let modal_panel = container(
         column![title_bar, search_bar, main_area]
@@ -250,7 +253,7 @@ pub(crate) fn default_playlist_picker_overlay<'a>(
         background: Some(modal_bg.into()),
         border: Border {
             color: modal_border,
-            width: 1.5,
+            width: 1.0,
             radius: modal_radius,
         },
         ..Default::default()
