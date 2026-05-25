@@ -889,6 +889,16 @@ pub(crate) fn bg3() -> Color {
     read_color(|t| t.bg3)
 }
 
+/// Background for the metadata strip rendered below the player bar (and
+/// above the side-nav content in `TrackInfoDisplay::TopBar` mode). A 17%
+/// darken of `bg0_hard()` so the strip reads as its own band rather than
+/// continuing the player-bar chrome (matches the flat-redesign Everforest
+/// delta: bg-dim `#232A2E` → status `#1d2326`).
+#[inline]
+pub(crate) fn status_strip_bg() -> Color {
+    darken(bg0_hard(), 0.17)
+}
+
 // ============================================================================
 // Foreground Colors
 // ============================================================================

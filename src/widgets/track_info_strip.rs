@@ -377,7 +377,7 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
         .height(Length::Fixed(STRIP_HEIGHT))
         .center_y(STRIP_HEIGHT)
         .style(move |_| container::Style {
-            background: Some(theme::bg0_hard().into()),
+            background: Some(theme::status_strip_bg().into()),
             ..Default::default()
         })
         .into()
@@ -450,7 +450,7 @@ fn build_merged_centered_strip<'a, M: Clone + 'static>(
         .height(Length::Fixed(STRIP_HEIGHT))
         .center_y(STRIP_HEIGHT)
         .style(move |_| container::Style {
-            background: Some(theme::bg0_hard().into()),
+            background: Some(theme::status_strip_bg().into()),
             ..Default::default()
         })
         .into()
