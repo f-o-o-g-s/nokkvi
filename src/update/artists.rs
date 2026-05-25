@@ -480,7 +480,7 @@ impl Nokkvi {
             }
             ArtistsAction::LoadLargeArtwork => {
                 // Settled-scroll / hotkey navigation: refresh viewport mini
-                // artwork, fetch 500px artwork + dominant color for the new
+                // artwork, fetch 500px artwork for the new
                 // center artist, and chain a page-fetch if the viewport is
                 // near the loaded edge. Mid-drag scrolling does NOT enter
                 // here — `SlotListScrollSeek` returns `None` and lets the

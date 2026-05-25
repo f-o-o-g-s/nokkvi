@@ -1,4 +1,8 @@
-//! Artwork caches (mini, large, dominant colors, collages) and loading state.
+//! Artwork caches (mini, large, collages) and loading state.
+//!
+//! Pre-redesign also held dominant-color extractions for the artwork-elevated
+//! header — the redesign moved every active-state visual onto `accent_bright()`
+//! fills, so the dominant-color path was removed (along with `color-thief`).
 
 use std::{collections::HashSet, num::NonZeroUsize};
 
