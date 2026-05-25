@@ -621,19 +621,35 @@ impl Nokkvi {
             let lines_mirror = cfg.lines.mirror;
             drop(cfg);
 
+            // In side-nav mode the sidebar is the full-height leftmost
+            // band; the visualizer (and boat) overlay must start to its
+            // RIGHT, not at x=0, or the bars/lines bleed under the icons.
+            let side_nav_inset = if crate::theme::is_side_nav() {
+                crate::widgets::side_nav_bar::side_nav_total_width()
+            } else {
+                0.0
+            };
+            let visualizer_width = (self.window.width - side_nav_inset).max(0.0);
+
             let visualizer_height = widgets::visualizer::visualizer_area_height(
-                self.window.width,
+                visualizer_width,
                 self.window.height,
                 height_percent,
             );
             let spacer_height =
                 (self.window.height - widgets::player_bar::player_bar_height() - visualizer_height)
                     .max(0.0);
-            let visualizer_overlay = column![
+            let visualizer_inner = column![
                 container(iced::widget::Space::new()).height(Length::Fixed(spacer_height)),
                 container(viz_with_mode.view())
                     .width(Length::Fill)
                     .height(Length::Fixed(visualizer_height))
+            ]
+            .width(Length::Fill)
+            .height(Length::Fill);
+            let visualizer_overlay = iced::widget::row![
+                iced::widget::Space::new().width(Length::Fixed(side_nav_inset)),
+                visualizer_inner,
             ]
             .width(Length::Fill)
             .height(Length::Fill);
@@ -644,17 +660,24 @@ impl Nokkvi {
             // shape above so the boat overlay's pixel coordinate space lines
             // up with the visualizer area. `boat_overlay()` returns a
             // fixed-size, self-clipping container, so we don't need an
-            // outer wrapper here.
+            // outer wrapper here. Insets the same `side_nav_inset` so the
+            // boat sails over the visualizer, not the sidebar.
             if self.boat.visible && self.engine.visualization_mode == VisualizationMode::Lines {
-                let boat_overlay_col = column![
+                let boat_inner = column![
                     container(iced::widget::Space::new()).height(Length::Fixed(spacer_height)),
                     crate::widgets::boat::boat_overlay::<Message>(
                         &self.boat,
-                        self.window.width,
+                        visualizer_width,
                         visualizer_height,
                         viz_opacity,
                         lines_mirror,
                     ),
+                ]
+                .width(Length::Fill)
+                .height(Length::Fill);
+                let boat_overlay_col = iced::widget::row![
+                    iced::widget::Space::new().width(Length::Fixed(side_nav_inset)),
+                    boat_inner,
                 ]
                 .width(Length::Fill)
                 .height(Length::Fill);
