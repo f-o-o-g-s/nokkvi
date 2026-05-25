@@ -19,12 +19,14 @@ use crate::{embedded_svg, theme, widgets::slot_list};
 /// Height of the description area at the bottom of the panel
 const DESCRIPTION_HEIGHT: f32 = 72.0;
 
-/// SM-style panel container: bg0_soft interior + bg1 border.
-/// Replaces `slot_list_background_container` for the settings-only panel look.
+/// Flat-redesign settings panel container: theme::bg0() body with a 1 px
+/// theme::border() outline and theme::ui_radius_lg() corners in rounded mode.
+/// Mirrors `.nk-settings` in the flat CSS — the panel itself is the visual
+/// container so individual rows can render flush to the edge.
 fn settings_panel_container(content: Element<'_, SettingsMessage>) -> Element<'_, SettingsMessage> {
-    let bg = theme::bg0_soft();
-    let border_color = theme::bg1();
-    let radius = theme::ui_border_radius();
+    let bg = theme::bg0();
+    let border_color = theme::border();
+    let radius = theme::ui_radius_lg();
     container(content)
         .width(Length::Fill)
         .height(Length::Fill)
@@ -204,17 +206,21 @@ impl SettingsPage {
         settings_panel_container(content.into())
     }
 
-    /// Render the breadcrumb bar based on the current nav stack.
+    /// Render the breadcrumb / search bar at the top of the settings panel.
+    /// Matches the design's `.nk-settings-bar`: theme::bg0_hard() background,
+    /// 1 px theme::border() bottom separator, italic title font for the
+    /// current segment, mono fg2 separators, plus an inline search field.
     ///
     /// Level 1: "Settings"
-    /// Level 2: "‹ General"
-    /// Sub-list: "‹ General  ›  Sub-item"
+    /// Level 2: "‹ Settings › General"
+    /// Sub-list: "‹ Settings › General › Sub-item"
     pub(super) fn breadcrumb_header(&self) -> Element<'_, SettingsMessage> {
-        let font = theme::ui_font();
-        let label_size = 13.0;
+        let body_font = theme::ui_font();
+        let label_size = 14.0;
         let separator_size = 12.0;
 
-        let dim_color = theme::fg4();
+        let dim_color = theme::fg3();
+        let mid_color = theme::fg2();
         let active_color = theme::fg0();
 
         // Build segments from nav stack
@@ -236,11 +242,16 @@ impl SettingsPage {
             segments.push(&sub.label);
         }
 
-        let mut content = row![Space::new().width(Length::Fixed(12.0))];
+        let mut content = row![Space::new().width(Length::Fixed(16.0))];
 
         // Back arrow if we can navigate back
         if can_go_back {
-            content = content.push(text("‹  ").size(separator_size + 2.0).color(dim_color));
+            content = content.push(
+                text("‹  ")
+                    .size(separator_size + 4.0)
+                    .color(dim_color)
+                    .font(body_font),
+            );
         }
 
         let last_idx = segments.len().saturating_sub(1);
@@ -248,21 +259,33 @@ impl SettingsPage {
             let is_last = i == last_idx;
 
             if i > 0 {
-                content = content.push(text("  ›  ").size(separator_size).color(dim_color));
+                content = content.push(
+                    text("  ›  ")
+                        .size(separator_size)
+                        .color(dim_color)
+                        .font(body_font),
+                );
             }
 
             if is_last {
+                // Last segment — bold italic title font to mirror the
+                // design's `.nk-crumb` (font-title + italic + 600).
                 content = content.push(
                     text(*segment)
                         .size(label_size)
                         .font(Font {
                             weight: Weight::Bold,
-                            ..font
+                            ..theme::title_font()
                         })
                         .color(active_color),
                 );
             } else {
-                content = content.push(text(*segment).size(label_size).font(font).color(dim_color));
+                content = content.push(
+                    text(*segment)
+                        .size(label_size - 1.0)
+                        .font(body_font)
+                        .color(mid_color),
+                );
             }
         }
 
@@ -277,27 +300,51 @@ impl SettingsPage {
         );
         content = content.push(search_bar);
 
-        content = content.push(Space::new().width(Length::Fixed(12.0)));
+        content = content.push(Space::new().width(Length::Fixed(16.0)));
 
         let content = content
             .align_y(Alignment::Center)
-            .height(Length::Fixed(38.0));
+            .height(Length::Fixed(BREADCRUMB_HEIGHT - 1.0));
+
+        // bg0_hard chrome bar + bottom border separator.
+        let bar = container(content)
+            .width(Length::Fill)
+            .height(Length::Fixed(BREADCRUMB_HEIGHT - 1.0))
+            .style(|_: &iced::Theme| container::Style {
+                background: Some(theme::bg0_hard().into()),
+                ..Default::default()
+            });
+
+        let separator = container(Space::new())
+            .width(Length::Fill)
+            .height(Length::Fixed(1.0))
+            .style(|_: &iced::Theme| container::Style {
+                background: Some(theme::border().into()),
+                ..Default::default()
+            });
+
+        let stacked = column![bar, separator]
+            .width(Length::Fill)
+            .height(Length::Fixed(BREADCRUMB_HEIGHT));
 
         // Clickable breadcrumb when we can go back
         if can_go_back {
-            button(content)
+            button(stacked)
                 .on_press(SettingsMessage::Escape)
                 .style(transparent_button_style)
                 .padding(0)
                 .width(Length::Fill)
                 .into()
         } else {
-            container(content).width(Length::Fill).into()
+            container(stacked).width(Length::Fill).into()
         }
     }
 
-    /// Description area at the bottom of the panel — shows the focused item's description
-    /// with an SM-style exit button on the right side.
+    /// Footer panel — shows the focused row's description on the left and a
+    /// flat "Exit (Esc)" button on the right. Mirrors the design's
+    /// `.nk-settings-footer`: theme::bg0_hard() bg, 1 px theme::border() top
+    /// separator, 72 px min height, mono 12 px description, pill (rounded) or
+    /// square (flat) exit button at the right.
     fn description_area(&self) -> Element<'_, SettingsMessage> {
         let desc = if self.description_text.is_empty() {
             " " // Maintain height even when empty
@@ -309,76 +356,59 @@ impl SettingsPage {
             .width(Length::Fill)
             .height(Length::Fixed(1.0))
             .style(|_: &iced::Theme| container::Style {
-                background: Some(
-                    iced::Color {
-                        a: 0.25,
-                        ..theme::accent()
-                    }
-                    .into(),
-                ),
+                background: Some(theme::border().into()),
                 ..Default::default()
             });
 
-        let desc_text = text(desc)
-            .size(11.0)
-            .color(theme::accent_bright())
-            .font(Font {
-                weight: Weight::Medium,
-                ..theme::ui_font()
-            });
+        let desc_text = text(desc).size(12.0).color(theme::fg2()).font(Font {
+            weight: Weight::Medium,
+            ..theme::ui_font()
+        });
 
-        // SM-style exit button — always visible, sends Escape
+        // Flat Exit button matching `.nk-settings-footer .exit`.
         let exit_icon_size = 12.0;
-        let exit_label_size = 10.0;
+        let exit_label_size = 11.0;
         let exit_btn = button(
             row![
                 embedded_svg::svg_widget("assets/icons/log-out.svg")
                     .width(Length::Fixed(exit_icon_size))
                     .height(Length::Fixed(exit_icon_size))
                     .style(move |_theme, _status| svg::Style {
-                        color: Some(theme::fg3()),
+                        color: Some(theme::fg2()),
                     }),
                 text("Exit (Esc)")
                     .size(exit_label_size)
-                    .color(theme::fg3())
+                    .color(theme::fg0())
                     .font(Font {
                         weight: Weight::Medium,
                         ..theme::ui_font()
                     }),
             ]
-            .spacing(4)
+            .spacing(8)
             .align_y(Alignment::Center),
         )
         .on_press(SettingsMessage::Escape)
         .style(|_theme: &iced::Theme, status: button::Status| {
             let is_hovered = matches!(status, button::Status::Hovered);
-            let bg_alpha = if is_hovered { 0.35 } else { 0.20 };
-            let border_alpha = if is_hovered { 0.6 } else { 0.35 };
             button::Style {
                 background: Some(
-                    Color {
-                        a: bg_alpha,
-                        ..theme::accent()
+                    if is_hovered {
+                        theme::bg1()
+                    } else {
+                        theme::bg0()
                     }
                     .into(),
                 ),
                 border: Border {
-                    color: Color {
-                        a: border_alpha,
-                        ..theme::accent()
-                    },
+                    color: theme::border(),
                     width: 1.0,
-                    radius: theme::ui_border_radius(),
+                    radius: theme::ui_radius_pill(),
                 },
-                text_color: if is_hovered {
-                    theme::fg2()
-                } else {
-                    theme::fg3()
-                },
+                text_color: theme::fg0(),
                 ..Default::default()
             }
         })
-        .padding(Padding::new(4.0).left(8.0).right(8.0));
+        .padding(Padding::new(6.0).left(14.0).right(14.0));
 
         let desc_row = row![
             container(desc_text)
@@ -386,9 +416,9 @@ impl SettingsPage {
                 .height(Length::Fill)
                 .clip(true)
                 .align_y(Alignment::Center)
-                .padding(Padding::new(0.0).left(12.0)),
+                .padding(Padding::new(0.0).left(24.0)),
             exit_btn,
-            Space::new().width(Length::Fixed(8.0)),
+            Space::new().width(Length::Fixed(16.0)),
         ]
         .align_y(Alignment::Center)
         .height(Length::Fill);
@@ -399,21 +429,15 @@ impl SettingsPage {
             .padding(Padding::new(0.0))
             .align_y(Alignment::Center)
             .style(|_: &iced::Theme| container::Style {
-                background: Some(
-                    iced::Color {
-                        a: 0.15,
-                        ..theme::accent()
-                    }
-                    .into(),
-                ),
+                background: Some(theme::bg0_hard().into()),
                 border: Border {
                     radius: {
-                        let r = theme::ui_border_radius();
+                        let r = theme::ui_radius_lg();
                         iced::border::Radius {
                             top_left: 0.0,
                             top_right: 0.0,
-                            bottom_left: r.top_left,
-                            bottom_right: r.top_right,
+                            bottom_left: r.bottom_left,
+                            bottom_right: r.bottom_right,
                         }
                     },
                     ..Default::default()

@@ -20,6 +20,7 @@ pub(crate) mod marquee_text;
 pub(crate) mod menu_constants;
 pub(crate) mod metadata_pill;
 pub(crate) mod nav_bar;
+pub(crate) mod pill_segmented_button;
 pub(crate) mod player_bar;
 pub(crate) mod player_modes_menu;
 pub(crate) mod scroll_indicator;

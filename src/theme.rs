@@ -276,7 +276,6 @@ static TITLE_FONT_CACHE: LazyLock<RwLock<(String, Font)>> =
 /// Get the title font — used for hero titles, view headers, modal headings.
 /// Falls back to `ui_font()` when no title font is configured (default).
 #[inline]
-#[allow(dead_code)] // Wired up by Wave-1 widget lanes; kept exported here.
 pub(crate) fn title_font() -> Font {
     let current_family = { TITLE_FONT_FAMILY.read().clone() };
 
@@ -395,7 +394,6 @@ pub(crate) fn ui_border_radius() -> iced::border::Radius {
 /// Scale step `xs` — 4 px in rounded mode, 0 in flat. Use for checkboxes,
 /// swatches, tiny chips.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn ui_radius_xs() -> iced::border::Radius {
     if is_rounded_mode() {
         R_XS.into()
