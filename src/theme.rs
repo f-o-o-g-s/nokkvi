@@ -620,6 +620,19 @@ pub(crate) fn is_top_nav() -> bool {
     UI_MODE.nav_layout.load(Ordering::Relaxed) == 0
 }
 
+/// Current navigation layout — bytes round-trip through `NavLayout::from_u8`
+/// (unknown bytes fall back to `Top`, the declared default; see the
+/// `atomic_u8_enum!` macro's forward-compat contract).
+///
+/// Test-only: production code uses `is_top_nav()` / `is_side_nav()` /
+/// `is_none_nav()` directly; the enum-shaped reader is here so chrome-math
+/// tests can save/restore the active variant in a single hop.
+#[cfg(test)]
+#[inline]
+pub(crate) fn nav_layout() -> NavLayout {
+    NavLayout::from_u8(UI_MODE.nav_layout.load(Ordering::Relaxed))
+}
+
 /// Set the navigation layout from a NavLayout enum value
 #[inline]
 pub(crate) fn set_nav_layout(layout: NavLayout) {

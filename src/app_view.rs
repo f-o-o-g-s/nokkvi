@@ -148,6 +148,38 @@ impl Nokkvi {
     // SECTION: View Functions
     // =========================================================================
 
+    /// Resolve the artwork handle for the player-bar mini-player section.
+    ///
+    /// Returns `None` whenever any of the following holds, in order:
+    /// - `track_info_display() != TrackInfoDisplay::MiniPlayer` (every other
+    ///   strip mode hides the mini-player section, so resolving artwork is
+    ///   wasted work — short-circuit before walking the queue).
+    /// - Radio playback is active (radio streams don't have album-keyed art).
+    /// - No `scrobble.current_song_id` (no track loaded).
+    /// - The current song isn't in `library.queue_songs`.
+    /// - Neither the large nor the mini LRU has a cached handle for the song's
+    ///   `album_id`.
+    ///
+    /// Otherwise returns the cached handle (large preferred, mini fallback so
+    /// the thumbnail still appears while the full-size art is in flight).
+    pub(crate) fn mini_player_artwork(&self) -> Option<iced::widget::image::Handle> {
+        use nokkvi_data::types::player_settings::TrackInfoDisplay;
+        if crate::theme::track_info_display() != TrackInfoDisplay::MiniPlayer {
+            return None;
+        }
+        if self.active_playback.is_radio() {
+            return None;
+        }
+        let sid = self.scrobble.current_song_id.as_deref()?;
+        let song = self.library.queue_songs.iter().find(|s| s.id == sid)?;
+        self.artwork
+            .large_artwork
+            .snapshot
+            .get(&song.album_id)
+            .or_else(|| self.artwork.album_art.snapshot.get(&song.album_id))
+            .cloned()
+    }
+
     /// Horizontal extent of the content pane — everything inside the outer
     /// chrome that the per-view widgets render into.
     ///
@@ -309,28 +341,11 @@ impl Nokkvi {
 
         let has_queue = !self.library.queue_songs.is_empty();
 
-        // Artwork handle for the `MiniPlayer` track-info display mode —
-        // looks up the current song's album_id in the LRU caches (large
-        // preferred, mini fallback so the thumbnail stays warm even when
-        // the full-size art hasn't loaded yet). `None` when radio mode is
-        // active, no song is loaded, or no cached art exists.
-        let mini_player_artwork: Option<iced::widget::image::Handle> =
-            if self.active_playback.is_radio() {
-                None
-            } else {
-                self.scrobble
-                    .current_song_id
-                    .as_deref()
-                    .and_then(|sid| self.library.queue_songs.iter().find(|s| s.id == sid))
-                    .and_then(|song| {
-                        self.artwork
-                            .large_artwork
-                            .snapshot
-                            .get(&song.album_id)
-                            .or_else(|| self.artwork.album_art.snapshot.get(&song.album_id))
-                            .cloned()
-                    })
-            };
+        // Mode-gated mini-player artwork handle — see
+        // `Nokkvi::mini_player_artwork()` for the resolution rules. Gated on
+        // `TrackInfoDisplay::MiniPlayer` inside the method so other strip
+        // modes short-circuit before walking the queue.
+        let mini_player_artwork: Option<iced::widget::image::Handle> = self.mini_player_artwork();
 
         let player_bar_data = widgets::PlayerBarViewData {
             playback_position: self.playback.position,

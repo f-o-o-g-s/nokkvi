@@ -24,6 +24,7 @@ mod navigation;
 mod page_loader;
 mod playback;
 mod queue;
+mod redesign_chrome;
 mod roulette;
 mod session;
 mod settings;
