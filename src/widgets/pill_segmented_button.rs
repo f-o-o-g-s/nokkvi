@@ -86,9 +86,7 @@ where
     // Chip group: tight gap between chips matches the design's
     // adjacent-cell look in flat mode + rounded-mode 4 px pill gap.
     let chip_gap: f32 = if theme::is_rounded_mode() { 4.0 } else { 0.0 };
-    let mut chip_row = row![]
-        .spacing(chip_gap)
-        .align_y(Alignment::Center);
+    let mut chip_row = row![].spacing(chip_gap).align_y(Alignment::Center);
 
     let cursor_index = match variant {
         PillVariant::Multi { cursor_index } => cursor_index,
@@ -123,7 +121,11 @@ where
 {
     let is_on = option.on;
     let is_cursored = cursor_index == Some(index);
-    let effective_opacity = if params.is_center { 1.0 } else { params.opacity };
+    let effective_opacity = if params.is_center {
+        1.0
+    } else {
+        params.opacity
+    };
 
     // Color resolution — selected wins over cursored on label color (cursored
     // border still signals which chip Enter targets, but the green fill is the
@@ -152,7 +154,11 @@ where
     // Chip label — uppercased manually since iced has no text-transform.
     // Mono comes from `ui_font()`; weight bumps to Medium when on so the chip
     // pops a bit visually without changing layout width significantly.
-    let label_weight = if is_on { Weight::Medium } else { Weight::Normal };
+    let label_weight = if is_on {
+        Weight::Medium
+    } else {
+        Weight::Normal
+    };
     let label = text(option.display.to_uppercase())
         .size(params.font_size)
         .font(Font {

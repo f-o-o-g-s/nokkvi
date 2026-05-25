@@ -360,13 +360,10 @@ impl SettingsPage {
                 ..Default::default()
             });
 
-        let desc_text = text(desc)
-            .size(12.0)
-            .color(theme::fg2())
-            .font(Font {
-                weight: Weight::Medium,
-                ..theme::ui_font()
-            });
+        let desc_text = text(desc).size(12.0).color(theme::fg2()).font(Font {
+            weight: Weight::Medium,
+            ..theme::ui_font()
+        });
 
         // Flat Exit button matching `.nk-settings-footer .exit`.
         let exit_icon_size = 12.0;

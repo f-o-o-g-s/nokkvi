@@ -17,9 +17,7 @@ use super::{
 use crate::{
     embedded_svg, theme,
     widgets::{
-        pill_segmented_button::{
-            PillOption, PillRowParams, PillVariant, pill_segmented_button,
-        },
+        pill_segmented_button::{PillOption, PillRowParams, PillVariant, pill_segmented_button},
         slot_list,
     },
 };
@@ -275,7 +273,7 @@ fn render_l2_section_header<'a>(
 
     // Bottom border() separator pinning the small-caps text to the panel
     // surface.
-    row_with_bottom_separator(header_body.into(), false).into()
+    row_with_bottom_separator(header_body.into(), false)
 }
 
 /// L1 category landing row — hero treatment matching `.nk-cat-row` in the
@@ -348,9 +346,7 @@ fn render_l1_category_row<'a>(
         .color(desc_color)
         .wrapping(Wrapping::None);
 
-    let text_col = column![title, desc_widget]
-        .spacing(4)
-        .width(Length::Fill);
+    let text_col = column![title, desc_widget].spacing(4).width(Length::Fill);
 
     let content = row![
         Space::new().width(Length::Fixed(16.0)),
@@ -753,8 +749,12 @@ fn render_numeric_row<'a>(
     let track: Option<Element<'a, SettingsMessage>> =
         numeric_normalized_fraction(value).map(|frac| numeric_mini_track(frac, eff_opacity));
 
-    let mut layout = row![left_arrow, Space::new().width(Length::Fixed(8.0)), value_badge,]
-        .align_y(Alignment::Center);
+    let mut layout = row![
+        left_arrow,
+        Space::new().width(Length::Fixed(8.0)),
+        value_badge,
+    ]
+    .align_y(Alignment::Center);
     if let Some(track_el) = track {
         layout = layout
             .push(Space::new().width(Length::Fixed(10.0)))
@@ -1235,9 +1235,13 @@ fn hotkey_capture_badge<'a>(
     .align_y(Alignment::Center);
 
     if let Some(h) = hint {
-        body = body.push(Space::new().width(Length::Fixed(8.0))).push(
-            slot_list::slot_list_text(h.to_string(), hint_size, hint_color),
-        );
+        body = body
+            .push(Space::new().width(Length::Fixed(8.0)))
+            .push(slot_list::slot_list_text(
+                h.to_string(),
+                hint_size,
+                hint_color,
+            ));
     }
 
     container(body)
