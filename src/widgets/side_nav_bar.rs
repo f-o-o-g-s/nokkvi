@@ -57,7 +57,6 @@ pub(crate) const SIDE_NAV_TOTAL_WIDTH: f32 = SIDE_NAV_WIDTH_ROUNDED + SIDE_NAV_B
 /// the active chrome mode. Use this in new code instead of the
 /// `SIDE_NAV_TOTAL_WIDTH` constant; the constant stays as a stable
 /// (worst-case) symbol for `app_view.rs` until L6 migrates that file.
-#[allow(dead_code)]
 #[inline]
 pub(crate) fn side_nav_total_width() -> f32 {
     side_nav_width() + SIDE_NAV_BORDER
