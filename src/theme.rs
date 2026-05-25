@@ -1207,14 +1207,17 @@ pub(crate) fn container_bg0_hard(_theme: &Theme) -> container::Style {
     }
 }
 
-/// Themed tooltip container style — dark/light aware with 3D border
+/// Themed tooltip container style — `bg0_hard` fill, `theme::border()`
+/// hairline, and the design's smallest corner radius. Migrated onto the
+/// shared chrome tokens so tooltip corners pick up the active theme's
+/// per-palette border color and the global flat-vs-rounded toggle.
 pub(crate) fn container_tooltip(_theme: &Theme) -> container::Style {
     container::Style {
         background: Some(bg0_hard().into()),
         border: iced::Border {
-            color: bg3(),
+            color: border(),
             width: 1.0,
-            radius: 2.0.into(),
+            radius: ui_radius_xs(),
         },
         text_color: Some(fg1()),
         ..Default::default()
