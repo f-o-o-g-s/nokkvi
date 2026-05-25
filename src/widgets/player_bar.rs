@@ -13,8 +13,13 @@ use iced::{
 
 use crate::{theme, widgets, widgets::hover_overlay::HoverOverlay};
 
-// Player bar dimensions (flat redesign)
-const BASE_PLAYER_BAR_HEIGHT: f32 = 64.0;
+// Player bar dimensions (flat redesign). 72 px in both modes — the design
+// CSS specified 64 in flat mode and 72 in rounded, but the 8 px difference
+// makes the 44 px mode buttons feel cramped (10 px gap each side) in flat
+// vs. floating (14 px gap each side) in rounded. Using 72 in both modes
+// gives the transport + mode buttons the same airy breathing room across
+// the two visual languages.
+const BASE_PLAYER_BAR_HEIGHT: f32 = 72.0;
 const CONTROL_ROW_HEIGHT: f32 = 44.0;
 /// Transport button (prev/play/pause/stop/next) — 40×40, borderless flat icon.
 const TRANSPORT_SIZE: f32 = 40.0;
@@ -35,15 +40,12 @@ const SCROLL_VOLUME_STEP_LINES: f32 = 0.01;
 /// Volume change per scroll pixel (e.g. trackpad smooth scrolling)
 const SCROLL_VOLUME_STEP_PIXELS: f32 = 0.001;
 
-/// Base player-bar height: 64 px in flat mode (per design CSS `.nk-player`),
-/// 72 px in rounded mode (extra 4 px padding above/below the pill capsules).
+/// Base player-bar height: 72 px in both modes (see
+/// `BASE_PLAYER_BAR_HEIGHT` rationale). Kept as a function so future
+/// mode-conditional changes don't need to chase call sites.
 #[inline]
 fn base_player_bar_height() -> f32 {
-    if theme::is_rounded_mode() {
-        72.0
-    } else {
-        BASE_PLAYER_BAR_HEIGHT
-    }
+    BASE_PLAYER_BAR_HEIGHT
 }
 
 /// Dynamic player bar height: base 64/72 px, plus info strip when track display
