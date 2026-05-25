@@ -1223,9 +1223,12 @@ pub(crate) fn container_tooltip(_theme: &Theme) -> container::Style {
 
 /// Full-width horizontal separator line.
 ///
-/// Renders as a `bg1`-colored container with the given pixel height.
-/// Replaces the inline `container(space()).width(Fill).height(Fixed(h)).style(bg1)` pattern
-/// that was duplicated across `player_bar.rs`, `track_info_strip.rs`, and `app_view.rs`.
+/// Renders as a `border()`-colored container with the given pixel height.
+/// Replaces the inline `container(space()).width(Fill).height(Fixed(h)).style(bg1)`
+/// pattern that was duplicated across `player_bar.rs`, `track_info_strip.rs`,
+/// and `app_view.rs`. The redesign aligned every 1 px chrome rule onto the
+/// shared `theme::border()` token, so this helper now reads the same
+/// hairline color as the modal/menu/nav-bar separator family.
 pub(crate) fn horizontal_separator<'a, M: 'a>(height: f32) -> iced::Element<'a, M> {
     use iced::{
         Length,
@@ -1235,15 +1238,17 @@ pub(crate) fn horizontal_separator<'a, M: 'a>(height: f32) -> iced::Element<'a, 
         .width(Length::Fill)
         .height(Length::Fixed(height))
         .style(move |_| container::Style {
-            background: Some(bg1().into()),
+            background: Some(border().into()),
             ..Default::default()
         })
         .into()
 }
 
-/// Fixed-height vertical separator line (1px wide, `bg3` colored).
+/// Fixed-height vertical separator line (1px wide, `border()` colored).
 ///
-/// Used inside info strip rows to delineate fields.
+/// Used inside info strip rows to delineate fields. Shares the same
+/// `theme::border()` hairline color as `horizontal_separator` and the
+/// rest of the chrome separator family.
 pub(crate) fn vertical_separator<'a, M: 'a>(height: f32) -> iced::Element<'a, M> {
     use iced::{
         Length,
@@ -1253,7 +1258,7 @@ pub(crate) fn vertical_separator<'a, M: 'a>(height: f32) -> iced::Element<'a, M>
         .width(Length::Fixed(1.0))
         .height(Length::Fixed(height))
         .style(move |_| container::Style {
-            background: Some(bg3().into()),
+            background: Some(border().into()),
             ..Default::default()
         })
         .into()
