@@ -1,5 +1,8 @@
 name = "Kanagawa"
 
+[dark]
+border = "#101015"
+
 [dark.background]
 default = "#1f1f28"
 hard = "#17171e"
@@ -46,6 +49,9 @@ border_color = "#17171e"
 border_opacity = 1.0
 led_border_opacity = 1.0
 peak_gradient_colors = ["#ff9e3b", "#ff9e3b", "#cc7f34", "#cc7f34", "#dd7e00", "#dd7e00"]
+
+[light]
+border = "#bdb893"
 
 [light.background]
 default = "#f2ecbc"

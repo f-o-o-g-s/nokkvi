@@ -1,5 +1,8 @@
 name = "Ember"
 
+[dark]
+border = "#080706"
+
 [dark.background]
 default = "#181412"
 hard = "#0c0a09"
@@ -45,6 +48,9 @@ border_color = "#0c0a09"
 border_opacity = 1.0
 led_border_opacity = 1
 peak_gradient_colors = ["#7c2d12", "#b91c1c", "#ea580c", "#f59e0b", "#fde047", "#22c55e"]
+
+[light]
+border = "#d0d0cf"
 
 [light.background]
 default = "#faf7f2"

@@ -1,5 +1,8 @@
 name = "Solarized"
 
+[dark]
+border = "#00161c"
+
 [dark.background]
 default = "#002b36"
 hard = "#002029"
@@ -46,6 +49,9 @@ border_color = "#002029"
 border_opacity = 1.0
 led_border_opacity = 1.0
 peak_gradient_colors = ["#b58900", "#b58900", "#906f20", "#906f20", "#9b6900", "#9b6900"]
+
+[light]
+border = "#c6c0b1"
 
 [light.background]
 default = "#fdf6e3"

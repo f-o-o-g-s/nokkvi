@@ -1,5 +1,8 @@
 name = "Dracula"
 
+[dark]
+border = "#15161c"
+
 [dark.background]
 default = "#282a36"
 hard = "#1e2029"
@@ -46,6 +49,9 @@ border_color = "#1e2029"
 border_opacity = 1.0
 led_border_opacity = 1.0
 peak_gradient_colors = ["#f1fa8c", "#f1fa8c", "#c1c973", "#c1c973", "#d0d96b", "#d0d96b"]
+
+[light]
+border = "#191b22"
 
 [light.background]
 default = "#282a36"

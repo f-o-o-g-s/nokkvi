@@ -1,5 +1,8 @@
 name = "Tokyo Night Storm"
 
+[dark]
+border = "#12151e"
+
 [dark.background]
 default = "#24283b"
 hard = "#1b1e2c"
@@ -46,6 +49,9 @@ border_color = "#1b1e2c"
 border_opacity = 1.0
 led_border_opacity = 1.0
 peak_gradient_colors = ["#e0af68", "#e0af68", "#b48d59", "#b48d59", "#c68d30", "#c68d30"]
+
+[light]
+border = "#a6a7aa"
 
 [light.background]
 default = "#d5d6db"

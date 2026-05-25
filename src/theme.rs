@@ -260,6 +260,60 @@ pub(crate) fn font_family() -> String {
     FONT_FAMILY.read().clone()
 }
 
+// ----------------------------------------------------------------------------
+// Title font (independent of body font — supports italic/serif title
+// typefaces like IBM Plex Sans without affecting JetBrains-Mono-style body text)
+// ----------------------------------------------------------------------------
+
+/// Title-font family. When empty, `title_font()` falls back to `ui_font()`
+/// so unconfigured themes behave like the body font.
+static TITLE_FONT_FAMILY: LazyLock<RwLock<String>> = LazyLock::new(|| RwLock::new(String::new()));
+
+/// Cached title-font storage to avoid leaking memory on every reload.
+static TITLE_FONT_CACHE: LazyLock<RwLock<(String, Font)>> =
+    LazyLock::new(|| RwLock::new((String::new(), Font::DEFAULT)));
+
+/// Get the title font — used for hero titles, view headers, modal headings.
+/// Falls back to `ui_font()` when no title font is configured (default).
+#[inline]
+#[allow(dead_code)] // Wired up by Wave-1 widget lanes; kept exported here.
+pub(crate) fn title_font() -> Font {
+    let current_family = { TITLE_FONT_FAMILY.read().clone() };
+
+    if current_family.is_empty() {
+        // No title font configured — delegate to body font (which has its own cache).
+        return ui_font();
+    }
+
+    {
+        let cache = TITLE_FONT_CACHE.read();
+        if cache.0 == current_family {
+            return cache.1;
+        }
+    }
+
+    // Slow path: title font changed, update cache.
+    let new_font = Font::with_family(iced::font::Family::name(&current_family));
+    let mut cache = TITLE_FONT_CACHE.write();
+    *cache = (current_family, new_font);
+
+    new_font
+}
+
+/// Set the title-font family (called from settings / config loading once
+/// the title-font setting is wired up).
+#[allow(dead_code)] // Wired up by L5 settings lane.
+pub(crate) fn set_title_font_family(family: String) {
+    let mut guard = TITLE_FONT_FAMILY.write();
+    *guard = family;
+}
+
+/// Get the current title-font family name (for settings UI display).
+#[allow(dead_code)] // Wired up by L5 settings lane.
+pub(crate) fn title_font_family() -> String {
+    TITLE_FONT_FAMILY.read().clone()
+}
+
 // ============================================================================
 // Light Mode Control
 // ============================================================================
@@ -282,8 +336,34 @@ pub(crate) fn set_light_mode(enabled: bool) {
 // Rounded Mode Control
 // ============================================================================
 
-/// Radius value applied to container borders when rounded mode is enabled
+/// Legacy single-radius value (kept for `ui_border_radius()` back-compat).
+/// New code prefers the scale helpers (`ui_radius_sm`, `ui_radius_md`, …).
 const ROUNDED_RADIUS: f32 = 6.0;
+
+// ----------------------------------------------------------------------------
+// Radius scale (flat redesign — rounded-mode values per element role)
+// ----------------------------------------------------------------------------
+// Each helper returns the corresponding radius in rounded mode, `0.0` in flat
+// mode, so call sites stay mode-agnostic.
+
+// Scale constants are wired up by the Wave-1 widget lanes — silence the
+// dead-code warnings until those callers land on `redesign`.
+
+/// xs (4 px) — checkboxes, hex swatches, small pips.
+#[allow(dead_code)]
+const R_XS: f32 = 4.0;
+/// sm (8 px) — mode buttons, badges, hover pills.
+#[allow(dead_code)]
+const R_SM: f32 = 8.0;
+/// md (12 px) — cards, popovers, album art, category tiles.
+#[allow(dead_code)]
+const R_MD: f32 = 12.0;
+/// lg (18 px) — list shells, modal frames, hero panels.
+#[allow(dead_code)]
+const R_LG: f32 = 18.0;
+/// pill (999 px) — tabs, transport buttons, search, sliders.
+#[allow(dead_code)]
+const R_PILL: f32 = 999.0;
 
 /// Returns true if rounded corners mode is enabled
 #[inline]
@@ -298,10 +378,11 @@ pub(crate) fn set_rounded_mode(enabled: bool) {
     debug!(" Rounded mode changed: rounded_mode={}", enabled);
 }
 
-/// Get the UI border radius based on current rounded mode setting.
+/// Get the legacy UI border radius (6 px in rounded mode, 0 in flat).
 ///
-/// Returns uniform `ROUNDED_RADIUS` when enabled, `0.0` when disabled.
-/// Use this instead of hardcoding `radius: 0.0.into()` in container styles.
+/// Kept for back-compat while widgets migrate to the scale helpers
+/// (`ui_radius_xs/sm/md/lg/pill`). New code should call the role-appropriate
+/// helper directly.
 #[inline]
 pub(crate) fn ui_border_radius() -> iced::border::Radius {
     if is_rounded_mode() {
@@ -309,6 +390,96 @@ pub(crate) fn ui_border_radius() -> iced::border::Radius {
     } else {
         0.0.into()
     }
+}
+
+/// Scale step `xs` — 4 px in rounded mode, 0 in flat. Use for checkboxes,
+/// swatches, tiny chips.
+#[inline]
+#[allow(dead_code)]
+pub(crate) fn ui_radius_xs() -> iced::border::Radius {
+    if is_rounded_mode() {
+        R_XS.into()
+    } else {
+        0.0.into()
+    }
+}
+
+/// Scale step `sm` — 8 px in rounded mode, 0 in flat. Use for mode buttons,
+/// badges, format pills.
+#[inline]
+#[allow(dead_code)]
+pub(crate) fn ui_radius_sm() -> iced::border::Radius {
+    if is_rounded_mode() {
+        R_SM.into()
+    } else {
+        0.0.into()
+    }
+}
+
+/// Scale step `md` — 12 px in rounded mode, 0 in flat. Use for cards,
+/// popovers, album art, category tiles.
+#[inline]
+#[allow(dead_code)]
+pub(crate) fn ui_radius_md() -> iced::border::Radius {
+    if is_rounded_mode() {
+        R_MD.into()
+    } else {
+        0.0.into()
+    }
+}
+
+/// Scale step `lg` — 18 px in rounded mode, 0 in flat. Use for list shells,
+/// modal frames, stats strips.
+#[inline]
+#[allow(dead_code)]
+pub(crate) fn ui_radius_lg() -> iced::border::Radius {
+    if is_rounded_mode() {
+        R_LG.into()
+    } else {
+        0.0.into()
+    }
+}
+
+/// Scale step `pill` — 999 px in rounded mode, 0 in flat. Use for tabs,
+/// transport buttons, search field, slider handles.
+#[inline]
+#[allow(dead_code)]
+pub(crate) fn ui_radius_pill() -> iced::border::Radius {
+    if is_rounded_mode() {
+        R_PILL.into()
+    } else {
+        0.0.into()
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Chrome sizing (mode-sensitive)
+// ----------------------------------------------------------------------------
+
+/// Top nav-bar content height — 32 px in flat mode, 44 px in rounded mode
+/// (rounded mode adds 6 px padding above and below the pill capsules).
+///
+/// Additive helper; the legacy `widgets::slot_list::NAV_BAR_HEIGHT` constant
+/// stays at 32.0 for back-compat. Lanes that need the dynamic value migrate
+/// to this function (L2 nav-chrome, L3 slot-list-view-header).
+#[inline]
+#[allow(dead_code)]
+pub(crate) fn nav_bar_height() -> f32 {
+    if is_rounded_mode() { 44.0 } else { 32.0 }
+}
+
+/// Fixed height of the 24 px status strip rendered below the player bar
+/// (added by L6 integration). Holds the mono `MP3 | title: … | artist: …`
+/// summary line in both flat and rounded modes.
+#[allow(dead_code)]
+pub(crate) const STATUS_STRIP_HEIGHT: f32 = 24.0;
+
+/// Background color for the 24 px status strip — a touch darker than
+/// `bg0_hard()` for visual separation from the player bar above it.
+#[inline]
+#[allow(dead_code)]
+pub(crate) fn status_strip_bg() -> Color {
+    darken(bg0_hard(), 0.05)
 }
 
 // ============================================================================
@@ -998,6 +1169,19 @@ pub(crate) fn star() -> Color {
 #[inline]
 pub(crate) fn star_bright() -> Color {
     read_color(|t| t.star_bright)
+}
+
+// ============================================================================
+// Chrome Border (1px hairline separators)
+// ============================================================================
+
+/// Hairline border color used by chrome dividers (between nav bars, list
+/// rows, capsules). Per-theme in TOML, falls back to a darkened
+/// `bg0_hard()` when unset. Replaces hard-coded `#1a2024`-style dividers.
+#[inline]
+#[allow(dead_code)]
+pub(crate) fn border() -> Color {
+    read_color(|t| t.border)
 }
 
 // ============================================================================

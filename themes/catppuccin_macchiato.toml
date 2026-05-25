@@ -1,5 +1,8 @@
 name = "Catppuccin Macchiato"
 
+[dark]
+border = "#12141e"
+
 [dark.background]
 default = "#24273a"
 hard = "#1b1d2c"
@@ -46,6 +49,9 @@ border_color = "#1b1d2c"
 border_opacity = 1.0
 led_border_opacity = 1.0
 peak_gradient_colors = ["#eed49f", "#eed49f", "#bfaa82", "#bfaa82", "#cdb480", "#cdb480"]
+
+[light]
+border = "#bbbcbf"
 
 [light.background]
 default = "#eff1f5"

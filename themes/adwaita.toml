@@ -1,5 +1,8 @@
 name = "Adwaita"
 
+[dark]
+border = "#141416"
+
 [dark.background]
 hard = "#1d1d20"
 default = "#222226"
@@ -47,6 +50,9 @@ border_color = "#1d1d20"
 border_opacity = 1.0
 led_border_opacity = 1.0
 peak_gradient_colors = ["#ed333b", "#ff7800", "#f6d32d"]
+
+[light]
+border = "#d8d8d8"
 
 [light.background]
 hard = "#ffffff"

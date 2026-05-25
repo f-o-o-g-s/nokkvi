@@ -1,5 +1,8 @@
 name = "Catppuccin"
 
+[dark]
+border = "#101018"
+
 [dark.background]
 default = "#1e1e2e"
 hard = "#171723"
@@ -46,6 +49,9 @@ border_color = "#171723"
 border_opacity = 1.0
 led_border_opacity = 1.0
 peak_gradient_colors = ["#f9e2af", "#f9e2af", "#c7b58d", "#c7b58d", "#d8c190", "#d8c190"]
+
+[light]
+border = "#bbbcbf"
 
 [light.background]
 default = "#eff1f5"
