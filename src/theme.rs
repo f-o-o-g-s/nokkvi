@@ -460,10 +460,11 @@ pub(crate) fn ui_radius_pill() -> iced::border::Radius {
 /// (rounded mode adds 6 px padding above and below the pill capsules).
 ///
 /// Additive helper; the legacy `widgets::slot_list::NAV_BAR_HEIGHT` constant
-/// stays at 32.0 for back-compat. Lanes that need the dynamic value migrate
-/// to this function (L2 nav-chrome, L3 slot-list-view-header).
+/// stays at 32.0 for back-compat (still referenced from `app_view.rs` and
+/// `base_slot_list_layout.rs`). Lanes that need the dynamic value migrate
+/// to this function — `slot_list::chrome_height_with_header` (L3) is the
+/// first consumer.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn nav_bar_height() -> f32 {
     if is_rounded_mode() { 44.0 } else { 32.0 }
 }
@@ -1179,7 +1180,6 @@ pub(crate) fn star_bright() -> Color {
 /// rows, capsules). Per-theme in TOML, falls back to a darkened
 /// `bg0_hard()` when unset. Replaces hard-coded `#1a2024`-style dividers.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn border() -> Color {
     read_color(|t| t.border)
 }

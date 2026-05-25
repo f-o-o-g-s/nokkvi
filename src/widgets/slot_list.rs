@@ -184,11 +184,18 @@ impl SlotListSlotStyle {
                 1 => theme::bg1(),
                 _ => theme::bg2(),
             };
+            // Flat redesign: rows touch (`SLOT_SPACING == 0`) and use the
+            // 1 px `theme::border()` hairline as a shared separator. Iced
+            // draws borders fully inside the rect, so adjacent rows'
+            // borders overlap into one clean line. In rounded mode the
+            // outer list shell owns its `ui_radius_lg()` corners — inside
+            // the shell every row is still flush, so the per-row hairline
+            // continues to read as a single separator.
             Self {
                 bg_color: Color { a: opacity, ..base },
                 border_color: Color {
                     a: opacity,
-                    ..theme::bg3()
+                    ..theme::border()
                 },
                 border_width: 1.0,
                 border_radius: slot_list_border_radius(),
@@ -265,9 +272,18 @@ const MAX_SLOT_COUNT: usize = 29;
 // =========================================================================
 
 /// Spacing between slot list slots in the column layout (pixels).
-pub(crate) const SLOT_SPACING: f32 = 3.0;
+///
+/// Flat redesign target: rows touch (0 px gap) so the bottom-only
+/// `theme::border()` separators line up into a single continuous rule
+/// between rows. The constant is kept at `0.0` in both flat and rounded
+/// modes — rounded mode wraps the whole list in an outer shell instead
+/// of separating individual rows.
+pub(crate) const SLOT_SPACING: f32 = 0.0;
 
-/// Height of the navigation bar at the top of the window (28px content + 4px borders).
+/// Height of the navigation bar at the top of the window. Back-compat
+/// alias for [`theme::nav_bar_height`] — kept as a `const` because other
+/// lanes still reference the symbol directly. New call sites prefer the
+/// function so rounded mode picks up the 44 px height automatically.
 pub(crate) const NAV_BAR_HEIGHT: f32 = 32.0;
 
 /// Height of the view header row (sort controls, search, etc.).
@@ -289,7 +305,7 @@ use super::player_bar::player_bar_height;
 /// plus the TopBar strip (21+1) when TrackInfoDisplay::TopBar is active.
 pub(crate) fn chrome_height_with_header() -> f32 {
     if crate::theme::is_top_nav() {
-        NAV_BAR_HEIGHT + player_bar_height() + VIEW_HEADER_HEIGHT
+        crate::theme::nav_bar_height() + player_bar_height() + VIEW_HEADER_HEIGHT
     } else {
         // Side or None mode: no top nav bar, but TopBar track info strip may add height
         let top_bar_strip = if crate::theme::show_top_bar_strip() {
@@ -439,7 +455,7 @@ pub(crate) fn slot_list_view_with_scroll<'a, T, Message: Clone + 'a>(
     let slots = build_slot_list_slots(sl, items, config, &mut render_item, on_hover);
     let inner: Element<'a, Message> = container(
         column(slots)
-            .spacing(3)
+            .spacing(SLOT_SPACING)
             .width(Length::Fill)
             .height(Length::Fill),
     )
@@ -488,7 +504,7 @@ pub(crate) fn slot_list_view_with_drag<'a, T, Message: Clone + 'a>(
     let slots = build_slot_list_slots(sl, items, config, &mut render_item, on_hover);
 
     let drag_column: Element<'a, Message> = DragColumn::from_vec(slots)
-        .spacing(3)
+        .spacing(SLOT_SPACING)
         .width(Length::Fill)
         .height(Length::Fill)
         .on_drag(on_drag_event)
@@ -1588,10 +1604,10 @@ mod tests {
 
         let row_height = config.row_height();
         // Available = 900 - 234 - 10 (padding) = 656
-        // Spacing = 8 * 3 = 24
-        // Content = 632
-        // Row height = 632 / 9 ≈ 70.22
-        assert!((row_height - 70.222).abs() < 0.01);
+        // Spacing = 8 * 0 = 0 (flat-redesign rows touch)
+        // Content = 656
+        // Row height = 656 / 9 ≈ 72.888
+        assert!((row_height - 72.888).abs() < 0.01);
     }
 
     #[test]
@@ -1613,10 +1629,10 @@ mod tests {
     fn test_dynamic_slot_count_large_window() {
         // Large window: should get more than 9 slots to keep row height near TARGET
         let config = SlotListConfig::with_dynamic_slots(900.0, 134.0);
-        // Available = 900 - 134 - 10 = 756
-        // raw ≈ 756 / 70 ≈ 10.5 → try 11 and 13
-        // 11 slots: spacing=30, content=726, row=66
-        // 13 slots: spacing=36, content=720, row=55.4
+        // Available = 900 - 134 - 10 = 756, SLOT_SPACING=0 (flat redesign).
+        // raw ≈ 756 / 70 ≈ 10.8 → try 11 and 13
+        // 11 slots: spacing=0, content=756, row=68.7  (|68.7-70|=1.3)
+        // 13 slots: spacing=0, content=756, row=58.2  (|58.2-70|=11.8)
         // 11 is closer to 70 → 11
         assert_eq!(config.slot_count, 11);
         assert_eq!(config.center_slot, 5);
@@ -1626,10 +1642,10 @@ mod tests {
     fn test_dynamic_slot_count_medium_window() {
         // Medium window should get fewer slots
         let config = SlotListConfig::with_dynamic_slots(450.0, 134.0);
-        // Available = 450 - 134 - 10 = 306
-        // raw ≈ 306 / 70 ≈ 4.1 → try 3 and 5
-        // 3 slots: spacing=6, content=300, row=100 (|100-70|=30)
-        // 5 slots: spacing=12, content=294, row=58.8 (|58.8-70|=11.2)
+        // Available = 450 - 134 - 10 = 306, SLOT_SPACING=0.
+        // raw ≈ 306 / 70 ≈ 4.37 → try 3 and 5
+        // 3 slots: spacing=0, content=306, row=102 (|102-70|=32)
+        // 5 slots: spacing=0, content=306, row=61.2 (|61.2-70|=8.8)
         // 5 is closer → 5
         assert_eq!(config.slot_count, 5);
         assert_eq!(config.center_slot, 2);
@@ -1639,10 +1655,10 @@ mod tests {
     fn test_dynamic_slot_count_small_window() {
         // Very small window should fall back to minimum slots
         let config = SlotListConfig::with_dynamic_slots(250.0, 134.0);
-        // Available = 250 - 134 - 10 = 106
-        // raw ≈ 106 / 70 ≈ 1.3 → lower_odd=1, upper_odd=3
-        // 1 slot: spacing=0, content=106, row=106  (|106-70|=36)
-        // 3 slots: spacing=6, content=100, row=33.3 (< MIN 55)
+        // Available = 250 - 134 - 10 = 106, SLOT_SPACING=0.
+        // raw ≈ 106 / 70 ≈ 1.51 → lower_odd=1, upper_odd=3
+        // 1 slot: content=106, row=106  (|106-70|=36)
+        // 3 slots: content=106, row=35.3 (< MIN 55)
         // upper fails MIN → use lower_odd=1
         assert_eq!(config.slot_count, 1);
         assert_eq!(config.center_slot, 0);
