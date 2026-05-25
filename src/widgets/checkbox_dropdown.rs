@@ -46,18 +46,16 @@ use iced::{
 
 use crate::{
     theme,
-    widgets::{
-        menu_constants::{
-            MENU_ICON_SIZE, MENU_MIN_WIDTH, MENU_SHADOW, MENU_TEXT_SIZE,
-            inflate_for_shadow_around_child, visible_menu_layout,
-        },
-        sizes::ICON_BUTTON_SIZE,
+    widgets::menu_constants::{
+        MENU_ICON_SIZE, MENU_MIN_WIDTH, MENU_SHADOW, MENU_TEXT_SIZE,
+        inflate_for_shadow_around_child, visible_menu_layout,
     },
 };
 
-/// 40×40 trigger button chassis — matches the shared `ICON_BUTTON_SIZE`.
-const TRIGGER_SIZE: f32 = ICON_BUTTON_SIZE;
-const TRIGGER_ICON_SIZE: f32 = 20.0;
+/// Trigger-button glyph size (px). Matches the 18 px icon used by
+/// `view_header::header_icon_cell` so the column-dropdown trigger reads at
+/// the same visual weight as the sibling sort/refresh/center icons.
+const TRIGGER_ICON_SIZE: f32 = 18.0;
 
 /// Max width of the name column in two-column rows (px). Sized for the
 /// wider `LIBRARY_SELECTOR_WIDTH` so longer library names ("Longmont
@@ -266,14 +264,21 @@ where
     )
 }
 
-/// Build the trigger element — a 40×40 styled container holding the icon,
-/// wrapped in a tooltip that mirrors `view_header::flat_icon_button` chrome
-/// (without on_press, since the `CheckboxDropdown` Widget intercepts the
-/// left-click itself).
+/// Build the trigger element — a transparent icon cell sized to match the
+/// surrounding `view_header` icon buttons (44×50 flat / 36×36 rounded), with
+/// a `HoverOverlay` for the hover/press feedback. No `on_press` here —
+/// `CheckboxDropdown`'s widget impl intercepts the left-click itself.
 fn trigger_button<'a, Message: 'a>(
     icon_path: &'static str,
     tooltip_text: &'static str,
 ) -> Element<'a, Message> {
+    let is_rounded = theme::is_rounded_mode();
+    let (cell_width, cell_height) = if is_rounded {
+        (36.0_f32, 36.0_f32)
+    } else {
+        (44.0_f32, 50.0_f32)
+    };
+
     let icon = crate::embedded_svg::svg_widget(icon_path)
         .width(Length::Fixed(TRIGGER_ICON_SIZE))
         .height(Length::Fixed(TRIGGER_ICON_SIZE))
@@ -281,21 +286,17 @@ fn trigger_button<'a, Message: 'a>(
             color: Some(theme::fg0()),
         });
 
-    let trigger = container(icon)
-        .width(Length::Fixed(TRIGGER_SIZE))
-        .height(Length::Fixed(TRIGGER_SIZE))
-        .style(|_theme| container::Style {
-            background: Some(theme::bg0_soft().into()),
-            border: iced::Border {
-                radius: theme::ui_border_radius(),
-                ..Default::default()
-            },
-            ..Default::default()
-        })
-        .center(Length::Fixed(TRIGGER_SIZE));
+    let chassis = container(icon)
+        .width(Length::Fixed(cell_width))
+        .height(Length::Fixed(cell_height))
+        .align_x(iced::Alignment::Center)
+        .align_y(iced::Alignment::Center);
+
+    let with_hover = super::hover_overlay::HoverOverlay::new(chassis)
+        .border_radius(theme::ui_radius_pill());
 
     tooltip(
-        trigger,
+        with_hover,
         container(text(tooltip_text).size(11.0).font(theme::ui_font())).padding(4),
         tooltip::Position::Top,
     )

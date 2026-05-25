@@ -522,7 +522,8 @@ fn header_icon_cell<'a, Message: Clone + 'a>(
                 container(icon_svg)
                     .width(Length::Fixed(cell_width))
                     .height(Length::Fixed(cell_height))
-                    .center(Length::Fill),
+                    .align_x(Alignment::Center)
+                    .align_y(Alignment::Center),
             )
             .border_radius(theme::ui_radius_pill()),
         )
