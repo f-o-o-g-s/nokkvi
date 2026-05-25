@@ -1574,6 +1574,14 @@ pub(crate) fn toast_level_color(level: nokkvi_data::types::toast::ToastLevel) ->
     }
 }
 
+/// Sequential guard shared across the workspace's tests that flip globals
+/// like `set_light_mode` or mutate the `UI_MODE` atomics. `parking_lot`
+/// avoids std-lock poisoning if one test panics. Exposed `pub(crate)`
+/// (test-only) so chrome-math regression tests in `widgets::*` can pin
+/// the same atomics under the same lock.
+#[cfg(test)]
+pub(crate) static THEME_MODE_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use std::time::Instant;
@@ -1618,10 +1626,8 @@ mod tests {
         );
     }
 
-    /// Sequential guard for tests that flip globals like `set_light_mode` or
-    /// mutate the `UI_MODE` atomics. `parking_lot::Mutex` avoids std-lock
-    /// poisoning if one test panics.
-    static THEME_MODE_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+    // `THEME_MODE_LOCK` is now defined at module scope so other test modules
+    // in the crate can share the same guard.
 
     // ------------------------------------------------------------------------
     // atomic_u8_enum! macro — verifies that the loader/store impls emitted

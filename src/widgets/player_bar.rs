@@ -28,7 +28,7 @@ const TRANSPORT_SIZE: f32 = 40.0;
 const MODE_BUTTON_HEIGHT: f32 = 44.0;
 /// Height of the track info strip below the player bar in PlayerBar display mode.
 /// Re-uses the canonical constant from `track_info_strip.rs` to avoid drift.
-use super::track_info_strip::STRIP_HEIGHT as INFO_STRIP_HEIGHT;
+use super::track_info_strip::STRIP_HEIGHT_WITH_SEPARATOR as INFO_STRIP_WITH_SEPARATOR;
 
 /// Compact transport-button size used while in `MiniPlayer` display mode.
 /// 28 px (with a 14 px glyph) lets the buttons stack above the progress
@@ -163,15 +163,21 @@ fn base_player_bar_height() -> f32 {
     BASE_PLAYER_BAR_HEIGHT
 }
 
-/// Dynamic player bar height: base 64/72 px, plus info strip when track display
-/// is PlayerBar and nav layout is Side (in Top mode the nav bar already shows
-/// track/format info). MiniPlayer mode keeps the base height — the stacked
-/// transports + progress column is sized to fit by shrinking transport
-/// buttons and trimming the row's vertical padding.
+/// Dynamic player bar height: base 72 px, plus the chrome above and below
+/// the main row when `TrackInfoDisplay::PlayerBar` is active. MiniPlayer
+/// mode keeps the base height — the stacked transports + progress column
+/// is sized to fit by shrinking transport buttons and trimming the row's
+/// vertical padding.
+///
+/// When the strip is on, the rendered widget tree is:
+/// `column![top_separator(1), main_row(base), strip(STRIP_HEIGHT_WITH_SEPARATOR)]`.
+/// `STRIP_HEIGHT_WITH_SEPARATOR` already accounts for the strip's own
+/// 1 px separator-above, so the chrome math here must add 1 more px for
+/// the player-bar's own top separator.
 pub(crate) fn player_bar_height() -> f32 {
     let base = base_player_bar_height();
     if crate::theme::show_player_bar_strip() {
-        base + INFO_STRIP_HEIGHT
+        base + 1.0 + INFO_STRIP_WITH_SEPARATOR
     } else {
         base
     }
@@ -1323,11 +1329,16 @@ pub(crate) fn player_bar<'a>(
 
     let main_content: Element<'_, PlayerBarMessage> = if let Some(strip) = info_strip {
         // --- TRACK DISPLAY MODE ---
-        // Main row on top, info strip below (separator built into the strip).
+        // Main row on top, info strip below (separator built into the
+        // strip). `player_bar_height()` reserves
+        // `base + 1 + STRIP_HEIGHT_WITH_SEPARATOR`, the outer column
+        // consumes the leading 1 px for `top_separator`, and the strip
+        // accounts for its own separator-above — so this row gets the
+        // bare `base_height`.
         column![
             container(main_row)
                 .width(Length::Fill)
-                .height(Length::Fixed(base_height - 1.0))
+                .height(Length::Fixed(base_height))
                 .center_y(Length::Fill),
             strip,
         ]
@@ -1370,6 +1381,49 @@ pub(crate) fn player_bar<'a>(
             PlayerBarMessage::ScrollVolume(y)
         })
         .into()
+}
+
+#[cfg(test)]
+mod player_bar_height_tests {
+    use nokkvi_data::types::player_settings::TrackInfoDisplay;
+
+    use super::{
+        super::track_info_strip::STRIP_HEIGHT_WITH_SEPARATOR, BASE_PLAYER_BAR_HEIGHT,
+        player_bar_height,
+    };
+    use crate::theme::{THEME_MODE_LOCK, set_track_info_display, track_info_display};
+
+    /// Player bar with no strip reports just the base 72 px footprint.
+    #[test]
+    fn player_bar_height_without_strip_is_base() {
+        let _guard = THEME_MODE_LOCK.lock();
+        let saved = track_info_display();
+        set_track_info_display(TrackInfoDisplay::Off);
+        let got = player_bar_height();
+        set_track_info_display(saved);
+        assert!(
+            (got - BASE_PLAYER_BAR_HEIGHT).abs() < f32::EPSILON,
+            "strip-off height drifted: got {got}, expected {BASE_PLAYER_BAR_HEIGHT}",
+        );
+    }
+
+    /// When the PlayerBar strip is active, the rendered widget is
+    /// `column![top_separator(1), main_row(base), strip(STRIP_HEIGHT_WITH_SEPARATOR)]`.
+    /// `player_bar_height()` must account for all three rows so the
+    /// `chrome_height_with_header()` math (and the iced layout) lines up.
+    #[test]
+    fn player_bar_height_with_strip_includes_top_separator_and_strip_separator() {
+        let _guard = THEME_MODE_LOCK.lock();
+        let saved = track_info_display();
+        set_track_info_display(TrackInfoDisplay::PlayerBar);
+        let got = player_bar_height();
+        set_track_info_display(saved);
+        let expected = BASE_PLAYER_BAR_HEIGHT + 1.0 + STRIP_HEIGHT_WITH_SEPARATOR;
+        assert!(
+            (got - expected).abs() < f32::EPSILON,
+            "strip-on height drifted: got {got}, expected {expected}",
+        );
+    }
 }
 
 #[cfg(test)]
