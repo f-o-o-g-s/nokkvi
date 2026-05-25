@@ -230,7 +230,7 @@ impl<Message: Clone + 'static> Widget<Message, Theme, iced::Renderer> for Player
                 theme::accent_bright(),
             )
         } else {
-            (theme::bg0_hard(), theme::fg1(), theme::border())
+            (theme::bg0(), theme::fg1(), theme::border())
         };
 
         renderer.fill_quad(
