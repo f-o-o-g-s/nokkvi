@@ -1158,8 +1158,13 @@ fn render_hotkey_badge<'a>(
     hotkey_idle_badge(combo, font_size, opacity)
 }
 
-/// Idle key-cap badge — full accent fill, dark text, 96 px wide minimum
-/// matching `nk-w-key` in the flat CSS.
+/// Idle key-cap badge — full accent fill, dark text. Sizes to its
+/// content (so long combos like `Ctrl+Alt+Shift+F12` aren't clipped)
+/// with a 96 px floor matching `nk-w-key` in the flat CSS for typical
+/// short combos. The floor is enforced via a `Stack` containing a
+/// fixed-width invisible spacer below the styled badge — iced's stack
+/// takes the max intrinsic width of its children, so the badge widens
+/// past 96 px when the content demands it.
 fn hotkey_idle_badge<'a>(
     combo: &str,
     font_size: f32,
@@ -1170,13 +1175,15 @@ fn hotkey_idle_badge<'a>(
     let border = bg;
     let text_color = scale_alpha_local(theme::bg0_hard(), opacity);
 
-    container(
+    const MIN_WIDTH: f32 = 96.0;
+
+    let badge = container(
         slot_list::slot_list_text(combo.to_string(), badge_size, text_color).font(Font {
             weight: Weight::Medium,
             ..theme::ui_font()
         }),
     )
-    .width(Length::Fixed(96.0))
+    .width(Length::Shrink)
     .align_x(Alignment::Center)
     .align_y(Alignment::Center)
     .padding(Padding::new(5.0).left(14.0).right(14.0))
@@ -1188,7 +1195,14 @@ fn hotkey_idle_badge<'a>(
             radius: theme::ui_radius_pill(),
         },
         ..Default::default()
-    })
+    });
+
+    iced::widget::stack![
+        Space::new()
+            .width(Length::Fixed(MIN_WIDTH))
+            .height(Length::Fixed(0.0)),
+        badge,
+    ]
     .into()
 }
 
