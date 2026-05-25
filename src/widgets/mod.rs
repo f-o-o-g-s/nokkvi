@@ -19,6 +19,7 @@ pub(crate) mod marquee_text;
 pub(crate) mod menu_chrome;
 pub(crate) mod menu_constants;
 pub(crate) mod metadata_pill;
+pub(crate) mod modal_button;
 pub(crate) mod nav_bar;
 pub(crate) mod pill_segmented_button;
 pub(crate) mod player_bar;

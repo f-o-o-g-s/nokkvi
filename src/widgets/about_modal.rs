@@ -18,7 +18,8 @@ use crate::{
     theme,
     widgets::{
         hover_overlay::HoverOverlay,
-        sizes::{MODAL_ICON_BUTTON_SIZE, MODAL_ICON_SIZE_LARGE, MODAL_ICON_SIZE_SMALL},
+        modal_button::modal_icon_button,
+        sizes::{MODAL_ICON_SIZE_LARGE, MODAL_ICON_SIZE_SMALL},
     },
 };
 
@@ -313,37 +314,6 @@ fn info_row<'a>(label: &str, value: &str) -> Element<'a, AboutModalMessage> {
 /// previously open-coded for the close/copy buttons. `icon_size` lets
 /// callers distinguish the visually-dominant close (X) glyph from the
 /// secondary copy glyph by inner SVG size.
-fn modal_icon_button<'a>(
-    icon_path: &'static str,
-    icon_size: f32,
-    on_press: AboutModalMessage,
-) -> Element<'a, AboutModalMessage> {
-    mouse_area(
-        HoverOverlay::new(
-            container(
-                crate::embedded_svg::svg_widget(icon_path)
-                    .width(Length::Fixed(icon_size))
-                    .height(Length::Fixed(icon_size))
-                    .style(|_theme, _status| svg::Style {
-                        color: Some(theme::fg3()),
-                    }),
-            )
-            .width(Length::Fixed(MODAL_ICON_BUTTON_SIZE))
-            .height(Length::Fixed(MODAL_ICON_BUTTON_SIZE))
-            .style(|_theme| container::Style {
-                background: None,
-                border: iced::Border::default(),
-                ..Default::default()
-            })
-            .center(Length::Fixed(MODAL_ICON_BUTTON_SIZE)),
-        )
-        .border_radius(theme::ui_border_radius()),
-    )
-    .on_press(on_press)
-    .interaction(iced::mouse::Interaction::Pointer)
-    .into()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
