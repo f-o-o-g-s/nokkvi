@@ -19,7 +19,13 @@ define_labeled_enum! {
         PlayerBar { label: "Player Bar", wire: "player_bar" },
         /// Track info strip at the top of the window (side nav only)
         TopBar { label: "Top Bar", wire: "top_bar" },
-        /// Scrolling metadata overlay on the progress bar track
+        /// Scrolling metadata overlay on the progress bar track.
+        ///
+        /// **Deprecated** in the flat redesign — the rendering code was
+        /// removed and the runtime silently migrates this variant to
+        /// `PlayerBar` on settings load (`src/update/playback.rs`).
+        /// Kept here so existing TOML files containing
+        /// `track_info_display = "progress_track"` still parse cleanly.
         ProgressTrack { label: "Progress Track", wire: "progress_track" },
     }
 }
