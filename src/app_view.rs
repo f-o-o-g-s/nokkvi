@@ -568,7 +568,13 @@ impl Nokkvi {
                     if let Some(artwork_extent) = elevated_extent {
                         (0.0, (self.content_pane_width() - artwork_extent).max(0.0))
                     } else {
-                        (crate::widgets::slot_list::NAV_BAR_HEIGHT, self.window.width)
+                        // Use the live nav-bar height (32 flat / 44 rounded)
+                        // — the legacy `slot_list::NAV_BAR_HEIGHT` const is
+                        // pinned at 32 and lets the rounded-mode nav overlay
+                        // into the view header by 12 px, eating its top
+                        // margin and pushing the header pill flush against
+                        // the bottom of the nav bar.
+                        (crate::theme::nav_bar_height(), self.window.width)
                     };
                 let is_elevated = elevated_extent.is_some();
 
