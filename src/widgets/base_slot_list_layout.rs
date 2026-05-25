@@ -50,17 +50,10 @@ pub(crate) const ARTWORK_MAX_SIZE: f32 = 1000.0;
 /// Horizontal orientation. Vertical orientation uses padding-based separation
 /// instead (see `VERTICAL_ARTWORK_TOP_PAD`).
 pub(crate) const HORIZONTAL_ARTWORK_STRIPE: f32 = 2.0;
-
-/// Left/right inset for the Vertical-orientation artwork — matches the 10 px
-/// horizontal padding `slot_list_background_container` applies to the slot
-/// list, so the artwork's edges line up vertically with the slot rows.
-pub(crate) const VERTICAL_ARTWORK_SIDE_PAD: f32 = 10.0;
-
-/// Top inset for the Vertical-orientation artwork — matches the historic
-/// flat-mode `slot_list_background_container` bottom padding (10 px), so the
-/// gap above the artwork mirrors the side insets. Bottom inset is 0: the
-/// view header that follows has its own internal padding, so no extra gap
-/// is added between the artwork and the header.
+/// Top inset for the Vertical-orientation artwork — gives the artwork
+/// breathing room below whatever chrome sits above it. Bottom inset is 0:
+/// the view header that follows has its own internal padding, so no extra
+/// gap is added between the artwork and the header.
 pub(crate) const VERTICAL_ARTWORK_TOP_PAD: f32 = 10.0;
 
 /// Configuration for base slot list layout
@@ -170,15 +163,14 @@ pub(crate) fn resolve_artwork_layout(config: &BaseSlotListLayoutConfig) -> Optio
             }
 
             // Horizontal doesn't fit. Try the vertical fallback on portrait
-            // windows: mirror the formula on the other axis. The artwork is
-            // inset by `VERTICAL_ARTWORK_SIDE_PAD` on each side to line up
-            // with the slot rows, so the available width for the square is
-            // `window_width - 2 * pad`. Only triggers when the height-based
-            // square is at least that wide — otherwise the panel would show
-            // `bg0_soft` letterbox bars inside the inset, which looks
-            // awkward; hide instead.
+            // windows: mirror the formula on the other axis. The artwork
+            // runs edge-to-edge (matching the new slot-row geometry), so
+            // the available width is just `window_width`. Only triggers
+            // when the height-based square is at least that wide —
+            // otherwise the panel would show `bg0_soft` letterbox bars,
+            // which looks awkward; hide instead.
             if config.window_height > config.window_width {
-                let inset_width = (config.window_width - 2.0 * VERTICAL_ARTWORK_SIDE_PAD).max(0.0);
+                let inset_width = config.window_width.max(0.0);
                 let v_square_uncapped = (config.window_height * auto_max_pct).min(ARTWORK_MAX_SIZE);
 
                 if v_square_uncapped >= inset_width {
@@ -848,13 +840,13 @@ where
         .into()
 }
 
-/// Vertical layout — artwork stacked above the slot list, inset by
-/// `VERTICAL_ARTWORK_SIDE_PAD` on left and right and `VERTICAL_ARTWORK_TOP_PAD`
-/// on top so its edges mirror the slot rows' 10 px padding. Bottom inset is 0;
-/// the view header that follows provides its own internal top padding so no
-/// extra gap is added between the artwork and the header. The view header lives
-/// between the artwork and the slot list so it stays adjacent to the list it
-/// controls.
+/// Vertical layout — artwork stacked above the slot list, edge-to-edge L/R
+/// (matching the slot rows' zero-inset geometry) with `VERTICAL_ARTWORK_TOP_PAD`
+/// on top so the artwork has breathing room from whatever chrome sits above it.
+/// Bottom inset is 0; the view header that follows provides its own internal top
+/// padding so no extra gap is added between the artwork and the header. The view
+/// header lives between the artwork and the slot list so it stays adjacent to
+/// the list it controls.
 ///
 /// Used by both the Auto-mode portrait fallback (no drag handle) and the
 /// `AlwaysVerticalNative` / `AlwaysVerticalStretched` modes (with a
@@ -906,8 +898,10 @@ where
         0.0
     };
 
-    // Artwork + optional drag handle inside the same inset wrapper so the
-    // handle aligns with the slot rows' L/R padding.
+    // Artwork + optional drag handle. Both run edge-to-edge horizontally
+    // (matches the slot rows' zero-pad geometry); only the top inset is
+    // applied so the artwork still has breathing room below whatever
+    // chrome sits above it.
     let inset_inner: Element<'a, Message> = if let Some(h) = handle {
         column![artwork_panel, h]
             .width(Length::Fill)
@@ -918,15 +912,14 @@ where
     };
 
     // Outer wrapper that paints the slot-list `bg0_hard` background in the
-    // top/left/right inset, so the artwork sits inside a margin that
-    // visually matches the slot rows' inset.
+    // top inset.
     let artwork_side = container(inset_inner)
         .width(Length::Fill)
         .padding(iced::Padding {
             top: VERTICAL_ARTWORK_TOP_PAD,
-            right: VERTICAL_ARTWORK_SIDE_PAD,
+            right: 0.0,
             bottom: 0.0,
-            left: VERTICAL_ARTWORK_SIDE_PAD,
+            left: 0.0,
         })
         .style(theme::container_bg0_hard);
 
@@ -1025,14 +1018,14 @@ mod tests {
     fn auto_tall_skinny_window_returns_vertical_inset_to_slot_list_padding() {
         let _g = lock_atomics();
         reset_atomics();
-        // Very tall + skinny window: 530 × 1430. Inset width = 530 - 20 = 510.
-        // height × 0.40 = 572 ≥ 510 so the artwork fills the inset width with
-        // no letterbox. extent = min(510, 1000) = 510. Leftover height
-        // 1430 - 510 - 10 = 910 ≥ 400.
+        // Very tall + skinny window: 530 × 1430. The artwork runs edge-to-edge
+        // (zero L/R inset), so inset_width = 530. height × 0.40 = 572 ≥ 530 so
+        // the artwork fills the window width with no letterbox. extent =
+        // min(530, 1000) = 530. Leftover height 1430 - 530 - 10 = 890 ≥ 400.
         let l = resolve_artwork_layout(&cfg(530.0, 1430.0, true)).expect("should show");
         assert_eq!(l.orientation, ArtworkOrientation::Vertical);
         assert!(matches!(l.panel_kind, PanelKind::Square));
-        assert!((l.extent - 510.0).abs() < 1e-3);
+        assert!((l.extent - 530.0).abs() < 1e-3);
     }
 
     #[test]
@@ -1040,9 +1033,9 @@ mod tests {
         let _g = lock_atomics();
         reset_atomics();
         // 766 × 1370 is portrait but height × 0.40 = 548 < inset width
-        // (766 - 20 = 746), so the height-based square wouldn't fill the
-        // inset — the panel would show `bg0_soft` bars on the sides inside
-        // the inset. Hide instead of showing the letterboxed panel.
+        // (edge-to-edge L/R, so inset_width = 766), so the height-based
+        // square wouldn't fill the window — the panel would show `bg0_soft`
+        // bars on the sides. Hide instead of showing the letterboxed panel.
         assert!(resolve_artwork_layout(&cfg(766.0, 1370.0, true)).is_none());
     }
 
@@ -1050,10 +1043,10 @@ mod tests {
     fn auto_portrait_hides_when_list_too_short() {
         let _g = lock_atomics();
         reset_atomics();
-        // 220 × 500: passes the letterbox check (500 × 0.40 = 200 ≥ inset
-        // 220 - 20 = 200) but leftover height 500 - 200 - 10 = 290 <
-        // MIN_SLOT_LIST_HEIGHT (400) → hide.
-        assert!(resolve_artwork_layout(&cfg(220.0, 500.0, true)).is_none());
+        // 200 × 500: passes the letterbox check (500 × 0.40 = 200 ≥ inset
+        // width 200, edge-to-edge L/R) but leftover height 500 - 200 - 10
+        // = 290 < MIN_SLOT_LIST_HEIGHT (400) → hide.
+        assert!(resolve_artwork_layout(&cfg(200.0, 500.0, true)).is_none());
     }
 
     #[test]
@@ -1164,9 +1157,10 @@ mod tests {
         let _g = lock_atomics();
         reset_atomics();
         // Tall-skinny Auto resolves to Vertical with extent = inset width.
-        // Chrome = extent + VERTICAL_ARTWORK_TOP_PAD.
+        // Edge-to-edge L/R, so inset width = window width = 530. Chrome =
+        // extent + VERTICAL_ARTWORK_TOP_PAD.
         let chrome = vertical_artwork_chrome(&cfg(530.0, 1430.0, true));
-        assert!((chrome - (510.0 + VERTICAL_ARTWORK_TOP_PAD)).abs() < 1e-3);
+        assert!((chrome - (530.0 + VERTICAL_ARTWORK_TOP_PAD)).abs() < 1e-3);
     }
 
     #[test]
@@ -1313,14 +1307,15 @@ mod tests {
         let _g = lock_atomics();
         reset_atomics();
         // 766 × 1370 at default 0.40 → height × pct = 548 < inset width
-        // (766 - 20 = 746), so the resolver hides (letterbox guard).
+        // (edge-to-edge L/R, so inset_width = 766), so the resolver hides
+        // (letterbox guard).
         assert!(resolve_artwork_layout(&cfg(766.0, 1370.0, true)).is_none());
-        // Bumping the user pct to 0.70 → height × pct = 959 ≥ inset 746, so
+        // Bumping the user pct to 0.70 → height × pct = 959 ≥ inset 766, so
         // the vertical candidate now fills the inset and the panel shows.
         theme::set_artwork_auto_max_pct(0.70);
         let l = resolve_artwork_layout(&cfg(766.0, 1370.0, true)).expect("should show");
         assert_eq!(l.orientation, ArtworkOrientation::Vertical);
-        assert!((l.extent - 746.0).abs() < 1e-3);
+        assert!((l.extent - 766.0).abs() < 1e-3);
         reset_atomics();
     }
 }

@@ -6,7 +6,7 @@
 //! Provides reusable slot list rendering with configurable item rendering
 
 use iced::{
-    Color, Element, Length, Padding,
+    Color, Element, Length,
     widget::{button, column, container, mouse_area},
 };
 
@@ -322,26 +322,6 @@ pub(crate) fn view_header_chrome() -> f32 {
 /// Height of the browsing panel tab bar.
 pub(crate) const TAB_BAR_HEIGHT: f32 = 32.0;
 
-/// Bottom padding for `slot_list_background_container`. Each mode returns
-/// the same pixel count that `slot_list_background_container` applies as
-/// bottom padding (flat: 10 px, rounded: 14 px to match the design's
-/// `.nk-list { margin-bottom: 14px }` rule), so the slot-count math in
-/// `with_dynamic_slots` stays in lockstep with the actual rendered
-/// rect — no empty `bg0_hard` strip at the bottom of the shell.
-#[inline]
-fn slot_list_bottom_pad() -> f32 {
-    if crate::theme::is_rounded_mode() {
-        14.0
-    } else {
-        SLOT_LIST_CONTAINER_PADDING_FLAT
-    }
-}
-
-/// Flat-mode bottom padding for `slot_list_background_container`. Picked
-/// once because the historic `SLOT_LIST_CONTAINER_PADDING = 10.0` const
-/// was the single source of truth for the flat-mode bottom inset.
-const SLOT_LIST_CONTAINER_PADDING_FLAT: f32 = 10.0;
-
 use super::player_bar::player_bar_height;
 
 /// Total height of chrome elements for views with headers.
@@ -350,9 +330,8 @@ use super::player_bar::player_bar_height;
 /// In side and none nav modes: player_bar + view_header_chrome() (no top bar),
 /// plus the TopBar strip when TrackInfoDisplay::TopBar is active.
 ///
-/// Does NOT include the slot-list bottom pad — that lives in
-/// `slot_list_bottom_pad()` and is subtracted separately by
-/// `with_dynamic_slots`.
+/// The slot list runs flush to the player bar, so no bottom pad is subtracted
+/// from the slot-count math in `with_dynamic_slots`.
 pub(crate) fn chrome_height_with_header() -> f32 {
     if crate::theme::is_top_nav() {
         crate::theme::nav_bar_height() + player_bar_height() + view_header_chrome()
@@ -402,7 +381,7 @@ impl SlotListConfig {
     /// short windows get fewer slots (7, 5, 3, 1) as before.
     /// Slot count is always odd so the center slot works correctly.
     pub(crate) fn with_dynamic_slots(window_height: f32, chrome_height: f32) -> Self {
-        let available_height = (window_height - chrome_height - slot_list_bottom_pad()).max(0.0);
+        let available_height = (window_height - chrome_height).max(0.0);
 
         // Estimate content height with a mid-range spacing guess for initial calc
         let estimated_spacing = 8.0 * SLOT_SPACING; // ~9 slots worth
@@ -461,8 +440,7 @@ impl SlotListConfig {
     /// Calculate row height based on window size
     /// All slots have uniform height.
     pub(crate) fn row_height(&self) -> f32 {
-        let available_height =
-            (self.window_height - self.chrome_height - slot_list_bottom_pad()).max(0.0);
+        let available_height = (self.window_height - self.chrome_height).max(0.0);
         let spacing_height = (self.slot_count.saturating_sub(1)) as f32 * SLOT_SPACING;
         let content_height = (available_height - spacing_height).max(0.0);
 
@@ -1501,20 +1479,17 @@ fn empty_slot<'a, Message: 'a>(opacity: f32) -> Element<'a, Message> {
 /// This prevents lighter background colors from bleeding through transparent slot list slots.
 /// Should be used by all slot-list-based views (albums, queue, etc.) for visual consistency.
 ///
-/// Flat mode: edge-to-edge `bg0_hard()` fill with 10 px L/R padding and
-/// 10 px bottom padding (mirrors the historical chrome). Rounded mode:
-/// wraps the rows in a list shell with `ui_radius_lg()` corners + 1 px
-/// `theme::border()` outline, then insets the whole shell by 16 px
-/// horizontally and 14 px on the bottom (matches the design's `.nk-list`
-/// `margin: 0 16px 14px` rule).
+/// Both modes paint a `bg0_hard()` fill behind the slot rows and run
+/// edge-to-edge — no L/R padding (rows align with the view header strip
+/// above) and no bottom padding (the last row meets the player bar with
+/// zero gap). Rounded mode adds an outer `ui_radius_lg()` shell with a
+/// 1 px `theme::border()` outline that clips the touching row hairlines
+/// into a single sealed perimeter.
 pub(crate) fn slot_list_background_container<'a, Message: 'a>(
     slot_list_content: Element<'a, Message>,
 ) -> Element<'a, Message> {
     if crate::theme::is_rounded_mode() {
-        // Inner shell — paints `bg0_hard()` + the rounded outline that
-        // visually clips the touching row hairlines into a single sealed
-        // perimeter.
-        let shell = container(slot_list_content)
+        container(slot_list_content)
             .width(Length::Fill)
             .height(Length::Fill)
             .style(|_| container::Style {
@@ -1526,32 +1501,12 @@ pub(crate) fn slot_list_background_container<'a, Message: 'a>(
                 },
                 ..Default::default()
             })
-            .clip(true);
-
-        // Outer wrapper — pure `bg0_hard()` background under the shell so
-        // the inset margins blend with the surrounding chrome (the same
-        // pattern the flat path uses for its 10 px L/R pad).
-        container(shell)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(iced::Padding {
-                top: 0.0,
-                right: 16.0,
-                bottom: 14.0,
-                left: 16.0,
-            })
-            .style(theme::container_bg0_hard)
+            .clip(true)
             .into()
     } else {
         container(slot_list_content)
             .width(Length::Fill)
             .height(Length::Fill)
-            .padding(
-                Padding::new(0.0)
-                    .right(10.0)
-                    .bottom(SLOT_LIST_CONTAINER_PADDING_FLAT)
-                    .left(10.0),
-            )
             .style(theme::container_bg0_hard)
             .into()
     }
@@ -1708,11 +1663,12 @@ mod tests {
         };
 
         let row_height = config.row_height();
-        // Available = 900 - 234 - 10 (padding) = 656
-        // Spacing = 8 * 0 = 0 (flat-redesign rows touch)
-        // Content = 656
-        // Row height = 656 / 9 ≈ 72.888
-        assert!((row_height - 72.888).abs() < 0.01);
+        // Available = 900 - 234 = 666 (slot list now runs flush to the
+        // player bar, no bottom pad).
+        // Spacing = 8 * 0 = 0 (flat-redesign rows touch).
+        // Content = 666
+        // Row height = 666 / 9 = 74.0
+        assert!((row_height - 74.0).abs() < 0.01);
     }
 
     #[test]
@@ -1833,17 +1789,16 @@ mod tests {
     #[test]
     fn slots_never_exceed_available_space() {
         // The core invariant: rendered slots + spacing must fit in the
-        // available area. If this fails, the last slot clips.
-        //
-        // Uses `slot_list_bottom_pad()` so the math tracks the active
-        // theme mode (10 px flat, 14 px rounded).
+        // available area. If this fails, the last slot clips. The slot list
+        // now runs flush to the player bar (no bottom pad in either mode),
+        // so `available` is simply `height - chrome`.
         for height in (300..=2160).step_by(50) {
             for chrome in [100.0, 134.0, 170.0, 200.0] {
                 let config = SlotListConfig::with_dynamic_slots(height as f32, chrome);
                 let row_height = config.row_height();
                 let spacing = config.slot_count.saturating_sub(1) as f32 * SLOT_SPACING;
                 let used = config.slot_count as f32 * row_height + spacing;
-                let available = (height as f32 - chrome - slot_list_bottom_pad()).max(0.0);
+                let available = (height as f32 - chrome).max(0.0);
                 assert!(
                     used <= available + 0.01, // f32 tolerance
                     "clipped at height={height}, chrome={chrome}: used={used:.1} > available={available:.1}"
