@@ -36,14 +36,18 @@ pub(crate) fn default_playlist_chip<'a, Message: Clone + 'a>(
             color: Some(icon_color),
         });
 
+    // Flat redesign: bg0_hard() chip surface with a 1 px border() outline,
+    // matching the post-redesign view-header chrome. `sm` corner so the chip
+    // reads as a button-scale element in rounded mode.
     let body = container(pin_icon)
         .width(Length::Fixed(40.0))
         .height(Length::Fixed(40.0))
         .style(|_theme| container::Style {
-            background: Some(theme::bg0_soft().into()),
+            background: Some(theme::bg0_hard().into()),
             border: iced::Border {
-                radius: theme::ui_border_radius(),
-                ..Default::default()
+                color: theme::border(),
+                width: 1.0,
+                radius: theme::ui_radius_sm(),
             },
             ..Default::default()
         })
@@ -56,7 +60,7 @@ pub(crate) fn default_playlist_chip<'a, Message: Clone + 'a>(
     };
 
     tooltip(
-        mouse_area(HoverOverlay::new(body).border_radius(theme::ui_border_radius()))
+        mouse_area(HoverOverlay::new(body).border_radius(theme::ui_radius_sm()))
             .on_press(on_press)
             .interaction(iced::mouse::Interaction::Pointer),
         container(text(tooltip_label).size(11.0).font(theme::ui_font())).padding(4),

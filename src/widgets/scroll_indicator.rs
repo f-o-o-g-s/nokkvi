@@ -236,9 +236,6 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ScrollbarOverlay
         let handle_h = self.handle_height(track.height);
         let handle_y = self.handle_y(track, fraction);
 
-        let is_rounded = theme::is_rounded_mode();
-        let radius = theme::ui_border_radius();
-
         // --- Handle only (no track background — modern transient style) ---
         let handle_bounds = Rectangle {
             x: track.x + 2.0,
@@ -249,7 +246,7 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ScrollbarOverlay
 
         // Always use accent-family colors so the handle stays visible over
         // selected (accent_bright) and now-playing (accent) slot backgrounds.
-        // Hover: darker accent for extra contrast; idle: bright accent.
+        // Hover/drag: deeper accent for extra contrast; idle: bright accent.
         let handle_base = if is_hovered_track {
             theme::accent()
         } else {
@@ -261,7 +258,8 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for ScrollbarOverlay
             ..handle_base
         };
 
-        let handle_radius = if is_rounded { radius } else { 0.0.into() };
+        // Rounded mode → fully-pill handle; flat mode → square.
+        let handle_radius = theme::ui_radius_pill();
 
         // Use the darkest theme color for a crisp border that pops against any bg
         let border_color = Color {

@@ -407,7 +407,6 @@ pub(crate) fn ui_radius_xs() -> iced::border::Radius {
 /// Scale step `sm` — 8 px in rounded mode, 0 in flat. Use for mode buttons,
 /// badges, format pills.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn ui_radius_sm() -> iced::border::Radius {
     if is_rounded_mode() {
         R_SM.into()
@@ -419,7 +418,6 @@ pub(crate) fn ui_radius_sm() -> iced::border::Radius {
 /// Scale step `md` — 12 px in rounded mode, 0 in flat. Use for cards,
 /// popovers, album art, category tiles.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn ui_radius_md() -> iced::border::Radius {
     if is_rounded_mode() {
         R_MD.into()
@@ -431,7 +429,6 @@ pub(crate) fn ui_radius_md() -> iced::border::Radius {
 /// Scale step `lg` — 18 px in rounded mode, 0 in flat. Use for list shells,
 /// modal frames, stats strips.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn ui_radius_lg() -> iced::border::Radius {
     if is_rounded_mode() {
         R_LG.into()
@@ -443,7 +440,6 @@ pub(crate) fn ui_radius_lg() -> iced::border::Radius {
 /// Scale step `pill` — 999 px in rounded mode, 0 in flat. Use for tabs,
 /// transport buttons, search field, slider handles.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn ui_radius_pill() -> iced::border::Radius {
     if is_rounded_mode() {
         R_PILL.into()
@@ -1179,7 +1175,6 @@ pub(crate) fn star_bright() -> Color {
 /// rows, capsules). Per-theme in TOML, falls back to a darkened
 /// `bg0_hard()` when unset. Replaces hard-coded `#1a2024`-style dividers.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn border() -> Color {
     read_color(|t| t.border)
 }
@@ -1359,13 +1354,13 @@ pub(crate) fn vertical_separator<'a, M: 'a>(height: f32) -> iced::Element<'a, M>
 // ----------------------------------------------------------------------------
 // Modal separators
 // ----------------------------------------------------------------------------
-// These three helpers consolidate the eight near-identical separator lambdas
-// that previously lived in `about_modal`, `info_modal`, `eq_modal`,
-// `nav_bar` (twice), and `side_nav_bar`. The two alpha levels (0.12 / 0.2)
-// correspond to the row-vs-header visual hierarchy already present in the
-// originating widgets.
+// Both helpers consolidate the eight near-identical separator lambdas that
+// previously lived in `about_modal`, `info_modal`, `eq_modal`, `nav_bar`
+// (twice), and `side_nav_bar`. After the flat redesign they share the same
+// `border()` token — the design CSS uses the same `#1a2024` for modal-head,
+// modal-actions, row separators, popover head, and pop-row borders.
 
-/// 1-px horizontal separator between rows inside a modal (subtle, alpha 0.12).
+/// 1-px horizontal separator between rows inside a modal.
 ///
 /// Replaces the inline `row_separator` lambdas in `about_modal::info_row`
 /// and `info_modal`'s property table.
@@ -1377,18 +1372,14 @@ pub(crate) fn modal_row_separator<'a, M: 'a>() -> iced::Element<'a, M> {
     container(space::horizontal())
         .width(Length::Fill)
         .height(Length::Fixed(1.0))
-        .style(|_| {
-            let mut c = fg4();
-            c.a = 0.12;
-            container::Style {
-                background: Some(c.into()),
-                ..Default::default()
-            }
+        .style(|_| container::Style {
+            background: Some(border().into()),
+            ..Default::default()
         })
         .into()
 }
 
-/// 1-px horizontal separator under a modal's header (slightly stronger, alpha 0.2).
+/// 1-px horizontal separator under a modal's header.
 ///
 /// Replaces the inline `separator_line` lambdas in `about_modal`, `info_modal`,
 /// and `eq_modal`.
@@ -1400,13 +1391,9 @@ pub(crate) fn modal_header_separator<'a, M: 'a>() -> iced::Element<'a, M> {
     container(space::horizontal())
         .width(Length::Fill)
         .height(Length::Fixed(1.0))
-        .style(|_| {
-            let mut c = fg4();
-            c.a = 0.2;
-            container::Style {
-                background: Some(c.into()),
-                ..Default::default()
-            }
+        .style(|_| container::Style {
+            background: Some(border().into()),
+            ..Default::default()
         })
         .into()
 }
