@@ -349,19 +349,15 @@ const ROUNDED_RADIUS: f32 = 6.0;
 // dead-code warnings until those callers land on `redesign`.
 
 /// xs (4 px) — checkboxes, hex swatches, small pips.
-#[allow(dead_code)]
 const R_XS: f32 = 4.0;
 /// sm (8 px) — mode buttons, badges, hover pills.
-#[allow(dead_code)]
 const R_SM: f32 = 8.0;
 /// md (12 px) — cards, popovers, album art, category tiles.
 #[allow(dead_code)]
 const R_MD: f32 = 12.0;
 /// lg (18 px) — list shells, modal frames, hero panels.
-#[allow(dead_code)]
 const R_LG: f32 = 18.0;
 /// pill (999 px) — tabs, transport buttons, search, sliders.
-#[allow(dead_code)]
 const R_PILL: f32 = 999.0;
 
 /// Returns true if rounded corners mode is enabled
@@ -454,10 +450,11 @@ pub(crate) fn ui_radius_pill() -> iced::border::Radius {
 /// (rounded mode adds 6 px padding above and below the pill capsules).
 ///
 /// Additive helper; the legacy `widgets::slot_list::NAV_BAR_HEIGHT` constant
-/// stays at 32.0 for back-compat. Lanes that need the dynamic value migrate
-/// to this function (L2 nav-chrome, L3 slot-list-view-header).
+/// stays at 32.0 for back-compat (still referenced from `app_view.rs` and
+/// `base_slot_list_layout.rs`). Lanes that need the dynamic value migrate
+/// to this function — `slot_list::chrome_height_with_header` (L3) is the
+/// first consumer.
 #[inline]
-#[allow(dead_code)]
 pub(crate) fn nav_bar_height() -> f32 {
     if is_rounded_mode() { 44.0 } else { 32.0 }
 }
@@ -1518,7 +1515,13 @@ pub(crate) fn transparent_button_style(
 }
 
 /// Themed search/filter text input style matching the Gruvbox palette.
-/// Used in view headers and settings sub-lists.
+///
+/// Previously the default for the view-header search bar; the L3 flat
+/// redesign owns that default now (see `search_bar::flat_search_input_style`).
+/// Kept around for the L5 settings widgets lane and any future caller that
+/// wants the legacy 2 px-bordered look — clippy's `dead_code` allow is
+/// intentional until a Wave-1 lane wires it back up.
+#[allow(dead_code)]
 pub(crate) fn search_input_style(_theme: &Theme, status: text_input::Status) -> text_input::Style {
     text_input::Style {
         background: (bg0_soft()).into(),

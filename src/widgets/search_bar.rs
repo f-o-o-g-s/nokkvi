@@ -6,6 +6,42 @@ use iced::{
 
 use crate::theme;
 
+/// Default text-input style used by the view-header search bar (flat
+/// redesign). Flat mode: 1 px `theme::border()` outline, `theme::bg0_soft()`
+/// fill. Rounded mode: pill outline (`theme::ui_radius_pill()`) with
+/// `theme::bg0()` fill so the input reads as an inset capsule against the
+/// view header's pill chrome.
+///
+/// Kept inside `search_bar.rs` so the flat-redesign defaults stay
+/// co-located with the call site; callers wanting a different look pass
+/// `Some(style_fn)` via the `style` parameter.
+pub(crate) fn flat_search_input_style(
+    _theme: &iced::Theme,
+    status: text_input::Status,
+) -> text_input::Style {
+    let bg = if theme::is_rounded_mode() {
+        theme::bg0()
+    } else {
+        theme::bg0_soft()
+    };
+    text_input::Style {
+        background: bg.into(),
+        border: iced::Border {
+            color: if matches!(status, text_input::Status::Focused { .. }) {
+                theme::accent_bright()
+            } else {
+                theme::border()
+            },
+            width: 1.0,
+            radius: theme::ui_radius_pill(),
+        },
+        icon: theme::fg4(),
+        placeholder: theme::fg4(),
+        value: theme::fg0(),
+        selection: theme::selection_color(),
+    }
+}
+
 /// A reusable search bar widget that visually integrates a magnifying glass icon
 /// on the left and a conditional clear button on the right inside the input bounds,
 /// preserving native focus borders and styles.
@@ -38,7 +74,7 @@ pub(crate) fn search_bar<'a, Message: Clone + 'a>(
             weight: Weight::Medium,
             ..theme::ui_font()
         })
-        .style(style.unwrap_or(theme::search_input_style));
+        .style(style.unwrap_or(flat_search_input_style));
 
     // Left magnifying glass icon
     let search_icon = crate::embedded_svg::svg_widget("assets/icons/search.svg")
