@@ -1128,6 +1128,31 @@ mod layout_invariants {
     }
 
     #[test]
+    fn nav_tabs_covers_every_nav_view_variant() {
+        // `NAV_TABS` must list every `NavView` variant exactly once, and in
+        // the same order as `NavView::ALL`. The static-assert blocks at the
+        // top of `nav_bar.rs` pin the LENGTH (both 7), but a future agent
+        // could re-order or substitute a variant inside the existing length
+        // without those firing. This test pins the per-position equality
+        // so the side-nav reads its tab strip from the same source of truth
+        // as the top-nav.
+        use super::{NAV_TABS, NavView};
+
+        assert_eq!(
+            NAV_TABS.len(),
+            NavView::ALL.len(),
+            "NAV_TABS must list every NavView variant",
+        );
+        for (i, (_, _, nav_view)) in NAV_TABS.iter().enumerate() {
+            assert_eq!(
+                *nav_view, NavView::ALL[i],
+                "NAV_TABS[{i}] = {nav_view:?}, expected NavView::ALL[{i}] = {:?}",
+                NavView::ALL[i],
+            );
+        }
+    }
+
+    #[test]
     fn fill_outer_row_lane_tracks_window_resize() {
         // Verifies the lane width follows the window width — the resize behavior
         // the user observed as broken in Top Bar mode. With the fix the lane
