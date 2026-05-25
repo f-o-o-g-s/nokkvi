@@ -110,6 +110,20 @@ fn strip_context_state(
     }
 }
 
+/// Library-filter chrome state aggregated for the nav-bar trigger + popover.
+///
+/// Built by `Nokkvi::library_filter_view_data()`; consumed by both the
+/// top-nav `NavBarViewData` builder and the side-nav `SideNavBarData`
+/// builder so the two share the same library list / counter / popover
+/// state without re-deriving it from `AppService`.
+pub(crate) struct LibraryFilterViewData {
+    pub count: usize,
+    pub active_count: usize,
+    pub rows: Vec<(i32, String, Option<u32>, bool)>,
+    pub popover_open: bool,
+    pub trigger_bounds: Option<iced::Rectangle>,
+}
+
 /// Convert a `NavBarMessage` into the root `Message` type.
 ///
 /// Shared between the horizontal nav bar (top mode) and the vertical
@@ -147,6 +161,53 @@ impl Nokkvi {
     // =========================================================================
     // SECTION: View Functions
     // =========================================================================
+
+    /// Aggregate the library-filter chrome state that the nav-bar trigger +
+    /// popover read every frame.
+    ///
+    /// `library_count == 0` (pre-login or before `refresh_libraries` lands)
+    /// suppresses the trigger so the user never sees a chrome flicker
+    /// before the count is known.
+    ///
+    /// `active.is_empty()` is the "all libraries" convention — every row
+    /// renders as checked and the counter reads `{total} / {total}`. Rows
+    /// are sorted by name so the popover order stays stable across reloads.
+    ///
+    /// Shared between the top-nav `navigation_bar()` and the side-nav's
+    /// `SideNavBarData` builder so a future tweak (different sort order,
+    /// added per-library metadata column, etc.) lands at one site.
+    pub(crate) fn library_filter_view_data(&self) -> LibraryFilterViewData {
+        let (count, active_count, rows) = match &self.app_service {
+            Some(svc) => {
+                let active = svc.active_library_ids();
+                let all_checked = active.is_empty();
+                let mut rows: Vec<(i32, String, Option<u32>, bool)> = svc
+                    .all_libraries()
+                    .into_iter()
+                    .map(|lib| {
+                        let checked = all_checked || active.contains(&lib.id);
+                        (lib.id, lib.name, lib.song_count, checked)
+                    })
+                    .collect();
+                rows.sort_by(|a, b| a.1.cmp(&b.1));
+                let active_for_display = if all_checked {
+                    rows.len()
+                } else {
+                    active.len()
+                };
+                (svc.library_count(), active_for_display, rows)
+            }
+            None => (0, 0, Vec::new()),
+        };
+        let (open, bounds) = library_selector_state(&self.open_menu);
+        LibraryFilterViewData {
+            count,
+            active_count,
+            rows,
+            popover_open: open,
+            trigger_bounds: bounds,
+        }
+    }
 
     /// Resolve the artwork handle for the player-bar mini-player section.
     ///
@@ -549,40 +610,16 @@ impl Nokkvi {
                         .unwrap_or(widgets::NavView::Queue);
                 // Mirror the top-nav library state into the side-nav so
                 // the footer trigger + popover see the same source of
-                // truth.
-                let (sn_library_count, sn_active_library_count, sn_library_rows) =
-                    match &self.app_service {
-                        Some(svc) => {
-                            let active = svc.active_library_ids();
-                            let all_checked = active.is_empty();
-                            let mut rows: Vec<(i32, String, Option<u32>, bool)> = svc
-                                .all_libraries()
-                                .into_iter()
-                                .map(|lib| {
-                                    let checked = all_checked || active.contains(&lib.id);
-                                    (lib.id, lib.name, lib.song_count, checked)
-                                })
-                                .collect();
-                            rows.sort_by(|a, b| a.1.cmp(&b.1));
-                            let active_for_display = if all_checked {
-                                rows.len()
-                            } else {
-                                active.len()
-                            };
-                            (svc.library_count(), active_for_display, rows)
-                        }
-                        None => (0, 0, Vec::new()),
-                    };
-                let (sn_library_selector_open, sn_library_selector_bounds) =
-                    library_selector_state(&self.open_menu);
+                // truth (shared via `library_filter_view_data`).
+                let lib = self.library_filter_view_data();
                 let side_data = widgets::SideNavBarData {
                     current_view: side_nav_view,
                     settings_open: self.current_view == View::Settings,
-                    library_count: sn_library_count,
-                    active_library_count: sn_active_library_count,
-                    library_selector_open: sn_library_selector_open,
-                    library_selector_bounds: sn_library_selector_bounds,
-                    library_rows: sn_library_rows,
+                    library_count: lib.count,
+                    active_library_count: lib.active_count,
+                    library_selector_open: lib.popover_open,
+                    library_selector_bounds: lib.trigger_bounds,
+                    library_rows: lib.rows,
                     hamburger_open: matches!(
                         self.open_menu,
                         Some(crate::app_message::OpenMenu::Hamburger)
@@ -1136,41 +1173,15 @@ impl Nokkvi {
             crate::state::ActivePlayback::Queue => (None, None, None, None),
         };
 
-        // Library-filter chrome state — `library_count == 0` (pre-login or
-        // before `refresh_libraries` lands) suppresses the trigger so the user
-        // never sees a chrome flicker before the count is known.
-        let (library_count, active_library_count, library_rows) = match &self.app_service {
-            Some(svc) => {
-                let active = svc.active_library_ids();
-                // Empty active set = "all" semantically; render each row
-                // as checked so the popover reflects the user's mental
-                // model ("everything is on") instead of an unchecked
-                // wall of rows that toggle into a subset on click.
-                let all_checked = active.is_empty();
-                let mut rows: Vec<(i32, String, Option<u32>, bool)> = svc
-                    .all_libraries()
-                    .into_iter()
-                    .map(|lib| {
-                        let checked = all_checked || active.contains(&lib.id);
-                        (lib.id, lib.name, lib.song_count, checked)
-                    })
-                    .collect();
-                rows.sort_by(|a, b| a.1.cmp(&b.1));
-                // When the empty-as-all convention is in effect the
-                // popover counter reads "{total} / {total}" so the
-                // header matches the all-checked row state instead of
-                // showing "0 / {total}" while every box looks ticked.
-                let active_for_display = if all_checked {
-                    rows.len()
-                } else {
-                    active.len()
-                };
-                (svc.library_count(), active_for_display, rows)
-            }
-            None => (0, 0, Vec::new()),
-        };
-        let (library_selector_open, library_selector_bounds) =
-            library_selector_state(&self.open_menu);
+        // Library-filter chrome state — shared with the side-nav builder
+        // via `library_filter_view_data`. See that method for the
+        // "all-checked" convention and sort order.
+        let lib = self.library_filter_view_data();
+        let library_count = lib.count;
+        let active_library_count = lib.active_count;
+        let library_rows = lib.rows;
+        let library_selector_open = lib.popover_open;
+        let library_selector_bounds = lib.trigger_bounds;
 
         let nav_bar_data = widgets::NavBarViewData {
             current_view: current_nav_view,
