@@ -295,7 +295,7 @@ fn tab_content<'a>(
 ) -> Element<'a, NavBarMessage> {
     let icon_size = 14.0;
     match display_mode {
-        NavDisplayMode::TextOnly => container(text(label).size(14.0).font(Font {
+        NavDisplayMode::TextOnly => container(text(label.to_uppercase()).size(14.0).font(Font {
             weight: Weight::Bold,
             ..theme::ui_font()
         }))
@@ -313,7 +313,7 @@ fn tab_content<'a>(
         NavDisplayMode::TextAndIcons => container(
             row![
                 colored_icon(icon_path, icon_size, text_color),
-                text(label).size(14.0).font(Font {
+                text(label.to_uppercase()).size(14.0).font(Font {
                     weight: Weight::Bold,
                     ..theme::ui_font()
                 }),

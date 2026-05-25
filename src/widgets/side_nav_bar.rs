@@ -162,7 +162,7 @@ impl<Message> canvas::Program<Message> for RotatedLabel {
         frame.rotate(-FRAC_PI_2);
 
         frame.fill_text(canvas::Text {
-            content: self.label.to_string(),
+            content: self.label.to_uppercase(),
             position: Point::new(0.0, 0.0),
             color: self.color,
             size: iced::Pixels(12.0),
