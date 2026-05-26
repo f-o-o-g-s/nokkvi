@@ -187,7 +187,10 @@ impl Nokkvi {
                 self.sfx_engine.play(nokkvi_data::audio::SfxType::Enter);
                 iced::widget::operation::focus(crate::views::settings::HEX_EDITOR_INPUT_ID)
             }
-            crate::views::SettingsAction::FocusSearch => Task::none(), // Config writes (theme/visualizer TOML values)
+            crate::views::SettingsAction::FocusSearch => {
+                iced::widget::operation::focus(crate::views::settings::SETTINGS_SEARCH_INPUT_ID)
+            }
+            // Config writes (theme/visualizer TOML values)
             crate::views::SettingsAction::WriteConfig {
                 key,
                 value,
