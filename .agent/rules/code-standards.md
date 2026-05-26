@@ -89,6 +89,12 @@ cargo build --release                        # release build
 
 Settings actions carry a typed `ConfigKey` (`AppScalar` / `AppArrayEntry` / `Theme` / `ThemeArrayEntry`) so the writer matches on the variant rather than sniffing key prefixes.
 
+## Release & Versioning
+
+- **`Cargo.toml` version bumps go through `/package` only.** Editing the `version = ` line directly and committing skips the changelog generation, README freshness check, annotated-tag policy, and (on minor/major bumps) the prior-minor archive step. The full procedure lives at `.agent/workflows/package.md`; defer to it for any version-bump commit.
+- **Pre-commit enforces the archive step.** When a staged `Cargo.toml` shows a minor or major bump, `.githooks/pre-commit` refuses the commit if the previous minor's release blocks still live in `CHANGELOG.md` — they belong in `changelog-archive/CHANGELOG-X.Y.md`. The hook only runs when `core.hooksPath` points at `.githooks`; `/package` step 0 sets that idempotently, so fresh clones / worktrees inherit the gate once the agent reaches step 0.
+- **CI is the backstop, not the primary gate.** `.github/workflows/release.yml` re-runs the same archive check on tag push, but it fails late (after the tag is on origin). Rely on the pre-commit hook for early-catch; the CI gate is what catches `--no-verify` or out-of-`/package` bump paths.
+
 ## Rule Maintenance
 
 When a commit changes **architecture, patterns, or conventions**, check `.agent/rules/` for staleness. Flag stale rules before committing.

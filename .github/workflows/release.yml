@@ -65,6 +65,21 @@ jobs:
             exit 0
           fi
 
+          # Minor/major bumps must close out the previous minor in CHANGELOG.md.
+          # If any v${prev_major}.${prev_minor}.* entries are still in the live
+          # CHANGELOG, they should have been moved to changelog-archive/ by the
+          # agent running /package step 1. Backstops the pre-commit hook for
+          # cases where it was bypassed or never installed.
+          archive_pattern="^## v${prev_major}\.${prev_minor}\."
+          if grep -qE "$archive_pattern" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md still contains v${prev_major}.${prev_minor}.* entries — close out the previous minor first."
+            echo "::error::Move those blocks into changelog-archive/CHANGELOG-${prev_major}.${prev_minor}.md and add a v${prev_major}.${prev_minor}.x line to the 'Older releases' footer (see .agent/workflows/package.md step 1)."
+            echo "::error::Recover with:"
+            echo "::error::  git push --delete origin $RELEASE_TAG && git tag -d $RELEASE_TAG"
+            echo "::error::  # archive, commit, push, re-tag (annotated for minor/major)"
+            exit 1
+          fi
+
           marker="allow-${kind}-bump"
           body=$(git tag -l --format='%(contents)' "$RELEASE_TAG" || true)
           if printf '%s\n' "$body" | grep -Fq "$marker"; then

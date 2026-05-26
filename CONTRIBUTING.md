@@ -17,6 +17,16 @@ Please read the [AI Disclosure](#ai-disclosure) section before diving in.
 - Rust toolchain via [rustup](https://rustup.rs/) (stable + nightly)
 - System dependencies (Arch Linux): `pacman -S pipewire fontconfig pkgconf`
 
+### First-time setup
+
+After cloning, point git at the repo's hook directory once:
+
+```bash
+git config --local core.hooksPath .githooks
+```
+
+The pre-commit hook (`.githooks/pre-commit`) keeps the Navidrome/PipeWire version pins in `README.md` current and refuses a minor/major version bump that hasn't archived the previous minor's `CHANGELOG.md` entries. Without this config line set, the hook silently does nothing.
+
 ### Build & Test
 
 ```bash

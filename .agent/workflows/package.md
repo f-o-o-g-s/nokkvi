@@ -8,6 +8,16 @@ description: Bump version, build, commit, push, and tag a release
 
 The release workflow (`.github/workflows/release.yml`) does the binary build and tarball packaging on tag push. This workflow is what gets you to that tag.
 
+## 0. Bootstrap git hooks
+
+Run this once per clone or worktree. It is idempotent — safe to re-run every release:
+
+```bash
+git config --local core.hooksPath .githooks
+```
+
+The pre-commit hook (`.githooks/pre-commit`) auto-updates Navidrome/PipeWire pins in `README.md` and refuses a minor/major `Cargo.toml` bump if the previous minor's entries are still in `CHANGELOG.md`. Without `core.hooksPath` set, both checks silently no-op and the bump can land unchecked — the CI gate in step 6 is the backstop, but it fails late (after the tag push). Bootstrap once and the hook catches the mistake locally instead.
+
 ## 1. Generate changelog from git history
 
 Review commits since the last version bump:

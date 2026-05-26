@@ -1,7 +1,50 @@
 #!/usr/bin/env bash
-# Updates README.md with the currently tested versions before commit
+# Updates README.md with the currently tested versions before commit,
+# and refuses minor/major Cargo.toml bumps that leave the previous minor's
+# entries unarchived in CHANGELOG.md (see .agent/workflows/package.md step 1).
 
 set -e
+
+# ── Archive-completeness check for minor/major version bumps ────────────────
+# Only fires when Cargo.toml is staged AND the [package] version is changing
+# AND the change is a minor or major bump. Patch bumps and non-version edits
+# skip silently.
+if git diff --cached --name-only | grep -qx 'Cargo.toml'; then
+    awk_extract='/^\[package\]/ { inpkg=1; next }
+                 inpkg && /^\[/ { exit }
+                 inpkg && /^version = / { gsub(/"/, "", $3); print $3; exit }'
+
+    old_ver=$(git show HEAD:Cargo.toml 2>/dev/null | awk "$awk_extract" || true)
+    new_ver=$(git show :Cargo.toml | awk "$awk_extract")
+
+    if [ -n "$old_ver" ] && [ -n "$new_ver" ] && [ "$old_ver" != "$new_ver" ]; then
+        IFS='.' read -r old_major old_minor _ <<<"$old_ver"
+        IFS='.' read -r new_major new_minor _ <<<"$new_ver"
+
+        bump_kind=""
+        if [ "$new_major" -gt "$old_major" ]; then
+            bump_kind=major
+        elif [ "$new_major" -eq "$old_major" ] && [ "$new_minor" -gt "$old_minor" ]; then
+            bump_kind=minor
+        fi
+
+        if [ -n "$bump_kind" ]; then
+            staged_changelog=$(git show :CHANGELOG.md 2>/dev/null || true)
+            archive_pattern="^## v${old_major}\.${old_minor}\."
+            if printf '%s\n' "$staged_changelog" | grep -qE "$archive_pattern"; then
+                echo "ERROR: $bump_kind bump from $old_ver to $new_ver, but CHANGELOG.md still"
+                echo "       contains v${old_major}.${old_minor}.* entries."
+                echo
+                echo "  Move those release blocks into:"
+                echo "      changelog-archive/CHANGELOG-${old_major}.${old_minor}.md"
+                echo "  and add a v${old_major}.${old_minor}.x line to the 'Older releases' footer."
+                echo "  See .agent/workflows/package.md step 1 (Archive boundary)."
+                exit 1
+            fi
+        fi
+    fi
+fi
+# ────────────────────────────────────────────────────────────────────────────
 
 CHANGED_README=0
 
