@@ -1,6 +1,13 @@
-//! Settings view rendering — panel with drill-down navigation.
+//! Settings view rendering — persistent two-pane layout.
 //!
-//! All methods are pure `&self` view functions producing `Element<SettingsMessage>`.
+//! Layout: a 340 px categories sidebar on the left + a scrollable detail
+//! pane on the right, both flush against the chrome (no outer padding,
+//! no panel border, no footer). Search lives in the sidebar header.
+//! Sub-lists (color array editor) replace the detail pane content
+//! in-place; the font picker still overlays as a modal.
+//!
+//! All methods are pure `&self` view functions producing
+//! `Element<SettingsMessage>`.
 
 use iced::{
     Alignment, Border, Color, Element, Length, Padding,
@@ -10,46 +17,35 @@ use iced::{
 
 use super::{
     BREADCRUMB_HEIGHT, FONT_SEARCH_BAR_HEIGHT, SETTINGS_CHROME_HEIGHT, SETTINGS_SEARCH_INPUT_ID,
-    SettingsMessage, SettingsPage, SettingsViewData,
+    SettingsMessage, SettingsPage, SettingsTab, SettingsViewData,
     items::SettingsEntry,
     rendering::{SlotRenderContext, render_settings_slot, transparent_button_style},
 };
 use crate::{embedded_svg, theme, widgets::slot_list};
 
-/// Height of the description area at the bottom of the panel
-const DESCRIPTION_HEIGHT: f32 = 72.0;
+/// Sidebar width (px). Matches the design spec.
+pub(super) const SIDEBAR_WIDTH: f32 = 340.0;
 
-/// Flat-redesign settings panel container: theme::bg0() body with a 1 px
-/// theme::border() outline and theme::ui_radius_lg() corners in rounded mode.
-/// Mirrors `.nk-settings` in the flat CSS — the panel itself is the visual
-/// container so individual rows can render flush to the edge.
-fn settings_panel_container(content: Element<'_, SettingsMessage>) -> Element<'_, SettingsMessage> {
-    let bg = theme::bg0();
-    let border_color = theme::border();
-    let radius = theme::ui_radius_lg();
-    container(content)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(move |_: &iced::Theme| container::Style {
-            background: Some(bg.into()),
-            border: Border {
-                color: border_color,
-                width: 1.0,
-                radius,
-            },
-            ..Default::default()
-        })
-        .into()
-}
+/// Height of the sidebar header (Settings title + search input).
+const SIDEBAR_HEADER_HEIGHT: f32 = 60.0;
+
+/// Height of the sidebar footer (version + Esc pill).
+const SIDEBAR_FOOTER_HEIGHT: f32 = 44.0;
 
 impl SettingsPage {
-    /// Render the settings view — centered panel layout
+    /// Render the settings view — persistent two-pane layout.
+    ///
+    /// Left: 340 px categories sidebar (always visible).
+    /// Right: detail pane for the active category, OR an in-place sub-list
+    ///        (color array editor) when one is open.
+    /// Font picker still overlays as a modal stack on top of everything.
     pub(crate) fn view(&self, data: SettingsViewData) -> Element<'_, SettingsMessage> {
         let font = theme::ui_font();
         let window_height = data.window_height;
 
-        // When editing, use cached entries (modified optimistically in update());
-        // otherwise rebuild from live config so hot-reload changes are reflected.
+        // Detail-pane entries: either the optimistically-edited cache or a
+        // fresh rebuild from live config so hot-reloads land. Sub-lists
+        // bypass this entirely (they render their own slot list).
         let built_entries;
         let entries: &[SettingsEntry] = if (self.editing_index.is_some()
             || self.sub_list.is_some()
@@ -59,46 +55,26 @@ impl SettingsPage {
         {
             &self.cached_entries
         } else {
-            built_entries = Self::build_category_sections(self.active_category, &data);
+            built_entries = if self.search_query.is_empty() {
+                Self::build_category_sections(self.active_category, &data)
+            } else {
+                Self::search_all_entries(&data, &self.search_query)
+            };
             &built_entries
         };
 
-        // Base content layer — color sub-list or main settings slot list
-        // (font sub-list is now a modal overlay, not a replacement)
-        let base_content = if let Some(sub) = &self.sub_list {
+        let right_pane = if let Some(sub) = &self.sub_list {
             self.render_sub_list(sub, window_height, font)
         } else {
-            self.render_slot_list(entries, &data, window_height, font)
+            self.render_detail_pane(entries, window_height)
         };
 
-        // Panel at ~75% width, centered with spacers
-        let panel = container(base_content)
+        let base_row: Element<'_, SettingsMessage> = row![self.render_sidebar(), right_pane]
             .width(Length::Fill)
             .height(Length::Fill)
-            .clip(true)
-            .style(theme::container_bg0_hard)
-            .padding(Padding::new(0.0).top(10.0).bottom(10.0));
+            .into();
 
-        // 75% center panel via FillPortion: 1 | 6 | 1 = 75% center
-        let left_spacer = container(Space::new())
-            .width(Length::FillPortion(1))
-            .height(Length::Fill)
-            .style(theme::container_bg0_hard);
-        let right_spacer = container(Space::new())
-            .width(Length::FillPortion(1))
-            .height(Length::Fill)
-            .style(theme::container_bg0_hard);
-
-        let base_row: Element<'_, SettingsMessage> = row![
-            left_spacer,
-            panel.width(Length::FillPortion(6)),
-            right_spacer
-        ]
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into();
-
-        // If font sub-list is active, overlay it as a modal
+        // Font picker overlays on top of the two-pane layout.
         if let Some(fsw) = &self.font_sub_list {
             let modal = self.render_font_modal(fsw, window_height, font);
             stack![base_row, modal]
@@ -110,25 +86,230 @@ impl SettingsPage {
         }
     }
 
-    /// Render the main settings slot list with items
-    fn render_slot_list<'a>(
+    // ========================================================================
+    // Sidebar (left pane)
+    // ========================================================================
+
+    /// Render the 340 px categories sidebar: title + search input header,
+    /// scrollable slot list of categories, version + Esc footer.
+    fn render_sidebar(&self) -> Element<'_, SettingsMessage> {
+        let header = self.render_sidebar_header();
+        let body = self.render_sidebar_body();
+        let footer = self.render_sidebar_footer();
+
+        let content = column![header, body, footer]
+            .width(Length::Fill)
+            .height(Length::Fill);
+
+        container(content)
+            .width(Length::Fixed(SIDEBAR_WIDTH))
+            .height(Length::Fill)
+            .style(|_: &iced::Theme| container::Style {
+                background: Some(theme::bg0_hard().into()),
+                border: Border {
+                    color: theme::border(),
+                    width: 0.0,
+                    radius: iced::border::Radius::default(),
+                },
+                ..Default::default()
+            })
+            .into()
+    }
+
+    /// Sidebar header: "Settings" title + relocated search input. Search
+    /// always renders so its `text_input` id survives across renders.
+    fn render_sidebar_header(&self) -> Element<'_, SettingsMessage> {
+        let title = text("Settings").size(15.0).color(theme::fg0()).font(Font {
+            weight: Weight::Bold,
+            ..theme::ui_font()
+        });
+
+        let search_input = crate::widgets::search_bar::search_bar(
+            &self.search_query,
+            "Search settings…",
+            SETTINGS_SEARCH_INPUT_ID,
+            SettingsMessage::SearchChanged,
+            Some(theme::settings_search_input_style),
+        );
+
+        let header_row = row![title, Space::new().width(Length::Fixed(12.0)), search_input]
+            .align_y(Alignment::Center)
+            .width(Length::Fill);
+
+        let sep = container(Space::new())
+            .width(Length::Fill)
+            .height(Length::Fixed(1.0))
+            .style(|_: &iced::Theme| container::Style {
+                background: Some(theme::border().into()),
+                ..Default::default()
+            });
+
+        column![
+            container(header_row)
+                .width(Length::Fill)
+                .height(Length::Fixed(SIDEBAR_HEADER_HEIGHT - 1.0))
+                .align_y(Alignment::Center)
+                .padding(Padding::new(0.0).left(18.0).right(18.0)),
+            sep,
+        ]
+        .width(Length::Fill)
+        .height(Length::Fixed(SIDEBAR_HEADER_HEIGHT))
+        .into()
+    }
+
+    /// Sidebar body: slot list of the six categories. Reuses the existing
+    /// L1-hero renderer via `is_level1: true`; the active row is the slot
+    /// list's center, which `apply_sidebar_index` keeps synced to
+    /// `active_category`. Click routes through `SidebarClickItem`.
+    fn render_sidebar_body(&self) -> Element<'_, SettingsMessage> {
+        let entries: Vec<SettingsEntry> = SettingsTab::ALL
+            .iter()
+            .map(|tab| SettingsEntry::Header {
+                label: tab.label(),
+                icon: tab.icon_path(),
+            })
+            .collect();
+
+        // Use the dynamic slot config so the sidebar still scrolls if the
+        // window is shorter than 6 rows × row_height.
+        let mut config = slot_list::SlotListConfig::with_dynamic_slots(
+            // Carve out chrome: top-bar/player-bar (96) + sidebar header
+            // (60) + sidebar footer (44).
+            // The slot list runs in the remaining space.
+            f32::MAX,
+            SETTINGS_CHROME_HEIGHT + SIDEBAR_HEADER_HEIGHT + SIDEBAR_FOOTER_HEIGHT,
+        );
+        config.cull_empty = true;
+
+        let entries_owned = entries.clone();
+
+        slot_list::slot_list_view_with_scroll(
+            &self.sidebar_slot_list,
+            &entries_owned,
+            &config,
+            SettingsMessage::SidebarUp,
+            SettingsMessage::SidebarDown,
+            // Scrollbar seek: clamp into the sidebar slot range.
+            {
+                let total = entries_owned.len();
+                move |f: f32| {
+                    SettingsMessage::SidebarSetOffset(
+                        (f * total as f32) as usize,
+                        iced::keyboard::Modifiers::default(),
+                    )
+                }
+            },
+            None,
+            move |entry, ctx| {
+                let ctx = SlotRenderContext {
+                    item_index: ctx.item_index,
+                    is_center: ctx.is_center,
+                    opacity: ctx.opacity,
+                    row_height: ctx.row_height,
+                    scale_factor: ctx.scale_factor,
+                    is_capturing: false,
+                    conflict_text: None,
+                    is_level1: true,
+                    toggle_cursor: None,
+                };
+                render_sidebar_slot(&ctx, entry)
+            },
+        )
+    }
+
+    /// Sidebar footer: version label on the left, decorative "Esc" pill on
+    /// the right (matches the design's `.nk-sidebar-foot`).
+    fn render_sidebar_footer(&self) -> Element<'_, SettingsMessage> {
+        let sep = container(Space::new())
+            .width(Length::Fill)
+            .height(Length::Fixed(1.0))
+            .style(|_: &iced::Theme| container::Style {
+                background: Some(theme::border().into()),
+                ..Default::default()
+            });
+
+        let version = text(concat!("v", env!("CARGO_PKG_VERSION")))
+            .size(10.0)
+            .color(theme::fg3())
+            .font(theme::ui_font());
+
+        let esc_pill = button(
+            row![
+                embedded_svg::svg_widget("assets/icons/log-out.svg")
+                    .width(Length::Fixed(11.0))
+                    .height(Length::Fixed(11.0))
+                    .style(move |_, _| svg::Style {
+                        color: Some(theme::fg2()),
+                    }),
+                text("Esc").size(10.0).color(theme::fg0()).font(Font {
+                    weight: Weight::Medium,
+                    ..theme::ui_font()
+                }),
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center),
+        )
+        .on_press(SettingsMessage::Escape)
+        .style(|_theme: &iced::Theme, status: button::Status| {
+            let is_hovered = matches!(status, button::Status::Hovered);
+            button::Style {
+                background: Some(
+                    if is_hovered {
+                        theme::bg1()
+                    } else {
+                        theme::bg0()
+                    }
+                    .into(),
+                ),
+                border: Border {
+                    color: theme::border(),
+                    width: 1.0,
+                    radius: theme::ui_radius_pill(),
+                },
+                text_color: theme::fg0(),
+                ..Default::default()
+            }
+        })
+        .padding(Padding::new(4.0).left(10.0).right(10.0));
+
+        let footer_row = row![version, Space::new().width(Length::Fill), esc_pill]
+            .align_y(Alignment::Center)
+            .width(Length::Fill);
+
+        column![
+            sep,
+            container(footer_row)
+                .width(Length::Fill)
+                .height(Length::Fixed(SIDEBAR_FOOTER_HEIGHT - 1.0))
+                .align_y(Alignment::Center)
+                .padding(Padding::new(0.0).left(18.0).right(14.0)),
+        ]
+        .width(Length::Fill)
+        .height(Length::Fixed(SIDEBAR_FOOTER_HEIGHT))
+        .into()
+    }
+
+    // ========================================================================
+    // Detail pane (right pane)
+    // ========================================================================
+
+    /// Render the detail pane — slot list of the active category's entries.
+    ///
+    /// Phase 3 placeholder: uses the existing uniform-height slot list
+    /// renderer with `is_level1: false`. Phase 4 swaps in the
+    /// variable-height detail row layout from the design.
+    fn render_detail_pane<'a>(
         &'a self,
         entries: &[SettingsEntry],
-        _data: &SettingsViewData,
         window_height: f32,
-        _font: Font,
     ) -> Element<'a, SettingsMessage> {
-        let has_search = !self.search_query.is_empty();
-
         if entries.is_empty() {
-            let empty_msg = if has_search {
-                "No settings match the search query"
-            } else {
+            let empty_msg = if self.search_query.is_empty() {
                 "No settings available"
+            } else {
+                "No settings match the search query"
             };
-            let top_bar = self.breadcrumb_header();
-            let top_section = column![top_bar].width(Length::Fill);
-            let empty_content = container(
+            return container(
                 text(empty_msg)
                     .size(14)
                     .font(theme::ui_font())
@@ -136,25 +317,19 @@ impl SettingsPage {
             )
             .width(Length::Fill)
             .height(Length::Fill)
-            .center(Length::Fill);
-            let content = column![top_section, empty_content]
-                .width(Length::Fill)
-                .height(Length::Fill);
-            return settings_panel_container(content.into());
+            .center(Length::Fill)
+            .style(|_: &iced::Theme| container::Style {
+                background: Some(theme::bg0().into()),
+                ..Default::default()
+            })
+            .into();
         }
 
-        let mut config = slot_list::SlotListConfig::with_dynamic_slots(
-            window_height,
-            SETTINGS_CHROME_HEIGHT + BREADCRUMB_HEIGHT + DESCRIPTION_HEIGHT,
-        );
+        let mut config =
+            slot_list::SlotListConfig::with_dynamic_slots(window_height, SETTINGS_CHROME_HEIGHT);
         config.cull_empty = true;
 
         let entries_owned: Vec<SettingsEntry> = entries.to_vec();
-        // The detail pane never renders the L1 category-picker hero rows in
-        // the persistent-sidebar layout — those rows live in the sidebar
-        // (Phase 3). `is_level1` survives in SlotRenderContext for one more
-        // cycle; Phase 6 deletes the field outright.
-        let is_level1 = false;
         let editing_index = self.editing_index;
         let is_capturing = self.capturing_hotkey.is_some();
         let conflict_text_owned = self.conflict_label.as_ref().map(|(s, _)| s.clone());
@@ -183,7 +358,7 @@ impl SettingsPage {
                     } else {
                         None
                     },
-                    is_level1,
+                    is_level1: false,
                     toggle_cursor: if ctx.is_center { toggle_cursor } else { None },
                 };
                 let hi = if is_editing { &hex_input_owned } else { "" };
@@ -191,255 +366,13 @@ impl SettingsPage {
             },
         );
 
-        // Top bar: breadcrumb with inline search when active
-        let breadcrumb = self.breadcrumb_header();
-        let top_section = column![breadcrumb].width(Length::Fill);
-
-        // Description area at bottom
-        let description = self.description_area();
-
-        let content = column![top_section, slot_list_content, description]
+        container(slot_list_content)
             .width(Length::Fill)
-            .height(Length::Fill);
-
-        settings_panel_container(content.into())
-    }
-
-    /// Render the breadcrumb / search bar at the top of the settings panel.
-    /// Matches the design's `.nk-settings-bar`: theme::bg0_hard() background,
-    /// 1 px theme::border() bottom separator, italic title font for the
-    /// current segment, mono fg2 separators, plus an inline search field.
-    ///
-    /// Level 1: "Settings"
-    /// Level 2: "‹ Settings › General"
-    /// Sub-list: "‹ Settings › General › Sub-item"
-    pub(super) fn breadcrumb_header(&self) -> Element<'_, SettingsMessage> {
-        let body_font = theme::ui_font();
-        let label_size = 14.0;
-        let separator_size = 12.0;
-
-        let dim_color = theme::fg3();
-        let mid_color = theme::fg2();
-        let active_color = theme::fg0();
-
-        // Build segments from the active category. With the persistent
-        // sidebar, "Settings ›" + the active tab name is the breadcrumb;
-        // sub-lists append their own label. Phase 3 will retire this
-        // header outright in favour of a sidebar-rooted title.
-        let mut segments: Vec<&str> = vec!["Settings", self.active_category.label()];
-        let can_go_back = self.sub_list.is_some();
-
-        // Append sub-list label if in sub-list mode
-        if let Some(sub) = &self.sub_list {
-            segments.push(&sub.label);
-        }
-
-        let mut content = row![Space::new().width(Length::Fixed(16.0))];
-
-        // Back arrow if we can navigate back
-        if can_go_back {
-            content = content.push(
-                text("‹  ")
-                    .size(separator_size + 4.0)
-                    .color(dim_color)
-                    .font(body_font),
-            );
-        }
-
-        let last_idx = segments.len().saturating_sub(1);
-        for (i, segment) in segments.iter().enumerate() {
-            let is_last = i == last_idx;
-
-            if i > 0 {
-                content = content.push(
-                    text("  ›  ")
-                        .size(separator_size)
-                        .color(dim_color)
-                        .font(body_font),
-                );
-            }
-
-            if is_last {
-                // Last segment — bold italic title font to mirror the
-                // design's `.nk-crumb` (font-title + italic + 600).
-                content = content.push(
-                    text(*segment)
-                        .size(label_size)
-                        .font(Font {
-                            weight: Weight::Bold,
-                            ..theme::ui_font()
-                        })
-                        .color(active_color),
-                );
-            } else {
-                content = content.push(
-                    text(*segment)
-                        .size(label_size - 1.0)
-                        .font(body_font)
-                        .color(mid_color),
-                );
-            }
-        }
-
-        // Always-visible inline search
-        content = content.push(Space::new().width(Length::Fixed(16.0)));
-        let search_bar = crate::widgets::search_bar::search_bar(
-            &self.search_query,
-            "Search settings…",
-            SETTINGS_SEARCH_INPUT_ID,
-            SettingsMessage::SearchChanged,
-            Some(crate::theme::settings_search_input_style),
-        );
-        content = content.push(search_bar);
-
-        content = content.push(Space::new().width(Length::Fixed(16.0)));
-
-        let content = content
-            .align_y(Alignment::Center)
-            .height(Length::Fixed(BREADCRUMB_HEIGHT - 1.0));
-
-        // bg0_hard chrome bar + bottom border separator.
-        let bar = container(content)
-            .width(Length::Fill)
-            .height(Length::Fixed(BREADCRUMB_HEIGHT - 1.0))
+            .height(Length::Fill)
             .style(|_: &iced::Theme| container::Style {
-                background: Some(theme::bg0_hard().into()),
+                background: Some(theme::bg0().into()),
                 ..Default::default()
-            });
-
-        let separator = container(Space::new())
-            .width(Length::Fill)
-            .height(Length::Fixed(1.0))
-            .style(|_: &iced::Theme| container::Style {
-                background: Some(theme::border().into()),
-                ..Default::default()
-            });
-
-        let stacked = column![bar, separator]
-            .width(Length::Fill)
-            .height(Length::Fixed(BREADCRUMB_HEIGHT));
-
-        // Clickable breadcrumb when we can go back
-        if can_go_back {
-            button(stacked)
-                .on_press(SettingsMessage::Escape)
-                .style(transparent_button_style)
-                .padding(0)
-                .width(Length::Fill)
-                .into()
-        } else {
-            container(stacked).width(Length::Fill).into()
-        }
-    }
-
-    /// Footer panel — shows the focused row's description on the left and a
-    /// flat "Exit (Esc)" button on the right. Mirrors the design's
-    /// `.nk-settings-footer`: theme::bg0_hard() bg, 1 px theme::border() top
-    /// separator, 72 px min height, mono 12 px description, pill (rounded) or
-    /// square (flat) exit button at the right.
-    fn description_area(&self) -> Element<'_, SettingsMessage> {
-        let desc = if self.description_text.is_empty() {
-            " " // Maintain height even when empty
-        } else {
-            &self.description_text
-        };
-
-        let sep = container(Space::new())
-            .width(Length::Fill)
-            .height(Length::Fixed(1.0))
-            .style(|_: &iced::Theme| container::Style {
-                background: Some(theme::border().into()),
-                ..Default::default()
-            });
-
-        let desc_text = text(desc).size(12.0).color(theme::fg2()).font(Font {
-            weight: Weight::Medium,
-            ..theme::ui_font()
-        });
-
-        // Flat Exit button matching `.nk-settings-footer .exit`.
-        let exit_icon_size = 12.0;
-        let exit_label_size = 11.0;
-        let exit_btn = button(
-            row![
-                embedded_svg::svg_widget("assets/icons/log-out.svg")
-                    .width(Length::Fixed(exit_icon_size))
-                    .height(Length::Fixed(exit_icon_size))
-                    .style(move |_theme, _status| svg::Style {
-                        color: Some(theme::fg2()),
-                    }),
-                text("Exit (Esc)")
-                    .size(exit_label_size)
-                    .color(theme::fg0())
-                    .font(Font {
-                        weight: Weight::Medium,
-                        ..theme::ui_font()
-                    }),
-            ]
-            .spacing(8)
-            .align_y(Alignment::Center),
-        )
-        .on_press(SettingsMessage::Escape)
-        .style(|_theme: &iced::Theme, status: button::Status| {
-            let is_hovered = matches!(status, button::Status::Hovered);
-            button::Style {
-                background: Some(
-                    if is_hovered {
-                        theme::bg1()
-                    } else {
-                        theme::bg0()
-                    }
-                    .into(),
-                ),
-                border: Border {
-                    color: theme::border(),
-                    width: 1.0,
-                    radius: theme::ui_radius_pill(),
-                },
-                text_color: theme::fg0(),
-                ..Default::default()
-            }
-        })
-        .padding(Padding::new(6.0).left(14.0).right(14.0));
-
-        let desc_row = row![
-            container(desc_text)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .clip(true)
-                .align_y(Alignment::Center)
-                .padding(Padding::new(0.0).left(24.0)),
-            exit_btn,
-            Space::new().width(Length::Fixed(16.0)),
-        ]
-        .align_y(Alignment::Center)
-        .height(Length::Fill);
-
-        let desc_container = container(desc_row)
-            .width(Length::Fill)
-            .height(Length::Fixed(DESCRIPTION_HEIGHT - 1.0))
-            .padding(Padding::new(0.0))
-            .align_y(Alignment::Center)
-            .style(|_: &iced::Theme| container::Style {
-                background: Some(theme::bg0_hard().into()),
-                border: Border {
-                    radius: {
-                        let r = theme::ui_radius_lg();
-                        iced::border::Radius {
-                            top_left: 0.0,
-                            top_right: 0.0,
-                            bottom_left: r.bottom_left,
-                            bottom_right: r.bottom_right,
-                        }
-                    },
-                    ..Default::default()
-                },
-                ..Default::default()
-            });
-
-        column![sep, desc_container]
-            .width(Length::Fill)
-            .height(Length::Fixed(DESCRIPTION_HEIGHT))
+            })
             .into()
     }
 
@@ -622,5 +555,157 @@ impl SettingsPage {
         });
 
         backdrop.into()
+    }
+}
+
+/// Render a single sidebar row — visual is the L1 category hero (icon
+/// chip + name + blurb + 2 px accent left stripe on active), but clicks
+/// dispatch sidebar messages rather than the detail-pane drill-down
+/// messages the L1 hero hardcodes. Headers only (sidebar entries are all
+/// `SettingsEntry::Header`); `Item` rows are unreachable here.
+fn render_sidebar_slot<'a>(
+    ctx: &SlotRenderContext<'_>,
+    entry: &SettingsEntry,
+) -> Element<'a, SettingsMessage> {
+    let (label, icon_path) = match entry {
+        SettingsEntry::Header { label, icon } => (*label, *icon),
+        SettingsEntry::Item(_) => return container(text("")).width(Length::Fill).into(),
+    };
+
+    let title_size =
+        nokkvi_data::utils::scale::calculate_font_size(20.0, ctx.row_height, ctx.scale_factor)
+            * ctx.scale_factor;
+    let desc_size =
+        nokkvi_data::utils::scale::calculate_font_size(11.0, ctx.row_height, ctx.scale_factor)
+            * ctx.scale_factor;
+
+    let title_color = if ctx.is_center {
+        theme::fg0()
+    } else {
+        sidebar_scale_alpha(theme::fg0(), ctx.opacity * 0.85)
+    };
+    let desc_color = sidebar_scale_alpha(theme::fg2(), ctx.opacity * 0.85);
+
+    let chip_size = (title_size * 2.4).clamp(40.0, 56.0);
+    let icon_inner_size = (chip_size * 0.5).clamp(20.0, 28.0);
+    let icon_color = sidebar_scale_alpha(theme::accent_bright(), ctx.opacity);
+    let chip_bg = sidebar_scale_alpha(theme::bg0_hard(), ctx.opacity);
+    let chip_border = sidebar_scale_alpha(theme::border(), ctx.opacity);
+
+    let icon_chip = container(
+        embedded_svg::svg_widget(icon_path)
+            .width(Length::Fixed(icon_inner_size))
+            .height(Length::Fixed(icon_inner_size))
+            .style(move |_, _| svg::Style {
+                color: Some(icon_color),
+            }),
+    )
+    .width(Length::Fixed(chip_size))
+    .height(Length::Fixed(chip_size))
+    .align_x(Alignment::Center)
+    .align_y(Alignment::Center)
+    .style(move |_: &iced::Theme| container::Style {
+        background: Some(chip_bg.into()),
+        border: Border {
+            color: chip_border,
+            width: 1.0,
+            radius: theme::ui_radius_md(),
+        },
+        ..Default::default()
+    });
+
+    let title = text(label)
+        .size(title_size)
+        .font(Font {
+            weight: Weight::Bold,
+            ..theme::ui_font()
+        })
+        .color(title_color);
+    let description = sidebar_category_description(label);
+    let desc_widget = text(description)
+        .size(desc_size)
+        .font(theme::ui_font())
+        .color(desc_color);
+
+    let text_col = column![title, desc_widget].spacing(4).width(Length::Fill);
+
+    let content = row![
+        Space::new().width(Length::Fixed(14.0)),
+        icon_chip,
+        Space::new().width(Length::Fixed(12.0)),
+        container(text_col)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .clip(true)
+            .align_y(Alignment::Center),
+    ]
+    .spacing(0)
+    .align_y(Alignment::Center)
+    .height(Length::Fill);
+
+    let body = sidebar_cursor_stripe(content.into(), ctx.is_center);
+
+    button(body)
+        .style(transparent_button_style)
+        .padding(0)
+        .width(Length::Fill)
+        .on_press(SettingsMessage::SidebarClickItem(ctx.item_index))
+        .into()
+}
+
+/// Wrap a sidebar row body in the active-state chrome: bg1 fill + 2 px
+/// accent left stripe when this row matches the active category. Mirrors
+/// the design's `.nk-cat-row.active` block.
+fn sidebar_cursor_stripe<'a>(
+    body: Element<'a, SettingsMessage>,
+    is_active: bool,
+) -> Element<'a, SettingsMessage> {
+    let bg = if is_active {
+        theme::bg1()
+    } else {
+        theme::bg0_hard()
+    };
+    let stripe_color = if is_active {
+        theme::accent_bright()
+    } else {
+        Color::TRANSPARENT
+    };
+    let stripe = container(Space::new())
+        .width(Length::Fixed(2.0))
+        .height(Length::Fill)
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(stripe_color.into()),
+            ..Default::default()
+        });
+    let row_with_stripe = row![stripe, body]
+        .align_y(Alignment::Center)
+        .height(Length::Fill);
+    container(row_with_stripe)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(bg.into()),
+            ..Default::default()
+        })
+        .into()
+}
+
+/// Per-category description shown below the sidebar row title. Reads
+/// directly from `SettingsTab::description()` so a single source of
+/// truth feeds both the sidebar blurb and any future ALL-iteration
+/// surface (e.g. Hotkeys page descriptions).
+fn sidebar_category_description(label: &str) -> &'static str {
+    SettingsTab::ALL
+        .iter()
+        .find(|t| t.label() == label)
+        .map_or("Configure this section", |t| t.description())
+}
+
+/// Multiply a color's alpha by `factor`. Local helper to avoid pulling
+/// in the private `scale_alpha_local` from `rendering.rs`.
+fn sidebar_scale_alpha(color: Color, factor: f32) -> Color {
+    Color {
+        a: (color.a * factor).clamp(0.0, 1.0),
+        ..color
     }
 }
