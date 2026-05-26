@@ -144,21 +144,18 @@ impl Nokkvi {
                     self.settings_page.toggle_cursor = None;
                     self.settings_page.slot_list.move_up(total);
                     self.settings_page.snap_to_non_header(false);
-                    self.settings_page.update_description();
                 }
                 SettingsMessage::SlotListDown => {
                     self.settings_page.editing_index = None;
                     self.settings_page.toggle_cursor = None;
                     self.settings_page.slot_list.move_down(total);
                     self.settings_page.snap_to_non_header(true);
-                    self.settings_page.update_description();
                 }
                 SettingsMessage::SlotListSetOffset(offset, _) => {
                     self.settings_page.editing_index = None;
                     self.settings_page.toggle_cursor = None;
                     self.settings_page.slot_list.set_offset(offset, total);
                     self.settings_page.snap_to_non_header(true);
-                    self.settings_page.update_description();
                 }
                 _ => unreachable!(),
             }

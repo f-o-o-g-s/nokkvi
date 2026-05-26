@@ -193,7 +193,6 @@ impl SettingsPage {
                     let parent_offset = sub.parent_offset;
                     self.sub_list = None;
                     self.restore_parent_offset(parent_offset);
-                    self.update_description();
                     SettingsAction::None
                 }
             }
@@ -262,7 +261,6 @@ impl SettingsPage {
                 let parent_offset = fsw.parent_offset;
                 self.font_sub_list = None;
                 self.restore_parent_offset(parent_offset);
-                self.update_description();
                 SettingsAction::None
             }
             // Not applicable in font sub-list:
@@ -331,7 +329,6 @@ impl SettingsPage {
                     scale_factor: ctx.scale_factor,
                     is_capturing: false,
                     conflict_text: None,
-                    is_level1: false,
                     toggle_cursor: None,
                 };
                 render_color_slot(

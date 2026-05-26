@@ -551,8 +551,6 @@ pub struct SettingsPage {
     pub(crate) search_query: String,
     /// Whether the search overlay is active (replaces breadcrumb with search input)
     pub(crate) search_active: bool,
-    /// Description text for the currently focused item
-    pub(crate) description_text: String,
     /// Cached system font families — populated once on first font picker open
     pub(crate) cached_system_fonts: Option<Vec<String>>,
     /// Whether config has changed since last entry rebuild (set by file watcher
@@ -581,7 +579,6 @@ impl SettingsPage {
             hex_input: String::new(),
             search_query: String::new(),
             search_active: false,
-            description_text: String::new(),
             cached_system_fonts: None,
             config_dirty: true,
             active_category: SettingsTab::General,
@@ -715,7 +712,6 @@ impl SettingsPage {
                 self.toggle_cursor = None;
                 self.slot_list.move_up(total);
                 self.snap_to_non_header(false);
-                self.update_description();
                 action
             }
             SettingsMessage::SlotListDown => {
@@ -731,7 +727,6 @@ impl SettingsPage {
                 self.toggle_cursor = None;
                 self.slot_list.move_down(total);
                 self.snap_to_non_header(true);
-                self.update_description();
                 action
             }
             SettingsMessage::SlotListSetOffset(offset, _) => {
@@ -743,7 +738,6 @@ impl SettingsPage {
                 self.toggle_cursor = None;
                 self.slot_list.set_offset(offset, total);
                 self.snap_to_non_header(true);
-                self.update_description();
                 action
             }
             SettingsMessage::SlotListClickItem(offset) => {
@@ -751,7 +745,6 @@ impl SettingsPage {
                 self.toggle_cursor = None;
                 self.slot_list.set_offset(offset, total);
                 self.snap_to_non_header(true);
-                self.update_description();
                 // Activate the newly focused item (click = focus + activate, like Enter)
                 self.update(SettingsMessage::EditActivate, data)
             }
@@ -988,7 +981,6 @@ impl SettingsPage {
                     self.search_query.clear();
                     self.search_active = false;
                     self.cached_entries.clear();
-                    self.description_text.clear();
                     self.slot_list = SlotListView::new();
                     tracing::debug!(" [SETTINGS] ExitSettings triggered!");
                     SettingsAction::ExitSettings
@@ -1115,7 +1107,6 @@ impl SettingsPage {
         self.toggle_cursor = None;
         self.hex_input.clear();
         self.refresh_entries(data);
-        self.update_description();
     }
 
     /// Collect (key, default_hex) pairs for a __restore_* group key.
@@ -1360,28 +1351,6 @@ impl SettingsPage {
         } else {
             self.cached_entries = Self::build_category_sections(self.active_category, data);
         }
-        self.update_description();
-    }
-
-    /// Update the description_text from the centered detail-pane item's
-    /// subtitle. Called after any slot list navigation or entry refresh.
-    /// Kept around until Phase 3 retires the footer status bar; readers in
-    /// view.rs feed it into the soon-to-be-deleted `description_area`.
-    pub(crate) fn update_description(&mut self) {
-        let total = self.cached_entries.len();
-        self.description_text = self
-            .slot_list
-            .get_center_item_index(total)
-            .and_then(|idx| self.cached_entries.get(idx))
-            .map(|entry| match entry {
-                SettingsEntry::Item(item) => item
-                    .subtitle
-                    .as_deref()
-                    .unwrap_or(item.category)
-                    .to_string(),
-                SettingsEntry::Header { label, .. } => label.to_string(),
-            })
-            .unwrap_or_default();
     }
 
     /// If the current viewport offset is on a header at Level 2, snap to the

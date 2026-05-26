@@ -450,7 +450,6 @@ impl SettingsPage {
                         scale_factor: ctx.scale_factor,
                         is_capturing: false,
                         conflict_text: None,
-                        is_level1: false,
                         toggle_cursor: None,
                     };
                     render_font_slot(&ctx, font_name)
