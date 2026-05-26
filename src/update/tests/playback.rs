@@ -1,6 +1,6 @@
 //! Tests for playback transport, modes, volume, and crossfade update handlers.
 
-use crate::{View, app_message::PlaybackStateUpdate, test_helpers::*};
+use crate::{app_message::PlaybackStateUpdate, test_helpers::*};
 
 // ============================================================================
 // Mode Flag Handlers (playback.rs)

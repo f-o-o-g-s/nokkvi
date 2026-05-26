@@ -1148,6 +1148,7 @@ pub(crate) fn render_detail_header<'a>(
 /// 2 px accent left stripe + `bg1` fill, the bold label, the
 /// "Enter ↵" affordance, and the hotkey-capture / toggle-cursor
 /// indicators. Equivalent to `ctx.is_center` in the legacy slot list.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn render_detail_row<'a>(
     item: &SettingItem,
     item_index: usize,
