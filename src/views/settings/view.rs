@@ -329,8 +329,10 @@ impl SettingsPage {
         }
 
         let scrollable_body = iced::widget::scrollable(col)
+            .id(iced::widget::Id::new(super::DETAIL_SCROLLABLE_ID))
             .width(Length::Fill)
-            .height(Length::Fill);
+            .height(Length::Fill)
+            .style(theme::settings_scrollable_style);
 
         container(scrollable_body)
             .width(Length::Fill)

@@ -527,6 +527,16 @@ pub(crate) const SETTINGS_SEARCH_INPUT_ID: &str = "settings_search";
 /// Unique text_input ID for the hex color editor
 pub(crate) const HEX_EDITOR_INPUT_ID: &str = "hex_editor_input";
 
+/// Unique scrollable ID for the detail pane. The `SlotListUp`/`SlotListDown`
+/// fast-path uses this with `iced::widget::operation::scroll_to` to keep
+/// the focused row in view as Tab/Backspace cycles.
+pub(crate) const DETAIL_SCROLLABLE_ID: &str = "settings_detail_scrollable";
+
+/// Estimated row height (px) used by the auto-scroll math in the detail
+/// pane. Variable-height rows preclude an exact figure; 64 averages an
+/// item with subtitle (≈78) and one without (≈60).
+pub(crate) const DETAIL_AVERAGE_ROW_HEIGHT: f32 = 64.0;
+
 /// Settings page state
 pub struct SettingsPage {
     /// Index of the currently keyboard-cursored badge within a ToggleSet (None = no cursor)

@@ -122,6 +122,14 @@ impl Nokkvi {
     pub(crate) fn handle_settings(&mut self, msg: crate::views::SettingsMessage) -> Task<Message> {
         use crate::views::SettingsMessage;
 
+        let is_detail_nav = matches!(
+            msg,
+            SettingsMessage::SlotListUp
+                | SettingsMessage::SlotListDown
+                | SettingsMessage::SlotListSetOffset(..)
+                | SettingsMessage::SlotListClickItem(_)
+        );
+
         // Fast path: pure navigation messages don't need SettingsViewData at all
         // when entries are already cached — avoid disk I/O for arrow key nav.
         let is_nav_only = matches!(
@@ -159,7 +167,7 @@ impl Nokkvi {
                 }
                 _ => unreachable!(),
             }
-            return Task::none();
+            return self.detail_pane_scroll_task();
         }
 
         // Full path: build SettingsViewData (reads from theme system + config.toml)
@@ -314,7 +322,42 @@ impl Nokkvi {
 
         self.refresh_settings_entries_if_dirty();
 
-        task
+        // Detail-pane nav (Tab / Backspace / click / scrollbar seek): chain
+        // a scroll task so the focused row stays in view. The sidebar and
+        // sub-list paths skip this — only the right pane needs auto-scroll.
+        if is_detail_nav
+            && self.settings_page.sub_list.is_none()
+            && self.settings_page.font_sub_list.is_none()
+        {
+            Task::batch([task, self.detail_pane_scroll_task()])
+        } else {
+            task
+        }
+    }
+
+    /// Dispatch a `scroll_to` task that brings the currently-focused
+    /// detail-pane row roughly into the middle of the visible viewport.
+    ///
+    /// The detail pane is variable-height, so the target y is approximate
+    /// — `DETAIL_AVERAGE_ROW_HEIGHT` averages a row with subtitle (≈ 78)
+    /// and one without (≈ 60). Centering the focused row makes drift
+    /// tolerable: even if the estimate is off by a row or two, the row
+    /// stays inside the viewport.
+    fn detail_pane_scroll_task(&self) -> Task<Message> {
+        use iced::widget::scrollable::AbsoluteOffset;
+
+        let focused = self.settings_page.slot_list.viewport_offset as f32;
+        let row_height = crate::views::settings::DETAIL_AVERAGE_ROW_HEIGHT;
+        let viewport = (self.window.height - 96.0).max(120.0); // 96 = chrome
+        let target_y = (focused * row_height + row_height / 2.0 - viewport / 2.0).max(0.0);
+
+        iced::widget::operation::scroll_to(
+            iced::widget::Id::new(crate::views::settings::DETAIL_SCROLLABLE_ID),
+            AbsoluteOffset {
+                x: 0.0,
+                y: target_y,
+            },
+        )
     }
 
     /// Rebuild the settings page's cached entries when `config_dirty` is set.

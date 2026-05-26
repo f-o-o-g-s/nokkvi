@@ -1444,6 +1444,93 @@ pub(crate) fn settings_search_input_style(
     }
 }
 
+/// Themed scrollbar style for the settings detail pane: `bg2` rail, `fg4`
+/// scroller resting, `accent_bright` scroller on hover/drag. Matches the
+/// info-modal scrollable's chrome so all in-settings scrollable surfaces
+/// read consistently against the flat-redesign palette.
+pub(crate) fn settings_scrollable_style(
+    _theme: &Theme,
+    status: iced::widget::scrollable::Status,
+) -> iced::widget::scrollable::Style {
+    use iced::widget::{container, scrollable};
+
+    let rail = scrollable::Rail {
+        background: Some(bg2().into()),
+        border: iced::Border {
+            radius: ui_border_radius(),
+            ..Default::default()
+        },
+        scroller: scrollable::Scroller {
+            background: fg4().into(),
+            border: iced::Border {
+                radius: ui_border_radius(),
+                ..Default::default()
+            },
+        },
+    };
+    let hot_rail = scrollable::Rail {
+        scroller: scrollable::Scroller {
+            background: accent_bright().into(),
+            ..rail.scroller
+        },
+        ..rail
+    };
+    let auto_scroll = scrollable::AutoScroll {
+        background: iced::Color::TRANSPARENT.into(),
+        border: iced::Border::default(),
+        shadow: iced::Shadow::default(),
+        icon: iced::Color::TRANSPARENT,
+    };
+
+    match status {
+        scrollable::Status::Active { .. } => scrollable::Style {
+            container: container::Style::default(),
+            vertical_rail: rail,
+            horizontal_rail: rail,
+            gap: None,
+            auto_scroll,
+        },
+        scrollable::Status::Hovered {
+            is_vertical_scrollbar_hovered,
+            is_horizontal_scrollbar_hovered,
+            ..
+        } => scrollable::Style {
+            container: container::Style::default(),
+            vertical_rail: if is_vertical_scrollbar_hovered {
+                hot_rail
+            } else {
+                rail
+            },
+            horizontal_rail: if is_horizontal_scrollbar_hovered {
+                hot_rail
+            } else {
+                rail
+            },
+            gap: None,
+            auto_scroll,
+        },
+        scrollable::Status::Dragged {
+            is_vertical_scrollbar_dragged,
+            is_horizontal_scrollbar_dragged,
+            ..
+        } => scrollable::Style {
+            container: container::Style::default(),
+            vertical_rail: if is_vertical_scrollbar_dragged {
+                hot_rail
+            } else {
+                rail
+            },
+            horizontal_rail: if is_horizontal_scrollbar_dragged {
+                hot_rail
+            } else {
+                rail
+            },
+            gap: None,
+            auto_scroll,
+        },
+    }
+}
+
 // ============================================================================
 // Iced Theme Integration
 // ============================================================================
