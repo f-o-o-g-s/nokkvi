@@ -326,11 +326,19 @@ pub(crate) fn view_header<
     // Wrap the sort-dropdown cell with a sided-border divider. Pinning to
     // a fixed `SORT_CELL_MIN_WIDTH` matches the design's
     // `.nk-ctrl-sort { min-width: 130px }` and keeps the rest of the row
-    // aligned across views with different sort-mode labels.
+    // aligned across views with different sort-mode labels. The static-label
+    // branch (Similar's "similar to: …" / "top songs: …") instead shrinks to
+    // content up to the inner container's `max_width(300)` — dynamic labels
+    // are longer than the dropdown cells and would otherwise ellipsize to a
+    // single letter inside the 130 px fixed cell.
     let view_selector_cell: Element<'a, Message> = wrap_header_cell(
-        container(view_selector)
-            .width(Length::Fixed(SORT_CELL_MIN_WIDTH))
-            .into(),
+        if view_options.is_empty() {
+            view_selector
+        } else {
+            container(view_selector)
+                .width(Length::Fixed(SORT_CELL_MIN_WIDTH))
+                .into()
+        },
         true,
     );
 
