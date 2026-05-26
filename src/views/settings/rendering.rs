@@ -1480,6 +1480,270 @@ pub(crate) fn render_font_slot<'a>(
         .into()
 }
 
+// ============================================================================
+// Variable-height detail-pane renderers (persistent-sidebar layout)
+// ============================================================================
+//
+// The detail pane on the right of the persistent sidebar uses
+// variable-height rows so each row can grow to fit inline help text
+// (from `SettingItem.subtitle`) and wrap pill groups without clipping.
+// Headers also grow to their content. These renderers share the value
+// widgets (`render_value_display`) with the legacy slot-list path but
+// drop the `Length::Fill` height requirement.
+
+/// Render a section header for the variable-height detail pane.
+/// Same small-caps mono treatment as `render_l2_section_header` but
+/// shrink-sized vertically so it sits naturally above the rows.
+pub(crate) fn render_detail_header<'a>(
+    label: &str,
+    icon_path: &str,
+) -> Element<'a, SettingsMessage> {
+    let font_size = 11.0;
+    let icon_size = 13.0;
+
+    let label_owned = label.to_string();
+    let icon_owned = icon_path.to_string();
+
+    let section_icon = embedded_svg::svg_widget(&icon_owned)
+        .width(Length::Fixed(icon_size))
+        .height(Length::Fixed(icon_size))
+        .style(move |_, _| svg::Style {
+            color: Some(theme::fg2()),
+        });
+
+    let label_widget = text(label_owned.to_uppercase())
+        .size(font_size)
+        .font(Font {
+            weight: Weight::Medium,
+            ..theme::ui_font()
+        })
+        .color(theme::fg3())
+        .wrapping(Wrapping::None);
+
+    let content_row = row![
+        Space::new().width(Length::Fixed(4.0)),
+        section_icon,
+        label_widget,
+        Space::new().width(Length::Fill),
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center);
+
+    let body = container(content_row).width(Length::Fill).padding(
+        Padding::new(0.0)
+            .top(18.0)
+            .bottom(10.0)
+            .left(24.0)
+            .right(28.0),
+    );
+
+    let sep = container(Space::new())
+        .width(Length::Fill)
+        .height(Length::Fixed(1.0))
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(theme::border().into()),
+            ..Default::default()
+        });
+
+    column![body, sep].width(Length::Fill).into()
+}
+
+/// Render a variable-height detail row: `[label + help text below]
+/// [value widget] [Default: X label]`. Pill groups inside the value
+/// widget wrap; rows grow to fit.
+///
+/// `is_focused` corresponds to "the keyboard-cursored row" — drives the
+/// 2 px accent left stripe + `bg1` fill, the bold label, the
+/// "Enter ↵" affordance, and the hotkey-capture / toggle-cursor
+/// indicators. Equivalent to `ctx.is_center` in the legacy slot list.
+pub(crate) fn render_detail_row<'a>(
+    item: &SettingItem,
+    item_index: usize,
+    is_focused: bool,
+    is_editing: bool,
+    is_capturing: bool,
+    hex_input: &str,
+    toggle_cursor: Option<usize>,
+    conflict_text: Option<&str>,
+) -> Element<'a, SettingsMessage> {
+    let label_size = 13.0;
+    let help_size = 11.0;
+    let value_size = 13.0;
+    let default_size = 10.0;
+
+    let label_color = if is_focused {
+        theme::accent_bright()
+    } else {
+        theme::fg0()
+    };
+    let label_weight = if is_focused {
+        Weight::Bold
+    } else {
+        Weight::Medium
+    };
+
+    // SlotRenderContext built from this row's perspective so the shared
+    // value-widget producers light up the right indicators.
+    let ctx = SlotRenderContext {
+        item_index,
+        is_center: is_focused,
+        opacity: 1.0,
+        row_height: 60.0,
+        scale_factor: 1.0,
+        is_capturing,
+        conflict_text,
+        is_level1: false,
+        toggle_cursor: if is_focused { toggle_cursor } else { None },
+    };
+    let style = slot_list::SlotListSlotStyle {
+        text_color: label_color,
+        subtext_color: theme::fg3(),
+        bg_color: Color::TRANSPARENT,
+        border_color: Color::TRANSPARENT,
+        border_width: 0.0,
+        border_radius: 0.0.into(),
+        hover_text_color: theme::accent_bright(),
+    };
+
+    let label_text = text(item.label.clone())
+        .size(label_size)
+        .font(Font {
+            weight: label_weight,
+            ..theme::ui_font()
+        })
+        .color(label_color)
+        .wrapping(Wrapping::None);
+
+    let label_row: Element<'a, SettingsMessage> = if let Some(icon_path) = item.label_icon {
+        let icon_color = label_color;
+        let inline_icon = embedded_svg::svg_widget(icon_path)
+            .width(Length::Fixed(label_size))
+            .height(Length::Fixed(label_size))
+            .style(move |_, _| svg::Style {
+                color: Some(icon_color),
+            });
+        row![label_text, inline_icon]
+            .spacing(5)
+            .align_y(Alignment::Center)
+            .into()
+    } else {
+        label_text.into()
+    };
+
+    let mut label_col = column![label_row].spacing(2);
+    if let Some(help) = item.subtitle.as_ref() {
+        label_col = label_col.push(
+            text(help.to_string())
+                .size(help_size)
+                .color(theme::fg3())
+                .font(theme::ui_font()),
+        );
+    }
+
+    let label_container = container(label_col)
+        .width(Length::Fixed(260.0))
+        .align_y(Alignment::Center);
+
+    let show_hint = item_needs_enter_hint(item) && is_focused && !is_editing && !is_capturing;
+    let value_widget =
+        render_value_display(&item.value, value_size, &style, &ctx, is_editing, hex_input);
+    let value_block: Element<'a, SettingsMessage> = if show_hint {
+        row![
+            value_widget,
+            Space::new().width(Length::Fixed(8.0)),
+            text("Enter ↵")
+                .size(default_size)
+                .color(theme::fg3())
+                .font(theme::ui_font()),
+        ]
+        .align_y(Alignment::Center)
+        .into()
+    } else {
+        value_widget
+    };
+
+    let value_col = container(value_block)
+        .width(Length::Fill)
+        .align_x(Alignment::End)
+        .align_y(Alignment::Center)
+        .padding(Padding::new(0.0).left(12.0).right(12.0));
+
+    let default_label_str = format!("Default: {}", item.default.display());
+    let default_col = container(
+        text(default_label_str)
+            .size(default_size)
+            .color(theme::fg3())
+            .font(theme::ui_font())
+            .wrapping(Wrapping::None),
+    )
+    .width(Length::Shrink)
+    .align_y(Alignment::Center);
+
+    let content_row = row![label_container, value_col, default_col]
+        .spacing(0)
+        .align_y(Alignment::Center)
+        .width(Length::Fill);
+
+    // 2 px accent left stripe + bg1 fill when focused.
+    let stripe_color = if is_focused {
+        theme::accent_bright()
+    } else {
+        Color::TRANSPARENT
+    };
+    let row_bg = if is_focused {
+        theme::bg1()
+    } else {
+        Color::TRANSPARENT
+    };
+    let stripe = container(Space::new())
+        .width(Length::Fixed(2.0))
+        .height(Length::Fill)
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(stripe_color.into()),
+            ..Default::default()
+        });
+
+    let stripe_row = row![
+        stripe,
+        container(content_row).width(Length::Fill).padding(
+            Padding::new(0.0)
+                .top(14.0)
+                .bottom(14.0)
+                .left(22.0)
+                .right(28.0)
+        ),
+    ]
+    .align_y(Alignment::Center);
+
+    let body = container(stripe_row)
+        .width(Length::Fill)
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(row_bg.into()),
+            ..Default::default()
+        });
+
+    let sep = container(Space::new())
+        .width(Length::Fill)
+        .height(Length::Fixed(1.0))
+        .style(move |_: &iced::Theme| container::Style {
+            background: Some(theme::border().into()),
+            ..Default::default()
+        });
+
+    let stacked = column![body, sep].width(Length::Fill);
+
+    button(stacked)
+        .on_press(if is_focused {
+            SettingsMessage::EditActivate
+        } else {
+            SettingsMessage::SlotListClickItem(item_index)
+        })
+        .style(transparent_button_style)
+        .padding(0)
+        .width(Length::Fill)
+        .into()
+}
+
 #[cfg(test)]
 mod tests {
     use std::borrow::Cow;

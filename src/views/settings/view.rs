@@ -16,10 +16,10 @@ use iced::{
 };
 
 use super::{
-    BREADCRUMB_HEIGHT, FONT_SEARCH_BAR_HEIGHT, SETTINGS_CHROME_HEIGHT, SETTINGS_SEARCH_INPUT_ID,
-    SettingsMessage, SettingsPage, SettingsTab, SettingsViewData,
+    BREADCRUMB_HEIGHT, FONT_SEARCH_BAR_HEIGHT, SETTINGS_SEARCH_INPUT_ID, SettingsMessage,
+    SettingsPage, SettingsTab, SettingsViewData,
     items::SettingsEntry,
-    rendering::{SlotRenderContext, render_settings_slot, transparent_button_style},
+    rendering::{render_detail_header, render_detail_row, transparent_button_style},
 };
 use crate::{embedded_svg, theme, widgets::slot_list};
 
@@ -252,15 +252,21 @@ impl SettingsPage {
     // Detail pane (right pane)
     // ========================================================================
 
-    /// Render the detail pane — slot list of the active category's entries.
+    /// Render the detail pane — a `scrollable` column of variable-height
+    /// rows for the active category's entries. Each row grows to fit its
+    /// label + inline help text + control + "Default: X" label. Headers
+    /// scroll with the content (v1 sticky fallback per the plan).
     ///
-    /// Phase 3 placeholder: uses the existing uniform-height slot list
-    /// renderer with `is_level1: false`. Phase 4 swaps in the
-    /// variable-height detail row layout from the design.
+    /// The focused row is `slot_list.viewport_offset` (the existing slot
+    /// state, repurposed as a row-index pointer now that the visual is
+    /// no longer slot-list-paginated). Tab / Backspace continue to drive
+    /// `SettingsMessage::SlotListUp`/`SlotListDown`; click on a row
+    /// dispatches `SlotListClickItem(idx)`. Mouse-wheel scrolls the pane
+    /// natively via `iced::scrollable`.
     fn render_detail_pane<'a>(
         &'a self,
         entries: &[SettingsEntry],
-        window_height: f32,
+        _window_height: f32,
     ) -> Element<'a, SettingsMessage> {
         if entries.is_empty() {
             let empty_msg = if self.search_query.is_empty() {
@@ -284,48 +290,49 @@ impl SettingsPage {
             .into();
         }
 
-        let mut config =
-            slot_list::SlotListConfig::with_dynamic_slots(window_height, SETTINGS_CHROME_HEIGHT);
-        config.cull_empty = true;
-
-        let entries_owned: Vec<SettingsEntry> = entries.to_vec();
+        let focused_index = self.slot_list.viewport_offset;
         let editing_index = self.editing_index;
         let is_capturing = self.capturing_hotkey.is_some();
         let conflict_text_owned = self.conflict_label.as_ref().map(|(s, _)| s.clone());
         let hex_input_owned = self.hex_input.clone();
         let toggle_cursor = self.toggle_cursor;
 
-        let slot_list_content = slot_list::slot_list_view_with_scroll(
-            &self.slot_list,
-            &entries_owned,
-            &config,
-            SettingsMessage::SlotListUp,
-            SettingsMessage::SlotListDown,
-            super::settings_seek_to(entries_owned.len()),
-            None,
-            move |entry, ctx| {
-                let is_editing = editing_index == Some(ctx.item_index);
-                let ctx = SlotRenderContext {
-                    item_index: ctx.item_index,
-                    is_center: ctx.is_center,
-                    opacity: 1.0,
-                    row_height: ctx.row_height,
-                    scale_factor: ctx.scale_factor,
-                    is_capturing: is_capturing && ctx.is_center,
-                    conflict_text: if is_capturing && ctx.is_center {
+        let mut col = column![].width(Length::Fill);
+        for (idx, entry) in entries.iter().enumerate() {
+            let row_element: Element<'a, SettingsMessage> = match entry {
+                SettingsEntry::Header { label, icon } => render_detail_header(label, icon),
+                SettingsEntry::Item(item) => {
+                    let is_focused = idx == focused_index;
+                    let is_editing = editing_index == Some(idx);
+                    let conflict_text = if is_focused && is_capturing {
                         conflict_text_owned.as_deref()
                     } else {
                         None
-                    },
-                    is_level1: false,
-                    toggle_cursor: if ctx.is_center { toggle_cursor } else { None },
-                };
-                let hi = if is_editing { &hex_input_owned } else { "" };
-                render_settings_slot(&ctx, entry, is_editing, hi)
-            },
-        );
+                    };
+                    render_detail_row(
+                        item,
+                        idx,
+                        is_focused,
+                        is_editing,
+                        is_capturing && is_focused,
+                        if is_editing {
+                            hex_input_owned.as_str()
+                        } else {
+                            ""
+                        },
+                        toggle_cursor,
+                        conflict_text,
+                    )
+                }
+            };
+            col = col.push(row_element);
+        }
 
-        container(slot_list_content)
+        let scrollable_body = iced::widget::scrollable(col)
+            .width(Length::Fill)
+            .height(Length::Fill);
+
+        container(scrollable_body)
             .width(Length::Fill)
             .height(Length::Fill)
             .style(|_: &iced::Theme| container::Style {
