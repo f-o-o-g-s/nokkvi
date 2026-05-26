@@ -1,0 +1,68 @@
+# Changelog — v0.5.x archive
+
+Releases v0.5.0 through v0.5.3, covering 2026-05-21 to 2026-05-24. The current changelog (v0.6.0 onward) lives in [CHANGELOG.md](../CHANGELOG.md).
+
+## v0.5.3 — 2026-05-24
+
+### Added
+
+- In Top nav layout, the artwork panel now reaches up over the nav bar, except when the metadata strip itself occupies the top bar.
+
+### Changed
+
+- The label naming the centered slot-list item is now an opaque bar pinned to the bottom of the artwork panel, replacing the centered floating pill.
+- The queue's read-only playlist context bar no longer shows a small icon next to the playlist title.
+- Overlay menus (hamburger, player-modes kebab, context menus, library-selector popover) now cast a drop shadow.
+- Toggles in the player-modes kebab now render with the same filled checkbox glyph as the library-selector popover.
+
+### Fixed
+
+- Playlists side-nav tab now uses a music-note sheet icon to avoid the 'iii' visual collision with rotated tab text.
+
+## v0.5.2 — 2026-05-23
+
+### Added
+
+- MPRIS album-art cache now self-cleans — orphan files from prior crashes are swept on launch, and clean exits clear the cache on shutdown.
+
+### Fixed
+
+- Logging out and back in to Navidrome no longer leaks one OS thread per cycle, so long-running sessions stay flat in thread count.
+- MPRIS album art shown by desktop shells now refreshes on every track change instead of pinning to the first track's cover for the whole session.
+
+## v0.5.1 — 2026-05-22
+
+### Added
+
+- Multi-library filter — a new nav-bar popover (top-nav and side-nav
+  layouts) lets users scope every browse view (Albums, Artists, Songs,
+  Genres) to a subset of Navidrome libraries. Empty selection is treated
+  as "all". The trigger is hidden when only one library exists, so
+  single-library servers see no UI change. Selection persists across
+  restarts (redb), and libraries deleted on the server are pruned from
+  the active set at next launch. Playlists are intentionally not
+  filtered — Navidrome's `/api/playlist` endpoint ignores `library_id`
+  and the server's per-user library access already filters playlists.
+
+### Changed
+
+- Hamburger menu moved from the far-right of the top nav to the left edge, next to the library-filter trigger in both top-nav and side-nav layouts.
+
+### Fixed
+
+- MPRIS `LoopStatus` requests from clients like `playerctl` now set the requested mode directly instead of cycling, so `playerctl loop Track` from Playlist state no longer lands on None.
+- MPRIS cover art is published on D-Bus as a local file URL instead of an authenticated Navidrome link, no longer exposing the Subsonic credential triple to other same-user processes.
+- Switching Navidrome servers no longer shows the prior server's covers for overlapping album IDs, retries SSE against the old host, or emits the old server's cover via MPRIS until the next track change.
+- Radios and Similar views now render the right number of rows after a window resize, matching every other slot-list view.
+- Library-changed SSE events with non-ASCII metadata (artist names with diacritics, Japanese titles, …) are no longer dropped when a multi-byte character spans an HTTP chunk boundary.
+
+## v0.5.0 — 2026-05-21
+
+### Added
+
+- New `nokkvi <verb>` CLI for scripting and WM hotkeys — 16 verbs covering transport, volume, queue, view-switching, and `love`/`rate` on the currently-playing track.
+
+### Fixed
+
+- Lock, heart, and star outline icons in slot-list rows now darken in lockstep with the row's text when the row is selected (centered, multi-selected, or currently playing) — previously they kept their muted light tint against the light selected-row fill and were hard to read. Most visible on private playlists in the Playlists view, but the heart and star outlines had the same issue under multi-selection (ctrl-click) on every slot-list view.
+- Menu text no longer renders blank on systems whose sans-serif font has no Medium weight (e.g. Sway + Intel iGPU; reported by hollisticated-horse).
