@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Metadata-strip text (title, artist, codec, bitrate) is now legible on light themes.
+
 ### Removed
 
 ## v0.6.0 — 2026-05-25
