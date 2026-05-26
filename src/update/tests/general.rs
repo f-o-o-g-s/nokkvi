@@ -23,11 +23,9 @@ fn server_version_fetched_updates_state() {
 
 #[test]
 fn settings_escape_at_root_exits() {
-    use crate::views::settings::{NavLevel, SettingsAction, SettingsMessage};
+    use crate::views::settings::{SettingsAction, SettingsMessage};
     let mut page = crate::views::SettingsPage::new();
-    // Default state: nav_stack = [CategoryPicker], no search, no editing
-    assert_eq!(page.nav_stack.len(), 1);
-    assert_eq!(*page.current_level(), NavLevel::CategoryPicker);
+    // Default state: no search, no editing — Escape exits settings.
 
     let data = make_settings_view_data();
     let action = page.update(SettingsMessage::Escape, &data);
@@ -73,27 +71,6 @@ fn settings_escape_with_active_search_clears_search() {
     );
     assert!(!page.search_active, "search_active should be cleared");
     assert!(page.search_query.is_empty(), "search query should be empty");
-}
-
-#[test]
-fn settings_escape_pops_nav_stack() {
-    use crate::views::settings::{NavLevel, SettingsAction, SettingsMessage, SettingsTab};
-    let mut page = crate::views::SettingsPage::new();
-    // Drill into General category
-    page.push_level(NavLevel::Category(SettingsTab::General));
-    assert_eq!(page.nav_stack.len(), 2);
-
-    let data = make_settings_view_data();
-    let action = page.update(SettingsMessage::Escape, &data);
-    assert!(
-        matches!(action, SettingsAction::None),
-        "Escape at depth 2 should pop nav stack, got: {action:?}"
-    );
-    assert_eq!(
-        page.nav_stack.len(),
-        1,
-        "Nav stack should be popped to root"
-    );
 }
 
 #[test]

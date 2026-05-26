@@ -1,36 +1,22 @@
 //! Settings entry building and filtering — pure functions for constructing and filtering
 //! the `SettingsEntry` lists from config data.
 //!
-//! Supports two navigation levels:
-//! - Level 1 (CategoryPicker): one Header per tab
-//! - Level 2 (Category): all items within a tab, under auto-expanded section headers
+//! The persistent two-pane settings shell drives the detail-pane entries
+//! from `SettingsPage::active_category`. Sidebar entries are
+//! `SettingsTab::ALL` directly; the detail entries come from
+//! `build_category_sections`. Cross-tab search flattens results from
+//! every tab into one list.
 
 use super::{SettingsPage, SettingsTab, SettingsViewData, items, items::SettingsEntry};
 
 impl SettingsPage {
     // ========================================================================
-    // Level 1: Category Picker
+    // Category Sections (all sections always inline)
     // ========================================================================
 
-    /// Build entries for the category picker (Level 1) — one Header per tab.
-    /// Also feeds the persistent sidebar; the two surfaces render the same
-    /// six-row list under different chrome.
-    pub(super) fn build_category_picker_entries() -> Vec<SettingsEntry> {
-        SettingsTab::ALL
-            .iter()
-            .map(|tab| SettingsEntry::Header {
-                label: tab.label(),
-                icon: tab.icon_path(),
-            })
-            .collect()
-    }
-
-    // ========================================================================
-    // Level 2: Category Sections (all sections always inline)
-    // ========================================================================
-
-    /// Build entries for a category (Level 2).
-    /// All sections are rendered inline with a header + all child items.
+    /// Build the detail-pane entries for a single category. Headers + Items
+    /// are interleaved in section order; the renderer treats headers as
+    /// non-interactive separators.
     pub(super) fn build_category_sections(
         tab: SettingsTab,
         data: &SettingsViewData,

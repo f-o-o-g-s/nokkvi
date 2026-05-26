@@ -9,8 +9,8 @@ use iced::{
 };
 
 use super::{
-    BREADCRUMB_HEIGHT, FONT_SEARCH_BAR_HEIGHT, NavLevel, SETTINGS_CHROME_HEIGHT,
-    SETTINGS_SEARCH_INPUT_ID, SettingsMessage, SettingsPage, SettingsViewData,
+    BREADCRUMB_HEIGHT, FONT_SEARCH_BAR_HEIGHT, SETTINGS_CHROME_HEIGHT, SETTINGS_SEARCH_INPUT_ID,
+    SettingsMessage, SettingsPage, SettingsViewData,
     items::SettingsEntry,
     rendering::{SlotRenderContext, render_settings_slot, transparent_button_style},
 };
@@ -59,10 +59,7 @@ impl SettingsPage {
         {
             &self.cached_entries
         } else {
-            built_entries = match self.current_level() {
-                NavLevel::CategoryPicker => Self::build_category_picker_entries(),
-                NavLevel::Category(tab) => Self::build_category_sections(*tab, &data),
-            };
+            built_entries = Self::build_category_sections(self.active_category, &data);
             &built_entries
         };
 
@@ -153,7 +150,11 @@ impl SettingsPage {
         config.cull_empty = true;
 
         let entries_owned: Vec<SettingsEntry> = entries.to_vec();
-        let is_level1 = matches!(self.current_level(), NavLevel::CategoryPicker);
+        // The detail pane never renders the L1 category-picker hero rows in
+        // the persistent-sidebar layout — those rows live in the sidebar
+        // (Phase 3). `is_level1` survives in SlotRenderContext for one more
+        // cycle; Phase 6 deletes the field outright.
+        let is_level1 = false;
         let editing_index = self.editing_index;
         let is_capturing = self.capturing_hotkey.is_some();
         let conflict_text_owned = self.conflict_label.as_ref().map(|(s, _)| s.clone());
@@ -221,19 +222,12 @@ impl SettingsPage {
         let mid_color = theme::fg2();
         let active_color = theme::fg0();
 
-        // Build segments from nav stack
-        let mut segments: Vec<&str> = Vec::new();
-        let can_go_back = self.nav_stack.len() > 1 || self.sub_list.is_some();
-
-        match self.current_level() {
-            NavLevel::CategoryPicker => {
-                segments.push("Settings");
-            }
-            NavLevel::Category(tab) => {
-                segments.push("Settings");
-                segments.push(tab.label());
-            }
-        }
+        // Build segments from the active category. With the persistent
+        // sidebar, "Settings ›" + the active tab name is the breadcrumb;
+        // sub-lists append their own label. Phase 3 will retire this
+        // header outright in favour of a sidebar-rooted title.
+        let mut segments: Vec<&str> = vec!["Settings", self.active_category.label()];
+        let can_go_back = self.sub_list.is_some();
 
         // Append sub-list label if in sub-list mode
         if let Some(sub) = &self.sub_list {

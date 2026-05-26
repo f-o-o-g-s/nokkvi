@@ -6,7 +6,7 @@
 //! Up/Down navigates items, Enter activates edit mode, Escape goes back.
 //! ColorArray items open a sub-list showing individual gradient colors.
 
-use std::{collections::HashMap, time::Instant};
+use std::time::Instant;
 
 use nokkvi_data::types::{
     hotkey_config::{HotkeyAction, KeyCombo},
@@ -334,30 +334,6 @@ impl SettingsTab {
 }
 
 // ============================================================================
-// Navigation Level
-// ============================================================================
-
-/// A level in the drill-down navigation hierarchy.
-/// The nav_stack stores these to track where the user is.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum NavLevel {
-    /// Level 1: category picker (General, Hotkeys, Theme, Visualizer)
-    CategoryPicker,
-    /// Level 2: all items within a category, under auto-expanded section headers
-    Category(SettingsTab),
-}
-
-impl NavLevel {
-    /// Unique key for cursor memory storage
-    fn cursor_key(&self) -> String {
-        match self {
-            NavLevel::CategoryPicker => "L1".to_string(),
-            NavLevel::Category(tab) => format!("L2:{}", tab.label()),
-        }
-    }
-}
-
-// ============================================================================
 // Settings Messages
 // ============================================================================
 
@@ -553,11 +529,6 @@ pub(crate) const HEX_EDITOR_INPUT_ID: &str = "hex_editor_input";
 
 /// Settings page state
 pub struct SettingsPage {
-    /// Navigation stack — tracks current drill-down position.
-    /// Empty = Level 1 (category picker). 1 entry = Level 2 (sections). 2 = Level 3 (items).
-    pub(crate) nav_stack: Vec<NavLevel>,
-    /// Cursor position memory per nav level (keyed by NavLevel::cursor_key())
-    pub(crate) level_cursors: HashMap<String, usize>,
     /// Index of the currently keyboard-cursored badge within a ToggleSet (None = no cursor)
     pub(crate) toggle_cursor: Option<usize>,
     /// Slot list navigation state
@@ -599,8 +570,6 @@ pub struct SettingsPage {
 impl SettingsPage {
     pub(crate) fn new() -> Self {
         Self {
-            nav_stack: vec![NavLevel::CategoryPicker],
-            level_cursors: HashMap::new(),
             slot_list: SlotListView::new(),
             toggle_cursor: None,
             editing_index: None,
@@ -618,58 +587,6 @@ impl SettingsPage {
             active_category: SettingsTab::General,
             sidebar_slot_list: SlotListView::new(),
         }
-    }
-
-    /// Get the current navigation level (top of the stack)
-    pub(crate) fn current_level(&self) -> &NavLevel {
-        self.nav_stack.last().unwrap_or(&NavLevel::CategoryPicker)
-    }
-
-    /// Get the currently active tab based on navigation stack
-    pub(crate) fn active_tab(&self) -> Option<SettingsTab> {
-        for level in self.nav_stack.iter().rev() {
-            match level {
-                NavLevel::Category(tab) => return Some(*tab),
-                NavLevel::CategoryPicker => {}
-            }
-        }
-        None
-    }
-
-    /// Save cursor position for the current navigation level.
-    fn save_cursor(&mut self) {
-        let key = self.current_level().cursor_key();
-        self.level_cursors
-            .insert(key, self.slot_list.viewport_offset);
-    }
-
-    /// Reset slot list and restore saved cursor for the current level.
-    fn reset_and_restore_cursor(&mut self) {
-        self.slot_list = SlotListView::new();
-        self.editing_index = None;
-        self.toggle_cursor = None;
-        self.hex_input.clear();
-        let key = self.current_level().cursor_key();
-        if let Some(&saved_offset) = self.level_cursors.get(&key) {
-            self.slot_list.viewport_offset = saved_offset;
-        }
-    }
-
-    /// Push a new level onto the nav stack, saving cursor position
-    pub(crate) fn push_level(&mut self, level: NavLevel) {
-        self.save_cursor();
-        self.nav_stack.push(level);
-        self.reset_and_restore_cursor();
-    }
-
-    /// Pop the nav stack (go back one level), restoring cursor position
-    pub(crate) fn pop_level(&mut self) {
-        if self.nav_stack.len() <= 1 {
-            return; // Already at root
-        }
-        self.save_cursor();
-        self.nav_stack.pop();
-        self.reset_and_restore_cursor();
     }
 
     /// Restore parent slot list position after exiting a sub-list.
@@ -847,27 +764,11 @@ impl SettingsPage {
 
                 if let Some(center_idx) = self.slot_list.get_center_item_index(total) {
                     match self.cached_entries.get(center_idx) {
-                        Some(SettingsEntry::Header { label, .. }) => {
-                            // Headers drill down based on current nav level
-                            match self.current_level().clone() {
-                                NavLevel::CategoryPicker => {
-                                    // Level 1: headers are category labels — drill into category
-                                    if let Some(tab) =
-                                        SettingsTab::ALL.iter().find(|t| t.label() == *label)
-                                    {
-                                        self.push_level(NavLevel::Category(*tab));
-                                        // Rebuild entries for the new level so snap
-                                        // can see the actual Level 2 items.
-                                        self.refresh_entries(data);
-                                        self.snap_to_non_header(true);
-                                        self.update_description();
-                                        return SettingsAction::PlayEnter;
-                                    }
-                                }
-                                NavLevel::Category(_) => {
-                                    // Level 2: headers are section separators (non-interactive)
-                                }
-                            }
+                        Some(SettingsEntry::Header { label: _, .. }) => {
+                            // Detail-pane headers are section separators —
+                            // non-interactive. Category drill-down moved to the
+                            // sidebar slot list in the persistent two-pane
+                            // shell, so Enter on a header is a no-op here.
                             return SettingsAction::None;
                         }
                         Some(SettingsEntry::Item(item)) => {
@@ -1019,7 +920,7 @@ impl SettingsPage {
             }
             SettingsMessage::ResetToDefault => {
                 // Hotkey items: reset single binding
-                if self.active_tab() == Some(SettingsTab::Hotkeys)
+                if self.active_category == SettingsTab::Hotkeys
                     && let Some(center_idx) = self.slot_list.get_center_item_index(total)
                     && let Some(SettingsEntry::Item(item)) = self.cached_entries.get(center_idx)
                     && matches!(item.value, SettingValue::Hotkey(_))
@@ -1054,8 +955,7 @@ impl SettingsPage {
             }
             SettingsMessage::Escape => {
                 tracing::debug!(
-                    " [SETTINGS] Escape: nav_depth={}, search={}, editing={}, capturing={}",
-                    self.nav_stack.len(),
+                    " [SETTINGS] Escape: search_active={}, editing={}, capturing={}",
                     self.search_active,
                     self.editing_index.is_some(),
                     self.capturing_hotkey.is_some(),
@@ -1073,30 +973,23 @@ impl SettingsPage {
                     self.hex_input.clear();
                     SettingsAction::None
                 } else if self.search_active && !self.search_query.is_empty() {
-                    // Clear visible search filter and restore entries for current nav level
+                    // Clear visible search filter and restore entries for the
+                    // current active category.
                     self.search_active = false;
                     self.search_query.clear();
                     self.slot_list = SlotListView::new();
                     self.refresh_entries(data);
                     SettingsAction::None
-                } else if self.nav_stack.len() > 1 {
-                    // Pop navigation stack — go back one level
-                    // Clear any stale search query from a dismissed search bar
-                    self.search_query.clear();
-                    self.pop_level();
-                    self.refresh_entries(data);
-                    SettingsAction::None
                 } else {
-                    // Reset all transient state for clean re-open.
-                    // This handles the zombie scenario where Tab sets
-                    // search_active=false while search_query remains populated,
-                    // causing Escape to skip the search-clearing branch.
+                    // Top-level Escape — reset transient state for clean
+                    // re-open. The zombie scenario (Tab cleared
+                    // search_active but left search_query populated) still
+                    // funnels through here, so both flags are reset.
                     self.search_query.clear();
                     self.search_active = false;
                     self.cached_entries.clear();
                     self.description_text.clear();
                     self.slot_list = SlotListView::new();
-                    self.nav_stack.truncate(1); // Reset to CategoryPicker
                     tracing::debug!(" [SETTINGS] ExitSettings triggered!");
                     SettingsAction::ExitSettings
                 }
@@ -1457,22 +1350,23 @@ impl SettingsPage {
         SettingsAction::None
     }
 
-    /// Populate cached entries from config data based on current nav level.
+    /// Populate cached entries from config data: either the cross-tab
+    /// search results (when a query is active) or the active category's
+    /// items. The persistent sidebar drives `active_category`; the detail
+    /// pane renders what this populates.
     pub(crate) fn refresh_entries(&mut self, data: &SettingsViewData) {
         if !self.search_query.is_empty() {
             self.cached_entries = Self::search_all_entries(data, &self.search_query);
-            self.update_description();
-            return;
+        } else {
+            self.cached_entries = Self::build_category_sections(self.active_category, data);
         }
-        self.cached_entries = match self.current_level() {
-            NavLevel::CategoryPicker => Self::build_category_picker_entries(),
-            NavLevel::Category(tab) => Self::build_category_sections(*tab, data),
-        };
         self.update_description();
     }
 
-    /// Update the description_text from the center item's subtitle.
-    /// Called after any slot list navigation or entry refresh.
+    /// Update the description_text from the centered detail-pane item's
+    /// subtitle. Called after any slot list navigation or entry refresh.
+    /// Kept around until Phase 3 retires the footer status bar; readers in
+    /// view.rs feed it into the soon-to-be-deleted `description_area`.
     pub(crate) fn update_description(&mut self) {
         let total = self.cached_entries.len();
         self.description_text = self
@@ -1485,23 +1379,7 @@ impl SettingsPage {
                     .as_deref()
                     .unwrap_or(item.category)
                     .to_string(),
-                SettingsEntry::Header { label, .. } => {
-                    // At Level 1 (without active search), look up the tab's
-                    // description for a meaningful footer. During search, headers
-                    // are section separators from within tabs and may collide with
-                    // tab names (e.g. Visualizer's "General" section vs the General
-                    // tab) — show the raw label instead.
-                    if matches!(self.current_level(), NavLevel::CategoryPicker)
-                        && self.search_query.is_empty()
-                    {
-                        SettingsTab::ALL
-                            .iter()
-                            .find(|t| t.label() == *label)
-                            .map_or_else(|| label.to_string(), |t| t.description().to_string())
-                    } else {
-                        label.to_string()
-                    }
-                }
+                SettingsEntry::Header { label, .. } => label.to_string(),
             })
             .unwrap_or_default();
     }
@@ -1512,12 +1390,8 @@ impl SettingsPage {
     /// `forward == true`: prefer scanning forward, fall back to backward.
     /// `forward == false`: prefer scanning backward, fall back to forward.
     ///
-    /// No-op at Level 1 (all entries are selectable headers) or if the current
-    /// entry is already an `Item`.
+    /// No-op when the current entry is already an `Item`.
     pub(crate) fn snap_to_non_header(&mut self, forward: bool) {
-        if matches!(self.current_level(), NavLevel::CategoryPicker) {
-            return;
-        }
         let offset = self.slot_list.viewport_offset;
         if self
             .cached_entries
