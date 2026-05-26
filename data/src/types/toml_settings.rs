@@ -395,12 +395,29 @@ impl TomlSettings {
     /// omitted), then hand-write the residual scalars that aren't (yet)
     /// owned by any per-tab or per-view-column macro invocation.
     ///
-    /// `light_mode` is intentionally not touched — the on-disk truth is
-    /// owned by the `SetLightModeAtomic` side-effect handler in the UI crate
-    /// via a targeted `update_config_value` write that does not go through
-    /// this function. The default `TomlSettings { light_mode: false, .. }`
-    /// matches the pre-refactor behavior of hard-coding `false`.
+    /// `light_mode` has no writer that sources from `ps` (the value lives
+    /// on a UI atomic + `config.toml`, not on `LivePlayerSettings`). To
+    /// prevent the whole-section replace in `write_section` from stomping
+    /// the targeted writer's prior value, this entry point reads the
+    /// current on-disk value and threads it through. Tests use
+    /// [`from_player_settings_with_existing`] to pin the merge in isolation.
     pub fn from_player_settings(ps: &crate::types::player_settings::LivePlayerSettings) -> Self {
+        let existing_light_mode = crate::services::toml_settings_io::read_toml_settings()
+            .ok()
+            .flatten()
+            .map(|s| s.light_mode);
+        Self::from_player_settings_with_existing(ps, existing_light_mode)
+    }
+
+    /// Same as [`from_player_settings`], but accepts an `existing_light_mode`
+    /// override that the production caller is expected to source from the
+    /// on-disk `[settings]` table. Tests pass a known value directly so they
+    /// can assert the merge behavior without needing a writable `config.toml`
+    /// path (which `get_config_path` does not expose for tests).
+    pub fn from_player_settings_with_existing(
+        ps: &crate::types::player_settings::LivePlayerSettings,
+        existing_light_mode: Option<bool>,
+    ) -> Self {
         let mut ts = Self::default();
 
         // Per-tab macro-emitted writers (define_settings! `write:` closures).
@@ -430,9 +447,10 @@ impl TomlSettings {
         //   `sound_effects_enabled`, `sfx_volume`) and 3 EQ fields
         //   (`eq_enabled`, `eq_gains`, `custom_eq_presets`) live on
         //   different code paths and aren't claimed by any tab today.
-        // - `light_mode` deliberately stays at the default value (false) so
-        //   the on-disk truth maintained by the UI crate's targeted writer
-        //   isn't stomped by this whole-section serialize. See the doc above.
+        // - `light_mode` is owned by the `SetLightModeAtomic` side-effect
+        //   handler in the UI crate (targeted `update_config_value` write).
+        //   The value is threaded in via `existing_light_mode` below so the
+        //   whole-section replace doesn't reset it to `false`.
         ts.artwork_column_width_pct = ps.artwork_column_width_pct;
         ts.font_family = ps.font_family.clone();
         ts.visualization_mode = ps.visualization_mode;
@@ -441,6 +459,10 @@ impl TomlSettings {
         ts.eq_enabled = ps.eq_enabled;
         ts.eq_gains = ps.eq_gains;
         ts.custom_eq_presets = ps.custom_eq_presets.clone();
+
+        if let Some(v) = existing_light_mode {
+            ts.light_mode = v;
+        }
 
         ts
     }
@@ -612,5 +634,46 @@ mod tests {
         assert_eq!(parsed.start_view, "Albums");
         assert!(parsed.stable_viewport); // default
         assert_eq!(parsed.crossfade_duration_secs, 5); // default
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    //  from_player_settings_with_existing — light_mode merge
+    // ══════════════════════════════════════════════════════════════════
+    //
+    // Regression guard: toggling light mode then changing any other
+    // general-tab setting used to revert the theme. Root cause was
+    // `from_player_settings` starting from `Self::default()` (light_mode
+    // = false) and the per-tab writers not touching the field, so the
+    // resulting `TomlSettings` always serialized `light_mode = false` and
+    // the whole-section `[settings]` replace in `write_section` stomped
+    // the targeted writer's prior `light_mode = true`. The fix routes
+    // through a seedable helper so the production caller can pass the
+    // on-disk value and tests can pin merge behavior in isolation.
+
+    #[test]
+    fn from_player_settings_with_existing_preserves_some_true() {
+        let ps = crate::types::player_settings::LivePlayerSettings::default();
+        let ts = TomlSettings::from_player_settings_with_existing(&ps, Some(true));
+        assert!(
+            ts.light_mode,
+            "Some(true) must override the default — whole-section serialize would otherwise stomp on-disk truth",
+        );
+    }
+
+    #[test]
+    fn from_player_settings_with_existing_preserves_some_false() {
+        let ps = crate::types::player_settings::LivePlayerSettings::default();
+        let ts = TomlSettings::from_player_settings_with_existing(&ps, Some(false));
+        assert!(!ts.light_mode, "Some(false) must be honored");
+    }
+
+    #[test]
+    fn from_player_settings_with_existing_none_keeps_default() {
+        let ps = crate::types::player_settings::LivePlayerSettings::default();
+        let ts = TomlSettings::from_player_settings_with_existing(&ps, None);
+        assert!(
+            !ts.light_mode,
+            "None must preserve the struct default — no on-disk source means no override",
+        );
     }
 }

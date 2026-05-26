@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - Metadata-strip text (title, artist, codec, bitrate) is now legible on light themes.
+- Toggling light mode in Settings no longer reverts to dark when any other setting is changed.
 
 ### Removed
 
