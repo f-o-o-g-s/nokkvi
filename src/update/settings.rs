@@ -99,6 +99,7 @@ impl Nokkvi {
             theme_file,
             active_theme_stem,
             window_height: self.window.height,
+            window_width: self.window.width,
             hotkey_config: self.hotkey_config.clone(),
             is_light_mode: crate::theme::is_light_mode(),
             rounded_mode: crate::theme::is_rounded_mode(),

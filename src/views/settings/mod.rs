@@ -497,6 +497,7 @@ pub(crate) struct SettingsViewData {
     pub theme_file: ThemeFile,
     pub active_theme_stem: String,
     pub window_height: f32,
+    pub window_width: f32,
     pub hotkey_config: nokkvi_data::types::hotkey_config::HotkeyConfig,
     pub is_light_mode: bool,
     pub rounded_mode: bool,

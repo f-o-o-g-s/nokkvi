@@ -32,6 +32,17 @@ const SIDEBAR_HEADER_HEIGHT: f32 = 60.0;
 /// Height of the sidebar footer (version + Esc pill).
 const SIDEBAR_FOOTER_HEIGHT: f32 = 44.0;
 
+/// Below this content width the layout collapses to the narrow variant —
+/// the 340 px sidebar swaps for a horizontal scrollable chip strip
+/// above the detail pane. Calibrated so the wide layout still has room
+/// for the sidebar (340 px) + a reasonable detail pane (≥ 380 px).
+const NARROW_BREAKPOINT_WIDTH: f32 = 720.0;
+
+/// Vertical height of the narrow-variant chip strip (matches the
+/// design's `NarrowTabStrip` 12 px / 16 px padding around 32 px pills,
+/// plus a 1 px bottom border).
+const NARROW_STRIP_HEIGHT: f32 = 56.0;
+
 impl SettingsPage {
     /// Render the settings view — persistent two-pane layout.
     ///
@@ -42,6 +53,7 @@ impl SettingsPage {
     pub(crate) fn view(&self, data: SettingsViewData) -> Element<'_, SettingsMessage> {
         let font = theme::ui_font();
         let window_height = data.window_height;
+        let is_narrow = data.window_width < NARROW_BREAKPOINT_WIDTH;
 
         // Detail-pane entries: either the optimistically-edited cache or a
         // fresh rebuild from live config so hot-reloads land. Sub-lists
@@ -69,20 +81,32 @@ impl SettingsPage {
             self.render_detail_pane(entries, window_height)
         };
 
-        let base_row: Element<'_, SettingsMessage> = row![self.render_sidebar(), right_pane]
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into();
-
-        // Font picker overlays on top of the two-pane layout.
-        if let Some(fsw) = &self.font_sub_list {
-            let modal = self.render_font_modal(fsw, window_height, font);
-            stack![base_row, modal]
+        // Wide: 340 px sidebar + detail in a horizontal row.
+        // Narrow: horizontal category strip + search header above the
+        //         detail pane, both stacked vertically.
+        let base: Element<'_, SettingsMessage> = if is_narrow {
+            let strip = self.render_narrow_strip();
+            let search_bar = self.render_narrow_search_header();
+            column![search_bar, strip, right_pane]
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into()
         } else {
-            base_row
+            row![self.render_sidebar(), right_pane]
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+        };
+
+        // Font picker overlays on top of either layout.
+        if let Some(fsw) = &self.font_sub_list {
+            let modal = self.render_font_modal(fsw, window_height, font);
+            stack![base, modal]
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+        } else {
+            base
         }
     }
 
@@ -246,6 +270,92 @@ impl SettingsPage {
         .width(Length::Fill)
         .height(Length::Fixed(SIDEBAR_FOOTER_HEIGHT))
         .into()
+    }
+
+    // ========================================================================
+    // Narrow variant (horizontal chip strip + search header)
+    // ========================================================================
+
+    /// Narrow-variant search header: just the relocated search input on
+    /// `bg0_hard` with a 1 px bottom border. The "Settings" title is
+    /// implicit (the Settings nav-tab is already highlighted in the chrome).
+    fn render_narrow_search_header(&self) -> Element<'_, SettingsMessage> {
+        let search_input = crate::widgets::search_bar::search_bar(
+            &self.search_query,
+            "Search settings…",
+            SETTINGS_SEARCH_INPUT_ID,
+            SettingsMessage::SearchChanged,
+            Some(theme::settings_search_input_style),
+        );
+
+        let body = container(search_input)
+            .width(Length::Fill)
+            .padding(
+                Padding::new(0.0)
+                    .top(8.0)
+                    .bottom(8.0)
+                    .left(16.0)
+                    .right(16.0),
+            )
+            .style(|_: &iced::Theme| container::Style {
+                background: Some(theme::bg0_hard().into()),
+                ..Default::default()
+            });
+
+        let sep = container(Space::new())
+            .width(Length::Fill)
+            .height(Length::Fixed(1.0))
+            .style(|_: &iced::Theme| container::Style {
+                background: Some(theme::border().into()),
+                ..Default::default()
+            });
+
+        column![body, sep].width(Length::Fill).into()
+    }
+
+    /// Narrow-variant category strip: horizontal scrollable row of pill
+    /// chips, one per category. Active chip gets the accent border +
+    /// `accent_soft` fill + accent text; inactive chips use the
+    /// `bg_border_2` outline. Matches the design's `NarrowTabStrip`.
+    fn render_narrow_strip(&self) -> Element<'_, SettingsMessage> {
+        let active_index = self.sidebar_slot_list.viewport_offset;
+        let mut chip_row = row![Space::new().width(Length::Fixed(16.0))]
+            .spacing(6)
+            .align_y(Alignment::Center);
+        for (idx, tab) in SettingsTab::ALL.iter().enumerate() {
+            chip_row = chip_row.push(render_narrow_chip(*tab, idx, idx == active_index));
+        }
+        chip_row = chip_row.push(Space::new().width(Length::Fixed(16.0)));
+
+        let scrollable_strip = iced::widget::scrollable(chip_row)
+            .direction(iced::widget::scrollable::Direction::Horizontal(
+                iced::widget::scrollable::Scrollbar::new()
+                    .width(0)
+                    .scroller_width(0),
+            ))
+            .width(Length::Fill);
+
+        let body = container(scrollable_strip)
+            .width(Length::Fill)
+            .height(Length::Fixed(NARROW_STRIP_HEIGHT - 1.0))
+            .align_y(Alignment::Center)
+            .style(|_: &iced::Theme| container::Style {
+                background: Some(theme::bg0_hard().into()),
+                ..Default::default()
+            });
+
+        let sep = container(Space::new())
+            .width(Length::Fill)
+            .height(Length::Fixed(1.0))
+            .style(|_: &iced::Theme| container::Style {
+                background: Some(theme::border().into()),
+                ..Default::default()
+            });
+
+        column![body, sep]
+            .width(Length::Fill)
+            .height(Length::Fixed(NARROW_STRIP_HEIGHT))
+            .into()
     }
 
     // ========================================================================
@@ -523,6 +633,86 @@ impl SettingsPage {
 
         backdrop.into()
     }
+}
+
+/// Narrow-variant category chip: pill-shaped, icon + name only (no
+/// blurb), `accent` border + `accent_soft` fill on the active chip,
+/// `bg2` outline + `bg0` fill on inactive. Click emits
+/// `SidebarClickItem(idx)` — same handler as the wide-sidebar row.
+fn render_narrow_chip<'a>(
+    tab: SettingsTab,
+    idx: usize,
+    is_active: bool,
+) -> Element<'a, SettingsMessage> {
+    let border_color = if is_active {
+        theme::accent_bright()
+    } else {
+        theme::bg2()
+    };
+    let bg_color = if is_active {
+        // Mirrors `--nk-acc-soft` (rgba(184, 212, 154, 0.16)) — a soft
+        // accent fill at ~16% alpha; nokkvi doesn't expose this exact
+        // token so we build it inline.
+        Color {
+            a: 0.16,
+            ..theme::accent_bright()
+        }
+    } else {
+        theme::bg0()
+    };
+    let text_color = if is_active {
+        theme::accent_bright()
+    } else {
+        theme::fg0()
+    };
+
+    let icon = embedded_svg::svg_widget(tab.icon_path())
+        .width(Length::Fixed(13.0))
+        .height(Length::Fixed(13.0))
+        .style(move |_, _| svg::Style {
+            color: Some(text_color),
+        });
+    let label = text(tab.label()).size(12.0).color(text_color).font(Font {
+        weight: if is_active {
+            Weight::Bold
+        } else {
+            Weight::Medium
+        },
+        ..theme::ui_font()
+    });
+
+    let content = row![icon, label].spacing(8).align_y(Alignment::Center);
+
+    button(content)
+        .on_press(SettingsMessage::SidebarClickItem(idx))
+        .padding(
+            Padding::new(0.0)
+                .top(8.0)
+                .bottom(8.0)
+                .left(12.0)
+                .right(12.0),
+        )
+        .style(move |_theme: &iced::Theme, status: button::Status| {
+            let hovered = matches!(status, button::Status::Hovered);
+            let bg = if is_active {
+                bg_color
+            } else if hovered {
+                theme::bg1()
+            } else {
+                bg_color
+            };
+            button::Style {
+                background: Some(bg.into()),
+                border: Border {
+                    color: border_color,
+                    width: 1.0,
+                    radius: theme::ui_radius_pill(),
+                },
+                text_color,
+                ..Default::default()
+            }
+        })
+        .into()
 }
 
 /// Single sidebar row at the design's compact proportions: 38 px icon
