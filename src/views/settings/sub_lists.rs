@@ -205,7 +205,11 @@ impl SettingsPage {
             | SettingsMessage::FontSearchChanged(_)
             | SettingsMessage::SearchChanged(_)
             | SettingsMessage::ToggleSearch
-            | SettingsMessage::ToggleSetToggle(_) => SettingsAction::None,
+            | SettingsMessage::ToggleSetToggle(_)
+            | SettingsMessage::SidebarUp
+            | SettingsMessage::SidebarDown
+            | SettingsMessage::SidebarSetOffset(_, _)
+            | SettingsMessage::SidebarClickItem(_) => SettingsAction::None,
         }
     }
 
@@ -271,7 +275,11 @@ impl SettingsPage {
             | SettingsMessage::HotkeyCaptured(_, _)
             | SettingsMessage::SearchChanged(_)
             | SettingsMessage::ToggleSearch
-            | SettingsMessage::ToggleSetToggle(_) => SettingsAction::None,
+            | SettingsMessage::ToggleSetToggle(_)
+            | SettingsMessage::SidebarUp
+            | SettingsMessage::SidebarDown
+            | SettingsMessage::SidebarSetOffset(_, _)
+            | SettingsMessage::SidebarClickItem(_) => SettingsAction::None,
         }
     }
 

@@ -28,6 +28,7 @@ mod redesign_chrome;
 mod roulette;
 mod session;
 mod settings;
+mod settings_sidebar;
 mod slot_list;
 mod star_rating;
 mod state;

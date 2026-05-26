@@ -398,6 +398,14 @@ pub enum SettingsMessage {
     EditSetValue(String),
     /// Toggle a single badge in a ToggleSet (key = the setting_key of the toggled badge)
     ToggleSetToggle(String),
+    /// Move sidebar focus to the next category (Shift+Tab default)
+    SidebarDown,
+    /// Move sidebar focus to the previous category (Shift+Backspace default)
+    SidebarUp,
+    /// Scrollbar-seek the sidebar to a specific category offset
+    SidebarSetOffset(usize, iced::keyboard::Modifiers),
+    /// Sidebar row clicked — focus + activate (loads the category into the detail pane)
+    SidebarClickItem(usize),
 }
 
 /// Build the scrollbar-seek closure shared by every settings slot list.
@@ -580,6 +588,12 @@ pub struct SettingsPage {
     /// and config writes, cleared after `refresh_entries`). Starts `true` so
     /// the first render always populates entries.
     pub(crate) config_dirty: bool,
+    /// Active category whose entries populate the detail pane (right side of
+    /// the persistent two-pane layout). Defaults to `General`.
+    pub(crate) active_category: SettingsTab,
+    /// Slot-list state for the categories sidebar (left pane). Distinct from
+    /// `slot_list`, which tracks the detail pane focus.
+    pub(crate) sidebar_slot_list: SlotListView,
 }
 
 impl SettingsPage {
@@ -601,6 +615,8 @@ impl SettingsPage {
             description_text: String::new(),
             cached_system_fonts: None,
             config_dirty: true,
+            active_category: SettingsTab::General,
+            sidebar_slot_list: SlotListView::new(),
         }
     }
 
@@ -1149,7 +1165,64 @@ impl SettingsPage {
                 }
                 SettingsAction::FocusSearch
             }
+            SettingsMessage::SidebarDown => {
+                self.sidebar_step(true, data);
+                SettingsAction::None
+            }
+            SettingsMessage::SidebarUp => {
+                self.sidebar_step(false, data);
+                SettingsAction::None
+            }
+            SettingsMessage::SidebarSetOffset(offset, _) => {
+                self.sidebar_set_index(offset, data);
+                SettingsAction::None
+            }
+            SettingsMessage::SidebarClickItem(offset) => {
+                self.sidebar_set_index(offset, data);
+                SettingsAction::None
+            }
         }
+    }
+
+    /// Advance the sidebar cursor by one row (forward = next category) and
+    /// update `active_category` in lockstep. Resets the detail-pane slot list
+    /// when the category actually changes.
+    fn sidebar_step(&mut self, forward: bool, data: &SettingsViewData) {
+        let total = SettingsTab::ALL.len();
+        if forward {
+            self.sidebar_slot_list.move_down(total);
+        } else {
+            self.sidebar_slot_list.move_up(total);
+        }
+        self.apply_sidebar_index(data);
+    }
+
+    /// Set the sidebar cursor to a specific index and update `active_category`.
+    fn sidebar_set_index(&mut self, index: usize, data: &SettingsViewData) {
+        let total = SettingsTab::ALL.len();
+        self.sidebar_slot_list.set_offset(index, total);
+        self.apply_sidebar_index(data);
+    }
+
+    /// Read `sidebar_slot_list.viewport_offset` and synchronise
+    /// `active_category` + detail pane state. No-op when the category is
+    /// already current.
+    fn apply_sidebar_index(&mut self, data: &SettingsViewData) {
+        let idx = self
+            .sidebar_slot_list
+            .viewport_offset
+            .min(SettingsTab::ALL.len() - 1);
+        let new_tab = SettingsTab::ALL[idx];
+        if new_tab == self.active_category {
+            return;
+        }
+        self.active_category = new_tab;
+        self.slot_list = SlotListView::new();
+        self.editing_index = None;
+        self.toggle_cursor = None;
+        self.hex_input.clear();
+        self.refresh_entries(data);
+        self.update_description();
     }
 
     /// Collect (key, default_hex) pairs for a __restore_* group key.

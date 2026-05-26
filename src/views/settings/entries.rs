@@ -13,6 +13,8 @@ impl SettingsPage {
     // ========================================================================
 
     /// Build entries for the category picker (Level 1) — one Header per tab.
+    /// Also feeds the persistent sidebar; the two surfaces render the same
+    /// six-row list under different chrome.
     pub(super) fn build_category_picker_entries() -> Vec<SettingsEntry> {
         SettingsTab::ALL
             .iter()

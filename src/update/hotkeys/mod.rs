@@ -437,7 +437,10 @@ impl Nokkvi {
         // key event, suppress hotkey dispatch to avoid triggering actions
         // while the user is typing. Exceptions:
         //   - Escape: always allowed (close overlays, clear search)
+        //   - Tab: always allowed (slot-list navigation)
         //   - Ctrl+key: always allowed (intentional shortcuts like Ctrl+S)
+        //   - Shift+key: always allowed (settings sidebar nav binds
+        //     Shift+Tab / Shift+Backspace; Shift is not a typing modifier)
         if status == iced::event::Status::Captured {
             let is_escape = matches!(
                 key,
@@ -447,7 +450,7 @@ impl Nokkvi {
                 key,
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab)
             );
-            if !is_escape && !is_tab && !modifiers.control() {
+            if !is_escape && !is_tab && !modifiers.control() && !modifiers.shift() {
                 return Task::none();
             }
         }
@@ -459,11 +462,20 @@ impl Nokkvi {
         }
     }
 
-    /// Settings sidebar category motion. Stubbed in Phase 1 — wired to
-    /// the real `SettingsMessage::SidebarUp`/`SidebarDown` dispatch when
-    /// the sidebar state lands in Phase 2a.
-    pub(crate) fn handle_settings_category_motion(&mut self, _forward: bool) -> Task<Message> {
-        Task::none()
+    /// Settings sidebar category motion: forward = next category, backward =
+    /// previous. Routes to `SettingsMessage::SidebarDown`/`SidebarUp` when the
+    /// settings view is active; no-op everywhere else (the hotkey config can
+    /// bind these globally without bleeding into other views).
+    pub(crate) fn handle_settings_category_motion(&mut self, forward: bool) -> Task<Message> {
+        if self.current_view != View::Settings {
+            return Task::none();
+        }
+        let msg = if forward {
+            crate::views::SettingsMessage::SidebarDown
+        } else {
+            crate::views::SettingsMessage::SidebarUp
+        };
+        self.handle_settings(msg)
     }
 
     /// Track the current keyboard modifier state so views can read it
