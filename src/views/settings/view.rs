@@ -32,11 +32,13 @@ const SIDEBAR_HEADER_HEIGHT: f32 = 60.0;
 /// Height of the sidebar footer (version + Esc pill).
 const SIDEBAR_FOOTER_HEIGHT: f32 = 44.0;
 
-/// Below this content width the layout collapses to the narrow variant —
+/// Below this window width the layout collapses to the narrow variant —
 /// the 340 px sidebar swaps for a horizontal scrollable chip strip
-/// above the detail pane. Calibrated so the wide layout still has room
-/// for the sidebar (340 px) + a reasonable detail pane (≥ 380 px).
-const NARROW_BREAKPOINT_WIDTH: f32 = 720.0;
+/// above the detail pane. Tuned from a running-app review: at ~1320 px
+/// the wide sidebar still rendered but the detail pane felt
+/// claustrophobic. 1400 keeps the wide layout for ≥ 1080p monitors and
+/// flips narrow on 1366-px laptops and smaller.
+const NARROW_BREAKPOINT_WIDTH: f32 = 1400.0;
 
 /// Vertical height of the narrow-variant chip strip (matches the
 /// design's `NarrowTabStrip` 12 px / 16 px padding around 32 px pills,
