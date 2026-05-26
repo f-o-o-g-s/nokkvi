@@ -800,7 +800,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                                 super::marquee_text::marquee_text(merged)
                                     .size(10.0)
                                     .font(theme::ui_font())
-                                    .color(theme::selected_color())
+                                    .color(theme::legible_strip_text(theme::selected_color()))
                                     .align_x(iced::alignment::Horizontal::Center),
                             ]
                             .align_y(Alignment::Center)
@@ -838,7 +838,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                             super::marquee_text::marquee_text(merged)
                                 .size(10.0)
                                 .font(theme::ui_font())
-                                .color(theme::selected_color())
+                                .color(theme::legible_strip_text(theme::selected_color()))
                                 .align_x(iced::alignment::Horizontal::Center),
                         ]
                         .align_y(Alignment::Center)
@@ -848,15 +848,21 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
             } else {
                 if show_title {
                     info_row = info_row.push(info_sep());
-                    info_row =
-                        info_row.push(info_field(title_label, title, theme::now_playing_color()));
+                    info_row = info_row.push(info_field(
+                        title_label,
+                        title,
+                        theme::legible_strip_text(theme::now_playing_color()),
+                    ));
                     has_prev_field = true;
                 }
 
                 if show_artist {
                     info_row = info_row.push(info_sep());
-                    info_row =
-                        info_row.push(info_field(artist_label, artist, theme::selected_color()));
+                    info_row = info_row.push(info_field(
+                        artist_label,
+                        artist,
+                        theme::legible_strip_text(theme::selected_color()),
+                    ));
                     has_prev_field = true;
                 }
 
@@ -940,7 +946,7 @@ pub(crate) fn nav_bar(data: NavBarViewData) -> Element<'static, NavBarMessage> {
                             weight: Weight::Medium,
                             ..theme::ui_font()
                         })
-                        .color(theme::fg3())
+                        .color(theme::legible_strip_text(theme::fg3()))
                         .wrapping(Wrapping::None),
                 ]
                 .spacing(6)

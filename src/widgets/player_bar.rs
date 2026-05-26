@@ -697,8 +697,16 @@ fn mini_player_section(data: &PlayerBarViewData) -> Element<'static, PlayerBarMe
         )
     };
 
-    let title_line = make_line(line1, theme::now_playing_color(), true);
-    let artist_line = make_line(line2, theme::selected_color(), false);
+    let title_line = make_line(
+        line1,
+        theme::legible_strip_text(theme::now_playing_color()),
+        true,
+    );
+    let artist_line = make_line(
+        line2,
+        theme::legible_strip_text(theme::selected_color()),
+        false,
+    );
     let album_line = make_line(line3, theme::fg2(), false);
 
     let text_column = container(

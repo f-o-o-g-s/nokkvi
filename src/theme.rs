@@ -1187,6 +1187,77 @@ pub(crate) fn darken(color: Color, amount: f32) -> Color {
 }
 
 // ============================================================================
+// Contrast helpers
+// ============================================================================
+//
+// Several shipped light-mode palettes tune `accent.now_playing` / `selected`
+// to muted, low-saturation hues that match the surrounding chrome aesthetic.
+// When those colors are reused as *text* (metadata strip title/artist), the
+// luminance ends up too close to `bg0_hard()` and the text becomes unreadable
+// even though the same accent reads fine as a fill or border. The helpers
+// below let a render path nudge such a color back into a legible band
+// without disturbing dark-mode behavior or the original theme palette.
+
+/// WCAG 2.1 relative luminance.
+#[inline]
+fn relative_luminance(c: Color) -> f32 {
+    let channel = |v: f32| {
+        if v <= 0.03928 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b)
+}
+
+/// WCAG contrast ratio between two colors. Result is in `[1.0, 21.0]`.
+#[inline]
+fn contrast_ratio(a: Color, b: Color) -> f32 {
+    let la = relative_luminance(a);
+    let lb = relative_luminance(b);
+    let (light, dark) = if la >= lb { (la, lb) } else { (lb, la) };
+    (light + 0.05) / (dark + 0.05)
+}
+
+/// Minimum contrast we aim for when used as small (10 px) UI text — WCAG AA
+/// for normal text.
+const LEGIBLE_TEXT_CONTRAST: f32 = 4.5;
+
+/// Darken `color` toward black until its contrast against `bg` meets
+/// [`LEGIBLE_TEXT_CONTRAST`]. Returns the input unchanged when it already
+/// meets the threshold, or the maximally-darkened form when the search
+/// budget is exhausted.
+fn darken_until_legible(color: Color, bg: Color) -> Color {
+    if contrast_ratio(color, bg) >= LEGIBLE_TEXT_CONTRAST {
+        return color;
+    }
+    let mut adjusted = color;
+    let mut amount: f32 = 0.05;
+    while amount < 0.95 {
+        adjusted = darken(color, amount);
+        if contrast_ratio(adjusted, bg) >= LEGIBLE_TEXT_CONTRAST {
+            return adjusted;
+        }
+        amount += 0.05;
+    }
+    adjusted
+}
+
+/// In light mode, darkens `color` until it meets WCAG AA contrast against
+/// the chrome surface ([`bg0_hard`]), so muted theme accents stay legible
+/// when rendered as small text inside the metadata / mini-player strip. In
+/// dark mode the function is a no-op — vibrant accents on dark surfaces
+/// already exceed the threshold.
+#[inline]
+pub(crate) fn legible_strip_text(color: Color) -> Color {
+    if !is_light_mode() {
+        return color;
+    }
+    darken_until_legible(color, bg0_hard())
+}
+
+// ============================================================================
 // Container Style Helpers
 // ============================================================================
 // These functions can be used directly with `.style(theme::container_bg0_hard)`
@@ -1632,6 +1703,87 @@ mod tests {
 
     // `THEME_MODE_LOCK` is now defined at module scope so other test modules
     // in the crate can share the same guard.
+
+    // ------------------------------------------------------------------------
+    // Contrast helpers — luminance/contrast math + the light-mode darkening
+    // routine that keeps muted theme accents readable as strip text.
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn relative_luminance_at_endpoints() {
+        assert!((relative_luminance(Color::WHITE) - 1.0).abs() < 0.001);
+        assert!(relative_luminance(Color::BLACK).abs() < 0.001);
+    }
+
+    #[test]
+    fn contrast_ratio_extremes() {
+        assert!((contrast_ratio(Color::WHITE, Color::BLACK) - 21.0).abs() < 0.1);
+        assert!((contrast_ratio(Color::BLACK, Color::WHITE) - 21.0).abs() < 0.1);
+        assert!((contrast_ratio(Color::WHITE, Color::WHITE) - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn darken_until_legible_returns_input_when_already_legible() {
+        // Black on white is 21:1 — well past 4.5:1, no adjustment expected.
+        let result = darken_until_legible(Color::BLACK, Color::WHITE);
+        assert_eq!(result.r, Color::BLACK.r);
+        assert_eq!(result.g, Color::BLACK.g);
+        assert_eq!(result.b, Color::BLACK.b);
+    }
+
+    #[test]
+    fn darken_until_legible_lifts_muted_accent_past_threshold() {
+        // Everforest light: selected = #A6B0A0 (a desaturated grey-green that
+        // sits at almost the same luminance as the chrome surface). The raw
+        // contrast against bg0_hard #EFEBD4 is ~1.8:1 — far below WCAG AA.
+        let muted = Color::from_rgb(
+            0xA6 as f32 / 255.0,
+            0xB0 as f32 / 255.0,
+            0xA0 as f32 / 255.0,
+        );
+        let bg = Color::from_rgb(
+            0xEF as f32 / 255.0,
+            0xEB as f32 / 255.0,
+            0xD4 as f32 / 255.0,
+        );
+
+        let before = contrast_ratio(muted, bg);
+        assert!(
+            before < LEGIBLE_TEXT_CONTRAST,
+            "fixture should start below threshold; got {before:.2}"
+        );
+
+        let adjusted = darken_until_legible(muted, bg);
+        let after = contrast_ratio(adjusted, bg);
+        assert!(
+            after >= LEGIBLE_TEXT_CONTRAST,
+            "darkening should reach WCAG AA; before={before:.2}, after={after:.2}"
+        );
+        assert!(
+            relative_luminance(adjusted) < relative_luminance(muted),
+            "adjusted color should be darker than input"
+        );
+    }
+
+    #[test]
+    fn legible_strip_text_is_identity_in_dark_mode() {
+        let _guard = THEME_MODE_LOCK.lock();
+        let saved = UI_MODE.light_mode.load(Ordering::Relaxed);
+        set_light_mode(false);
+
+        // Pick a color that would otherwise be darkened in light mode.
+        let muted = Color::from_rgb(
+            0xA6 as f32 / 255.0,
+            0xB0 as f32 / 255.0,
+            0xA0 as f32 / 255.0,
+        );
+        let result = legible_strip_text(muted);
+        assert_eq!(result.r, muted.r);
+        assert_eq!(result.g, muted.g);
+        assert_eq!(result.b, muted.b);
+
+        UI_MODE.light_mode.store(saved, Ordering::Relaxed);
+    }
 
     // ------------------------------------------------------------------------
     // atomic_u8_enum! macro — verifies that the loader/store impls emitted

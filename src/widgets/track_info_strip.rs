@@ -81,7 +81,7 @@ where
                 weight: Weight::Bold,
                 ..theme::ui_font()
             })
-            .color(theme::now_playing_color()),
+            .color(theme::legible_strip_text(theme::now_playing_color())),
     );
 
     if !icy_title.is_empty() {
@@ -89,7 +89,7 @@ where
         row_in = row_in.push(info_field_widget(
             "playing:",
             icy_title.to_string(),
-            theme::accent_bright(),
+            theme::legible_strip_text(theme::accent_bright()),
         ));
     }
 
@@ -98,7 +98,7 @@ where
         row_in = row_in.push(info_field_widget(
             "artist:",
             icy_artist.to_string(),
-            theme::selected_color(),
+            theme::legible_strip_text(theme::selected_color()),
         ));
     }
 
@@ -257,7 +257,7 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
                     weight: Weight::Medium,
                     ..theme::ui_font()
                 })
-                .color(theme::fg3())
+                .color(theme::legible_strip_text(theme::fg3()))
                 .wrapping(text::Wrapping::None),
         );
         info_row = info_row.push(info_sep());
@@ -292,7 +292,7 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
                     super::marquee_text::marquee_text(merged)
                         .size(10.0)
                         .font(theme::ui_font())
-                        .color(theme::selected_color()),
+                        .color(theme::legible_strip_text(theme::selected_color())),
                 ]
                 .align_y(Alignment::Center)
                 .width(Length::FillPortion(9)),
@@ -308,15 +308,22 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
         }
 
         if show_title {
-            center_row =
-                center_row.push(info_field(title_label, title, theme::now_playing_color()));
+            center_row = center_row.push(info_field(
+                title_label,
+                title,
+                theme::legible_strip_text(theme::now_playing_color()),
+            ));
             has_prev_field = true;
         }
         if show_artist {
             if has_prev_field {
                 center_row = center_row.push(info_sep());
             }
-            center_row = center_row.push(info_field(artist_label, artist, theme::selected_color()));
+            center_row = center_row.push(info_field(
+                artist_label,
+                artist,
+                theme::legible_strip_text(theme::selected_color()),
+            ));
             has_prev_field = true;
         }
         if show_album {
@@ -369,7 +376,7 @@ pub(crate) fn track_info_strip<'a, M: Clone + 'static>(
                     weight: Weight::Medium,
                     ..theme::ui_font()
                 })
-                .color(theme::fg3())
+                .color(theme::legible_strip_text(theme::fg3()))
                 .wrapping(text::Wrapping::None),
         );
     }
@@ -410,7 +417,7 @@ fn build_merged_centered_strip<'a, M: Clone + 'static>(
                 weight: Weight::Medium,
                 ..theme::ui_font()
             })
-            .color(theme::fg3())
+            .color(theme::legible_strip_text(theme::fg3()))
             .wrapping(text::Wrapping::None)
     };
 
@@ -418,7 +425,7 @@ fn build_merged_centered_strip<'a, M: Clone + 'static>(
         super::marquee_text::marquee_text(merged)
             .size(10.0)
             .font(theme::ui_font())
-            .color(theme::selected_color())
+            .color(theme::legible_strip_text(theme::selected_color()))
             .align_x(iced::alignment::Horizontal::Center),
     ]
     .align_y(Alignment::Center)
